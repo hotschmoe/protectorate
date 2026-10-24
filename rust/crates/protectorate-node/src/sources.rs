@@ -1,7 +1,5 @@
 //! Bounded, node-local job source upload and staging.
-use base64::{engine::general_purpose::STANDARD, Engine as _};
-use protectorate_wire::{Code, RpcError};
-use serde_json::{json, Value};
+use protectorate_wire::{v1, Code, RpcError};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -88,22 +86,13 @@ fn relative_path(path: &str) -> Option<PathBuf> {
     }
 }
 impl Source {
-    pub(crate) fn parse(v: &Value) -> Result<Self, RpcError> {
-        let key = v.get("repoKey").and_then(Value::as_str).unwrap_or_default();
-        let commit = v.get("commit").and_then(Value::as_str).unwrap_or_default();
-        let name = v
-            .get("artifactName")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let archive = v
-            .get("artifactArchive")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let bundle = v
-            .get("bundleUploaded")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        let workdir = v.get("workdir").and_then(Value::as_str).unwrap_or_default();
+    pub(crate) fn parse(request: &v1::RunJobRequest) -> Result<Self, RpcError> {
+        let key = request.repo_key.as_str();
+        let commit = request.commit.as_str();
+        let name = request.artifact_name.as_str();
+        let archive = request.artifact_archive;
+        let bundle = request.bundle_uploaded;
+        let workdir = request.workdir.as_str();
         if !key.is_empty() {
             if !valid_id(key)
                 || !valid_commit(commit)
@@ -213,16 +202,17 @@ impl Sources {
         }
         Ok(())
     }
-    pub(crate) fn prepare(&self, v: &Value) -> Result<Value, RpcError> {
-        let id = v.get("jobId").and_then(Value::as_str).unwrap_or_default();
-        let key = v.get("repoKey").and_then(Value::as_str).unwrap_or_default();
-        let commit = v.get("commit").and_then(Value::as_str).unwrap_or_default();
-        if !valid_id(id) || !valid_id(key) || !valid_commit(commit) {
+    pub(crate) fn prepare(
+        &self,
+        request: &v1::PrepareJobRequest,
+    ) -> Result<v1::PrepareJobResponse, RpcError> {
+        let (key, commit) = (request.repo_key.as_str(), request.commit.as_str());
+        if !valid_id(&request.job_id) || !valid_id(key) || !valid_commit(commit) {
             return Err(RpcError::invalid("invalid job id, repo key, or commit"));
         }
         let repo = self.repo_root.join(key);
         if !repo.join("HEAD").is_file() {
-            return Ok(json!({"hasCommit":false}));
+            return Ok(v1::PrepareJobResponse::default());
         }
         let _ = fs::write(repo.join(".pc-last-used"), b"");
         let repo_arg = git_path(&repo).map_err(io_rpc)?;
@@ -244,36 +234,33 @@ impl Sources {
             "refs/pc/",
         ])
         .unwrap_or_default();
-        let known = String::from_utf8_lossy(&refs)
+        let known_commits = String::from_utf8_lossy(&refs)
             .split_whitespace()
             .filter(|s| valid_commit(s))
             .take(8)
             .map(str::to_owned)
-            .collect::<Vec<_>>();
-        Ok(json!({"hasCommit":has_commit,"knownCommits":known}))
+            .collect();
+        Ok(v1::PrepareJobResponse {
+            has_commit,
+            known_commits,
+        })
     }
-    pub(crate) fn upload(&self, v: &Value) -> Result<Value, RpcError> {
-        let id = v.get("jobId").and_then(Value::as_str).unwrap_or_default();
+    pub(crate) fn upload(
+        &self,
+        request: &v1::UploadJobDataRequest,
+    ) -> Result<v1::UploadJobDataResponse, RpcError> {
+        let id = request.job_id.as_str();
         if !valid_id(id) {
             return Err(RpcError::invalid("invalid job id"));
         }
-        let offset = v
-            .get("offset")
-            .and_then(Value::as_str)
-            .and_then(|s| s.parse::<u64>().ok())
-            .or_else(|| v.get("offset").and_then(Value::as_u64))
-            .unwrap_or(0);
-        let data = STANDARD
-            .decode(v.get("data").and_then(Value::as_str).unwrap_or_default())
-            .map_err(|_| RpcError::invalid("invalid upload data"))?;
+        let (offset, data, last) = (request.offset, &request.data, request.last);
         if data.len() > MAX_CHUNK {
             return Err(RpcError::new(
                 Code::ResourceExhausted,
                 "upload chunk exceeds 4 MiB",
             ));
         }
-        let last = v.get("last").and_then(Value::as_bool).unwrap_or(false);
-        let digest = v.get("sha256").and_then(Value::as_str).unwrap_or_default();
+        let digest = request.sha256.as_str();
         let mut state = self
             .uploads
             .lock()
@@ -389,7 +376,7 @@ impl Sources {
                 .completed
                 .insert(id.to_string(), (received, Instant::now()));
         }
-        Ok(json!({"received":received.to_string()}))
+        Ok(v1::UploadJobDataResponse { received })
     }
     pub(crate) fn cleanup(&self, id: &str, source: &Source, base: &Path) {
         if let Ok(mut state) = self.uploads.lock() {

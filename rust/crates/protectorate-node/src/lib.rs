@@ -19,14 +19,14 @@ pub use jobs::Jobs;
 use jobs::Jobs as JobStore;
 #[cfg(target_os = "linux")]
 pub use jobs::SandboxConfig;
-use protectorate_node_metrics::{Collector, NodeMetrics, Probe};
+use protectorate_node_metrics::{metrics_proto, Collector, NodeMetrics, Probe};
 use protectorate_wire::{
-    self as wire, AuthContext, Catalog, Code, Method, RpcError, RpcRequest, RpcResponse,
-    UnaryServer,
+    self as wire,
+    v1::{self, get_file_response::Part, node_agent_service},
+    AuthContext, Call, Catalog, Code, Method, RpcError, UnaryServer,
 };
 use protectorate_xfer::Kind;
 pub use retention::DiskLimits;
-use serde_json::{json, Value};
 use std::{
     io,
     path::Path,
@@ -65,9 +65,9 @@ struct Beat {
     seq: AtomicU64,
 }
 impl Beat {
-    fn stamp(&self, metrics: &mut Value) {
-        metrics["instance"] = json!(self.instance);
-        metrics["seq"] = json!((self.seq.fetch_add(1, Ordering::SeqCst) + 1).to_string());
+    fn stamp(&self, metrics: &mut v1::NodeMetrics) {
+        metrics.instance = self.instance.clone();
+        metrics.seq = self.seq.fetch_add(1, Ordering::SeqCst) + 1;
     }
 }
 
@@ -183,266 +183,237 @@ impl Agent {
             .with_max_stream_message_bytes(8 << 20);
         let agent = Arc::new(self);
         let jobs = agent.jobs.clone();
-        server.register(
-            "/protectorate.v1.NodeAgentService/PrepareJob",
-            move |request| {
-                let jobs = jobs.clone();
-                async move { jobs.ok_or_else(no_jobs)?.prepare(&request).await }
-            },
-        )?;
+        server.unary(node_agent_service::PREPARE_JOB, move |call: Call<_>| {
+            let jobs = jobs.clone();
+            async move { jobs.ok_or_else(no_jobs)?.prepare(call.request).await }
+        })?;
         let jobs = agent.jobs.clone();
-        server.register(
-            "/protectorate.v1.NodeAgentService/UploadJobData",
-            move |request| {
-                let jobs = jobs.clone();
-                async move { jobs.ok_or_else(no_jobs)?.upload(&request).await }
-            },
-        )?;
+        server.unary(node_agent_service::UPLOAD_JOB_DATA, move |call: Call<_>| {
+            let jobs = jobs.clone();
+            async move { jobs.ok_or_else(no_jobs)?.upload(call.request).await }
+        })?;
         let jobs = agent.jobs.clone();
-        server.register(
-            "/protectorate.v1.NodeAgentService/ListJobs",
-            move |request| {
-                let jobs = jobs.clone();
-                async move { jobs.ok_or_else(no_jobs)?.list(&request).await }
-            },
-        )?;
+        server.unary(node_agent_service::LIST_JOBS, move |_: Call<_>| {
+            let jobs = jobs.clone();
+            async move { Ok(jobs.ok_or_else(no_jobs)?.list().await) }
+        })?;
         let jobs = agent.jobs.clone();
-        server.register(
-            "/protectorate.v1.NodeAgentService/CancelJob",
-            move |request| {
-                let jobs = jobs.clone();
-                async move { jobs.ok_or_else(no_jobs)?.cancel(&request).await }
-            },
-        )?;
+        server.unary(node_agent_service::CANCEL_JOB, move |call: Call<_>| {
+            let jobs = jobs.clone();
+            async move { Ok(jobs.ok_or_else(no_jobs)?.cancel(&call.request.job_id).await) }
+        })?;
         let jobs = agent.jobs.clone();
-        server.register_streaming(
-            "/protectorate.v1.NodeAgentService/RunJob",
-            move |request, sender| {
+        server.stream(node_agent_service::RUN_JOB, move |call: Call<_>, sender| {
+            let jobs = jobs.clone();
+            async move {
+                let jobs = jobs.ok_or_else(no_jobs)?;
+                let id = jobs.start(&call.request).await?;
+                jobs.attach(sender, &id, 0).await?;
+                Ok(Default::default())
+            }
+        })?;
+        let jobs = agent.jobs.clone();
+        server.stream(
+            node_agent_service::ATTACH_JOB,
+            move |call: Call<_>, sender| {
                 let jobs = jobs.clone();
                 async move {
                     let jobs = jobs.ok_or_else(no_jobs)?;
-                    let input = serde_json::to_value(&request.message)
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                    let id = jobs.start(input).await?;
-                    jobs.attach(&request, sender, &id, 0).await?;
-                    Ok(Default::default())
-                }
-            },
-        )?;
-        let jobs = agent.jobs.clone();
-        server.register_streaming(
-            "/protectorate.v1.NodeAgentService/AttachJob",
-            move |request, sender| {
-                let jobs = jobs.clone();
-                async move {
-                    let jobs = jobs.ok_or_else(no_jobs)?;
-                    let input = serde_json::to_value(&request.message)
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                    let id = input
-                        .get("jobId")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default();
-                    let offset = input
-                        .get("fromOffset")
-                        .and_then(Value::as_str)
-                        .and_then(|s| s.parse::<usize>().ok())
-                        .or_else(|| {
-                            input
-                                .get("fromOffset")
-                                .and_then(Value::as_u64)
-                                .and_then(|n| usize::try_from(n).ok())
-                        })
-                        .unwrap_or(0);
-                    jobs.attach(&request, sender, id, offset).await?;
+                    let offset = usize::try_from(call.request.from_offset).unwrap_or(usize::MAX);
+                    jobs.attach(sender, &call.request.job_id, offset).await?;
                     Ok(Default::default())
                 }
             },
         )?;
         let get = Arc::clone(&agent);
-        server.register(
-            "/protectorate.v1.NodeAgentService/GetMetrics",
-            move |request| {
-                let collector = Arc::clone(&get.collector);
-                let beat = Arc::clone(&get.beat);
-                let updater = get.updater.clone();
-                let jobs = get.jobs.clone();
-                async move {
-                    let mut metrics = tokio::task::spawn_blocking(move || collector.collect())
-                        .await
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?
-                        .map_err(|e| {
-                            RpcError::new(Code::Unavailable, format!("collect metrics: {e}"))
-                        })?;
-                    if let Some(jobs) = jobs {
-                        metrics.jobs = Some(jobs.isolation());
-                    }
-                    let mut response = metrics_json(&metrics);
-                    beat.stamp(&mut response);
-                    if let Some(updater) = updater {
-                        let reported = metrics.agent_version.clone();
-                        let touch = Arc::clone(&updater);
-                        tokio::task::spawn_blocking(move || touch.touch(&reported))
-                            .await
-                            .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?
-                            .map_err(|e| {
-                                RpcError::new(Code::Internal, format!("confirm node update: {e}"))
-                            })?;
-                        if let Some(state) = tokio::task::spawn_blocking(move || updater.state())
-                            .await
-                            .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?
-                            .map_err(|e| {
-                                RpcError::new(Code::Internal, format!("read node update: {e}"))
-                            })?
-                        {
-                            response["update"] = state;
-                        }
-                    }
-                    respond(&request, response)
+        server.unary(node_agent_service::GET_METRICS, move |_: Call<_>| {
+            let collector = Arc::clone(&get.collector);
+            let beat = Arc::clone(&get.beat);
+            let updater = get.updater.clone();
+            let jobs = get.jobs.clone();
+            async move {
+                let mut metrics = collect(collector).await?;
+                if let Some(jobs) = jobs {
+                    metrics.jobs = Some(jobs.isolation());
                 }
-            },
-        )?;
+                let mut response = metrics_proto(&metrics);
+                beat.stamp(&mut response);
+                if let Some(updater) = updater {
+                    let reported = metrics.agent_version;
+                    response.update = tokio::task::spawn_blocking(move || {
+                        updater
+                            .touch(&reported)
+                            .map_err(|e| format!("confirm node update: {e}"))?;
+                        updater
+                            .state()
+                            .map_err(|e| format!("read node update: {e}"))
+                    })
+                    .await
+                    .map_err(join_error)?
+                    .map_err(|e| RpcError::new(Code::Internal, e))?;
+                }
+                Ok(response)
+            }
+        })?;
         let updater = agent.updater.clone();
-        server.register(
-            "/protectorate.v1.NodeAgentService/ApplyUpdate",
-            move |request| {
-                let updater = updater.clone();
-                async move {
-                    let updater = updater.ok_or_else(|| {
-                        RpcError::new(Code::Unimplemented, "this node does not accept updates")
-                    })?;
-                    let input = serde_json::to_value(&request.message)
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                    let result = tokio::task::spawn_blocking(move || updater.apply(&input))
-                        .await
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
-                    respond(&request, result)
-                }
-            },
-        )?;
+        server.unary(node_agent_service::APPLY_UPDATE, move |call: Call<_>| {
+            let updater = updater.clone();
+            async move {
+                let updater = updater.ok_or_else(|| {
+                    RpcError::new(Code::Unimplemented, "this node does not accept updates")
+                })?;
+                tokio::task::spawn_blocking(move || updater.apply(&call.request))
+                    .await
+                    .map_err(join_error)?
+            }
+        })?;
         let renew = agent.renew.clone();
-        server.register(
-            "/protectorate.v1.NodeAgentService/RenewCertificate",
-            move |request| {
+        server.unary(
+            node_agent_service::RENEW_CERTIFICATE,
+            move |call: Call<_>| {
                 let renew = renew.clone();
                 async move {
                     let renew = renew.ok_or_else(|| {
                         RpcError::new(Code::Unimplemented, "this agent serves no certificate")
                     })?;
-                    let input = serde_json::to_value(&request.message)
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                    let pem = input["certificate"].as_str().unwrap_or_default();
-                    renew(pem).map_err(|e| RpcError::invalid(format!("certificate: {e}")))?;
-                    respond(&request, json!({}))
+                    renew(&call.request.certificate)
+                        .map_err(|e| RpcError::invalid(format!("certificate: {e}")))?;
+                    Ok(v1::RenewCertificateResponse {})
                 }
             },
         )?;
         let uninstaller = agent.uninstaller.clone();
-        server.register(
-            "/protectorate.v1.NodeAgentService/Uninstall",
-            move |request| {
-                let uninstaller = uninstaller.clone();
-                async move {
-                    let uninstaller = uninstaller.ok_or_else(|| {
-                        RpcError::new(
-                            Code::Unimplemented,
-                            "node self-uninstall is unavailable on this platform",
-                        )
-                    })?;
-                    respond(&request, uninstaller.schedule())
-                }
-            },
-        )?;
+        server.unary(node_agent_service::UNINSTALL, move |_: Call<_>| {
+            let uninstaller = uninstaller.clone();
+            async move {
+                let uninstaller = uninstaller.ok_or_else(|| {
+                    RpcError::new(
+                        Code::Unimplemented,
+                        "node self-uninstall is unavailable on this platform",
+                    )
+                })?;
+                Ok(uninstaller.schedule())
+            }
+        })?;
         let files = agent.files.clone();
-        server.register(
-            "/protectorate.v1.NodeAgentService/PutFile",
-            move |request| {
-                let files = files.clone();
-                async move {
-                    let files = files.ok_or_else(|| {
-                        RpcError::new(
-                            Code::Unimplemented,
-                            "this node does not serve file transfers",
-                        )
-                    })?;
-                    let input = serde_json::to_value(&request.message)
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                    let value = tokio::task::spawn_blocking(move || files.put(&input))
-                        .await
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
-                    respond(&request, value)
-                }
-            },
-        )?;
-        let files = agent.files.clone();
-        server.register_streaming("/protectorate.v1.NodeAgentService/GetFile", move |request, sender| {
+        server.unary(node_agent_service::PUT_FILE, move |call: Call<_>| {
             let files = files.clone();
             async move {
-                let files = files.ok_or_else(|| RpcError::new(Code::Unimplemented, "this node does not serve file transfers"))?;
-                let input = serde_json::to_value(&request.message).map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                let path = input.get("path").and_then(Value::as_str).unwrap_or_default().to_string();
-                let compress = !input.get("noCompress").and_then(Value::as_bool).unwrap_or(false);
-                let (resolved, mut source) = tokio::task::spawn_blocking(move || files.open(&path, compress)).await
-                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))??;
-                let header = source.header();
-                let kind = if header.kind == Kind::File { "FILE_KIND_FILE" } else { "FILE_KIND_DIRECTORY" };
-                let header_value = json!({"header": {"kind": kind, "mode": header.mode, "size": header.size.to_string(), "path": resolved.to_string_lossy()}});
-                sender.send(&decode(&request, header_value)?).await?;
-                loop {
-                    if sender.is_cancelled() { return Err(RpcError::new(Code::Canceled, "stream cancelled")); }
-                    let (next, chunk) = tokio::task::spawn_blocking(move || {
-                        let result = source.next_chunk(); (source, result)
-                    }).await.map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                    source = next;
-                    let chunk = chunk.map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                    let Some(chunk) = chunk else { break };
-                    let value = json!({"chunk": {"data": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &chunk.data), "compressed": chunk.compressed, "rawSize": chunk.raw_size}});
-                    sender.send(&decode(&request, value)?).await?;
-                }
-                let trailer = tokio::task::spawn_blocking(move || source.trailer()).await
-                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?
-                    .map_err(|e| RpcError::new(Code::Aborted, e.to_string()))?;
-                sender.send(&decode(&request, json!({"trailer": {"size": trailer.size.to_string(), "sha256": trailer.sha256, "skipped": trailer.skipped}}))?).await?;
-                Ok(Default::default())
+                let files = files.ok_or_else(no_files)?;
+                tokio::task::spawn_blocking(move || files.put(call.request))
+                    .await
+                    .map_err(join_error)?
             }
         })?;
-        server.register_streaming("/protectorate.v1.NodeAgentService/WatchMetrics", move |request, sender| {
-            let collector = Arc::clone(&agent.collector);
-            let beat = Arc::clone(&agent.beat);
-            async move {
-                let input = serde_json::to_value(&request.message).map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                let seconds = input.get("intervalSeconds").and_then(Value::as_i64).unwrap_or_default();
-                let seconds = if seconds <= 0 { 10 } else { seconds.max(5) } as u64;
-                let mut interval = tokio::time::interval(Duration::from_secs(seconds));
-                loop {
-                    tokio::select! {
-                        _ = sender.cancelled() => break,
-                        _ = interval.tick() => {
-                            let collector = Arc::clone(&collector);
-                            let metrics = tokio::task::spawn_blocking(move || collector.collect()).await
-                                .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?
-                                .map_err(|e| RpcError::new(Code::Unavailable, format!("collect metrics: {e}")))?;
-                            let mut value = metrics_json(&metrics);
-                            beat.stamp(&mut value);
-                            let message = decode(&request, value)?;
-                            sender.send(&message).await?;
+        let files = agent.files.clone();
+        server.stream(
+            node_agent_service::GET_FILE,
+            move |call: Call<_>, sender| {
+                let files = files.clone();
+                async move {
+                    let files = files.ok_or_else(no_files)?;
+                    let request: v1::GetFileRequest = call.request;
+                    let compress = !request.no_compress;
+                    let (resolved, mut source) =
+                        tokio::task::spawn_blocking(move || files.open(&request.path, compress))
+                            .await
+                            .map_err(join_error)??;
+                    let header = source.header();
+                    let kind = match header.kind {
+                        Kind::File => v1::FileKind::File,
+                        Kind::Directory => v1::FileKind::Directory,
+                    };
+                    sender
+                        .send(&file_part(Part::Header(v1::FileHeader {
+                            kind: kind as i32,
+                            mode: header.mode,
+                            size: header.size,
+                            path: resolved.to_string_lossy().into_owned(),
+                        })))
+                        .await?;
+                    loop {
+                        if sender.is_cancelled() {
+                            return Err(RpcError::new(Code::Canceled, "stream cancelled"));
+                        }
+                        let (next, chunk) = tokio::task::spawn_blocking(move || {
+                            let result = source.next_chunk();
+                            (source, result)
+                        })
+                        .await
+                        .map_err(join_error)?;
+                        source = next;
+                        let chunk =
+                            chunk.map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+                        let Some(chunk) = chunk else { break };
+                        sender
+                            .send(&file_part(Part::Chunk(v1::FileChunk {
+                                data: chunk.data,
+                                compressed: chunk.compressed,
+                                raw_size: chunk.raw_size,
+                            })))
+                            .await?;
+                    }
+                    let trailer = tokio::task::spawn_blocking(move || source.trailer())
+                        .await
+                        .map_err(join_error)?
+                        .map_err(|e| RpcError::new(Code::Aborted, e.to_string()))?;
+                    sender
+                        .send(&file_part(Part::Trailer(v1::FileTrailer {
+                            size: trailer.size,
+                            sha256: trailer.sha256,
+                            skipped: trailer.skipped,
+                        })))
+                        .await?;
+                    Ok(Default::default())
+                }
+            },
+        )?;
+        server.stream(
+            node_agent_service::WATCH_METRICS,
+            move |call: Call<_>, sender| {
+                let collector = Arc::clone(&agent.collector);
+                let beat = Arc::clone(&agent.beat);
+                async move {
+                    let seconds = match call.request.interval_seconds {
+                        seconds if seconds <= 0 => 10,
+                        seconds => seconds.max(5) as u64,
+                    };
+                    let mut interval = tokio::time::interval(Duration::from_secs(seconds));
+                    loop {
+                        tokio::select! {
+                            _ = sender.cancelled() => break,
+                            _ = interval.tick() => {
+                                let mut metrics = metrics_proto(&collect(Arc::clone(&collector)).await?);
+                                beat.stamp(&mut metrics);
+                                sender.send(&metrics).await?;
+                            }
                         }
                     }
+                    Ok(Default::default())
                 }
-                Ok(Default::default())
-            }
-        })?;
+            },
+        )?;
         Ok(server.router())
     }
+}
+async fn collect(collector: Arc<dyn MetricsCollector>) -> wire::Result<NodeMetrics> {
+    tokio::task::spawn_blocking(move || collector.collect())
+        .await
+        .map_err(join_error)?
+        .map_err(|e| RpcError::new(Code::Unavailable, format!("collect metrics: {e}")))
+}
+fn file_part(part: Part) -> v1::GetFileResponse {
+    v1::GetFileResponse { part: Some(part) }
+}
+fn join_error(error: tokio::task::JoinError) -> RpcError {
+    RpcError::new(Code::Internal, error.to_string())
 }
 fn no_jobs() -> RpcError {
     RpcError::new(Code::Unimplemented, "this node does not run jobs")
 }
-fn decode(request: &RpcRequest, value: Value) -> wire::Result<wire::DynamicMessage> {
-    let bytes =
-        serde_json::to_vec(&value).map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-    wire::decode_json(request.method.output(), &bytes)
+fn no_files() -> RpcError {
+    RpcError::new(
+        Code::Unimplemented,
+        "this node does not serve file transfers",
+    )
 }
-fn respond(request: &RpcRequest, value: Value) -> wire::Result<RpcResponse> {
-    Ok(decode(request, value)?.into())
-}
-pub use protectorate_node_metrics::metrics_json;
