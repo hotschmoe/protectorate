@@ -1,100 +1,104 @@
-use super::{input, respond, string, Hub};
+use super::{proto_time, Hub};
 use prost_reflect::Value as FieldValue;
 use protectorate_audit::{Audit, Entry, Error, Head, Query};
-use protectorate_wire::{AuthContext, Code, DynamicMessage, Method, Result, RpcError, UnaryServer};
-use serde_json::{json, Value};
+use protectorate_wire::{
+    v1::{self, audit_service},
+    AuthContext, Call, Code, DynamicMessage, Method, Result, RpcError, UnaryServer,
+};
 use std::sync::Arc;
 
 pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
     let list = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.AuditService/ListAuditEntries",
-        move |request| {
+    server.unary(
+        audit_service::LIST_AUDIT_ENTRIES,
+        move |call: Call<v1::ListAuditEntriesRequest>| {
             let hub = Arc::clone(&list);
             async move {
-                let value = input(&request)?;
-                let limit = value.get("limit").and_then(Value::as_i64).unwrap_or(0);
-                if limit < 0 {
+                let request = call.request;
+                if request.limit < 0 {
                     return Err(RpcError::invalid("limit must not be negative"));
                 }
-                let outcome = string(&value, "outcome");
-                if !matches!(outcome.as_str(), "" | "ok" | "denied" | "error") {
+                if !matches!(request.outcome.as_str(), "" | "ok" | "denied" | "error") {
                     return Err(RpcError::invalid("outcome must be ok, denied or error"));
                 }
                 let query = Query {
-                    limit: if limit == 0 {
+                    limit: if request.limit == 0 {
                         50
                     } else {
-                        limit.min(500) as usize
+                        request.limit.min(500) as usize
                     },
-                    before: string(&value, "pageToken"),
-                    actor: string(&value, "actor"),
-                    procedure: string(&value, "procedure"),
-                    subject: string(&value, "subject"),
-                    outcome,
-                    run_id: string(&value, "runId"),
+                    before: request.page_token,
+                    actor: request.actor,
+                    procedure: request.procedure,
+                    subject: request.subject,
+                    outcome: request.outcome,
+                    run_id: request.run_id,
                 };
-                let (page, head) = tokio::task::spawn_blocking(move || {
+                let (page, current) = tokio::task::spawn_blocking(move || {
                     Ok::<_, Error>((hub.audit.page(query)?, hub.audit.head()?))
                 })
                 .await
-                .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?
+                .map_err(super::join_error)?
                 .map_err(|e| match e {
                     Error::Cursor(_) => RpcError::invalid(e.to_string()),
                     _ => RpcError::new(Code::Internal, e.to_string()),
                 })?;
-                respond(
-                    &request,
-                    json!({
-                        "entries": page.entries.iter().map(|entry| json!({
-                            "time": entry.time.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true),
-                            "actor": entry.actor,
-                            "tokenId": entry.token_id,
-                            "procedure": entry.procedure,
-                            "subject": entry.subject,
-                            "outcome": entry.outcome,
-                            "code": entry.code,
-                            "task": entry.task,
-                            "detail": entry.detail,
-                            "runId": entry.run_id,
-                            "seq": entry.seq.to_string(),
-                            "prevHash": entry.prev,
-                            "hash": entry.hash,
-                        })).collect::<Vec<_>>(),
-                        "nextPageToken": page.next,
-                        "head": head_json(head.unwrap_or_default()),
-                    }),
-                )
+                Ok(v1::ListAuditEntriesResponse {
+                    entries: page
+                        .entries
+                        .into_iter()
+                        .map(|entry| v1::AuditEntry {
+                            time: Some(proto_time(entry.time)),
+                            actor: entry.actor,
+                            token_id: entry.token_id,
+                            procedure: entry.procedure,
+                            subject: entry.subject,
+                            outcome: entry.outcome,
+                            code: entry.code,
+                            task: entry.task,
+                            detail: entry.detail,
+                            run_id: entry.run_id,
+                            seq: entry.seq,
+                            prev_hash: entry.prev,
+                            hash: entry.hash,
+                        })
+                        .collect(),
+                    next_page_token: page.next,
+                    head: Some(head(current.unwrap_or_default())),
+                })
             }
         },
     )?;
     let verify = Arc::clone(&hub);
-    server.register(
-        "/protectorate.v1.AuditService/VerifyAudit",
-        move |request| {
-            let hub = Arc::clone(&verify);
-            async move {
-                let result = tokio::task::spawn_blocking(move || hub.audit.verify())
-                    .await
-                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                let response = match result {
-                    Ok(report) => json!({
-                        "ok": true,
-                        "entries": report.entries.to_string(),
-                        "head": head_json(report.head),
-                        "beyondHead": report.beyond_head.to_string(),
-                    }),
-                    Err(Error::Broken(reason)) => json!({"ok": false, "error": reason}),
-                    Err(error) => return Err(RpcError::new(Code::Internal, error.to_string())),
-                };
-                respond(&request, response)
+    server.unary(audit_service::VERIFY_AUDIT, move |_: Call<_>| {
+        let hub = Arc::clone(&verify);
+        async move {
+            let result = tokio::task::spawn_blocking(move || hub.audit.verify())
+                .await
+                .map_err(super::join_error)?;
+            match result {
+                Ok(report) => Ok(v1::VerifyAuditResponse {
+                    ok: true,
+                    entries: report.entries,
+                    head: Some(head(report.head)),
+                    beyond_head: report.beyond_head,
+                    ..Default::default()
+                }),
+                Err(Error::Broken(reason)) => Ok(v1::VerifyAuditResponse {
+                    error: reason,
+                    ..Default::default()
+                }),
+                Err(error) => Err(RpcError::new(Code::Internal, error.to_string())),
             }
-        },
-    )
+        }
+    })
 }
 
-pub(super) fn head_json(head: Head) -> Value {
-    json!({"seq": head.seq.to_string(), "hash": head.hash})
+pub(super) fn head(head: Head) -> v1::AuditHead {
+    v1::AuditHead {
+        seq: head.seq,
+        hash: head.hash,
+    }
 }
 
 pub(super) fn record_completion(
