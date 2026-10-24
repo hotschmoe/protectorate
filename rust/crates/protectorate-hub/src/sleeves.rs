@@ -121,6 +121,28 @@ impl SpawnParent {
     }
 }
 
+/// One sleeve per directory: a workspace that is, contains or lies inside
+/// another sleeve's is refused, whatever either sleeve's mode. An exited
+/// sleeve keeps its directory until it is killed. Callers hold
+/// `sleeve_launch_lock`.
+pub(super) fn claim_workspace(hub: &Hub, name: &str, workspace: &Path) -> Result<()> {
+    let owners: Vec<_> = crate::workspaces::owners(hub)
+        .into_iter()
+        .filter(|(_, owner)| owner != name)
+        .collect();
+    match crate::workspaces::owner_of(&owners, workspace) {
+        Some((owned, owner)) => Err(RpcError::new(
+            Code::FailedPrecondition,
+            format!(
+                "{} is owned by sleeve {owner} ({}); one sleeve per directory: kill that sleeve to free it, or give the new one its own clone with --new-branch",
+                workspace.display(),
+                owned.display()
+            ),
+        )),
+        None => Ok(()),
+    }
+}
+
 /// Whether the caller is the identity that spawned this sleeve.
 pub(super) fn spawned_by(auth: &AuthContext, row: &Record) -> bool {
     let same_token = !row.parent_token_id.is_empty() && row.parent_token_id == auth.token_id;
@@ -1618,6 +1640,7 @@ fn spawn_terminal(hub: &Hub, launch: &Launch, parent: &SpawnParent) -> Result<Re
             "workspace is not a directory",
         ));
     }
+    claim_workspace(hub, &name, &workspace)?;
     if let Ok(prev) = hub.sleeves.get(&name) {
         if refresh_record(hub, &prev).state == State::Running {
             return Err(RpcError::new(Code::AlreadyExists, "sleeve already running"));

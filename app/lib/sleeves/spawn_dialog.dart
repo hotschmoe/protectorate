@@ -169,7 +169,7 @@ class _SpawnSleeveDialogState extends State<SpawnSleeveDialog> {
     if (w.gitBranch.isNotEmpty) 'branch ${w.gitBranch}',
     if (w.gitRemote.isNotEmpty) w.gitRemote,
     if (w.sleeve.isNotEmpty)
-      w.busy ? 'in use by ${w.sleeve}' : 'last used by ${w.sleeve}',
+      w.busy ? 'owned by ${w.sleeve}, running' : 'owned by ${w.sleeve}, exited',
   ].join('\n');
 
   Future<void> _browse(String path) async {

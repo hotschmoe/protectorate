@@ -1179,6 +1179,7 @@ fn spawn_chat(
             "workspace must be an absolute directory",
         ));
     }
+    crate::sleeves::claim_workspace(hub, &name, &workspace)?;
     let previous = hub.sleeves.get(&name).ok();
     if previous.as_ref().is_some_and(|r| r.state == State::Running) {
         return Err(RpcError::new(Code::AlreadyExists, "sleeve already running"));

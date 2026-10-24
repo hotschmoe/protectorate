@@ -97,6 +97,8 @@ async fn terminal_agent_harnesses_use_their_tui_with_scoped_credentials() {
         ("codex", "HARNESS_CODEX"),
         ("grok", "HARNESS_GROK"),
     ] {
+        let workspace = workspace.join(provider);
+        fs::create_dir_all(&workspace).unwrap();
         let (status, spawned) = call(
             addr,
             "/protectorate.v1.SleeveService/SpawnSleeve",
@@ -297,6 +299,101 @@ async fn call_as(addr: std::net::SocketAddr, path: &str, token: &str, body: Valu
         head.split_whitespace().nth(1).unwrap().parse().unwrap(),
         serde_json::from_str(body).unwrap(),
     )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn one_sleeve_owns_a_directory_until_it_is_killed() {
+    let root = tempfile::tempdir().unwrap();
+    let state = root.path().join("state");
+    let owner_home = root.path().join("owner");
+    let runtime = root.path().join("runtime");
+    let projects = root.path().join("projects");
+    let repo = projects.join("repo");
+    let inner = repo.join("sub");
+    let other = projects.join("other");
+    for dir in [&state, &owner_home, &runtime, &inner, &other] {
+        fs::create_dir_all(dir).unwrap();
+    }
+    let socket = format!("p-rust-owner-{}", std::process::id());
+    let _tmux = PrivateTmux::new(&socket);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let launcher = TerminalLauncher {
+        state_root: state.clone(),
+        user_home: owner_home,
+        runtime_dir: runtime,
+        runner: env!("CARGO_BIN_EXE_protectorate-hub-sleeve-runner").into(),
+        helper: env!("CARGO_BIN_EXE_protectorate-hub-sandbox-helper").into(),
+        hub_url: format!("http://{}", listener.local_addr().unwrap()),
+        cli_executable: None,
+        tool_roots: Vec::new(),
+        flutter_sdk_root: None,
+        flutter_cache_lower: None,
+        flutter_tools_lower: None,
+        pub_cache_lower: None,
+        go_mod_cache_lower: None,
+        tasks_max: 64,
+    };
+    let hub = Hub::open(&state, "owner-secret", "test")
+        .unwrap()
+        .with_sessions(Arc::new(Manager::new(&socket)))
+        .with_terminal_launcher(launcher);
+    let (addr, task) = serve(listener, hub).await;
+    let spawn = |name: &'static str, workspace: &std::path::Path| {
+        let body =
+            json!({"name":name,"harness":"HARNESS_SHELL","workspace":workspace,"args":["sh"]});
+        async move { call(addr, "/protectorate.v1.SleeveService/SpawnSleeve", body).await }
+    };
+    let (status, spawned) = spawn("owner", &repo).await;
+    assert_eq!(status, 200, "{spawned}");
+    for (name, workspace) in [("same", &repo), ("inside", &inner), ("around", &projects)] {
+        let (status, refused) = spawn(name, workspace).await;
+        assert_eq!(status, 400, "{name}: {refused}");
+        assert_eq!(refused["code"], "failed_precondition", "{name}: {refused}");
+        assert!(
+            refused["message"]
+                .as_str()
+                .unwrap()
+                .contains("is owned by sleeve owner"),
+            "{name}: {refused}"
+        );
+    }
+    let (status, sibling) = spawn("sibling", &other).await;
+    assert_eq!(status, 200, "{sibling}");
+    let (status, listed) = call(
+        addr,
+        "/protectorate.v1.SleeveService/ListWorkspaces",
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, 200, "{listed}");
+    let owned = listed["workspaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["path"] == fs::canonicalize(&repo).unwrap().to_str().unwrap())
+        .unwrap_or_else(|| panic!("{listed}"));
+    assert_eq!(owned["sleeve"], "owner", "{listed}");
+    assert_eq!(owned["requiredName"], "owner", "{listed}");
+    assert_eq!(owned["busy"], true, "{listed}");
+    let (status, killed) = call(
+        addr,
+        "/protectorate.v1.SleeveService/KillSleeve",
+        json!({"name":"owner"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{killed}");
+    let (status, successor) = spawn("same", &repo).await;
+    assert_eq!(status, 200, "{successor}");
+    for name in ["same", "sibling"] {
+        let (status, killed) = call(
+            addr,
+            "/protectorate.v1.SleeveService/KillSleeve",
+            json!({"name":name}),
+        )
+        .await;
+        assert_eq!(status, 200, "{name}: {killed}");
+    }
+    task.abort();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

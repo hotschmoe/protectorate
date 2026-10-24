@@ -302,6 +302,10 @@ for line in sys.stdin:
 
         // api call: pretty JSON by default, one compact line with --json.
         let workspace = work.to_str().unwrap();
+        let beta_work = work.with_file_name("beta-work");
+        let gamma_work = work.with_file_name("gamma-work");
+        fs::create_dir_all(&beta_work).unwrap();
+        fs::create_dir_all(&gamma_work).unwrap();
         let pretty = owner.ok(&[
             "api",
             "call",
@@ -316,7 +320,7 @@ for line in sys.stdin:
             "api",
             "call",
             "protectorate.v1.SleeveService/SpawnSleeve",
-            &json!({"name":"beta","harness":"HARNESS_PI","workspace":workspace}).to_string(),
+            &json!({"name":"beta","harness":"HARNESS_PI","workspace":beta_work}).to_string(),
         ]);
         assert_eq!(compact.lines().count(), 1, "{compact}");
         let missing = owner
@@ -437,7 +441,7 @@ for line in sys.stdin:
             "api",
             "call",
             "SleeveService/SpawnSleeve",
-            &json!({"name":"gamma","harness":"HARNESS_CLAUDE","workspace":workspace,"supervised":true})
+            &json!({"name":"gamma","harness":"HARNESS_CLAUDE","workspace":gamma_work,"supervised":true})
                 .to_string(),
         ]);
         let mut gate = owner.spawn(&["chat", "watch", "gamma"]);

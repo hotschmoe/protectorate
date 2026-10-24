@@ -1742,6 +1742,8 @@ class WorkspaceDirectory extends $pb.GeneratedMessage {
   @$pb.TagNumber(5)
   void clearGitRemote() => $_clearField(5);
 
+  /// acceptable is false with a reason for directories no sleeve may use,
+  /// including one inside or around another sleeve's workspace.
   @$pb.TagNumber(6)
   $core.bool get acceptable => $_getBF(5);
   @$pb.TagNumber(6)
@@ -1760,6 +1762,8 @@ class WorkspaceDirectory extends $pb.GeneratedMessage {
   @$pb.TagNumber(7)
   void clearReason() => $_clearField(7);
 
+  /// required_name is the only sleeve name that may use this directory: the
+  /// sleeve that owns it, or a state-directory workspace's name.
   @$pb.TagNumber(8)
   $core.String get requiredName => $_getSZ(7);
   @$pb.TagNumber(8)
@@ -2504,7 +2508,9 @@ class Workspace extends $pb.GeneratedMessage {
   @$pb.TagNumber(4)
   void clearGitBranch() => $_clearField(4);
 
-  /// sleeve is the sleeve that uses this workspace, running or exited.
+  /// sleeve owns this workspace, running or exited, until it is killed. One
+  /// sleeve per directory: SpawnSleeve refuses the workspace, and any
+  /// directory inside or around it, for every other name.
   @$pb.TagNumber(5)
   $core.String get sleeve => $_getSZ(4);
   @$pb.TagNumber(5)
@@ -2514,7 +2520,7 @@ class Workspace extends $pb.GeneratedMessage {
   @$pb.TagNumber(5)
   void clearSleeve() => $_clearField(5);
 
-  /// busy is true while that sleeve is running; SpawnSleeve then refuses it.
+  /// busy is true while the owning sleeve is running.
   @$pb.TagNumber(6)
   $core.bool get busy => $_getBF(5);
   @$pb.TagNumber(6)
@@ -2524,8 +2530,9 @@ class Workspace extends $pb.GeneratedMessage {
   @$pb.TagNumber(6)
   void clearBusy() => $_clearField(6);
 
-  /// required_name is set for a workspace in the hub's state directory: only a
-  /// sleeve of exactly that name may use it. Other workspaces take any name.
+  /// required_name is the only sleeve name that may use this workspace: its
+  /// owner, or the name of a workspace in the hub's state directory. Empty
+  /// means any name.
   @$pb.TagNumber(7)
   $core.String get requiredName => $_getSZ(6);
   @$pb.TagNumber(7)

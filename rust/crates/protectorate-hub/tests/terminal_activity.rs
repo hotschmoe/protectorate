@@ -190,6 +190,8 @@ async fn terminal_sleeves_report_blocked_working_and_idle_from_their_screens() {
     while line(&mut stream).await != "\r\n" {}
 
     for (name, harness, _, _, _) in cases {
+        let workspace = workspace.join(name);
+        fs::create_dir_all(&workspace).unwrap();
         let (status, spawned) = call(
             addr,
             "/protectorate.v1.SleeveService/SpawnSleeve",
