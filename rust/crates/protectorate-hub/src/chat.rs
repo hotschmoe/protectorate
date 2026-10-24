@@ -23,7 +23,7 @@ use protectorate_wire::{
 };
 use serde_json::{json, Value};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     fs,
     io::{BufRead, BufReader, Write},
     os::unix::fs::PermissionsExt,
@@ -274,6 +274,12 @@ pub struct ChatLauncher {
 pub struct ChatRuntime {
     launcher: ChatLauncher,
     sessions: Mutex<HashMap<String, Arc<dyn ChatSession>>>,
+    /// Sleeves whose harness the hub is stopping. Their exit is the stop's
+    /// to record, as killed, not a natural exit a concurrent read observed.
+    stopping: Mutex<HashSet<String>>,
+    /// The last chat log event each sleeve's state watcher has charged to
+    /// the token budgets; a sleeve is idle only once its usage is charged.
+    accounted: Mutex<HashMap<String, u64>>,
     logs: Mutex<HashMap<String, Arc<Log>>>,
     requests: Mutex<HashMap<String, RequestKeys>>,
 }
@@ -577,6 +583,13 @@ impl ChatStateWatcher {
             &mut previous,
             &mut last_publish,
         );
+        if let Some(runtime) = self.runtime.upgrade() {
+            runtime
+                .accounted
+                .lock()
+                .unwrap()
+                .insert(name.clone(), self.after);
+        }
         let cancelled = AtomicBool::new(false);
         let _ = self.log.watch(self.after, &cancelled, |event| {
             let Some(current) = self.runtime.upgrade() else {
@@ -599,6 +612,11 @@ impl ChatStateWatcher {
             {
                 charge_budgets(&self, &current, tokens);
             }
+            current
+                .accounted
+                .lock()
+                .unwrap()
+                .insert(name.clone(), event.seq);
             let state = event.payload["state"]["state"]
                 .as_str()
                 .or_else(|| event.payload.get("user").map(|_| "CHAT_STATE_WORKING"))
@@ -622,6 +640,19 @@ impl ChatStateWatcher {
             publish_chat_state(events, name, &status, &mut previous, &mut last_publish);
             Ok(())
         });
+        // Nothing charges this session's usage any more; waits must not
+        // block on it.
+        if let Some(runtime) = self.runtime.upgrade() {
+            let replaced = runtime
+                .sessions
+                .lock()
+                .unwrap()
+                .get(name)
+                .is_some_and(|live| !Arc::ptr_eq(live, session));
+            if !replaced {
+                runtime.accounted.lock().unwrap().remove(name);
+            }
+        }
     }
 }
 
@@ -630,6 +661,8 @@ impl ChatRuntime {
         Self {
             launcher,
             sessions: Mutex::new(HashMap::new()),
+            stopping: Mutex::new(HashSet::new()),
+            accounted: Mutex::new(HashMap::new()),
             logs: Mutex::new(HashMap::new()),
             requests: Mutex::new(HashMap::new()),
         }
@@ -670,26 +703,46 @@ impl ChatRuntime {
             .get(name)
             .map(|session| chat_status(hub, session.as_ref()))
     }
-    pub fn exited(&self, name: &str) -> bool {
-        self.sessions
+    /// Whether the state watcher has charged every event logged so far.
+    fn accounted(&self, name: &str) -> bool {
+        let accounted = self.accounted.lock().unwrap();
+        let Some(seq) = accounted.get(name) else {
+            return true;
+        };
+        self.logs
             .lock()
             .unwrap()
             .get(name)
-            .is_some_and(|s| s.is_exited())
+            .is_none_or(|log| *seq >= log.last())
+    }
+    pub fn exited(&self, name: &str) -> bool {
+        let stopping = self.stopping.lock().unwrap();
+        !stopping.contains(name)
+            && self
+                .sessions
+                .lock()
+                .unwrap()
+                .get(name)
+                .is_some_and(|s| s.is_exited())
     }
     pub fn stop(&self, name: &str) -> Result<()> {
         let session = self.sessions.lock().unwrap().get(name).cloned();
         if let Some(session) = session {
+            self.stopping.lock().unwrap().insert(name.to_owned());
             session.stop();
-            if !session.wait_exited(std::time::Duration::from_secs(5)) {
+            let exited = session.wait_exited(std::time::Duration::from_secs(5));
+            if exited {
+                self.sessions.lock().unwrap().remove(name);
+                self.logs.lock().unwrap().remove(name);
+                self.requests.lock().unwrap().remove(name);
+            }
+            self.stopping.lock().unwrap().remove(name);
+            if !exited {
                 return Err(RpcError::new(
                     Code::Unavailable,
                     "chat process did not exit after cancellation",
                 ));
             }
-            self.sessions.lock().unwrap().remove(name);
-            self.logs.lock().unwrap().remove(name);
-            self.requests.lock().unwrap().remove(name);
         }
         Ok(())
     }
@@ -2609,7 +2662,11 @@ async fn wait(hub: &Hub, request: &v1::WaitRequest) -> Result<v1::WaitResponse> 
                 ));
             }
             let session = live_session(hub, name)?;
-            if session.is_idle() && hub.mail.pending().get(name).is_none_or(Vec::is_empty) {
+            let runtime = hub.chat_runtime.as_ref().ok_or_else(unavailable)?;
+            if session.is_idle()
+                && runtime.accounted(name)
+                && hub.mail.pending().get(name).is_none_or(Vec::is_empty)
+            {
                 return Ok(v1::WaitResponse {
                     sleeve: name.into(),
                     result: None,
