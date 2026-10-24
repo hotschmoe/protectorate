@@ -611,56 +611,48 @@ pub(crate) fn suggest_text(response: &v1::SuggestResponse) -> String {
     align(&out)
 }
 
-pub(crate) fn node_list_text(response: &Value) -> String {
-    let nodes = items(response, "nodes");
-    let mut hub_version = String::new();
-    for status in &nodes {
-        if boolean(at(status, "node").unwrap_or(&Value::Null), "local") {
-            hub_version = at(status, "metrics")
-                .map(|metrics| text(metrics, "agentVersion"))
-                .unwrap_or_default();
-            break;
-        }
-    }
+pub(crate) fn node_list_text(response: &v1::ListNodesResponse) -> String {
+    let nodes = &response.nodes;
+    let hub_version = nodes
+        .iter()
+        .find(|status| status.node.as_ref().is_some_and(|node| node.local))
+        .and_then(|status| status.metrics.as_ref())
+        .map(|metrics| metrics.agent_version.clone())
+        .unwrap_or_default();
     let mut out = String::from(NODE_COLUMNS);
     out.push('\n');
     let mut skew = false;
-    for status in &nodes {
-        let node = at(status, "node").unwrap_or(&Value::Null);
-        let metrics = at(status, "metrics");
-        let mut name = text(node, "name");
-        if boolean(node, "local") {
+    for status in nodes {
+        let node = status.node.clone().unwrap_or_default();
+        let metrics = status.metrics.as_ref();
+        let mut name = node.name.clone();
+        if node.local {
             name.push('*');
         }
         let version = match metrics {
-            Some(metrics) => version_cell(&text(metrics, "agentVersion"), &hub_version),
+            Some(metrics) => version_cell(&metrics.agent_version, &hub_version),
             None => "-".to_owned(),
         };
         skew = skew || version.ends_with("(!)");
+        let dash = || "-".to_owned();
         let line = [
             name,
-            platform(node),
+            os_arch(&node.os, &node.arch),
             version,
             metrics
-                .and_then(|m| number(m, "cpu.usagePercent"))
-                .map(percent)
-                .unwrap_or_else(|| "-".to_owned()),
+                .and_then(|m| m.cpu.as_ref())
+                .map(|cpu| percent(cpu.usage_percent))
+                .unwrap_or_else(dash),
+            metrics.map(|m| gpu_summary(&m.gpus)).unwrap_or_else(dash),
             metrics
-                .map(|m| gpu_summary(&items(m, "gpus")))
-                .unwrap_or_else(|| "-".to_owned()),
+                .and_then(|m| m.memory.as_ref())
+                .map(|memory| percent(memory.used_percent))
+                .unwrap_or_else(dash),
+            metrics.and_then(primary_disk).unwrap_or_else(dash),
             metrics
-                .and_then(|m| number(m, "memory.usedPercent"))
-                .map(percent)
-                .unwrap_or_else(|| "-".to_owned()),
-            metrics
-                .and_then(primary_disk)
-                .unwrap_or_else(|| "-".to_owned()),
-            metrics
-                .map(|m| match at(m, "engine") {
-                    Some(engine) => items(engine, "containers").len().to_string(),
-                    None => "-".to_owned(),
-                })
-                .unwrap_or_else(|| "-".to_owned()),
+                .and_then(|m| m.engine.as_ref())
+                .map(|engine| engine.containers.len().to_string())
+                .unwrap_or_else(dash),
             freshness_label(status),
             alert_label(status),
         ]
@@ -674,94 +666,69 @@ pub(crate) fn node_list_text(response: &Value) -> String {
             "(!) differs from the hub's {hub_version}: protectorate node update <node> | --all\n"
         ));
     }
-    for status in &nodes {
-        for alert in items(status, "alerts") {
-            if text(&alert, "kind") == "ALERT_KIND_NAME_MISMATCH" {
-                out.push_str(&format!("warning: {}\n", text(&alert, "message")));
-            }
-        }
-    }
     align(&out)
 }
 
-pub(crate) fn node_show_text(status: &Value) -> String {
-    let node = at(status, "node").unwrap_or(&Value::Null);
+pub(crate) fn node_show_text(status: &v1::NodeStatus) -> String {
+    let node = status.node.clone().unwrap_or_default();
     let mut out = String::new();
-    row(&mut out, "name", text(node, "name"));
-    row(&mut out, "address", text(node, "address"));
-    row(&mut out, "tier", text(node, "tier"));
-    row(&mut out, "ssh alias", text(node, "sshAlias"));
-    row(
-        &mut out,
-        "tags",
-        or_dash(
-            items(node, "tags")
-                .iter()
-                .filter_map(Value::as_str)
-                .collect::<Vec<_>>()
-                .join(", "),
-        ),
-    );
-    row(&mut out, "notes", text(node, "notes"));
+    row(&mut out, "name", node.name);
+    row(&mut out, "address", node.address);
+    row(&mut out, "tier", node.tier);
+    row(&mut out, "ssh alias", node.ssh_alias);
+    row(&mut out, "tags", or_dash(node.tags.join(", ")));
+    row(&mut out, "notes", node.notes);
     row(&mut out, "freshness", freshness_label(status));
-    optional_row(&mut out, "last error", text(status, "error"));
-    for alert in items(status, "alerts") {
-        row(&mut out, "ALERT", text(&alert, "message"));
+    optional_row(&mut out, "last error", status.error.clone());
+    for alert in &status.alerts {
+        row(&mut out, "ALERT", alert.message.clone());
     }
-    for busy in items(status, "busyGpus") {
+    for busy in &status.busy_gpus {
         row(
             &mut out,
-            &format!("gpu {} busy", text(&busy, "index")),
-            format!(
-                "{} (placement skips it; ask before using it)",
-                text(&busy, "reason")
-            ),
+            &format!("gpu {} busy", busy.index),
+            format!("{} (placement skips it; ask before using it)", busy.reason),
         );
     }
-    if let Some(metrics) = at(status, "metrics") {
+    if let Some(metrics) = &status.metrics {
         write_metrics(&mut out, metrics);
     }
     align(&out)
 }
 
-pub(crate) fn node_invite_text(response: &Value) -> String {
-    let mut out = String::new();
-    let commands = items(response, "commands");
-    if commands.is_empty() {
-        let name = response
-            .get("node")
-            .map(|node| text(node, "name"))
-            .unwrap_or_default();
+pub(crate) fn node_invite_text(response: &v1::InviteNodeResponse) -> String {
+    let name = response
+        .node
+        .as_ref()
+        .map(|node| node.name.as_str())
+        .unwrap_or_default();
+    let install = format!(
+        "PROTECTORATE_JOIN_CODE={} protectorate-rs node install --hub {} --ca-cert ca.pem --name {}\n",
+        sh_word(&response.code),
+        sh_word(&response.hub_url),
+        sh_word(name),
+    );
+    if response.commands.is_empty() {
         return format!(
-            "{name} is invited. Fetch {}/ca.pem, check its SHA-256 is {}, then on the node:\n  PROTECTORATE_JOIN_CODE={} protectorate-rs node install --hub {} --ca-cert ca.pem --name {}\nKeep the code private.\n",
-            text(response, "hubUrl"), text(response, "caSha256"),
-            sh_word(&text(response, "code")), sh_word(&text(response, "hubUrl")), sh_word(&name),
+            "{name} is invited. Fetch {}/ca.pem, check its SHA-256 is {}, then on the node:\n  {install}Keep the code private.\n",
+            response.hub_url, response.ca_sha256,
         );
     }
-    for command in commands {
-        let platform = text(&command, "platform")
-            .trim_start_matches("INSTALL_PLATFORM_")
-            .to_owned();
+    let mut out = String::new();
+    for command in &response.commands {
         out.push_str(&format!(
             "{} ({}):\n  {}\n\n",
-            platform,
-            text(&command, "shell"),
-            text(&command, "command")
+            command
+                .platform()
+                .as_str_name()
+                .trim_start_matches("INSTALL_PLATFORM_"),
+            command.shell,
+            command.command
         ));
     }
     out.push_str(&format!(
-        "Manual, with the Rust server and node sandbox helper already on the machine and\n{}/ca.pem saved as ca.pem after checking its SHA-256 is {}:\n  ",
-        text(response, "hubUrl"),
-        text(response, "caSha256"),
-    ));
-    out.push_str(&format!(
-        "PROTECTORATE_JOIN_CODE={} protectorate-rs node install --hub {} --ca-cert ca.pem --name {}\n",
-        sh_word(&text(response, "code")),
-        sh_word(&text(response, "hubUrl")),
-        response
-            .get("node")
-            .map(|node| sh_word(&text(node, "name")))
-            .unwrap_or_default(),
+        "Manual, with the Rust server and node sandbox helper already on the machine and\n{}/ca.pem saved as ca.pem after checking its SHA-256 is {}:\n  {install}",
+        response.hub_url, response.ca_sha256,
     ));
     out
 }
@@ -770,272 +737,217 @@ fn sh_word(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-fn write_metrics(out: &mut String, metrics: &Value) {
+fn write_metrics(out: &mut String, metrics: &v1::NodeMetrics) {
     out.push('\n');
-    row(out, "hostname", text(metrics, "hostname"));
+    row(out, "hostname", metrics.hostname.clone());
     row(
         out,
         "platform",
-        format!("{} {}", platform(metrics), text(metrics, "platform"))
-            .trim()
-            .to_owned(),
+        format!(
+            "{} {}",
+            os_arch(&metrics.os, &metrics.arch),
+            metrics.platform
+        )
+        .trim()
+        .to_owned(),
     );
-    row(out, "agent", text(metrics, "agentVersion"));
-    row(
-        out,
-        "uptime",
-        fmt_minutes(number(metrics, "uptimeSeconds").unwrap_or_default()),
-    );
-    if let Some(cpu) = at(metrics, "cpu") {
+    row(out, "agent", metrics.agent_version.clone());
+    row(out, "uptime", fmt_minutes(metrics.uptime_seconds as f64));
+    if let Some(cpu) = &metrics.cpu {
         let mut line = format!(
             "{:.1}% of {} logical cores",
-            number(cpu, "usagePercent").unwrap_or_default(),
-            number(cpu, "logicalCores").unwrap_or_default() as i64
+            cpu.usage_percent, cpu.logical_cores
         );
-        if let (Some(load1), Some(load5), Some(load15)) = (
-            number(cpu, "load1"),
-            number(cpu, "load5"),
-            number(cpu, "load15"),
-        ) {
+        if let (Some(load1), Some(load5), Some(load15)) = (cpu.load1, cpu.load5, cpu.load15) {
             line.push_str(&format!(", load {load1:.2} {load5:.2} {load15:.2}"));
         }
         row(out, "cpu", line);
     }
-    if let Some(jobs) = at(metrics, "jobs") {
-        let mut line = format!("sandbox {}", text(jobs, "sandbox"));
-        let admin = text(jobs, "admin");
-        if admin.is_empty() {
+    if let Some(jobs) = &metrics.jobs {
+        let mut line = format!("sandbox {}", jobs.sandbox);
+        if jobs.admin.is_empty() {
             line.push_str(", no admin jobs");
         } else {
-            line.push_str(&format!(", admin via {admin}"));
+            line.push_str(&format!(", admin via {}", jobs.admin));
         }
-        optional_inline(&mut line, &text(jobs, "note"), " (", ")");
+        if !jobs.note.is_empty() {
+            line.push_str(&format!(" ({})", jobs.note));
+        }
         row(out, "jobs", line);
     }
-    if let Some(memory) = at(metrics, "memory") {
+    if let Some(memory) = &metrics.memory {
         row(
             out,
             "memory",
             format!(
                 "{:.1}% ({} of {} used, {} available)",
-                number(memory, "usedPercent").unwrap_or_default(),
-                bytes(number(memory, "usedBytes").unwrap_or_default() as u64),
-                bytes(number(memory, "totalBytes").unwrap_or_default() as u64),
-                bytes(number(memory, "availableBytes").unwrap_or_default() as u64)
+                memory.used_percent,
+                bytes(memory.used_bytes),
+                bytes(memory.total_bytes),
+                bytes(memory.available_bytes)
             ),
         );
-        if number(memory, "swapTotalBytes").unwrap_or_default() > 0.0 {
+        if memory.swap_total_bytes > 0 {
             row(
                 out,
                 "swap",
                 format!(
                     "{:.1}% ({} of {})",
-                    number(memory, "swapUsedPercent").unwrap_or_default(),
-                    bytes(number(memory, "swapUsedBytes").unwrap_or_default() as u64),
-                    bytes(number(memory, "swapTotalBytes").unwrap_or_default() as u64)
+                    memory.swap_used_percent,
+                    bytes(memory.swap_used_bytes),
+                    bytes(memory.swap_total_bytes)
                 ),
             );
         }
     }
-    let filesystems = items(metrics, "filesystems");
-    if !filesystems.is_empty() {
+    if !metrics.filesystems.is_empty() {
         out.push_str("\nFILESYSTEM\tTYPE\tTOTAL\tUSED\tFREE\tUSE%\n");
-        for filesystem in &filesystems {
-            out.push_str(
-                &[
-                    text(filesystem, "mount"),
-                    text(filesystem, "fstype"),
-                    bytes(number(filesystem, "totalBytes").unwrap_or_default() as u64),
-                    bytes(number(filesystem, "usedBytes").unwrap_or_default() as u64),
-                    bytes(number(filesystem, "freeBytes").unwrap_or_default() as u64),
-                    format!(
-                        "{:.1}%",
-                        number(filesystem, "usedPercent").unwrap_or_default()
-                    ),
-                ]
-                .join("\t"),
-            );
-            out.push('\n');
+        for filesystem in &metrics.filesystems {
+            out.push_str(&format!(
+                "{}\t{}\t{}\t{}\t{}\t{:.1}%\n",
+                filesystem.mount,
+                filesystem.fstype,
+                bytes(filesystem.total_bytes),
+                bytes(filesystem.used_bytes),
+                bytes(filesystem.free_bytes),
+                filesystem.used_percent
+            ));
         }
     }
-    let gpus = items(metrics, "gpus");
-    if !gpus.is_empty() {
+    if !metrics.gpus.is_empty() {
         out.push_str("\nGPU\tNAME\tTYPE\tDRIVER\tUTIL\tVRAM\tTEMP\n");
-        for (position, gpu) in gpus.iter().enumerate() {
-            let kind = if boolean(gpu, "integrated") {
-                "integrated"
+        for gpu in &metrics.gpus {
+            let (kind, vram) = if gpu.integrated {
+                ("integrated", "shared".to_owned())
             } else {
-                "discrete"
+                (
+                    "discrete",
+                    or_dash(vram_label(std::slice::from_ref(gpu)).unwrap_or_default()),
+                )
             };
-            let vram = if boolean(gpu, "integrated") {
-                "shared".to_owned()
+            // Zero is what an agent without a sensor reports.
+            let temp = if gpu.temperature_celsius <= 0.0 {
+                "-".to_owned()
             } else {
-                or_dash(vram_label(std::slice::from_ref(gpu)).unwrap_or_default())
+                format!("{:.0}C", gpu.temperature_celsius)
             };
-            let temp = number(gpu, "temperatureCelsius").unwrap_or(-1.0);
-            out.push_str(
-                &[
-                    number(gpu, "index")
-                        .unwrap_or(position as f64)
-                        .trunc()
-                        .to_string(),
-                    format!("{} {}", text(gpu, "vendor"), text(gpu, "name"))
-                        .trim()
-                        .to_owned(),
-                    kind.to_owned(),
-                    or_dash(text(gpu, "driver")),
-                    util(number(gpu, "utilizationPercent").unwrap_or_default()),
-                    vram,
-                    if temp < 0.0 {
-                        "-".to_owned()
-                    } else {
-                        format!("{temp:.0}C")
-                    },
-                ]
-                .join("\t"),
-            );
-            out.push('\n');
+            out.push_str(&format!(
+                "{}\t{}\t{kind}\t{}\t{}\t{vram}\t{temp}\n",
+                gpu.index,
+                format!("{} {}", gpu.vendor, gpu.name).trim(),
+                or_dash(gpu.driver.clone()),
+                util(gpu.utilization_percent),
+            ));
         }
     }
-    let npus = items(metrics, "npus");
-    if !npus.is_empty() {
+    if !metrics.npus.is_empty() {
         out.push_str("\nNPU\tNAME\tDRIVER\tUTIL\tCLOCK\n");
-        for (index, npu) in npus.iter().enumerate() {
-            let clock = number(npu, "frequencyHz").filter(|hz| *hz > 0.0);
-            out.push_str(
-                &[
-                    index.to_string(),
-                    format!("{} {}", text(npu, "vendor"), text(npu, "name"))
-                        .trim()
-                        .to_owned(),
-                    or_dash(text(npu, "driver")),
-                    util(number(npu, "utilizationPercent").unwrap_or_default()),
-                    clock
-                        .map(|hz| format!("{:.0} MHz", hz / 1e6))
-                        .unwrap_or_else(|| "-".to_owned()),
-                ]
-                .join("\t"),
-            );
-            out.push('\n');
-        }
-    }
-    if let Some(engine) = at(metrics, "engine") {
-        row(
-            out,
-            "container engine",
-            format!("{} {}", text(engine, "kind"), text(engine, "version")),
-        );
-        match at(engine, "disk") {
-            Some(disk) => {
-                out.push_str(&format!(
-                    "\nENGINE DISK (measured {} ago)\tCOUNT\tSIZE\tRECLAIMABLE\n",
-                    fmt_minutes(age_since(text(disk, "measuredAt")))
-                ));
-                for name in ["images", "containers", "volumes", "buildCache"] {
-                    let bucket = at(disk, name).cloned().unwrap_or(Value::Null);
-                    out.push_str(
-                        &[
-                            if name == "buildCache" {
-                                "build cache".to_owned()
-                            } else {
-                                name.to_owned()
-                            },
-                            number(&bucket, "count")
-                                .unwrap_or_default()
-                                .trunc()
-                                .to_string(),
-                            bytes(number(&bucket, "sizeBytes").unwrap_or_default() as u64),
-                            bytes(number(&bucket, "reclaimableBytes").unwrap_or_default() as u64),
-                        ]
-                        .join("\t"),
-                    );
-                    out.push('\n');
-                }
-            }
-            None => row(out, "engine disk", "not measured yet".to_owned()),
-        }
-        let containers = items(engine, "containers");
-        if !containers.is_empty() {
-            out.push_str("\nCONTAINER\tIMAGE\tSTATE\tCPU\tMEM\tMEM%\tWRITABLE\tAGE\n");
-            for container in &containers {
-                let state = text(container, "state");
-                let age = match text(container, "createdAt") {
-                    raw if raw.is_empty() => "-".to_owned(),
-                    raw => fmt_minutes(age_since(raw)),
-                };
-                let writable =
-                    bytes(number(container, "writableLayerBytes").unwrap_or_default() as u64);
-                let mut cells = vec![
-                    text(container, "name"),
-                    text(container, "image"),
-                    state.clone(),
-                ];
-                if state != "running" {
-                    cells.extend(["-".into(), "-".into(), "-".into(), writable, age]);
-                } else if !text(container, "statsError").is_empty() {
-                    cells.push(format!(
-                        "stats unavailable: {}",
-                        text(container, "statsError")
-                    ));
-                } else {
-                    cells.extend([
-                        format!(
-                            "{:.1}%",
-                            number(container, "cpuPercent").unwrap_or_default()
-                        ),
-                        bytes(number(container, "memoryUsedBytes").unwrap_or_default() as u64),
-                        format!(
-                            "{:.1}%",
-                            number(container, "memoryPercent").unwrap_or_default()
-                        ),
-                        writable,
-                        age,
-                    ]);
-                }
-                out.push_str(&cells.join("\t"));
-                out.push('\n');
-            }
-        }
-    }
-
-    let watched = items(metrics, "watchDirs");
-    if !watched.is_empty() {
-        out.push_str("\nWATCHED DIR\tSIZE\tMEASURED\tNOTE\n");
-        for dir in &watched {
-            let note = match (text(dir, "error"), boolean(dir, "complete")) {
-                (error, _) if !error.is_empty() => error,
-                (_, false) => "lower bound (time budget)".to_owned(),
-                _ => String::new(),
+        for (index, npu) in metrics.npus.iter().enumerate() {
+            let clock = if npu.frequency_hz > 0 {
+                format!("{:.0} MHz", npu.frequency_hz as f64 / 1e6)
+            } else {
+                "-".to_owned()
             };
-            out.push_str(
-                &[
-                    text(dir, "path"),
-                    bytes(number(dir, "sizeBytes").unwrap_or_default() as u64),
-                    format!("{} ago", fmt_minutes(age_since(text(dir, "measuredAt")))),
-                    note,
-                ]
-                .join("\t"),
-            );
-            out.push('\n');
+            out.push_str(&format!(
+                "{index}\t{}\t{}\t{}\t{clock}\n",
+                format!("{} {}", npu.vendor, npu.name).trim(),
+                or_dash(npu.driver.clone()),
+                util(npu.utilization_percent),
+            ));
         }
     }
-
-    let warnings = items(metrics, "warnings");
-    let mut warned = false;
-    for warning in warnings {
-        if !warned {
-            out.push('\n');
-            warned = true;
+    if let Some(engine) = &metrics.engine {
+        write_engine(out, engine);
+    }
+    if !metrics.watch_dirs.is_empty() {
+        out.push_str("\nWATCHED DIR\tSIZE\tMEASURED\tNOTE\n");
+        for dir in &metrics.watch_dirs {
+            let note = if !dir.error.is_empty() {
+                dir.error.clone()
+            } else if !dir.complete {
+                "lower bound (time budget)".to_owned()
+            } else {
+                String::new()
+            };
+            out.push_str(&format!(
+                "{}\t{}\t{} ago\t{note}\n",
+                dir.path,
+                bytes(dir.size_bytes.max(0) as u64),
+                fmt_minutes(age_since(dir.measured_at.as_ref())),
+            ));
         }
-        row(
-            out,
-            "warning",
-            warning.as_str().unwrap_or_default().to_owned(),
-        );
+    }
+    if !metrics.warnings.is_empty() {
+        out.push('\n');
+    }
+    for warning in &metrics.warnings {
+        row(out, "warning", warning.clone());
     }
 }
 
-pub(crate) fn local_metrics_text(metrics: &Value) -> String {
+fn write_engine(out: &mut String, engine: &v1::ContainerEngine) {
+    row(
+        out,
+        "container engine",
+        format!("{} {}", engine.kind, engine.version),
+    );
+    match &engine.disk {
+        Some(disk) => {
+            out.push_str(&format!(
+                "\nENGINE DISK (measured {} ago)\tCOUNT\tSIZE\tRECLAIMABLE\n",
+                fmt_minutes(age_since(engine.disk_measured_at.as_ref()))
+            ));
+            for (name, bucket) in [
+                ("images", &disk.images),
+                ("containers", &disk.containers),
+                ("volumes", &disk.volumes),
+                ("build cache", &disk.build_cache),
+            ] {
+                let bucket = bucket.clone().unwrap_or_default();
+                out.push_str(&format!(
+                    "{name}\t{}\t{}\t{}\n",
+                    bucket.count,
+                    bytes(bucket.size_bytes.max(0) as u64),
+                    bytes(bucket.reclaimable_bytes.max(0) as u64)
+                ));
+            }
+        }
+        None => row(out, "engine disk", "not measured yet".to_owned()),
+    }
+    if engine.containers.is_empty() {
+        return;
+    }
+    out.push_str("\nCONTAINER\tIMAGE\tSTATE\tCPU\tMEM\tMEM%\tWRITABLE\tAGE\n");
+    for container in &engine.containers {
+        let age = match &container.created_at {
+            None => "-".to_owned(),
+            at => fmt_minutes(age_since(at.as_ref())),
+        };
+        let writable = bytes(container.writable_layer_bytes.max(0) as u64);
+        let mut cells = vec![
+            container.name.clone(),
+            container.image.clone(),
+            container.state.clone(),
+        ];
+        if container.state != "running" {
+            cells.extend(["-".into(), "-".into(), "-".into(), writable, age]);
+        } else if !container.stats_error.is_empty() {
+            cells.push(format!("stats unavailable: {}", container.stats_error));
+        } else {
+            cells.extend([
+                format!("{:.1}%", container.cpu_percent),
+                bytes(container.memory_used_bytes),
+                format!("{:.1}%", container.memory_percent),
+                writable,
+                age,
+            ]);
+        }
+        out.push_str(&cells.join("\t"));
+        out.push('\n');
+    }
+}
+
+pub(crate) fn local_metrics_text(metrics: &v1::NodeMetrics) -> String {
     let mut out = String::new();
     write_metrics(&mut out, metrics);
     if out.starts_with('\n') {
@@ -2284,20 +2196,6 @@ fn optional_row(out: &mut String, label: &str, value: String) {
     }
 }
 
-fn optional_inline(out: &mut String, value: &str, open: &str, close: &str) {
-    if !value.is_empty() {
-        out.push_str(&format!("{open}{value}{close}"));
-    }
-}
-
-fn platform(value: &Value) -> String {
-    let os = text(value, "os");
-    if os.is_empty() {
-        return "-".to_owned();
-    }
-    format!("{os}/{}", text(value, "arch"))
-}
-
 fn percent(value: f64) -> String {
     format!("{value:.0}%")
 }
@@ -2376,31 +2274,25 @@ fn version_cell(node_version: &str, hub_version: &str) -> String {
     }
 }
 
-fn primary_disk(metrics: &Value) -> Option<String> {
-    items(metrics, "filesystems")
+fn primary_disk(metrics: &v1::NodeMetrics) -> Option<String> {
+    metrics
+        .filesystems
         .iter()
-        .find(|filesystem| boolean(filesystem, "primary"))
-        .map(|filesystem| {
-            format!(
-                "{:.0}% {}",
-                number(filesystem, "usedPercent").unwrap_or_default(),
-                text(filesystem, "mount")
-            )
-        })
+        .find(|filesystem| filesystem.primary)
+        .map(|filesystem| format!("{:.0}% {}", filesystem.used_percent, filesystem.mount))
 }
 
-fn vram_label(gpus: &[Value]) -> Option<String> {
+fn vram_label(gpus: &[v1::GpuMetrics]) -> Option<String> {
     let mut used = 0u64;
     let mut total = 0u64;
     let mut known = true;
     for gpu in gpus {
-        if boolean(gpu, "integrated") || number(gpu, "memoryTotalBytes").unwrap_or_default() == 0.0
-        {
+        if gpu.integrated || gpu.memory_total_bytes == 0 {
             continue;
         }
-        total += number(gpu, "memoryTotalBytes").unwrap_or_default() as u64;
-        match number(gpu, "memoryUsedBytes") {
-            Some(value) => used += value as u64,
+        total += gpu.memory_total_bytes;
+        match gpu.memory_used_bytes {
+            Some(value) => used += value,
             None => known = false,
         }
     }
@@ -2414,15 +2306,11 @@ fn vram_label(gpus: &[Value]) -> Option<String> {
     }
 }
 
-fn gpu_summary(gpus: &[Value]) -> String {
+fn gpu_summary(gpus: &[v1::GpuMetrics]) -> String {
     let Some(first) = gpus.first() else {
         return "-".to_owned();
     };
-    let mut summary = format!(
-        "{}x {}",
-        gpus.len(),
-        util(number(first, "utilizationPercent").unwrap_or_default())
-    );
+    let mut summary = format!("{}x {}", gpus.len(), util(first.utilization_percent));
     if let Some(vram) = vram_label(gpus) {
         summary.push(' ');
         summary.push_str(&vram);
@@ -2430,32 +2318,32 @@ fn gpu_summary(gpus: &[Value]) -> String {
     summary
 }
 
-fn freshness_label(status: &Value) -> String {
-    let age = duration_seconds(status, "age").map(|age| format!(" ({} old)", fmt_minutes(age)));
-    let age = age.unwrap_or_default();
-    match text(status, "freshness").as_str() {
-        "NODE_FRESHNESS_FRESH" => "fresh".to_owned(),
-        "NODE_FRESHNESS_STALE" => format!("STALE{age}"),
-        "NODE_FRESHNESS_INVITED" => "invited, not yet joined".to_owned(),
-        "NODE_FRESHNESS_UNREACHABLE" if at(status, "metrics").is_some() => {
+fn freshness_label(status: &v1::NodeStatus) -> String {
+    let age = seconds(status.age.as_ref())
+        .map(|age| format!(" ({} old)", fmt_minutes(age)))
+        .unwrap_or_default();
+    match status.freshness() {
+        v1::NodeFreshness::Fresh => "fresh".to_owned(),
+        v1::NodeFreshness::Stale => format!("STALE{age}"),
+        v1::NodeFreshness::Invited => "invited, not yet joined".to_owned(),
+        v1::NodeFreshness::Unreachable if status.metrics.is_some() => {
             format!("UNREACHABLE{age}")
         }
-        "NODE_FRESHNESS_UNREACHABLE" => "UNREACHABLE (never seen)".to_owned(),
-        _ => "pending".to_owned(),
+        v1::NodeFreshness::Unreachable => "UNREACHABLE (never seen)".to_owned(),
+        v1::NodeFreshness::Unspecified => "pending".to_owned(),
     }
 }
 
-fn alert_label(status: &Value) -> String {
-    let parts: Vec<String> = items(status, "alerts")
+fn alert_label(status: &v1::NodeStatus) -> String {
+    let parts: Vec<String> = status
+        .alerts
         .iter()
-        .map(|alert| match text(alert, "kind").as_str() {
-            "ALERT_KIND_DISK_PERCENT" => format!("disk:{}", text(alert, "subject")),
-            "ALERT_KIND_MEM_PRESSURE" => "mem".to_owned(),
-            "ALERT_KIND_UNREACHABLE" => "down".to_owned(),
-            "ALERT_KIND_NAME_MISMATCH" => format!("name-mismatch:{}", text(alert, "subject")),
-            _ => String::new(),
+        .filter_map(|alert| match alert.kind() {
+            v1::AlertKind::DiskPercent => Some(format!("disk:{}", alert.subject)),
+            v1::AlertKind::MemPressure => Some("mem".to_owned()),
+            v1::AlertKind::Unreachable => Some("down".to_owned()),
+            v1::AlertKind::Unspecified => None,
         })
-        .filter(|part| !part.is_empty())
         .collect();
     or_dash(parts.join(","))
 }
@@ -2511,9 +2399,12 @@ fn now_millis() -> i64 {
         .unwrap_or(i64::MAX)
 }
 
-/// How long ago a hub timestamp is, in seconds.
-fn age_since(raw: String) -> f64 {
-    match timestamp_millis(&raw) {
+/// How long ago a hub timestamp is, in seconds; zero when absent.
+fn age_since<T: Copy>(at: Option<&T>) -> f64
+where
+    SystemTime: TryFrom<T>,
+{
+    match unix_millis(at) {
         Some(millis) => (now_millis() - millis) as f64 / 1000.0,
         None => 0.0,
     }
@@ -2543,7 +2434,7 @@ where
 
 /// A protobuf enum value name without its type prefix, lowercased; empty
 /// for the unspecified value.
-fn word(name: &str, prefix: &str) -> String {
+pub(crate) fn word(name: &str, prefix: &str) -> String {
     match name.strip_prefix(prefix).unwrap_or(name) {
         "UNSPECIFIED" => String::new(),
         rest => rest.to_ascii_lowercase(),

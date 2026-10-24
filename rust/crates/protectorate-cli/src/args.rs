@@ -5,7 +5,7 @@ use crate::{
     SessionNew, SleeveEnvoy, SleeveModeName, SleevePrune, SleeveResleeve, SleeveSpawn, WaitUntil,
     DEFAULT_JOB_TIMEOUT, DEFAULT_TIMEOUT, MAX_JOB_TIMEOUT, MAX_WAIT,
 };
-use protectorate_wire::{Result, RpcError};
+use protectorate_wire::{v1, Result, RpcError};
 use serde_json::Value;
 use std::{path::PathBuf, time::Duration};
 
@@ -818,7 +818,7 @@ fn node(args: &[String], index: &mut usize, json: &mut bool) -> Result<Command> 
         }
         "rm" => {
             let mut name = None;
-            let mut jobs = "REMOVE_JOBS_UNSPECIFIED".to_owned();
+            let mut jobs = v1::RemoveJobs::Unspecified;
             let mut uninstall = false;
             let mut wait_timeout = None;
             while let Some(token) = next(args, *index + 1) {
@@ -827,10 +827,10 @@ fn node(args: &[String], index: &mut usize, json: &mut bool) -> Result<Command> 
                     "--jobs" => {
                         *index += 1;
                         jobs = match value(args, index, flag, inline)?.as_str() {
-                            "wait" => "REMOVE_JOBS_WAIT",
-                            "cancel" => "REMOVE_JOBS_CANCEL",
+                            "wait" => v1::RemoveJobs::Wait,
+                            "cancel" => v1::RemoveJobs::Cancel,
                             _ => return Err(bad_argument("--jobs must be wait or cancel")),
-                        }.to_owned();
+                        };
                     }
                     "--wait-timeout" => {
                         *index += 1;

@@ -56,15 +56,6 @@ const LIST_TOKENS: &str = "/protectorate.v1.TokenService/ListTokens";
 const LIST_PROJECTS: &str = "/protectorate.v1.DirectoryService/ListProjects";
 const GET_PROJECT: &str = "/protectorate.v1.DirectoryService/GetProject";
 const SUBSCRIBE_EVENTS: &str = "/protectorate.v1.EventService/Subscribe";
-const LIST_NODES: &str = "/protectorate.v1.NodeService/ListNodes";
-const GET_NODE: &str = "/protectorate.v1.NodeService/GetNode";
-const ADD_NODE: &str = "/protectorate.v1.NodeService/AddNode";
-const REMOVE_NODE: &str = "/protectorate.v1.NodeService/RemoveNode";
-const SET_NODE_TIER: &str = "/protectorate.v1.NodeService/SetNodeTier";
-const UPDATE_NODE: &str = "/protectorate.v1.NodeService/UpdateNode";
-const INVITE_NODE: &str = "/protectorate.v1.NodeService/InviteNode";
-const PUT_FILE: &str = "/protectorate.v1.NodeService/PutFile";
-const GET_FILE: &str = "/protectorate.v1.NodeService/GetFile";
 const LIST_NOTES: &str = "/protectorate.v1.BacklogService/ListNotes";
 const GET_NOTE: &str = "/protectorate.v1.BacklogService/GetNote";
 const CREATE_NOTE: &str = "/protectorate.v1.BacklogService/CreateNote";
@@ -673,7 +664,7 @@ pub enum Command {
     },
     NodeRemove {
         name: String,
-        jobs: String,
+        jobs: v1::RemoveJobs,
         uninstall: bool,
         wait_timeout: Option<Duration>,
     },
@@ -1120,31 +1111,26 @@ fn render(
             uninstall,
             wait_timeout,
         } => {
-            let mut request = json!({"name": name, "jobs": jobs, "uninstall": uninstall});
-            if let Some(timeout) = wait_timeout {
-                request["waitTimeout"] = json!(format_duration(*timeout));
-            }
-            client.stream(REMOVE_NODE, &request, |progress| {
+            let request = v1::RemoveNodeRequest {
+                name: name.clone(),
+                jobs: *jobs as i32,
+                uninstall: *uninstall,
+                wait_timeout: wait_timeout.map(proto_duration),
+            };
+            client.server_stream(v1::node_service::REMOVE_NODE, &request, |progress| {
                 let line = if invocation.json {
-                    value_line(&progress)?
+                    json_line(&progress)?
                 } else {
-                    let phase = progress["phase"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .trim_start_matches("REMOVE_PHASE_")
-                        .to_ascii_lowercase();
                     format!(
-                        "{phase}\t{}\n",
-                        progress["message"].as_str().unwrap_or_default()
+                        "{}\t{}\n",
+                        format::word(progress.phase().as_str_name(), "REMOVE_PHASE_"),
+                        progress.message
                     )
                 };
                 stdout
                     .write_all(line.as_bytes())
-                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                stdout
-                    .flush()
-                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                Ok(())
+                    .and_then(|()| stdout.flush())
+                    .map_err(|e| RpcError::new(Code::Internal, format!("write node removal: {e}")))
             })?;
             Ok(String::new())
         }
@@ -1306,20 +1292,18 @@ fn update_nodes(
     json: bool,
     stdout: &mut dyn std::io::Write,
 ) -> Result<()> {
-    let listing = client.call(LIST_NODES, &json!({}))?;
-    let nodes = listing["nodes"]
-        .as_array()
-        .ok_or_else(|| RpcError::new(Code::DataLoss, "node listing is missing nodes"))?;
+    let listing = client.unary(v1::node_service::LIST_NODES, &v1::ListNodesRequest {})?;
+    let wanted = name.map(str::to_ascii_lowercase);
     let mut matched = false;
     let mut errors = Vec::new();
-    for status in nodes {
-        let node = &status["node"];
-        let current = node["name"].as_str().unwrap_or_default();
-        if !all && Some(current) != name.map(|name| name.to_ascii_lowercase()).as_deref() {
+    for status in &listing.nodes {
+        let Some(node) = &status.node else { continue };
+        let current = node.name.as_str();
+        if !all && Some(current) != wanted.as_deref() {
             continue;
         }
         matched = true;
-        if node["local"].as_bool().unwrap_or(false) {
+        if node.local {
             if all {
                 continue;
             }
@@ -1330,13 +1314,12 @@ fn update_nodes(
                 ),
             ));
         }
-        let freshness = status["freshness"]
-            .as_str()
-            .unwrap_or("NODE_FRESHNESS_UNSPECIFIED");
-        if freshness != "NODE_FRESHNESS_FRESH" || status["metrics"].is_null() {
+        if status.freshness() != v1::NodeFreshness::Fresh || status.metrics.is_none() {
             let reason = format!(
                 "node is not reachable ({})",
-                freshness
+                status
+                    .freshness()
+                    .as_str_name()
                     .trim_start_matches("NODE_FRESHNESS_")
                     .to_ascii_lowercase()
             );
@@ -1347,32 +1330,29 @@ fn update_nodes(
             }
             return Err(RpcError::new(Code::Unavailable, reason));
         }
-        let mut last_phase = String::new();
-        let result = client.stream(
-            UPDATE_NODE,
-            &json!({"name":current,"force":force}),
-            |progress| {
-                let phase = progress["phase"].as_str().unwrap_or_default();
-                last_phase = phase.to_owned();
-                let line = if json {
-                    value_line(&progress)?
-                } else {
-                    update_line(current, &progress)
-                };
-                if !line.is_empty() {
-                    stdout
-                        .write_all(line.as_bytes())
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                    stdout
-                        .flush()
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-                }
-                if no_wait && phase == "UPDATE_PHASE_SWAPPING" {
-                    return Err(RpcError::new(Code::Canceled, "node update no-wait"));
-                }
-                Ok(())
-            },
-        );
+        let mut last_phase = v1::UpdatePhase::Unspecified;
+        let request = v1::UpdateNodeRequest {
+            name: current.to_owned(),
+            force,
+        };
+        let result = client.server_stream(v1::node_service::UPDATE_NODE, &request, |progress| {
+            last_phase = progress.phase();
+            let line = if json {
+                json_line(&progress)?
+            } else {
+                update_line(current, &progress)
+            };
+            if !line.is_empty() {
+                stdout
+                    .write_all(line.as_bytes())
+                    .and_then(|()| stdout.flush())
+                    .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+            }
+            if no_wait && last_phase == v1::UpdatePhase::Swapping {
+                return Err(RpcError::new(Code::Canceled, "node update no-wait"));
+            }
+            Ok(())
+        });
         if let Err(error) = result {
             if !(no_wait && error.code == Code::Canceled && error.message == "node update no-wait")
             {
@@ -1381,7 +1361,7 @@ fn update_nodes(
                 }
                 errors.push(format!("{current}: {}", error.message));
             }
-        } else if last_phase == "UPDATE_PHASE_ROLLED_BACK" {
+        } else if last_phase == v1::UpdatePhase::RolledBack {
             if !all {
                 return Err(RpcError::new(
                     Code::Aborted,
@@ -1406,39 +1386,23 @@ fn update_nodes(
     }
 }
 
-fn update_line(name: &str, progress: &Value) -> String {
-    let phase = progress["phase"].as_str().unwrap_or_default();
-    let message = progress["message"].as_str().unwrap_or_default();
-    let detail = match phase {
-        "UPDATE_PHASE_SKIPPED" => message.to_owned(),
-        "UPDATE_PHASE_SENDING" => {
-            let total = progress["totalBytes"]
-                .as_str()
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(0);
-            let sent = progress["sentBytes"]
-                .as_str()
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(0);
-            if total == 0 || sent < total {
-                String::new()
-            } else {
-                format!("sent {}", format::bytes(sent))
-            }
+fn update_line(name: &str, progress: &v1::UpdateNodeProgress) -> String {
+    use v1::UpdatePhase;
+    let detail = match progress.phase() {
+        UpdatePhase::Skipped => progress.message.clone(),
+        UpdatePhase::Sending
+            if progress.total_bytes > 0 && progress.sent_bytes >= progress.total_bytes =>
+        {
+            format!("sent {}", format::bytes(progress.sent_bytes))
         }
-        "UPDATE_PHASE_VERIFYING" => "verifying".into(),
-        "UPDATE_PHASE_SWAPPING" => format!(
+        UpdatePhase::Verifying => "verifying".into(),
+        UpdatePhase::Swapping => format!(
             "swapped {} -> {}, restarting ({})",
-            progress["previousVersion"].as_str().unwrap_or_default(),
-            progress["version"].as_str().unwrap_or_default(),
-            progress["restart"].as_str().unwrap_or_default()
+            progress.previous_version, progress.version, progress.restart
         ),
-        "UPDATE_PHASE_RESTARTING" => "waiting for the node to come back".into(),
-        "UPDATE_PHASE_CONFIRMED" => format!(
-            "reports {}",
-            progress["version"].as_str().unwrap_or_default()
-        ),
-        "UPDATE_PHASE_ROLLED_BACK" => format!("rolled back: {message}"),
+        UpdatePhase::Restarting => "waiting for the node to come back".into(),
+        UpdatePhase::Confirmed => format!("reports {}", progress.version),
+        UpdatePhase::RolledBack => format!("rolled back: {}", progress.message),
         _ => String::new(),
     };
     if detail.is_empty() {
@@ -1829,17 +1793,20 @@ fn execute_commands(
             }
         }
         Command::NodeList => {
-            let nodes = client.call(LIST_NODES, &json!({}))?;
+            let nodes = client.unary(v1::node_service::LIST_NODES, &v1::ListNodesRequest {})?;
             if json {
-                value_line(&nodes)
+                json_line(&nodes)
             } else {
                 Ok(format::node_list_text(&nodes))
             }
         }
         Command::NodeShow { name } => {
-            let node = client.call(GET_NODE, &json!({"name": name}))?;
+            let node = client.unary(
+                v1::node_service::GET_NODE,
+                &v1::GetNodeRequest { name: name.clone() },
+            )?;
             if json {
-                value_line(&node)
+                json_line(&node)
             } else {
                 Ok(format::node_show_text(&node))
             }
@@ -1853,27 +1820,45 @@ fn execute_commands(
             notes,
             update,
         } => {
-            let node = client.call(ADD_NODE, &json!({"node": {"name": name, "address": address, "sshAlias": ssh_alias, "tier": tier, "tags": tags, "notes": notes}, "update": update}))?;
+            let request = v1::AddNodeRequest {
+                node: Some(v1::NodeInfo {
+                    name: name.clone(),
+                    address: address.clone(),
+                    ssh_alias: ssh_alias.clone(),
+                    tier: tier.clone(),
+                    tags: tags.clone(),
+                    notes: notes.clone(),
+                    ..Default::default()
+                }),
+                update: *update,
+            };
+            let node = client.unary(v1::node_service::ADD_NODE, &request)?;
             if json {
-                value_line(&node)
+                json_line(&node)
             } else {
                 Ok(format!(
                     "added {} ({}, tier {})\n",
-                    node["name"].as_str().unwrap_or(name),
-                    node["address"].as_str().unwrap_or(address),
-                    node["tier"].as_str().unwrap_or(tier)
+                    or(&node.name, name),
+                    or(&node.address, address),
+                    or(&node.tier, tier)
                 ))
             }
         }
         Command::NodeTier { name, tier } => {
-            let node = client.call(SET_NODE_TIER, &json!({"name": name, "tier": tier}))?;
+            let node = client.unary(
+                v1::node_service::SET_NODE_TIER,
+                &v1::SetNodeTierRequest {
+                    name: name.clone(),
+                    tier: tier.clone(),
+                },
+            )?;
             if json {
-                value_line(&node)
+                json_line(&node)
             } else {
                 Ok(format!(
                     "{} is now tier {}\n",
-                    node["name"].as_str().unwrap_or(name),
-                    node["tier"].as_str().unwrap_or(tier)
+                    or(&node.name, name),
+                    or(&node.tier, tier)
                 ))
             }
         }
@@ -1883,27 +1868,25 @@ fn execute_commands(
             ttl,
             install_url,
         } => {
-            let invite = client.call(
-                INVITE_NODE,
-                &json!({
-                    "name": name,
-                    "tier": tier,
-                    "ttl": format_duration(*ttl),
-                    "installUrl": install_url,
-                }),
+            let invite = client.unary(
+                v1::node_service::INVITE_NODE,
+                &v1::InviteNodeRequest {
+                    name: name.clone(),
+                    tier: tier.clone(),
+                    ttl: Some(proto_duration(*ttl)),
+                    install_url: install_url.clone(),
+                },
             )?;
             if json {
-                value_line(&invite)
+                json_line(&invite)
             } else {
                 let invited_name = invite
-                    .get("node")
-                    .and_then(|node| node.get("name"))
-                    .and_then(Value::as_str)
-                    .unwrap_or(name);
+                    .node
+                    .as_ref()
+                    .map_or(name.as_str(), |node| or(&node.name, name));
                 let expiry = invite
-                    .get("expiresAt")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unknown time");
+                    .expires_at
+                    .map_or_else(|| "unknown time".to_owned(), |at| at.to_string());
                 writeln!(stderr, "{invited_name} is in the inventory as invited; the key is single-use and expires {expiry}")
                     .map_err(|error| RpcError::new(Code::Internal, format!("write invite status: {error}")))?;
                 Ok(format::node_invite_text(&invite))
@@ -1919,14 +1902,11 @@ fn execute_commands(
             let (response, total, wire, elapsed) =
                 transfer::put(client, name, local, remote, *force, *no_compress)?;
             if json {
-                value_line(&response)
+                json_line(&response)
             } else {
                 Ok(format!(
                     "put\t{name}:{}\nbytes\t{total} ({wire} bytes sent, {elapsed:?})\n",
-                    response
-                        .get("path")
-                        .and_then(Value::as_str)
-                        .unwrap_or(remote)
+                    or(&response.path, remote)
                 ))
             }
         }
@@ -1940,9 +1920,11 @@ fn execute_commands(
             let (trailer, wire, elapsed) =
                 transfer::get(client, name, remote, local, *force, *no_compress)?;
             if json {
-                value_line(
-                    &json!({"size": trailer.size.to_string(), "sha256": trailer.sha256, "skipped": trailer.skipped}),
-                )
+                json_line(&v1::FileTrailer {
+                    size: trailer.size,
+                    sha256: trailer.sha256,
+                    skipped: trailer.skipped,
+                })
             } else {
                 let mut output = format!(
                     "get\t{name}:{remote}\nbytes\t{} ({wire} bytes received, {elapsed:?})\n",
@@ -2700,7 +2682,7 @@ fn transport_timeout(invocation: &Invocation) -> Duration {
         Command::NodeRemove {
             jobs, wait_timeout, ..
         } => {
-            let wait = if jobs == "REMOVE_JOBS_WAIT" {
+            let wait = if *jobs == v1::RemoveJobs::Wait {
                 wait_timeout.unwrap_or(Duration::from_secs(3600))
             } else {
                 Duration::from_secs(120)
@@ -2906,11 +2888,13 @@ fn local_metrics(watch: &[PathBuf], json: bool) -> Result<String> {
     let snapshot = snapshot.map_err(|error| {
         RpcError::new(Code::Internal, format!("collect local metrics: {error}"))
     })?;
-    let value = metrics_json(&snapshot);
+    let encoded = serde_json::to_vec(&metrics_json(&snapshot))
+        .map_err(|error| RpcError::new(Code::Internal, format!("encode local metrics: {error}")))?;
+    let metrics: v1::NodeMetrics = protectorate_wire::decode(&encoded)?;
     if json {
-        value_line(&value)
+        json_line(&metrics)
     } else {
-        Ok(format::local_metrics_text(&value))
+        Ok(format::local_metrics_text(&metrics))
     }
 }
 
@@ -3581,6 +3565,15 @@ pub(crate) fn value_line(value: &Value) -> Result<String> {
     serde_json::to_string(value)
         .map(|line| format!("{line}\n"))
         .map_err(|error| RpcError::new(Code::Internal, format!("encode JSON: {error}")))
+}
+
+/// `value`, or `fallback` when the hub left it empty.
+fn or<'a>(value: &'a str, fallback: &'a str) -> &'a str {
+    if value.is_empty() {
+        fallback
+    } else {
+        value
+    }
 }
 
 fn now_millis() -> i64 {
