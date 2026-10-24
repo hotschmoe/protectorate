@@ -159,9 +159,9 @@ pub(super) fn prepare(hub: &Hub, launch: Launch) -> Result<Prepared> {
     };
 
     let parent = hub.workspaces.state_root().join("workspaces");
-    fs::create_dir_all(&parent).map_err(internal)?;
-    fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).map_err(internal)?;
-    if fs::canonicalize(&parent).map_err(internal)? != parent {
+    fs::create_dir_all(&parent).map_err(RpcError::internal)?;
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).map_err(RpcError::internal)?;
+    if fs::canonicalize(&parent).map_err(RpcError::internal)? != parent {
         return Err(RpcError::new(
             Code::FailedPrecondition,
             "workspaces directory must not be a symlink",
@@ -183,7 +183,8 @@ pub(super) fn prepare(hub: &Hub, launch: Launch) -> Result<Prepared> {
         destination: Some(destination.clone()),
         view: None,
     };
-    fs::set_permissions(&destination, fs::Permissions::from_mode(0o700)).map_err(internal)?;
+    fs::set_permissions(&destination, fs::Permissions::from_mode(0o700))
+        .map_err(RpcError::internal)?;
     let destination_text = destination.to_string_lossy().into_owned();
     let mut clone = vec![
         "clone".to_owned(),
@@ -280,7 +281,7 @@ pub(crate) fn base_grants(state: &Path, name: &str, repo: &str) -> Result<Vec<Bi
         .map_err(|error| RpcError::new(Code::InvalidArgument, error))?;
     let common = directories.last().unwrap();
     for part in ["objects", "refs"] {
-        let metadata = fs::symlink_metadata(common.join(part)).map_err(internal)?;
+        let metadata = fs::symlink_metadata(common.join(part)).map_err(RpcError::internal)?;
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
             return Err(RpcError::new(
                 Code::InvalidArgument,
@@ -317,16 +318,16 @@ fn create_base_view(
         .last()
         .ok_or_else(|| RpcError::new(Code::Internal, "base Git directory missing"))?;
     let parent = state.join("base-views");
-    fs::create_dir_all(&parent).map_err(internal)?;
-    if fs::canonicalize(&parent).map_err(internal)? != parent {
+    fs::create_dir_all(&parent).map_err(RpcError::internal)?;
+    if fs::canonicalize(&parent).map_err(RpcError::internal)? != parent {
         return Err(RpcError::new(
             Code::FailedPrecondition,
             "base view directory must not be a symlink",
         ));
     }
-    fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).map_err(internal)?;
+    fs::set_permissions(&parent, fs::Permissions::from_mode(0o700)).map_err(RpcError::internal)?;
     let view = parent.join(name);
-    fs::create_dir(&view).map_err(internal)?;
+    fs::create_dir(&view).map_err(RpcError::internal)?;
     let setup = || -> io::Result<()> {
         fs::set_permissions(&view, fs::Permissions::from_mode(0o700))?;
         let mut config = "[core]\nrepositoryformatversion = 1\nbare = true\n".to_owned();
@@ -342,7 +343,7 @@ fn create_base_view(
     };
     if let Err(error) = setup() {
         let _ = fs::remove_dir_all(&view);
-        return Err(internal(error));
+        return Err(RpcError::internal(error));
     }
     Ok(view)
 }
@@ -392,9 +393,7 @@ fn refresh_packed_refs(view: &Path, common: &Path) -> io::Result<()> {
     {
         return Ok(());
     }
-    let mut suffix = [0_u8; 8];
-    getrandom::getrandom(&mut suffix).map_err(|error| io::Error::other(error.to_string()))?;
-    let suffix: String = suffix.iter().map(|byte| format!("{byte:02x}")).collect();
+    let suffix = protectorate_fsutil::random_hex(8)?;
     let temporary = CString::new(format!(".packed-refs.{suffix}")).map_err(io::Error::other)?;
     let mut file = open(&temporary, libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL)?;
     let written = file

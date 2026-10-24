@@ -329,7 +329,7 @@ impl Jobs {
         let sources = Arc::clone(&self.sources);
         tokio::task::spawn_blocking(move || sources.prepare(&request))
             .await
-            .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?
+            .map_err(RpcError::internal)?
     }
     pub async fn upload(
         &self,
@@ -344,7 +344,7 @@ impl Jobs {
         let sources = Arc::clone(&self.sources);
         tokio::task::spawn_blocking(move || sources.upload(&request))
             .await
-            .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?
+            .map_err(RpcError::internal)?
     }
     pub async fn list(&self) -> v1::NodeAgentServiceListJobsResponse {
         self.sweep_expired().await;
@@ -439,14 +439,11 @@ impl Jobs {
             }
             if let Some(finished) = finished {
                 for artifact in artifacts {
-                    let mut file = fs::File::open(&artifact.file)
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+                    let mut file = fs::File::open(&artifact.file).map_err(RpcError::internal)?;
                     let mut first = true;
                     loop {
                         let mut buf = vec![0u8; CHUNK];
-                        let n = file
-                            .read(&mut buf)
-                            .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+                        let n = file.read(&mut buf).map_err(RpcError::internal)?;
                         buf.truncate(n);
                         let last = n < CHUNK;
                         let frame = v1::JobArtifactChunk {

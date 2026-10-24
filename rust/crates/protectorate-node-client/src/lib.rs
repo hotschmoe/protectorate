@@ -121,13 +121,8 @@ fn put_chunk_with_retry(
 }
 
 fn random_id() -> Result<String> {
-    let mut bytes = [0_u8; 12];
-    getrandom::getrandom(&mut bytes).map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-    let mut id = String::from("xfer-");
-    for byte in bytes {
-        id.push_str(&format!("{byte:02x}"));
-    }
-    Ok(id)
+    let suffix = protectorate_fsutil::random_hex(12).map_err(RpcError::internal)?;
+    Ok(format!("xfer-{suffix}"))
 }
 fn file_kind(kind: Kind) -> v1::FileKind {
     match kind {

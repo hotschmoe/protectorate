@@ -936,7 +936,11 @@ fn apply(s: &mut Inner, rec: Record) -> std::result::Result<(), String> {
         None => return Ok(()),
     };
     let at = rec.at;
-    let has = !rec.rcpt.is_empty() && m.deliveries.contains_key(&rec.rcpt);
+    let delivery = if rec.rcpt.is_empty() {
+        None
+    } else {
+        m.deliveries.get_mut(&rec.rcpt)
+    };
     match rec.op.as_str() {
         "resolve" => {
             if !m.recipients.is_empty() {
@@ -948,39 +952,28 @@ fn apply(s: &mut Inner, rec: Record) -> std::result::Result<(), String> {
             }
         }
         "arm" => {
-            if has {
-                let d = m.deliveries.get_mut(&rec.rcpt).unwrap();
-                if d.since.is_none() {
-                    d.since = Some(at);
-                }
+            if let Some(d) = delivery {
+                d.since.get_or_insert(at);
             }
         }
         "deliver" => {
-            if has {
-                let d = m.deliveries.get_mut(&rec.rcpt).unwrap();
+            if let Some(d) = delivery {
                 d.delivered = Some(at);
                 d.since = Some(at);
             }
         }
         "read" => {
-            if has {
-                let d = m.deliveries.get_mut(&rec.rcpt).unwrap();
-                if d.read.is_none() {
-                    d.read = Some(at);
-                }
+            if let Some(d) = delivery {
+                d.read.get_or_insert(at);
             }
         }
         "ack" => {
-            if has {
-                let d = m.deliveries.get_mut(&rec.rcpt).unwrap();
-                if d.acked.is_none() {
-                    d.acked = Some(at);
-                }
+            if let Some(d) = delivery {
+                d.acked.get_or_insert(at);
             }
         }
         "remind" => {
-            if has {
-                let d = m.deliveries.get_mut(&rec.rcpt).unwrap();
+            if let Some(d) = delivery {
                 d.reminders += 1;
                 d.since = Some(at);
                 d.delivered = Some(at);

@@ -380,7 +380,7 @@ impl Updater {
         let _guard = self.lock.lock().unwrap();
         if self
             .load()
-            .map_err(internal)?
+            .map_err(RpcError::internal)?
             .is_some_and(|marker| marker.phase == "trial" || marker.phase == "ready")
         {
             return Err(RpcError::new(
@@ -407,8 +407,8 @@ impl Updater {
             ));
         }
         let candidate = self.candidate_path();
-        copy_binary(&staged, &candidate).map_err(internal)?;
-        let (copied_size, copied_sha) = digest(&candidate).map_err(internal)?;
+        copy_binary(&staged, &candidate).map_err(RpcError::internal)?;
+        let (copied_size, copied_sha) = digest(&candidate).map_err(RpcError::internal)?;
         if copied_size != expected_size || !copied_sha.eq_ignore_ascii_case(expected_sha) {
             let _ = fs::remove_file(&candidate);
             return Err(RpcError::new(
@@ -435,7 +435,7 @@ impl Updater {
             ));
         }
         let previous = self.previous_path();
-        swap_binary(&self.exe, &candidate, &previous).map_err(internal)?;
+        swap_binary(&self.exe, &candidate, &previous).map_err(RpcError::internal)?;
         let marker = Marker {
             phase: "trial".into(),
             from: self.version.clone(),
@@ -448,7 +448,7 @@ impl Updater {
         };
         if let Err(error) = self.save(&marker) {
             let _ = restore_binary(&self.exe, &previous);
-            return Err(internal(error));
+            return Err(RpcError::internal(error));
         }
         let restart = Arc::clone(&self.restart);
         tokio::spawn(async move {
@@ -479,7 +479,7 @@ impl Updater {
         #[cfg(target_os = "linux")]
         {
             if !fs::symlink_metadata(staged)
-                .map_err(internal)?
+                .map_err(RpcError::internal)?
                 .file_type()
                 .is_dir()
             {
@@ -495,7 +495,7 @@ impl Updater {
             let (expected_size, expected_sha) = (body.size, body.sha256.as_str());
             let bundle = verify_bundle(staged, expected_version, expected_size, expected_sha)
                 .map_err(|error| RpcError::new(Code::FailedPrecondition, error.to_string()))?;
-            let previous_release = current_pointer(&installed.root).map_err(internal)?;
+            let previous_release = current_pointer(&installed.root).map_err(RpcError::internal)?;
             let running_release = self
                 .exe
                 .parent()
@@ -537,31 +537,34 @@ impl Updater {
             let prepared = installed
                 .root
                 .join(format!(".node-update-{target_name}-{}", std::process::id()));
-            fs::create_dir(&prepared).map_err(internal)?;
+            fs::create_dir(&prepared).map_err(RpcError::internal)?;
             for (name, component) in &bundle.components {
                 let destination = prepared.join(name);
-                copy_binary(&staged.join(name), &destination).map_err(internal)?;
-                fs::hard_link(&destination, prepared.join(component)).map_err(internal)?;
+                copy_binary(&staged.join(name), &destination).map_err(RpcError::internal)?;
+                fs::hard_link(&destination, prepared.join(component))
+                    .map_err(RpcError::internal)?;
             }
-            copy_regular(&staged.join("VERSION"), &prepared.join("VERSION")).map_err(internal)?;
+            copy_regular(&staged.join("VERSION"), &prepared.join("VERSION"))
+                .map_err(RpcError::internal)?;
             copy_regular(&staged.join("SHA256SUMS"), &prepared.join("SHA256SUMS"))
-                .map_err(internal)?;
+                .map_err(RpcError::internal)?;
             let metadata = staged.join("release.json");
             if metadata.is_file()
                 && !fs::symlink_metadata(&metadata)
-                    .map_err(internal)?
+                    .map_err(RpcError::internal)?
                     .file_type()
                     .is_symlink()
             {
-                copy_regular(&metadata, &prepared.join("release.json")).map_err(internal)?;
+                copy_regular(&metadata, &prepared.join("release.json"))
+                    .map_err(RpcError::internal)?;
             } else {
                 fsutil::write_file(
                     &prepared.join("release.json"),
                     &serde_json::to_vec(&serde_json::json!({"version": expected_version}))
-                        .map_err(internal)?,
+                        .map_err(RpcError::internal)?,
                     0o644,
                 )
-                .map_err(internal)?;
+                .map_err(RpcError::internal)?;
             }
             verify_bundle(&prepared, expected_version, expected_size, expected_sha).map_err(
                 |error| {
@@ -584,7 +587,7 @@ impl Updater {
                     format!("candidate reports {actual_version}, expected {expected_version}"),
                 ));
             }
-            fs::rename(&prepared, installed.root.join(&target_name)).map_err(internal)?;
+            fs::rename(&prepared, installed.root.join(&target_name)).map_err(RpcError::internal)?;
             let marker = Marker {
                 phase: "trial".into(),
                 from: self.version.clone(),
@@ -595,7 +598,7 @@ impl Updater {
                 previous_release,
                 candidate_release: target_name,
             };
-            self.save(&marker).map_err(internal)?;
+            self.save(&marker).map_err(RpcError::internal)?;
             let restart = Arc::clone(&self.restart);
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_millis(500)).await;
@@ -655,9 +658,6 @@ fn now_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or_default()
-}
-fn internal(error: impl std::fmt::Display) -> RpcError {
-    RpcError::new(Code::Internal, error.to_string())
 }
 fn digest(path: &Path) -> io::Result<(u64, String)> {
     let mut file = File::open(path)?;

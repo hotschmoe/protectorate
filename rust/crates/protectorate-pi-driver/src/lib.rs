@@ -6,6 +6,7 @@ use protectorate_sandbox::{
     runtime::{self, KillHandle, LaunchOptions, StdioMode},
     PlanKind, ValidatedPlan,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -18,6 +19,26 @@ use std::{
 
 const MAX_LINE: usize = 4 << 20;
 const MAX_TOOL_OUTPUT: usize = 16 << 10;
+
+/// One entry of Pi's `get_available_models` reply.
+#[derive(Deserialize)]
+struct PiModel {
+    provider: String,
+    id: String,
+    name: Option<String>,
+    reasoning: Option<bool>,
+}
+
+/// A catalog entry in the ListModels JSON shape.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelOption {
+    model: String,
+    name: String,
+    efforts: Vec<String>,
+    default_effort: String,
+    is_default: bool,
+}
 
 #[derive(Default)]
 struct State {
@@ -169,6 +190,10 @@ impl Session {
     }
 
     pub fn list_models(&self) -> Result<Value, String> {
+        Ok(json!({"supported":true,"liveUpdate":true,"models":self.catalog()?}))
+    }
+
+    fn catalog(&self) -> Result<Vec<ModelOption>, String> {
         if self.is_exited() {
             return Err("pi session exited".into());
         }
@@ -184,28 +209,35 @@ impl Session {
         let efforts = levels["levels"]
             .as_array()
             .ok_or("pi returned no thinking levels")?;
-        let efforts: Vec<_> = efforts.iter().filter_map(Value::as_str).collect();
-        let state = self.state.lock().unwrap();
-        let result = options
+        let efforts: Vec<String> = efforts
             .iter()
-            .filter_map(|model| {
-                let provider = model["provider"].as_str()?;
-                let id = model["id"].as_str()?;
-                let name = model["name"].as_str().unwrap_or(id);
-                let reasoning = model["reasoning"].as_bool().unwrap_or(false);
-                let option_efforts = if reasoning {
-                    efforts.clone()
-                } else {
-                    vec!["off"]
-                };
-                Some(
-                    json!({"model":format_model(provider,id),"name":name,"efforts":option_efforts,
-                "defaultEffort":if reasoning {state.default_effort.as_str()} else {"off"},
-                "isDefault":provider==state.default_provider && id==state.default_model}),
-                )
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect();
+        let state = self.state.lock().unwrap();
+        Ok(options
+            .iter()
+            .filter_map(|model| PiModel::deserialize(model).ok())
+            .map(|model| {
+                let reasoning = model.reasoning.unwrap_or(false);
+                ModelOption {
+                    model: format_model(&model.provider, &model.id),
+                    name: model.name.unwrap_or_else(|| model.id.clone()),
+                    efforts: if reasoning {
+                        efforts.clone()
+                    } else {
+                        vec!["off".into()]
+                    },
+                    default_effort: if reasoning {
+                        state.default_effort.clone()
+                    } else {
+                        "off".into()
+                    },
+                    is_default: model.provider == state.default_provider
+                        && model.id == state.default_model,
+                }
             })
-            .collect::<Vec<_>>();
-        Ok(json!({"supported":true,"liveUpdate":true,"models":result}))
+            .collect())
     }
 
     pub fn set_selection(
@@ -257,20 +289,13 @@ impl Session {
         } else {
             requested_effort
         };
-        let catalog = self.list_models()?;
-        let models = catalog["models"]
-            .as_array()
-            .ok_or("pi returned no model catalog")?;
+        let models = self.catalog()?;
         let chosen = format_model(provider, model_id);
         let model = models
             .iter()
-            .find(|model| model["model"] == chosen)
+            .find(|model| model.model == chosen)
             .ok_or("invalid: requested model is not in Pi's catalog")?;
-        if !effort.is_empty()
-            && !model["efforts"]
-                .as_array()
-                .is_some_and(|list| list.iter().any(|e| e == effort))
-        {
+        if !effort.is_empty() && !model.efforts.iter().any(|e| e == effort) {
             return Err("invalid: requested effort is not available for this model".into());
         }
         let selected = self.command(

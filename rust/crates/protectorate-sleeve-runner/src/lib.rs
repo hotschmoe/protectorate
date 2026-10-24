@@ -653,7 +653,7 @@ fn seed_flutter_metadata(lower: &Path, upper: &Path) -> io::Result<()> {
             libc::openat(
                 source.as_raw_fd(),
                 c_name.as_ptr(),
-                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC,
             )
         };
         if fd < 0 {
@@ -799,7 +799,7 @@ fn ensure_login_profile(home: &fs::File) -> io::Result<()> {
         libc::openat(
             home.as_raw_fd(),
             name.as_ptr(),
-            libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC,
         )
     };
     if fd < 0 {

@@ -321,9 +321,7 @@ impl Store {
 fn new_id(notes: &[Note]) -> Result<String> {
     for n in 2..=8 {
         for _ in 0..64 {
-            let mut bytes = vec![0; n];
-            getrandom::getrandom(&mut bytes).map_err(|e| io::Error::other(e.to_string()))?;
-            let id: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+            let id = protectorate_fsutil::random_hex(n)?;
             if !notes.iter().any(|n| n.id == id) {
                 return Ok(id);
             }

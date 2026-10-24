@@ -8,13 +8,13 @@ description = "MCP bridge that serves the unary hub RPCs as tools over stdio or 
 protectorate-connect-client = { path = "../protectorate-connect-client" }
 protectorate-wire = { path = "../protectorate-wire" }
 protectorate-tls = { path = "../protectorate-tls" }
+protectorate-fsutil = { path = "../protectorate-fsutil" }
 prost-reflect = { version = "0.16", features = ["serde"] }
 serde_json = "1"
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "io-util", "time", "sync", "signal"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "ring", "tls12"] }
 futures-core = "0.3"
-getrandom = "0.2"
 subtle = "2"
 base64 = "0.22"
 

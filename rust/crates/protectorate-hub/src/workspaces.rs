@@ -8,7 +8,10 @@ use std::{
     ffi::CString,
     fs,
     io::{self, Read},
-    os::fd::{AsRawFd, FromRawFd},
+    os::{
+        fd::{AsRawFd, FromRawFd},
+        unix::fs::OpenOptionsExt,
+    },
     path::{Component, Path, PathBuf},
     sync::Arc,
 };
@@ -423,21 +426,15 @@ pub(super) fn git_details(path: &Path) -> (String, String, bool) {
 }
 
 fn read_git_file(git: &Path, name: &str) -> Option<Vec<u8>> {
-    let dir_path = CString::new(git.as_os_str().as_encoded_bytes()).ok()?;
     let name = CString::new(name).ok()?;
     // The directory and file are opened relative to stable file descriptors.
     // This prevents an untrusted checkout from redirecting metadata reads
     // through a symlink while the hub is inspecting it.
-    let dir_fd = unsafe {
-        libc::open(
-            dir_path.as_ptr(),
-            libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC,
-        )
-    };
-    if dir_fd < 0 {
-        return None;
-    }
-    let dir = unsafe { fs::File::from_raw_fd(dir_fd) };
+    let dir = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(git)
+        .ok()?;
     let file_fd = unsafe {
         libc::openat(
             dir.as_raw_fd(),

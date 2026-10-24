@@ -1,6 +1,7 @@
 //! Child-process plumbing shared by the CLI-backed readers.
 
-use std::process::{Child, Command};
+use std::io;
+use std::process::{Child, Command, ExitStatus};
 
 pub struct ManagedChild {
     child: Child,
@@ -19,6 +20,49 @@ impl std::ops::Deref for ManagedChild {
 impl std::ops::DerefMut for ManagedChild {
     fn deref_mut(&mut self) -> &mut Child {
         &mut self.child
+    }
+}
+
+impl ManagedChild {
+    /// Whether the leader has exited. On Unix it is left unreaped, so its
+    /// PID, which names the group, stays reserved until `reap_group`.
+    pub fn exited(&mut self) -> bool {
+        #[cfg(unix)]
+        {
+            exited_unreaped(self.child.id(), libc::WNOHANG).unwrap_or(true)
+        }
+        #[cfg(not(unix))]
+        {
+            !matches!(self.child.try_wait(), Ok(None))
+        }
+    }
+
+    /// Waits for the leader, kills whatever is left of its group, then reaps
+    /// it. Killing first would hit live work; reaping first would let the
+    /// group kill reach a process that reused the PID.
+    pub fn reap_group(&mut self) -> io::Result<ExitStatus> {
+        #[cfg(unix)]
+        exited_unreaped(self.child.id(), 0)?;
+        #[cfg(not(unix))]
+        self.child.wait()?;
+        kill_group(self);
+        self.child.wait()
+    }
+}
+
+#[cfg(unix)]
+fn exited_unreaped(pid: u32, flags: libc::c_int) -> io::Result<bool> {
+    loop {
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        let flags = libc::WEXITED | libc::WNOWAIT | flags;
+        if unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, flags) } == 0 {
+            // WNOHANG leaves si_pid zero while the child is still running.
+            return Ok(unsafe { info.si_pid() } != 0);
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(error);
+        }
     }
 }
 

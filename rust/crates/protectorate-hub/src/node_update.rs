@@ -309,8 +309,7 @@ async fn payload_path(hub: &Hub, os: &str, arch: &str) -> Result<Payload> {
     }
     let mut host_binary = None;
     if os == std::env::consts::OS && arch == host_arch() {
-        let binary =
-            std::env::current_exe().map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+        let binary = std::env::current_exe().map_err(RpcError::internal)?;
         let local = local_payload(binary.clone(), &hub.version, os, arch, staging_root)?;
         if local.bundle {
             return Ok(local);

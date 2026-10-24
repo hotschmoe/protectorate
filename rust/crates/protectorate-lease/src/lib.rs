@@ -235,12 +235,7 @@ fn sort_queue(queue: &mut [Ticket]) {
 }
 fn random_id(prefix: &str, d: &Disk) -> Result<String> {
     loop {
-        let mut b = [0u8; 8];
-        getrandom::getrandom(&mut b).map_err(|e| io::Error::other(e.to_string()))?;
-        let id = format!(
-            "{prefix}{}",
-            b.iter().map(|b| format!("{b:02x}")).collect::<String>()
-        );
+        let id = format!("{prefix}{}", protectorate_fsutil::random_hex(8)?);
         if !d.leases.contains_key(&id) && !d.queue.iter().any(|q| q.id == id) {
             return Ok(id);
         }

@@ -8,6 +8,7 @@ use protectorate_auth::{
     capability::{self, Claims},
     proof::{self, Proof},
 };
+use protectorate_fsutil::hex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -208,19 +209,21 @@ fn random_bytes(n: usize) -> Result<Zeroizing<Vec<u8>>> {
     getrandom::getrandom(&mut b).map_err(|e| io::Error::other(e.to_string()))?;
     Ok(b)
 }
-fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
 fn ttl_seconds(ttl: Duration) -> Result<i64> {
     if ttl.is_zero() || ttl > MAX_TTL {
         return invalid("capability lifetime must be positive and at most 24 hours");
     }
     Ok(ttl.as_secs().max(1) as i64)
 }
+/// Decodes the 64 hex digits of a stored key. Works on bytes: slicing the
+/// text could split a multibyte character in a corrupt file and panic.
 fn key_from_hex(text: &str) -> Option<Zeroizing<Vec<u8>>> {
-    (text.len() == 64).then_some(())?;
-    let bytes = (0..32)
-        .map(|i| u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).ok())
+    let digits = text.as_bytes();
+    (digits.len() == 64).then_some(())?;
+    let nibble = |digit: u8| char::from(digit).to_digit(16).map(|value| value as u8);
+    let bytes = digits
+        .chunks_exact(2)
+        .map(|pair| Some(nibble(pair[0])? << 4 | nibble(pair[1])?))
         .collect::<Option<Vec<u8>>>()?;
     Some(Zeroizing::new(bytes))
 }

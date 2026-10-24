@@ -5,6 +5,7 @@ use protectorate_sandbox::{
     runtime::{self, KillHandle, LaunchOptions, StdioMode},
     PlanKind, ValidatedPlan,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
@@ -18,6 +19,64 @@ use std::{
 const MAX_LINE: usize = 8 << 20;
 const MAX_TOOL_OUTPUT: usize = 16 << 10;
 const RPC_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// One page of the app-server's `model/list` reply.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogPage {
+    data: Option<Vec<CatalogEntry>>,
+    #[serde(default)]
+    next_cursor: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogEntry {
+    #[serde(default)]
+    model: String,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    is_default: bool,
+    #[serde(default)]
+    default_reasoning_effort: Option<String>,
+    #[serde(default)]
+    supported_reasoning_efforts: Vec<EffortOption>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EffortOption {
+    #[serde(default)]
+    reasoning_effort: String,
+}
+
+/// A catalog entry in the ListModels JSON shape.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelOption {
+    model: String,
+    name: String,
+    is_default: bool,
+    default_effort: String,
+    efforts: Vec<String>,
+}
+
+impl From<CatalogEntry> for ModelOption {
+    fn from(entry: CatalogEntry) -> Self {
+        Self {
+            model: entry.model,
+            name: entry.display_name.unwrap_or_default(),
+            is_default: entry.is_default,
+            default_effort: entry.default_reasoning_effort.unwrap_or_default(),
+            efforts: entry
+                .supported_reasoning_efforts
+                .into_iter()
+                .map(|option| option.reasoning_effort)
+                .collect(),
+        }
+    }
+}
 
 #[derive(Clone)]
 struct Approval {
@@ -176,9 +235,7 @@ impl Session {
             else if s.compacting {"CHAT_STATE_COMPACTING"} else if s.busy {"CHAT_STATE_WORKING"} else {"CHAT_STATE_IDLE"},
             "harnessSessionId":s.thread_id,"model":s.model,"provider":"openai","reasoningEffort":s.effort,
             "contextTokens":s.context_tokens.to_string(),"contextWindow":s.context_window.to_string(),"lastSeq":self.log.last().to_string(),"cache":self.log.cache(),
-            "settings":{"requested":{"model":s.requested_model,"effort":s.requested_effort},
-                "effective":{"model":s.model,"effort":s.effort},
-                "nativeDefaults":{"model":s.default_model,"effort":s.default_effort}}})
+            "settings":settings(&s)})
     }
     pub fn is_exited(&self) -> bool {
         self.state.lock().unwrap().exited
@@ -362,6 +419,9 @@ impl Session {
         Ok(())
     }
     pub fn list_models(&self) -> Result<Value, String> {
+        Ok(json!({"supported":true,"liveUpdate":true,"models":self.catalog()?}))
+    }
+    fn catalog(&self) -> Result<Vec<ModelOption>, String> {
         let mut cursor = String::new();
         let mut seen = std::collections::BTreeSet::new();
         let mut models = Vec::new();
@@ -371,14 +431,12 @@ impl Session {
             } else {
                 json!({"limit":100,"cursor":cursor})
             };
-            let page = self.rpc("model/list", params, RPC_TIMEOUT)?;
-            let entries = page["data"]
-                .as_array()
-                .ok_or("codex model/list returned no data")?;
-            models.extend(entries.iter().map(|m| json!({"model":m["model"],"name":m["displayName"],
-                "isDefault":m["isDefault"],"defaultEffort":m["defaultReasoningEffort"],
-                "efforts":m["supportedReasoningEfforts"].as_array().map(|v|v.iter().map(|e|e["reasoningEffort"].clone()).collect::<Vec<_>>()).unwrap_or_default()})));
-            cursor = page["nextCursor"].as_str().unwrap_or_default().into();
+            let page: CatalogPage =
+                serde_json::from_value(self.rpc("model/list", params, RPC_TIMEOUT)?)
+                    .map_err(|e| format!("codex model/list: {e}"))?;
+            let entries = page.data.ok_or("codex model/list returned no data")?;
+            models.extend(entries.into_iter().map(ModelOption::from));
+            cursor = page.next_cursor.unwrap_or_default();
             if cursor.is_empty() {
                 break;
             }
@@ -386,7 +444,7 @@ impl Session {
                 return Err("codex model catalog pagination did not finish".into());
             }
         }
-        Ok(json!({"supported":true,"liveUpdate":true,"models":models}))
+        Ok(models)
     }
     pub fn set_selection(
         &self,
@@ -411,8 +469,7 @@ impl Session {
         result
     }
     fn set_selection_inner(&self, model: &str, effort: &str) -> Result<Value, String> {
-        let catalog = self.list_models()?;
-        let models = catalog["models"].as_array().unwrap();
+        let models = self.catalog()?;
         let (default_model, default_effort, thread) = {
             let s = self.state.lock().unwrap();
             (
@@ -428,22 +485,18 @@ impl Session {
         };
         let entry = models
             .iter()
-            .find(|m| m["model"] == chosen)
+            .find(|m| m.model == chosen)
             .ok_or_else(|| format!("invalid: model {chosen:?} is not in Codex's catalog"))?;
         let chosen_effort = if effort.is_empty() {
             if model.is_empty() {
                 default_effort.as_str()
             } else {
-                entry["defaultEffort"].as_str().unwrap_or_default()
+                entry.default_effort.as_str()
             }
         } else {
             effort
         };
-        if !chosen_effort.is_empty()
-            && !entry["efforts"]
-                .as_array()
-                .is_some_and(|list| list.iter().any(|e| e == chosen_effort))
-        {
+        if !chosen_effort.is_empty() && !entry.efforts.iter().any(|e| e == chosen_effort) {
             return Err(format!(
                 "invalid: model {chosen:?} does not advertise effort {chosen_effort:?}"
             ));
@@ -623,7 +676,7 @@ impl Session {
                     let mut s = self.state.lock().unwrap();
                     s.model = model.into();
                     s.effort.clear();
-                    let settings = self.settings_value(&s);
+                    let settings = settings(&s);
                     drop(s);
                     let _ = self.log.append(Event::new(json!({"selection":settings})));
                 }
@@ -756,14 +809,15 @@ impl Session {
             _ => {}
         }
     }
-    fn settings_value(&self, s: &State) -> Value {
-        json!({"requested":{"model":s.requested_model,"effort":s.requested_effort},
-            "effective":{"model":s.model,"effort":s.effort},
-            "nativeDefaults":{"model":s.default_model,"effort":s.default_effort}})
-    }
     fn log_error(&self, message: &str) {
         let _ = self
             .log
             .append(Event::new(json!({"error":{"text":message}})));
     }
+}
+
+fn settings(s: &State) -> Value {
+    json!({"requested":{"model":s.requested_model,"effort":s.requested_effort},
+        "effective":{"model":s.model,"effort":s.effort},
+        "nativeDefaults":{"model":s.default_model,"effort":s.default_effort}})
 }

@@ -12,11 +12,12 @@ use protectorate_sandbox::{
     runtime::{self, KillHandle, LaunchOptions, StdioMode},
     PlanKind, ValidatedPlan,
 };
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
     io::{BufRead, BufReader, Read, Write},
-    process::{Child, ChildStdin, Command, Stdio},
+    process::ChildStdin,
     sync::{Arc, Condvar, Mutex},
     thread,
     time::{Duration, Instant},
@@ -30,7 +31,15 @@ const GATE_TIMEOUT: Duration = Duration::from_secs(60);
 #[derive(Clone)]
 struct Pending {
     rpc_id: Value,
-    options: Vec<Value>,
+    options: Vec<PermissionOption>,
+}
+
+/// One choice offered by `session/request_permission`.
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PermissionOption {
+    kind: String,
+    option_id: String,
 }
 
 #[derive(Default)]
@@ -48,26 +57,12 @@ struct State {
     context_window: u64,
 }
 
-enum Stop {
-    Sandbox(KillHandle),
-    Pid(u32),
-}
-
-impl Stop {
-    fn stop(&self) {
-        match self {
-            Self::Sandbox(kill) => kill.kill(),
-            Self::Pid(pid) => signal(*pid),
-        }
-    }
-}
-
 pub struct Session {
     stdin: Mutex<ChildStdin>,
     event_gate: Mutex<()>,
     state: Mutex<State>,
     changed: Condvar,
-    stop: Stop,
+    kill: KillHandle,
     log: Arc<Log>,
 }
 
@@ -108,7 +103,7 @@ impl Session {
             event_gate: Mutex::new(()),
             state: Mutex::new(State::default()),
             changed: Condvar::new(),
-            stop: Stop::Sandbox(child.kill_handle()),
+            kill: child.kill_handle(),
             log,
         });
         let waiter = Arc::clone(&session);
@@ -116,46 +111,6 @@ impl Session {
             waiter.note_exit(&child.wait());
         });
         drive(session, stdout, stderr, cwd, resume, autonomous)
-    }
-
-    /// Drive an already started `grok agent stdio` process with piped stdio.
-    /// `cwd` is the directory that process uses for `session/new` and `session/load`.
-    pub fn attach(
-        mut child: Child,
-        log: Arc<Log>,
-        cwd: &str,
-        resume: Option<&str>,
-        autonomous: bool,
-    ) -> Result<Arc<Self>, String> {
-        if cwd.is_empty() {
-            return Err("grok working directory is required".into());
-        }
-        let pid = child.id();
-        let stdin = child
-            .stdin
-            .take()
-            .ok_or("grok process did not supply stdin")?;
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or("grok process did not supply stdout")?;
-        let stderr = child
-            .stderr
-            .take()
-            .ok_or("grok process did not supply stderr")?;
-        let session = Arc::new(Self {
-            stdin: Mutex::new(stdin),
-            event_gate: Mutex::new(()),
-            state: Mutex::new(State::default()),
-            changed: Condvar::new(),
-            stop: Stop::Pid(pid),
-            log,
-        });
-        let waiter = Arc::clone(&session);
-        thread::spawn(move || {
-            waiter.note_exit(&child.wait());
-        });
-        drive(session, stdout, stderr, cwd.to_owned(), resume, autonomous)
     }
 
     pub fn status(&self) -> Value {
@@ -198,7 +153,7 @@ impl Session {
 
     pub fn stop(&self) {
         self.log.note_stop();
-        self.stop.stop();
+        self.kill.kill();
     }
 
     pub fn wait_exited(&self, timeout: Duration) -> bool {
@@ -465,7 +420,7 @@ impl Session {
                     self.stop();
                     break;
                 }
-                Ok(_) => match serde_json::from_slice::<Value>(trim_line(&line)) {
+                Ok(_) => match serde_json::from_slice::<Value>(&line) {
                     Ok(message) => self.handle(&message),
                     Err(error) => self.log_error(&format!("invalid grok ACP message: {error}")),
                 },
@@ -629,10 +584,13 @@ impl Session {
             return;
         }
         let tool = &message["params"]["toolCall"];
+        // An option without a string kind and id can never be picked.
         let options = message["params"]["options"]
             .as_array()
-            .cloned()
-            .unwrap_or_default();
+            .into_iter()
+            .flatten()
+            .filter_map(|option| PermissionOption::deserialize(option).ok())
+            .collect();
         let id = approval_key(&message["id"]);
         let summary = {
             let title = tool["title"].as_str().unwrap_or("");
@@ -715,25 +673,6 @@ fn drive(
     Ok(session)
 }
 
-fn signal(pid: u32) {
-    if pid == 0 {
-        return;
-    }
-    let _ = Command::new("kill")
-        .args(["-KILL", &pid.to_string()])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-}
-
-fn trim_line(line: &[u8]) -> &[u8] {
-    line.strip_suffix(b"\n")
-        .unwrap_or(line)
-        .strip_suffix(b"\r")
-        .unwrap_or(line)
-}
-
 fn rpc_id(value: &Value) -> Option<u64> {
     value
         .as_u64()
@@ -773,7 +712,7 @@ fn tool_output(update: &Value) -> String {
     }
 }
 
-fn pick_outcome(options: &[Value], allow: bool) -> Value {
+fn pick_outcome(options: &[PermissionOption], allow: bool) -> Value {
     let (want, prefix) = if allow {
         ("allow_once", "allow")
     } else {
@@ -781,8 +720,7 @@ fn pick_outcome(options: &[Value], allow: bool) -> Value {
     };
     let mut pick = None;
     for option in options {
-        let kind = option["kind"].as_str().unwrap_or("");
-        let id = option["optionId"].as_str().unwrap_or("");
+        let (kind, id) = (option.kind.as_str(), option.option_id.as_str());
         if id.is_empty() {
             continue;
         }

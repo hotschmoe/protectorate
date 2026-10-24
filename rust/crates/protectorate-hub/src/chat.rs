@@ -1,6 +1,7 @@
 //! Headless chat sleeves. Pi is the first live driver; unsupported harnesses
 //! remain explicit failures rather than shell sessions pretending to be chat.
 use super::{
+    now,
     sleeves::{stored, Launch, SpawnParent},
     EventBus, Hub,
 };
@@ -76,14 +77,9 @@ fn run_handoff_summary(
     let scratch = tempfile::tempdir().map_err(|e| e.to_string())?;
     let workspace = scratch.path().join("workspace");
     fs::create_dir(&workspace).map_err(|e| e.to_string())?;
-    let mut random = [0u8; 8];
-    getrandom::getrandom(&mut random).map_err(|e| e.to_string())?;
     let name = format!(
         "summary-{}",
-        random
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>()
+        protectorate_fsutil::random_hex(8).map_err(|e| e.to_string())?
     );
     let root = launcher.state_root.join("sleeves").join(&name);
     let home = root.join("home");
@@ -1189,11 +1185,11 @@ fn spawn_chat(
     runtime.requests.lock().unwrap().remove(&name);
     let root = launcher.state_root.join("sleeves").join(&name);
     let home = root.join("home");
-    fs::create_dir_all(&home).map_err(internal)?;
-    fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).map_err(internal)?;
+    fs::create_dir_all(&home).map_err(RpcError::internal)?;
+    fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).map_err(RpcError::internal)?;
     let cache_environment =
         protectorate_sleeve_runner::prepare_private_caches(&home, &launcher.user_home)
-            .map_err(internal)?;
+            .map_err(RpcError::internal)?;
     crate::sleeves::seed_git_identity(&home, &launcher.user_home)?;
     let (provider, executable, tool_roots, harness_name) = match harness {
         Harness::Pi => (
@@ -1246,7 +1242,7 @@ fn spawn_chat(
         ));
     }
     if harness == Harness::Pi {
-        fs::create_dir_all(home.join(".pi/sessions")).map_err(internal)?;
+        fs::create_dir_all(home.join(".pi/sessions")).map_err(RpcError::internal)?;
     }
     let auth = launcher.state_root.join("auth").join(provider.as_str());
     if !auth.is_dir() {
@@ -1381,7 +1377,7 @@ fn spawn_chat(
                 launcher.flutter_sdk_root.as_deref(),
                 launcher.flutter_cache_lower.as_deref(),
             )
-            .map_err(internal)?
+            .map_err(RpcError::internal)?
             .into_iter()
             .chain(
                 protectorate_sleeve_runner::flutter_tools_overlay(
@@ -1390,7 +1386,7 @@ fn spawn_chat(
                     launcher.flutter_sdk_root.as_deref(),
                     launcher.flutter_tools_lower.as_deref(),
                 )
-                .map_err(internal)?,
+                .map_err(RpcError::internal)?,
             )
             .chain(
                 protectorate_sleeve_runner::pub_cache_overlay(
@@ -1399,7 +1395,7 @@ fn spawn_chat(
                     &launcher.user_home,
                     launcher.pub_cache_lower.as_deref(),
                 )
-                .map_err(internal)?,
+                .map_err(RpcError::internal)?,
             )
             .chain(
                 protectorate_sleeve_runner::go_mod_cache_overlay(
@@ -1408,7 +1404,7 @@ fn spawn_chat(
                     &launcher.user_home,
                     launcher.go_mod_cache_lower.as_deref(),
                 )
-                .map_err(internal)?,
+                .map_err(RpcError::internal)?,
             )
             .collect(),
             masks: Vec::new(),
@@ -1486,15 +1482,16 @@ fn spawn_chat(
         // Claude's transcript and settings live in the sleeve's private home.
         // Only its credential file resolves to the shared provider authority.
         let config = root.join("home/.claude");
-        fs::create_dir_all(&config).map_err(internal)?;
-        fs::set_permissions(&config, fs::Permissions::from_mode(0o700)).map_err(internal)?;
+        fs::create_dir_all(&config).map_err(RpcError::internal)?;
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o700))
+            .map_err(RpcError::internal)?;
         let credential = config.join(".credentials.json");
         if auth.join(".credentials.json").exists() && fs::symlink_metadata(&credential).is_err() {
             std::os::unix::fs::symlink(
                 "/run/protectorate/auth/claude/.credentials.json",
                 &credential,
             )
-            .map_err(internal)?;
+            .map_err(RpcError::internal)?;
         }
         options
             .environment
@@ -1509,12 +1506,13 @@ fn spawn_chat(
         );
     } else if harness == Harness::Codex {
         let config = root.join("home/.codex");
-        fs::create_dir_all(&config).map_err(internal)?;
-        fs::set_permissions(&config, fs::Permissions::from_mode(0o700)).map_err(internal)?;
+        fs::create_dir_all(&config).map_err(RpcError::internal)?;
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o700))
+            .map_err(RpcError::internal)?;
         let credential = config.join("auth.json");
         if auth.join("auth.json").exists() && fs::symlink_metadata(&credential).is_err() {
             std::os::unix::fs::symlink("/run/protectorate/auth/codex/auth.json", &credential)
-                .map_err(internal)?;
+                .map_err(RpcError::internal)?;
         }
         crate::sleeves::seed_file(
             &config.join("config.toml"),
@@ -1530,8 +1528,9 @@ fn spawn_chat(
         );
     } else {
         let config = root.join("home/.grok");
-        fs::create_dir_all(&config).map_err(internal)?;
-        fs::set_permissions(&config, fs::Permissions::from_mode(0o700)).map_err(internal)?;
+        fs::create_dir_all(&config).map_err(RpcError::internal)?;
+        fs::set_permissions(&config, fs::Permissions::from_mode(0o700))
+            .map_err(RpcError::internal)?;
         for filename in ["auth.json", "auth.json.lock"] {
             let credential = config.join(filename);
             if fs::symlink_metadata(&credential).is_err() {
@@ -1539,7 +1538,7 @@ fn spawn_chat(
                     format!("/run/protectorate/auth/grok/{filename}"),
                     &credential,
                 )
-                .map_err(internal)?;
+                .map_err(RpcError::internal)?;
             }
         }
         options.environment.insert(
@@ -2249,30 +2248,30 @@ fn catalog_codex(hub: &Hub) -> Result<v1::ListModelsResponse> {
         ));
     }
     let sleeves_root = launcher.state_root.join("sleeves");
-    fs::create_dir_all(&sleeves_root).map_err(internal)?;
+    fs::create_dir_all(&sleeves_root).map_err(RpcError::internal)?;
     let scratch = tempfile::Builder::new()
         .prefix("catalog-")
         .tempdir_in(&sleeves_root)
-        .map_err(internal)?;
+        .map_err(RpcError::internal)?;
     let home = scratch.path().join("home");
     let config = home.join(".codex");
-    let workspace_root = tempfile::tempdir().map_err(internal)?;
+    let workspace_root = tempfile::tempdir().map_err(RpcError::internal)?;
     let workspace = workspace_root.path().join("workspace");
-    fs::create_dir_all(&config).map_err(internal)?;
-    fs::create_dir_all(&workspace).map_err(internal)?;
-    fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).map_err(internal)?;
+    fs::create_dir_all(&config).map_err(RpcError::internal)?;
+    fs::create_dir_all(&workspace).map_err(RpcError::internal)?;
+    fs::set_permissions(&home, fs::Permissions::from_mode(0o700)).map_err(RpcError::internal)?;
     if auth.join("auth.json").is_file() {
         std::os::unix::fs::symlink(
             "/run/protectorate/auth/codex/auth.json",
             config.join("auth.json"),
         )
-        .map_err(internal)?;
+        .map_err(RpcError::internal)?;
     }
     fs::write(
         config.join("config.toml"),
         "approval_policy = \"never\"\nsandbox_mode = \"danger-full-access\"\n",
     )
-    .map_err(internal)?;
+    .map_err(RpcError::internal)?;
     let mut tool_roots = launcher.codex_tool_roots.clone();
     tool_roots.sort();
     tool_roots.dedup();
@@ -2323,7 +2322,7 @@ fn catalog_codex(hub: &Hub) -> Result<v1::ListModelsResponse> {
             scratch.path().join("home").as_path(),
             &launcher.user_home,
         )
-        .map_err(internal)?,
+        .map_err(RpcError::internal)?,
     );
     options.environment.insert(
         "HOME".into(),
@@ -2664,14 +2663,8 @@ fn chat_event(event: &Event) -> Result<v1::ChatEvent> {
     }
     stored(&value)
 }
-fn now() -> String {
-    Utc::now().to_rfc3339_opts(SecondsFormat::Nanos, true)
-}
 fn unavailable() -> RpcError {
     RpcError::new(Code::Unavailable, "chat launcher is not configured")
-}
-fn internal(error: std::io::Error) -> RpcError {
-    RpcError::new(Code::Internal, error.to_string())
 }
 fn log_error(error: LogError) -> RpcError {
     RpcError::new(Code::Internal, error.to_string())

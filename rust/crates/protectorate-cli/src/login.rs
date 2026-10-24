@@ -3,7 +3,7 @@
 //! per hub under the state home. Ordinary commands sign with that key when no
 //! `--token-file` and no token environment variable is set.
 use crate::{
-    format::{minute, now_millis, unix_millis},
+    format::{minute, unix_millis},
     hub_url, json_line, message_value, value_line, Invocation,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -304,10 +304,7 @@ fn normalized_hub(hub: &str) -> Result<String> {
 fn credential_path(home: &Path, hub: &str) -> Result<PathBuf> {
     let hub = normalized_hub(hub)?;
     let digest = Sha256::digest(hub.as_bytes());
-    let name = digest
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
+    let name = protectorate_fsutil::hex(&digest);
     Ok(home.join(CREDENTIALS_DIR).join(format!("{name}.json")))
 }
 
@@ -361,7 +358,7 @@ fn save_credential(path: &Path, hub: &str, device: &v1::DeviceInfo, pkcs8: &[u8]
         "deviceId": device.id,
         "name": device.name,
         "platform": device.platform,
-        "savedAt": json!(now_millis()),
+        "savedAt": json!(protectorate_fsutil::unix_millis()),
         "key": STANDARD.encode(pkcs8),
     });
     let body =

@@ -66,7 +66,8 @@ fn current_sid() -> io::Result<String> {
         {
             return Err(io::Error::last_os_error());
         }
-        let mut bytes = vec![0u8; size as usize];
+        // usize elements keep the buffer aligned for TOKEN_USER.
+        let mut bytes = vec![0usize; (size as usize).div_ceil(std::mem::size_of::<usize>())];
         if GetTokenInformation(
             token.0,
             TokenUser,
@@ -126,8 +127,11 @@ fn check_key_acl(file: &File) -> io::Result<()> {
             {
                 return Err(denied("TLS key has an unsupported access control entry"));
             }
-            let allowed = &*(ace.cast::<ACCESS_ALLOWED_ACE>());
-            let sid = (&allowed.SidStart as *const u32).cast_mut().cast();
+            // The SID runs past SidStart, so keep the pointer's provenance
+            // over the whole ACE rather than one u32 field.
+            let sid = std::ptr::addr_of!((*ace.cast::<ACCESS_ALLOWED_ACE>()).SidStart)
+                .cast_mut()
+                .cast();
             let sid = sid_string(sid)?;
             if sid == current {
                 user_allowed = true;

@@ -2,8 +2,8 @@
 //! usage/chat updates are deliberately separate from these read routes.
 pub(super) mod branch;
 mod prune_git;
-use super::{approvals::Requester, Hub};
-use chrono::{DateTime, Utc};
+use super::{approvals::Requester, now, proto_time, Hub};
+use chrono::Utc;
 use prost_reflect::prost_types;
 use protectorate_audit::Entry as AuditEntry;
 use protectorate_sandbox::{
@@ -399,7 +399,7 @@ fn resleeve_sleeve(
             .as_ref()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default(),
-        at: Some(timestamp(at)),
+        at: Some(proto_time(at)),
     })?;
     let row = hub
         .sleeves
@@ -1798,15 +1798,16 @@ fn spawn_terminal(hub: &Hub, launch: &Launch, parent: &SpawnParent) -> Result<Re
         env.insert("PATH".into(), format!("/opt/protectorate/bin:{existing}"));
     }
     let root = launcher.state_root.join("sleeves").join(&name);
-    fs::create_dir_all(root.join("home")).map_err(internal)?;
-    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).map_err(internal)?;
-    fs::set_permissions(root.join("home"), fs::Permissions::from_mode(0o700)).map_err(internal)?;
+    fs::create_dir_all(root.join("home")).map_err(RpcError::internal)?;
+    fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).map_err(RpcError::internal)?;
+    fs::set_permissions(root.join("home"), fs::Permissions::from_mode(0o700))
+        .map_err(RpcError::internal)?;
     if let Some(provider) = provider.as_deref() {
         prepare_terminal_credentials(&root.join("home"), &launcher.user_home, provider, &mut env)?;
     }
     env.extend(
         protectorate_sleeve_runner::prepare_private_caches(&root.join("home"), &launcher.user_home)
-            .map_err(internal)?,
+            .map_err(RpcError::internal)?,
     );
     seed_git_identity(&root.join("home"), &launcher.user_home)?;
     let nonce = SystemTime::now()
@@ -1877,7 +1878,7 @@ fn spawn_terminal(hub: &Hub, launch: &Launch, parent: &SpawnParent) -> Result<Re
     issue_terminal_identity(hub, &name, parent)?;
     if let Err(error) = protectorate_sleeve_runner::write_config(&config_path, &config) {
         let _ = revoke_terminal_identity(hub, &name);
-        return Err(internal(error));
+        return Err(RpcError::internal(error));
     }
     let session_name = format!("sleeve-{name}");
     let create = hub.sessions.create(&CreateOptions {
@@ -2001,7 +2002,7 @@ fn prepare_terminal_credentials(
 ) -> Result<()> {
     let (directory, files, variable) = match provider {
         "pi" => {
-            fs::create_dir_all(home.join(".pi/sessions")).map_err(internal)?;
+            fs::create_dir_all(home.join(".pi/sessions")).map_err(RpcError::internal)?;
             env.insert(
                 "PI_CODING_AGENT_DIR".into(),
                 "/run/protectorate/auth/pi".into(),
@@ -2026,8 +2027,8 @@ fn prepare_terminal_credentials(
         }
     };
     let config = home.join(directory);
-    fs::create_dir_all(&config).map_err(internal)?;
-    fs::set_permissions(&config, fs::Permissions::from_mode(0o700)).map_err(internal)?;
+    fs::create_dir_all(&config).map_err(RpcError::internal)?;
+    fs::set_permissions(&config, fs::Permissions::from_mode(0o700)).map_err(RpcError::internal)?;
     for file in files {
         let target = format!("/run/protectorate/auth/{provider}/{file}");
         let link = config.join(file);
@@ -2042,9 +2043,9 @@ fn prepare_terminal_credentials(
                 ))
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                std::os::unix::fs::symlink(&target, &link).map_err(internal)?;
+                std::os::unix::fs::symlink(&target, &link).map_err(RpcError::internal)?;
             }
-            Err(error) => return Err(internal(error)),
+            Err(error) => return Err(RpcError::internal(error)),
         }
     }
     if provider == "claude" {
@@ -2070,9 +2071,11 @@ pub(crate) fn seed_file(path: &Path, content: &str) -> Result<()> {
         .mode(0o600)
         .open(path)
     {
-        Ok(mut file) => file.write_all(content.as_bytes()).map_err(internal),
+        Ok(mut file) => file
+            .write_all(content.as_bytes())
+            .map_err(RpcError::internal),
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
-        Err(error) => Err(internal(error)),
+        Err(error) => Err(RpcError::internal(error)),
     }
 }
 
@@ -2424,10 +2427,9 @@ fn prune_clone(
             // Move the exact directory opened above out of the public clone
             // name before examining it. A new sleeve cannot acquire that name
             // while the launch lock is held, and renameat2 refuses overwrite.
-            let mut nonce = [0_u8; 8];
-            getrandom::getrandom(&mut nonce)
+            let nonce = protectorate_fsutil::random_hex(8)
                 .map_err(|error| RpcError::new(Code::Internal, format!("prune nonce: {error}")))?;
-            let hidden = format!(".prune-{name}-{:016x}", u64::from_le_bytes(nonce));
+            let hidden = format!(".prune-{name}-{nonce}");
             rename_child(parent, basename, OsStr::new(&hidden)).map_err(cache_error)?;
             let hidden_path = workspaces.join(&hidden);
             let pinned = open_child_directory(parent, OsStr::new(&hidden))
@@ -2510,15 +2512,9 @@ fn quarantine_error(path: &Path, error: io::Error) -> RpcError {
 }
 
 fn same_directory(left: &fs::File, right: &fs::File) -> io::Result<bool> {
-    let mut a: libc::stat = unsafe { std::mem::zeroed() };
-    let mut b: libc::stat = unsafe { std::mem::zeroed() };
-    if unsafe { libc::fstat(left.as_raw_fd(), &mut a) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    if unsafe { libc::fstat(right.as_raw_fd(), &mut b) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(a.st_dev == b.st_dev && a.st_ino == b.st_ino)
+    use std::os::unix::fs::MetadataExt;
+    let (a, b) = (left.metadata()?, right.metadata()?);
+    Ok(a.dev() == b.dev() && a.ino() == b.ino())
 }
 
 fn rename_child(parent: &fs::File, from: &OsStr, to: &OsStr) -> io::Result<()> {
@@ -2878,29 +2874,39 @@ fn open_inaccessible_overlay_directory(parent: &fs::File, name: &OsStr) -> io::R
         return Err(io::Error::last_os_error());
     }
     let pinned = unsafe { fs::File::from_raw_fd(fd) };
-    let empty = c"";
-    // Linux fchmodat2 is syscall 452 on supported amd64 and arm64 hosts.
-    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-    let changed = unsafe {
-        libc::syscall(
-            452 as libc::c_long,
-            pinned.as_raw_fd(),
-            empty.as_ptr(),
-            0o700,
-            libc::AT_EMPTY_PATH,
-        )
-    };
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-    let changed = -1;
-    if changed != 0 {
-        return Err(io::Error::last_os_error());
-    }
+    chmod_path_fd(&pinned, 0o700)?;
     open_child_directory(parent, OsStr::from_bytes(name.as_bytes()))?.ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::NotFound,
             "overlay work directory disappeared",
         )
     })
+}
+
+/// fchmodat2(fd, "", mode, AT_EMPTY_PATH): chmod through an O_PATH descriptor.
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+fn chmod_path_fd(file: &fs::File, mode: libc::mode_t) -> io::Result<()> {
+    // Syscall 452 on both amd64 and arm64; libc has no constant for arm64.
+    let changed = unsafe {
+        libc::syscall(
+            452 as libc::c_long,
+            file.as_raw_fd(),
+            c"".as_ptr(),
+            mode,
+            libc::AT_EMPTY_PATH,
+        )
+    };
+    if changed != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+fn chmod_path_fd(_file: &fs::File, _mode: libc::mode_t) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "fchmodat2 is only wired for amd64 and arm64",
+    ))
 }
 
 fn unlink_child(parent: &fs::File, name: &OsStr, flags: libc::c_int) -> io::Result<()> {
@@ -2914,9 +2920,7 @@ fn unlink_child(parent: &fs::File, name: &OsStr, flags: libc::c_int) -> io::Resu
 }
 
 fn remove_open_tree(parent: &fs::File, name: &OsStr, tree: fs::File) -> io::Result<()> {
-    if unsafe { libc::fchmod(tree.as_raw_fd(), 0o700) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
+    tree.set_permissions(fs::Permissions::from_mode(0o700))?;
     // /proc/self/fd points at the directory already opened with O_NOFOLLOW.
     // Every mutation below is anchored to that descriptor with openat/unlinkat.
     for entry in fs::read_dir(format!("/proc/self/fd/{}", tree.as_raw_fd()))? {
@@ -3003,16 +3007,7 @@ fn resolve_executable(executable: &str, tool_roots: &[PathBuf]) -> Result<PathBu
 }
 
 pub(super) fn new_run_id() -> Result<String> {
-    let mut bytes = [0u8; 8];
-    getrandom::getrandom(&mut bytes).map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
-    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
-}
-
-fn internal(error: std::io::Error) -> RpcError {
-    RpcError::new(Code::Internal, error.to_string())
-}
-fn now() -> String {
-    Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+    protectorate_fsutil::random_hex(8).map_err(RpcError::internal)
 }
 
 /// The egress a sleeve or harness helper gets: its provider's API hosts
@@ -3186,17 +3181,9 @@ fn stored_time(text: &str) -> Result<prost_types::Timestamp> {
         .map_err(|_| RpcError::new(Code::Internal, format!("stored time {text:?}")))
 }
 
-fn timestamp(time: DateTime<Utc>) -> prost_types::Timestamp {
-    prost_types::Timestamp {
-        seconds: time.timestamp(),
-        nanos: time.timestamp_subsec_nanos() as i32,
-    }
-}
-
 /// Encodes a message as the protobuf JSON the registry and chat log keep.
 fn to_stored<T: ReflectMessage>(message: &T) -> Result<Value> {
-    serde_json::from_slice(&wire::encode(message)?)
-        .map_err(|error| RpcError::new(Code::Internal, error.to_string()))
+    serde_json::from_slice(&wire::encode(message)?).map_err(RpcError::internal)
 }
 
 fn registry_error(error: Error) -> RpcError {
@@ -3213,8 +3200,7 @@ fn registry_error(error: Error) -> RpcError {
 /// Decodes protobuf JSON the hub keeps outside the API (registry records,
 /// chat logs, driver status) into its generated message.
 pub(super) fn stored<T: ReflectMessage + Default>(value: &Value) -> Result<T> {
-    let bytes = serde_json::to_vec(value)
-        .map_err(|error| RpcError::new(Code::Internal, error.to_string()))?;
+    let bytes = serde_json::to_vec(value).map_err(RpcError::internal)?;
     wire::decode(&bytes).map_err(|error| {
         RpcError::new(
             Code::Internal,

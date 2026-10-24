@@ -2510,7 +2510,7 @@ fn cpu_percent_flag(text: &str) -> Result<u32> {
 }
 
 /// 512, 512M, 8G or 8GiB, in powers of 1024.
-fn parse_size(text: &str) -> Result<u64> {
+pub(crate) fn parse_size(text: &str) -> Result<u64> {
     let mut body = text.trim().to_ascii_uppercase();
     if let Some(stripped) = body.strip_suffix('B') {
         body = stripped.to_owned();

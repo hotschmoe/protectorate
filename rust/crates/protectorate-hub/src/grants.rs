@@ -2,9 +2,10 @@
 use super::{
     access::{self, scope_methods, token_info},
     approvals::{self, Gated},
-    now_unix, Hub,
+    Hub,
 };
 use prost_reflect::ReflectMessage;
+use protectorate_fsutil::unix_seconds;
 use protectorate_identity::Mint;
 use protectorate_inventory::SHARED;
 use protectorate_wire::{
@@ -115,7 +116,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                             ttl,
                             file: None,
                         },
-                        now_unix(),
+                        unix_seconds(),
                     )
                     .map_err(access::token_error)?;
                 hub.emit("grant.minted", &record.id, json!({"node": node}));

@@ -170,11 +170,7 @@ struct RawTerminal(libc::termios);
 #[cfg(unix)]
 impl RawTerminal {
     fn enter() -> Result<Self> {
-        if unsafe { libc::isatty(libc::STDIN_FILENO) } != 1
-            || unsafe { libc::isatty(libc::STDOUT_FILENO) } != 1
-        {
-            return Err(RpcError::invalid("attach needs an interactive terminal"));
-        }
+        require_tty()?;
         let mut state = std::mem::MaybeUninit::<libc::termios>::uninit();
         if unsafe { libc::tcgetattr(libc::STDIN_FILENO, state.as_mut_ptr()) } < 0 {
             return Err(io_error("terminal state"));
@@ -449,9 +445,8 @@ fn encode_segment(value: &str) -> String {
 
 #[cfg(unix)]
 fn require_tty() -> Result<()> {
-    if unsafe { libc::isatty(libc::STDIN_FILENO) } != 1
-        || unsafe { libc::isatty(libc::STDOUT_FILENO) } != 1
-    {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         return Err(RpcError::invalid("attach needs an interactive terminal"));
     }
     Ok(())
@@ -593,7 +588,7 @@ fn bridge(
                     stdout
                         .write_all(&frame[1..])
                         .and_then(|_| stdout.flush())
-                        .map_err(|e| RpcError::new(Code::Internal, e.to_string()))?;
+                        .map_err(RpcError::internal)?;
                 }
                 b'2' => notice = String::from_utf8_lossy(&frame[1..]).into_owned(),
                 _ => {}
