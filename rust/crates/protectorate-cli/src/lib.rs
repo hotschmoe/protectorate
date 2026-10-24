@@ -53,9 +53,6 @@ pub const DEVICE_CREDENTIAL_ENV: &str = "PROTECTORATE_DEVICE_CREDENTIAL";
 pub const HOME_ENV: &str = "PROTECTORATE_HOME";
 
 const LIST_TOKENS: &str = "/protectorate.v1.TokenService/ListTokens";
-const LIST_JOBS: &str = "/protectorate.v1.JobService/ListJobs";
-const GET_JOB: &str = "/protectorate.v1.JobService/GetJob";
-const CANCEL_JOB: &str = "/protectorate.v1.JobService/CancelJob";
 const CHAT_SEND: &str = "/protectorate.v1.ChatService/Send";
 const CHAT_WATCH: &str = "/protectorate.v1.ChatService/Watch";
 const CHAT_RESPOND: &str = "/protectorate.v1.ChatService/Respond";
@@ -211,16 +208,15 @@ impl JobState {
         }
     }
 
-    /// The enum name ListJobsRequest takes.
-    pub fn as_proto(&self) -> &'static str {
+    pub fn as_proto(&self) -> v1::JobState {
         match self {
-            Self::Preparing => "JOB_STATE_PREPARING",
-            Self::Running => "JOB_STATE_RUNNING",
-            Self::Succeeded => "JOB_STATE_SUCCEEDED",
-            Self::Failed => "JOB_STATE_FAILED",
-            Self::Canceled => "JOB_STATE_CANCELED",
-            Self::TimedOut => "JOB_STATE_TIMED_OUT",
-            Self::Killed => "JOB_STATE_KILLED",
+            Self::Preparing => v1::JobState::Preparing,
+            Self::Running => v1::JobState::Running,
+            Self::Succeeded => v1::JobState::Succeeded,
+            Self::Failed => v1::JobState::Failed,
+            Self::Canceled => v1::JobState::Canceled,
+            Self::TimedOut => v1::JobState::TimedOut,
+            Self::Killed => v1::JobState::Killed,
         }
     }
 
@@ -2158,25 +2154,24 @@ fn execute_commands(
             }
         }
         Command::JobList(filter) => {
-            let mut request = json!({ "limit": filter.limit });
-            if let Some(state) = filter.state {
-                request["state"] = json!(state.as_proto());
-            }
-            let jobs = client.call(LIST_JOBS, &request)?;
+            let request = v1::ListJobsRequest {
+                state: filter.state.map_or(0, |state| state.as_proto() as i32),
+                limit: filter.limit,
+            };
+            let jobs = client.unary(v1::job_service::LIST_JOBS, &request)?;
             if json {
-                Ok(format::items(&jobs, "jobs")
-                    .iter()
-                    .map(value_line)
-                    .collect::<Result<Vec<_>>>()?
-                    .concat())
+                json_lines(&jobs.jobs)
             } else {
                 Ok(format::job_list_text(&jobs, now_millis()))
             }
         }
         Command::JobShow { id } => {
-            let job = client.call(GET_JOB, &json!({"id": id}))?;
+            let job = client.unary(
+                v1::job_service::GET_JOB,
+                &v1::GetJobRequest { id: id.clone() },
+            )?;
             if json {
-                value_line(&job)
+                json_line(&job)
             } else {
                 Ok(format::job_text(&job))
             }
@@ -2343,9 +2338,15 @@ fn execute_commands(
             }
         }
         Command::JobCancel { id } => {
-            let job = client.call(CANCEL_JOB, &json!({"id": id}))?;
+            let job = client.unary(
+                v1::job_service::CANCEL_JOB,
+                &v1::CancelJobRequest {
+                    id: id.clone(),
+                    ..Default::default()
+                },
+            )?;
             if json {
-                value_line(&job)
+                json_line(&job)
             } else {
                 Ok(format::job_cancel_text(&job))
             }

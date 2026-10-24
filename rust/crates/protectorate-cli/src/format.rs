@@ -1034,123 +1034,117 @@ pub(crate) fn lease_text(lease: &v1::Lease) -> String {
     align(&out)
 }
 
-pub(crate) fn job_list_text(response: &Value, now: i64) -> String {
-    let jobs = items(response, "jobs");
+pub(crate) fn job_list_text(response: &v1::ListJobsResponse, now: i64) -> String {
     let mut out = String::from("ID\tSTATE\tNODE\tAGE\tRUN\tCOMMAND\n");
-    for job in &jobs {
-        let age = match timestamp_millis(&text(job, "submittedAt")) {
+    for job in &response.jobs {
+        let age = match unix_millis(job.submitted_at.as_ref()) {
             Some(millis) => fmt_minutes((now - millis) as f64 / 1000.0),
             None => "-".to_owned(),
         };
-        out.push_str(
-            &[
-                text(job, "id"),
-                job_state_label(job),
-                or_dash(text(job, "node")),
-                age,
-                go_duration(duration_seconds(job, "runTime").unwrap_or_default()),
-                truncate(&command_line(job), 48),
-            ]
-            .join("\t"),
-        );
-        out.push('\n');
+        out.push_str(&format!(
+            "{}\t{}\t{}\t{age}\t{}\t{}\n",
+            job.id,
+            job_state_label(job),
+            or_dash(job.node.clone()),
+            go_duration(seconds(job.run_time.as_ref()).unwrap_or_default()),
+            truncate(&job.command.join(" "), 48),
+        ));
     }
     align(&out)
 }
 
-pub(crate) fn job_text(job: &Value) -> String {
+pub(crate) fn job_text(job: &v1::Job) -> String {
     let mut out = String::new();
-    row(&mut out, "id", text(job, "id"));
+    row(&mut out, "id", job.id.clone());
     row(&mut out, "state", job_state_label(job));
-    row(&mut out, "node", text(job, "node"));
-    row(&mut out, "command", command_line(job));
+    row(&mut out, "node", job.node.clone());
+    row(&mut out, "command", job.command.join(" "));
     row(&mut out, "mode", job_mode_label(job));
-    row(&mut out, "isolation", text(job, "isolation"));
-    optional_row(&mut out, "task", text(job, "task"));
+    row(&mut out, "isolation", job.isolation.clone());
+    optional_row(&mut out, "task", job.task.clone());
     optional_row(&mut out, "source", job_source_label(job));
-    row(&mut out, "submitted", local_stamp(text(job, "submittedAt")));
-    row(&mut out, "started", local_stamp(text(job, "startedAt")));
-    row(&mut out, "finished", local_stamp(text(job, "finishedAt")));
-    optional_row(&mut out, "gpu", text(job, "gpuIndex"));
-    job_exit_row(&mut out, job);
-    optional_row(&mut out, "error", text(job, "error"));
+    row(&mut out, "submitted", stamp(job.submitted_at.as_ref()));
+    row(&mut out, "started", stamp(job.started_at.as_ref()));
+    row(&mut out, "finished", stamp(job.finished_at.as_ref()));
+    if let Some(gpu) = job.gpu_index {
+        row(&mut out, "gpu", gpu.to_string());
+    }
+    // A job that has not run yet has no exit code.
+    if job.exit_code != 0
+        || !matches!(
+            job.state(),
+            v1::JobState::Unspecified | v1::JobState::Preparing | v1::JobState::Running
+        )
+    {
+        row(&mut out, "exit code", job.exit_code.to_string());
+    }
+    optional_row(&mut out, "error", job.error.clone());
     row(
         &mut out,
         "source sent",
         format!(
             "{} in {} (warm worktree: {})",
-            bytes(number(job, "sourceBytes").unwrap_or_default() as u64),
-            go_duration(duration_seconds(job, "transferTime").unwrap_or_default()),
-            boolean(job, "workspaceReused")
+            bytes(job.source_bytes),
+            go_duration(seconds(job.transfer_time.as_ref()).unwrap_or_default()),
+            job.workspace_reused
         ),
     );
     row(
         &mut out,
         "run time",
-        go_duration(duration_seconds(job, "runTime").unwrap_or_default()),
+        go_duration(seconds(job.run_time.as_ref()).unwrap_or_default()),
     );
-    row(
-        &mut out,
-        "log",
-        bytes(number(job, "logBytes").unwrap_or_default() as u64),
-    );
-    for artifact in items(job, "artifacts") {
+    row(&mut out, "log", bytes(job.log_bytes));
+    for artifact in &job.artifacts {
         row(
             &mut out,
             "artifact",
-            format!(
-                "{} ({})",
-                text(&artifact, "path"),
-                bytes(number(&artifact, "sizeBytes").unwrap_or_default() as u64)
-            ),
+            format!("{} ({})", artifact.path, bytes(artifact.size_bytes)),
         );
     }
     align(&out)
 }
 
-pub(crate) fn job_cancel_text(job: &Value) -> String {
-    format!("job {} {}\n", text(job, "id"), job_state_label(job))
+pub(crate) fn job_cancel_text(job: &v1::Job) -> String {
+    format!("job {} {}\n", job.id, job_state_label(job))
 }
 
 /// The one-line summary `job run` prints after the log. Durations are rounded
 /// to a millisecond (`1m2.5s`).
-pub(crate) fn job_summary_line(job: &Value) -> String {
-    let state = text(job, "state");
-    let mut line = format!("job {} {}", text(job, "id"), job_state_label(job));
-    if state == "JOB_STATE_SUCCEEDED" || state == "JOB_STATE_FAILED" {
-        let code = text(job, "exitCode");
-        let code = if code.is_empty() { "0" } else { code.as_str() };
-        line.push_str(&format!(" (exit {code})"));
+pub(crate) fn job_summary_line(job: &v1::Job) -> String {
+    let mut line = format!("job {} {}", job.id, job_state_label(job));
+    if matches!(job.state(), v1::JobState::Succeeded | v1::JobState::Failed) {
+        line.push_str(&format!(" (exit {})", job.exit_code));
     }
     line.push_str(&format!(
         " on {}: run {}",
-        text(job, "node"),
-        round_go_duration(duration_seconds(job, "runTime").unwrap_or_default())
+        job.node,
+        round_go_duration(seconds(job.run_time.as_ref()).unwrap_or_default())
     ));
-    if at(job, "source").is_some_and(|source| {
-        !source.is_null() && source.as_object().is_some_and(|fields| !fields.is_empty())
-    }) {
+    if job
+        .source
+        .as_ref()
+        .is_some_and(|source| source.kind.is_some())
+    {
         line.push_str(&format!(
             ", source {} in {}",
-            bytes(number(job, "sourceBytes").unwrap_or_default() as u64),
-            round_go_duration(duration_seconds(job, "transferTime").unwrap_or_default())
+            bytes(job.source_bytes),
+            round_go_duration(seconds(job.transfer_time.as_ref()).unwrap_or_default())
         ));
-        if boolean(job, "workspaceReused") {
+        if job.workspace_reused {
             line.push_str(", warm worktree");
         }
     }
-    let artifacts = items(job, "artifacts");
-    if !artifacts.is_empty() {
+    if !job.artifacts.is_empty() {
         line.push_str(&format!(
             ", {} artifact(s) {}",
-            artifacts.len(),
-            bytes(number(job, "artifactBytes").unwrap_or_default() as u64)
+            job.artifacts.len(),
+            bytes(job.artifact_bytes)
         ));
     }
-    let error = text(job, "error");
-    if !error.is_empty() {
+    if !job.error.is_empty() {
         line.push_str(": ");
-        line.push_str(&error);
+        line.push_str(&job.error);
     }
     line
 }
@@ -2064,61 +2058,27 @@ fn or_unknown(value: String) -> String {
     }
 }
 
-fn job_state_label(job: &Value) -> String {
-    let state = text(job, "state");
-    if state.is_empty() {
-        return "-".to_owned();
-    }
-    state
-        .strip_prefix("JOB_STATE_")
-        .unwrap_or(&state)
-        .to_lowercase()
-        .replace('_', " ")
-}
-
-/// A job that has run always has an exit code; protobuf JSON omits a zero
-/// one, so a finished job without the field gets an explicit 0.
-fn job_exit_row(out: &mut String, job: &Value) {
-    let code = text(job, "exitCode");
-    if !code.is_empty() {
-        return row(out, "exit code", code);
-    }
-    match text(job, "state").as_str() {
-        "" | "JOB_STATE_PREPARING" | "JOB_STATE_RUNNING" => {}
-        _ => row(out, "exit code", "0".to_owned()),
+fn job_state_label(job: &v1::Job) -> String {
+    match word(job.state().as_str_name(), "JOB_STATE_") {
+        state if state.is_empty() => "-".to_owned(),
+        state => state.replace('_', " "),
     }
 }
 
-fn job_mode_label(job: &Value) -> String {
-    match text(job, "mode").as_str() {
-        "" | "JOB_MODE_UNSPECIFIED" => "sandboxed".to_owned(),
-        mode => mode
-            .strip_prefix("JOB_MODE_")
-            .unwrap_or(mode)
-            .to_lowercase(),
+fn job_mode_label(job: &v1::Job) -> String {
+    match job.mode() {
+        v1::JobMode::Unspecified => "sandboxed".to_owned(),
+        mode => word(mode.as_str_name(), "JOB_MODE_"),
     }
 }
 
-fn job_source_label(job: &Value) -> String {
-    let source = match at(job, "source") {
-        Some(source) => source,
-        None => return String::new(),
-    };
-    if let Some(git) = at(source, "git") {
-        return format!("git {}@{}", text(git, "repo"), text(git, "commit"));
+fn job_source_label(job: &v1::Job) -> String {
+    use v1::job_source::Kind;
+    match job.source.as_ref().and_then(|source| source.kind.as_ref()) {
+        Some(Kind::Git(git)) => format!("git {}@{}", git.repo, git.commit),
+        Some(Kind::Artifact(artifact)) => format!("artifact {}", artifact.path),
+        None => String::new(),
     }
-    if let Some(artifact) = at(source, "artifact") {
-        return format!("artifact {}", text(artifact, "path"));
-    }
-    String::new()
-}
-
-fn command_line(job: &Value) -> String {
-    items(job, "command")
-        .iter()
-        .filter_map(Value::as_str)
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn truncate(text: &str, limit: usize) -> String {
