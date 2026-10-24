@@ -147,14 +147,22 @@ pub fn claude_stream(data: &[u8]) {
     settle(&peer, session, |s| drop(s.status()), |s| s.stop());
 }
 
-const CODEX_HANDSHAKE: &[u8] = b"{\"id\":1,\"result\":{}}\n\
-{\"id\":2,\"result\":{\"thread\":{\"id\":\"fuzz-thread\"},\"model\":\"gpt\",\"reasoningEffort\":\"low\"}}\n\
-{\"id\":3,\"result\":{\"turn\":{\"id\":\"fuzz-turn\"}}}\n";
+// Replies follow their requests, as from a real harness: the drivers drop
+// replies to requests nobody is waiting on.
+const CODEX_INITIALIZE: &[u8] = b"{\"id\":1,\"result\":{}}\n";
+const CODEX_THREAD: &[u8] = b"{\"id\":2,\"result\":{\"thread\":{\"id\":\"fuzz-thread\"},\"model\":\"gpt\",\"reasoningEffort\":\"low\"}}\n";
+const CODEX_TURN: &[u8] = b"{\"id\":3,\"result\":{\"turn\":{\"id\":\"fuzz-turn\"}}}\n";
 
 /// Codex app-server JSON-RPC notifications and requests during one turn.
 pub fn codex_rpc(data: &[u8]) {
     let (autonomous, data) = split_autonomous(data);
-    let peer = peer(&[(0, CODEX_HANDSHAKE), (4, data)]);
+    // initialize; initialized and thread/start; turn/start on send.
+    let peer = peer(&[
+        (1, CODEX_INITIALIZE),
+        (2, CODEX_THREAD),
+        (1, CODEX_TURN),
+        (0, data),
+    ]);
     let Ok(session) = protectorate_codex_driver::Session::start(
         &peer.plan,
         peer.options.clone(),
@@ -168,16 +176,24 @@ pub fn codex_rpc(data: &[u8]) {
     settle(&peer, session, |s| drop(s.status()), |s| s.stop());
 }
 
-const GROK_HANDSHAKE: &[u8] =
-    b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":1}}\n\
-{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"sessionId\":\"fuzz-session\"}}\n\
-{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"stopReason\":\"end_turn\"}}\n";
+const GROK_INITIALIZE: &[u8] =
+    b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":1}}\n";
+const GROK_SESSION: &[u8] =
+    b"{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"sessionId\":\"fuzz-session\"}}\n";
+const GROK_GATE: &[u8] =
+    b"{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"stopReason\":\"end_turn\"}}\n";
 
 /// Grok ACP (`grok agent stdio`) updates, permission requests and the reply
 /// to prompt id 4.
 pub fn grok_acp(data: &[u8]) {
     let (autonomous, data) = split_autonomous(data);
-    let peer = peer(&[(0, GROK_HANDSHAKE), (4, data)]);
+    // initialize, session/new, the approval gate prompt, then the turn's prompt.
+    let peer = peer(&[
+        (1, GROK_INITIALIZE),
+        (1, GROK_SESSION),
+        (1, GROK_GATE),
+        (1, data),
+    ]);
     let Ok(session) = protectorate_grok_driver::Session::start(
         &peer.plan,
         peer.options.clone(),
