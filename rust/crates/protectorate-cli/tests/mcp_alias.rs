@@ -1,7 +1,7 @@
 //! Public CLI delegation preserves MCP's stdio protocol and exit status.
 #![cfg(unix)]
 
-mod common;
+use crate::common;
 
 use common::{installed_cli, write_executable};
 use sha2::{Digest, Sha256};

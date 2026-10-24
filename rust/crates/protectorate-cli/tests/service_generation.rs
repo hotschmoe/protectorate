@@ -1,5 +1,5 @@
 #![cfg(unix)]
-mod common;
+use crate::common;
 
 use std::{
     fs,

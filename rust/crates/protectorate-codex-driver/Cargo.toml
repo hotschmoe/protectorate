@@ -7,3 +7,7 @@ edition.workspace = true
 protectorate-chatlog = { path = "../protectorate-chatlog" }
 protectorate-sandbox = { path = "../protectorate-sandbox" }
 serde_json = "1"
+
+[lib]
+test = false
+doctest = false

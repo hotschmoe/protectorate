@@ -9,3 +9,6 @@ protectorate-sandbox = { path = "../protectorate-sandbox" }
 serde_json = "1"
 getrandom = "0.2"
 
+[lib]
+test = false
+doctest = false

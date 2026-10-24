@@ -1,5 +1,4 @@
-#[path = "support/capability.rs"]
-mod capability;
+use crate::support::capability;
 use protectorate_connect_client::Client;
 use protectorate_hub::Hub;
 use protectorate_inventory::Node;

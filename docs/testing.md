@@ -10,7 +10,15 @@ make check      # fmt, clippy -D warnings, make test, flutter analyze, check-ver
 ```
 
 `make test` needs Linux with unprivileged user namespaces, tmux and git. The
-scenarios live in `rust/crates/*/tests/`:
+scenarios live in `rust/crates/*/tests/`. A crate with several scenario
+files builds them into one test binary, `e2e` (`tests/e2e.rs` declares each
+file as a module), so the hub links once per crate and the scenarios run in
+parallel threads. Libraries and binaries have no unit-test harness
+(`test = false`) and no doctests, except the two compile-checked examples in
+`protectorate-mcpbridge`. `protectorate-cli --test chat_commands` keeps its own
+binary because it has its own `main` and doubles as the sandbox helper. A
+scenario's name is `<file>::<test>`, so `cargo test -p protectorate-hub
+--test e2e governance::` runs one file.
 
 - `protectorate-server`: the real `protectorate-rs` binary (backup and
   restore, harness drivers, the checked-in Flutter client against a Rust hub,
@@ -31,15 +39,16 @@ scenarios live in `rust/crates/*/tests/`:
 ## Host-only lanes
 
 These are `#[ignore]`d because they need host state; run them by name with
-`cargo test -p <crate> --test <file> -- --ignored`:
+`cargo test -p <crate> --test e2e <file>:: -- --ignored`:
 
-- `protectorate-server --test service_job_restart`: a working systemd user
+- `protectorate-server`, `service_job_restart::`: a working systemd user
   manager.
-- `protectorate-sleeve-runner --test pub_offline|go_mod_offline|flutter_offline`
-  and `protectorate-hub --test terminal_sleeve`: published cache generations
-  passed as `PROTECTORATE_TEST_PUB_LOWER`, `PROTECTORATE_TEST_GO_MOD_LOWER` or
-  the `PROTECTORATE_TEST_FLUTTER_*` variables.
-- `protectorate-hub --test sleeve_resleeve`: an installed, authenticated Pi
+- `protectorate-sleeve-runner`, `pub_offline::`, `go_mod_offline::` or
+  `flutter_offline::`, and `protectorate-hub`, `terminal_sleeve::`: published
+  cache generations passed as `PROTECTORATE_TEST_PUB_LOWER`,
+  `PROTECTORATE_TEST_GO_MOD_LOWER` or the `PROTECTORATE_TEST_FLUTTER_*`
+  variables.
+- `protectorate-hub`, `sleeve_resleeve::`: an installed, authenticated Pi
   (`PROTECTORATE_LIVE_PI`, `PROTECTORATE_LIVE_PI_AUTH`), copied only into the
   test's private hub state.
 

@@ -2,7 +2,7 @@
 
 //! `sleeve status` against a real hub watching a real tmux pane that shows a
 //! pane captured from the Claude Code TUI at a permission prompt.
-mod common;
+use crate::common;
 
 use common::{cli, PrivateTmux};
 use protectorate_hub::Hub;

@@ -1,10 +1,8 @@
 //! Run correlation, approval gates, harness pinning and token budgets
 //! against a real hub over HTTP, with sandboxed fake harnesses.
 #![cfg(target_os = "linux")]
-#[path = "support/capability.rs"]
-mod capability;
-#[path = "support/executable.rs"]
-mod executable;
+use crate::support::capability;
+use crate::support::executable;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use protectorate_inventory::{Node, SHARED};
 use protectorate_lease::{parse_resource, Chooser, Error};

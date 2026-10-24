@@ -1,7 +1,7 @@
 //! A real hub process runs a real terminal sleeve: its egress is confined
 //! to the proxy and audited, and its workspace checkpoints round-trip.
 #![cfg(target_os = "linux")]
-mod support;
+use crate::support;
 
 use protectorate_connect_client::Client;
 use serde_json::{json, Value};

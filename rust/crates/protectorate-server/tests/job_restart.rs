@@ -1,7 +1,7 @@
 //! A live node job survives a SIGKILL of the real hub process.
 
 #[cfg(target_os = "linux")]
-mod support;
+use crate::support;
 
 #[cfg(target_os = "linux")]
 mod linux {

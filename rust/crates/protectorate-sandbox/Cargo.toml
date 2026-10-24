@@ -2,6 +2,7 @@
 name = "protectorate-sandbox"
 version = "0.1.0"
 edition.workspace = true
+autotests = false
 description = "Validated Linux sandbox plans and an isolated re-exec launcher"
 
 [dependencies]
@@ -12,3 +13,21 @@ tempfile = "3"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+[lib]
+test = false
+doctest = false
+
+[[bin]]
+name = "protectorate-sandbox-helper"
+path = "src/bin/protectorate-sandbox-helper.rs"
+test = false
+
+[[bin]]
+name = "protectorate-sandbox-nested-probe"
+path = "src/bin/protectorate-sandbox-nested-probe.rs"
+test = false
+
+[[test]]
+name = "e2e"
+path = "tests/e2e.rs"

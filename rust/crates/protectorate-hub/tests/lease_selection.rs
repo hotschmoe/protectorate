@@ -1,8 +1,7 @@
 //! Lease admission against live node agents: GPU busy state, freshness and
 //! tier decide what is granted, and queued waiters are granted in priority
 //! order only once the resource is really free.
-#[path = "support/fleet.rs"]
-mod fleet;
+use crate::support::fleet;
 
 use fleet::{agent, call, gpu, poll, serve, Metrics};
 use protectorate_hub::Hub;

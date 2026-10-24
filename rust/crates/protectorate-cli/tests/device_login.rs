@@ -3,7 +3,7 @@
 //! `login` with no harness against a real hub: the pairing round trip, the
 //! private credential file it leaves behind, and what ordinary commands do
 //! with that credential when no token flag or token environment is set.
-mod common;
+use crate::common;
 
 use common::cli as owner_cli;
 use protectorate_hub::Hub;

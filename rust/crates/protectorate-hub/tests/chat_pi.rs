@@ -1,6 +1,5 @@
 #![cfg(target_os = "linux")]
-#[path = "support/executable.rs"]
-mod executable;
+use crate::support::executable;
 use protectorate_connect_client::Client;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use protectorate_sleeve_registry::{Harness, Mode, Record};

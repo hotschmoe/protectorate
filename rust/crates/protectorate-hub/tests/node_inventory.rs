@@ -1,9 +1,7 @@
 //! The node inventory over the owner API: add, update and re-tier survive a
 //! hub restart, and a care node is never handed to an agent's job or lease.
-#[path = "support/capability.rs"]
-mod capability;
-#[path = "support/fleet.rs"]
-mod fleet;
+use crate::support::capability;
+use crate::support::fleet;
 
 use fleet::{agent, call, poll, serve, Metrics};
 use protectorate_hub::Hub;

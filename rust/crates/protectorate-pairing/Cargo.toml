@@ -7,3 +7,7 @@ edition.workspace = true
 qrcodegen = "1.8"
 http = "1"
 percent-encoding = "2"
+
+[lib]
+test = false
+doctest = false

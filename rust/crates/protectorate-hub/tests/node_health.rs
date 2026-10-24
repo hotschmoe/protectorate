@@ -1,7 +1,6 @@
 //! Node health as the owner sees it: poll events, resource alerts, the
 //! down transition and the drain mark while a node is being removed.
-#[path = "support/fleet.rs"]
-mod fleet;
+use crate::support::fleet;
 
 use fleet::{agent, call, client, events_until, poll, serve, subscribe, Metrics};
 use protectorate_hub::Hub;

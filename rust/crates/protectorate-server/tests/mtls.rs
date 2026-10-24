@@ -1,7 +1,7 @@
 //! The hub and its nodes bind private addresses only and authenticate each
 //! other with certificates the hub CA issues when a node joins.
 #![cfg(target_os = "linux")]
-mod support;
+use crate::support;
 
 use protectorate_connect_client::{Client, NodeTls};
 use serde_json::{json, Value};

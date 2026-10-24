@@ -1,6 +1,5 @@
 #![cfg(target_os = "linux")]
-#[path = "support/executable.rs"]
-mod executable;
+use crate::support::executable;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use serde_json::{json, Value};
 use std::{

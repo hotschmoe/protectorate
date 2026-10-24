@@ -1,7 +1,7 @@
 //! A user systemd service restarts a killed hub and reattaches a running node job.
 
 #[cfg(target_os = "linux")]
-mod support;
+use crate::support;
 
 #[cfg(target_os = "linux")]
 mod linux {

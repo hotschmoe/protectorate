@@ -1,6 +1,6 @@
 #![cfg(unix)]
 #![cfg(target_os = "linux")]
-mod common;
+use crate::common;
 
 use common::PrivateTmux;
 use protectorate_hub::Hub;

@@ -12,3 +12,7 @@ ring = "0.17"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 time = { version = "0.3", default-features = false, features = ["std"] }
 webpki = { package = "rustls-webpki", version = "0.103", default-features = false, features = ["ring", "std"] }
+
+[lib]
+test = false
+doctest = false

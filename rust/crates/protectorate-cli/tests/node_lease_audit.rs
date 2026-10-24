@@ -2,7 +2,7 @@
 
 //! The owner's node, lease and audit commands against a real hub admitting
 //! leases on a live in-process node agent.
-mod common;
+use crate::common;
 
 use common::cli;
 use protectorate_hub::Hub;

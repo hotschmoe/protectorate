@@ -7,3 +7,6 @@ edition.workspace = true
 base64 = "0.22"
 serde_json = "1"
 
+[lib]
+test = false
+doctest = false

@@ -6,6 +6,7 @@ edition.workspace = true
 [[bin]]
 name = "protectorate-rs-termux"
 path = "src/main.rs"
+test = false
 
 [dependencies]
 protectorate-svcgen = { path = "../protectorate-svcgen" }

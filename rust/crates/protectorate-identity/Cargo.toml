@@ -12,3 +12,7 @@ getrandom = "0.2"
 sha2 = "0.10"
 subtle = "2"
 zeroize = "1"
+
+[lib]
+test = false
+doctest = false

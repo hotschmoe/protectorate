@@ -2,7 +2,7 @@
 
 //! `report` from a sleeve: each report carries a growing sequence, and a late
 //! or repeated one is dropped by the hub instead of replacing a newer result.
-mod common;
+use crate::common;
 
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
 use protectorate_sleeve_registry::{Harness, Mode, Record};

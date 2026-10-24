@@ -9,3 +9,7 @@ protectorate-connect-client = { path = "../protectorate-connect-client" }
 protectorate-wire = { path = "../protectorate-wire" }
 protectorate-xfer = { path = "../protectorate-xfer" }
 getrandom = "0.2"
+
+[lib]
+test = false
+doctest = false
