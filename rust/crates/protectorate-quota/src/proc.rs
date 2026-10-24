@@ -3,6 +3,9 @@
 use std::io;
 use std::process::{Child, Command, ExitStatus};
 
+#[cfg(windows)]
+use protectorate_sandbox::job::Job;
+
 pub struct ManagedChild {
     child: Child,
     #[cfg(windows)]
@@ -76,7 +79,7 @@ pub fn spawn(cmd: &mut Command) -> std::io::Result<ManagedChild> {
         let job = Job::new()?;
         cmd.creation_flags(CREATE_SUSPENDED | CREATE_NO_WINDOW);
         let mut child = cmd.spawn()?;
-        if let Err(error) = job.attach(&child) {
+        if let Err(error) = attach(&job, &child) {
             let _ = child.kill();
             let _ = child.wait();
             return Err(error);
@@ -120,79 +123,16 @@ pub fn kill_group(child: &mut ManagedChild) {
 }
 
 #[cfg(windows)]
-struct Job(usize);
+fn attach(job: &Job, child: &Child) -> std::io::Result<()> {
+    use std::os::windows::io::AsRawHandle;
 
-#[cfg(windows)]
-impl Job {
-    fn new() -> std::io::Result<Self> {
-        use std::{mem, ptr};
-        use windows_sys::Win32::System::JobObjects::{
-            CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
-            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        };
-
-        let handle = unsafe { CreateJobObjectW(ptr::null(), ptr::null()) };
-        if handle.is_null() {
-            return Err(std::io::Error::last_os_error());
-        }
-        let job = Self(handle as usize);
-        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let applied = unsafe {
-            SetInformationJobObject(
-                handle,
-                JobObjectExtendedLimitInformation,
-                (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
-                mem::size_of_val(&limits) as u32,
-            )
-        };
-        if applied == 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(job)
+    let process = child.as_raw_handle();
+    // SAFETY: the child is suspended and its handle is live for both calls.
+    unsafe {
+        job.assign(process)?;
+        protectorate_sandbox::job::resume_process(process)
+            .map_err(|error| std::io::Error::other(format!("resume quota process failed: {error}")))
     }
-
-    fn attach(&self, child: &Child) -> std::io::Result<()> {
-        use std::os::windows::io::AsRawHandle;
-        use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
-
-        let process = child.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
-        if unsafe { AssignProcessToJobObject(self.0 as _, process) } == 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        let result = unsafe { NtResumeProcess(process) };
-        if result < 0 {
-            return Err(std::io::Error::other(format!(
-                "resume quota process failed: NTSTATUS {result:#x}"
-            )));
-        }
-        Ok(())
-    }
-
-    fn terminate(&self) -> std::io::Result<()> {
-        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
-
-        if unsafe { TerminateJobObject(self.0 as _, 1) } == 0 {
-            Err(std::io::Error::last_os_error())
-        } else {
-            Ok(())
-        }
-    }
-}
-
-#[cfg(windows)]
-impl Drop for Job {
-    fn drop(&mut self) {
-        unsafe {
-            windows_sys::Win32::Foundation::CloseHandle(self.0 as _);
-        }
-    }
-}
-
-#[cfg(windows)]
-#[link(name = "ntdll")]
-unsafe extern "system" {
-    fn NtResumeProcess(process: windows_sys::Win32::Foundation::HANDLE) -> i32;
 }
 
 /// Finds an executable on PATH, the way `exec.LookPath` does.

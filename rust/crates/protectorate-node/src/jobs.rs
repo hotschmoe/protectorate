@@ -734,11 +734,8 @@ impl Jobs {
             command.as_std_mut().process_group(0);
         }
         #[cfg(windows)]
-        let spawned = crate::windows_process::ProcessTree::spawn(
-            &mut command,
-            spec.cpu_percent,
-            spec.memory_bytes,
-        );
+        let spawned =
+            crate::windows_process::spawn(&mut command, spec.cpu_percent, spec.memory_bytes);
         #[cfg(not(windows))]
         let spawned = spawn_unless_busy(&mut command).await;
         #[cfg(windows)]

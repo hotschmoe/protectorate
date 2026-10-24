@@ -1,9 +1,7 @@
 #![allow(dead_code)]
-use std::{
-    ffi::OsStr,
-    path::{Path, PathBuf},
-    process::Command,
-};
+#[cfg(unix)]
+use std::path::PathBuf;
+use std::{ffi::OsStr, path::Path, process::Command};
 
 /// Runs the CLI binary against `url` with `token`; Ok is stdout, Err is stderr.
 pub fn cli<S: AsRef<OsStr>>(
