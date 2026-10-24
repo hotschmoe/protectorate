@@ -22,8 +22,6 @@ APP_FLAGS ?=
 
 .PHONY: gen check-gen build test check app-check app-build-web apk app-build-linux app-build-windows version version-app check-version
 
-build test check: export CARGO_INCREMENTAL ?= 0
-
 MCP_CATALOG := rust/crates/protectorate-mcpbridge/tests/testdata/mcp_tools.json
 DESCRIPTOR := rust/crates/protectorate-wire/assets/protectorate.binpb
 RUST_API := rust/crates/protectorate-wire/src/v1.rs

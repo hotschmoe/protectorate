@@ -36,6 +36,26 @@ scenario's name is `<file>::<test>`, so `cargo test -p protectorate-hub
   catalog.
 - `protectorate-node-windows`: the Windows binary (Windows hosts only).
 
+## Build speed
+
+Incremental compilation stays on for local `make test` and `make check`; the
+hosted workflows set `CARGO_INCREMENTAL=0` themselves. Setting it locally
+costs about 2.4x the CPU to rebuild after a hub edit, and switching it
+between runs recompiles every workspace crate.
+
+The default `cc` linker on aarch64 Linux is GNU ld. Linking with lld cuts
+the CPU of a rebuild after a hub edit by about a third (26 s to 17 s for
+`cargo build --workspace --tests`). It is a per-user setting, so hosts
+without lld are unaffected; with lld installed, add to `~/.cargo/config.toml`
+(x86_64 Linux already links with rust-lld by default):
+
+```toml
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+```
+
+Changing rustflags rebuilds everything once.
+
 ## Host-only lanes
 
 These are `#[ignore]`d because they need host state; run them by name with
