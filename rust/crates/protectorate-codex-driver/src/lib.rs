@@ -558,7 +558,7 @@ impl Session {
         drop(s);
         let status = self.status();
         self.log
-            .append(Event::new(json!({"selection":status["settings"]})))
+            .append(Event::new(json!({"settings":status["settings"]})))
             .map_err(|e| e.to_string())?;
         Ok(status)
     }
@@ -716,7 +716,7 @@ impl Session {
                     s.effort.clear();
                     let settings = settings(&s);
                     drop(s);
-                    let _ = self.log.append(Event::new(json!({"selection":settings})));
+                    let _ = self.log.append(Event::new(json!({"settings":settings})));
                 }
             }
             "turn/started" => {

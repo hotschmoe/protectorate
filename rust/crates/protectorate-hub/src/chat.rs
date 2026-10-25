@@ -939,7 +939,9 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                         .join("chat.jsonl");
                     for event in protectorate_chatlog::read_all(path).map_err(log_error)? {
                         if event.seq > after {
-                            sender.send(&chat_event(&event)?).await?;
+                            if let Some(message) = decodable(&name, &event) {
+                                sender.send(&message).await?;
+                            }
                         }
                     }
                     return Ok(Default::default());
@@ -952,10 +954,13 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     cancel_sender.cancelled().await;
                     cancel_flag.store(true, Ordering::Release);
                 });
+                let watched = name.clone();
                 let result = tokio::task::spawn_blocking(move || {
                     let handle = tokio::runtime::Handle::current();
                     log.watch(after, &cancelled, |event| {
-                        let message = chat_event(event).map_err(|e| e.to_string())?;
+                        let Some(message) = decodable(&watched, event) else {
+                            return Ok(());
+                        };
                         handle
                             .block_on(sender.send(&message))
                             .map_err(|e| e.to_string())
@@ -2665,6 +2670,19 @@ fn wait_timeout(value: Option<&prost_types::Duration>) -> Result<Duration> {
         return Err(RpcError::new(Code::InvalidArgument, "invalid timeout"));
     }
     Ok(timeout)
+}
+/// A logged event the API cannot represent is skipped, not allowed to end the
+/// stream: watchers resume after the last event they received and would stop
+/// at it forever.
+fn decodable(name: &str, event: &Event) -> Option<v1::ChatEvent> {
+    chat_event(event)
+        .map_err(|error| {
+            eprintln!(
+                "chat {name}: skipping event {}: {}",
+                event.seq, error.message
+            )
+        })
+        .ok()
 }
 fn chat_event(event: &Event) -> Result<v1::ChatEvent> {
     let time = Utc
