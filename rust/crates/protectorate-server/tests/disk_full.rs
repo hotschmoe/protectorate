@@ -1,0 +1,618 @@
+//! A real hub whose home sits on a tiny tmpfs, in a user and mount namespace
+//! the test owns, so the disk really fills (ENOSPC) without any privilege.
+//! Writes must fail with a clear error and leave memory and disk in step,
+//! reads must keep working, and the hub must take writes again once space
+//! returns, without a restart.
+#![cfg(target_os = "linux")]
+use crate::support;
+
+use protectorate_connect_client::Client;
+use serde_json::{json, Value};
+use std::{
+    fs,
+    io::{BufRead, BufReader, Write},
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+    time::{Duration, Instant},
+};
+use support::{binary, bound, until, Process, OWNER};
+
+const MSG: &str = "/protectorate.v1.MessageService/";
+const NOTE: &str = "/protectorate.v1.BacklogService/";
+const TOKEN: &str = "/protectorate.v1.TokenService/";
+const NODE: &str = "/protectorate.v1.NodeService/";
+const SLEEVE: &str = "/protectorate.v1.SleeveService/";
+const JOB: &str = "/protectorate.v1.JobService/";
+const LEASE: &str = "/protectorate.v1.LeaseService/";
+const AUDIT: &str = "/protectorate.v1.AuditService/";
+const HUB: &str = "/protectorate.v1.HubService/GetStatus";
+
+/// Keeps a private mount namespace alive with a size-limited tmpfs mounted at
+/// `mount`; hub processes join it with nsenter.
+struct SmallDisk {
+    holder: Process,
+    mount: PathBuf,
+}
+
+impl SmallDisk {
+    fn new(mount: &Path, size: &str) -> Self {
+        fs::create_dir_all(mount).unwrap();
+        let mut child = Command::new("unshare")
+            .args(["--user", "--map-root-user", "--mount", "sh", "-c"])
+            .arg(r#"mount -t tmpfs -o "size=$2,mode=0755" tmpfs "$1" && echo mounted && exec sleep 3600"#)
+            .args(["sh"])
+            .arg(mount)
+            .arg(size)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("unshare is required for the disk-full scenarios");
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        assert_eq!(
+            line.trim(),
+            "mounted",
+            "a size-limited tmpfs needs unprivileged user namespaces"
+        );
+        Self {
+            holder: Process(child),
+            mount: mount.to_owned(),
+        }
+    }
+
+    fn pid(&self) -> u32 {
+        self.holder.0.id()
+    }
+
+    /// `path` as seen from outside, inside the namespace's mount tree.
+    fn outside(&self, path: &Path) -> PathBuf {
+        PathBuf::from(format!("/proc/{}/root", self.pid())).join(path.strip_prefix("/").unwrap())
+    }
+
+    fn command(&self, program: impl AsRef<std::ffi::OsStr>) -> Command {
+        let mut command = Command::new("nsenter");
+        command
+            .arg("-t")
+            .arg(self.pid().to_string())
+            .args(["-U", "-m", "--preserve-credentials", "--"])
+            .arg(program);
+        command
+    }
+
+    fn free_bytes(&self) -> u64 {
+        let stat = nix_statvfs(&self.outside(&self.mount));
+        stat.0 * stat.1
+    }
+
+    /// Writes a file until the filesystem refuses; returns the filler's path.
+    fn fill(&self) -> PathBuf {
+        let filler = self.outside(&self.mount.join("filler"));
+        let mut file = fs::File::create(&filler).unwrap();
+        let block = vec![0xa5u8; 4096];
+        while file.write_all(&block).is_ok() {}
+        // Whatever is left is under a page, or nothing.
+        assert!(self.free_bytes() < 4096, "the disk did not fill");
+        filler
+    }
+}
+
+/// (available blocks, block size).
+fn nix_statvfs(path: &Path) -> (u64, u64) {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    assert_eq!(unsafe { libc::statvfs(c.as_ptr(), &mut stat) }, 0);
+    (stat.f_bavail as u64, stat.f_frsize as u64)
+}
+
+struct DiskHub {
+    process: Option<Process>,
+    client: Client,
+    log: PathBuf,
+}
+
+fn start_hub(disk: &SmallDisk, root: &Path, run: u32) -> DiskHub {
+    let user_home = root.join("user");
+    fs::create_dir_all(&user_home).unwrap();
+    let token = root.join("owner-token");
+    fs::write(&token, OWNER).unwrap();
+    fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
+    let log = root.join(format!("hub-{run}.log"));
+    let tmux = format!(
+        "p-full-{}-{}",
+        std::process::id(),
+        root.file_name().unwrap().to_string_lossy()
+    );
+    let mut command = disk.command(binary());
+    command
+        .args(["serve", "--home"])
+        .arg(&disk.mount)
+        .arg("--owner-token-file")
+        .arg(&token)
+        .args(["--listen", "127.0.0.1:0", "--tls-listen", "127.0.0.1:0"])
+        .args(["--node-interval", "1s"])
+        .args(["--release-api-url", "http://127.0.0.1:1"])
+        .args(["--tmux-socket", &tmux])
+        .env("HOME", &user_home)
+        .env("PROTECTORATE_HUB_GUARD_CHILD", "1")
+        .env_remove("PROTECTORATE_HOME")
+        .env_remove("PROTECTORATE_TOKEN")
+        .env_remove("PROTECTORATE_TOKEN_FILE")
+        .env_remove("PROTECTORATE_HUB")
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(fs::File::create(&log).unwrap()));
+    let mut process = Process(command.spawn().unwrap());
+    until("hub start on the small disk", &log, || {
+        assert!(
+            process.0.try_wait().unwrap().is_none(),
+            "hub exited: {}",
+            fs::read_to_string(&log).unwrap_or_default()
+        );
+        bound(&log, "serving TLS").is_some()
+    });
+    let url = format!("http://{}", bound(&log, "serving").unwrap());
+    // Short timeouts: a write that hangs on a full disk fails the test.
+    let client = Client::new(&url, OWNER, Duration::from_secs(20)).unwrap();
+    until("hub status", &log, || client.call(HUB, &json!({})).is_ok());
+    DiskHub {
+        process: Some(process),
+        client,
+        log,
+    }
+}
+
+impl DiskHub {
+    fn call(&self, path: &str, body: Value) -> Result<Value, String> {
+        let started = Instant::now();
+        let result = self.client.call(path, &body).map_err(|e| e.to_string());
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "{path} hung for {:?}",
+            started.elapsed()
+        );
+        result
+    }
+
+    fn ok(&self, path: &str, body: Value) -> Value {
+        self.call(path, body)
+            .unwrap_or_else(|e| panic!("{path}: {e}\n{}", self.log_text()))
+    }
+
+    fn log_text(&self) -> String {
+        fs::read_to_string(&self.log).unwrap_or_default()
+    }
+
+    fn alive(&mut self) {
+        assert!(
+            self.process
+                .as_mut()
+                .unwrap()
+                .0
+                .try_wait()
+                .unwrap()
+                .is_none(),
+            "hub died: {}",
+            self.log_text()
+        );
+        self.ok(HUB, json!({}));
+        assert!(
+            !self.log_text().contains("panicked"),
+            "hub panicked: {}",
+            self.log_text()
+        );
+    }
+}
+
+#[derive(Default)]
+struct Acked {
+    /// The first message, note, token and node get changed in place later;
+    /// these are what a failed or acknowledged change leaves them as.
+    first_acked: bool,
+    first_revoked: bool,
+    first_care: bool,
+    mails: Vec<(String, String)>,
+    notes: Vec<(String, String)>,
+    tokens: Vec<String>,
+    nodes: Vec<String>,
+}
+
+fn text(value: &Value) -> &str {
+    value.as_str().unwrap_or("")
+}
+
+/// One mutation of each kind with a body that crosses a page boundary.
+/// Returns the failures' messages; successes join `acked`.
+fn mutate_all(hub: &DiskHub, acked: &mut Acked, tag: &str, size: usize) -> Vec<String> {
+    let mut errors = Vec::new();
+    let body = format!("{tag} {}", "m".repeat(size));
+    match hub.call(
+        &format!("{MSG}Send"),
+        json!({"to":"owner","body":body,"requestId":format!("full-{tag}-mail")}),
+    ) {
+        Ok(sent) => acked.mails.push((
+            text(&sent["message"]["id"]).to_owned(),
+            text(&sent["message"]["threadId"]).to_owned(),
+        )),
+        Err(e) => errors.push(format!("send: {e}")),
+    }
+    match hub.call(
+        &format!("{NOTE}CreateNote"),
+        json!({"title":format!("note {tag}"),"body":"n".repeat(size)}),
+    ) {
+        Ok(made) => acked
+            .notes
+            .push((text(&made["note"]["id"]).to_owned(), format!("note {tag}"))),
+        Err(e) => errors.push(format!("create note: {e}")),
+    }
+    match hub.call(
+        &format!("{TOKEN}CreateToken"),
+        json!({"name":format!("token {tag}"),"scopes":["read"]}),
+    ) {
+        Ok(made) => acked.tokens.push(text(&made["token"]["id"]).to_owned()),
+        Err(e) => errors.push(format!("create token: {e}")),
+    }
+    let name = format!("node-{tag}");
+    match hub.call(
+        &format!("{NODE}AddNode"),
+        json!({"node":{"name":name,"address":"127.0.0.1:9","tier":"shared"}}),
+    ) {
+        Ok(_) => acked.nodes.push(name),
+        Err(e) => errors.push(format!("add node: {e}")),
+    }
+    errors
+}
+
+/// Changes the first message, note, token and node in place; a change the
+/// hub refuses must leave the old value, one it accepts must stick.
+fn change_first(hub: &DiskHub, acked: &mut Acked, tag: &str) -> usize {
+    let mut failed = 0;
+    let mut outcome = |result: Result<Value, String>| match result {
+        Ok(_) => true,
+        Err(e) => {
+            assert!(e.contains("space"), "unclear error for a full disk: {e}");
+            failed += 1;
+            false
+        }
+    };
+    let (id, _) = acked.mails[0].clone();
+    if outcome(hub.call(&format!("{MSG}Ack"), json!({"id":id}))) {
+        acked.first_acked = true;
+    }
+    let (note, _) = acked.notes[0].clone();
+    let title = format!("changed {tag}");
+    if outcome(hub.call(
+        &format!("{NOTE}UpdateNote"),
+        json!({"id":note,"title":title}),
+    )) {
+        acked.notes[0].1 = title;
+    }
+    let token = acked.tokens[0].clone();
+    if outcome(hub.call(&format!("{TOKEN}RevokeToken"), json!({"id":token}))) {
+        acked.first_revoked = true;
+    }
+    let node = acked.nodes[0].clone();
+    if outcome(hub.call(
+        &format!("{NODE}SetNodeTier"),
+        json!({"name":node,"tier":"care"}),
+    )) {
+        acked.first_care = true;
+    }
+    failed
+}
+
+/// Spawns a sleeve, submits a job and takes a lease on the joined node.
+/// Each either fails with a clear error and leaves no trace, or succeeds.
+fn heavy(hub: &DiskHub, work: &Path, tag: &str, must_succeed: bool) {
+    let local = "disk-peer";
+    let sleeve = format!("sl-{tag}");
+    let dir = work.join(&sleeve);
+    fs::create_dir_all(&dir).unwrap();
+    let spawned = hub.call(
+        &format!("{SLEEVE}SpawnSleeve"),
+        json!({"name":sleeve,"harness":"HARNESS_SHELL","mode":"SLEEVE_MODE_TERMINAL",
+            "workspace":dir,"args":["/usr/bin/sh","-c","sleep 1"]}),
+    );
+    let request = format!("full-job-{tag}");
+    let job = hub.call(
+        &format!("{JOB}SubmitJob"),
+        json!({"requestId":request,"target":{"node":local},
+            "command":["/bin/echo","x"],"timeout":"60s"}),
+    );
+    let lease = hub.call(
+        &format!("{LEASE}AcquireLease"),
+        json!({"resource":local,"holder":tag,"ttl":"3600s"}),
+    );
+    if must_succeed {
+        spawned.as_ref().expect("spawn after recovery");
+        job.as_ref().expect("job after recovery");
+        lease.as_ref().expect("lease after recovery");
+    }
+    for (what, result) in [("spawn", &spawned), ("job", &job), ("lease", &lease)] {
+        if let Err(e) = result {
+            assert!(
+                e.contains("space"),
+                "unclear {what} error for a full disk: {e}"
+            );
+        }
+    }
+    let got = hub.call(&format!("{SLEEVE}GetSleeve"), json!({"name":sleeve}));
+    assert_eq!(
+        got.is_ok(),
+        spawned.is_ok(),
+        "sleeve record vs spawn result: {got:?}"
+    );
+    if let Ok(job) = &job {
+        hub.ok(&format!("{JOB}GetJob"), json!({"id":job["id"]}));
+    } else {
+        hub.ok(&format!("{JOB}ListJobs"), json!({"limit":1000}));
+    }
+    let leases = hub.ok(&format!("{LEASE}ListLeases"), json!({}));
+    let held = leases["leases"]
+        .as_array()
+        .is_some_and(|l| l.iter().any(|l| text(&l["holder"]) == tag));
+    assert_eq!(held, lease.is_ok(), "lease table vs acquire result");
+}
+
+/// Reads through the API: exactly the acknowledged state is visible.
+fn check_reads(hub: &DiskHub, acked: &Acked, context: &str) {
+    for (id, thread) in &acked.mails {
+        let thread = hub.ok(&format!("{MSG}Thread"), json!({"threadId":thread}));
+        assert!(
+            thread["messages"]
+                .as_array()
+                .is_some_and(|m| m.iter().any(|m| text(&m["id"]) == id)),
+            "{context}: message {id} missing: {thread}"
+        );
+    }
+    if let Some((id, thread)) = acked.mails.first() {
+        let thread = hub.ok(&format!("{MSG}Thread"), json!({"threadId":thread}));
+        let message = thread["messages"]
+            .as_array()
+            .and_then(|m| m.iter().find(|m| text(&m["id"]) == id))
+            .unwrap();
+        let is_acked = message["deliveries"]
+            .as_array()
+            .is_some_and(|d| d.iter().any(|d| !d["ackedAt"].is_null()));
+        assert_eq!(is_acked, acked.first_acked, "{context}: ack state of {id}");
+    }
+    let listed = hub.ok(&format!("{NOTE}ListNotes"), json!({}));
+    let notes = listed["notes"].as_array().cloned().unwrap_or_default();
+    for (id, title) in &acked.notes {
+        assert!(
+            notes
+                .iter()
+                .any(|n| text(&n["id"]) == id && text(&n["title"]) == title),
+            "{context}: note {id} missing"
+        );
+    }
+    assert_eq!(
+        notes.len(),
+        acked.notes.len(),
+        "{context}: a failed create is visible in memory: {listed}"
+    );
+    let tokens = hub.ok(&format!("{TOKEN}ListTokens"), json!({}));
+    let tokens = tokens["tokens"].as_array().cloned().unwrap_or_default();
+    for id in &acked.tokens {
+        assert!(
+            tokens.iter().any(|t| text(&t["id"]) == id),
+            "{context}: token {id} missing"
+        );
+    }
+    if let Some(id) = acked.tokens.first() {
+        let token = tokens.iter().find(|t| text(&t["id"]) == id).unwrap();
+        assert_eq!(
+            !token["revokedAt"].is_null(),
+            acked.first_revoked,
+            "{context}: revocation state of {id}"
+        );
+    }
+    assert_eq!(
+        tokens
+            .iter()
+            .filter(|t| text(&t["name"]).starts_with("token "))
+            .count(),
+        acked.tokens.len(),
+        "{context}: a failed token is visible in memory"
+    );
+    for (i, name) in acked.nodes.iter().enumerate() {
+        let node = hub.ok(&format!("{NODE}GetNode"), json!({"name":name}));
+        if i == 0 {
+            let want = if acked.first_care { "care" } else { "shared" };
+            assert_eq!(node["node"]["tier"], want, "{context}: tier of {name}");
+        }
+    }
+    let nodes = hub.ok(&format!("{NODE}ListNodes"), json!({}));
+    let added = nodes["nodes"].as_array().map_or(0, |all| {
+        all.iter()
+            .filter(|n| n["node"]["local"] != true && n["node"]["name"] != "disk-peer")
+            .count()
+    });
+    assert_eq!(
+        added,
+        acked.nodes.len(),
+        "{context}: a failed node add is visible in memory"
+    );
+}
+
+/// Every durable file parses and no store file is truncated or torn.
+fn check_disk(disk: &SmallDisk, context: &str) {
+    let home = disk.outside(&disk.mount);
+    for name in [
+        "identity.json",
+        "nodes.json",
+        "sleeves.json",
+        "leases.json",
+        "directory.json",
+        "notes.json",
+    ] {
+        if let Ok(bytes) = fs::read(home.join(name)) {
+            serde_json::from_slice::<Value>(&bytes)
+                .unwrap_or_else(|e| panic!("{context}: {name} is corrupt: {e}"));
+        }
+    }
+    let mailbox = fs::read(home.join("mailbox.jsonl")).unwrap_or_default();
+    assert!(
+        mailbox.is_empty() || mailbox.ends_with(b"\n"),
+        "{context}: mailbox.jsonl ends in a torn line"
+    );
+    for (n, line) in mailbox.split(|b| *b == b'\n').enumerate() {
+        if !line.is_empty() {
+            serde_json::from_slice::<Value>(line)
+                .unwrap_or_else(|e| panic!("{context}: mailbox.jsonl line {}: {e}", n + 1));
+        }
+    }
+    // The audit log may end in one torn line (the next write cuts it); a
+    // torn line with entries after it is a break.
+    for entry in fs::read_dir(home.join("audit"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let path = entry.path();
+        if path.extension().is_some_and(|e| e == "jsonl") {
+            let bytes = fs::read(&path).unwrap();
+            let complete = bytes
+                .rsplit(|b| *b == b'\n')
+                .nth(1)
+                .map_or(&[][..], |_| &bytes[..]);
+            let body = complete.rsplitn(2, |b| *b == b'\n').nth(1).unwrap_or(&[]);
+            for line in body.split(|b| *b == b'\n').filter(|l| !l.is_empty()) {
+                serde_json::from_slice::<Value>(line).unwrap_or_else(|e| {
+                    panic!(
+                        "{context}: {} has a torn line in the middle: {e}",
+                        path.display()
+                    )
+                });
+            }
+        }
+    }
+}
+
+#[test]
+fn full_disk_fails_writes_cleanly_keeps_reads_and_recovers_without_restart() {
+    let root = tempfile::tempdir().unwrap();
+    let disk = SmallDisk::new(&root.path().join("small"), "3m");
+    let mut hub = start_hub(&disk, root.path(), 0);
+    let mut acked = Acked::default();
+
+    let errors = mutate_all(&hub, &mut acked, "base", 300);
+    assert!(errors.is_empty(), "{errors:?}");
+    let baseline = disk.outside(&disk.mount).join("mailbox.jsonl");
+    let baseline_bytes = fs::read(&baseline).unwrap();
+    check_reads(&hub, &acked, "baseline");
+
+    let work = root.path().join("work");
+    fs::create_dir_all(&work).unwrap();
+    let node_home = root.path().join("node");
+    let invite = hub.ok(
+        &format!("{NODE}InviteNode"),
+        json!({"name":"disk-peer","tier":"shared"}),
+    );
+    let ca = root.path().join("ca.pem");
+    fs::copy(disk.outside(&disk.mount).join("ca/ca.pem"), &ca).unwrap();
+    let joined = Command::new(binary())
+        .args(["node", "join", "--hub"])
+        .arg(text(&invite["hubUrl"]))
+        .args(["--code", text(&invite["code"]), "--ca-cert"])
+        .arg(&ca)
+        .args([
+            "--name",
+            "disk-peer",
+            "--listen",
+            &support::free_port(),
+            "--home",
+        ])
+        .arg(&node_home)
+        .env("HOME", root.path().join("user"))
+        .output()
+        .unwrap();
+    assert!(
+        joined.status.success(),
+        "node join: {}",
+        String::from_utf8_lossy(&joined.stderr)
+    );
+    let node_log = root.path().join("node.stderr");
+    let _node = support::serve_node(&node_home, &root.path().join("user"), &node_log);
+    until("node poll", &node_log, || {
+        hub.call(&format!("{NODE}GetNode"), json!({"name":"disk-peer"}))
+            .is_ok_and(|n| n["freshness"] == "NODE_FRESHNESS_FRESH")
+    });
+    let filler = disk.fill();
+    let mut failures = 0;
+    for round in 0..40 {
+        // Odd sizes so appends straddle page boundaries.
+        let size = 700 + (round * 331) % 5000;
+        if round % 8 == 0 {
+            heavy(&hub, &work, &format!("full{round}"), false);
+        }
+        failures += change_first(&hub, &mut acked, &format!("full{round}"));
+        for error in mutate_all(&hub, &mut acked, &format!("full{round}"), size) {
+            failures += 1;
+            assert!(
+                error.contains("space") || error.contains("ENOSPC") || error.contains("28"),
+                "unclear error for a full disk: {error}"
+            );
+        }
+    }
+    assert!(
+        failures > 100,
+        "writes did not fail on a full disk: {failures}"
+    );
+    hub.alive();
+    check_reads(&hub, &acked, "full");
+    check_disk(&disk, "while full");
+    assert!(
+        fs::read(&baseline).unwrap().starts_with(&baseline_bytes),
+        "old mailbox content was damaged"
+    );
+
+    // A backup into the full disk fails cleanly and leaves no archive.
+    let backups = disk.mount.join("backups");
+    fs::create_dir_all(disk.outside(&backups)).unwrap();
+    let output = disk
+        .command(binary())
+        .args(["hub", "backup", "--home"])
+        .arg(&disk.mount)
+        .arg("--to")
+        .arg(&backups)
+        .env_remove("PROTECTORATE_HOME")
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "a backup into a full disk succeeded"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("space"),
+        "unclear backup error: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let left = fs::read_dir(disk.outside(&backups)).unwrap().count();
+    assert_eq!(left, 0, "a failed backup left files behind");
+
+    // Space returns: the hub takes writes again on the same process.
+    fs::File::create(&filler).unwrap();
+    assert!(disk.free_bytes() > 1 << 20);
+    let errors = mutate_all(&hub, &mut acked, "after", 300);
+    assert!(errors.is_empty(), "the hub did not recover: {errors:?}");
+    heavy(&hub, &work, "after", true);
+    assert_eq!(change_first(&hub, &mut acked, "after"), 0);
+    assert!(acked.first_acked && acked.first_revoked && acked.first_care);
+    hub.alive();
+    check_reads(&hub, &acked, "recovered");
+    check_disk(&disk, "after recovery");
+    let audit = hub.ok(&format!("{AUDIT}VerifyAudit"), json!({}));
+    assert_eq!(audit["ok"], true, "{audit}");
+
+    // And a kill and restart on the same disk loses nothing.
+    hub.process = None;
+    let mut hub = start_hub(&disk, root.path(), 1);
+    check_reads(&hub, &acked, "restarted");
+    check_disk(&disk, "after restart");
+    let audit = hub.ok(&format!("{AUDIT}VerifyAudit"), json!({}));
+    assert_eq!(audit["ok"], true, "{audit}");
+    hub.alive();
+}

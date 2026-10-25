@@ -903,9 +903,18 @@ impl Store {
             Some(f) => f,
             None => return Err(Error::Closed),
         };
+        let start = file
+            .metadata()
+            .map_err(|e| Error::io("stat mailbox", e))?
+            .len();
+        // A failed append may have written part of the line; cut it off so
+        // the next record does not join it.
         file.write_all(&line)
-            .map_err(|e| Error::io("write mailbox", e))?;
-        file.sync_all().map_err(|e| Error::io("sync mailbox", e))?;
+            .map_err(|e| Error::io("write mailbox", e))
+            .and_then(|()| file.sync_all().map_err(|e| Error::io("sync mailbox", e)))
+            .inspect_err(|_| {
+                let _ = file.set_len(start);
+            })?;
         let mut s = self.lock();
         apply(&mut s, rec).map_err(|message| Error::Corrupt {
             path: s.path.display().to_string(),
