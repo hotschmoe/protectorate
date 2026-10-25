@@ -44,7 +44,7 @@ fn install_commands(
     );
     let sh = |script: &str| {
         let url = super::distribution::shell_word(&format!("{base}/{script}"));
-        format!("{sh_pin} && script=$(curl -fsSL --cacert \"$ca\" {url}) && [ -n \"$script\" ] && printf '%s\\n' \"$script\" | PROTECTORATE_CA_CERT=\"$ca\" PROTECTORATE_JOIN_CODE={sh_code} sh -s -- --name {sh_name} || echo 'protectorate node install failed' >&2")
+        format!("{sh_pin} && script=$(curl -fsSL --cacert \"$ca\" {url}) && [ -n \"$script\" ] && printf '%s\\n' \"$script\" | PROTECTORATE_CA_CERT=\"$ca\" PROTECTORATE_JOIN_CODE={sh_code} sh -s -- --name {sh_name} || {{ echo 'protectorate node install failed' >&2; false; }}")
     };
     let ps_code = super::distribution::powershell_word(code);
     let ps_name = super::distribution::powershell_word(name);
