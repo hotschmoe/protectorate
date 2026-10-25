@@ -16,7 +16,7 @@ use std::{
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
-use support::{binary, bound, until, Process, OWNER};
+use support::{binary, bound, die_with_parent, until, Process, OWNER};
 
 const MSG: &str = "/protectorate.v1.MessageService/";
 const NOTE: &str = "/protectorate.v1.BacklogService/";
@@ -38,8 +38,13 @@ struct SmallDisk {
 impl SmallDisk {
     fn new(mount: &Path, size: &str) -> Self {
         fs::create_dir_all(mount).unwrap();
-        let mut child = Command::new("unshare")
-            .args(["--user", "--map-root-user", "--mount", "sh", "-c"])
+        let mut child = die_with_parent(Command::new("unshare").args([
+            "--user",
+            "--map-root-user",
+            "--mount",
+            "sh",
+            "-c",
+        ]))
             .arg(r#"mount -t tmpfs -o "size=$2,mode=0755" tmpfs "$1" && echo mounted && exec sleep 3600"#)
             .args(["sh"])
             .arg(mount)
@@ -145,7 +150,7 @@ fn start_hub(disk: &SmallDisk, root: &Path, run: u32) -> DiskHub {
         .env_remove("PROTECTORATE_HUB")
         .stdout(Stdio::null())
         .stderr(Stdio::from(fs::File::create(&log).unwrap()));
-    let mut process = Process(command.spawn().unwrap());
+    let mut process = Process(die_with_parent(&mut command).spawn().unwrap());
     until("hub start on the small disk", &log, || {
         assert!(
             process.0.try_wait().unwrap().is_none(),

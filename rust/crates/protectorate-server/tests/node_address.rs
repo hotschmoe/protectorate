@@ -137,7 +137,7 @@ mod linux {
 
     fn spawn_in(ns: u32, args: &[&str], home: &Path, log: &Path) -> Process {
         Process(
-            protectorate(Some(ns), args, home)
+            support::die_with_parent(&mut protectorate(Some(ns), args, home))
                 .stdout(Stdio::null())
                 .stderr(Stdio::from(fs::File::create(log).unwrap()))
                 .spawn()
@@ -229,8 +229,7 @@ mod linux {
         // The node namespace is held by a sleeping process; killing the
         // process (or the PID namespace around everything) removes it.
         let holder = Process(
-            Command::new("unshare")
-                .args(["--net", "sleep", "3600"])
+            support::die_with_parent(Command::new("unshare").args(["--net", "sleep", "3600"]))
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .spawn()
