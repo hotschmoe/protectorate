@@ -16,9 +16,6 @@ mod unix {
         time::{Duration, Instant},
     };
 
-    #[cfg(target_os = "linux")]
-    use std::time::{SystemTime, UNIX_EPOCH};
-
     /// A process group of its own; dropping it stops the whole tree, so a
     /// guardian's hub child or `flutter`'s tester cannot outlive the test.
     /// If the test binary is killed before the drop runs, the kernel sends
@@ -190,27 +187,21 @@ mod unix {
             app.join(".dart_tool/package_config.json").is_file(),
             "Flutter package config is required: run make app-check first"
         );
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "protectorate-flutter-invite-{}-{stamp}",
-            std::process::id()
-        ));
-        fs::create_dir(&root).unwrap();
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
-        eprintln!("retained node invitation fixture: {}", root.display());
+        let root = tempfile::Builder::new()
+            .prefix("protectorate-flutter-invite-")
+            .tempdir()
+            .unwrap();
+        let root = root.path();
         let token = "rust-flutter-node-invite-e2e-token";
         let hub = Hub::start(
-            &root,
+            root,
             token,
             &["--tls-listen", "127.0.0.1:0", "--node-interval", "1s"],
         );
         let bin = env!("CARGO_BIN_EXE_protectorate-rs");
         scenario(
             &hub,
-            &root,
+            root,
             "node_invite_ui_e2e",
             Command::new("flutter")
                 .args(["test", "--no-pub", "--reporter", "expanded"])
