@@ -122,14 +122,13 @@ fn mutate(ctx: &Ctx, ledger: &Mutex<Ledger>, tag: &str, n: u64, op: u64) {
             let request = format!("crash-mail-{tag}");
             let sent = call(
                 &format!("{MSG}Send"),
-                json!({"to":"orchestrator","body":format!("mail body {tag}"),"requestId":request,
+                json!({"to":"owner","body":format!("mail body {tag}"),"requestId":request,
                     "kind":"MESSAGE_KIND_REQUEST"}),
             );
             if let Ok(sent) = sent {
                 let id = sent["message"]["id"].as_str().unwrap().to_owned();
                 let thread = sent["message"]["threadId"].as_str().unwrap().to_owned();
-                let acked =
-                    call(&format!("{MSG}Ack"), json!({"id":id,"as":"orchestrator"})).is_ok();
+                let acked = call(&format!("{MSG}Ack"), json!({"id":id})).is_ok();
                 ledger
                     .lock()
                     .unwrap()
@@ -322,7 +321,7 @@ fn verify(hub: &Hub, ledger: &mut Ledger, context: &str) {
         }
         let again = call(
             &format!("{MSG}Send"),
-            json!({"to":"orchestrator","body":m["body"],"requestId":request,
+            json!({"to":"owner","body":m["body"],"requestId":request,
                 "kind":"MESSAGE_KIND_REQUEST"}),
         );
         assert!(
@@ -515,6 +514,16 @@ fn acknowledged_mutations_survive_hub_sigkill_at_random_points() {
     fs::create_dir_all(&work).unwrap();
 
     let ledger = Mutex::new(Ledger::default());
+    // Spawning is slow enough that few land inside a kill window.
+    let seeding = Ctx {
+        client: hub.client.clone(),
+        tls: hub.tls.clone(),
+        ca: hub.ca(),
+        work: work.clone(),
+    };
+    for n in 0..3 {
+        mutate(&seeding, &ledger, &format!("seed-n{n}"), n, 9);
+    }
     for iteration in 0..iterations {
         let delay = Duration::from_millis(150 + rng.below(700));
         eprintln!("crash_consistency: iteration {iteration}: kill after {delay:?}");
@@ -565,8 +574,9 @@ fn acknowledged_mutations_survive_hub_sigkill_at_random_points() {
     }
     let ledger = ledger.lock().unwrap();
     eprintln!(
-        "crash_consistency: {} mails, {} notes, {} tokens, {} devices, {} nodes, {} jobs, {} sleeves, {} leases acknowledged",
+        "crash_consistency: {} mails ({} acked), {} notes, {} tokens, {} devices, {} nodes, {} jobs, {} sleeves, {} leases acknowledged",
         ledger.mails.len(),
+        ledger.mails.iter().filter(|m| m.3).count(),
         ledger.notes.len(),
         ledger.tokens.len(),
         ledger.devices.len(),
