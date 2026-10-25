@@ -77,6 +77,7 @@ pub struct Jobs {
     local_name: String,
     dialer: Dialer,
     state: Mutex<BTreeMap<String, Stored>>,
+    writer: Mutex<()>,
     canceled_request_ids: Mutex<BTreeMap<String, i64>>,
     changed: Notify,
     admission: Option<Arc<RwLock<()>>>,
@@ -512,6 +513,7 @@ impl Jobs {
             local_name,
             dialer: Dialer::default(),
             state: Mutex::new(state),
+            writer: Mutex::new(()),
             canceled_request_ids: Mutex::new(canceled_request_ids),
             changed: Notify::new(),
             admission: None,
@@ -603,14 +605,18 @@ impl Jobs {
     }
 
     fn update(&self, id: &str, f: impl FnOnce(&mut Stored)) -> Result<v1::Job> {
-        let mut state = self.state.lock().unwrap();
-        let stored = state
-            .get_mut(id)
+        let _writer = self.writer.lock().unwrap();
+        let mut stored = self
+            .state
+            .lock()
+            .unwrap()
+            .get(id)
+            .cloned()
             .ok_or_else(|| RpcError::new(Code::NotFound, "job not found"))?;
-        f(stored);
-        persist(&self.root, id, stored)?;
+        f(&mut stored);
+        persist(&self.root, id, &stored)?;
         let job = stored.job.clone();
-        drop(state);
+        self.state.lock().unwrap().insert(id.to_owned(), stored);
         self.changed.notify_waiters();
         Ok(job)
     }
@@ -911,7 +917,8 @@ impl Jobs {
         if !key.is_empty() {
             validate_request_id(&key)?;
         }
-        let mut state = self.state.lock().unwrap();
+        let writer = self.writer.lock().unwrap();
+        let state = self.state.lock().unwrap();
         if !key.is_empty() {
             if self
                 .canceled_request_ids
@@ -1013,6 +1020,7 @@ impl Jobs {
             request_id: key,
             cancel_requested: false,
         };
+        drop(state);
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -1024,8 +1032,8 @@ impl Jobs {
             let _ = fs::remove_file(self.root.join(format!("{id}.log")));
             return Err(error);
         }
-        state.insert(id.clone(), stored);
-        drop(state);
+        self.state.lock().unwrap().insert(id.clone(), stored);
+        drop(writer);
         self.changed.notify_waiters();
         let mut run_env = BTreeMap::new();
         if let Some(gpu) = placement.gpu {
@@ -1494,11 +1502,17 @@ impl Jobs {
 
     fn job_for_request_id_or_cancel(&self, key: &str) -> Result<String> {
         validate_request_id(key)?;
-        let state = self.state.lock().unwrap();
-        if let Some((id, _)) = state.iter().find(|(_, stored)| stored.request_id == key) {
+        let _writer = self.writer.lock().unwrap();
+        if let Some((id, _)) = self
+            .state
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(_, stored)| stored.request_id == key)
+        {
             return Ok(id.clone());
         }
-        let mut canceled = self.canceled_request_ids.lock().unwrap();
+        let mut canceled = self.canceled_request_ids.lock().unwrap().clone();
         let now = unix_seconds();
         canceled.retain(|_, expires| *expires > now);
         if !canceled.contains_key(key) && canceled.len() >= MAX_CANCELED_REQUEST_IDS {
@@ -1508,15 +1522,9 @@ impl Jobs {
             ));
         }
         let expires = now + REQUEST_ID_WINDOW.as_secs() as i64;
-        let prior = canceled.insert(key.to_owned(), expires);
-        if let Err(error) = persist_canceled_request_ids(&self.root, &canceled) {
-            if let Some(prior) = prior {
-                canceled.insert(key.to_owned(), prior);
-            } else {
-                canceled.remove(key);
-            }
-            return Err(error);
-        }
+        canceled.insert(key.to_owned(), expires);
+        persist_canceled_request_ids(&self.root, &canceled)?;
+        *self.canceled_request_ids.lock().unwrap() = canceled;
         Err(RpcError::new(
             Code::NotFound,
             format!("no job for request id {key:?}; a later submit with it is refused"),

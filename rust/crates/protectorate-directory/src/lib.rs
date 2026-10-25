@@ -267,6 +267,7 @@ struct Disk {
 pub struct Directory {
     file: PathBuf,
     projects: Mutex<BTreeMap<String, Project>>,
+    writer: Mutex<()>,
 }
 impl Directory {
     pub fn open(file: impl Into<PathBuf>) -> Result<Self> {
@@ -278,6 +279,7 @@ impl Directory {
         };
         Ok(Self {
             file,
+            writer: Mutex::new(()),
             projects: Mutex::new(
                 disk.projects
                     .into_iter()
@@ -316,8 +318,12 @@ impl Directory {
         Ok(())
     }
     pub fn update(&self, scans: &[Scan]) -> Result<()> {
-        let mut guard = self.projects.lock().unwrap_or_else(|e| e.into_inner());
-        let mut next = guard.clone();
+        let _writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        let mut next = self
+            .projects
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         for p in next.values_mut() {
             p.owners.clear()
         }
@@ -376,17 +382,21 @@ impl Directory {
             p.deps = deps.into_iter().collect();
         }
         self.persist(&next)?;
-        *guard = next;
+        *self.projects.lock().unwrap_or_else(|e| e.into_inner()) = next;
         Ok(())
     }
     pub fn set_refs(&self, id: &str, refs: RefState) -> Result<()> {
-        let mut guard = self.projects.lock().unwrap_or_else(|e| e.into_inner());
-        let mut next = guard.clone();
+        let _writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        let mut next = self
+            .projects
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         next.get_mut(id)
             .ok_or_else(|| Error::NotFound(id.into()))?
             .refs = Some(refs);
         self.persist(&next)?;
-        *guard = next;
+        *self.projects.lock().unwrap_or_else(|e| e.into_inner()) = next;
         Ok(())
     }
     pub fn list(&self) -> Vec<View> {

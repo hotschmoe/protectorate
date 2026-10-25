@@ -79,6 +79,7 @@ pub struct Inventory {
     local_name: String,
     local: Node,
     nodes: Mutex<Vec<Node>>,
+    writer: Mutex<()>,
 }
 impl Inventory {
     pub fn open(path: impl Into<PathBuf>, local_name: &str) -> Result<Self> {
@@ -115,16 +116,18 @@ impl Inventory {
             local_name,
             local,
             nodes: Mutex::new(nodes),
+            writer: Mutex::new(()),
         })
     }
 
     /// Regenerate the user-facing host summary from the current inventory.
     pub fn write_hosts(&self) -> Result<()> {
-        let nodes = self.nodes.lock().unwrap();
-        self.write_hosts_locked(&nodes)
+        let _writer = self.writer.lock().unwrap();
+        let nodes = self.nodes.lock().unwrap().clone();
+        self.write_hosts_of(&nodes)
     }
 
-    fn write_hosts_locked(&self, nodes: &[Node]) -> Result<()> {
+    fn write_hosts_of(&self, nodes: &[Node]) -> Result<()> {
         let path = self.path.with_file_name("hosts.md");
         fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
         protectorate_fsutil::write_file(&path, &render_hosts(&self.local, nodes), 0o644)?;
@@ -145,18 +148,20 @@ impl Inventory {
     }
     pub fn remove(&self, name: &str) -> Result<Node> {
         let name = name.trim().to_ascii_lowercase();
-        let mut nodes = self.nodes.lock().unwrap();
+        let _writer = self.writer.lock().unwrap();
+        let nodes = self.nodes.lock().unwrap().clone();
         let mut next = nodes.clone();
         let at = next
             .iter()
             .position(|node| node.name == name)
             .ok_or_else(|| Error::NotFound(name.clone()))?;
         let removed = next.remove(at);
-        self.commit(&mut nodes, next)?;
+        self.commit(next)?;
         Ok(removed)
     }
     pub fn add(&self, node: Node, update: bool) -> Result<Node> {
-        let mut nodes = self.nodes.lock().unwrap();
+        let _writer = self.writer.lock().unwrap();
+        let nodes = self.nodes.lock().unwrap().clone();
         let name = node.name.trim().to_ascii_lowercase();
         let at = nodes.iter().position(|n| n.name == name);
         if at.is_some() && !update {
@@ -197,7 +202,7 @@ impl Inventory {
         } else {
             next.push(node.clone());
         }
-        self.commit(&mut nodes, next)?;
+        self.commit(next)?;
         Ok(node)
     }
     pub fn set_tier(&self, name: &str, tier: &str) -> Result<Node> {
@@ -208,7 +213,8 @@ impl Inventory {
             )));
         }
         let name = name.trim().to_ascii_lowercase();
-        let mut nodes = self.nodes.lock().unwrap();
+        let _writer = self.writer.lock().unwrap();
+        let nodes = self.nodes.lock().unwrap().clone();
         let mut next = nodes.clone();
         let node = next
             .iter_mut()
@@ -219,13 +225,14 @@ impl Inventory {
         }
         node.tier = tier;
         let node = node.clone();
-        self.commit(&mut nodes, next)?;
+        self.commit(next)?;
         Ok(node)
     }
     /// Records an invited node's first successful authenticated metrics poll.
     pub fn clear_invited(&self, name: &str) -> Result<()> {
         let name = name.trim().to_ascii_lowercase();
-        let mut nodes = self.nodes.lock().unwrap();
+        let _writer = self.writer.lock().unwrap();
+        let nodes = self.nodes.lock().unwrap().clone();
         let mut next = nodes.clone();
         let Some(node) = next.iter_mut().find(|node| node.name == name) else {
             return Ok(());
@@ -234,13 +241,14 @@ impl Inventory {
             return Ok(());
         }
         node.invited = false;
-        self.commit(&mut nodes, next)
+        self.commit(next)
     }
     /// Redeems an invited node's join code once: records the certificate
     /// issued for it and forgets the code. NotFound covers every refusal.
     pub fn redeem(&self, name: &str, code_sha256: &str, now: i64, joined: Node) -> Result<Node> {
         let name = name.trim().to_ascii_lowercase();
-        let mut nodes = self.nodes.lock().unwrap();
+        let _writer = self.writer.lock().unwrap();
+        let nodes = self.nodes.lock().unwrap().clone();
         let mut next = nodes.clone();
         let node = next
             .iter_mut()
@@ -260,12 +268,13 @@ impl Inventory {
         node.public_key = joined.public_key;
         *node = normalize(node.clone())?;
         let node = node.clone();
-        self.commit(&mut nodes, next)?;
+        self.commit(next)?;
         Ok(node)
     }
     /// Records a renewed certificate for the node's current enrollment.
     pub fn renewed(&self, name: &str, cert_id: &str, cert_expires: i64) -> Result<()> {
-        let mut nodes = self.nodes.lock().unwrap();
+        let _writer = self.writer.lock().unwrap();
+        let nodes = self.nodes.lock().unwrap().clone();
         let mut next = nodes.clone();
         let Some(node) = next
             .iter_mut()
@@ -274,12 +283,13 @@ impl Inventory {
             return Err(Error::NotFound(name.to_owned()));
         };
         node.cert_expires = cert_expires;
-        self.commit(&mut nodes, next)
+        self.commit(next)
     }
     /// Caches OS and architecture reported by a successful metrics poll.
     pub fn set_platform(&self, name: &str, os: &str, arch: &str) -> Result<()> {
         let name = name.trim().to_ascii_lowercase();
-        let mut nodes = self.nodes.lock().unwrap();
+        let _writer = self.writer.lock().unwrap();
+        let nodes = self.nodes.lock().unwrap().clone();
         let mut next = nodes.clone();
         let Some(node) = next.iter_mut().find(|node| node.name == name) else {
             return Ok(());
@@ -289,19 +299,21 @@ impl Inventory {
         }
         node.os = os.to_owned();
         node.arch = arch.to_owned();
-        self.commit(&mut nodes, next)
+        self.commit(next)
     }
-    fn commit(&self, nodes: &mut Vec<Node>, mut next: Vec<Node>) -> Result<()> {
+    /// The caller holds the writer lock, so the disk and hosts.md are written
+    /// with the nodes lock free for readers.
+    fn commit(&self, mut next: Vec<Node>) -> Result<()> {
         next.sort_by(|a, b| a.name.cmp(&b.name));
         let bytes = serde_json::to_vec_pretty(&File {
             nodes: next.clone(),
         })?;
         fs::create_dir_all(self.path.parent().unwrap_or(Path::new(".")))?;
         protectorate_fsutil::write_file(&self.path, &bytes, 0o600)?;
-        *nodes = next;
-        if let Err(error) = self.write_hosts_locked(nodes) {
+        if let Err(error) = self.write_hosts_of(&next) {
             eprintln!("write hosts.md: {error}");
         }
+        *self.nodes.lock().unwrap() = next;
         Ok(())
     }
 }
