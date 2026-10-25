@@ -17,10 +17,17 @@ use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{BufRead, BufReader, Read},
-    sync::{Arc, Condvar, Mutex},
+    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
     thread,
     time::{Duration, Instant},
 };
+
+/// The session state is independent flags, counters and maps for one chat; the
+/// hub must still be able to read, interrupt and stop the session after a
+/// panic in the reader thread, so a poisoned guard is reused.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 const MAX_LINE: usize = 8 << 20;
 const MAX_TOOL_OUTPUT: usize = 16 << 10;
@@ -123,7 +130,7 @@ impl Session {
     }
 
     pub fn status(&self) -> Value {
-        let state = self.state.lock().unwrap();
+        let state = lock(&self.state);
         let name = if state.exited {
             "CHAT_STATE_EXITED"
         } else if !state.approvals.is_empty() {
@@ -152,11 +159,11 @@ impl Session {
     }
 
     pub fn is_exited(&self) -> bool {
-        self.state.lock().unwrap().exited
+        lock(&self.state).exited
     }
 
     pub fn is_idle(&self) -> bool {
-        let state = self.state.lock().unwrap();
+        let state = lock(&self.state);
         !state.exited && !state.busy && state.approvals.is_empty()
     }
 
@@ -167,13 +174,16 @@ impl Session {
 
     pub fn wait_exited(&self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
-        let mut state = self.state.lock().unwrap();
+        let mut state = lock(&self.state);
         while !state.exited {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 return false;
             }
-            let (next, _) = self.changed.wait_timeout(state, remaining).unwrap();
+            let (next, _) = self
+                .changed
+                .wait_timeout(state, remaining)
+                .unwrap_or_else(PoisonError::into_inner);
             state = next;
         }
         true
@@ -183,9 +193,9 @@ impl Session {
         if text.is_empty() || text.len() > 1 << 20 {
             return Err("invalid: message must contain 1 to 1048576 bytes".into());
         }
-        let _gate = self.event_gate.lock().unwrap();
+        let _gate = lock(&self.event_gate);
         let (id, session_id) = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = lock(&self.state);
             if state.exited {
                 return Err("grok session exited".into());
             }
@@ -205,7 +215,7 @@ impl Session {
             }
         }))?;
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = lock(&self.state);
             state.live = true;
             state.busy = true;
             state.per_call = false;
@@ -223,9 +233,9 @@ impl Session {
     }
 
     pub fn interrupt(&self) -> Result<(), String> {
-        let _gate = self.event_gate.lock().unwrap();
+        let _gate = lock(&self.event_gate);
         let (session_id, pending) = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = lock(&self.state);
             if state.exited || !state.busy {
                 return Ok(());
             }
@@ -250,11 +260,8 @@ impl Session {
     }
 
     pub fn respond(&self, id: &str, allow: bool, _note: &str, by: &str) -> Result<(), String> {
-        let _gate = self.event_gate.lock().unwrap();
-        let pending = self
-            .state
-            .lock()
-            .unwrap()
+        let _gate = lock(&self.event_gate);
+        let pending = lock(&self.state)
             .approvals
             .get(id)
             .cloned()
@@ -265,7 +272,7 @@ impl Session {
             "id": pending.rpc_id,
             "result": {"outcome": outcome}
         }))?;
-        self.state.lock().unwrap().approvals.remove(id);
+        lock(&self.state).approvals.remove(id);
         self.log
             .append(Event::new(
                 json!({"approvalResolved":{"id":id,"allow":allow,"by":by}}),
@@ -287,7 +294,7 @@ impl Session {
     }
 
     pub fn compact(&self) -> Result<Value, String> {
-        let state = self.state.lock().unwrap();
+        let state = lock(&self.state);
         if state.exited {
             return Err("grok session exited".into());
         }
@@ -337,7 +344,7 @@ impl Session {
                 .ok_or("session/new returned no session id")?
                 .to_owned()
         };
-        self.state.lock().unwrap().session_id = session_id.clone();
+        lock(&self.state).session_id = session_id.clone();
         let gate = if autonomous {
             "/always-approve on"
         } else {
@@ -360,7 +367,7 @@ impl Session {
 
     fn rpc(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
         let id = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = lock(&self.state);
             if state.exited {
                 return Err("grok session exited".into());
             }
@@ -373,12 +380,12 @@ impl Session {
             .input
             .write(&json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}))
         {
-            self.state.lock().unwrap().pending.remove(&id);
+            lock(&self.state).pending.remove(&id);
             return Err(error);
         }
         let deadline = Instant::now() + timeout;
         loop {
-            let mut state = self.state.lock().unwrap();
+            let mut state = lock(&self.state);
             if let Some(reply) = state.replies.remove(&id) {
                 state.pending.remove(&id);
                 if let Some(error) = reply.get("error") {
@@ -399,19 +406,22 @@ impl Session {
                 self.stop();
                 return Err(format!("{method} timed out"));
             }
-            let (next, _) = self.changed.wait_timeout(state, remaining).unwrap();
+            let (next, _) = self
+                .changed
+                .wait_timeout(state, remaining)
+                .unwrap_or_else(PoisonError::into_inner);
             drop(next);
         }
     }
 
     fn note_exit<E: std::fmt::Display>(&self, result: &Result<std::process::ExitStatus, E>) {
-        let _gate = self.event_gate.lock().unwrap();
+        let _gate = lock(&self.event_gate);
         let _ = self.log.append_exit("grok", result);
         let _ = self
             .log
             .append(Event::new(json!({"state":{"state":"CHAT_STATE_EXITED"}})));
         let _ = self.log.close();
-        let mut state = self.state.lock().unwrap();
+        let mut state = lock(&self.state);
         state.exited = true;
         state.busy = false;
         state.prompt_id = None;
@@ -443,7 +453,7 @@ impl Session {
     }
 
     fn handle(&self, message: &Value) {
-        let _gate = self.event_gate.lock().unwrap();
+        let _gate = lock(&self.event_gate);
         let method = message["method"].as_str().unwrap_or("");
         let has_id = message.get("id").is_some() && !message["id"].is_null();
         if !method.is_empty() && has_id {
@@ -457,7 +467,7 @@ impl Session {
 
     fn on_response(&self, id: u64, message: &Value) {
         let prompt = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = lock(&self.state);
             if state.live && state.prompt_id == Some(id) {
                 state.prompt_id = None;
                 state.busy = false;
@@ -508,7 +518,7 @@ impl Session {
     fn on_note(&self, method: &str, params: &Value) {
         let announced = params["sessionId"].as_str().unwrap_or("");
         let (current, live) = {
-            let state = self.state.lock().unwrap();
+            let state = lock(&self.state);
             (state.session_id.clone(), state.live)
         };
         if !live || (!announced.is_empty() && !current.is_empty() && announced != current) {
@@ -570,7 +580,7 @@ impl Session {
         if input.saturating_add(read).saturating_add(write) == 0 {
             return;
         }
-        self.state.lock().unwrap().per_call = true;
+        lock(&self.state).per_call = true;
         self.emit_usage(
             input.saturating_add(read).saturating_add(write),
             input,
@@ -615,7 +625,7 @@ impl Session {
                 truncate(title, 300)
             }
         };
-        self.state.lock().unwrap().approvals.insert(
+        lock(&self.state).approvals.insert(
             id.clone(),
             Pending {
                 rpc_id: message["id"].clone(),
@@ -635,7 +645,7 @@ impl Session {
 
     fn emit_usage(&self, context: u64, input: u64, output: u64, read: u64, write: u64) {
         let window = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = lock(&self.state);
             state.context_tokens = context;
             state.context_window
         };

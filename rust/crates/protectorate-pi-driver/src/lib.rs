@@ -11,10 +11,17 @@ use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{BufRead, BufReader, Read},
-    sync::{Arc, Condvar, Mutex},
+    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
     thread,
     time::{Duration, Instant},
 };
+
+/// The session state is independent flags, counters and maps for one chat; the
+/// hub must still be able to read, interrupt and stop the session after a
+/// panic in the reader thread, so a poisoned guard is reused.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 const MAX_LINE: usize = 4 << 20;
 const MAX_TOOL_OUTPUT: usize = 16 << 10;
@@ -118,13 +125,13 @@ impl Session {
         let waiter = Arc::clone(&session);
         thread::spawn(move || {
             let result = child.wait();
-            let _gate = waiter.event_gate.lock().unwrap();
+            let _gate = lock(&waiter.event_gate);
             let _ = waiter.log.append_exit("pi", &result);
             let _ = waiter
                 .log
                 .append(Event::new(json!({"state":{"state":"CHAT_STATE_EXITED"}})));
             let _ = waiter.log.close();
-            let mut state = waiter.state.lock().unwrap();
+            let mut state = lock(&waiter.state);
             state.exited = true;
             state.busy = false;
             waiter.changed.notify_all();
@@ -143,7 +150,7 @@ impl Session {
             }
         }
         {
-            let mut state = session.state.lock().unwrap();
+            let mut state = lock(&session.state);
             state.session_id = id.into();
             state.model = data["model"]["id"].as_str().unwrap_or_default().into();
             state.provider = data["model"]["provider"]
@@ -165,7 +172,7 @@ impl Session {
     }
 
     pub fn status(&self) -> Value {
-        let state = self.state.lock().unwrap();
+        let state = lock(&self.state);
         json!({
             "state": if state.exited {"CHAT_STATE_EXITED"} else if state.compacting {"CHAT_STATE_COMPACTING"} else if state.busy {"CHAT_STATE_WORKING"} else {"CHAT_STATE_IDLE"},
             "harnessSessionId": state.session_id,
@@ -185,15 +192,15 @@ impl Session {
     }
 
     pub fn model_base_url(&self) -> String {
-        self.state.lock().unwrap().model_base_url.clone()
+        lock(&self.state).model_base_url.clone()
     }
 
     pub fn is_exited(&self) -> bool {
-        self.state.lock().unwrap().exited
+        lock(&self.state).exited
     }
 
     pub fn is_idle(&self) -> bool {
-        let state = self.state.lock().unwrap();
+        let state = lock(&self.state);
         !state.exited && !state.busy && !state.compacting && !state.selecting
     }
 
@@ -222,7 +229,7 @@ impl Session {
             .filter_map(Value::as_str)
             .map(str::to_owned)
             .collect();
-        let state = self.state.lock().unwrap();
+        let state = lock(&self.state);
         Ok(options
             .iter()
             .filter_map(|model| PiModel::deserialize(model).ok())
@@ -253,9 +260,9 @@ impl Session {
         requested_model: &str,
         requested_effort: &str,
     ) -> Result<Value, String> {
-        let _operation = self.operation.lock().unwrap();
+        let _operation = lock(&self.operation);
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = lock(&self.state);
             if state.exited {
                 return Err("pi session exited".into());
             }
@@ -265,7 +272,7 @@ impl Session {
             state.selecting = true;
         }
         let result = self.set_selection_inner(requested_model, requested_effort);
-        self.state.lock().unwrap().selecting = false;
+        lock(&self.state).selecting = false;
         result
     }
 
@@ -275,7 +282,7 @@ impl Session {
         requested_effort: &str,
     ) -> Result<Value, String> {
         let (default_provider, default_model, default_effort) = {
-            let state = self.state.lock().unwrap();
+            let state = lock(&self.state);
             (
                 state.default_provider.clone(),
                 state.default_model.clone(),
@@ -312,7 +319,7 @@ impl Session {
             Duration::from_secs(15),
         )?;
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = lock(&self.state);
             state.provider = provider.into();
             state.model = model_id.into();
             state.model_base_url = selected["baseUrl"].as_str().unwrap_or_default().into();
@@ -324,7 +331,7 @@ impl Session {
                 Duration::from_secs(15),
             )?;
         }
-        let mut state = self.state.lock().unwrap();
+        let mut state = lock(&self.state);
         state.effort = effort.into();
         state.requested_model = requested_model.into();
         state.requested_effort = requested_effort.into();
@@ -339,9 +346,9 @@ impl Session {
     }
 
     pub fn compact(&self) -> Result<Value, String> {
-        let _operation = self.operation.lock().unwrap();
+        let _operation = lock(&self.operation);
         {
-            let mut state = self.state.lock().unwrap();
+            let mut state = lock(&self.state);
             if state.exited {
                 return Err("pi session exited".into());
             }
@@ -357,7 +364,7 @@ impl Session {
             json!({"state":{"state":"CHAT_STATE_COMPACTING"}}),
         ));
         let result = self.command("compact", json!({}), Duration::from_secs(120));
-        let mut state = self.state.lock().unwrap();
+        let mut state = lock(&self.state);
         let compaction = match result {
             Ok(data) => {
                 if state.compaction_result.is_none() {
@@ -366,7 +373,7 @@ impl Session {
                         .wait_timeout_while(state, Duration::from_millis(200), |s| {
                             s.compaction_result.is_none() && !s.exited
                         })
-                        .unwrap();
+                        .unwrap_or_else(PoisonError::into_inner);
                     state = next;
                 }
                 let observed = state.compaction_result.take();
@@ -390,7 +397,7 @@ impl Session {
         state.compacting = false;
         state.manual_compaction = false;
         drop(state);
-        let _gate = self.event_gate.lock().unwrap();
+        let _gate = lock(&self.event_gate);
         let _ = self
             .log
             .append(Event::new(json!({"state":{"state":"CHAT_STATE_IDLE"}})));
@@ -403,8 +410,8 @@ impl Session {
         if text.is_empty() || text.len() > 1 << 20 {
             return Err("message must contain 1 to 1048576 bytes".into());
         }
-        let _gate = self.event_gate.lock().unwrap();
-        let mut state = self.state.lock().unwrap();
+        let _gate = lock(&self.event_gate);
+        let mut state = lock(&self.state);
         if state.exited {
             return Err("pi session exited".into());
         }
@@ -428,7 +435,7 @@ impl Session {
     }
 
     pub fn interrupt(&self) -> Result<(), String> {
-        let state = self.state.lock().unwrap();
+        let state = lock(&self.state);
         if state.exited || !state.busy {
             return Ok(());
         }
@@ -443,19 +450,22 @@ impl Session {
 
     pub fn wait_exited(&self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
-        let mut state = self.state.lock().unwrap();
+        let mut state = lock(&self.state);
         while !state.exited {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 return false;
             }
-            (state, _) = self.changed.wait_timeout(state, remaining).unwrap();
+            (state, _) = self
+                .changed
+                .wait_timeout(state, remaining)
+                .unwrap_or_else(PoisonError::into_inner);
         }
         true
     }
 
     fn command(&self, kind: &str, fields: Value, timeout: Duration) -> Result<Value, String> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = lock(&self.state);
         state.next_id += 1;
         let id = format!("c{}", state.next_id);
         state.pending.insert(id.clone());
@@ -488,7 +498,10 @@ impl Session {
                 self.stop();
                 return Err(format!("pi {kind} timed out"));
             }
-            (state, _) = self.changed.wait_timeout(state, remaining).unwrap();
+            (state, _) = self
+                .changed
+                .wait_timeout(state, remaining)
+                .unwrap_or_else(PoisonError::into_inner);
         }
     }
 
@@ -521,20 +534,20 @@ impl Session {
     }
 
     fn handle(&self, message: &Value) {
-        let _gate = self.event_gate.lock().unwrap();
+        let _gate = lock(&self.event_gate);
         let kind = message["type"].as_str().unwrap_or_default();
         let event = match kind {
             "response" => {
                 let id = message["id"].as_str().unwrap_or_default();
                 if !id.is_empty() {
-                    let mut state = self.state.lock().unwrap();
+                    let mut state = lock(&self.state);
                     if state.pending.contains(id) {
                         state.replies.insert(id.into(), message.clone());
                         self.changed.notify_all();
                     }
                 }
                 if message["success"] == false && message["command"] == "prompt" {
-                    let mut state = self.state.lock().unwrap();
+                    let mut state = lock(&self.state);
                     state.busy = false;
                     Some(
                         json!({"error":{"text":message["error"].as_str().unwrap_or("pi prompt failed")}}),
@@ -545,7 +558,7 @@ impl Session {
             }
             "message_start" => {
                 if message["message"]["role"] == "assistant" {
-                    self.state.lock().unwrap().next_message += 1;
+                    lock(&self.state).next_message += 1;
                 }
                 None
             }
@@ -553,7 +566,7 @@ impl Session {
                 let part = &message["assistantMessageEvent"];
                 let thinking = part["type"] == "thinking_delta";
                 if part["type"] == "text_delta" || thinking {
-                    let id = format!("pi-{}", self.state.lock().unwrap().next_message);
+                    let id = format!("pi-{}", lock(&self.state).next_message);
                     let _ = self.log.append_text(
                         &id,
                         thinking,
@@ -589,7 +602,7 @@ impl Session {
             }
             "message_end" => {
                 if message["message"]["role"] == "assistant" {
-                    let mut state = self.state.lock().unwrap();
+                    let mut state = lock(&self.state);
                     if message["message"]["model"]
                         .as_str()
                         .is_some_and(|model| model != state.model)
@@ -620,7 +633,7 @@ impl Session {
                 }
             }
             "agent_settled" => {
-                self.state.lock().unwrap().busy = false;
+                lock(&self.state).busy = false;
                 self.changed.notify_all();
                 let stop = if message["aborted"] == true {
                     "cancelled"
@@ -634,7 +647,7 @@ impl Session {
                 if data.is_null() {
                     None
                 } else {
-                    let mut state = self.state.lock().unwrap();
+                    let mut state = lock(&self.state);
                     if state.suppress_compaction_event {
                         state.suppress_compaction_event = false;
                         None
