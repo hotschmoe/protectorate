@@ -367,14 +367,28 @@ impl Monitor {
 
     /// The node's health without its inventory record (`node` is unset).
     pub fn status(&self, name: &str, address: &str, invited: bool) -> v1::NodeStatus {
+        let states = lock(&self.state);
         if invited {
+            // A joined node stays invited until its first good poll, so a
+            // firewall in the way must show up here.
+            let error = states
+                .get(name)
+                .filter(|state| state.address == address && !state.last_error.is_empty())
+                .map_or_else(
+                    || "invited, not yet joined".to_owned(),
+                    |state| {
+                        format!(
+                            "invited; the hub cannot reach {address}: {}",
+                            state.last_error
+                        )
+                    },
+                );
             return v1::NodeStatus {
                 freshness: NodeFreshness::Invited as i32,
-                error: "invited, not yet joined".into(),
+                error,
                 ..Default::default()
             };
         }
-        let states = lock(&self.state);
         let state = states.get(name).filter(|state| state.address == address);
         let Some(state) = state.filter(|state| state.attempted) else {
             return v1::NodeStatus {
