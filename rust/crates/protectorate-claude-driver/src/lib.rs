@@ -10,10 +10,17 @@ use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, HashSet},
     io::{BufRead, BufReader, Read},
-    sync::{Arc, Condvar, Mutex},
+    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
     thread,
     time::{Duration, Instant},
 };
+
+/// The session state is independent flags, counters and maps for one chat; the
+/// hub must still be able to read, interrupt and stop the session after a
+/// panic in the reader thread, so a poisoned guard is reused.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 const MAX_LINE: usize = 8 << 20;
 const MAX_TOOL_OUTPUT: usize = 16 << 10;
@@ -92,13 +99,13 @@ impl Session {
         let waiter = Arc::clone(&session);
         thread::spawn(move || {
             let result = child.wait();
-            let _gate = waiter.event_gate.lock().unwrap();
+            let _gate = lock(&waiter.event_gate);
             let _ = waiter.log.append_exit("claude", &result);
             let _ = waiter
                 .log
                 .append(Event::new(json!({"state":{"state":"CHAT_STATE_EXITED"}})));
             let _ = waiter.log.close();
-            let mut state = waiter.state.lock().unwrap();
+            let mut state = lock(&waiter.state);
             state.exited = true;
             state.busy = false;
             waiter.changed.notify_all();
@@ -111,7 +118,7 @@ impl Session {
     }
 
     pub fn status(&self) -> Value {
-        let s = self.state.lock().unwrap();
+        let s = lock(&self.state);
         json!({"state": if s.exited {"CHAT_STATE_EXITED"} else if !s.approvals.is_empty() {"CHAT_STATE_AWAITING_APPROVAL"}
             else if s.compacting {"CHAT_STATE_COMPACTING"} else if s.busy {"CHAT_STATE_WORKING"} else {"CHAT_STATE_IDLE"},
             "harnessSessionId":s.session_id,"model":s.model,"provider":"anthropic",
@@ -119,10 +126,10 @@ impl Session {
             "lastSeq":self.log.last().to_string(),"cache":self.log.cache()})
     }
     pub fn is_exited(&self) -> bool {
-        self.state.lock().unwrap().exited
+        lock(&self.state).exited
     }
     pub fn is_idle(&self) -> bool {
-        let s = self.state.lock().unwrap();
+        let s = lock(&self.state);
         !s.exited && !s.busy && !s.compacting && s.approvals.is_empty()
     }
     pub fn stop(&self) {
@@ -131,13 +138,16 @@ impl Session {
     }
     pub fn wait_exited(&self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
-        let mut s = self.state.lock().unwrap();
+        let mut s = lock(&self.state);
         while !s.exited {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
                 return false;
             }
-            (s, _) = self.changed.wait_timeout(s, remaining).unwrap();
+            (s, _) = self
+                .changed
+                .wait_timeout(s, remaining)
+                .unwrap_or_else(PoisonError::into_inner);
         }
         true
     }
@@ -145,8 +155,8 @@ impl Session {
         if text.is_empty() || text.len() > 1 << 20 {
             return Err("invalid: message must contain 1 to 1048576 bytes".into());
         }
-        let _gate = self.event_gate.lock().unwrap();
-        let mut s = self.state.lock().unwrap();
+        let _gate = lock(&self.event_gate);
+        let mut s = lock(&self.state);
         if s.exited {
             return Err("claude session exited".into());
         }
@@ -166,8 +176,8 @@ impl Session {
         seq.map_err(|e| e.to_string())
     }
     pub fn interrupt(&self) -> Result<(), String> {
-        let _gate = self.event_gate.lock().unwrap();
-        let mut s = self.state.lock().unwrap();
+        let _gate = lock(&self.event_gate);
+        let mut s = lock(&self.state);
         if s.exited || !s.busy {
             return Ok(());
         }
@@ -179,8 +189,8 @@ impl Session {
         )
     }
     pub fn respond(&self, id: &str, allow: bool, note: &str, by: &str) -> Result<(), String> {
-        let _gate = self.event_gate.lock().unwrap();
-        let mut s = self.state.lock().unwrap();
+        let _gate = lock(&self.event_gate);
+        let mut s = lock(&self.state);
         let input = s
             .approvals
             .get(id)
@@ -201,9 +211,9 @@ impl Session {
         Ok(())
     }
     pub fn compact(&self) -> Result<Value, String> {
-        let _gate = self.event_gate.lock().unwrap();
+        let _gate = lock(&self.event_gate);
         {
-            let mut s = self.state.lock().unwrap();
+            let mut s = lock(&self.state);
             if s.exited {
                 return Err("claude session exited".into());
             }
@@ -218,12 +228,12 @@ impl Session {
             .input
             .write(&json!({"type":"user","message":{"role":"user","content":"/compact"}}))
         {
-            self.state.lock().unwrap().compacting = false;
+            lock(&self.state).compacting = false;
             return Err(e);
         }
         drop(_gate);
         let deadline = Instant::now() + Duration::from_secs(120);
-        let mut s = self.state.lock().unwrap();
+        let mut s = lock(&self.state);
         loop {
             if let Some(error) = s.compact_error.take() {
                 return Err(error);
@@ -242,7 +252,10 @@ impl Session {
                 self.stop();
                 return Err("claude compaction timed out".into());
             }
-            (s, _) = self.changed.wait_timeout(s, remaining).unwrap();
+            (s, _) = self
+                .changed
+                .wait_timeout(s, remaining)
+                .unwrap_or_else(PoisonError::into_inner);
         }
     }
     pub fn list_models(&self) -> Result<Value, String> {
@@ -281,13 +294,13 @@ impl Session {
         }
     }
     fn handle(&self, value: &Value) {
-        let _gate = self.event_gate.lock().unwrap();
+        let _gate = lock(&self.event_gate);
         let kind = value["type"].as_str().unwrap_or_default();
         match kind {
             "system" => match value["subtype"].as_str().unwrap_or_default() {
                 "init" => {
                     if let Some(id) = value["session_id"].as_str() {
-                        let mut s = self.state.lock().unwrap();
+                        let mut s = lock(&self.state);
                         if s.session_id != id {
                             drop(s);
                             self.log_error("Claude resumed a different session");
@@ -302,7 +315,7 @@ impl Session {
                     let event = json!({"tokensBefore":meta["pre_tokens"].as_u64().unwrap_or_default().to_string(),
                         "tokensAfter":meta["post_tokens"].as_u64().unwrap_or_default().to_string(),
                         "native":meta["trigger"] == "auto"});
-                    let mut s = self.state.lock().unwrap();
+                    let mut s = lock(&self.state);
                     if s.compacting {
                         s.compact_result = Some(event.clone());
                         self.changed.notify_all();
@@ -326,11 +339,11 @@ impl Session {
         let message = &value["message"];
         let id = message["id"].as_str().unwrap_or_default();
         if let Some(model) = message["model"].as_str() {
-            self.state.lock().unwrap().model = model.into();
+            lock(&self.state).model = model.into();
         }
         let usage = &message["usage"];
         if !id.is_empty() && usage.is_object() {
-            let mut s = self.state.lock().unwrap();
+            let mut s = lock(&self.state);
             if s.seen_messages.insert(format!("usage:{id}")) {
                 let input = usage["input_tokens"].as_u64().unwrap_or_default();
                 let read = usage["cache_read_input_tokens"]
@@ -359,7 +372,7 @@ impl Session {
                     }
                     "tool_use" => {
                         let key = format!("block:{id}:{index}:tool_use");
-                        if !self.state.lock().unwrap().seen_messages.insert(key) {
+                        if !lock(&self.state).seen_messages.insert(key) {
                             continue;
                         }
                         let _ = self.log.append(Event::new(json!({"toolCall":{
@@ -426,11 +439,7 @@ impl Session {
             ));
             return;
         }
-        self.state
-            .lock()
-            .unwrap()
-            .approvals
-            .insert(id.into(), input.clone());
+        lock(&self.state).approvals.insert(id.into(), input.clone());
         let _ = self.log.append(Event::new(
             json!({"approval":{"id":id,"kind":name,"summary":summary}}),
         ));
@@ -440,7 +449,7 @@ impl Session {
         self.changed.notify_all();
     }
     fn on_result(&self, value: &Value) {
-        let mut s = self.state.lock().unwrap();
+        let mut s = lock(&self.state);
         if let Some(id) = value["session_id"].as_str() {
             if id != s.session_id {
                 drop(s);

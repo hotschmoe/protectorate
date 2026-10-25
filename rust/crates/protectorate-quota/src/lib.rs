@@ -253,11 +253,14 @@ pub(crate) fn safe_read(r: &dyn Reader, ctx: &Ctx, http: &dyn Transport) -> Snap
             error: err.to_string(),
             ..Snapshot::default()
         },
-        Err(_) => Snapshot {
-            provider: provider.clone(),
-            error: "reader panic".to_string(),
-            ..Snapshot::default()
-        },
+        Err(_) => {
+            eprintln!("quota: {provider} reader panicked, reporting it as a read error");
+            Snapshot {
+                provider: provider.clone(),
+                error: "reader panic".to_string(),
+                ..Snapshot::default()
+            }
+        }
     };
     snap.provider = provider;
     snap

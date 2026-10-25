@@ -63,6 +63,14 @@ use std::{
 };
 use zeroize::Zeroizing;
 
+/// Locks a std mutex and keeps serving after a panic poisoned it. Every
+/// hub mutex guards either `()`, a set or map changed by one call, or a store
+/// that builds its next state outside the lock and assigns it in one step, so
+/// a panic in a critical section cannot leave a half-applied update behind.
+pub(crate) fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 struct EventBus {
     sequence: AtomicU64,
     sender: tokio::sync::broadcast::Sender<v1::Event>,
@@ -1285,5 +1293,5 @@ fn no_local_agent() -> RpcError {
 }
 
 fn join_error(error: tokio::task::JoinError) -> RpcError {
-    RpcError::new(Code::Internal, error.to_string())
+    RpcError::from_join(error)
 }

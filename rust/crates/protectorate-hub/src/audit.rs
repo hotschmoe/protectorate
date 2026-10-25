@@ -108,6 +108,15 @@ pub(super) fn record_completion(
     message: &DynamicMessage,
     error: Option<&RpcError>,
 ) {
+    // A panicking handler is always recorded, read or write, so a recovered
+    // panic is visible in the audit chain and the log.
+    let panicked = error.is_some_and(RpcError::is_panic);
+    if let Some(error) = error.filter(|_| panicked) {
+        eprintln!(
+            "hub: {} by {} panicked: {}",
+            method.procedure, auth.actor, error.message
+        );
+    }
     // Handlers record successful operations whose resolved subject or detail
     // is known only after they finish. Keep this observer for failures.
     if error.is_none()
@@ -125,7 +134,7 @@ pub(super) fn record_completion(
     }
     // A node file download is sensitive even though it does not mutate
     // state, so it is recorded though reads normally are not.
-    if !audited_method(method, auth) {
+    if !panicked && !audited_method(method, auth) {
         return;
     }
     if method.procedure == "/protectorate.v1.NodeService/PutFile" && error.is_none() {
@@ -145,7 +154,9 @@ pub(super) fn record_completion(
     let subject = subject(method, auth, message, error.is_none());
     // The grant task is a validated, at-most-500-byte description of why the
     // capability was minted. Never audit the response, which holds its secret.
-    let detail = if method.procedure == "/protectorate.v1.DeviceService/StartDeviceAuth" {
+    let detail = if let Some(error) = error.filter(|_| panicked) {
+        error.message.clone()
+    } else if method.procedure == "/protectorate.v1.DeviceService/StartDeviceAuth" {
         pairing_detail(auth)
     } else if method.procedure == "/protectorate.v1.GrantService/Admin" && error.is_none() {
         format!("task: {}", field_string(message, "task").trim())

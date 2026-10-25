@@ -2,7 +2,7 @@
 //! usage/chat updates are deliberately separate from these read routes.
 pub(super) mod branch;
 mod prune_git;
-use super::{approvals::Requester, now, proto_time, Hub};
+use super::{approvals::Requester, lock, now, proto_time, Hub};
 use chrono::Utc;
 use prost_reflect::prost_types;
 use protectorate_audit::Entry as AuditEntry;
@@ -245,12 +245,12 @@ fn custom(selection: &v1::ModelSelection) -> bool {
 
 impl Drop for ResleeveReservation<'_> {
     fn drop(&mut self) {
-        self.hub.resleeving.lock().unwrap().remove(&self.name);
+        lock(&self.hub.resleeving).remove(&self.name);
     }
 }
 
 fn reserve_resleeve<'a>(hub: &'a Hub, name: &str) -> Result<ResleeveReservation<'a>> {
-    let mut names = hub.resleeving.lock().unwrap();
+    let mut names = lock(&hub.resleeving);
     if !names.insert(name.to_owned()) {
         return Err(RpcError::new(
             Code::FailedPrecondition,
@@ -271,7 +271,7 @@ fn resleeve_sleeve(
     let name = request.name.clone();
     protectorate_sleeve_registry::valid_name(&name).map_err(registry_error)?;
     let _reservation = reserve_resleeve(hub, &name)?;
-    let _envoy_guard = (name == "envoy").then(|| hub.envoy_spawn_lock.lock().unwrap());
+    let _envoy_guard = (name == "envoy").then(|| lock(&hub.envoy_spawn_lock));
     let old = hub.sleeves.get(&name).map_err(registry_error)?;
     if old.helper || old.mode != Mode::Chat || refresh_record(hub, &old).state != State::Running {
         return Err(RpcError::new(
@@ -351,7 +351,7 @@ fn resleeve_sleeve(
     .ok();
     crate::checkpoints::before_resleeve(hub, &old);
     {
-        let _guard = hub.sleeve_launch_lock.lock().unwrap();
+        let _guard = lock(&hub.sleeve_launch_lock);
         crate::chat::kill_pi(hub, &name)?;
     }
     match crate::chat::spawn_resleeve(hub, &launch, to) {
@@ -939,7 +939,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                         "envoy is a reserved sleeve name",
                     ));
                 }
-                if hub.resleeving.lock().unwrap().contains(&request.name) {
+                if lock(&hub.resleeving).contains(&request.name) {
                     return Err(RpcError::new(
                         Code::FailedPrecondition,
                         "sleeve is being resleeved",
@@ -985,7 +985,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             async move {
                 let v1::KillSleeveRequest { name, drop_caches } = call.request;
                 let auth = call.auth;
-                if hub.resleeving.lock().unwrap().contains(&name) {
+                if lock(&hub.resleeving).contains(&name) {
                     return Err(RpcError::new(
                         Code::FailedPrecondition,
                         "sleeve is being resleeved",
@@ -999,7 +999,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     ));
                 }
                 tokio::task::spawn_blocking(move || {
-                    let _guard = hub.sleeve_launch_lock.lock().unwrap();
+                    let _guard = lock(&hub.sleeve_launch_lock);
                     if !auth.owner && !auth.device && !has_kill_scope(&auth) {
                         let row = hub.sleeves.get(&name).map_err(registry_error)?;
                         if name == "envoy" || !spawned_by(&auth, &row) {
@@ -1009,7 +1009,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                             ));
                         }
                     }
-                    if hub.resleeving.lock().unwrap().contains(&name) {
+                    if lock(&hub.resleeving).contains(&name) {
                         return Err(RpcError::new(
                             Code::FailedPrecondition,
                             "sleeve is being resleeved",
@@ -1118,8 +1118,8 @@ fn spawn_envoy(
     hub: &Hub,
     request: &v1::SpawnEnvoyRequest,
 ) -> Result<(Record, v1::SpawnEnvoyResponse)> {
-    let _envoy_guard = hub.envoy_spawn_lock.lock().unwrap();
-    if hub.resleeving.lock().unwrap().contains("envoy") {
+    let _envoy_guard = lock(&hub.envoy_spawn_lock);
+    if lock(&hub.resleeving).contains("envoy") {
         return Err(RpcError::new(
             Code::FailedPrecondition,
             "envoy is being resleeved",
@@ -1222,7 +1222,7 @@ fn spawn_envoy(
                     "Envoy record is not a chat sleeve",
                 ));
             }
-            let _guard = hub.sleeve_launch_lock.lock().unwrap();
+            let _guard = lock(&hub.sleeve_launch_lock);
             crate::chat::kill_pi(hub, "envoy")?;
             true
         } else {
@@ -1597,7 +1597,7 @@ fn spawn_terminal(hub: &Hub, launch: &Launch, parent: &SpawnParent) -> Result<Re
             "terminal sleeve launcher is not configured",
         )
     })?;
-    let _guard = hub.sleeve_launch_lock.lock().unwrap();
+    let _guard = lock(&hub.sleeve_launch_lock);
     let request = &launch.request;
     let name = request.name.clone();
     protectorate_sleeve_registry::valid_name(&name).map_err(registry_error)?;
@@ -2188,7 +2188,7 @@ fn drop_home_caches(hub: &Hub, name: &str) -> Result<()> {
 /// cannot race a destructive prune and a newly started sleeve cannot acquire
 /// a path that has already been classified as stopped.
 fn prune_sleeves(hub: &Hub, options: &v1::PruneSleevesRequest) -> Result<Vec<v1::SleeveDiskEntry>> {
-    let _guard = hub.sleeve_launch_lock.lock().unwrap();
+    let _guard = lock(&hub.sleeve_launch_lock);
     let v1::PruneSleevesRequest {
         yes,
         homes,
@@ -2791,9 +2791,9 @@ fn enforce_disk_limit(hub: &Hub, row: &Record, used: u64, warned: &mut BTreeSet<
         return;
     }
     warned.remove(name);
-    let _guard = hub.sleeve_launch_lock.lock().unwrap();
+    let _guard = lock(&hub.sleeve_launch_lock);
     let current = hub.sleeves.get(name).ok();
-    if hub.resleeving.lock().unwrap().contains(name)
+    if lock(&hub.resleeving).contains(name)
         || current.is_none_or(|current| {
             current.created_at != row.created_at || current.state != State::Running
         })

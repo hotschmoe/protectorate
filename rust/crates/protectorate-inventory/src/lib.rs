@@ -5,8 +5,14 @@ use std::{
     fs, io,
     net::IpAddr,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Mutex, MutexGuard, PoisonError},
 };
+
+/// Every mutation builds the next state outside the lock and assigns it in one
+/// step, so a poisoned guard still holds consistent data.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 pub const SHARED: &str = "shared";
 pub const CARE: &str = "care";
@@ -122,8 +128,8 @@ impl Inventory {
 
     /// Regenerate the user-facing host summary from the current inventory.
     pub fn write_hosts(&self) -> Result<()> {
-        let _writer = self.writer.lock().unwrap();
-        let nodes = self.nodes.lock().unwrap().clone();
+        let _writer = lock(&self.writer);
+        let nodes = lock(&self.nodes).clone();
         self.write_hosts_of(&nodes)
     }
 
@@ -134,13 +140,11 @@ impl Inventory {
         Ok(())
     }
     pub fn list(&self) -> Vec<Node> {
-        self.nodes.lock().unwrap().clone()
+        lock(&self.nodes).clone()
     }
     pub fn get(&self, name: &str) -> Result<Node> {
         let name = name.trim().to_ascii_lowercase();
-        self.nodes
-            .lock()
-            .unwrap()
+        lock(&self.nodes)
             .iter()
             .find(|n| n.name == name)
             .cloned()
@@ -148,8 +152,8 @@ impl Inventory {
     }
     pub fn remove(&self, name: &str) -> Result<Node> {
         let name = name.trim().to_ascii_lowercase();
-        let _writer = self.writer.lock().unwrap();
-        let nodes = self.nodes.lock().unwrap().clone();
+        let _writer = lock(&self.writer);
+        let nodes = lock(&self.nodes).clone();
         let mut next = nodes.clone();
         let at = next
             .iter()
@@ -160,8 +164,8 @@ impl Inventory {
         Ok(removed)
     }
     pub fn add(&self, node: Node, update: bool) -> Result<Node> {
-        let _writer = self.writer.lock().unwrap();
-        let nodes = self.nodes.lock().unwrap().clone();
+        let _writer = lock(&self.writer);
+        let nodes = lock(&self.nodes).clone();
         let name = node.name.trim().to_ascii_lowercase();
         let at = nodes.iter().position(|n| n.name == name);
         if at.is_some() && !update {
@@ -213,8 +217,8 @@ impl Inventory {
             )));
         }
         let name = name.trim().to_ascii_lowercase();
-        let _writer = self.writer.lock().unwrap();
-        let nodes = self.nodes.lock().unwrap().clone();
+        let _writer = lock(&self.writer);
+        let nodes = lock(&self.nodes).clone();
         let mut next = nodes.clone();
         let node = next
             .iter_mut()
@@ -231,8 +235,8 @@ impl Inventory {
     /// Records an invited node's first successful authenticated metrics poll.
     pub fn clear_invited(&self, name: &str) -> Result<()> {
         let name = name.trim().to_ascii_lowercase();
-        let _writer = self.writer.lock().unwrap();
-        let nodes = self.nodes.lock().unwrap().clone();
+        let _writer = lock(&self.writer);
+        let nodes = lock(&self.nodes).clone();
         let mut next = nodes.clone();
         let Some(node) = next.iter_mut().find(|node| node.name == name) else {
             return Ok(());
@@ -247,8 +251,8 @@ impl Inventory {
     /// issued for it and forgets the code. NotFound covers every refusal.
     pub fn redeem(&self, name: &str, code_sha256: &str, now: i64, joined: Node) -> Result<Node> {
         let name = name.trim().to_ascii_lowercase();
-        let _writer = self.writer.lock().unwrap();
-        let nodes = self.nodes.lock().unwrap().clone();
+        let _writer = lock(&self.writer);
+        let nodes = lock(&self.nodes).clone();
         let mut next = nodes.clone();
         let node = next
             .iter_mut()
@@ -273,8 +277,8 @@ impl Inventory {
     }
     /// Records a renewed certificate for the node's current enrollment.
     pub fn renewed(&self, name: &str, cert_id: &str, cert_expires: i64) -> Result<()> {
-        let _writer = self.writer.lock().unwrap();
-        let nodes = self.nodes.lock().unwrap().clone();
+        let _writer = lock(&self.writer);
+        let nodes = lock(&self.nodes).clone();
         let mut next = nodes.clone();
         let Some(node) = next
             .iter_mut()
@@ -288,8 +292,8 @@ impl Inventory {
     /// Caches OS and architecture reported by a successful metrics poll.
     pub fn set_platform(&self, name: &str, os: &str, arch: &str) -> Result<()> {
         let name = name.trim().to_ascii_lowercase();
-        let _writer = self.writer.lock().unwrap();
-        let nodes = self.nodes.lock().unwrap().clone();
+        let _writer = lock(&self.writer);
+        let nodes = lock(&self.nodes).clone();
         let mut next = nodes.clone();
         let Some(node) = next.iter_mut().find(|node| node.name == name) else {
             return Ok(());
@@ -313,7 +317,7 @@ impl Inventory {
         if let Err(error) = self.write_hosts_of(&next) {
             eprintln!("write hosts.md: {error}");
         }
-        *self.nodes.lock().unwrap() = next;
+        *lock(&self.nodes) = next;
         Ok(())
     }
 }

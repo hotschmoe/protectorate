@@ -1,6 +1,6 @@
 //! Durable hub records, source shipping, and output relay for node jobs.
 //! Node execution continues independently of a client WatchJob stream.
-use super::Hub;
+use super::{lock, Hub};
 use chrono::Utc;
 use protectorate_audit::Entry as AuditEntry;
 use protectorate_auth as auth;
@@ -532,9 +532,7 @@ impl Jobs {
     }
 
     pub(super) fn active_on(&self, name: &str) -> Vec<String> {
-        self.state
-            .lock()
-            .unwrap()
+        lock(&self.state)
             .iter()
             .filter(|(_, stored)| stored.job.node == name && !terminal(&stored.job))
             .map(|(id, _)| id.clone())
@@ -544,7 +542,7 @@ impl Jobs {
     fn is_draining(&self, name: &str) -> bool {
         self.draining
             .as_ref()
-            .is_some_and(|set| set.lock().unwrap().contains(name))
+            .is_some_and(|set| lock(set).contains(name))
     }
 
     pub(super) fn uninstall_node(&self, name: &str) -> Result<v1::UninstallResponse> {
@@ -558,10 +556,7 @@ impl Jobs {
 
     /// Launches every persisted job that has not finished.
     pub(super) fn resume(self: &Arc<Self>) {
-        let resume = self
-            .state
-            .lock()
-            .unwrap()
+        let resume = lock(&self.state)
             .iter()
             .filter(|(_, s)| !terminal(&s.job))
             .map(|(id, _)| id.clone())
@@ -573,7 +568,7 @@ impl Jobs {
     }
 
     fn job_node(&self, id: &str) -> Result<String> {
-        let state = self.state.lock().unwrap();
+        let state = lock(&self.state);
         let stored = state
             .get(id)
             .ok_or_else(|| RpcError::new(Code::NotFound, "job not found"))?;
@@ -596,27 +591,22 @@ impl Jobs {
     }
 
     fn snapshot(&self, id: &str) -> Result<v1::Job> {
-        self.state
-            .lock()
-            .unwrap()
+        lock(&self.state)
             .get(id)
             .map(|s| s.job.clone())
             .ok_or_else(|| RpcError::new(Code::NotFound, "job not found"))
     }
 
     fn update(&self, id: &str, f: impl FnOnce(&mut Stored)) -> Result<v1::Job> {
-        let _writer = self.writer.lock().unwrap();
-        let mut stored = self
-            .state
-            .lock()
-            .unwrap()
+        let _writer = lock(&self.writer);
+        let mut stored = lock(&self.state)
             .get(id)
             .cloned()
             .ok_or_else(|| RpcError::new(Code::NotFound, "job not found"))?;
         f(&mut stored);
         persist(&self.root, id, &stored)?;
         let job = stored.job.clone();
-        self.state.lock().unwrap().insert(id.to_owned(), stored);
+        lock(&self.state).insert(id.to_owned(), stored);
         self.changed.notify_waiters();
         Ok(job)
     }
@@ -917,13 +907,10 @@ impl Jobs {
         if !key.is_empty() {
             validate_request_id(&key)?;
         }
-        let writer = self.writer.lock().unwrap();
-        let state = self.state.lock().unwrap();
+        let writer = lock(&self.writer);
+        let state = lock(&self.state);
         if !key.is_empty() {
-            if self
-                .canceled_request_ids
-                .lock()
-                .unwrap()
+            if lock(&self.canceled_request_ids)
                 .get(&key)
                 .is_some_and(|expires| *expires > unix_seconds())
             {
@@ -1032,7 +1019,7 @@ impl Jobs {
             let _ = fs::remove_file(self.root.join(format!("{id}.log")));
             return Err(error);
         }
-        self.state.lock().unwrap().insert(id.clone(), stored);
+        lock(&self.state).insert(id.clone(), stored);
         drop(writer);
         self.changed.notify_waiters();
         let mut run_env = BTreeMap::new();
@@ -1265,10 +1252,7 @@ impl Jobs {
                     return;
                 }
             };
-            if self
-                .state
-                .lock()
-                .unwrap()
+            if lock(&self.state)
                 .get(&id)
                 .is_some_and(|s| s.cancel_requested)
             {
@@ -1293,10 +1277,7 @@ impl Jobs {
                     return;
                 }
             }
-            if self
-                .state
-                .lock()
-                .unwrap()
+            if lock(&self.state)
                 .get(&id)
                 .is_some_and(|s| s.cancel_requested)
             {
@@ -1394,10 +1375,7 @@ impl Jobs {
                     s.job.isolation = started.isolation;
                     s.job.workspace_reused = started.workspace_reused;
                 })?;
-                let cancel = self
-                    .state
-                    .lock()
-                    .unwrap()
+                let cancel = lock(&self.state)
                     .get(id)
                     .is_some_and(|s| s.cancel_requested);
                 if cancel {
@@ -1481,7 +1459,7 @@ impl Jobs {
 
     pub(super) fn cancel(&self, id: &str) -> Result<v1::Job> {
         let done = {
-            let state = self.state.lock().unwrap();
+            let state = lock(&self.state);
             let s = state
                 .get(id)
                 .ok_or_else(|| RpcError::new(Code::NotFound, "job not found"))?;
@@ -1502,17 +1480,14 @@ impl Jobs {
 
     fn job_for_request_id_or_cancel(&self, key: &str) -> Result<String> {
         validate_request_id(key)?;
-        let _writer = self.writer.lock().unwrap();
-        if let Some((id, _)) = self
-            .state
-            .lock()
-            .unwrap()
+        let _writer = lock(&self.writer);
+        if let Some((id, _)) = lock(&self.state)
             .iter()
             .find(|(_, stored)| stored.request_id == key)
         {
             return Ok(id.clone());
         }
-        let mut canceled = self.canceled_request_ids.lock().unwrap().clone();
+        let mut canceled = lock(&self.canceled_request_ids).clone();
         let now = unix_seconds();
         canceled.retain(|_, expires| *expires > now);
         if !canceled.contains_key(key) && canceled.len() >= MAX_CANCELED_REQUEST_IDS {
@@ -1524,7 +1499,7 @@ impl Jobs {
         let expires = now + REQUEST_ID_WINDOW.as_secs() as i64;
         canceled.insert(key.to_owned(), expires);
         persist_canceled_request_ids(&self.root, &canceled)?;
-        *self.canceled_request_ids.lock().unwrap() = canceled;
+        *lock(&self.canceled_request_ids) = canceled;
         Err(RpcError::new(
             Code::NotFound,
             format!("no job for request id {key:?}; a later submit with it is refused"),
@@ -1585,11 +1560,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     return Err(RpcError::invalid("invalid limit"));
                 }
                 let limit = if limit == 0 { 50 } else { limit as usize };
-                let mut jobs = hub
-                    .jobs
-                    .state
-                    .lock()
-                    .unwrap()
+                let mut jobs = lock(&hub.jobs.state)
                     .values()
                     .filter(|s| state == 0 || s.job.state == state)
                     .map(|s| s.job.clone())
