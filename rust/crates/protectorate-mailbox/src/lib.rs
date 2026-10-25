@@ -283,7 +283,6 @@ pub struct ThreadInfo {
 
 struct Inner {
     path: PathBuf,
-    file: Option<File>,
     msgs: HashMap<String, Message>,
     order: Vec<String>,
     by_req: HashMap<String, String>,
@@ -308,6 +307,8 @@ fn delivery_pending(delivery: &Delivery) -> bool {
 /// The message store. All methods are safe for concurrent use.
 pub struct Store {
     inner: Mutex<Inner>,
+    /// Serializes writers and owns the log; held across the fsync, never taken by readers.
+    writer: Mutex<Option<File>>,
     changed: ChangeSignal,
 }
 
@@ -349,20 +350,20 @@ impl Store {
             use std::os::unix::fs::OpenOptionsExt;
             opts.mode(0o600);
         }
-        let file = opts.open(path).map_err(|e| Error::io("open mailbox", e))?;
+        let mut file = opts.open(path).map_err(|e| Error::io("open mailbox", e))?;
         let mut inner = Inner {
             path: path.to_path_buf(),
-            file: Some(file),
             msgs: HashMap::new(),
             order: Vec::new(),
             by_req: HashMap::new(),
             next_msg: 0,
             next_thr: 0,
         };
-        replay(&mut inner)?;
+        replay_file(&mut inner, &mut file)?;
         let (asynchronous, _) = watch::channel(0);
         Ok(Store {
             inner: Mutex::new(inner),
+            writer: Mutex::new(Some(file)),
             changed: ChangeSignal {
                 sync: Condvar::new(),
                 asynchronous,
@@ -376,8 +377,8 @@ impl Store {
 
     /// Closes the log. Later writes fail.
     pub fn close(&self) -> std::io::Result<()> {
-        let mut inner = self.lock();
-        match inner.file.take() {
+        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        match writer.take() {
             Some(f) => f.sync_all(),
             None => Ok(()),
         }
@@ -391,7 +392,8 @@ impl Store {
     /// request_id returns the original and created=false. A message without a
     /// thread starts a new one.
     pub fn send(&self, n: NewMessage) -> Result<SendOutcome> {
-        let mut s = self.lock();
+        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        let s = self.lock();
         if !n.request_id.is_empty() {
             if let Some(id) = s.by_req.get(&req_key(&n.from, &n.request_id)) {
                 return Ok(SendOutcome {
@@ -424,9 +426,9 @@ impl Store {
             msg.body = format!("{}\n\n{}", msg.body.trim_end_matches('\n'), f(&msg.thread));
         }
         let id = msg.id.clone();
-        commit(
-            &mut s,
-            &self.changed,
+        drop(s);
+        self.commit(
+            &mut writer,
             Record {
                 op: "send".to_string(),
                 at: msg.created,
@@ -435,7 +437,7 @@ impl Store {
             },
         )?;
         Ok(SendOutcome {
-            message: s.msgs[&id].clone(),
+            message: self.lock().msgs[&id].clone(),
             created: true,
         })
     }
@@ -443,73 +445,71 @@ impl Store {
     /// Sets the recipients of a message that had none and starts the ack timer
     /// for each recipient that cannot be injected (armed).
     pub fn resolve(&self, id: &str, rcpts: &[String], armed: &[String]) -> Result<()> {
-        let mut s = self.lock();
-        if let Some(m) = s.msgs.get(id) {
+        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(m) = self.lock().msgs.get(id) {
             if !m.recipients.is_empty() {
                 return Ok(());
             }
         }
-        op(&mut s, &self.changed, "resolve", id, "", |r| {
-            r.to = rcpts.to_vec()
-        })?;
+        self.op(&mut writer, "resolve", id, "", |r| r.to = rcpts.to_vec())?;
         for a in armed {
-            op(&mut s, &self.changed, "arm", id, a, |_| {})?;
+            self.op(&mut writer, "arm", id, a, |_| {})?;
         }
         Ok(())
     }
 
     /// Starts the ack timer of a recipient that is not injected.
     pub fn arm(&self, id: &str, rcpt: &str) -> Result<()> {
-        let mut s = self.lock();
-        if let Some(m) = s.msgs.get(id) {
+        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(m) = self.lock().msgs.get(id) {
             if m.deliveries.get(rcpt).and_then(|d| d.since).is_some() {
                 return Ok(());
             }
         }
-        op(&mut s, &self.changed, "arm", id, rcpt, |_| {})
+        self.op(&mut writer, "arm", id, rcpt, |_| {})
     }
 
     /// Records that the message was injected into rcpt's chat.
     pub fn deliver(&self, id: &str, rcpt: &str) -> Result<()> {
-        let mut s = self.lock();
-        op(&mut s, &self.changed, "deliver", id, rcpt, |_| {})
+        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        self.op(&mut writer, "deliver", id, rcpt, |_| {})
     }
 
     /// Records a second delivery of an unacked message.
     pub fn remind(&self, id: &str, rcpt: &str) -> Result<()> {
-        let mut s = self.lock();
-        op(&mut s, &self.changed, "remind", id, rcpt, |_| {})
+        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        self.op(&mut writer, "remind", id, rcpt, |_| {})
     }
 
     /// Records that an unacked message was escalated. It happens once.
     pub fn escalate(&self, id: &str) -> Result<()> {
-        let mut s = self.lock();
-        if let Some(m) = s.msgs.get(id) {
+        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(m) = self.lock().msgs.get(id) {
             if m.escalated.is_some() {
                 return Ok(());
             }
         }
-        op(&mut s, &self.changed, "escalate", id, "", |_| {})
+        self.op(&mut writer, "escalate", id, "", |_| {})
     }
 
     /// Records the note a request was filed as.
     pub fn set_note_id(&self, id: &str, note: &str) -> Result<()> {
-        let mut s = self.lock();
-        op(&mut s, &self.changed, "backlog", id, "", |r| {
+        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        self.op(&mut writer, "backlog", id, "", |r| {
             r.item = note.to_string()
         })
     }
 
     /// Marks the message acked by rcpt. changed is false if it already was.
     pub fn ack(&self, id: &str, rcpt: &str) -> Result<(Message, bool)> {
-        let mut s = self.lock();
-        if let Some(cur) = s.msgs.get(id) {
+        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cur) = self.lock().msgs.get(id) {
             if cur.deliveries.get(rcpt).and_then(|d| d.acked).is_some() {
                 return Ok((cur.clone(), false));
             }
         }
-        op(&mut s, &self.changed, "ack", id, rcpt, |_| {})?;
-        Ok((s.msgs[id].clone(), true))
+        self.op(&mut writer, "ack", id, rcpt, |_| {})?;
+        Ok((self.lock().msgs[id].clone(), true))
     }
 
     /// Returns one message.
@@ -540,30 +540,27 @@ impl Store {
         unread_only: bool,
         peek: bool,
     ) -> Result<Vec<Message>> {
-        let mut s = self.lock();
+        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
         let mut out = Vec::new();
-        let count = s.order.len();
-        let mut i = 0;
-        while i < count {
-            let skip = match s.msgs.get(&s.order[i]) {
-                None => true,
-                Some(m) => {
-                    !m.deliveries.contains_key(rcpt)
-                        || (!thread.is_empty() && m.thread != thread)
-                        || (unread_only && !m.unread(rcpt))
+        let mut unread = Vec::new();
+        {
+            let s = self.lock();
+            for id in &s.order {
+                let Some(m) = s.msgs.get(id) else { continue };
+                if !m.deliveries.contains_key(rcpt)
+                    || (!thread.is_empty() && m.thread != thread)
+                    || (unread_only && !m.unread(rcpt))
+                {
+                    continue;
                 }
-            };
-            if skip {
-                i += 1;
-                continue;
+                if !peek && m.deliveries[rcpt].read.is_none() {
+                    unread.push(id.clone());
+                }
+                out.push(m.clone());
             }
-            let c = s.msgs[&s.order[i]].clone();
-            if !peek && s.msgs[&s.order[i]].deliveries[rcpt].read.is_none() {
-                let id = s.order[i].clone();
-                op(&mut s, &self.changed, "read", &id, rcpt, |_| {})?;
-            }
-            out.push(c);
-            i += 1;
+        }
+        for id in &unread {
+            self.op(&mut writer, "read", id, rcpt, |_| {})?;
         }
         Ok(out)
     }
@@ -862,53 +859,63 @@ fn wait_scan(s: &Inner, target: &str, who: &str) -> Option<Result<Message>> {
     None
 }
 
-fn op(
-    s: &mut Inner,
-    changed: &ChangeSignal,
-    op: &str,
-    id: &str,
-    rcpt: &str,
-    extra: impl FnOnce(&mut Record),
-) -> Result<()> {
-    if !s.msgs.contains_key(id) {
-        return Err(Error::NotFound { id: id.to_string() });
-    }
-    if !rcpt.is_empty() && !s.msgs[id].deliveries.contains_key(rcpt) {
-        return Err(Error::NotRecipient {
-            rcpt: rcpt.to_string(),
+impl Store {
+    /// The caller holds the writer lock, so nothing but this path changes the
+    /// state between the check and the apply.
+    fn op(
+        &self,
+        writer: &mut Option<File>,
+        op: &str,
+        id: &str,
+        rcpt: &str,
+        extra: impl FnOnce(&mut Record),
+    ) -> Result<()> {
+        {
+            let s = self.lock();
+            if !s.msgs.contains_key(id) {
+                return Err(Error::NotFound { id: id.to_string() });
+            }
+            if !rcpt.is_empty() && !s.msgs[id].deliveries.contains_key(rcpt) {
+                return Err(Error::NotRecipient {
+                    rcpt: rcpt.to_string(),
+                    id: id.to_string(),
+                });
+            }
+        }
+        let mut rec = Record {
+            op: op.to_string(),
+            at: Utc::now(),
             id: id.to_string(),
-        });
+            rcpt: rcpt.to_string(),
+            ..Default::default()
+        };
+        extra(&mut rec);
+        self.commit(writer, rec)
     }
-    let mut rec = Record {
-        op: op.to_string(),
-        at: Utc::now(),
-        id: id.to_string(),
-        rcpt: rcpt.to_string(),
-        ..Default::default()
-    };
-    extra(&mut rec);
-    commit(s, changed, rec)
-}
 
-/// Appends rec durably and applies it. The state changes only if the write
-/// succeeded.
-fn commit(s: &mut Inner, changed: &ChangeSignal, rec: Record) -> Result<()> {
-    let mut line = serde_json::to_vec(&rec).map_err(|e| Error::corrupt(e.to_string()))?;
-    line.push(b'\n');
-    let file = match s.file.as_mut() {
-        Some(f) => f,
-        None => return Err(Error::Closed),
-    };
-    file.write_all(&line)
-        .map_err(|e| Error::io("write mailbox", e))?;
-    file.sync_all().map_err(|e| Error::io("sync mailbox", e))?;
-    apply(s, rec).map_err(|message| Error::Corrupt {
-        path: s.path.display().to_string(),
-        line: 0,
-        message,
-    })?;
-    changed.notify_all();
-    Ok(())
+    /// Appends rec durably, then applies it under the state lock. The fsync
+    /// runs with only the writer lock held, so readers never wait on it. The
+    /// state changes only if the write succeeded.
+    fn commit(&self, writer: &mut Option<File>, rec: Record) -> Result<()> {
+        let mut line = serde_json::to_vec(&rec).map_err(|e| Error::corrupt(e.to_string()))?;
+        line.push(b'\n');
+        let file = match writer.as_mut() {
+            Some(f) => f,
+            None => return Err(Error::Closed),
+        };
+        file.write_all(&line)
+            .map_err(|e| Error::io("write mailbox", e))?;
+        file.sync_all().map_err(|e| Error::io("sync mailbox", e))?;
+        let mut s = self.lock();
+        apply(&mut s, rec).map_err(|message| Error::Corrupt {
+            path: s.path.display().to_string(),
+            line: 0,
+            message,
+        })?;
+        drop(s);
+        self.changed.notify_all();
+        Ok(())
+    }
 }
 
 fn apply(s: &mut Inner, rec: Record) -> std::result::Result<(), String> {
@@ -990,16 +997,6 @@ fn apply(s: &mut Inner, rec: Record) -> std::result::Result<(), String> {
         _ => {}
     }
     Ok(())
-}
-
-fn replay(s: &mut Inner) -> Result<()> {
-    let mut file = match s.file.take() {
-        Some(f) => f,
-        None => return Err(Error::Closed),
-    };
-    let res = replay_file(s, &mut file);
-    s.file = Some(file);
-    res
 }
 
 fn replay_file(s: &mut Inner, file: &mut File) -> Result<()> {
