@@ -257,7 +257,7 @@ fn text(value: &Value) -> &str {
 }
 
 /// Every durable file in `home` parses; temp files are reported, not fatal.
-fn check_files(home: &Path) {
+fn check_files(home: &Path, live: Option<u32>) {
     for name in [
         "identity.json",
         "nodes.json",
@@ -281,6 +281,22 @@ fn check_files(home: &Path) {
             }
         }
     }
+    // Only the running hub may have a replacement in flight.
+    for dir in [home.to_path_buf(), home.join("jobs"), home.join("ca")] {
+        for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let pid = name.strip_prefix('.').and_then(|rest| {
+                let mut parts = rest.rsplitn(3, '.');
+                parts.next()?.parse::<u64>().ok()?;
+                parts.next()?.parse::<u32>().ok()
+            });
+            assert!(
+                pid.is_none_or(|pid| Some(pid) == live) && !name.starts_with(".tmp"),
+                "a dead writer's temp file survives: {}",
+                entry.path().display()
+            );
+        }
+    }
     let mailbox = fs::read(home.join("mailbox.jsonl")).unwrap_or_default();
     assert!(
         mailbox.is_empty() || mailbox.ends_with(b"\n"),
@@ -297,7 +313,7 @@ fn verify(hub: &Hub, ledger: &mut Ledger, context: &str) {
             .call(path, &body)
             .unwrap_or_else(|e| panic!("{context}: {path}: {e}"))
     };
-    check_files(&hub.home);
+    check_files(&hub.home, hub.process.as_ref().map(|p| p.0.id()));
     let log = fs::read_to_string(hub.home.parent().unwrap().join("hub.log")).unwrap_or_default();
     assert!(!log.contains("panicked"), "{context}: hub panicked: {log}");
 
@@ -471,7 +487,7 @@ fn check_backups(dir: &Path, scratch: &Path) -> usize {
             archive.display(),
             String::from_utf8_lossy(&output.stderr)
         );
-        check_files(&home);
+        check_files(&home, None);
         restored += 1;
     }
     restored
@@ -588,4 +604,97 @@ fn acknowledged_mutations_survive_hub_sigkill_at_random_points() {
     hub.stop();
     let restored = check_backups(&backups, root.path());
     eprintln!("crash_consistency: {restored} backup archives restored");
+}
+
+/// What a power cut leaves behind that SIGKILL cannot: a half-written final
+/// line in each append log, and temp files of writers that never finished.
+#[test]
+fn torn_log_tails_and_stray_temp_files_do_not_stop_the_hub() {
+    let root = tempfile::tempdir().unwrap();
+    let mut hub = Hub::start(root.path());
+    let mail = hub.call(
+        &format!("{MSG}Send"),
+        json!({"to":"owner","body":"mail body before the tear","requestId":"torn-tail-mail"}),
+    );
+    hub.call(&format!("{MSG}Ack"), json!({"id":mail["message"]["id"]}));
+    let note = hub.call(
+        &format!("{NOTE}CreateNote"),
+        json!({"title":"note before the tear","body":"kept"}),
+    );
+    hub.stop();
+
+    let append = |path: &Path, bytes: &[u8]| {
+        use std::io::Write;
+        let mut file = fs::OpenOptions::new().append(true).open(path).unwrap();
+        file.write_all(bytes).unwrap();
+    };
+    append(
+        &hub.home.join("mailbox.jsonl"),
+        br#"{"op":"send","at":"2026-10-25T00:00:00Z","msg":{"id":"m99","thr"#,
+    );
+    let audit = fs::read_dir(hub.home.join("audit"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+        .max()
+        .expect("the hub audits its own mutations");
+    append(&audit, br#"{"seq":99,"prev":"ab"#);
+    // Writers that died mid-replacement, and one whose process still lives.
+    let dead = {
+        let mut child = Command::new("true").spawn().unwrap();
+        child.wait().unwrap();
+        child.id()
+    };
+    let dead_temps = [
+        hub.home.join(format!(".identity.json.{dead}.3")),
+        hub.home.join(format!(".notes.json.{dead}.4")),
+        hub.home
+            .join("jobs")
+            .join(format!(".{dead}-job.json.{dead}.5")),
+    ];
+    for temp in &dead_temps {
+        fs::create_dir_all(temp.parent().unwrap()).unwrap();
+        fs::write(temp, br#"{"half":"written"#).unwrap();
+    }
+    let live_temp = hub
+        .home
+        .join(format!(".notes.json.{}.6", std::process::id()));
+    fs::write(&live_temp, b"a writer that is still running").unwrap();
+
+    hub.restart();
+    let thread = hub.call(
+        &format!("{MSG}Thread"),
+        json!({"threadId":mail["message"]["threadId"]}),
+    );
+    assert_eq!(thread["messages"][0]["body"], "mail body before the tear");
+    assert!(
+        !thread["messages"][0]["deliveries"][0]["ackedAt"].is_null(),
+        "{thread}"
+    );
+    hub.call(&format!("{NOTE}GetNote"), json!({"id":note["note"]["id"]}));
+    // Both logs take new records after the cut (the first audited write
+    // drops the torn audit line) and survive another restart.
+    let again = hub.call(
+        &format!("{MSG}Send"),
+        json!({"to":"owner","body":"mail body after the tear","requestId":"torn-tail-after"}),
+    );
+    hub.stop();
+    hub.restart();
+    hub.call(
+        &format!("{MSG}Thread"),
+        json!({"threadId":again["message"]["threadId"]}),
+    );
+    let audit_ok = hub.call(&format!("{AUDIT}VerifyAudit"), json!({}));
+    assert_eq!(audit_ok["ok"], true, "{audit_ok}");
+    check_files(&hub.home, Some(std::process::id()));
+
+    for temp in &dead_temps {
+        assert!(
+            !temp.exists(),
+            "a dead writer's temp file survives a restart: {}",
+            temp.display()
+        );
+    }
+    assert!(live_temp.exists(), "a live writer's temp file was removed");
 }
