@@ -10,7 +10,10 @@ make check      # fmt, clippy -D warnings, make test, flutter analyze, check-ver
 ```
 
 `make test` needs Linux with unprivileged user namespaces, tmux and git. The
-scenarios live in `rust/crates/*/tests/`. A crate with several scenario
+`protectorate-server` scenario `node_address::` also needs `unshare`, `nsenter`
+and `ip` (iproute2) and a kernel that allows veth links in an unprivileged
+network namespace; when it does not, it prints why and passes without running.
+The scenarios live in `rust/crates/*/tests/`. A crate with several scenario
 files builds them into one test binary, `e2e` (`tests/e2e.rs` declares each
 file as a module), so the hub links once per crate and the scenarios run in
 parallel threads. Libraries and binaries have no unit-test harness

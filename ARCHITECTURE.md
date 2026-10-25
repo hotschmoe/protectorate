@@ -133,9 +133,16 @@ location is not identity. Details: [install](docs/install.md#network-model),
   (`pc1.` macaroons): scoped, about one hour, renewable, attenuable offline,
   revocable by lineage. Delegated mints never exceed the minter's scopes.
 - Nodes join with a single-use code, get a certificate from the hub CA, and
-  accept only the hub's client certificate. The hub dials nodes (never the
-  reverse) on 7475 at the address the node reported. Node-initiated
-  connections are a recorded future option.
+  accept only the hub's client certificate. The hub dials nodes on 7475 at
+  the address the node reported. The one call a node makes to the hub after
+  joining is `NodeService/ReportNodeAddress`, over mutual TLS with its own
+  certificate (the hub's TLS listeners accept an optional client certificate
+  that chains to the CA; the RPC is `node_only_rpc` and admits nothing else:
+  no token, device or owner). When the machine's IP changes the node rebinds
+  to the address its route to the hub leaves from (same port), stores it in
+  `node.json` and reports it; the hub requires the reported IP to equal the
+  connection's source IP (no NAT between hub and nodes), audits the old and
+  new address and re-polls the node there.
 
 ## Sleeves
 
