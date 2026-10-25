@@ -7,9 +7,9 @@ autotests = false
 [dependencies]
 protectorate-sandbox = { path = "../protectorate-sandbox" }
 protectorate-audit = { path = "../protectorate-audit" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-libc = "0.2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+libc = { workspace = true }
 
 [[bin]]
 name = "protectorate-sleeve-runner"
@@ -22,7 +22,7 @@ path = "src/helper.rs"
 test = false
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = { workspace = true }
 
 [lib]
 test = false

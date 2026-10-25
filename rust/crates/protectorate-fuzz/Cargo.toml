@@ -25,10 +25,10 @@ protectorate-sandbox = { path = "../protectorate-sandbox" }
 protectorate-session = { path = "../protectorate-session" }
 protectorate-wire = { path = "../protectorate-wire" }
 protectorate-xfer = { path = "../protectorate-xfer" }
-flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
-serde_json = "1"
-sha2 = "0.10"
-tempfile = "3"
+flate2 = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
 
 [lib]
 test = false

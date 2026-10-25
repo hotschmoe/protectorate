@@ -6,8 +6,8 @@ edition.workspace = true
 [dependencies]
 protectorate-chatlog = { path = "../protectorate-chatlog" }
 protectorate-sandbox = { path = "../protectorate-sandbox" }
-serde_json = "1"
-getrandom = "0.2"
+serde_json = { workspace = true }
+getrandom = { workspace = true }
 
 [lib]
 test = false

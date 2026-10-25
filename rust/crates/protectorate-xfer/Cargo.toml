@@ -5,15 +5,15 @@ edition.workspace = true
 description = "Bounded verified file and directory transfers"
 
 [dependencies]
-sha2 = "0.10"
-tempfile = "3"
-flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+flate2 = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-libc = "0.2"
+libc = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem"] }
+windows-sys = { workspace = true }
 
 [lib]
 test = false

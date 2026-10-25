@@ -3,10 +3,10 @@ name = "protectorate-handoff"
 version = "0.1.0"
 edition.workspace = true
 [dependencies]
-serde_json = "1"
-chrono = { version = "0.4", default-features = false, features = ["std"] }
-cap-std = "3"
-getrandom = "0.2"
+serde_json = { workspace = true }
+chrono = { workspace = true, features = ["clock"] }
+cap-std = { workspace = true }
+getrandom = { workspace = true }
 
 [lib]
 test = false

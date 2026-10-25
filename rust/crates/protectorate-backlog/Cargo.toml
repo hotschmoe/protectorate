@@ -4,9 +4,9 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
-chrono = { version = "0.4", default-features = false, features = ["serde", "std"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+chrono = { workspace = true, features = ["clock"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
 protectorate-fsutil = { path = "../protectorate-fsutil" }
 
 [lib]

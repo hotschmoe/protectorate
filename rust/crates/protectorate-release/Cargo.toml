@@ -4,12 +4,12 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
-flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+flate2 = { workspace = true }
 protectorate-fsutil = { path = "../protectorate-fsutil" }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha2 = "0.10"
-ureq = { version = "3", default-features = false, features = ["rustls"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+ureq = { workspace = true }
 
 [lib]
 test = false

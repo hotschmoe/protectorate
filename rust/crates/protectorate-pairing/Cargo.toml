@@ -4,9 +4,9 @@ version = "0.1.0"
 edition.workspace = true
 
 [dependencies]
-qrcodegen = "1.8"
-http = "1"
-percent-encoding = "2"
+qrcodegen = { workspace = true }
+http = { workspace = true }
+percent-encoding = { workspace = true }
 
 [lib]
 test = false
