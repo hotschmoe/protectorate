@@ -6,69 +6,16 @@ use crate::support;
 
 #[cfg(unix)]
 mod unix {
-    use super::support::{bound, free_port, kill_tmux, until};
+    use super::support::{bound, free_port, kill_tmux, until, Group};
     use std::{
         fs,
-        os::unix::{fs::PermissionsExt, process::CommandExt},
+        os::unix::fs::PermissionsExt,
         path::{Path, PathBuf},
-        process::{Child, Command, ExitStatus},
+        process::Command,
+        sync::Mutex,
         thread,
         time::{Duration, Instant},
     };
-
-    #[cfg(target_os = "linux")]
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    /// A process group of its own; dropping it stops the whole tree, so a
-    /// guardian's hub child or `flutter`'s tester cannot outlive the test.
-    /// If the test binary is killed before the drop runs, the kernel sends
-    /// the leader SIGTERM, and `flutter` and the hub guardian stop their
-    /// children on it.
-    struct Group(Child);
-
-    impl Group {
-        fn spawn(command: &mut Command) -> Self {
-            // SAFETY: prctl is async-signal-safe and touches no memory.
-            unsafe {
-                command.pre_exec(|| {
-                    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                });
-            }
-            Self(command.process_group(0).spawn().unwrap())
-        }
-
-        fn alive(&mut self) -> bool {
-            self.0.try_wait().unwrap().is_none()
-        }
-
-        fn wait(&mut self, limit: Duration) -> Option<ExitStatus> {
-            let deadline = Instant::now() + limit;
-            loop {
-                if let Some(status) = self.0.try_wait().unwrap() {
-                    return Some(status);
-                }
-                if Instant::now() >= deadline {
-                    return None;
-                }
-                thread::sleep(Duration::from_millis(100));
-            }
-        }
-    }
-
-    impl Drop for Group {
-        fn drop(&mut self) {
-            let group = -(self.0.id() as i32);
-            unsafe { libc::kill(group, libc::SIGTERM) };
-            if self.wait(Duration::from_secs(15)).is_none() {
-                let _ = self.0.kill();
-            }
-            unsafe { libc::kill(group, libc::SIGKILL) };
-            let _ = self.0.wait();
-        }
-    }
 
     /// A configured hub as a service runs it, under its update guardian.
     struct Hub {
@@ -144,13 +91,37 @@ mod unix {
     /// Runs a Dart or Flutter scenario to completion. Its output goes to files,
     /// so a chatty run cannot block on a full pipe, and the deadline allows
     /// for compiling the scenario on a loaded host.
-    fn scenario(hub: &Hub, root: &Path, name: &str, command: &mut Command, limit: Duration) {
+    /// `flutter test` copies its assets into app/build/unit_test_assets before
+    /// it prints that it is loading the test, and two of them copying at once
+    /// crash the tool. Starts are taken one at a time; the tests then run
+    /// side by side.
+    static FLUTTER_STARTUP: Mutex<()> = Mutex::new(());
+
+    fn scenario(
+        hub: &Hub,
+        root: &Path,
+        name: &str,
+        command: &mut Command,
+        limit: Duration,
+        flutter: bool,
+    ) {
         let stdout = root.join(format!("{name}.stdout"));
         let stderr = root.join(format!("{name}.stderr"));
         command
             .stdout(fs::File::create(&stdout).unwrap())
             .stderr(fs::File::create(&stderr).unwrap());
+        let starting = flutter.then(|| FLUTTER_STARTUP.lock().unwrap_or_else(|e| e.into_inner()));
         let mut run = Group::spawn(command);
+        if starting.is_some() {
+            let deadline = Instant::now() + limit;
+            while run.alive()
+                && Instant::now() < deadline
+                && !fs::read_to_string(&stdout).is_ok_and(|out| out.contains("loading "))
+            {
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+        drop(starting);
         let status = run.wait(limit);
         let report = || {
             format!(
@@ -190,27 +161,21 @@ mod unix {
             app.join(".dart_tool/package_config.json").is_file(),
             "Flutter package config is required: run make app-check first"
         );
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "protectorate-flutter-invite-{}-{stamp}",
-            std::process::id()
-        ));
-        fs::create_dir(&root).unwrap();
-        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
-        eprintln!("retained node invitation fixture: {}", root.display());
+        let root = tempfile::Builder::new()
+            .prefix("protectorate-flutter-invite-")
+            .tempdir()
+            .unwrap();
+        let root = root.path();
         let token = "rust-flutter-node-invite-e2e-token";
         let hub = Hub::start(
-            &root,
+            root,
             token,
             &["--tls-listen", "127.0.0.1:0", "--node-interval", "1s"],
         );
         let bin = env!("CARGO_BIN_EXE_protectorate-rs");
         scenario(
             &hub,
-            &root,
+            root,
             "node_invite_ui_e2e",
             Command::new("flutter")
                 .args(["test", "--no-pub", "--reporter", "expanded"])
@@ -239,6 +204,7 @@ mod unix {
                 .arg("tool/node_invite_ui_e2e.dart")
                 .current_dir(&app),
             Duration::from_secs(600),
+            true,
         );
     }
 
@@ -286,6 +252,7 @@ mod unix {
                     .arg(token)
                     .current_dir(&app),
                 Duration::from_secs(300),
+                false,
             );
         }
     }
@@ -311,6 +278,7 @@ mod unix {
                 .arg(format!("tool/{name}.dart"))
                 .current_dir(&app),
             Duration::from_secs(600),
+            true,
         );
     }
 

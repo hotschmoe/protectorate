@@ -2,7 +2,7 @@
 //! are all stuck exits 70 with a diagnostic, and a process that is merely
 //! frozen for longer than the limit does not.
 #![cfg(target_os = "linux")]
-use crate::support::{binary, bound, until, Process, OWNER};
+use crate::support::{binary, bound, die_with_parent, until, Process, OWNER};
 
 use protectorate_connect_client::Client;
 use serde_json::json;
@@ -38,8 +38,7 @@ fn start(root: &Path) -> Running {
     fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
     let log = root.join("hub.log");
     let mut process = Process(
-        Command::new(binary())
-            .args(["serve", "--home"])
+        die_with_parent(Command::new(binary()).args(["serve", "--home"]))
             .arg(&home)
             .arg("--owner-token-file")
             .arg(&token)
@@ -180,8 +179,11 @@ fn watchdog_exits_a_hub_whose_runtime_is_wedged() {
         "exited after {:?}, before the limit: {log}",
         wedged.elapsed()
     );
+    // Every probe stalls at once, so whichever the watchdog reads first names
+    // the exit; the dump lists the runtime heartbeat with the rest.
+    assert!(log.contains("made no progress for"), "{log}");
     assert!(
-        log.contains("watchdog: runtime heartbeat made no progress for"),
+        log.contains("watchdog:   runtime heartbeat: last progress"),
         "{log}"
     );
     assert!(log.contains("watchdog:   thread "), "no thread dump: {log}");

@@ -13,9 +13,9 @@ use std::{
     fs,
     io::{Read, Write},
     net::TcpListener,
-    os::unix::{fs::PermissionsExt, process::CommandExt},
+    os::unix::fs::PermissionsExt,
     path::Path,
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -123,21 +123,11 @@ impl Drop for ReleaseServer {
 
 /// The guardian in its own process group, so cleanup reaches every hub child
 /// and candidate it started.
-struct Guardian(Child, String);
+struct Guardian(support::Group, String);
 
 impl Drop for Guardian {
     fn drop(&mut self) {
-        let group = -(self.0.id() as i32);
-        unsafe { libc::kill(group, libc::SIGTERM) };
-        let deadline = Instant::now() + Duration::from_secs(20);
-        while Instant::now() < deadline {
-            if self.0.try_wait().ok().flatten().is_some() {
-                break;
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
-        unsafe { libc::kill(group, libc::SIGKILL) };
-        let _ = self.0.wait();
+        self.0.stop();
         kill_tmux(&self.1);
     }
 }
@@ -272,23 +262,22 @@ fn guardian_installs_verified_releases_refuses_tampering_and_rolls_back() {
     let log = root.path().join("guardian.log");
     let tmux = format!("p-update-{}", std::process::id());
     let _guardian = Guardian(
-        Command::new(binary())
-            .args(["serve", "--home"])
-            .arg(&home)
-            .arg("--owner-token-file")
-            .arg(&token)
-            .args(["--listen", &plain, "--release-api-url", &api.base])
-            .args(["--release-repo", "owner/repo", "--release-dir"])
-            .arg(&releases)
-            .args(["--tmux-socket", &tmux])
-            .env("HOME", &user_home)
-            .env_remove("PROTECTORATE_HOME")
-            .env_remove("PROTECTORATE_HUB_GUARD_CHILD")
-            .process_group(0)
-            .stdout(Stdio::null())
-            .stderr(fs::File::create(&log).unwrap())
-            .spawn()
-            .unwrap(),
+        support::Group::spawn(
+            Command::new(binary())
+                .args(["serve", "--home"])
+                .arg(&home)
+                .arg("--owner-token-file")
+                .arg(&token)
+                .args(["--listen", &plain, "--release-api-url", &api.base])
+                .args(["--release-repo", "owner/repo", "--release-dir"])
+                .arg(&releases)
+                .args(["--tmux-socket", &tmux])
+                .env("HOME", &user_home)
+                .env_remove("PROTECTORATE_HOME")
+                .env_remove("PROTECTORATE_HUB_GUARD_CHILD")
+                .stdout(Stdio::null())
+                .stderr(fs::File::create(&log).unwrap()),
+        ),
         tmux,
     );
     let client = Client::new(&format!("http://{plain}"), OWNER, Duration::from_secs(60)).unwrap();
