@@ -16,7 +16,7 @@ use std::{
     fs, io,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Arc, Mutex, Weak,
     },
     thread,
@@ -204,6 +204,7 @@ pub struct Store {
     key: Zeroizing<Vec<u8>>,
     inner: Arc<Mutex<Inner>>,
     disk: Arc<DiskFile>,
+    device_interval: AtomicU32,
 }
 struct DiskFile {
     path: Option<PathBuf>,
@@ -290,6 +291,7 @@ impl Store {
         };
         Ok(Self {
             key,
+            device_interval: AtomicU32::new(DEVICE_INTERVAL),
             disk: Arc::new(DiskFile {
                 path,
                 writer: Mutex::new(()),
@@ -302,6 +304,15 @@ impl Store {
                 nonces: HashMap::new(),
             })),
         })
+    }
+    /// Sets the poll interval new device requests start with and slow_down
+    /// raises by; at least one second, since request times are whole seconds.
+    pub fn set_device_interval(&self, interval: Duration) {
+        let seconds = interval.as_secs().clamp(1, 60) as u32;
+        self.device_interval.store(seconds, Ordering::Relaxed);
+    }
+    fn device_interval(&self) -> u32 {
+        self.device_interval.load(Ordering::Relaxed)
     }
     pub fn open(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
@@ -502,6 +513,7 @@ impl Store {
             return invalid("the device key must be an uncompressed P-256 public key");
         }
         let secret = Secret(Zeroizing::new(hex(&random_bytes(32)?)));
+        let device_interval = self.device_interval();
         self.change(|d, _| {
             d.requests.retain(|r| now < r.request.expires);
             if d.requests.len() >= 1000
@@ -534,7 +546,7 @@ impl Store {
                     .checked_add(DEVICE_LIFETIME)
                     .ok_or_else(|| Error::Invalid("expiry overflows timestamp".into()))?,
                 status: DeviceStatus::Pending,
-                interval: DEVICE_INTERVAL,
+                interval: device_interval,
                 next_poll: None,
                 approved_at: None,
                 approved_by: String::new(),
@@ -595,6 +607,7 @@ impl Store {
     /// approved device can do still needs its private key.
     pub fn poll_device(&self, code: &str, now: i64) -> Result<DevicePoll> {
         let got = hash(code);
+        let device_interval = self.device_interval();
         self.change(|d, _| {
             let mut found = None;
             for (i, r) in d.requests.iter().enumerate() {
@@ -608,11 +621,11 @@ impl Store {
                 device: None,
             };
             let Some(i) = found else {
-                return Ok(poll(PollStatus::Expired, DEVICE_INTERVAL));
+                return Ok(poll(PollStatus::Expired, device_interval));
             };
             let r = &mut d.requests[i].request;
             if now >= r.expires {
-                return Ok(poll(PollStatus::Expired, DEVICE_INTERVAL));
+                return Ok(poll(PollStatus::Expired, device_interval));
             }
             if r.status == DeviceStatus::Consumed {
                 return Ok(poll(PollStatus::Consumed, r.interval));
@@ -621,7 +634,7 @@ impl Store {
                 return Ok(poll(PollStatus::Denied, r.interval));
             }
             if r.next_poll.is_some_and(|at| now < at) {
-                r.interval = r.interval.saturating_add(DEVICE_INTERVAL).min(300);
+                r.interval = r.interval.saturating_add(device_interval).min(300);
                 r.next_poll = Some(now.saturating_add(r.interval as i64));
                 return Ok(poll(PollStatus::SlowDown, r.interval));
             }
