@@ -27,10 +27,10 @@ pub fn write_file(path: &Path, data: &[u8], mode: u32) -> io::Result<()> {
         match OpenOptions::new().write(true).create_new(true).open(&tmp) {
             Ok(file) => break (file, tmp),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e),
+            Err(e) => return Err(context("create", &tmp, e)),
         }
     };
-    let result = (|| {
+    let result = (|| -> io::Result<()> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -48,7 +48,64 @@ pub fn write_file(path: &Path, data: &[u8], mode: u32) -> io::Result<()> {
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
     }
-    result
+    result.map_err(|e| context("write", path, e))
+}
+
+fn context(what: &str, path: &Path, error: io::Error) -> io::Error {
+    io::Error::new(error.kind(), format!("{what} {}: {error}", path.display()))
+}
+
+/// Removes temp files that `write_file` left in `dir` when its process died
+/// before the rename. A file whose process is still running is left alone.
+/// Returns how many it removed.
+pub fn remove_stale_temps(dir: &Path) -> io::Result<usize> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e),
+    };
+    let mut removed = 0;
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(pid) = temp_owner(&name.to_string_lossy()) else {
+            continue;
+        };
+        if !process_exists(pid) {
+            match fs::remove_file(entry.path()) {
+                Ok(()) => removed += 1,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
+        }
+    }
+    Ok(removed)
+}
+
+/// The process id in a name of the form `.<name>.<pid>.<counter>`.
+fn temp_owner(name: &str) -> Option<u32> {
+    let rest = name.strip_prefix('.')?;
+    let mut parts = rest.rsplitn(3, '.');
+    let counter = parts.next()?;
+    let pid = parts.next()?;
+    parts.next().filter(|base| !base.is_empty())?;
+    counter.parse::<u64>().ok()?;
+    pid.parse().ok()
+}
+
+#[cfg(unix)]
+fn process_exists(pid: u32) -> bool {
+    let Ok(pid) = libc::pid_t::try_from(pid) else {
+        return true;
+    };
+    // EPERM means the process exists under another user.
+    unsafe { libc::kill(pid, 0) == 0 || *libc::__errno_location() != libc::ESRCH }
+}
+
+/// Without a cheap liveness probe the file stays.
+#[cfg(not(unix))]
+fn process_exists(_pid: u32) -> bool {
+    true
 }
 
 /// Retry Windows sharing conflicts for up to five seconds.

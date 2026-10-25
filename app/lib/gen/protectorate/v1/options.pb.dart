@@ -32,6 +32,11 @@ class Options {
       _omitFieldNames ? '' : 'deviceAllowed',
       50005,
       $pb.PbFieldType.OB);
+  static final nodeOnlyRpc = $pb.Extension<$core.bool>(
+      _omitMessageNames ? '' : 'google.protobuf.MethodOptions',
+      _omitFieldNames ? '' : 'nodeOnlyRpc',
+      50006,
+      $pb.PbFieldType.OB);
   static final nodeLocal = $pb.Extension<$core.bool>(
       _omitMessageNames ? '' : 'google.protobuf.ServiceOptions',
       _omitFieldNames ? '' : 'nodeLocal',
@@ -46,6 +51,7 @@ class Options {
     registry.add(destructive);
     registry.add(ownerOnlyRpc);
     registry.add(deviceAllowed);
+    registry.add(nodeOnlyRpc);
     registry.add(nodeLocal);
     registry.add(ownerOnly);
   }

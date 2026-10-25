@@ -172,6 +172,34 @@ final $typed_data.Uint8List nodeSetupStageDescriptor = $convert.base64Decode(
     'ChZOT0RFX1NFVFVQX1NUQUdFX1JFQURZEAQSHgoaTk9ERV9TRVRVUF9TVEFHRV9BVFRFTlRJT0'
     '4QBSIECAMQAw==');
 
+@$core.Deprecated('Use reportNodeAddressRequestDescriptor instead')
+const ReportNodeAddressRequest$json = {
+  '1': 'ReportNodeAddressRequest',
+  '2': [
+    {'1': 'address', '3': 1, '4': 1, '5': 9, '10': 'address'},
+  ],
+};
+
+/// Descriptor for `ReportNodeAddressRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List reportNodeAddressRequestDescriptor =
+    $convert.base64Decode(
+        'ChhSZXBvcnROb2RlQWRkcmVzc1JlcXVlc3QSGAoHYWRkcmVzcxgBIAEoCVIHYWRkcmVzcw==');
+
+@$core.Deprecated('Use reportNodeAddressResponseDescriptor instead')
+const ReportNodeAddressResponse$json = {
+  '1': 'ReportNodeAddressResponse',
+  '2': [
+    {'1': 'previous_address', '3': 1, '4': 1, '5': 9, '10': 'previousAddress'},
+    {'1': 'changed', '3': 2, '4': 1, '5': 8, '10': 'changed'},
+  ],
+};
+
+/// Descriptor for `ReportNodeAddressResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List reportNodeAddressResponseDescriptor =
+    $convert.base64Decode(
+        'ChlSZXBvcnROb2RlQWRkcmVzc1Jlc3BvbnNlEikKEHByZXZpb3VzX2FkZHJlc3MYASABKAlSD3'
+        'ByZXZpb3VzQWRkcmVzcxIYCgdjaGFuZ2VkGAIgASgIUgdjaGFuZ2Vk');
+
 @$core.Deprecated('Use setNodeTierRequestDescriptor instead')
 const SetNodeTierRequest$json = {
   '1': 'SetNodeTierRequest',
@@ -1656,6 +1684,12 @@ const $core.Map<$core.String, $core.dynamic> NodeServiceBase$json = {
       '3': '.protectorate.v1.JoinNodeResponse'
     },
     {
+      '1': 'ReportNodeAddress',
+      '2': '.protectorate.v1.ReportNodeAddressRequest',
+      '3': '.protectorate.v1.ReportNodeAddressResponse',
+      '4': {}
+    },
+    {
       '1': 'WatchNodeSetup',
       '2': '.protectorate.v1.WatchNodeSetupRequest',
       '3': '.protectorate.v1.NodeSetupProgress',
@@ -1740,6 +1774,8 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
   '.protectorate.v1.InstallCommand': InstallCommand$json,
   '.protectorate.v1.JoinNodeRequest': JoinNodeRequest$json,
   '.protectorate.v1.JoinNodeResponse': JoinNodeResponse$json,
+  '.protectorate.v1.ReportNodeAddressRequest': ReportNodeAddressRequest$json,
+  '.protectorate.v1.ReportNodeAddressResponse': ReportNodeAddressResponse$json,
   '.protectorate.v1.WatchNodeSetupRequest': WatchNodeSetupRequest$json,
   '.protectorate.v1.NodeSetupProgress': NodeSetupProgress$json,
   '.protectorate.v1.PutFileRequest': PutFileRequest$json,
@@ -1767,14 +1803,16 @@ final $typed_data.Uint8List nodeServiceDescriptor = $convert.base64Decode(
     'b2RlUHJvZ3Jlc3MiCIi1GAGgtRgBMAESWwoKSW52aXRlTm9kZRIiLnByb3RlY3RvcmF0ZS52MS'
     '5JbnZpdGVOb2RlUmVxdWVzdBojLnByb3RlY3RvcmF0ZS52MS5JbnZpdGVOb2RlUmVzcG9uc2Ui'
     'BKC1GAESTwoISm9pbk5vZGUSIC5wcm90ZWN0b3JhdGUudjEuSm9pbk5vZGVSZXF1ZXN0GiEucH'
-    'JvdGVjdG9yYXRlLnYxLkpvaW5Ob2RlUmVzcG9uc2USYwoOV2F0Y2hOb2RlU2V0dXASJi5wcm90'
-    'ZWN0b3JhdGUudjEuV2F0Y2hOb2RlU2V0dXBSZXF1ZXN0GiIucHJvdGVjdG9yYXRlLnYxLk5vZG'
-    'VTZXR1cFByb2dyZXNzIgOQAgEwARJMCgdQdXRGaWxlEh8ucHJvdGVjdG9yYXRlLnYxLlB1dEZp'
-    'bGVSZXF1ZXN0GiAucHJvdGVjdG9yYXRlLnYxLlB1dEZpbGVSZXNwb25zZRJOCgdHZXRGaWxlEh'
-    '8ucHJvdGVjdG9yYXRlLnYxLkdldEZpbGVSZXF1ZXN0GiAucHJvdGVjdG9yYXRlLnYxLkdldEZp'
-    'bGVSZXNwb25zZTABEl4KC0FwcGx5VXBkYXRlEiMucHJvdGVjdG9yYXRlLnYxLkFwcGx5VXBkYX'
-    'RlUmVxdWVzdBokLnByb3RlY3RvcmF0ZS52MS5BcHBseVVwZGF0ZVJlc3BvbnNlIgSgtRgBEmEK'
-    'ClVwZGF0ZU5vZGUSIi5wcm90ZWN0b3JhdGUudjEuVXBkYXRlTm9kZVJlcXVlc3QaIy5wcm90ZW'
-    'N0b3JhdGUudjEuVXBkYXRlTm9kZVByb2dyZXNzIgigtRgBqLUYATABElMKC1NldE5vZGVUaWVy'
-    'EiMucHJvdGVjdG9yYXRlLnYxLlNldE5vZGVUaWVyUmVxdWVzdBoZLnByb3RlY3RvcmF0ZS52MS'
-    '5Ob2RlSW5mbyIEoLUYAQ==');
+    'JvdGVjdG9yYXRlLnYxLkpvaW5Ob2RlUmVzcG9uc2USdAoRUmVwb3J0Tm9kZUFkZHJlc3MSKS5w'
+    'cm90ZWN0b3JhdGUudjEuUmVwb3J0Tm9kZUFkZHJlc3NSZXF1ZXN0GioucHJvdGVjdG9yYXRlLn'
+    'YxLlJlcG9ydE5vZGVBZGRyZXNzUmVzcG9uc2UiCKC1GAGwtRgBEmMKDldhdGNoTm9kZVNldHVw'
+    'EiYucHJvdGVjdG9yYXRlLnYxLldhdGNoTm9kZVNldHVwUmVxdWVzdBoiLnByb3RlY3RvcmF0ZS'
+    '52MS5Ob2RlU2V0dXBQcm9ncmVzcyIDkAIBMAESTAoHUHV0RmlsZRIfLnByb3RlY3RvcmF0ZS52'
+    'MS5QdXRGaWxlUmVxdWVzdBogLnByb3RlY3RvcmF0ZS52MS5QdXRGaWxlUmVzcG9uc2USTgoHR2'
+    'V0RmlsZRIfLnByb3RlY3RvcmF0ZS52MS5HZXRGaWxlUmVxdWVzdBogLnByb3RlY3RvcmF0ZS52'
+    'MS5HZXRGaWxlUmVzcG9uc2UwARJeCgtBcHBseVVwZGF0ZRIjLnByb3RlY3RvcmF0ZS52MS5BcH'
+    'BseVVwZGF0ZVJlcXVlc3QaJC5wcm90ZWN0b3JhdGUudjEuQXBwbHlVcGRhdGVSZXNwb25zZSIE'
+    'oLUYARJhCgpVcGRhdGVOb2RlEiIucHJvdGVjdG9yYXRlLnYxLlVwZGF0ZU5vZGVSZXF1ZXN0Gi'
+    'MucHJvdGVjdG9yYXRlLnYxLlVwZGF0ZU5vZGVQcm9ncmVzcyIIoLUYAai1GAEwARJTCgtTZXRO'
+    'b2RlVGllchIjLnByb3RlY3RvcmF0ZS52MS5TZXROb2RlVGllclJlcXVlc3QaGS5wcm90ZWN0b3'
+    'JhdGUudjEuTm9kZUluZm8iBKC1GAE=');

@@ -134,6 +134,8 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
       $pb.ServerContext ctx, $5.InviteNodeRequest request);
   $async.Future<$5.JoinNodeResponse> joinNode(
       $pb.ServerContext ctx, $5.JoinNodeRequest request);
+  $async.Future<$5.ReportNodeAddressResponse> reportNodeAddress(
+      $pb.ServerContext ctx, $5.ReportNodeAddressRequest request);
   $async.Future<$5.NodeSetupProgress> watchNodeSetup(
       $pb.ServerContext ctx, $5.WatchNodeSetupRequest request);
   $async.Future<$5.PutFileResponse> putFile(
@@ -161,6 +163,8 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
         return $5.InviteNodeRequest();
       case 'JoinNode':
         return $5.JoinNodeRequest();
+      case 'ReportNodeAddress':
+        return $5.ReportNodeAddressRequest();
       case 'WatchNodeSetup':
         return $5.WatchNodeSetupRequest();
       case 'PutFile':
@@ -193,6 +197,8 @@ abstract class NodeServiceBase extends $pb.GeneratedService {
         return inviteNode(ctx, request as $5.InviteNodeRequest);
       case 'JoinNode':
         return joinNode(ctx, request as $5.JoinNodeRequest);
+      case 'ReportNodeAddress':
+        return reportNodeAddress(ctx, request as $5.ReportNodeAddressRequest);
       case 'WatchNodeSetup':
         return watchNodeSetup(ctx, request as $5.WatchNodeSetupRequest);
       case 'PutFile':

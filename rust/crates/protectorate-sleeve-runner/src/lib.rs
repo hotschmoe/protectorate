@@ -787,7 +787,11 @@ fn ensure_login_profile(home: &fs::File) -> io::Result<()> {
     };
     if fd >= 0 {
         let mut profile = unsafe { fs::File::from_raw_fd(fd) };
-        return profile.write_all(LOGIN_PROFILE.as_bytes());
+        return profile
+            .write_all(LOGIN_PROFILE.as_bytes())
+            .map_err(|error| {
+                io::Error::new(error.kind(), format!("write sleeve login profile: {error}"))
+            });
     }
     let error = io::Error::last_os_error();
     if error.kind() != io::ErrorKind::AlreadyExists {

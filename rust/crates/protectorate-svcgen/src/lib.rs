@@ -84,7 +84,7 @@ pub fn systemd(spec: &Spec) -> Result<String, Error> {
     } else {
         "/usr/local/bin:/usr/bin:/bin"
     };
-    let mut out = format!("[Unit]\nDescription=Protectorate {}\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\n", spec.role);
+    let mut out = format!("[Unit]\nDescription=Protectorate {}\nAfter=network-online.target\nWants=network-online.target\n# The in-process watchdog exits a hung process with status 70; never let a run of restarts leave the service stopped.\nStartLimitIntervalSec=0\n\n[Service]\n", spec.role);
     if !spec.user.is_empty() {
         out.push_str(&format!("User={}\n", spec.user));
     }

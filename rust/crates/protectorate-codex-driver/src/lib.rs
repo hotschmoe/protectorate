@@ -10,10 +10,17 @@ use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
     io::{BufRead, BufReader, Read},
-    sync::{Arc, Condvar, Mutex},
+    sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
     thread,
     time::{Duration, Instant},
 };
+
+/// The session state is independent flags, counters and maps for one chat; the
+/// hub must still be able to read, interrupt and stop the session after a
+/// panic in the reader thread, so a poisoned guard is reused.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 const MAX_LINE: usize = 8 << 20;
 const MAX_TOOL_OUTPUT: usize = 16 << 10;
@@ -166,8 +173,8 @@ impl Session {
         let waiter = Arc::clone(&session);
         thread::spawn(move || {
             let result = child.wait();
-            let _gate = waiter.event_gate.lock().unwrap();
-            let mut state = waiter.state.lock().unwrap();
+            let _gate = lock(&waiter.event_gate);
+            let mut state = lock(&waiter.state);
             state.exited = true;
             state.busy = false;
             waiter.changed.notify_all();
@@ -221,7 +228,7 @@ impl Session {
             return Err(format!("codex {method} returned an invalid thread id"));
         }
         {
-            let mut state = session.state.lock().unwrap();
+            let mut state = lock(&session.state);
             state.thread_id = id.into();
             state.model = result["model"].as_str().unwrap_or_default().into();
             state.effort = result["reasoningEffort"]
@@ -242,7 +249,7 @@ impl Session {
     }
 
     pub fn status(&self) -> Value {
-        let s = self.state.lock().unwrap();
+        let s = lock(&self.state);
         json!({"state":if s.exited {"CHAT_STATE_EXITED"} else if !s.approvals.is_empty() {"CHAT_STATE_AWAITING_APPROVAL"}
             else if s.compacting {"CHAT_STATE_COMPACTING"} else if s.busy {"CHAT_STATE_WORKING"} else {"CHAT_STATE_IDLE"},
             "harnessSessionId":s.thread_id,"model":s.model,"provider":"openai","reasoningEffort":s.effort,
@@ -250,10 +257,10 @@ impl Session {
             "settings":settings(&s)})
     }
     pub fn is_exited(&self) -> bool {
-        self.state.lock().unwrap().exited
+        lock(&self.state).exited
     }
     pub fn is_idle(&self) -> bool {
-        let s = self.state.lock().unwrap();
+        let s = lock(&self.state);
         !s.exited && !s.busy && !s.compacting && !s.selecting && s.approvals.is_empty()
     }
     pub fn stop(&self) {
@@ -262,13 +269,16 @@ impl Session {
     }
     pub fn wait_exited(&self, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
-        let mut s = self.state.lock().unwrap();
+        let mut s = lock(&self.state);
         while !s.exited {
             let remain = deadline.saturating_duration_since(Instant::now());
             if remain.is_zero() {
                 return false;
             }
-            (s, _) = self.changed.wait_timeout(s, remain).unwrap();
+            (s, _) = self
+                .changed
+                .wait_timeout(s, remain)
+                .unwrap_or_else(PoisonError::into_inner);
         }
         true
     }
@@ -276,7 +286,7 @@ impl Session {
     /// it, and only pending ids keep their replies.
     fn begin_rpc(&self, method: &str, params: Value) -> Result<u64, String> {
         let id = {
-            let mut s = self.state.lock().unwrap();
+            let mut s = lock(&self.state);
             s.next_id += 1;
             let id = s.next_id;
             s.pending.insert(id);
@@ -286,14 +296,14 @@ impl Session {
             .input
             .write(&json!({"id":id,"method":method,"params":params}))
         {
-            self.state.lock().unwrap().pending.remove(&id);
+            lock(&self.state).pending.remove(&id);
             return Err(error);
         }
         Ok(id)
     }
     fn await_rpc(&self, id: u64, timeout: Duration) -> Result<Value, String> {
         let deadline = Instant::now() + timeout;
-        let mut s = self.state.lock().unwrap();
+        let mut s = lock(&self.state);
         loop {
             if let Some(reply) = s.replies.remove(&id) {
                 s.pending.remove(&id);
@@ -315,7 +325,10 @@ impl Session {
                 self.stop();
                 return Err("codex RPC timed out".into());
             }
-            (s, _) = self.changed.wait_timeout(s, remain).unwrap();
+            (s, _) = self
+                .changed
+                .wait_timeout(s, remain)
+                .unwrap_or_else(PoisonError::into_inner);
         }
     }
     fn rpc(&self, method: &str, params: Value, timeout: Duration) -> Result<Value, String> {
@@ -327,10 +340,10 @@ impl Session {
         if text.is_empty() || text.len() > 1 << 20 {
             return Err("invalid: message must contain 1 to 1048576 bytes".into());
         }
-        let _op = self.operation.lock().unwrap();
-        let gate = self.event_gate.lock().unwrap();
+        let _op = lock(&self.operation);
+        let gate = lock(&self.event_gate);
         let (thread, turn) = {
-            let s = self.state.lock().unwrap();
+            let s = lock(&self.state);
             if s.exited {
                 return Err("codex session exited".into());
             }
@@ -363,14 +376,14 @@ impl Session {
             ("turn/start", json!({"threadId":thread,"input":input}))
         };
         let rpc_id = self.begin_rpc(method, params)?;
-        self.state.lock().unwrap().busy = true;
+        lock(&self.state).busy = true;
         let seq = self
             .log
             .append(Event::new(
                 json!({"user":{"text":text,"from":from,"requestId":request_id}}),
             ))
             .map_err(|e| {
-                self.state.lock().unwrap().pending.remove(&rpc_id);
+                lock(&self.state).pending.remove(&rpc_id);
                 self.stop();
                 e.to_string()
             })?;
@@ -382,13 +395,13 @@ impl Session {
         match result {
             Ok(result) => {
                 if let Some(id) = result["turn"]["id"].as_str() {
-                    self.state.lock().unwrap().turn_id = id.into();
+                    lock(&self.state).turn_id = id.into();
                 }
                 Ok(seq)
             }
             Err(e) => {
                 if !was_steer {
-                    self.state.lock().unwrap().busy = false;
+                    lock(&self.state).busy = false;
                     let _ = self
                         .log
                         .append(Event::new(json!({"state":{"state":"CHAT_STATE_IDLE"}})));
@@ -400,7 +413,7 @@ impl Session {
     }
     pub fn interrupt(&self) -> Result<(), String> {
         let (thread, turn) = {
-            let s = self.state.lock().unwrap();
+            let s = lock(&self.state);
             if !s.busy || s.turn_id.is_empty() || s.exited {
                 return Ok(());
             }
@@ -415,8 +428,8 @@ impl Session {
         .map(|_| ())
     }
     pub fn respond(&self, id: &str, allow: bool, _note: &str, by: &str) -> Result<(), String> {
-        let _gate = self.event_gate.lock().unwrap();
-        let approval = { self.state.lock().unwrap().approvals.get(id).cloned() }
+        let _gate = lock(&self.event_gate);
+        let approval = { lock(&self.state).approvals.get(id).cloned() }
             .ok_or("invalid: approval is not pending")?;
         let result = if approval.method == "item/permissions/requestApproval" {
             json!({"permissions":if allow {approval.params["permissions"].clone()} else {json!({})},"scope":"turn"})
@@ -425,13 +438,13 @@ impl Session {
         };
         self.input
             .write(&json!({"id":approval.rpc_id,"result":result}))?;
-        self.state.lock().unwrap().approvals.remove(id);
+        lock(&self.state).approvals.remove(id);
         self.log
             .append(Event::new(
                 json!({"approvalResolved":{"id":id,"allow":allow,"by":by}}),
             ))
             .map_err(|e| e.to_string())?;
-        if self.state.lock().unwrap().approvals.is_empty() {
+        if lock(&self.state).approvals.is_empty() {
             let _ = self
                 .log
                 .append(Event::new(json!({"state":{"state":"CHAT_STATE_WORKING"}})));
@@ -472,9 +485,9 @@ impl Session {
         requested_model: &str,
         requested_effort: &str,
     ) -> Result<Value, String> {
-        let _op = self.operation.lock().unwrap();
+        let _op = lock(&self.operation);
         {
-            let mut s = self.state.lock().unwrap();
+            let mut s = lock(&self.state);
             if s.exited {
                 return Err("codex session exited".into());
             }
@@ -485,14 +498,14 @@ impl Session {
             s.settings_confirmed = false;
         }
         let result = self.set_selection_inner(requested_model, requested_effort);
-        self.state.lock().unwrap().selecting = false;
+        lock(&self.state).selecting = false;
         self.changed.notify_all();
         result
     }
     fn set_selection_inner(&self, model: &str, effort: &str) -> Result<Value, String> {
         let models = self.catalog()?;
         let (default_model, default_effort, thread) = {
-            let s = self.state.lock().unwrap();
+            let s = lock(&self.state);
             (
                 s.default_model.clone(),
                 s.default_effort.clone(),
@@ -528,7 +541,7 @@ impl Session {
         }
         self.rpc("thread/settings/update", params, RPC_TIMEOUT)?;
         let deadline = Instant::now() + RPC_TIMEOUT;
-        let mut s = self.state.lock().unwrap();
+        let mut s = lock(&self.state);
         while !s.settings_confirmed {
             if s.exited {
                 return Err("codex exited before confirming settings".into());
@@ -539,7 +552,10 @@ impl Session {
                     "codex settings acknowledged but effective values were not confirmed".into(),
                 );
             }
-            (s, _) = self.changed.wait_timeout(s, remain).unwrap();
+            (s, _) = self
+                .changed
+                .wait_timeout(s, remain)
+                .unwrap_or_else(PoisonError::into_inner);
         }
         s.requested_model = model.into();
         s.requested_effort = effort.into();
@@ -551,9 +567,9 @@ impl Session {
         Ok(status)
     }
     pub fn compact(&self) -> Result<Value, String> {
-        let _op = self.operation.lock().unwrap();
+        let _op = lock(&self.operation);
         let thread = {
-            let mut s = self.state.lock().unwrap();
+            let mut s = lock(&self.state);
             if s.exited {
                 return Err("codex session exited".into());
             }
@@ -571,11 +587,11 @@ impl Session {
             json!({"threadId":thread}),
             RPC_TIMEOUT,
         ) {
-            self.state.lock().unwrap().compacting = false;
+            lock(&self.state).compacting = false;
             return Err(format!("codex compact: {error}"));
         }
         let deadline = Instant::now() + Duration::from_secs(120);
-        let mut s = self.state.lock().unwrap();
+        let mut s = lock(&self.state);
         loop {
             if let Some(result) = s.compaction.take() {
                 return result;
@@ -587,7 +603,10 @@ impl Session {
             if remain.is_zero() {
                 return Err("codex compaction timed out".into());
             }
-            (s, _) = self.changed.wait_timeout(s, remain).unwrap();
+            (s, _) = self
+                .changed
+                .wait_timeout(s, remain)
+                .unwrap_or_else(PoisonError::into_inner);
         }
     }
     fn read_stdout(&self, output: impl Read) {
@@ -614,7 +633,7 @@ impl Session {
         }
     }
     fn handle(&self, message: &Value) {
-        let _gate = self.event_gate.lock().unwrap();
+        let _gate = lock(&self.event_gate);
         if let Some(method) = message["method"].as_str() {
             if message.get("id").is_some() {
                 self.handle_request(message, method);
@@ -622,7 +641,7 @@ impl Session {
                 self.handle_note(method, &message["params"]);
             }
         } else if let Some(id) = message["id"].as_u64() {
-            let mut s = self.state.lock().unwrap();
+            let mut s = lock(&self.state);
             if s.pending.contains(&id) {
                 s.replies.insert(id, message.clone());
                 self.changed.notify_all();
@@ -660,7 +679,7 @@ impl Session {
             other => other.to_string(),
         };
         let summary = summary.chars().take(300).collect::<String>();
-        self.state.lock().unwrap().approvals.insert(
+        lock(&self.state).approvals.insert(
             id.clone(),
             Approval {
                 rpc_id: message["id"].clone(),
@@ -678,13 +697,13 @@ impl Session {
     }
     fn handle_note(&self, method: &str, p: &Value) {
         let thread = p["threadId"].as_str().unwrap_or_default();
-        if !thread.is_empty() && thread != self.state.lock().unwrap().thread_id {
+        if !thread.is_empty() && thread != lock(&self.state).thread_id {
             return;
         }
         match method {
             "thread/settings/updated" => {
                 if let Some(model) = p["threadSettings"]["model"].as_str() {
-                    let mut s = self.state.lock().unwrap();
+                    let mut s = lock(&self.state);
                     s.model = model.into();
                     s.effort = p["threadSettings"]["effort"]
                         .as_str()
@@ -696,7 +715,7 @@ impl Session {
             }
             "model/rerouted" => {
                 if let Some(model) = p["toModel"].as_str() {
-                    let mut s = self.state.lock().unwrap();
+                    let mut s = lock(&self.state);
                     s.model = model.into();
                     s.effort.clear();
                     let settings = settings(&s);
@@ -706,7 +725,7 @@ impl Session {
             }
             "turn/started" => {
                 if let Some(id) = p["turn"]["id"].as_str() {
-                    self.state.lock().unwrap().turn_id = id.into();
+                    lock(&self.state).turn_id = id.into();
                 }
             }
             "item/agentMessage/delta"
@@ -752,7 +771,7 @@ impl Session {
                         let _ = self.log.append(Event::new(json!({"toolResult":{"toolCallId":item["id"],"output":output,"isError":failed,"truncated":truncated}})));
                     }
                     "contextCompaction" => {
-                        let mut s = self.state.lock().unwrap();
+                        let mut s = lock(&self.state);
                         let before = s.context_tokens;
                         let after = s.compact_post;
                         s.context_tokens = after;
@@ -772,7 +791,7 @@ impl Session {
                 let input = last["inputTokens"].as_u64().unwrap_or_default();
                 let output = last["outputTokens"].as_u64().unwrap_or_default();
                 let cached = last["cachedInputTokens"].as_u64().unwrap_or_default();
-                let mut s = self.state.lock().unwrap();
+                let mut s = lock(&self.state);
                 s.compact_post = last["totalTokens"].as_u64().unwrap_or_default();
                 if input > 0 {
                     s.context_tokens = input;
@@ -789,7 +808,7 @@ impl Session {
                 }
             }
             "turn/completed" => {
-                let mut s = self.state.lock().unwrap();
+                let mut s = lock(&self.state);
                 s.turn_id.clear();
                 if s.compacting {
                     if p["turn"]["status"] == "failed" {

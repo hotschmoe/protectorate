@@ -285,17 +285,38 @@ fn http1(mut config: ServerConfig) -> Arc<ServerConfig> {
     Arc::new(config)
 }
 
-/// The hub's listener configuration. Clients authenticate with tokens, not
-/// certificates.
-pub fn hub_server_config(identity: &Identity) -> io::Result<Arc<ServerConfig>> {
+/// The hub's listener configuration. Clients authenticate with tokens or
+/// device keys; a node may also present the certificate the hub CA issued it,
+/// which authenticates only the calls a node makes about itself.
+pub fn hub_server_config(identity: &Identity, ca_pem: &[u8]) -> io::Result<Arc<ServerConfig>> {
     let key = PrivateKeyDer::from_pem_slice(identity.key_pem.as_bytes()).map_err(invalid)?;
+    let mut roots = RootCertStore::empty();
+    for cert in certs(ca_pem)? {
+        roots.add(cert).map_err(invalid)?;
+    }
+    let clients = WebPkiClientVerifier::builder_with_provider(Arc::new(roots), provider())
+        .allow_unauthenticated()
+        .build()
+        .map_err(invalid)?;
     let config = ServerConfig::builder_with_provider(provider())
         .with_safe_default_protocol_versions()
         .map_err(invalid)?
-        .with_no_client_auth()
+        .with_client_cert_verifier(clients)
         .with_single_cert(certs(identity.cert_pem.as_bytes())?, key)
         .map_err(invalid)?;
     Ok(http1(config))
+}
+
+/// Whether `cert_der` is the certificate `Ca::issue_node` issues for node
+/// `name` under enrollment `id`. The caller has already verified the chain.
+pub fn is_node_cert(cert_der: &[u8], name: &str, id: &str) -> bool {
+    let Ok(dns) = ServerName::try_from(node_name(name, id)) else {
+        return false;
+    };
+    let cert = CertificateDer::from(cert_der);
+    webpki::EndEntityCert::try_from(&cert)
+        .and_then(|cert| cert.verify_is_valid_for_subject_name(&dns))
+        .is_ok()
 }
 
 /// A node's TLS state: its certificate, replaced in place on renewal, and the

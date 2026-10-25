@@ -1,7 +1,7 @@
 //! Headless chat sleeves. Pi is the first live driver; unsupported harnesses
 //! remain explicit failures rather than shell sessions pretending to be chat.
 use super::{
-    now,
+    lock, now,
     sleeves::{stored, Launch, SpawnParent},
     EventBus, Hub,
 };
@@ -580,21 +580,14 @@ impl ChatStateWatcher {
             &mut last_publish,
         );
         if let Some(runtime) = self.runtime.upgrade() {
-            runtime
-                .accounted
-                .lock()
-                .unwrap()
-                .insert(name.clone(), self.after);
+            lock(&runtime.accounted).insert(name.clone(), self.after);
         }
         let cancelled = AtomicBool::new(false);
         let _ = self.log.watch(self.after, &cancelled, |event| {
             let Some(current) = self.runtime.upgrade() else {
                 return Err("chat runtime stopped".into());
             };
-            if !current
-                .sessions
-                .lock()
-                .unwrap()
+            if !lock(&current.sessions)
                 .get(name)
                 .is_some_and(|live| Arc::ptr_eq(live, session))
             {
@@ -608,11 +601,7 @@ impl ChatStateWatcher {
             {
                 charge_budgets(&self, &current, tokens);
             }
-            current
-                .accounted
-                .lock()
-                .unwrap()
-                .insert(name.clone(), event.seq);
+            lock(&current.accounted).insert(name.clone(), event.seq);
             let state = event.payload["state"]["state"]
                 .as_str()
                 .or_else(|| event.payload.get("user").map(|_| "CHAT_STATE_WORKING"))
@@ -639,14 +628,11 @@ impl ChatStateWatcher {
         // Nothing charges this session's usage any more; waits must not
         // block on it.
         if let Some(runtime) = self.runtime.upgrade() {
-            let replaced = runtime
-                .sessions
-                .lock()
-                .unwrap()
+            let replaced = lock(&runtime.sessions)
                 .get(name)
                 .is_some_and(|live| !Arc::ptr_eq(live, session));
             if !replaced {
-                runtime.accounted.lock().unwrap().remove(name);
+                lock(&runtime.accounted).remove(name);
             }
         }
     }
@@ -664,7 +650,7 @@ impl ChatRuntime {
         }
     }
     fn log(&self, name: &str) -> Result<Arc<Log>> {
-        let mut logs = self.logs.lock().unwrap();
+        let mut logs = lock(&self.logs);
         if let Some(log) = logs.get(name).cloned() {
             return Ok(log);
         }
@@ -688,51 +674,44 @@ impl ChatRuntime {
                 serde_json::from_str(&line).map_err(|e| log_error(LogError::Json(e)))?;
             keys.restore_event(&event, now_ms);
         }
-        self.requests.lock().unwrap().insert(name.into(), keys);
+        lock(&self.requests).insert(name.into(), keys);
         logs.insert(name.into(), Arc::clone(&log));
         Ok(log)
     }
     pub fn status(&self, hub: &Hub, name: &str) -> Option<Value> {
-        self.sessions
-            .lock()
-            .unwrap()
+        lock(&self.sessions)
             .get(name)
             .map(|session| chat_status(hub, session.as_ref()))
     }
     /// Whether the state watcher has charged every event logged so far.
     fn accounted(&self, name: &str) -> bool {
-        let accounted = self.accounted.lock().unwrap();
+        let accounted = lock(&self.accounted);
         let Some(seq) = accounted.get(name) else {
             return true;
         };
-        self.logs
-            .lock()
-            .unwrap()
+        lock(&self.logs)
             .get(name)
             .is_none_or(|log| *seq >= log.last())
     }
     pub fn exited(&self, name: &str) -> bool {
-        let stopping = self.stopping.lock().unwrap();
+        let stopping = lock(&self.stopping);
         !stopping.contains(name)
-            && self
-                .sessions
-                .lock()
-                .unwrap()
+            && lock(&self.sessions)
                 .get(name)
                 .is_some_and(|s| s.is_exited())
     }
     pub fn stop(&self, name: &str) -> Result<()> {
-        let session = self.sessions.lock().unwrap().get(name).cloned();
+        let session = lock(&self.sessions).get(name).cloned();
         if let Some(session) = session {
-            self.stopping.lock().unwrap().insert(name.to_owned());
+            lock(&self.stopping).insert(name.to_owned());
             session.stop();
             let exited = session.wait_exited(std::time::Duration::from_secs(5));
             if exited {
-                self.sessions.lock().unwrap().remove(name);
-                self.logs.lock().unwrap().remove(name);
-                self.requests.lock().unwrap().remove(name);
+                lock(&self.sessions).remove(name);
+                lock(&self.logs).remove(name);
+                lock(&self.requests).remove(name);
             }
-            self.stopping.lock().unwrap().remove(name);
+            lock(&self.stopping).remove(name);
             if !exited {
                 return Err(RpcError::new(
                     Code::Unavailable,
@@ -743,8 +722,8 @@ impl ChatRuntime {
         Ok(())
     }
     pub fn shutdown(&self) {
-        let sessions = std::mem::take(&mut *self.sessions.lock().unwrap());
-        let logs = std::mem::take(&mut *self.logs.lock().unwrap());
+        let sessions = std::mem::take(&mut *lock(&self.sessions));
+        let logs = std::mem::take(&mut *lock(&self.logs));
         for session in sessions.values() {
             session.stop();
         }
@@ -1083,7 +1062,7 @@ fn recovery_request(hub: &Hub, row: &Record) -> Launch {
 /// Resume the owner-facing Envoy after an unplanned process exit. An explicit
 /// owner kill leaves `killed` set and must not be undone by queued mail.
 pub(super) fn resume_envoy_for_mail(hub: &Hub) -> Result<bool> {
-    let _guard = hub.envoy_spawn_lock.lock().unwrap();
+    let _guard = lock(&hub.envoy_spawn_lock);
     let Ok(row) = hub.sleeves.get("envoy") else {
         return Ok(false);
     };
@@ -1190,7 +1169,7 @@ fn spawn_chat(
 ) -> Result<Record> {
     let request = &launch.request;
     let exit_after_idle = launch.exit_after_idle()?;
-    let _guard = hub.sleeve_launch_lock.lock().unwrap();
+    let _guard = lock(&hub.sleeve_launch_lock);
     let runtime = hub.chat_runtime.as_ref().ok_or_else(unavailable)?;
     let launcher = &runtime.launcher;
     let name = request.name.clone();
@@ -1201,7 +1180,7 @@ fn spawn_chat(
             "envoy is a reserved sleeve name",
         ));
     }
-    if !resleeve && hub.resleeving.lock().unwrap().contains(&name) {
+    if !resleeve && lock(&hub.resleeving).contains(&name) {
         return Err(RpcError::new(
             Code::FailedPrecondition,
             "sleeve is being resleeved",
@@ -1234,8 +1213,8 @@ fn spawn_chat(
         return Err(RpcError::new(Code::AlreadyExists, "sleeve already running"));
     }
     runtime.stop(&name)?;
-    runtime.logs.lock().unwrap().remove(&name);
-    runtime.requests.lock().unwrap().remove(&name);
+    lock(&runtime.logs).remove(&name);
+    lock(&runtime.requests).remove(&name);
     let root = launcher.state_root.join("sleeves").join(&name);
     let home = root.join("home");
     fs::create_dir_all(&home).map_err(RpcError::internal)?;
@@ -1759,11 +1738,7 @@ fn spawn_chat(
         let _ = revoke_identity(hub, &name);
         registry_error(e)
     })?;
-    runtime
-        .sessions
-        .lock()
-        .unwrap()
-        .insert(name.clone(), Arc::clone(&session));
+    lock(&runtime.sessions).insert(name.clone(), Arc::clone(&session));
     hub.emit(
         "sleeve.spawned",
         &name,
@@ -1850,7 +1825,7 @@ fn charge_budgets(watcher: &ChatStateWatcher, runtime: &ChatRuntime, tokens: u64
         let state = if budget == 0 {
             None
         } else if crossed(100) {
-            if let Some(session) = runtime.sessions.lock().unwrap().get(&name).cloned() {
+            if let Some(session) = lock(&runtime.sessions).get(&name).cloned() {
                 let _ = session.interrupt();
             }
             Some((
@@ -1955,10 +1930,10 @@ fn reap_idle(
         else {
             continue;
         };
-        if limit.is_zero() || hub.resleeving.lock().unwrap().contains(&row.name) {
+        if limit.is_zero() || lock(&hub.resleeving).contains(&row.name) {
             continue;
         }
-        let session = runtime.sessions.lock().unwrap().get(&row.name).cloned();
+        let session = lock(&runtime.sessions).get(&row.name).cloned();
         let Some(session) = session else { continue };
         if !session.is_idle()
             || pending
@@ -1977,16 +1952,13 @@ fn reap_idle(
             next.insert(row.name.clone(), (row.created_at, since));
             continue;
         }
-        let _launch = hub.sleeve_launch_lock.lock().unwrap();
-        let busy = hub.resleeving.lock().unwrap();
+        let _launch = lock(&hub.sleeve_launch_lock);
+        let busy = lock(&hub.resleeving);
         let still_idle = !busy.contains(&row.name)
             && hub.sleeves.get(&row.name).is_ok_and(|current| {
                 current.state == State::Running && current.created_at == row.created_at
             })
-            && runtime
-                .sessions
-                .lock()
-                .unwrap()
+            && lock(&runtime.sessions)
                 .get(&row.name)
                 .is_some_and(|current| current.is_idle())
             && hub.mail.pending().get(&row.name).is_none_or(Vec::is_empty);
@@ -2013,7 +1985,7 @@ fn send_inner(
     actor: &str,
     require_idle: bool,
 ) -> Result<u64> {
-    let resleeving = hub.resleeving.lock().unwrap();
+    let resleeving = lock(&hub.resleeving);
     if resleeving.contains(name) {
         return Err(RpcError::new(
             Code::FailedPrecondition,
@@ -2038,7 +2010,7 @@ fn send_inner(
     }
     let runtime = hub.chat_runtime.as_ref().ok_or_else(unavailable)?;
     let _ = runtime.log(name)?;
-    let mut requests = runtime.requests.lock().unwrap();
+    let mut requests = lock(&runtime.requests);
     let keys = requests.entry(name.to_owned()).or_default();
     keys.sweep(request_now_ms());
     if !request_id.is_empty() {
@@ -2057,10 +2029,7 @@ fn send_inner(
             ));
         }
     }
-    let session = runtime
-        .sessions
-        .lock()
-        .unwrap()
+    let session = lock(&runtime.sessions)
         .get(name)
         .cloned()
         .ok_or_else(|| RpcError::new(Code::Unavailable, "chat process is unavailable"))?;
@@ -2114,7 +2083,7 @@ pub(super) fn chat_idle(hub: &Hub, name: &str) -> bool {
     }
     hub.chat_runtime
         .as_ref()
-        .and_then(|runtime| runtime.sessions.lock().unwrap().get(name).cloned())
+        .and_then(|runtime| lock(&runtime.sessions).get(name).cloned())
         .is_some_and(|session| session.is_idle())
 }
 
@@ -2180,7 +2149,7 @@ fn interrupt(hub: &Hub, name: &str) -> Result<()> {
     if row.mode != Mode::Chat {
         return Err(RpcError::new(Code::FailedPrecondition, "not a chat sleeve"));
     }
-    if let Some(session) = runtime.sessions.lock().unwrap().get(name) {
+    if let Some(session) = lock(&runtime.sessions).get(name) {
         session
             .interrupt()
             .map_err(|e| RpcError::new(Code::Unavailable, e))?;
@@ -2213,7 +2182,7 @@ fn live_session(hub: &Hub, name: &str) -> Result<Arc<dyn ChatSession>> {
         ));
     }
     let runtime = hub.chat_runtime.as_ref().ok_or_else(unavailable)?;
-    let session = runtime.sessions.lock().unwrap().get(name).cloned();
+    let session = lock(&runtime.sessions).get(name).cloned();
     session.ok_or_else(|| RpcError::new(Code::Unavailable, "chat process is unavailable"))
 }
 fn driver_error(error: String) -> RpcError {
@@ -2559,7 +2528,7 @@ fn report(hub: &Hub, actor: &str, request: &v1::ReportRequest) -> Result<(v1::Sl
         ));
     }
     let runtime = hub.chat_runtime.as_ref().ok_or_else(unavailable)?;
-    let _request_guard = runtime.requests.lock().unwrap();
+    let _request_guard = lock(&runtime.requests);
     let row = hub.sleeves.get(self_name).map_err(registry_error)?;
     let path = runtime
         .launcher

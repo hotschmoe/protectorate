@@ -1596,6 +1596,103 @@ Only one release binary existed on disk: `target/release/protectorate-rs-termux`
 
 Shelving them drops these 9 packages: `protectorate-desk-node`, `protectorate-desk-policy`, `chrono-tz`, `phf`, `phf_shared`, `siphasher`, `png`, `fdeflate` and `miniz_oxide 0.8`. That also removes a duplicate `miniz_oxide` version. Total about 1,839 lines of Rust. The Windows-specific code in `desk-node/src/windows.rs` would go too.
 
+### A.13 Rust TUI versus Flutter for the client (2026-10-25)
+
+Marks: [V] verified in the repo, on crates.io/npm/GitHub or by a scratch build; [J] judgment.
+
+| Option | Terminal / SSH | Web | Android | No Dart codegen | Migration | Risk |
+|---|---|---|---|---|---|---|
+| (a) ratatui `protectorate tui` in the CLI, served to browsers through the hub; Flutter cut to an Android-only app | Excellent | Good on desktop browsers, poor on phones | Flutter (smaller) | No, while Flutter stays | 7-11k Rust lines; Flutter 18.3k to 7-8k Dart | Low-medium |
+| (b) One Rust GUI everywhere (Slint, egui, Dioxus, Makepad, Tauri) | Still needs a TUI | egui, Dioxus good; Slint weak | All have open Android IME/input bugs | Yes | Rewrite ~18k Dart lines plus a terminal widget | High |
+| (c) Flutter only | CLI only | Works (~4 MB gzipped) | Works | No | None | Lowest; no terminal-native UI |
+
+Recommendation: (a), staged, starting with a 1-2 day spike. [V] The CLI
+already has the device-key credential, the blocking Connect client with
+server streaming, the terminal WebSocket client and ~2.3k lines of formatting
+helpers. [J] No Rust GUI is trustworthy yet for Android text input, the one
+place a chat app must type well.
+
+What a UI covers [V]: app/lib outside gen is 18,291 Dart lines in 60 files
+(gen 44,232), 77 lines of Kotlin (Keystore and browser channels), 1,210 lines
+of Dart e2e drivers. Desktop/web shell: overview, sleeves and chat,
+terminals, nodes, quota, mail, notes, devices, audit, hubs, history,
+sessions, Envoy, pairing with QR, update cards, approval banners. Android:
+ENVOY, QUOTAS, NODES, DEVICES, emergency stop; no notifications or background
+service. Terminals use xterm2 over `/ws/terminal/{name}` (0x30 data, 0x31
+resize; browser proof in the subprotocol). Auth is a P-256 proof per request,
+keys in the Android Keystore, a non-extractable WebCrypto key, or a 0600 CLI
+key file. docs/design.md says the UI is "a graphical instrument, not a
+console" with painted meters; [J] a TUI means a character-cell VFD look.
+
+Terminal TUI: [V] ratatui 0.30.2 (split crates, crossterm 0.29), tachyonfx,
+ratatui-image, ratatui-textarea 0.9.3; cursive has had no release since
+2024-08. vt100 0.18.1, tui-term 0.3.4 (pins vt100 0.16), alacritty_terminal
+0.26. A ratatui + tui-term spike driven in a private tmux server
+(send-keys / capture-pane) rendered emoji and CJK at the right widths;
+release binary 620 KB stripped, 45 packages new to the workspace lock.
+ratatui grapheme-width issues remain open (#2826). [J] Chat log, compose box,
+sidebars and tables fit ratatui well; clipboard over SSH needs OSC 52;
+terminal sleeves are simplest as a tmux split running `sleeve attach`, with
+no VT emulation of our own; do not depend on images inside tmux.
+
+Web: (W1) Ratzilla 0.3.1 runs ratatui in the browser (DOM, canvas, WebGL2
+via beamterm). [V] Input is one keydown listener: no composition, input or
+paste events; issue #192 loses input after resize. WebGL2 hello is ~1.1 MB
+gzipped vs Flutter web ~4 MB. [J] Unusable for typing on Android browsers
+(Gboard sends "Unidentified"); needs a fetch-based Connect client and
+splitting protectorate-wire off axum/tokio. (W2) Server-side: the hub
+already serves the terminal WebSocket; a browser page with xterm.js 6.0 or
+ghostty-web 0.4 (Coder, MIT, ~400 KB wasm, Android PRs merged 2025-12) shows
+`protectorate tui` running on the hub. [J] Cheapest path (~300-500 lines of
+page), but the TUI on the hub needs its own credential: an owner host
+session grants nothing new (devices can already open host terminals) yet
+loses per-device audit attribution and device-only approvals; the clean fix,
+a device-session credential minted at attach, is an auth change that needs
+its own review. Phone keyboards inherit xterm.js issues (#3600, #5377).
+(W3) egui/eframe 0.37 to wasm: mobile keyboard work merged in 2026; canvas
+accessibility; fits only (b).
+
+Rust GUI with Android [V]: Slint 1.18.1 (Android IME PRs #14216/#14289 open,
+royalty-free license needs an AboutSlint badge), egui 0.37 (#5590 keyboard
+not opening, open), Dioxus 0.7.10 (WebView by default, #5786 open; team
+joined Cognition 2026-09), Tauri 2.12.5 (WebView, JS or wasm frontend), Makepad
+1.0, Freya 0.4.3, Iced 0.14 and Xilem 0.4 (experimental on Android). No crate
+does non-exportable Keystore signing; [J] every option repeats today's ~40
+lines of Kotlin through jni. APKs land near Flutter's size. Verdict [J]:
+too risky to drop Flutter on Android now.
+
+Gains of (a) [J]: manage everything from any terminal (SSH, hub console,
+tmux); native and web paths use protectorate-wire types directly; TUI e2e
+fits the policy (private tmux, send-keys, capture-pane, verified by the
+spike) and is faster than flutter test; ~620 KB in the CLI binary. Losses:
+Dart codegen, check-gen and flutter analyze stay while Android stays; the
+painted look goes; phone browsers get worse than Flutter web; two UIs to
+keep in step.
+
+Plan: Stage 0 spike in a worktree: `protectorate tui` with live sleeve list,
+one chat view (watch stream, compose, send), quota panel, approval banner;
+terminal sleeves via tmux split; one real-binary tmux e2e; measure deps,
+size, SSH/tmux behavior, emoji/Markdown in harness output; try it in desktop
+Chrome and on the phone through the existing terminal page. Stage 1: parity
+for overview, sleeves/chat, nodes, quota, mail, notes, devices, audit;
+decide the web credential; ship a minimal xterm.js or ghostty-web page.
+Stage 2: cut Flutter to the Android subset (deletion needs approval),
+retire Flutter web and desktop, rewrite design.md. Revisit (b) in 6-12
+months (Slint Android IME, egui #5590).
+
+Sources: github.com/ratatui/ratatui (releases, #2826, #2790),
+github.com/ratatui/ratzilla (#192), crates.io (ratatui-textarea, tui-term,
+vt100, alacritty_terminal, ratatui-image, egui_ratatui, jni,
+android-keyring, tauri-plugin-biometric, tauri-plugin-notification),
+github.com/coder/ghostty-web (#110), npmjs.com/package/@xterm/xterm,
+github.com/xtermjs/xterm.js (#3600, #5377), github.com/emilk/egui (#5590,
+#8068, #8358), github.com/rust-windowing/winit (#4736),
+docs.slint.dev (Android guide), slint.dev/pricing, github.com/slint-ui/slint
+(#14216, #9240, royalty-free license), dioxuslabs.com (0.7 mobile guide),
+github.com/DioxusLabs/dioxus (#5786), unite.ai (Dioxus team and Cognition),
+github.com/iced-rs/iced, github.com/linebender/xilem,
+github.com/marc2332/freya, github.com/makepad/makepad.
+
 ## Appendix B: references
 
 External:

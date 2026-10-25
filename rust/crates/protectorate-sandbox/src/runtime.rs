@@ -22,10 +22,16 @@ use std::{
     process::{Child, Command, Output, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc, Mutex,
+        mpsc, Arc, Mutex, MutexGuard, PoisonError,
     },
     time::Duration,
 };
+
+/// The kill gate guards `()` (the `alive` atomic carries the state) and the
+/// spawner slot is a single assignment, so a poisoned guard is safe to reuse.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
 const HELPER_FLAG: &str = "--internal-protectorate-sandbox-v1";
 const CONTROL_FD: RawFd = 3;
 const MAX_PLAN_BYTES: usize = 4 << 20;
@@ -341,7 +347,7 @@ impl KillHandle {
             return;
         }
         if self.host_direct {
-            let _gate = self.kill_gate.lock().unwrap();
+            let _gate = lock(&self.kill_gate);
             if !self.alive.load(Ordering::Acquire) {
                 return;
             }
@@ -369,7 +375,7 @@ impl KillHandle {
                 .stderr(Stdio::null())
                 .status();
         }
-        let _gate = self.kill_gate.lock().unwrap();
+        let _gate = lock(&self.kill_gate);
         if self.pid > 0 && self.alive.load(Ordering::Acquire) {
             // SAFETY: the helper starts in its own session and process group,
             // and `alive` is cleared under the gate before it is reaped.
@@ -433,7 +439,7 @@ impl ChildHandle {
         if self.host_direct {
             self.kill_handle_for(child.id()).kill();
         }
-        let _gate = self.kill_gate.lock().unwrap();
+        let _gate = lock(&self.kill_gate);
         self.alive.store(false, Ordering::Release);
         child.wait().map_err(ioerr("wait sandbox"))
     }
@@ -497,7 +503,7 @@ fn spawn_from_lasting_thread(command: Command) -> io::Result<Child> {
     type Request = (Command, mpsc::SyncSender<io::Result<Child>>);
     static SPAWNER: Mutex<Option<mpsc::Sender<Request>>> = Mutex::new(None);
     let sender = {
-        let mut spawner = SPAWNER.lock().unwrap();
+        let mut spawner = lock(&SPAWNER);
         match &*spawner {
             Some(sender) => sender.clone(),
             None => {

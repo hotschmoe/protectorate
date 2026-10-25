@@ -10,9 +10,15 @@ use protectorate_wire::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::{Duration, Instant, SystemTime},
 };
+
+/// Everything guarded here is a health cache, a callback slot or a serialising
+/// token, rebuilt by the next poll, so a poisoned guard is safe to reuse.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 const BUSY_VRAM_FRACTION: f64 = 0.5;
 const BUSY_UTIL: f64 = 60.0;
@@ -44,7 +50,7 @@ pub struct Dialer(Mutex<Option<NodeTls>>);
 
 impl Dialer {
     pub fn set(&self, tls: NodeTls) {
-        *self.0.lock().unwrap() = Some(tls);
+        *lock(&self.0) = Some(tls);
     }
 
     pub fn client(&self, node: &Node, timeout: Duration) -> Result<Client, RpcError> {
@@ -71,10 +77,9 @@ impl Dialer {
         if node.cert_id.is_empty() {
             return Client::new_node("", &address, None, timeout);
         }
-        let tls =
-            self.0.lock().unwrap().clone().ok_or_else(|| {
-                RpcError::new(Code::Unavailable, "the hub has no node certificate")
-            })?;
+        let tls = lock(&self.0)
+            .clone()
+            .ok_or_else(|| RpcError::new(Code::Unavailable, "the hub has no node certificate"))?;
         Client::new_node(
             &protectorate_tls::node_name(&node.name, &node.cert_id),
             &address,
@@ -197,18 +202,18 @@ impl Monitor {
     }
 
     pub fn set_event_sink(&self, sink: PollSink) {
-        *self.events.lock().unwrap() = Some(sink);
+        *lock(&self.events) = Some(sink);
     }
 
     /// Drops cached health when an inventory record is edited.
     pub fn invalidate(&self, name: &str) {
-        self.state.lock().unwrap().remove(name);
+        lock(&self.state).remove(name);
     }
 
     /// Polls the local collector and every inventory node. The hub launches
     /// this on a blocking worker, before each scheduled interval.
     pub fn poll_all(&self) {
-        let _guard = self.poll_lock.lock().unwrap();
+        let _guard = lock(&self.poll_lock);
         let nodes = self.inventory.list();
         self.poll_local();
         for group in nodes.chunks(POLL_CONCURRENCY) {
@@ -219,15 +224,13 @@ impl Monitor {
             });
         }
         let current: HashSet<_> = nodes.iter().map(|n| n.name.as_str()).collect();
-        self.state
-            .lock()
-            .unwrap()
+        lock(&self.state)
             .retain(|name, _| name == &self.local_name || current.contains(name.as_str()));
     }
 
     /// Polls a just-added node without waiting for the next full round.
     pub fn poll_node(&self, name: &str) {
-        let _guard = self.poll_lock.lock().unwrap();
+        let _guard = lock(&self.poll_lock);
         if name == self.local_name {
             self.poll_local();
         } else if let Ok(node) = self.inventory.get(name) {
@@ -294,7 +297,7 @@ impl Monitor {
         joined: bool,
         result: Result<v1::NodeMetrics, String>,
     ) {
-        let mut states = self.state.lock().unwrap();
+        let mut states = lock(&self.state);
         let state = states.entry(name.to_owned()).or_default();
         if state.address != address {
             *state = State {
@@ -345,7 +348,7 @@ impl Monitor {
     }
 
     fn publish(&self, kind: &'static str, name: &str, address: &str) {
-        let sink = self.events.lock().unwrap().clone();
+        let sink = lock(&self.events).clone();
         if let Some(sink) = sink {
             sink(PollEvent {
                 kind,
@@ -364,7 +367,7 @@ impl Monitor {
                 ..Default::default()
             };
         }
-        let states = self.state.lock().unwrap();
+        let states = lock(&self.state);
         let state = states.get(name).filter(|state| state.address == address);
         let Some(state) = state.filter(|state| state.attempted) else {
             return v1::NodeStatus {
@@ -416,7 +419,7 @@ impl Monitor {
     }
 
     pub fn is_fresh(&self, name: &str, address: &str) -> bool {
-        let states = self.state.lock().unwrap();
+        let states = lock(&self.state);
         states.get(name).is_some_and(|state| {
             state.address == address
                 && state.last_error.is_empty()

@@ -12,9 +12,15 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+/// The lock only serialises marker transitions; the marker itself lives on
+/// disk, so a poisoned guard is safe to reuse.
+fn lock(m: &Mutex<()>) -> MutexGuard<'_, ()> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 const TRIAL: Duration = Duration::from_secs(4 * 60);
 const VERSION_TIMEOUT: Duration = Duration::from_secs(15);
@@ -266,7 +272,7 @@ impl Updater {
     /// Called before accepting requests. An unconfirmed second start restores
     /// the last binary. The first trial start arms a deadline watchdog.
     pub fn start(self: &Arc<Self>) -> io::Result<bool> {
-        let _guard = self.lock.lock().unwrap();
+        let _guard = lock(&self.lock);
         let Some(mut marker) = self.load()? else {
             return Ok(false);
         };
@@ -308,7 +314,7 @@ impl Updater {
             )
             .await;
             if let Some(updater) = weak.upgrade() {
-                let _guard = updater.lock.lock().unwrap();
+                let _guard = lock(&updater.lock);
                 match updater.load() {
                     Ok(Some(mut current))
                         if current.phase == "trial"
@@ -330,7 +336,7 @@ impl Updater {
     }
 
     pub fn touch(&self, reported_version: &str) -> io::Result<()> {
-        let _guard = self.lock.lock().unwrap();
+        let _guard = lock(&self.lock);
         if reported_version != self.version {
             return Ok(());
         }
@@ -348,7 +354,7 @@ impl Updater {
     }
 
     pub fn state(&self) -> io::Result<Option<v1::NodeUpdateState>> {
-        let _guard = self.lock.lock().unwrap();
+        let _guard = lock(&self.lock);
         Ok(self.load()?.map(|marker| v1::NodeUpdateState {
             phase: marker.phase,
             previous_version: marker.from,
@@ -377,7 +383,7 @@ impl Updater {
         &self,
         body: &v1::ApplyUpdateRequest,
     ) -> Result<v1::ApplyUpdateResponse, RpcError> {
-        let _guard = self.lock.lock().unwrap();
+        let _guard = lock(&self.lock);
         if self
             .load()
             .map_err(RpcError::internal)?

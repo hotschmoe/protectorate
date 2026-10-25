@@ -84,6 +84,7 @@ impl Code {
         }
     }
 }
+const PANIC_PREFIX: &str = "internal panic: ";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RpcError {
     pub code: Code,
@@ -110,6 +111,29 @@ impl RpcError {
     }
     pub fn internal(error: impl std::fmt::Display) -> Self {
         Self::new(Code::Internal, error.to_string())
+    }
+    /// A handler or task panicked and unwinding turned it into this error.
+    pub fn panicked(what: impl std::fmt::Display) -> Self {
+        Self::new(Code::Internal, format!("{PANIC_PREFIX}{what}"))
+    }
+    pub fn is_panic(&self) -> bool {
+        self.code == Code::Internal && self.message.starts_with(PANIC_PREFIX)
+    }
+    /// Converts a failed spawned task. A panic is logged here with its message,
+    /// so the service staying up is never silent; the caller, who may be a
+    /// sleeve, gets only that a task panicked.
+    pub fn from_join(error: tokio::task::JoinError) -> Self {
+        if !error.is_panic() {
+            return Self::new(Code::Internal, error.to_string());
+        }
+        let payload = error.into_panic();
+        let text = payload
+            .downcast_ref::<&str>()
+            .map(|text| (*text).to_owned())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "non-string panic payload".to_owned());
+        eprintln!("spawned task panicked, answered as an internal error: {text}");
+        Self::panicked("spawned task")
     }
     fn status(mut self, status: StatusCode) -> Self {
         self.status = Some(status);
@@ -289,6 +313,8 @@ pub struct Method {
     pub read_only: bool,
     pub owner_only: bool,
     pub device_allowed: bool,
+    /// Callable only by a joined node, authenticated by its client certificate.
+    pub node_only: bool,
     pub node_local: bool,
     pub destructive: bool,
     pub client_streaming: bool,
@@ -391,6 +417,7 @@ impl Catalog {
                     owner_only: extension(&service_options, "owner_only")
                         || extension(&options, "owner_only_rpc"),
                     device_allowed: extension(&options, "device_allowed"),
+                    node_only: extension(&options, "node_only_rpc"),
                     node_local: extension(&service_options, "node_local"),
                     destructive: extension(&options, "destructive"),
                     client_streaming: descriptor.is_client_streaming(),
@@ -431,10 +458,13 @@ pub struct AuthContext {
 /// The transport peer, inserted as a request extension by the listener and
 /// never taken from a header. `tls` is false only on the hub's loopback
 /// listener.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Peer {
     pub addr: SocketAddr,
     pub tls: bool,
+    /// The DER client certificate the TLS handshake verified against the hub
+    /// CA, when the peer presented one.
+    pub client_cert: Option<Arc<[u8]>>,
 }
 /// An admission failure, with whatever identity was established before it.
 #[derive(Clone, Debug)]
@@ -624,6 +654,8 @@ impl Drop for CompletionGuard {
                 .is_some_and(|expired| expired.load(Ordering::SeqCst))
             {
                 RpcError::new(Code::DeadlineExceeded, "stream deadline exceeded")
+            } else if std::thread::panicking() {
+                RpcError::panicked("handler future")
             } else {
                 RpcError::new(
                     Code::Canceled,
@@ -1010,12 +1042,12 @@ async fn dispatch_inner(
             .status(StatusCode::UNSUPPORTED_MEDIA_TYPE),
         ));
     }
-    let peer = request.extensions().get::<Peer>().copied();
+    let peer = request.extensions().get::<Peer>().cloned();
     let admission = match &server.authorize {
         Admission::Headers(authorize) => {
             authorize(&method, request.headers()).map_err(Box::<Denied>::from)
         }
-        Admission::Peer(authorize) => authorize(&method, request.headers(), peer),
+        Admission::Peer(authorize) => authorize(&method, request.headers(), peer.clone()),
     };
     let auth = match admission {
         Ok(auth) => auth,

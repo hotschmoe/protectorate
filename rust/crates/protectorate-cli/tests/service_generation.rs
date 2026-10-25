@@ -51,6 +51,13 @@ fn systemd_generation_uses_sibling_rust_server_and_keeps_serve_flags() {
         "{unit}"
     );
     assert!(!unit.contains("protectorate hub serve"), "{unit}");
+    for key in [
+        "Restart=on-failure\n",
+        "RestartSec=5\n",
+        "StartLimitIntervalSec=0\n",
+    ] {
+        assert!(unit.contains(key), "unit lacks {key:?}: {unit}");
+    }
 }
 
 #[test]

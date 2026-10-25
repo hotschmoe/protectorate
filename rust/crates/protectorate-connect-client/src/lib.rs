@@ -247,6 +247,34 @@ impl Client {
             catalog: Catalog::embedded()?,
         })
     }
+    /// A node-to-hub client: `base` is the hub's HTTPS URL, trusted through
+    /// the hub CA, and the node's own certificate is presented as the client
+    /// certificate. It is the only credential: it admits the calls a node
+    /// makes about itself.
+    pub fn new_for_node(base: &str, tls: &NodeTls, timeout: Duration) -> Result<Self> {
+        let base = base.trim_end_matches('/');
+        if !base.starts_with("https://") || !valid_endpoint(base) {
+            return Err(RpcError::invalid("a node reaches its hub over HTTPS"));
+        }
+        let config = ureq::Agent::config_builder()
+            .http_status_as_error(false)
+            .max_redirects(0)
+            .max_redirects_will_error(false)
+            .timeout_global(Some(timeout))
+            .tls_config(
+                ureq::tls::TlsConfig::builder()
+                    .root_certs(ureq::tls::RootCerts::new_with_certs(&tls.roots.0))
+                    .client_cert(Some(tls.identity.clone()))
+                    .build(),
+            );
+        Ok(Self {
+            base: base.into(),
+            credential: Credential::Transport,
+            dial: None,
+            agent: config.build().into(),
+            catalog: Catalog::embedded()?,
+        })
+    }
     pub fn new(base: &str, token: impl Into<String>, timeout: Duration) -> Result<Self> {
         if let Ok(pem) = std::env::var("PROTECTORATE_TLS_CA_PEM") {
             if pem.len() > 16 * 1024 {

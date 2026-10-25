@@ -1,4 +1,4 @@
-use super::Hub;
+use super::{lock, Hub};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use protectorate_fsutil::{hex, random_hex, unix_millis, unix_seconds};
 use protectorate_inventory::{Error, Node, CARE, SHARED};
@@ -87,7 +87,7 @@ struct Drain<'a> {
 }
 impl Drop for Drain<'_> {
     fn drop(&mut self) {
-        self.hub.node_draining.lock().unwrap().remove(&self.name);
+        lock(&self.hub.node_draining).remove(&self.name);
     }
 }
 
@@ -96,7 +96,7 @@ fn start_drain<'a>(hub: &'a Hub, name: &str) -> Result<Drain<'a>> {
         .node_admission
         .write()
         .unwrap_or_else(|error| error.into_inner());
-    let mut draining = hub.node_draining.lock().unwrap();
+    let mut draining = lock(&hub.node_draining);
     if !draining.insert(name.to_owned()) {
         return Err(RpcError::new(
             Code::FailedPrecondition,
@@ -155,7 +155,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 let draining = Arc::clone(&hub.node_draining);
                 let node = tokio::task::spawn_blocking(move || {
                     let _admission = admission.read().unwrap_or_else(|error| error.into_inner());
-                    if draining.lock().unwrap().contains(&node.name) {
+                    if lock(&draining).contains(&node.name) {
                         return Err(RpcError::new(
                             Code::FailedPrecondition,
                             "node is being removed",
@@ -187,6 +187,14 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
         let hub = Arc::clone(&join);
         async move { join_node(hub, call.request).await }
     })?;
+    let report = Arc::clone(&hub);
+    server.unary(
+        node_service::REPORT_NODE_ADDRESS,
+        move |call: Call<v1::ReportNodeAddressRequest>| {
+            let hub = Arc::clone(&report);
+            async move { report_address(hub, call).await }
+        },
+    )?;
     let set_tier = Arc::clone(&hub);
     server.unary(
         node_service::SET_NODE_TIER,
@@ -213,7 +221,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 let name_for_store = name.clone();
                 let node = tokio::task::spawn_blocking(move || {
                     let _admission = admission.read().unwrap_or_else(|error| error.into_inner());
-                    if draining.lock().unwrap().contains(&name_for_store) {
+                    if lock(&draining).contains(&name_for_store) {
                         return Err(RpcError::new(
                             Code::FailedPrecondition,
                             "node is being removed",
@@ -250,6 +258,136 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
         },
     )?;
     Ok(())
+}
+
+/// Admits a call to a node-only procedure: the connection must be TLS and its
+/// client certificate must be the one the hub issued to an enrolled node. The
+/// node is the caller; nothing in the request names it.
+pub(super) fn authenticate_node(
+    inventory: &protectorate_inventory::Inventory,
+    peer: Option<&wire::Peer>,
+) -> std::result::Result<wire::AuthContext, Box<wire::Denied>> {
+    let refuse = |actor: &str, message: &str| {
+        Box::new(wire::Denied {
+            error: RpcError::new(Code::Unauthenticated, message),
+            auth: wire::AuthContext {
+                actor: actor.into(),
+                requesting_ip: peer.map(|peer| peer.addr.ip()),
+                ..wire::AuthContext::default()
+            },
+        })
+    };
+    let cert = peer
+        .filter(|peer| peer.tls)
+        .and_then(|peer| peer.client_cert.as_deref())
+        .ok_or_else(|| {
+            refuse(
+                "unauthenticated",
+                "this procedure is for a node and needs its mutual TLS client certificate",
+            )
+        })?;
+    let node = inventory
+        .list()
+        .into_iter()
+        .find(|node| {
+            !node.cert_id.is_empty()
+                && protectorate_tls::is_node_cert(cert, &node.name, &node.cert_id)
+        })
+        .ok_or_else(|| {
+            refuse(
+                "unauthenticated",
+                "the client certificate does not belong to a node in this hub's inventory: join the node again",
+            )
+        })?;
+    Ok(wire::AuthContext {
+        actor: format!("{NODE_ACTOR}{}", node.name),
+        requesting_ip: peer.map(|peer| peer.addr.ip()),
+        ..wire::AuthContext::default()
+    })
+}
+
+const NODE_ACTOR: &str = "node:";
+
+/// A node tells the hub where it serves now. The reported IP must be the
+/// connection's own source address.
+async fn report_address(
+    hub: Arc<Hub>,
+    call: Call<v1::ReportNodeAddressRequest>,
+) -> Result<v1::ReportNodeAddressResponse> {
+    let name = call
+        .auth
+        .actor
+        .strip_prefix(NODE_ACTOR)
+        .ok_or_else(|| RpcError::new(Code::PermissionDenied, "only a node may report its address"))?
+        .to_owned();
+    let peer =
+        call.peer.as_ref().filter(|peer| peer.tls).ok_or_else(|| {
+            RpcError::new(Code::PermissionDenied, "a node reports over mutual TLS")
+        })?;
+    let address: std::net::SocketAddr = call.request.address.trim().parse().map_err(|_| {
+        RpcError::invalid(format!(
+            "address {:?} must be IP:PORT",
+            call.request.address
+        ))
+    })?;
+    protectorate_tls::check_listen(address)
+        .map_err(|error| RpcError::invalid(error.to_string()))?;
+    let source = super::device::normalize_ip(peer.addr.ip());
+    if super::device::normalize_ip(address.ip()) != source {
+        return Err(RpcError::new(
+            Code::PermissionDenied,
+            format!(
+                "node {name} reported {address} but this connection comes from {source}: a node can only report its own address (the hub does not support nodes behind NAT)"
+            ),
+        ));
+    }
+    let address = std::net::SocketAddr::new(source, address.port());
+    let inventory = Arc::clone(&hub.inventory);
+    let admission = Arc::clone(&hub.node_admission);
+    let draining = Arc::clone(&hub.node_draining);
+    let node_name = name.clone();
+    let (previous, current) = tokio::task::spawn_blocking(move || {
+        let _admission = admission.read().unwrap_or_else(|error| error.into_inner());
+        if lock(&draining).contains(&node_name) {
+            return Err(RpcError::new(
+                Code::FailedPrecondition,
+                "node is being removed",
+            ));
+        }
+        let node = inventory.get(&node_name).map_err(node_error)?;
+        let previous = inventory
+            .set_address(&node_name, &node.cert_id, &address.to_string())
+            .map_err(node_error)?;
+        Ok((previous, node.address))
+    })
+    .await
+    .map_err(super::join_error)??;
+    let Some(previous) = previous else {
+        return Ok(v1::ReportNodeAddressResponse {
+            previous_address: current,
+            changed: false,
+        });
+    };
+    hub.audit.write(protectorate_audit::Entry {
+        actor: call.auth.actor.clone(),
+        procedure: node_service::REPORT_NODE_ADDRESS.procedure.into(),
+        subject: name.clone(),
+        outcome: "ok".into(),
+        detail: format!("address {previous} -> {address}, reported over mutual TLS from {source}"),
+        ..protectorate_audit::Entry::default()
+    });
+    hub.node_monitor.invalidate(&name);
+    hub.emit(
+        "node.address",
+        &name,
+        json!({"previous": previous, "address": address.to_string()}),
+    );
+    let monitor = Arc::clone(&hub.node_monitor);
+    tokio::task::spawn_blocking(move || monitor.poll_node(&name));
+    Ok(v1::ReportNodeAddressResponse {
+        previous_address: previous,
+        changed: true,
+    })
 }
 
 async fn watch_node_setup(
@@ -431,7 +569,7 @@ async fn invite_node(hub: Arc<Hub>, body: v1::InviteNodeRequest) -> Result<v1::I
     let draining = Arc::clone(&hub.node_draining);
     let node = tokio::task::spawn_blocking(move || {
         let _admission = admission.write().unwrap_or_else(|error| error.into_inner());
-        if draining.lock().unwrap().contains(&node.name) {
+        if lock(&draining).contains(&node.name) {
             return Err(RpcError::new(
                 Code::FailedPrecondition,
                 "node is being removed",
@@ -901,11 +1039,7 @@ fn status(hub: &Arc<Hub>, node: v1::NodeInfo) -> Result<v1::NodeStatus> {
     let mut status = hub
         .node_monitor
         .status(&node.name, &node.address, node.invited);
-    status.draining = hub
-        .node_draining
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .contains(&node.name.to_ascii_lowercase());
+    status.draining = lock(&hub.node_draining).contains(&node.name.to_ascii_lowercase());
     if let Some(metrics) = &mut status.metrics {
         status.alerts.extend(resource_alerts(metrics));
         if node.local {
@@ -935,7 +1069,7 @@ fn renew_if_due(hub: &Arc<Hub>, name: &str) {
     };
     if node.cert_id.is_empty()
         || node.cert_expires - unix_seconds() > protectorate_tls::RENEW_BEFORE.as_secs() as i64
-        || !hub.renewing.lock().unwrap().insert(node.name.clone())
+        || !lock(&hub.renewing).insert(node.name.clone())
     {
         return;
     }
@@ -964,7 +1098,7 @@ fn renew_if_due(hub: &Arc<Hub>, name: &str) {
         if let Err(error) = result {
             eprintln!("renew certificate for {}: {error}", node.name);
         }
-        hub.renewing.lock().unwrap().remove(&node.name);
+        lock(&hub.renewing).remove(&node.name);
     });
 }
 

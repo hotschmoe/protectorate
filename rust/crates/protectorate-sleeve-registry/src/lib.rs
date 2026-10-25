@@ -7,8 +7,14 @@ use std::{
     collections::BTreeMap,
     fs, io,
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Mutex, MutexGuard, PoisonError},
 };
+
+/// Every mutation builds the next state outside the lock and assigns it in one
+/// step, so a poisoned guard still holds consistent data.
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 #[derive(Debug)]
 pub enum Error {
@@ -430,18 +436,14 @@ impl Registry {
         })
     }
     pub fn list(&self) -> Vec<Record> {
-        self.records
-            .lock()
-            .unwrap()
+        lock(&self.records)
             .values()
             .filter(|r| !r.helper)
             .cloned()
             .collect()
     }
     pub fn get(&self, name: &str) -> Result<Record> {
-        self.records
-            .lock()
-            .unwrap()
+        lock(&self.records)
             .get(name)
             .cloned()
             .ok_or_else(|| Error::NotFound(name.into()))
@@ -664,8 +666,8 @@ impl Registry {
         &self,
         apply: impl FnOnce(&mut BTreeMap<String, Record>) -> Result<T>,
     ) -> Result<T> {
-        let _writer = self.writer.lock().unwrap();
-        let current = self.records.lock().unwrap().clone();
+        let _writer = lock(&self.writer);
+        let current = lock(&self.records).clone();
         let mut next = current.clone();
         let value = apply(&mut next)?;
         if next != current {
@@ -677,7 +679,7 @@ impl Registry {
                 sleeves: next.values().cloned().collect(),
             })?;
             protectorate_fsutil::write_file(&self.path, &data, 0o600)?;
-            *self.records.lock().unwrap() = next;
+            *lock(&self.records) = next;
         }
         Ok(value)
     }

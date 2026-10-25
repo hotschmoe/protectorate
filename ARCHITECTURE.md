@@ -133,9 +133,16 @@ location is not identity. Details: [install](docs/install.md#network-model),
   (`pc1.` macaroons): scoped, about one hour, renewable, attenuable offline,
   revocable by lineage. Delegated mints never exceed the minter's scopes.
 - Nodes join with a single-use code, get a certificate from the hub CA, and
-  accept only the hub's client certificate. The hub dials nodes (never the
-  reverse) on 7475 at the address the node reported. Node-initiated
-  connections are a recorded future option.
+  accept only the hub's client certificate. The hub dials nodes on 7475 at
+  the address the node reported. The one call a node makes to the hub after
+  joining is `NodeService/ReportNodeAddress`, over mutual TLS with its own
+  certificate (the hub's TLS listeners accept an optional client certificate
+  that chains to the CA; the RPC is `node_only_rpc` and admits nothing else:
+  no token, device or owner). When the machine's IP changes the node rebinds
+  to the address its route to the hub leaves from (same port), stores it in
+  `node.json` and reports it; the hub requires the reported IP to equal the
+  connection's source IP (no NAT between hub and nodes), audits the old and
+  new address and re-polls the node there.
 
 ## Sleeves
 
@@ -244,6 +251,29 @@ External MCP clients use the same capability path.
   requested by an agent fail with `aborted` and open a request; the owner
   approves on a device or with `approvals approve`, and the identical call
   then runs once.
+
+## Hang detection and restarts
+
+A hung hub or node (deadlock, wedged runtime, stuck blocking pool) is
+restarted by its service manager, which only reacts to exits, so the process
+kills itself. `serve` runs a watchdog thread (`protectorate-server/src/
+watchdog.rs`) that expects progress from: a heartbeat task on the main
+runtime, a `spawn_blocking` round trip, and on the hub the identity,
+sleeve-registry, mailbox, inventory and directory locks (each probed by its own
+thread taking the lock and releasing it), on the node the job table locks. A
+probe that has not completed for 90 s (`PROTECTORATE_WATCHDOG_TIMEOUT`, for
+example `5s`, only shortens the bound for tests) makes it write the stalled
+probe and a thread list to stderr and `_exit(70)`, with no destructor that
+could take the stuck lock. 90 s is 60 times the 1.5 s fsync tail seen on the
+dev host. A late watchdog wake-up (SIGSTOP, debugger, frozen cgroup) is
+treated as a freeze and forgiven, not as a hang. Status 70 is a failure
+everywhere: systemd `Restart=on-failure` (`StartLimitIntervalSec=0`, so no run
+of restarts can leave the unit stopped), the Windows task's
+`RestartOnFailure` (every minute, 999 times), and Termux's runit service,
+which restarts on any exit. systemd `WatchdogSec=` is not used: it adds
+`Type=notify`, startup and update-trial handshakes across the guardian and its
+child, and a second hang definition, for no case the in-process watchdog misses
+(a process stuck in uninterruptible I/O cannot be killed by either).
 
 ## Quota (P1)
 

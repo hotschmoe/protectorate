@@ -163,6 +163,10 @@ impl Agent {
             .as_ref()
             .map_or(Ok(false), |updater| updater.start())
     }
+    /// The job table, for the server's hang watchdog to list like a poll.
+    pub fn jobs(&self) -> Option<Arc<Jobs>> {
+        self.jobs.clone()
+    }
     pub fn router(self) -> wire::Result<Router> {
         let catalog = Catalog::embedded()?;
         let authorize = Arc::new(|method: &Method, _: &HeaderMap| {
@@ -405,7 +409,7 @@ fn file_part(part: Part) -> v1::GetFileResponse {
     v1::GetFileResponse { part: Some(part) }
 }
 fn join_error(error: tokio::task::JoinError) -> RpcError {
-    RpcError::new(Code::Internal, error.to_string())
+    RpcError::from_join(error)
 }
 fn no_jobs() -> RpcError {
     RpcError::new(Code::Unimplemented, "this node does not run jobs")

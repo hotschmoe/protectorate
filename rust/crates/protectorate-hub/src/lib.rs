@@ -63,6 +63,14 @@ use std::{
 };
 use zeroize::Zeroizing;
 
+/// Locks a std mutex and keeps serving after a panic poisoned it. Every
+/// hub mutex guards either `()`, a set or map changed by one call, or a store
+/// that builds its next state outside the lock and assigns it in one step, so
+/// a panic in a critical section cannot leave a half-applied update behind.
+pub(crate) fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 struct EventBus {
     sequence: AtomicU64,
     sender: tokio::sync::broadcast::Sender<v1::Event>,
@@ -194,6 +202,10 @@ impl Hub {
         version: impl Into<String>,
     ) -> protectorate_identity::Result<Self> {
         let home = home.into();
+        // Temp files of writers killed before their rename; best effort.
+        for dir in [home.clone(), home.join("jobs"), home.join("ca")] {
+            let _ = protectorate_fsutil::remove_stale_temps(&dir);
+        }
         let workspace_config = workspaces::Config::new(&home);
         let hostname = std::env::var(if cfg!(windows) {
             "COMPUTERNAME"
@@ -230,9 +242,10 @@ impl Hub {
             )
             .map_err(|error| identity::Error::Invalid(error.to_string()))?,
         );
-        inventory
-            .write_hosts()
-            .map_err(|error| identity::Error::Invalid(format!("write hosts.md: {error}")))?;
+        // hosts.md is derived; a full disk must not keep the hub from serving.
+        if let Err(error) = inventory.write_hosts() {
+            eprintln!("write hosts.md: {error}");
+        }
         let node_monitor = Arc::new(NodeMonitor::new(
             Arc::clone(&inventory),
             hostname.clone(),
@@ -604,8 +617,12 @@ impl Hub {
         let require_device_peer = self.require_device_peer;
         let trusted_proxies = self.trusted_proxies.clone();
         let device_rates = Arc::clone(&self.device_rates);
+        let node_inventory = Arc::clone(&self.inventory);
         let authorize = Arc::new(
             move |method: &Method, headers: &HeaderMap, peer: Option<wire::Peer>| {
+                if method.node_only {
+                    return nodes::authenticate_node(&node_inventory, peer.as_ref());
+                }
                 if !device::public_procedure(&method.procedure) {
                     let caller = access::authenticate(
                         &owner,
@@ -614,7 +631,7 @@ impl Hub {
                         headers,
                         "POST",
                         &method.procedure,
-                        peer.is_some_and(|peer| peer.tls),
+                        peer.as_ref().is_some_and(|peer| peer.tls),
                     )
                     .map_err(|error| {
                         Box::new(wire::Denied {
@@ -630,6 +647,7 @@ impl Hub {
                 // A loopback-only listener may omit peer metadata in embedded
                 // routers. TLS listeners must always provide it.
                 let ip = peer
+                    .as_ref()
                     .map(|peer| device::source_ip(peer.addr.ip(), headers, &trusted_proxies))
                     .or_else(|| {
                         (!require_device_peer)
@@ -1285,5 +1303,5 @@ fn no_local_agent() -> RpcError {
 }
 
 fn join_error(error: tokio::task::JoinError) -> RpcError {
-    RpcError::new(Code::Internal, error.to_string())
+    RpcError::from_join(error)
 }
