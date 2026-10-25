@@ -180,3 +180,24 @@ path = "fuzz_targets/xfer_archive.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "backup_archive"
+path = "fuzz_targets/backup_archive.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "handoff_transcript"
+path = "fuzz_targets/handoff_transcript.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "inventory_nodes"
+path = "fuzz_targets/inventory_nodes.rs"
+test = false
+doc = false
+bench = false
