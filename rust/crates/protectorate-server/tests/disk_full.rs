@@ -219,6 +219,17 @@ struct Acked {
     nodes: Vec<String>,
 }
 
+/// A full disk reads as one, and says which write failed.
+fn assert_clear(error: &str) {
+    assert!(
+        error.contains("No space left on device")
+            && ["write ", "sync ", "create ", "stat "]
+                .iter()
+                .any(|what| error.contains(what)),
+        "an error for a full disk must name the disk and the failed write: {error}"
+    );
+}
+
 fn text(value: &Value) -> &str {
     value.as_str().unwrap_or("")
 }
@@ -269,35 +280,44 @@ fn mutate_all(hub: &DiskHub, acked: &mut Acked, tag: &str, size: usize) -> Vec<S
 /// hub refuses must leave the old value, one it accepts must stick.
 fn change_first(hub: &DiskHub, acked: &mut Acked, tag: &str) -> usize {
     let mut failed = 0;
-    let mut outcome = |result: Result<Value, String>| match result {
+    let mut outcome = |what: &str, result: Result<Value, String>| match result {
         Ok(_) => true,
         Err(e) => {
-            assert!(e.contains("space"), "unclear error for a full disk: {e}");
+            assert_clear(&format!("{what}: {e}"));
             failed += 1;
             false
         }
     };
     let (id, _) = acked.mails[0].clone();
-    if outcome(hub.call(&format!("{MSG}Ack"), json!({"id":id}))) {
+    if outcome("ack", hub.call(&format!("{MSG}Ack"), json!({"id":id}))) {
         acked.first_acked = true;
     }
     let (note, _) = acked.notes[0].clone();
     let title = format!("changed {tag}");
-    if outcome(hub.call(
-        &format!("{NOTE}UpdateNote"),
-        json!({"id":note,"title":title}),
-    )) {
+    if outcome(
+        "update note",
+        hub.call(
+            &format!("{NOTE}UpdateNote"),
+            json!({"id":note,"title":title}),
+        ),
+    ) {
         acked.notes[0].1 = title;
     }
     let token = acked.tokens[0].clone();
-    if outcome(hub.call(&format!("{TOKEN}RevokeToken"), json!({"id":token}))) {
+    if outcome(
+        "revoke",
+        hub.call(&format!("{TOKEN}RevokeToken"), json!({"id":token})),
+    ) {
         acked.first_revoked = true;
     }
     let node = acked.nodes[0].clone();
-    if outcome(hub.call(
-        &format!("{NODE}SetNodeTier"),
-        json!({"name":node,"tier":"care"}),
-    )) {
+    if outcome(
+        "set tier",
+        hub.call(
+            &format!("{NODE}SetNodeTier"),
+            json!({"name":node,"tier":"care"}),
+        ),
+    ) {
         acked.first_care = true;
     }
     failed
@@ -332,10 +352,7 @@ fn heavy(hub: &DiskHub, work: &Path, tag: &str, must_succeed: bool) {
     }
     for (what, result) in [("spawn", &spawned), ("job", &job), ("lease", &lease)] {
         if let Err(e) = result {
-            assert!(
-                e.contains("space"),
-                "unclear {what} error for a full disk: {e}"
-            );
+            assert_clear(&format!("{what}: {e}"));
         }
     }
     let got = hub.call(&format!("{SLEEVE}GetSleeve"), json!({"name":sleeve}));
@@ -552,9 +569,10 @@ fn full_disk_fails_writes_cleanly_keeps_reads_and_recovers_without_restart() {
         for error in mutate_all(&hub, &mut acked, &format!("full{round}"), size) {
             failures += 1;
             assert!(
-                error.contains("space") || error.contains("ENOSPC") || error.contains("28"),
+                error.contains("space"),
                 "unclear error for a full disk: {error}"
             );
+            assert_clear(&error);
         }
     }
     assert!(
@@ -598,7 +616,8 @@ fn full_disk_fails_writes_cleanly_keeps_reads_and_recovers_without_restart() {
     assert!(disk.free_bytes() > 1 << 20);
     let errors = mutate_all(&hub, &mut acked, "after", 300);
     assert!(errors.is_empty(), "the hub did not recover: {errors:?}");
-    heavy(&hub, &work, "after", true);
+    // The names that failed on the full disk must be free again.
+    heavy(&hub, &work, "full0", true);
     assert_eq!(change_first(&hub, &mut acked, "after"), 0);
     assert!(acked.first_acked && acked.first_revoked && acked.first_care);
     hub.alive();

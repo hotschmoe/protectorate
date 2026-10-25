@@ -27,10 +27,10 @@ pub fn write_file(path: &Path, data: &[u8], mode: u32) -> io::Result<()> {
         match OpenOptions::new().write(true).create_new(true).open(&tmp) {
             Ok(file) => break (file, tmp),
             Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e),
+            Err(e) => return Err(context("create", &tmp, e)),
         }
     };
-    let result = (|| {
+    let result = (|| -> io::Result<()> {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -48,7 +48,11 @@ pub fn write_file(path: &Path, data: &[u8], mode: u32) -> io::Result<()> {
     if result.is_err() {
         let _ = fs::remove_file(&tmp);
     }
-    result
+    result.map_err(|e| context("write", path, e))
+}
+
+fn context(what: &str, path: &Path, error: io::Error) -> io::Error {
+    io::Error::new(error.kind(), format!("{what} {}: {error}", path.display()))
 }
 
 /// Removes temp files that `write_file` left in `dir` when its process died
