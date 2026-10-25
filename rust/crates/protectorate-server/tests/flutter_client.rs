@@ -12,7 +12,9 @@ mod unix {
         os::unix::fs::PermissionsExt,
         path::{Path, PathBuf},
         process::Command,
-        time::Duration,
+        sync::Mutex,
+        thread,
+        time::{Duration, Instant},
     };
 
     /// A configured hub as a service runs it, under its update guardian.
@@ -89,13 +91,37 @@ mod unix {
     /// Runs a Dart or Flutter scenario to completion. Its output goes to files,
     /// so a chatty run cannot block on a full pipe, and the deadline allows
     /// for compiling the scenario on a loaded host.
-    fn scenario(hub: &Hub, root: &Path, name: &str, command: &mut Command, limit: Duration) {
+    /// `flutter test` copies its assets into app/build/unit_test_assets before
+    /// it prints that it is loading the test, and two of them copying at once
+    /// crash the tool. Starts are taken one at a time; the tests then run
+    /// side by side.
+    static FLUTTER_STARTUP: Mutex<()> = Mutex::new(());
+
+    fn scenario(
+        hub: &Hub,
+        root: &Path,
+        name: &str,
+        command: &mut Command,
+        limit: Duration,
+        flutter: bool,
+    ) {
         let stdout = root.join(format!("{name}.stdout"));
         let stderr = root.join(format!("{name}.stderr"));
         command
             .stdout(fs::File::create(&stdout).unwrap())
             .stderr(fs::File::create(&stderr).unwrap());
+        let starting = flutter.then(|| FLUTTER_STARTUP.lock().unwrap_or_else(|e| e.into_inner()));
         let mut run = Group::spawn(command);
+        if starting.is_some() {
+            let deadline = Instant::now() + limit;
+            while run.alive()
+                && Instant::now() < deadline
+                && !fs::read_to_string(&stdout).is_ok_and(|out| out.contains("loading "))
+            {
+                thread::sleep(Duration::from_millis(50));
+            }
+        }
+        drop(starting);
         let status = run.wait(limit);
         let report = || {
             format!(
@@ -178,6 +204,7 @@ mod unix {
                 .arg("tool/node_invite_ui_e2e.dart")
                 .current_dir(&app),
             Duration::from_secs(600),
+            true,
         );
     }
 
@@ -225,6 +252,7 @@ mod unix {
                     .arg(token)
                     .current_dir(&app),
                 Duration::from_secs(300),
+                false,
             );
         }
     }
@@ -250,6 +278,7 @@ mod unix {
                 .arg(format!("tool/{name}.dart"))
                 .current_dir(&app),
             Duration::from_secs(600),
+            true,
         );
     }
 
