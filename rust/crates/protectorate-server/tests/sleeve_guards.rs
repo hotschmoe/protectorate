@@ -7,21 +7,20 @@ use protectorate_connect_client::Client;
 use serde_json::{json, Value};
 use std::{
     fs,
-    os::unix::{fs::PermissionsExt, process::CommandExt},
+    os::unix::fs::PermissionsExt,
     path::Path,
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
     thread,
     time::{Duration, Instant},
 };
 
 const SLEEVE: &str = "/protectorate.v1.SleeveService/";
 
-struct Hub(Child, String);
+/// The hub supervises a guard child; the group stops both.
+struct Hub(support::Group, String);
 impl Drop for Hub {
     fn drop(&mut self) {
-        // The hub supervises a guard child; stop the whole process group.
-        unsafe { libc::kill(-(self.0.id() as i32), libc::SIGKILL) };
-        let _ = self.0.wait();
+        self.0.stop();
         support::kill_tmux(&self.1);
     }
 }
@@ -54,30 +53,29 @@ fn start(root: &Path, extra: &[&str]) -> (Hub, Client, String) {
         root.file_name().unwrap().to_string_lossy()
     );
     let log = fs::File::create(root.join("hub.stderr")).unwrap();
-    let child = Command::new(env!("CARGO_BIN_EXE_protectorate-rs"))
-        .arg("serve")
-        .arg("--home")
-        .arg(&home)
-        .arg("--owner-token-file")
-        .arg(&token_file)
-        .args(["--listen", "127.0.0.1:0"])
-        .args(["--release-api-url", "http://127.0.0.1:1"])
-        .args(["--tmux-socket", &tmux])
-        .args(extra)
-        .env("HOME", root)
-        .env_remove("PROTECTORATE_TOKEN")
-        .env_remove("PROTECTORATE_TOKEN_FILE")
-        .env_remove("PROTECTORATE_HUB")
-        .stdout(Stdio::null())
-        .stderr(log)
-        .process_group(0)
-        .spawn()
-        .unwrap();
-    let mut hub = Hub(child, tmux);
+    let group = support::Group::spawn(
+        Command::new(env!("CARGO_BIN_EXE_protectorate-rs"))
+            .arg("serve")
+            .arg("--home")
+            .arg(&home)
+            .arg("--owner-token-file")
+            .arg(&token_file)
+            .args(["--listen", "127.0.0.1:0"])
+            .args(["--release-api-url", "http://127.0.0.1:1"])
+            .args(["--tmux-socket", &tmux])
+            .args(extra)
+            .env("HOME", root)
+            .env_remove("PROTECTORATE_TOKEN")
+            .env_remove("PROTECTORATE_TOKEN_FILE")
+            .env_remove("PROTECTORATE_HUB")
+            .stdout(Stdio::null())
+            .stderr(log),
+    );
+    let mut hub = Hub(group, tmux);
     let log = root.join("hub.stderr");
     support::until("hub start", &log, || {
         assert!(
-            hub.0.try_wait().unwrap().is_none(),
+            hub.0.alive(),
             "hub exited: {}",
             fs::read_to_string(&log).unwrap_or_default()
         );

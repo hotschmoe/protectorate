@@ -6,66 +6,14 @@ use crate::support;
 
 #[cfg(unix)]
 mod unix {
-    use super::support::{bound, free_port, kill_tmux, until};
+    use super::support::{bound, free_port, kill_tmux, until, Group};
     use std::{
         fs,
-        os::unix::{fs::PermissionsExt, process::CommandExt},
+        os::unix::fs::PermissionsExt,
         path::{Path, PathBuf},
-        process::{Child, Command, ExitStatus},
-        thread,
-        time::{Duration, Instant},
+        process::Command,
+        time::Duration,
     };
-
-    /// A process group of its own; dropping it stops the whole tree, so a
-    /// guardian's hub child or `flutter`'s tester cannot outlive the test.
-    /// If the test binary is killed before the drop runs, the kernel sends
-    /// the leader SIGTERM, and `flutter` and the hub guardian stop their
-    /// children on it.
-    struct Group(Child);
-
-    impl Group {
-        fn spawn(command: &mut Command) -> Self {
-            // SAFETY: prctl is async-signal-safe and touches no memory.
-            unsafe {
-                command.pre_exec(|| {
-                    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                });
-            }
-            Self(command.process_group(0).spawn().unwrap())
-        }
-
-        fn alive(&mut self) -> bool {
-            self.0.try_wait().unwrap().is_none()
-        }
-
-        fn wait(&mut self, limit: Duration) -> Option<ExitStatus> {
-            let deadline = Instant::now() + limit;
-            loop {
-                if let Some(status) = self.0.try_wait().unwrap() {
-                    return Some(status);
-                }
-                if Instant::now() >= deadline {
-                    return None;
-                }
-                thread::sleep(Duration::from_millis(100));
-            }
-        }
-    }
-
-    impl Drop for Group {
-        fn drop(&mut self) {
-            let group = -(self.0.id() as i32);
-            unsafe { libc::kill(group, libc::SIGTERM) };
-            if self.wait(Duration::from_secs(15)).is_none() {
-                let _ = self.0.kill();
-            }
-            unsafe { libc::kill(group, libc::SIGKILL) };
-            let _ = self.0.wait();
-        }
-    }
 
     /// A configured hub as a service runs it, under its update guardian.
     struct Hub {

@@ -6,20 +6,93 @@ use serde_json::{json, Value};
 use std::{
     fs,
     net::TcpListener,
-    os::unix::fs::PermissionsExt,
+    os::unix::{fs::PermissionsExt, process::CommandExt},
     path::{Path, PathBuf},
-    process::{Child, Command, Output, Stdio},
+    process::{Child, Command, ExitStatus, Output, Stdio},
     thread,
     time::{Duration, Instant},
 };
 
 pub const OWNER: &str = "real-binary-owner-token";
 
+/// Makes the kernel SIGTERM the child when the thread that spawned it exits,
+/// so a killed test binary leaves no long-lived real binary behind. The
+/// signal follows the spawning thread, not the process: spawn from the test
+/// thread, which outlives every child its test owns, never from a helper
+/// thread that returns first.
+pub fn die_with_parent(command: &mut Command) -> &mut Command {
+    // SAFETY: prctl is async-signal-safe and touches no memory.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    command
+}
+
 pub struct Process(pub Child);
 impl Drop for Process {
     fn drop(&mut self) {
         let _ = self.0.kill();
         let _ = self.0.wait();
+    }
+}
+
+/// A process group of its own; dropping it stops the whole tree, so a
+/// guardian's hub child or `flutter`'s tester cannot outlive the test. If the
+/// test binary is killed before the drop runs, the kernel sends the leader
+/// SIGTERM (see `die_with_parent`), and `flutter` and the hub guardian stop
+/// their children on it.
+pub struct Group(Child, bool);
+
+impl Group {
+    pub fn spawn(command: &mut Command) -> Self {
+        Self(
+            die_with_parent(command).process_group(0).spawn().unwrap(),
+            false,
+        )
+    }
+
+    pub fn alive(&mut self) -> bool {
+        self.0.try_wait().unwrap().is_none()
+    }
+
+    pub fn wait(&mut self, limit: Duration) -> Option<ExitStatus> {
+        let deadline = Instant::now() + limit;
+        loop {
+            if let Some(status) = self.0.try_wait().unwrap() {
+                return Some(status);
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
+
+impl Group {
+    /// Stops the whole group now: SIGTERM, then SIGKILL after a grace period.
+    pub fn stop(&mut self) {
+        if std::mem::replace(&mut self.1, true) {
+            return;
+        }
+        let group = -(self.0.id() as i32);
+        unsafe { libc::kill(group, libc::SIGTERM) };
+        if self.wait(Duration::from_secs(20)).is_none() {
+            let _ = self.0.kill();
+        }
+        unsafe { libc::kill(group, libc::SIGKILL) };
+        let _ = self.0.wait();
+    }
+}
+
+impl Drop for Group {
+    fn drop(&mut self) {
+        self.stop();
     }
 }
 
@@ -62,8 +135,7 @@ pub fn run(args: &[&str], home: &Path) -> Output {
 
 pub fn spawn(args: &[&str], home: &Path, log: &Path) -> Process {
     Process(
-        command(args, home)
-            .stdout(Stdio::null())
+        die_with_parent(command(args, home).stdout(Stdio::null()))
             .stderr(Stdio::from(fs::File::create(log).unwrap()))
             .spawn()
             .unwrap(),
@@ -279,8 +351,7 @@ impl Drop for Hub {
 fn launch(args: &[String], user_home: &Path, log: &Path) -> (Process, String, String, Client) {
     let args = args.iter().map(String::as_str).collect::<Vec<_>>();
     let mut process = Process(
-        command(&args, user_home)
-            .env("PROTECTORATE_HUB_GUARD_CHILD", "1")
+        die_with_parent(command(&args, user_home).env("PROTECTORATE_HUB_GUARD_CHILD", "1"))
             .stdout(Stdio::null())
             .stderr(Stdio::from(fs::File::create(log).unwrap()))
             .spawn()
