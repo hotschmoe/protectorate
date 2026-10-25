@@ -119,8 +119,9 @@ impl RpcError {
     pub fn is_panic(&self) -> bool {
         self.code == Code::Internal && self.message.starts_with(PANIC_PREFIX)
     }
-    /// Converts a failed spawned task. A panic keeps its message and is logged
-    /// here, so the service staying up is never silent.
+    /// Converts a failed spawned task. A panic is logged here with its message,
+    /// so the service staying up is never silent; the caller, who may be a
+    /// sleeve, gets only that a task panicked.
     pub fn from_join(error: tokio::task::JoinError) -> Self {
         if !error.is_panic() {
             return Self::new(Code::Internal, error.to_string());
@@ -132,7 +133,7 @@ impl RpcError {
             .or_else(|| payload.downcast_ref::<String>().cloned())
             .unwrap_or_else(|| "non-string panic payload".to_owned());
         eprintln!("spawned task panicked, answered as an internal error: {text}");
-        Self::panicked(text)
+        Self::panicked("spawned task")
     }
     fn status(mut self, status: StatusCode) -> Self {
         self.status = Some(status);
