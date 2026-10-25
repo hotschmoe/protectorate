@@ -193,8 +193,10 @@ pub fn kill_tmux(socket: &str) {
 /// once it has bound that listener.
 pub fn bound(log: &Path, label: &str) -> Option<String> {
     let prefix = format!("protectorate-rs {label} on ");
-    fs::read_to_string(log)
-        .ok()?
+    // The hub writes a line in several pieces; only a finished line counts.
+    let text = fs::read_to_string(log).ok()?;
+    let complete = &text[..text.rfind('\n')? + 1];
+    complete
         .lines()
         .find_map(|line| line.strip_prefix(&prefix).map(str::to_owned))
 }

@@ -292,7 +292,8 @@ fn disk_limit_stops_the_harness() {
             }),
         )
         .unwrap_or_else(|e| panic!("REAL sandbox capability failure (not skipped): {e}"));
-    wait_for(&workspace.join("filled"));
+    // The monitor may stop the sleeve before the fill finishes, so `filled`
+    // is not awaited; the stop itself is the condition.
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         let sleeve = client
