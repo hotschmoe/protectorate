@@ -1293,5 +1293,5 @@ fn no_local_agent() -> RpcError {
 }
 
 fn join_error(error: tokio::task::JoinError) -> RpcError {
-    RpcError::new(Code::Internal, error.to_string())
+    RpcError::from_join(error)
 }

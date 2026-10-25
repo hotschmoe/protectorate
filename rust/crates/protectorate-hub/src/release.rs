@@ -284,5 +284,5 @@ fn not_configured() -> RpcError {
 }
 
 fn join_error(error: tokio::task::JoinError) -> RpcError {
-    RpcError::new(Code::Internal, format!("release worker: {error}"))
+    RpcError::from_join(error)
 }

@@ -84,6 +84,7 @@ impl Code {
         }
     }
 }
+const PANIC_PREFIX: &str = "internal panic: ";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RpcError {
     pub code: Code,
@@ -110,6 +111,28 @@ impl RpcError {
     }
     pub fn internal(error: impl std::fmt::Display) -> Self {
         Self::new(Code::Internal, error.to_string())
+    }
+    /// A handler or task panicked and unwinding turned it into this error.
+    pub fn panicked(what: impl std::fmt::Display) -> Self {
+        Self::new(Code::Internal, format!("{PANIC_PREFIX}{what}"))
+    }
+    pub fn is_panic(&self) -> bool {
+        self.code == Code::Internal && self.message.starts_with(PANIC_PREFIX)
+    }
+    /// Converts a failed spawned task. A panic keeps its message and is logged
+    /// here, so the service staying up is never silent.
+    pub fn from_join(error: tokio::task::JoinError) -> Self {
+        if !error.is_panic() {
+            return Self::new(Code::Internal, error.to_string());
+        }
+        let payload = error.into_panic();
+        let text = payload
+            .downcast_ref::<&str>()
+            .map(|text| (*text).to_owned())
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "non-string panic payload".to_owned());
+        eprintln!("spawned task panicked, answered as an internal error: {text}");
+        Self::panicked(text)
     }
     fn status(mut self, status: StatusCode) -> Self {
         self.status = Some(status);
@@ -624,6 +647,8 @@ impl Drop for CompletionGuard {
                 .is_some_and(|expired| expired.load(Ordering::SeqCst))
             {
                 RpcError::new(Code::DeadlineExceeded, "stream deadline exceeded")
+            } else if std::thread::panicking() {
+                RpcError::panicked("handler future")
             } else {
                 RpcError::new(
                     Code::Canceled,

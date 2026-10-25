@@ -405,7 +405,7 @@ fn file_part(part: Part) -> v1::GetFileResponse {
     v1::GetFileResponse { part: Some(part) }
 }
 fn join_error(error: tokio::task::JoinError) -> RpcError {
-    RpcError::new(Code::Internal, error.to_string())
+    RpcError::from_join(error)
 }
 fn no_jobs() -> RpcError {
     RpcError::new(Code::Unimplemented, "this node does not run jobs")
