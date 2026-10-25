@@ -86,8 +86,12 @@ fn launch(root: PathBuf, nested: bool, script: &str) -> runtime::ChildHandle {
         .unwrap_or_else(|error| panic!("real sandbox capability failure: {error}"))
 }
 
-fn run_fixture(root: PathBuf, nested: bool) {
-    let child = launch(root.clone(), nested, "sleep 300");
+fn run_fixture(root: PathBuf, kind: &str) {
+    if kind == "next" {
+        launch(root, false, "true").wait_with_output().unwrap();
+        return;
+    }
+    let child = launch(root.clone(), kind == "nested", "sleep 300");
     fs::write(root.join("init-pid"), child.init_pid.to_string()).unwrap();
     std::thread::sleep(Duration::from_secs(60));
     drop(child);
@@ -112,23 +116,22 @@ fn active_scopes(supervisor: u32) -> Vec<String> {
         .collect()
 }
 
-fn supervisor_death(nested: bool, kill_after: Option<Duration>) {
-    let temp = tempfile::tempdir().unwrap();
-    let mut supervisor = Command::new(std::env::current_exe().unwrap())
+fn fixture(kind: &str, root: &Path) -> Command {
+    let mut command = Command::new(std::env::current_exe().unwrap());
+    command
         .args([
             "--exact",
-            if nested {
-                "parent_death::losing_supervisor_releases_nested_scope"
-            } else {
-                "parent_death::losing_supervisor_kills_namespace_init"
-            },
+            "parent_death::losing_supervisor_kills_namespace_init",
             "--nocapture",
         ])
-        .env(
-            "PROTECTORATE_PARENT_DEATH_FIXTURE",
-            if nested { "nested" } else { "bounded" },
-        )
-        .env("PROTECTORATE_PARENT_DEATH_ROOT", temp.path())
+        .env("PROTECTORATE_PARENT_DEATH_FIXTURE", kind)
+        .env("PROTECTORATE_PARENT_DEATH_ROOT", root);
+    command
+}
+
+fn supervisor_death(nested: bool, kill_after: Option<Duration>) {
+    let temp = tempfile::tempdir().unwrap();
+    let mut supervisor = fixture(if nested { "nested" } else { "bounded" }, temp.path())
         .spawn()
         .unwrap();
     let marker = temp.path().join("init-pid");
@@ -155,11 +158,9 @@ fn supervisor_death(nested: bool, kill_after: Option<Duration>) {
     }
     let pid = supervisor.id();
     // A launcher killed before systemd attached its process leaves an empty
-    // scope behind; the next launch on the host releases it.
+    // scope behind; the first launch of the next launcher process releases it.
     let next = tempfile::tempdir().unwrap();
-    launch(next.path().to_path_buf(), false, "true")
-        .wait_with_output()
-        .unwrap();
+    assert!(fixture("next", next.path()).status().unwrap().success());
     loop {
         let scopes = active_scopes(pid);
         if scopes.is_empty() {
@@ -173,16 +174,16 @@ fn supervisor_death(nested: bool, kill_after: Option<Duration>) {
     }
 }
 
-fn fixture_root() -> Option<(PathBuf, bool)> {
+fn fixture_root() -> Option<(PathBuf, String)> {
     let kind = std::env::var("PROTECTORATE_PARENT_DEATH_FIXTURE").ok()?;
     let root = std::env::var_os("PROTECTORATE_PARENT_DEATH_ROOT").unwrap();
-    Some((PathBuf::from(root), kind == "nested"))
+    Some((PathBuf::from(root), kind))
 }
 
 #[test]
 fn losing_supervisor_kills_namespace_init() {
-    if let Some((root, nested)) = fixture_root() {
-        run_fixture(root, nested);
+    if let Some((root, kind)) = fixture_root() {
+        run_fixture(root, &kind);
         return;
     }
     supervisor_death(false, None);
@@ -190,8 +191,8 @@ fn losing_supervisor_kills_namespace_init() {
 
 #[test]
 fn losing_supervisor_releases_nested_scope() {
-    if let Some((root, nested)) = fixture_root() {
-        run_fixture(root, nested);
+    if let Some((root, kind)) = fixture_root() {
+        run_fixture(root, &kind);
         return;
     }
     supervisor_death(true, None);
@@ -199,8 +200,8 @@ fn losing_supervisor_releases_nested_scope() {
 
 #[test]
 fn losing_supervisor_mid_launch_releases_scope() {
-    if let Some((root, nested)) = fixture_root() {
-        run_fixture(root, nested);
+    if let Some((root, kind)) = fixture_root() {
+        run_fixture(root, &kind);
         return;
     }
     for millis in (0..100).step_by(3) {

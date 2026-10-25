@@ -589,9 +589,13 @@ impl Drop for ScopeGuard {
 /// systemd keeps a transient scope active when its only process dies before
 /// systemd attaches it (a launcher SIGKILLed mid-launch): the cgroup was never
 /// populated, so no "empty" event ever stops the scope, and the dead launcher
-/// cannot clean up after itself. Every later launch stops scopes whose
-/// launcher is gone and whose cgroup holds no task.
+/// cannot clean up after itself. The first launch of every later launcher
+/// process stops scopes whose launcher is gone and whose cgroup holds no task.
 fn reap_orphan_scopes() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(reap_orphan_scopes_now);
+}
+fn reap_orphan_scopes_now() {
     let Ok(listing) = Command::new("systemctl")
         .args([
             "--user",
