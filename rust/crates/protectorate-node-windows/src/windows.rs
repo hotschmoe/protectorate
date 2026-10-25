@@ -225,7 +225,7 @@ async fn serve_node(options: Serve) -> Result<bool, Box<dyn Error>> {
     let restart = Arc::clone(&restart_requested);
     let wake = Arc::clone(&restart_notify);
     axum::serve(
-        transport::TlsListener::new_rebindable(listener, tls, Some(rebind))?,
+        transport::TlsListener::new(listener, tls, Some(rebind))?,
         transport::peer_router(agent.router()?)
             .into_make_service_with_connect_info::<transport::Peer>(),
     )

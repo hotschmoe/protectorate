@@ -541,7 +541,7 @@ async fn serve_node(options: Serve) -> Result<ServeExit, Box<dyn Error>> {
     let shutdown_requested = Arc::clone(&restart_requested);
     let uninstall_shutdown = Arc::clone(&uninstall_requested);
     axum::serve(
-        transport::TlsListener::new_rebindable(listener, tls, Some(rebind))?,
+        transport::TlsListener::new(listener, tls, Some(rebind))?,
         transport::peer_router(agent.router()?)
             .into_make_service_with_connect_info::<transport::Peer>(),
     )

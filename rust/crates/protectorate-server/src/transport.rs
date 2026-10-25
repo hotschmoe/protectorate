@@ -39,17 +39,10 @@ async fn next_listener(swap: &mut Option<mpsc::Receiver<TcpListener>>) -> Option
 }
 
 impl TlsListener {
+    /// Accepts on each listener sent through `swap` from then on, so a node can
+    /// follow its machine's address without a restart. Connections already
+    /// accepted keep running.
     pub(crate) fn new(
-        listener: TcpListener,
-        config: Arc<rustls::ServerConfig>,
-    ) -> io::Result<Self> {
-        Self::new_rebindable(listener, config, None)
-    }
-
-    /// Like `new`, and accepts on each listener sent through `swap` from then
-    /// on, so a node can follow its machine's address without a restart.
-    /// Connections already accepted keep running.
-    pub(crate) fn new_rebindable(
         mut listener: TcpListener,
         config: Arc<rustls::ServerConfig>,
         mut swap: Option<mpsc::Receiver<TcpListener>>,
