@@ -40,11 +40,11 @@ fn install_commands(
     let sh_name = super::distribution::shell_word(name);
     let sh_ca = super::distribution::shell_word(&format!("{base}/ca.pem"));
     let sh_pin = format!(
-        "ca=$(mktemp) && curl -fsSk --max-redirs 0 {sh_ca} -o \"$ca\" && [ \"$(sha256sum < \"$ca\" | cut -d' ' -f1)\" = {ca_sha256} ]"
+        "ca=$(mktemp) && curl -fsSk --max-redirs 0 {sh_ca} -o \"$ca\" && {{ [ \"$(sha256sum < \"$ca\" | cut -d' ' -f1)\" = {ca_sha256} ] || {{ echo 'hub CA fingerprint mismatch' >&2; false; }}; }}"
     );
     let sh = |script: &str| {
         let url = super::distribution::shell_word(&format!("{base}/{script}"));
-        format!("{sh_pin} && script=$(curl -fsSL --cacert \"$ca\" {url}) && [ -n \"$script\" ] && printf '%s\\n' \"$script\" | PROTECTORATE_CA_CERT=\"$ca\" PROTECTORATE_JOIN_CODE={sh_code} sh -s -- --name {sh_name}")
+        format!("{sh_pin} && script=$(curl -fsSL --cacert \"$ca\" {url}) && [ -n \"$script\" ] && printf '%s\\n' \"$script\" | PROTECTORATE_CA_CERT=\"$ca\" PROTECTORATE_JOIN_CODE={sh_code} sh -s -- --name {sh_name} || echo 'protectorate node install failed' >&2")
     };
     let ps_code = super::distribution::powershell_word(code);
     let ps_name = super::distribution::powershell_word(name);
