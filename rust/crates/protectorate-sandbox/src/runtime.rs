@@ -586,6 +586,64 @@ impl Drop for ScopeGuard {
         }
     }
 }
+/// systemd keeps a transient scope active when its only process dies before
+/// systemd attaches it (a launcher SIGKILLed mid-launch): the cgroup was never
+/// populated, so no "empty" event ever stops the scope, and the dead launcher
+/// cannot clean up after itself. The first launch of every later launcher
+/// process stops scopes whose launcher is gone and whose cgroup holds no task.
+fn reap_orphan_scopes() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(reap_orphan_scopes_now);
+}
+fn reap_orphan_scopes_now() {
+    let Ok(listing) = Command::new("systemctl")
+        .args([
+            "--user",
+            "list-units",
+            "--all",
+            "--type=scope",
+            "--plain",
+            "--no-legend",
+            "protectorate-*.scope",
+        ])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return;
+    };
+    for line in String::from_utf8_lossy(&listing.stdout).lines() {
+        let Some(unit) = line.split_whitespace().next() else {
+            continue;
+        };
+        let Some(owner) = unit
+            .strip_prefix("protectorate-")
+            .and_then(|rest| rest.split('-').next())
+            .and_then(|pid| pid.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        if Path::new(&format!("/proc/{owner}")).exists() {
+            continue;
+        }
+        let Ok(state) = Command::new("systemctl")
+            .args(["--user", "show", "-p", "TasksCurrent", unit])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+        else {
+            continue;
+        };
+        if String::from_utf8_lossy(&state.stdout).trim() == "TasksCurrent=0" {
+            let _ = Command::new("systemctl")
+                .args(["--user", "stop", unit])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
+}
 fn delegated_parent_root() -> Option<PathBuf> {
     let root = PathBuf::from("/run/protectorate/cgroup");
     root.join("cgroup.controllers").is_file().then_some(root)
@@ -1010,7 +1068,10 @@ pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandl
     let tmp_bytes = tmpfs_bytes(limits);
     let mut direct_scope = ScopeGuard(match delegated_parent_root() {
         Some(root) => Some(create_direct_scope(&root, &unit, limits)?),
-        None => None,
+        None => {
+            reap_orphan_scopes();
+            None
+        }
     });
     let payload = HelperPlan {
         uid: unsafe { libc::getuid() },
