@@ -187,6 +187,18 @@ pub(crate) fn authorize(
     method: &Method,
 ) -> std::result::Result<AuthContext, Box<Denied>> {
     let auth = context(caller);
+    if method.node_only {
+        return Err(Box::new(Denied {
+            error: RpcError::new(
+                Code::PermissionDenied,
+                format!(
+                    "{} is callable only by the node it is about, over mutual TLS",
+                    method.tool
+                ),
+            ),
+            auth,
+        }));
+    }
     let allowed = match caller {
         Caller::Owner => method.tool != RENEW,
         Caller::Device(_) => method.tool != RENEW && (!method.owner_only || method.device_allowed),

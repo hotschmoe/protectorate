@@ -31,10 +31,28 @@ pub(crate) struct TlsListener {
     ready: mpsc::Receiver<(TlsIo, SocketAddr)>,
 }
 
+async fn next_listener(swap: &mut Option<mpsc::Receiver<TcpListener>>) -> Option<TcpListener> {
+    match swap {
+        Some(swap) => swap.recv().await,
+        None => pending().await,
+    }
+}
+
 impl TlsListener {
     pub(crate) fn new(
         listener: TcpListener,
         config: Arc<rustls::ServerConfig>,
+    ) -> io::Result<Self> {
+        Self::new_rebindable(listener, config, None)
+    }
+
+    /// Like `new`, and accepts on each listener sent through `swap` from then
+    /// on, so a node can follow its machine's address without a restart.
+    /// Connections already accepted keep running.
+    pub(crate) fn new_rebindable(
+        mut listener: TcpListener,
+        config: Arc<rustls::ServerConfig>,
+        mut swap: Option<mpsc::Receiver<TcpListener>>,
     ) -> io::Result<Self> {
         let local = listener.local_addr()?;
         let (tx, ready) = mpsc::channel(MAX_HANDSHAKES);
@@ -53,6 +71,13 @@ impl TlsListener {
                 };
                 let (stream, peer) = tokio::select! {
                     _ = tx.closed() => break,
+                    next = next_listener(&mut swap) => {
+                        match next {
+                            Some(next) => listener = next,
+                            None => swap = None,
+                        }
+                        continue;
+                    }
                     result = listener.accept() => match result {
                         Ok(pair) => pair,
                         Err(error) => {
@@ -69,10 +94,17 @@ impl TlsListener {
                         tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await;
                     drop(handshake);
                     if let Ok(Ok(stream)) = result {
+                        let client_cert = stream
+                            .get_ref()
+                            .1
+                            .peer_certificates()
+                            .and_then(|chain| chain.first())
+                            .map(|cert| Arc::<[u8]>::from(cert.as_ref()));
                         let _ = tx
                             .send((
                                 TlsIo {
                                     stream,
+                                    client_cert,
                                     _permit: connection,
                                 },
                                 peer,
@@ -104,6 +136,7 @@ impl Listener for TlsListener {
 
 pub(crate) struct TlsIo {
     stream: TlsStream<TcpStream>,
+    client_cert: Option<Arc<[u8]>>,
     _permit: OwnedSemaphorePermit,
 }
 
@@ -134,11 +167,11 @@ impl AsyncWrite for TlsIo {
 }
 
 #[derive(Clone)]
-pub(crate) struct Peer(pub SocketAddr);
+pub(crate) struct Peer(pub SocketAddr, pub Option<Arc<[u8]>>);
 
 impl<'a> axum::extract::connect_info::Connected<IncomingStream<'a, TlsListener>> for Peer {
     fn connect_info(stream: IncomingStream<'a, TlsListener>) -> Self {
-        Self(*stream.remote_addr())
+        Self(*stream.remote_addr(), stream.io().client_cert.clone())
     }
 }
 
@@ -146,14 +179,22 @@ async fn insert_peer(mut request: Request, next: Next) -> Response {
     let tls = request
         .extensions()
         .get::<ConnectInfo<Peer>>()
-        .map(|info| info.0 .0);
+        .map(|info| (info.0 .0, info.0 .1.clone()));
     let plain = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
         .map(|info| info.0);
     let peer = match (tls, plain) {
-        (Some(addr), _) => Some(protectorate_wire::Peer { addr, tls: true }),
-        (None, Some(addr)) => Some(protectorate_wire::Peer { addr, tls: false }),
+        (Some((addr, client_cert)), _) => Some(protectorate_wire::Peer {
+            addr,
+            tls: true,
+            client_cert,
+        }),
+        (None, Some(addr)) => Some(protectorate_wire::Peer {
+            addr,
+            tls: false,
+            client_cert: None,
+        }),
         _ => None,
     };
     if let Some(peer) = peer {

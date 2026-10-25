@@ -393,6 +393,32 @@ extension type NodeServiceClient (connect.Transport _transport) {
     );
   }
 
+  /// ReportNodeAddress tells the hub the address a node now serves on, after
+  /// the machine's IP changed. The caller is the node itself: the hub accepts
+  /// the call only over mutual TLS with the certificate it issued to that node,
+  /// and no token, device or owner can make it. The address must be a private
+  /// IP:PORT whose IP is the source address of the connection the call arrived
+  /// on (the hub and its nodes are not behind NAT), so a node can only point
+  /// the hub at itself. The hub stores the address, records the old and new
+  /// value in the audit log and dials the new one from then on. Reporting the
+  /// address the hub already has changes nothing.
+  Future<protectoratev1node.ReportNodeAddressResponse> reportNodeAddress(
+    protectoratev1node.ReportNodeAddressRequest input, {
+    connect.Headers? headers,
+    connect.AbortSignal? signal,
+    Function(connect.Headers)? onHeader,
+    Function(connect.Headers)? onTrailer,
+  }) {
+    return connect.Client(_transport).unary(
+      specs.NodeService.reportNodeAddress,
+      input,
+      signal: signal,
+      headers: headers,
+      onHeader: onHeader,
+      onTrailer: onTrailer,
+    );
+  }
+
   /// WatchNodeSetup follows a node from its invite to ready. It sends the
   /// current stage at once and again whenever the stage or its problems
   /// change, and ends after READY.

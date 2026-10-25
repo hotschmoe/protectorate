@@ -128,6 +128,7 @@ pub(super) fn record_completion(
                 | "/protectorate.v1.ReleaseService/UpdateHub"
                 | "/protectorate.v1.SleeveService/SpawnEnvoy"
                 | "/protectorate.v1.ApprovalService/DecideApproval"
+                | "/protectorate.v1.NodeService/ReportNodeAddress"
         )
     {
         return;

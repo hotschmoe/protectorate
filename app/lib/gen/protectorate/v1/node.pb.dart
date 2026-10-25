@@ -28,6 +28,144 @@ export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
 
 export 'node.pbenum.dart';
 
+class ReportNodeAddressRequest extends $pb.GeneratedMessage {
+  factory ReportNodeAddressRequest({
+    $core.String? address,
+  }) {
+    final result = ReportNodeAddressRequest._();
+    if (address != null) result.address = address;
+    return result;
+  }
+
+  ReportNodeAddressRequest._();
+
+  factory ReportNodeAddressRequest.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ReportNodeAddressRequest()..mergeFromBuffer(data, registry);
+  factory ReportNodeAddressRequest.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ReportNodeAddressRequest()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ReportNodeAddressRequest',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ReportNodeAddressRequest.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'address')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ReportNodeAddressRequest clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ReportNodeAddressRequest copyWith(
+          void Function(ReportNodeAddressRequest) updates) =>
+      super.copyWith((message) => updates(message as ReportNodeAddressRequest))
+          as ReportNodeAddressRequest;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use ReportNodeAddressRequest() / ReportNodeAddressRequest.new instead')
+  static ReportNodeAddressRequest create() => ReportNodeAddressRequest._();
+  static $pb.GeneratedMessage $_createMessage() => ReportNodeAddressRequest._();
+  @$core.override
+  ReportNodeAddressRequest createEmptyInstance() =>
+      ReportNodeAddressRequest._();
+  @$core.pragma('dart2js:noInline')
+  static ReportNodeAddressRequest getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ReportNodeAddressRequest>(
+          ReportNodeAddressRequest.$_createMessage);
+  static ReportNodeAddressRequest? _defaultInstance;
+
+  /// address is the node's listener as IP:PORT.
+  @$pb.TagNumber(1)
+  $core.String get address => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set address($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasAddress() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearAddress() => $_clearField(1);
+}
+
+class ReportNodeAddressResponse extends $pb.GeneratedMessage {
+  factory ReportNodeAddressResponse({
+    $core.String? previousAddress,
+    $core.bool? changed,
+  }) {
+    final result = ReportNodeAddressResponse._();
+    if (previousAddress != null) result.previousAddress = previousAddress;
+    if (changed != null) result.changed = changed;
+    return result;
+  }
+
+  ReportNodeAddressResponse._();
+
+  factory ReportNodeAddressResponse.fromBuffer($core.List<$core.int> data,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ReportNodeAddressResponse()..mergeFromBuffer(data, registry);
+  factory ReportNodeAddressResponse.fromJson($core.String json,
+          [$pb.ExtensionRegistry registry = $pb.ExtensionRegistry.EMPTY]) =>
+      ReportNodeAddressResponse()..mergeFromJson(json, registry);
+
+  static final $pb.BuilderInfo _i = $pb.BuilderInfo(
+      _omitMessageNames ? '' : 'ReportNodeAddressResponse',
+      package:
+          const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
+      createEmptyInstance: ReportNodeAddressResponse.$_createMessage)
+    ..aOS(1, _omitFieldNames ? '' : 'previousAddress')
+    ..aOB(2, _omitFieldNames ? '' : 'changed')
+    ..hasRequiredFields = false;
+
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ReportNodeAddressResponse clone() => deepCopy();
+  @$core.Deprecated('See https://github.com/google/protobuf.dart/issues/998.')
+  ReportNodeAddressResponse copyWith(
+          void Function(ReportNodeAddressResponse) updates) =>
+      super.copyWith((message) => updates(message as ReportNodeAddressResponse))
+          as ReportNodeAddressResponse;
+
+  @$core.override
+  $pb.BuilderInfo get info_ => _i;
+
+  @$core.pragma('dart2js:noInline')
+  @$core.Deprecated(
+      'Use ReportNodeAddressResponse() / ReportNodeAddressResponse.new instead')
+  static ReportNodeAddressResponse create() => ReportNodeAddressResponse._();
+  static $pb.GeneratedMessage $_createMessage() =>
+      ReportNodeAddressResponse._();
+  @$core.override
+  ReportNodeAddressResponse createEmptyInstance() =>
+      ReportNodeAddressResponse._();
+  @$core.pragma('dart2js:noInline')
+  static ReportNodeAddressResponse getDefault() => _defaultInstance ??=
+      $pb.GeneratedMessage.$_defaultFor<ReportNodeAddressResponse>(
+          ReportNodeAddressResponse.$_createMessage);
+  static ReportNodeAddressResponse? _defaultInstance;
+
+  /// previous_address is what the hub held before this call.
+  @$pb.TagNumber(1)
+  $core.String get previousAddress => $_getSZ(0);
+  @$pb.TagNumber(1)
+  set previousAddress($core.String value) => $_setString(0, value);
+  @$pb.TagNumber(1)
+  $core.bool hasPreviousAddress() => $_has(0);
+  @$pb.TagNumber(1)
+  void clearPreviousAddress() => $_clearField(1);
+
+  /// changed is false when the hub already held address.
+  @$pb.TagNumber(2)
+  $core.bool get changed => $_getBF(1);
+  @$pb.TagNumber(2)
+  set changed($core.bool value) => $_setBool(1, value);
+  @$pb.TagNumber(2)
+  $core.bool hasChanged() => $_has(1);
+  @$pb.TagNumber(2)
+  void clearChanged() => $_clearField(2);
+}
+
 class SetNodeTierRequest extends $pb.GeneratedMessage {
   factory SetNodeTierRequest({
     $core.String? name,
@@ -5044,6 +5182,20 @@ class NodeServiceApi {
           $pb.ClientContext? ctx, JoinNodeRequest request) =>
       _client.invoke<JoinNodeResponse>(
           ctx, 'NodeService', 'JoinNode', request, JoinNodeResponse());
+
+  /// ReportNodeAddress tells the hub the address a node now serves on, after
+  /// the machine's IP changed. The caller is the node itself: the hub accepts
+  /// the call only over mutual TLS with the certificate it issued to that node,
+  /// and no token, device or owner can make it. The address must be a private
+  /// IP:PORT whose IP is the source address of the connection the call arrived
+  /// on (the hub and its nodes are not behind NAT), so a node can only point
+  /// the hub at itself. The hub stores the address, records the old and new
+  /// value in the audit log and dials the new one from then on. Reporting the
+  /// address the hub already has changes nothing.
+  $async.Future<ReportNodeAddressResponse> reportNodeAddress(
+          $pb.ClientContext? ctx, ReportNodeAddressRequest request) =>
+      _client.invoke<ReportNodeAddressResponse>(ctx, 'NodeService',
+          'ReportNodeAddress', request, ReportNodeAddressResponse());
 
   /// WatchNodeSetup follows a node from its invite to ready. It sends the
   /// current stage at once and again whenever the stage or its problems

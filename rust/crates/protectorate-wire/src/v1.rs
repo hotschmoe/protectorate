@@ -2916,6 +2916,28 @@ impl ::prost_reflect::ReflectMessage for ReplyResponse {
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ReportNodeAddressRequest {
+    #[prost(string, tag = "1")]
+    pub address: ::std::string::String,
+}
+impl ::prost_reflect::ReflectMessage for ReportNodeAddressRequest {
+    fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
+        crate::message("protectorate.v1.ReportNodeAddressRequest")
+    }
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ReportNodeAddressResponse {
+    #[prost(string, tag = "1")]
+    pub previous_address: ::std::string::String,
+    #[prost(bool, tag = "2")]
+    pub changed: bool,
+}
+impl ::prost_reflect::ReflectMessage for ReportNodeAddressResponse {
+    fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
+        crate::message("protectorate.v1.ReportNodeAddressResponse")
+    }
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ReportRequest {
     #[prost(string, tag = "1")]
     pub sleeve: ::std::string::String,
@@ -4893,6 +4915,7 @@ pub mod node_service {
     pub const REMOVE_NODE: crate::Rpc<super::RemoveNodeRequest, super::RemoveNodeProgress> = crate::Rpc::new("/protectorate.v1.NodeService/RemoveNode");
     pub const INVITE_NODE: crate::Rpc<super::InviteNodeRequest, super::InviteNodeResponse> = crate::Rpc::new("/protectorate.v1.NodeService/InviteNode");
     pub const JOIN_NODE: crate::Rpc<super::JoinNodeRequest, super::JoinNodeResponse> = crate::Rpc::new("/protectorate.v1.NodeService/JoinNode");
+    pub const REPORT_NODE_ADDRESS: crate::Rpc<super::ReportNodeAddressRequest, super::ReportNodeAddressResponse> = crate::Rpc::new("/protectorate.v1.NodeService/ReportNodeAddress");
     pub const WATCH_NODE_SETUP: crate::Rpc<super::WatchNodeSetupRequest, super::NodeSetupProgress> = crate::Rpc::new("/protectorate.v1.NodeService/WatchNodeSetup");
     pub const PUT_FILE: crate::Rpc<super::PutFileRequest, super::PutFileResponse> = crate::Rpc::new("/protectorate.v1.NodeService/PutFile");
     pub const GET_FILE: crate::Rpc<super::GetFileRequest, super::GetFileResponse> = crate::Rpc::new("/protectorate.v1.NodeService/GetFile");

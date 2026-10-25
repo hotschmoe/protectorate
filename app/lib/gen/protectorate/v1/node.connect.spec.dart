@@ -213,6 +213,22 @@ abstract final class NodeService {
     protectoratev1node.JoinNodeResponse.new,
   );
 
+  /// ReportNodeAddress tells the hub the address a node now serves on, after
+  /// the machine's IP changed. The caller is the node itself: the hub accepts
+  /// the call only over mutual TLS with the certificate it issued to that node,
+  /// and no token, device or owner can make it. The address must be a private
+  /// IP:PORT whose IP is the source address of the connection the call arrived
+  /// on (the hub and its nodes are not behind NAT), so a node can only point
+  /// the hub at itself. The hub stores the address, records the old and new
+  /// value in the audit log and dials the new one from then on. Reporting the
+  /// address the hub already has changes nothing.
+  static const reportNodeAddress = connect.Spec(
+    '/$name/ReportNodeAddress',
+    connect.StreamType.unary,
+    protectoratev1node.ReportNodeAddressRequest.new,
+    protectoratev1node.ReportNodeAddressResponse.new,
+  );
+
   /// WatchNodeSetup follows a node from its invite to ready. It sends the
   /// current stage at once and again whenever the stage or its problems
   /// change, and ends after READY.

@@ -1054,7 +1054,7 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
     }
     names.extend(options.tls_names.iter().cloned());
     let identity = ca.hub_identity(&names)?;
-    let tls = protectorate_tls::hub_server_config(&identity)?;
+    let tls = protectorate_tls::hub_server_config(&identity, ca.pem().as_bytes())?;
     let node_tls = protectorate_connect_client::NodeTls::from_pem(
         ca.pem().as_bytes(),
         identity.cert_pem.as_bytes(),
