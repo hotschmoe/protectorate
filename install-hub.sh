@@ -77,12 +77,12 @@ PY
 main() {
   local role=hub channel=stable version='' repo=hotschmoe/protectorate base_url='' bundle_dir=''
   local release_root='' state_home='' listen='' token_file='' hub='' node_name=''
-  local ca_cert='' code_file='' public_url='' dead_retention=''
+  local ca_cert='' code_file='' public_url='' dead_retention='' backup_dir=''
   local -a tls_listens=() tls_names=() trusted_proxies=() local_llm_urls=() local_model_hosts=()
   local dry=0 no_start=0 allow_plain_jobs=0
   while (($#)); do
     case "$1" in
-      --role|--channel|--version|--release-repo|--base-url|--bundle-dir|--release-dir|--home|--listen|--tls-listen|--tls-name|--token-file|--hub|--name|--ca-cert|--code-file|--public-url|--trusted-proxy|--local-llm-url|--local-model-host|--dead-retention)
+      --role|--channel|--version|--release-repo|--base-url|--bundle-dir|--release-dir|--home|--listen|--tls-listen|--tls-name|--token-file|--hub|--name|--ca-cert|--code-file|--public-url|--trusted-proxy|--local-llm-url|--local-model-host|--dead-retention|--backup-dir)
         (($# >= 2)) && [[ -n "$2" ]] || die "missing value for $1"
         case "$1" in
           --role) role=$2 ;; --channel) channel=$2 ;; --version) version=$2 ;;
@@ -93,13 +93,13 @@ main() {
           --ca-cert) ca_cert=$2 ;; --code-file) code_file=$2 ;;
           --public-url) public_url=$2 ;; --trusted-proxy) trusted_proxies+=("$2") ;;
           --local-llm-url) local_llm_urls+=("$2") ;; --local-model-host) local_model_hosts+=("$2") ;;
-          --dead-retention) dead_retention=$2 ;;
+          --dead-retention) dead_retention=$2 ;; --backup-dir) backup_dir=$2 ;;
         esac
         shift 2 ;;
       --dry-run) dry=1; shift ;; --no-start) no_start=1; shift ;;
       --allow-plain-jobs) allow_plain_jobs=1; shift ;;
       --help|-h)
-        note "Usage: bash $(basename -- "$0") [--role hub|node] [--bundle-dir DIR | --version TAG] [--channel stable|dev] [--release-repo OWNER/REPO] [--base-url HTTPS_URL] [--release-dir DIR] [--home DIR] [--listen IP:PORT] [hub: --token-file FILE --tls-listen IP:PORT --tls-name HOST --public-url URL --trusted-proxy IP --local-llm-url URL --local-model-host HOST --dead-retention 24h|0] [node: --hub URL --name NAME --code-file FILE --ca-cert FILE --allow-plain-jobs] [--no-start] [--dry-run]"
+        note "Usage: bash $(basename -- "$0") [--role hub|node] [--bundle-dir DIR | --version TAG] [--channel stable|dev] [--release-repo OWNER/REPO] [--base-url HTTPS_URL] [--release-dir DIR] [--home DIR] [--listen IP:PORT] [hub: --token-file FILE --tls-listen IP:PORT --tls-name HOST --public-url URL --trusted-proxy IP --local-llm-url URL --local-model-host HOST --dead-retention 24h|0 --backup-dir DIR] [node: --hub URL --name NAME --code-file FILE --ca-cert FILE --allow-plain-jobs] [--no-start] [--dry-run]"
         note "--dry-run verifies assets and writes nothing. --no-start stages the unit without starting it."
         note "Hub: --listen is its loopback HTTP listener (default 127.0.0.1:7470); each --tls-listen is a private address served over HTTPS with the hub CA."
         note "Node: --listen is the private address the node reports when it joins (default: the interface that reaches the hub, port 7475)."
@@ -109,7 +109,7 @@ main() {
   done
   [[ "$role" == hub || "$role" == node ]] || die "--role must be hub or node"
   [[ "$role" == node || "$allow_plain_jobs" == 0 ]] || die "--allow-plain-jobs requires --role node"
-  [[ "$role" == hub || ( -z "$public_url$dead_retention$token_file" && ${#trusted_proxies[@]} == 0 && ${#local_llm_urls[@]} == 0 && ${#local_model_hosts[@]} == 0 && ${#tls_listens[@]} == 0 && ${#tls_names[@]} == 0 ) ]] || die "hub options require --role hub"
+  [[ "$role" == hub || ( -z "$public_url$dead_retention$token_file$backup_dir" && ${#trusted_proxies[@]} == 0 && ${#local_llm_urls[@]} == 0 && ${#local_model_hosts[@]} == 0 && ${#tls_listens[@]} == 0 && ${#tls_names[@]} == 0 ) ]] || die "hub options require --role hub"
   [[ -z "$dead_retention" || "$dead_retention" =~ ^(0|[0-9]+[smhd])$ ]] || die "--dead-retention requires a duration such as 24h or 0"
   [[ -z "$public_url" || "$public_url" == https://* || "$public_url" == http://* ]] || die "--public-url must be an HTTP or HTTPS URL"
   local local_llm_url
@@ -134,7 +134,7 @@ main() {
   command -v python3 >/dev/null || die "python3 is required to inspect the web archive"
   [[ -n "$bundle_dir" ]] || command -v curl >/dev/null || die "curl is required"
   local path
-  for path in "$bundle_dir" "$release_root" "$state_home" "$token_file" "$ca_cert" "$code_file"; do
+  for path in "$bundle_dir" "$release_root" "$state_home" "$token_file" "$ca_cert" "$code_file" "$backup_dir"; do
     [[ -z "$path" ]] || require_path path "$path"
   done
   [[ -z "$ca_cert" ]] || regular_file "$ca_cert"
@@ -368,6 +368,7 @@ PY
       printf ' --release-dir '; systemd_quote "$release_root"
       if [[ -n "$public_url" ]]; then printf ' --public-url '; systemd_quote "$public_url"; fi
       if [[ -n "$dead_retention" ]]; then printf ' --dead-retention '; systemd_quote "$dead_retention"; fi
+      if [[ -n "$backup_dir" ]]; then printf ' --backup-dir '; systemd_quote "$backup_dir"; fi
       for hub_option in "${trusted_proxies[@]}"; do printf ' --trusted-proxy '; systemd_quote "$hub_option"; done
       for hub_option in "${local_llm_urls[@]}"; do printf ' --local-llm-url '; systemd_quote "$hub_option"; done
       for hub_option in "${local_model_hosts[@]}"; do printf ' --local-model-host '; systemd_quote "$hub_option"; done

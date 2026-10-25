@@ -64,7 +64,7 @@ bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/hub" --rel
   --public-url https://example.test/ --trusted-proxy 127.0.0.2 --trusted-proxy 127.0.0.3 \
   --local-llm-url http://127.0.0.1:1234 --local-llm-url http://127.0.0.1:5678 \
   --local-model-host model.test --local-model-host backup.test --dead-retention 0 \
-  --tls-listen 192.168.22.5:7470 --tls-name hub.lan --no-start > "$temp/hub.log"
+  --tls-listen 192.168.22.5:7470 --tls-name hub.lan --backup-dir "$HOME/hub-backups" --no-start > "$temp/hub.log"
 [[ -x "$HOME/hub-releases/v9.8.7/protectorate-rs" ]]
 [[ -x "$HOME/hub-releases/v9.8.7/protectorate-sleeve-runner" ]]
 [[ -x "$HOME/hub-releases/v9.8.7/protectorate-mcpbridge" ]]
@@ -87,6 +87,7 @@ fi
 grep -Fq -- 'must be loopback' "$temp/hub-plain-lan.log"
 grep -Fq -- '--public-url "https://example.test/"' "$HOME/.config/systemd/user/protectorate-hub.service"
 grep -Fq -- '--dead-retention "0"' "$HOME/.config/systemd/user/protectorate-hub.service"
+grep -Fq -- "--backup-dir \"$HOME/hub-backups\"" "$HOME/.config/systemd/user/protectorate-hub.service"
 grep -Fq -- '--trusted-proxy "127.0.0.2"' "$HOME/.config/systemd/user/protectorate-hub.service"
 grep -Fq -- '--trusted-proxy "127.0.0.3"' "$HOME/.config/systemd/user/protectorate-hub.service"
 grep -Fq -- '--local-llm-url "http://127.0.0.1:1234"' "$HOME/.config/systemd/user/protectorate-hub.service"
