@@ -99,7 +99,8 @@ fn process_exists(pid: u32) -> bool {
         return true;
     };
     // EPERM means the process exists under another user.
-    unsafe { libc::kill(pid, 0) == 0 || *libc::__errno_location() != libc::ESRCH }
+    let alive = unsafe { libc::kill(pid, 0) } == 0;
+    alive || std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
 }
 
 /// Without a cheap liveness probe the file stays.
