@@ -135,6 +135,7 @@ pub struct Hub {
     pub identity: Arc<IdentityStore>,
     methods: Arc<Vec<Method>>,
     capability_ttl: std::time::Duration,
+    disk_interval: std::time::Duration,
     pub audit: Arc<Audit>,
     approvals: approvals::Approvals,
     pub backlog: Arc<BacklogStore>,
@@ -338,6 +339,7 @@ impl Hub {
             identity,
             methods,
             capability_ttl: std::time::Duration::from_secs(60 * 60),
+            disk_interval: std::time::Duration::from_secs(10),
             audit: Arc::new(audit),
             approvals: approvals::Approvals::new(approvals::DEFAULT_TTL),
             backlog: Arc::new(BacklogStore::new(home.clone())),
@@ -421,6 +423,18 @@ impl Hub {
     /// which it refreshes at half that age.
     pub fn with_capability_ttl(mut self, ttl: std::time::Duration) -> Self {
         self.capability_ttl = ttl.clamp(std::time::Duration::from_secs(2), identity::MAX_TTL);
+        self
+    }
+    /// How often a device waiting for approval may poll, which the hub tells
+    /// it and raises when it polls faster.
+    pub fn with_device_interval(self, interval: std::time::Duration) -> Self {
+        self.identity.set_device_interval(interval);
+        self
+    }
+
+    /// How often running sleeves with a disk limit are measured and held to it.
+    pub fn with_disk_interval(mut self, interval: std::time::Duration) -> Self {
+        self.disk_interval = interval;
         self
     }
     pub fn with_sessions(mut self, sessions: Arc<SessionManager>) -> Self {

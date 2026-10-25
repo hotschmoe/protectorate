@@ -228,8 +228,10 @@ fn capabilities_renew_across_expiry_narrow_and_die_when_revoked() {
         .with_credential(Credential::TokenFile(file.clone()));
     let mut seen = vec![first.clone()];
     // Half the TTL is the margin a call on a loaded host has to renew it.
-    let until = Instant::now() + Duration::from_secs(20);
-    while Instant::now() < until {
+    // It stops once the first token is past its life and two renewals were seen.
+    let start = Instant::now();
+    let until = start + Duration::from_secs(20);
+    while Instant::now() < until && !(seen.len() >= 3 && start.elapsed() > Duration::from_secs(9)) {
         client
             .call(STATUS, &json!({}))
             .unwrap_or_else(|error| panic!("renewed capability refused: {error:?}"));

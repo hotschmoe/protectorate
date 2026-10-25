@@ -171,6 +171,8 @@ impl Hub {
             "127.0.0.1:0",
             "--node-interval",
             "1s",
+            "--device-interval",
+            "1s",
             "--release-api-url",
             "http://127.0.0.1:1",
             "--tmux-socket",

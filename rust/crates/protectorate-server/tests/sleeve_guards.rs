@@ -278,7 +278,7 @@ fn disk_limit_stops_the_harness() {
     let root = tempfile::tempdir().unwrap();
     let workspace = root.path().join("disk-ws");
     fs::create_dir_all(&workspace).unwrap();
-    let (_hub, client, _) = start(root.path(), &[]);
+    let (_hub, client, _) = start(root.path(), &["--disk-interval", "1s"]);
     let limit: u64 = 32 << 20;
     client
         .call(
@@ -354,8 +354,9 @@ def call(procedure, token):
     return int(head.split(b" ")[1]), body.decode()
 status = "/protectorate.v1.HubService/GetStatus"
 tokens, codes = [], set()
-end = time.time() + 20
-while time.time() < end:
+start = time.time()
+end = start + 20
+while time.time() < end and not (len(tokens) >= 3 and time.time() > start + 9):
     token = open(os.environ["PROTECTORATE_TOKEN_FILE"]).read().strip()
     if not tokens or tokens[-1] != token:
         tokens.append(token)

@@ -843,16 +843,18 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
         });
         let weak = Arc::downgrade(&hub);
         // Running sleeves with a disk limit are sampled every tick; every
-        // sleeve is sampled for status every 30th tick.
+        // sleeve is sampled for status about every five minutes.
+        let every = hub.disk_interval;
+        let status_ticks = (300 / every.as_secs().max(1)).max(1);
         runtime.spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(10));
+            let mut interval = tokio::time::interval(every);
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             let mut warned = BTreeSet::new();
             for tick in 0_u64.. {
                 interval.tick().await;
                 let Some(hub) = weak.upgrade() else { break };
                 match tokio::task::spawn_blocking(move || {
-                    sample_sleeve_disks(&hub, tick % 30 == 0, &mut warned);
+                    sample_sleeve_disks(&hub, tick % status_ticks == 0, &mut warned);
                     warned
                 })
                 .await
