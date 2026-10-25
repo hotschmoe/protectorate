@@ -537,6 +537,41 @@ Round 5, reliability before the cutover (merged on rust-yolo; `make check`
   sizes about 1 run in 18 here, while a C SVE/NEON floating-point stress test
   shows no fault; it points at the Dart JIT test runtime, not product code.
 
+Round 6, production cutover (2026-10-26; hub and two nodes on
+v0.4.3-306-g6eeb818):
+- ms-r1's Go hub and Headscale are stopped and their state moved aside; the
+  Rust hub runs from a local bundle (`install-hub.sh --bundle-dir`) on
+  `192.168.10.44:7470` with `--tls-name protectorate.hotschmoe.com` and
+  scheduled backups. Nodes use the IP URL: the domain resolves to the WAN
+  address, LAN clients hairpin through the router and lose their source IP,
+  and a node reports its own new address by source IP. The phone app is to
+  use the domain through a Traefik TLS-passthrough TCP router; the hub gets
+  no `--trusted-proxy`, since a passthrough proxy cannot set
+  X-Forwarded-For and trusting it would let clients spoof theirs.
+- agentworld and kidsbox were joined with the Linux invite line and later
+  updated through `node update`. kidsbox's ufw needed TCP 7475 from the hub:
+  the Go node dialed out over the tailnet, the Rust hub dials the node.
+- Real deployment found ten defects the tests did not: the Windows invite
+  line pinned TLS to the hub CA and then downloaded from GitHub (it now uses
+  the hub's `/dl`, which serves the Windows trio and SHA256SUMS); a bundle
+  install kept only the hub's own architecture, so other invite lines got
+  404 (the installer now keeps every node asset the bundle lists, and
+  `node update` uses them); `libc::__errno_location` broke the Termux build;
+  the hub reported its own node as the crate version 0.1.0 and stored Rust
+  arch names (x86_64) where release assets, updates and selectors expect
+  amd64; a joined node behind a firewall showed "invited, not yet joined";
+  Linux invite lines failed silently; the installer could not enable
+  backups; Codex under an nvm Node was bound twice and could not start; and
+  the Codex and Grok drivers logged fields no ChatEvent has, which stalled
+  every chat watch at the first such event. The hub now skips and logs an
+  event it cannot represent, and every driver test checks that its whole
+  log decodes.
+- Release APKs cannot be built on this linux-arm64 host: Flutter ships no
+  linux-arm64 `gen_snapshot` for Android AOT. A debug APK builds with the
+  SDK's x86_64 CMake and NDK under qemu-user (`QEMU_LD_PREFIX` pointing at a
+  private root of the amd64 cross libc plus libz). Windows arm64 cannot be
+  built on officewin (no ARM64 MSVC libraries).
+
 Build profile (round 3, 12-core CIX P1: 8 Cortex-A720 + 4 Cortex-A520):
 - Cold, fresh target dir: dev bins 40 s, + tests 16 s, clippy all-targets
   26 s, release 91 s, dist 336 s (release and dist measured with other
