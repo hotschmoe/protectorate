@@ -110,6 +110,7 @@ fn nix_statvfs(path: &Path) -> (u64, u64) {
 
 struct DiskHub {
     process: Option<Process>,
+    tmux: String,
     client: Client,
     log: PathBuf,
 }
@@ -159,8 +160,26 @@ fn start_hub(disk: &SmallDisk, root: &Path, run: u32) -> DiskHub {
     until("hub status", &log, || client.call(HUB, &json!({})).is_ok());
     DiskHub {
         process: Some(process),
+        tmux,
         client,
         log,
+    }
+}
+
+/// A killed hub leaves its sleeves' tmux servers running; stop them by socket.
+impl Drop for DiskHub {
+    fn drop(&mut self) {
+        self.process = None;
+        // The hub runs as uid 0 inside its namespace, so tmux keeps the
+        // socket in /tmp/tmux-0, which support::kill_tmux does not look in.
+        let socket = Path::new("/tmp/tmux-0").join(&self.tmux);
+        let _ = Command::new("tmux")
+            .arg("-S")
+            .arg(&socket)
+            .arg("kill-server")
+            .stderr(Stdio::null())
+            .status();
+        let _ = fs::remove_file(socket);
     }
 }
 
