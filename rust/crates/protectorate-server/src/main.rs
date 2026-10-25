@@ -1196,8 +1196,7 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
         &user_home,
         options.pub_cache_lower.as_deref(),
     );
-    tool_roots.sort();
-    tool_roots.dedup();
+    coalesce_roots(&mut tool_roots);
     let explicit_claude = options.claude_executable.is_some();
     let claude_executable = options
         .claude_executable
@@ -1229,8 +1228,7 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
         &user_home,
         options.pub_cache_lower.as_deref(),
     );
-    claude_tool_roots.sort();
-    claude_tool_roots.dedup();
+    coalesce_roots(&mut claude_tool_roots);
     let explicit_codex = options.codex_executable.is_some();
     let codex_candidate = options
         .codex_executable
@@ -1268,8 +1266,7 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
         &user_home,
         options.pub_cache_lower.as_deref(),
     );
-    codex_tool_roots.sort();
-    codex_tool_roots.dedup();
+    coalesce_roots(&mut codex_tool_roots);
     let explicit_grok = options.grok_executable.is_some();
     let grok_candidate = options
         .grok_executable
@@ -1295,8 +1292,7 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
         &user_home,
         options.pub_cache_lower.as_deref(),
     );
-    grok_tool_roots.sort();
-    grok_tool_roots.dedup();
+    coalesce_roots(&mut grok_tool_roots);
     if pi_executable.is_some()
         || claude_executable.is_some()
         || codex_executable.is_some()
@@ -1442,6 +1438,13 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
     }
     result?;
     Ok(hub_restart.load(Ordering::SeqCst))
+}
+
+/// Sorted, with roots inside another root dropped: a harness installed under
+/// a default root (Codex under an nvm Node) must not be bound twice.
+fn coalesce_roots(roots: &mut Vec<PathBuf>) {
+    roots.sort();
+    roots.dedup_by(|root, kept| root.starts_with(kept));
 }
 
 fn omit_pub_roots_covered_by_overlay(
