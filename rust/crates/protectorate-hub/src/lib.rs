@@ -202,6 +202,10 @@ impl Hub {
         version: impl Into<String>,
     ) -> protectorate_identity::Result<Self> {
         let home = home.into();
+        // Temp files of writers killed before their rename; best effort.
+        for dir in [home.clone(), home.join("jobs"), home.join("ca")] {
+            let _ = protectorate_fsutil::remove_stale_temps(&dir);
+        }
         let workspace_config = workspaces::Config::new(&home);
         let hostname = std::env::var(if cfg!(windows) {
             "COMPUTERNAME"
@@ -238,9 +242,10 @@ impl Hub {
             )
             .map_err(|error| identity::Error::Invalid(error.to_string()))?,
         );
-        inventory
-            .write_hosts()
-            .map_err(|error| identity::Error::Invalid(format!("write hosts.md: {error}")))?;
+        // hosts.md is derived; a full disk must not keep the hub from serving.
+        if let Err(error) = inventory.write_hosts() {
+            eprintln!("write hosts.md: {error}");
+        }
         let node_monitor = Arc::new(NodeMonitor::new(
             Arc::clone(&inventory),
             hostname.clone(),

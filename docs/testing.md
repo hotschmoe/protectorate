@@ -22,7 +22,8 @@ scenario's name is `<file>::<test>`, so `cargo test -p protectorate-hub
 
 - `protectorate-server`: the real `protectorate-rs` binary (backup and
   restore, harness drivers, the checked-in Flutter client against a Rust hub,
-  node job replay after a hub SIGKILL).
+  node job replay after a hub SIGKILL, crash and full-disk durability; see
+  below).
   The `watchdog::` scenarios stop every thread of a real hub except its
   watchdog with ptrace from outside and expect exit 70 with the diagnostic,
   and freeze it with SIGSTOP for longer than the limit and expect no exit.
@@ -38,6 +39,47 @@ scenario's name is `<file>::<test>`, so `cargo test -p protectorate-hub
 - `protectorate-mcpbridge`: the real bridge binary and its committed tool
   catalog.
 - `protectorate-node-windows`: the Windows binary (Windows hosts only).
+
+## Crash and full-disk lane
+
+`protectorate-server`, `crash_consistency::` and `disk_full::`, part of the
+default run (about 15 s and 6 s).
+
+- `crash_consistency::acknowledged_mutations_survive_hub_sigkill_at_random_points`
+  runs a real hub with two nodes and six clients that mutate mail, notes,
+  tokens, device pairings, inventory, jobs, sleeves and leases while scheduled
+  and manual backups run. The hub (and every other round the node) is
+  SIGKILLed after a random delay and restarted on the same home. Each restart
+  must come up, keep every change a client saw succeed (an acknowledged ack,
+  cancel, approval or request id included), hold no half-applied record,
+  verify its audit chain, leave no dead writer's temp file, and every backup
+  archive must restore. A call that failed around the kill may or may not
+  have applied, and the test accepts both.
+- `crash_consistency::torn_log_tails_and_stray_temp_files_do_not_stop_the_hub`
+  adds what SIGKILL cannot: a half-written last line in `mailbox.jsonl` and
+  the audit log, and temp files of dead and live writers.
+- `disk_full::full_disk_fails_writes_cleanly_keeps_reads_and_recovers_without_restart`
+  runs a real hub with its home on a 3 MiB tmpfs that the test mounts in its
+  own unprivileged user and mount namespace (`unshare --user --map-root-user
+  --mount`; the hub joins it with `nsenter --preserve-credentials`), so the
+  disk fills with real ENOSPC and no root. Writes of every store, a sleeve
+  spawn, a job, a lease and a backup must fail with an error that names the
+  failed write, change nothing in memory or on disk, and leave no torn log
+  line or archive; reads keep working; a restart on the full disk comes up;
+  after space returns the same process takes writes again, including the
+  names that failed, with no restart.
+
+The kill delays and the order of operations come from a seed printed at the
+start (`crash_consistency: PROTECTORATE_CRASH_SEED=...`). Replay a failure with
+`PROTECTORATE_CRASH_SEED=<seed>`; the kill points still depend on timing, so a
+replay narrows rather than fixes the interleaving. More rounds:
+`PROTECTORATE_CRASH_ITERATIONS=40` (default 4).
+
+Not covered: power loss. The kernel keeps SIGKILLed writers' page cache, so
+the tests cannot show a missing fsync; they show a missing write, a torn
+line, an unhandled leftover or a store that refuses to load. The
+audit log is appended without fsync. Chat logs of live sleeves are
+not exercised on a full disk (they need a harness peer).
 
 ## Build speed
 

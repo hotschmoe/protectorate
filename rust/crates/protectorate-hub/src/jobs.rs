@@ -456,6 +456,11 @@ impl Jobs {
         for entry in fs::read_dir(&root)? {
             let entry = entry?;
             let path = entry.path();
+            // Source archives and bundles staged by a hub that was killed.
+            if entry.file_name().to_string_lossy().starts_with(".tmp") {
+                let _ = fs::remove_file(&path);
+                continue;
+            }
             if path.extension().is_none_or(|extension| extension != "json") {
                 continue;
             }
@@ -1662,34 +1667,13 @@ fn persist(root: &Path, id: &str, stored: &Stored) -> Result<()> {
     let job =
         serde_json::to_value(stored.job.transcode_to_dynamic()).map_err(RpcError::internal)?;
     let bytes = serde_json::to_vec(&json!({"id":id,"job":job,"requestId":stored.request_id,"cancelRequested":stored.cancel_requested})).map_err(RpcError::internal)?;
-    let temp = root.join(format!(
-        ".{id}-{}.tmp",
-        random_hex(8).map_err(RpcError::internal)?
-    ));
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    options.mode(0o600);
-    let mut file = options.open(&temp).map_err(RpcError::internal)?;
-    let result = (|| -> std::io::Result<()> {
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-        fs::rename(&temp, root.join(format!("{id}.json")))?;
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temp);
-    }
-    result.map_err(RpcError::internal)
+    protectorate_fsutil::write_file(&root.join(format!("{id}.json")), &bytes, 0o600)
+        .map_err(RpcError::internal)
 }
 fn persist_canceled_request_ids(root: &Path, canceled: &BTreeMap<String, i64>) -> Result<()> {
     let bytes = serde_json::to_vec(canceled).map_err(RpcError::internal)?;
-    let mut file = tempfile::NamedTempFile::new_in(root).map_err(RpcError::internal)?;
-    file.write_all(&bytes).map_err(RpcError::internal)?;
-    file.as_file().sync_all().map_err(RpcError::internal)?;
-    file.persist(root.join("canceled-requests"))
-        .map_err(RpcError::internal)?;
-    Ok(())
+    protectorate_fsutil::write_file(&root.join("canceled-requests"), &bytes, 0o600)
+        .map_err(RpcError::internal)
 }
 fn validate_request_id(key: &str) -> Result<()> {
     if key.len() < 8
