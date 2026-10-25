@@ -61,6 +61,9 @@ pub const RUST_BUNDLE: [&str; 6] = [
     "protectorate-mcpbridge",
 ];
 
+/// The Windows node release: the server, the CLI and the MCP bridge.
+pub const RUST_WINDOWS: [&str; 3] = ["protectorate-rs", "protectorate", "protectorate-mcpbridge"];
+
 pub fn rust_bundle_name(component: &str, os: &str, arch: &str) -> Result<String> {
     if os == "android" {
         return Err(invalid(

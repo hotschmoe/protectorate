@@ -1,9 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$Version,
     [Parameter(Mandatory = $true)][string]$ManifestSha256,
-    [string]$ReleaseTag = "",
     [string]$BundleDir = "",
-    [string]$ReleaseRepo = "hotschmoe/protectorate",
     [string]$Hub = "",
     [string]$Name = "",
     [string]$CaCert = "",
@@ -62,11 +60,8 @@ function Manifest-Hash([string]$Manifest, [string]$Asset) {
 }
 
 if ($Version -cnotmatch '^v[A-Za-z0-9][A-Za-z0-9._+-]{0,79}$') { throw "Invalid release version" }
-if (-not $ReleaseTag) { $ReleaseTag = $Version }
-if ($ReleaseTag -cnotmatch '^(?:dev|v[A-Za-z0-9][A-Za-z0-9._+-]{0,79})$') { throw "Invalid release tag" }
 if ($ManifestSha256 -notmatch '^[0-9a-fA-F]{64}$') { throw "ManifestSha256 must be 64 hex digits from a trusted source" }
-if ($ReleaseRepo -cnotmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { throw "Invalid ReleaseRepo" }
-if (-not $BundleDir -and $ReleaseRepo -ne "hotschmoe/protectorate") { throw "Only the official release repo is allowed for network downloads; use BundleDir for a mirror" }
+if (-not $BundleDir -and (-not $Hub -or -not $CaCert)) { throw "Downloads come from the hub: pass Hub and CaCert, or BundleDir" }
 
 $nativeArchitecture = switch ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()) {
     "X64" { "amd64" }
@@ -116,10 +111,21 @@ try {
         Copy-Item -LiteralPath $manifest -Destination (Join-Path $stage "SHA256SUMS")
         foreach ($asset in $assets) { Copy-Item -LiteralPath (Join-Path $BundleDir $asset) -Destination (Join-Path $stage $asset) }
     } else {
-        $base = "https://github.com/$ReleaseRepo/releases/download/$ReleaseTag"
-        Invoke-WebRequest -Uri "$base/SHA256SUMS" -OutFile (Join-Path $stage "SHA256SUMS") -MaximumRedirection 5 -UseBasicParsing
+        # Every download is pinned to the hub CA, like the invite line.
+        $hubCa = [Security.Cryptography.X509Certificates.X509Certificate2]::new($CaCert)
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        [Net.ServicePointManager]::ServerCertificateValidationCallback = {
+            param($s, $c, $x, $e)
+            $k = [Security.Cryptography.X509Certificates.X509Chain]::new()
+            $k.ChainPolicy.RevocationMode = "NoCheck"
+            $k.ChainPolicy.VerificationFlags = "AllowUnknownCertificateAuthority"
+            [void]$k.ChainPolicy.ExtraStore.Add($hubCa)
+            (($e -band 3) -eq 0) -and $k.Build([Security.Cryptography.X509Certificates.X509Certificate2]$c) -and ($k.ChainElements[$k.ChainElements.Count - 1].Certificate.Thumbprint -eq $hubCa.Thumbprint)
+        }.GetNewClosure()
+        $base = $Hub.TrimEnd("/") + "/dl"
+        Invoke-WebRequest -Uri "$base/SHA256SUMS" -OutFile (Join-Path $stage "SHA256SUMS") -MaximumRedirection 0 -UseBasicParsing
         foreach ($asset in $assets) {
-            Invoke-WebRequest -Uri "$base/$asset" -OutFile (Join-Path $stage $asset) -MaximumRedirection 5 -UseBasicParsing
+            Invoke-WebRequest -Uri "$base/$asset" -OutFile (Join-Path $stage $asset) -MaximumRedirection 0 -UseBasicParsing
         }
     }
     $manifest = Join-Path $stage "SHA256SUMS"

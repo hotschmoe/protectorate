@@ -181,9 +181,8 @@ async fn public_installers_and_owner_diagnostics_are_explicit_routes() {
     assert_eq!(status, 200);
     let script = String::from_utf8(body).unwrap();
     assert!(script.contains("$Version = 'v1-test'"));
-    assert!(script.contains("$ReleaseTag = 'dev'"));
-    assert!(script.contains("$ReleaseRepo = 'owner/repo'"));
-    assert!(script.contains("$ReleaseRepo -ne 'owner/repo'"));
+    assert!(!script.contains("github.com"));
+    assert!(script.contains("$base = $Hub.TrimEnd(\"/\") + \"/dl\""));
     assert!(script.contains("$Hub = 'https://hub.example.test:7470'"));
     assert!(script.contains("$ManifestSha256 = '"));
     assert!(script.contains("$Name = $env:PROTECTORATE_NODE_NAME"));

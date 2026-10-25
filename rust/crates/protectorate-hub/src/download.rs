@@ -14,12 +14,26 @@ use std::{io::Read, path::Path, sync::Arc};
 static READ_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 
 fn component_name(file: &str) -> Option<(&str, bool)> {
+    if file == "SHA256SUMS" {
+        return Some((file, false));
+    }
     let (name, checksum) = file
         .strip_suffix(".sha256")
         .map_or((file, false), |name| (name, true));
     for component in RUST_BUNDLE {
         for arch in ["amd64", "arm64"] {
             if release::rust_bundle_name(component, "linux", arch)
+                .ok()
+                .as_deref()
+                == Some(name)
+            {
+                return Some((name, checksum));
+            }
+        }
+    }
+    for component in release::RUST_WINDOWS {
+        for arch in ["amd64", "arm64"] {
+            if release::rust_bundle_name(component, "windows", arch)
                 .ok()
                 .as_deref()
                 == Some(name)
@@ -71,6 +85,11 @@ fn verified_asset(hub: &Hub, name: &str, checksum: bool) -> Result<(Vec<u8>, boo
     }
     let sums = read_bounded(&dir.join("SHA256SUMS"), release::MAX_SUMS)
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    // The Windows installer pins the manifest's hash and checks each asset
+    // against it, so the manifest itself is served as is.
+    if name == "SHA256SUMS" {
+        return Ok((sums, true));
+    }
     let bytes =
         read_bounded(&dir.join(name), release::MAX_ASSET).map_err(|_| StatusCode::NOT_FOUND)?;
     release::verify_checksum(name, &bytes, &sums).map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;

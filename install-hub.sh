@@ -24,6 +24,10 @@ fetch() {
   fi
 }
 
+listed() {
+  awk -v name="$1" '$2 == name || $2 == "*" name { found = 1 } END { exit !found }' "$stage/SHA256SUMS"
+}
+
 verify() {
   local name=$1 path=$2 expected actual count
   expected=$(awk -v name="$name" '$2 == name || $2 == "*" name { print $1 }' "$stage/SHA256SUMS")
@@ -192,6 +196,25 @@ with tarfile.open(archive, 'r:gz') as tf:
             raise SystemExit('web archive exceeds size limit')
 PY
   fi
+  # The hub serves node installers their binaries from its release, so a hub
+  # keeps every node asset its bundle lists.
+  local node_assets=() other_arch=amd64
+  [[ "$arch" == arm64 ]] || other_arch=arm64
+  if [[ "$role" == hub ]]; then
+    local candidates=(protectorate-rs-android-arm64)
+    for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge; do
+      candidates+=("$component-linux-$other_arch")
+    done
+    for component in protectorate-rs protectorate protectorate-mcpbridge; do
+      candidates+=("$component-windows-amd64.exe" "$component-windows-arm64.exe")
+    done
+    for name in "${candidates[@]}"; do
+      listed "$name" || continue
+      fetch "$name" "$stage/$name"
+      verify "$name" "$stage/$name"
+      node_assets+=("$name")
+    done
+  fi
   local binary="$stage/protectorate-rs-linux-$arch"
   if [[ -z "${PROTECTORATE_INSTALL_SKIP_BINARY_CHECK:-}" ]]; then
     local reported
@@ -240,6 +263,9 @@ PY
         add_web=1
       fi
     fi
+    for name in "${node_assets[@]}"; do
+      [[ ! -e "$install_dir/$name" && ! -L "$install_dir/$name" ]] || cmp -s "$stage/$name" "$install_dir/$name" || die "existing node asset differs: $name"
+    done
     [[ -f "$install_dir/release.json" && ! -L "$install_dir/release.json" ]] || die "existing release metadata is missing"
     note "Reusing verified release $build_version"
   fi
@@ -268,6 +294,9 @@ PY
       install -m 755 -- "$stage/$component-linux-$arch" "$prepared/$component-linux-$arch"
       ln -- "$prepared/$component-linux-$arch" "$prepared/$component"
     done
+    for name in "${node_assets[@]}"; do
+      install -m 755 -- "$stage/$name" "$prepared/$name"
+    done
     install -m 644 -- "$stage/SHA256SUMS" "$prepared/SHA256SUMS"
     install -m 644 -- "$stage/VERSION" "$prepared/VERSION"
     install -m 644 -- "$stage/release.json" "$prepared/release.json"
@@ -292,6 +321,13 @@ PY
     mv -- "$web_stage/web" "$install_dir/web"
     rmdir -- "$web_stage"
     note "Added verified web archive to node-first release $build_version"
+  fi
+  if [[ -e "$install_dir" ]]; then
+    for name in "${node_assets[@]}"; do
+      [[ -e "$install_dir/$name" ]] && continue
+      install -m 755 -- "$stage/$name" "$install_dir/.$name.install-$$"
+      mv -- "$install_dir/.$name.install-$$" "$install_dir/$name"
+    done
   fi
   if [[ "$role" == hub && ! -e "$token_file" && ! -L "$token_file" ]]; then
     mkdir -p -- "$(dirname -- "$token_file")"

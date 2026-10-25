@@ -50,23 +50,13 @@ pub(crate) fn powershell_word(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
 
-fn release_manifest(hub: &Hub) -> Result<(String, String, String, String), StatusCode> {
+fn release_manifest(hub: &Hub) -> Result<(String, String), StatusCode> {
     let source = hub
         .releases
         .as_ref()
         .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
-    let repo = source.repo().to_owned();
-    let current = source.current();
-    let version = current.version;
+    let version = source.current().version;
     if !release::valid_version(&version) {
-        return Err(StatusCode::SERVICE_UNAVAILABLE);
-    }
-    let tag = if current.tag.is_empty() {
-        version.clone()
-    } else {
-        current.tag
-    };
-    if tag != "dev" && !release::valid_version(&tag) {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
     let dir = source.release_dir(&version);
@@ -86,7 +76,7 @@ fn release_manifest(hub: &Hub) -> Result<(String, String, String, String), Statu
     if bytes.len() as u64 > MAX_SUMS {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
-    Ok((version, tag, repo, format!("{:x}", Sha256::digest(&bytes))))
+    Ok((version, format!("{:x}", Sha256::digest(&bytes))))
 }
 
 pub(super) async fn linux(hub: Arc<Hub>) -> Response {
@@ -94,7 +84,7 @@ pub(super) async fn linux(hub: Arc<Hub>) -> Response {
         Ok(base) => base,
         Err(status) => return status.into_response(),
     };
-    let (_, _, _, manifest_sha) = match release_manifest(&hub) {
+    let (_, manifest_sha) = match release_manifest(&hub) {
         Ok(manifest) => manifest,
         Err(status) => return status.into_response(),
     };
@@ -263,19 +253,17 @@ pub(super) async fn windows(hub: Arc<Hub>) -> Response {
         Ok(base) => base,
         Err(status) => return status.into_response(),
     };
-    let (version, tag, repo, manifest_sha) = match release_manifest(&hub) {
+    let (version, manifest_sha) = match release_manifest(&hub) {
         Ok(pair) => pair,
         Err(status) => return status.into_response(),
     };
-    let windows_version = |value: &str| {
-        value.starts_with('v')
-            && value.len() <= 81
-            && value
-                .as_bytes()
-                .get(1)
-                .is_some_and(u8::is_ascii_alphanumeric)
-    };
-    if !windows_version(&version) || (tag != "dev" && !windows_version(&tag)) {
+    let windows_version = version.starts_with('v')
+        && version.len() <= 81
+        && version
+            .as_bytes()
+            .get(1)
+            .is_some_and(u8::is_ascii_alphanumeric);
+    if !windows_version {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     }
     let template = include_str!("../../../../install-node-windows.ps1");
@@ -291,26 +279,6 @@ pub(super) async fn windows(hub: Arc<Hub>) -> Response {
                 "[string]$ManifestSha256 = {},",
                 powershell_word(&manifest_sha)
             ),
-            1,
-        )
-        .replacen(
-            "[string]$ReleaseTag = \"\",",
-            &format!("[string]$ReleaseTag = {},", powershell_word(&tag)),
-            1,
-        )
-        .replacen(
-            "[string]$ReleaseRepo = \"hotschmoe/protectorate\",",
-            &format!("[string]$ReleaseRepo = {},", powershell_word(&repo)),
-            1,
-        )
-        .replacen(
-            "$ReleaseRepo -ne \"hotschmoe/protectorate\"",
-            &format!("$ReleaseRepo -ne {}", powershell_word(&repo)),
-            1,
-        )
-        .replacen(
-            "Only the official release repo is allowed for network downloads; use BundleDir for a mirror",
-            "This installer is pinned to the hub's release repository; use BundleDir for a mirror",
             1,
         )
         .replacen(

@@ -54,7 +54,9 @@ for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-
   fi
   chmod +x "$temp/bundle/$name"
 done
-(cd "$temp/bundle" && sha256sum VERSION *-linux-"$arch" protectorate-web-v9.8.7.tar.gz > SHA256SUMS)
+printf 'MZ windows node\n' > "$temp/bundle/protectorate-rs-windows-arm64.exe"
+printf 'termux node\n' > "$temp/bundle/protectorate-rs-android-arm64"
+(cd "$temp/bundle" && sha256sum VERSION *-linux-"$arch" protectorate-rs-windows-arm64.exe protectorate-rs-android-arm64 protectorate-web-v9.8.7.tar.gz > SHA256SUMS)
 
 bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/hub" --release-dir "$HOME/hub-releases" --dry-run > "$temp/dry.log"
 [[ ! -e "$HOME/hub-releases" && ! -e "$HOME/.config/systemd/user/protectorate-hub.service" ]]
@@ -67,6 +69,9 @@ bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/hub" --rel
 [[ -x "$HOME/hub-releases/v9.8.7/protectorate-sleeve-runner" ]]
 [[ -x "$HOME/hub-releases/v9.8.7/protectorate-mcpbridge" ]]
 [[ -f "$HOME/hub-releases/v9.8.7/web/index.html" ]]
+cmp "$temp/bundle/protectorate-rs-windows-arm64.exe" "$HOME/hub-releases/v9.8.7/protectorate-rs-windows-arm64.exe"
+cmp "$temp/bundle/protectorate-rs-android-arm64" "$HOME/hub-releases/v9.8.7/protectorate-rs-android-arm64"
+[[ ! -e "$HOME/hub-releases/v9.8.7/protectorate-rs-windows-amd64.exe" ]]
 grep -Fq '"version":"v9.8.7"' "$HOME/hub-releases/v9.8.7/release.json"
 [[ "$(readlink "$HOME/hub-releases/current")" == v9.8.7 ]]
 [[ "$(stat -c %a "$HOME/hub/token")" == 600 ]]

@@ -40,13 +40,17 @@ async fn serves_only_verified_current_rust_components() {
     let name = "protectorate-rs-linux-amd64";
     let bytes = b"rust executable";
     let digest = format!("{:x}", Sha256::digest(bytes));
-    let sums = format!("{digest}  {name}\n");
+    let windows = "protectorate-mcpbridge-windows-arm64.exe";
+    let windows_bytes = b"windows bridge";
+    let windows_digest = format!("{:x}", Sha256::digest(windows_bytes));
+    let sums = format!("{digest}  {name}\n{windows_digest}  {windows}\n");
     let info = Info {
         version: "v-test".into(),
         ..Default::default()
     };
     let dir = source.store(&info, sums.as_bytes()).unwrap();
     std::fs::write(dir.join(name), bytes).unwrap();
+    std::fs::write(dir.join(windows), windows_bytes).unwrap();
     source.activate(&info.version).unwrap();
     let hub = Hub::open(temp.path().join("home"), "owner-secret", "v-test")
         .unwrap()
@@ -60,6 +64,12 @@ async fn serves_only_verified_current_rust_components() {
     assert_eq!(status, 200);
     assert_eq!(body, bytes);
     let (status, body) = get(addr, &format!("/dl/{name}.sha256")).await;
+    assert_eq!(status, 200);
+    assert_eq!(body, format!("{digest}  {name}\n").as_bytes());
+    let (status, body) = get(addr, &format!("/dl/{windows}")).await;
+    assert_eq!(status, 200);
+    assert_eq!(body, windows_bytes);
+    let (status, body) = get(addr, "/dl/SHA256SUMS").await;
     assert_eq!(status, 200);
     assert_eq!(body, sums.as_bytes());
     let (status, _) = get(addr, "/dl/protectorate-linux-amd64").await;
