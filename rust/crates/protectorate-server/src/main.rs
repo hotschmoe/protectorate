@@ -40,6 +40,7 @@ mod node_doctor;
 mod node_install;
 mod node_join;
 mod transport;
+mod watchdog;
 mod web;
 use std::{
     env,
@@ -1341,6 +1342,18 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
         eprintln!("protectorate-rs serving TLS on {}", listener.local_addr()?);
     }
     let chat_runtime = hub.chat_runtime.clone();
+    let mut dog = watchdog::Watchdog::new("hub", parse_interval)?;
+    let identity = Arc::clone(&hub.identity);
+    dog.sync_probe("identity store lock", move || drop(identity.devices()));
+    let sleeves = Arc::clone(&hub.sleeves);
+    dog.sync_probe("sleeve registry lock", move || drop(sleeves.list()));
+    let mail = Arc::clone(&hub.mail);
+    dog.sync_probe("mailbox lock", move || drop(mail.unresolved()));
+    let inventory = Arc::clone(&hub.inventory);
+    dog.sync_probe("node inventory lock", move || drop(inventory.list()));
+    let directory = Arc::clone(&hub.directory);
+    dog.sync_probe("directory lock", move || drop(directory.list()));
+    let _watchdog = dog.arm()?;
     let router = web.attach(hub.router()?);
     let worker = tokio::task::spawn_blocking(move || quota.run(transport.as_ref(), &worker_stop));
     let node_worker = tokio::task::spawn_blocking(move || {
@@ -1588,6 +1601,16 @@ async fn serve_node(options: Options) -> Result<NodeServeExit, Box<dyn Error>> {
         return Ok(NodeServeExit::Restart);
     }
     let listener = tokio::net::TcpListener::bind(address).await?;
+    let mut dog = watchdog::Watchdog::new("node", parse_interval)?;
+    if let Some(jobs) = agent.jobs() {
+        dog.async_probe("job table locks", move || {
+            let jobs = Arc::clone(&jobs);
+            async move {
+                jobs.list().await;
+            }
+        });
+    }
+    let _watchdog = dog.arm()?;
     eprintln!("protectorate-rs node serving on {}", listener.local_addr()?);
     let shutdown_requested = Arc::clone(&restart_requested);
     let uninstall_shutdown = Arc::clone(&uninstall_requested);

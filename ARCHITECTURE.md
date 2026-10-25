@@ -245,6 +245,29 @@ External MCP clients use the same capability path.
   approves on a device or with `approvals approve`, and the identical call
   then runs once.
 
+## Hang detection and restarts
+
+A hung hub or node (deadlock, wedged runtime, stuck blocking pool) is
+restarted by its service manager, which only reacts to exits, so the process
+kills itself. `serve` runs a watchdog thread (`protectorate-server/src/
+watchdog.rs`) that expects progress from: a heartbeat task on the main
+runtime, a `spawn_blocking` round trip, and on the hub the identity,
+sleeve-registry, mailbox, inventory and directory locks (each probed by its own
+thread taking the lock and releasing it), on the node the job table locks. A
+probe that has not completed for 90 s (`PROTECTORATE_WATCHDOG_TIMEOUT`, for
+example `5s`, only shortens the bound for tests) makes it write the stalled
+probe and a thread list to stderr and `_exit(70)`, with no destructor that
+could take the stuck lock. 90 s is 60 times the 1.5 s fsync tail seen on the
+dev host. A late watchdog wake-up (SIGSTOP, debugger, frozen cgroup) is
+treated as a freeze and forgiven, not as a hang. Status 70 is a failure
+everywhere: systemd `Restart=on-failure` (`StartLimitIntervalSec=0`, so no run
+of restarts can leave the unit stopped), the Windows task's
+`RestartOnFailure` (every minute, 999 times), and Termux's runit service,
+which restarts on any exit. systemd `WatchdogSec=` is not used: it adds
+`Type=notify`, startup and update-trial handshakes across the guardian and its
+child, and a second hang definition, for no case the in-process watchdog misses
+(a process stuck in uninterruptible I/O cannot be killed by either).
+
 ## Quota (P1)
 
 Read-only readers for Claude, Codex, Grok, Antigravity (local `agy` only) and

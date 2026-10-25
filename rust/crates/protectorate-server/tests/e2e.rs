@@ -13,3 +13,4 @@ mod job_restart;
 mod mtls;
 mod service_job_restart;
 mod sleeve_guards;
+mod watchdog;
