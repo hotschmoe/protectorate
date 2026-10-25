@@ -23,6 +23,9 @@ scenario's name is `<file>::<test>`, so `cargo test -p protectorate-hub
 - `protectorate-server`: the real `protectorate-rs` binary (backup and
   restore, harness drivers, the checked-in Flutter client against a Rust hub,
   node job replay after a hub SIGKILL).
+  The `watchdog::` scenarios stop every thread of a real hub except its
+  watchdog with ptrace from outside and expect exit 70 with the diagnostic,
+  and freeze it with SIGSTOP for longer than the limit and expect no exit.
 - `protectorate-cli`: the real `protectorate` binary against a real hub,
   node and private tmux server, plus the installed-companion forwarding.
 - `protectorate-hub`: the hub's HTTP API with real sandboxed sleeves, sleeve
