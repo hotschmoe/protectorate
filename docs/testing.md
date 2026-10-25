@@ -57,9 +57,20 @@ rustflags = ["-C", "link-arg=-fuse-ld=lld"]
 Changing rustflags rebuilds everything once.
 
 Prefer `--workspace` builds and select tests by name. A `-p <crate>` build
-resolves features for that crate alone, so it recompiles tokio, serde, hyper
-and axum under new hashes and stores a second copy of them. Cargo never
-removes stale artifacts from `target/`; reclaim space with `cargo clean`.
+resolves features for that crate alone, so a crate whose features differ from
+the workspace build is recompiled under a new hash and stored twice. Cargo
+never removes stale artifacts from `target/`; reclaim space with `cargo clean`.
+
+To keep that rare, every third-party dependency is declared once in the root
+`[workspace.dependencies]` with the union of the features the workspace uses,
+and members write `dep = { workspace = true }`. Add a feature to the root
+entry, not to a member. Two features are enabled per crate on purpose so the
+Windows and Android nodes stay lean: axum `ws`/`json` (from `protectorate-wire`
+off Windows and Android, and `protectorate-hub`) and chrono `clock` (members
+that need the clock, and `protectorate-node` off Android). What still differs
+between `-p` and `--workspace` builds is features that only other third-party
+crates enable (memchr, once_cell, serde_core, syn, rustix, subtle, crc32fast and
+libc defaults); only the small crates beneath them rebuild.
 
 ## Host-only lanes
 

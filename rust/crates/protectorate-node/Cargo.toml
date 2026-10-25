@@ -10,25 +10,31 @@ protectorate-node-metrics = { path = "../protectorate-node-metrics" }
 protectorate-fsutil = { path = "../protectorate-fsutil" }
 protectorate-xfer = { path = "../protectorate-xfer" }
 protectorate-sandbox = { path = "../protectorate-sandbox" }
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
-serde_json = "1"
-serde = { version = "1", features = ["derive"] }
-zeroize = "1"
-tokio = { version = "1", features = ["rt", "time", "sync", "process", "io-util", "fs"] }
-libc = "0.2"
-sha2 = "0.10"
-chrono = { version = "0.4", default-features = false, features = ["std"] }
-zip = { version = "0.6", default-features = false, features = ["deflate"] }
-glob = "0.3"
+axum = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true }
+zeroize = { workspace = true }
+tokio = { workspace = true }
+libc = { workspace = true }
+sha2 = { workspace = true }
+chrono = { workspace = true }
+zip = { workspace = true }
+glob = { workspace = true }
+
+# chrono's clock feature pulls iana-time-zone and android_system_properties on
+# Android; the workspace build enables it through the hub, so every other
+# target enables it here to keep -p builds identical.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+chrono = { workspace = true, features = ["clock"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_System_Threading", "Win32_System_Environment", "Win32_Storage_FileSystem", "Win32_System_Pipes", "Win32_NetworkManagement_NetManagement"] }
-getrandom = "0.2"
+windows-sys = { workspace = true }
+getrandom = { workspace = true }
 
 [dev-dependencies]
-base64 = "0.22"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util"] }
-tempfile = "3"
+base64 = { workspace = true }
+tokio = { workspace = true }
+tempfile = { workspace = true }
 
 [lib]
 test = false

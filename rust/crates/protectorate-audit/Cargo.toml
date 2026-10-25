@@ -3,10 +3,10 @@ name = "protectorate-audit"
 version = "0.1.0"
 edition.workspace = true
 [dependencies]
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
-sha2 = "0.10"
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true, features = ["clock"] }
+sha2 = { workspace = true }
 
 [lib]
 test = false

@@ -13,22 +13,22 @@ protectorate-wire = { path = "../protectorate-wire" }
 protectorate-fsutil = { path = "../protectorate-fsutil" }
 protectorate-svcgen = { path = "../protectorate-svcgen" }
 protectorate-node-metrics = { path = "../protectorate-node-metrics" }
-sha2 = "0.10"
+sha2 = { workspace = true }
 protectorate-mailbox = { path = "../protectorate-mailbox" }
-serde_json = "1"
-base64 = "0.22"
+serde_json = { workspace = true }
+base64 = { workspace = true }
 protectorate-xfer = { path = "../protectorate-xfer" }
-chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
-tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
-webpki-roots = "1"
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-zeroize = "1"
+chrono = { workspace = true, features = ["clock"] }
+tungstenite = { workspace = true }
+webpki-roots = { workspace = true }
+rustls = { workspace = true }
+zeroize = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
+libc = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_System_Memory", "Win32_System_Console"] }
+windows-sys = { workspace = true }
 
 [[bin]]
 name = "protectorate"
@@ -42,9 +42,9 @@ protectorate-identity = { path = "../protectorate-identity" }
 protectorate-node = { path = "../protectorate-node" }
 protectorate-sleeve-registry = { path = "../protectorate-sleeve-registry" }
 protectorate-session = { path = "../protectorate-session" }
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
-tempfile = "3"
+axum = { workspace = true }
+tokio = { workspace = true }
+tempfile = { workspace = true }
 
 [target.'cfg(unix)'.dev-dependencies]
 protectorate-hub = { path = "../protectorate-hub" }
