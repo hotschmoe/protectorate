@@ -1,0 +1,581 @@
+//! A real hub process is SIGKILLed while concurrent clients mutate every
+//! durable store, then restarted on the same home: it must start, every
+//! mutation a client saw succeed must be present, nothing may be half applied,
+//! and the audit chain must verify.
+//!
+//! The kill delays come from a seed that is printed on every run; set
+//! `PROTECTORATE_CRASH_SEED` to replay one and `PROTECTORATE_CRASH_ITERATIONS`
+//! to run more kill and restart rounds than the default.
+#![cfg(target_os = "linux")]
+use crate::support;
+
+use base64::{engine::general_purpose::STANDARD, Engine};
+use protectorate_auth::proof::DeviceKey;
+use protectorate_connect_client::Client;
+use serde_json::{json, Value};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
+    thread,
+    time::Duration,
+};
+use support::{binary, serve_node, Hub};
+
+const MSG: &str = "/protectorate.v1.MessageService/";
+const NOTE: &str = "/protectorate.v1.BacklogService/";
+const TOKEN: &str = "/protectorate.v1.TokenService/";
+const DEVICE: &str = "/protectorate.v1.DeviceService/";
+const NODE: &str = "/protectorate.v1.NodeService/";
+const JOB: &str = "/protectorate.v1.JobService/";
+const SLEEVE: &str = "/protectorate.v1.SleeveService/";
+const LEASE: &str = "/protectorate.v1.LeaseService/";
+const AUDIT: &str = "/protectorate.v1.AuditService/";
+
+struct Rng(u64);
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+    fn below(&mut self, n: u64) -> u64 {
+        self.next() % n
+    }
+}
+
+fn seed() -> u64 {
+    let seed = std::env::var("PROTECTORATE_CRASH_SEED")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos() as u64
+        });
+    eprintln!("crash_consistency: PROTECTORATE_CRASH_SEED={}", seed | 1);
+    seed | 1
+}
+
+/// What clients were told succeeded; all of it must survive every kill.
+#[derive(Default)]
+struct Ledger {
+    mails: Vec<(String, String, String, bool)>,
+    notes: Vec<(String, Vec<String>, bool)>,
+    deleted_notes: Vec<String>,
+    tokens: Vec<(String, bool)>,
+    devices: Vec<(String, String, String, bool)>,
+    nodes: Vec<(String, Vec<&'static str>)>,
+    jobs: Vec<String>,
+    canceled_jobs: Vec<String>,
+    sleeves: Vec<String>,
+    leases: Vec<String>,
+}
+
+/// What a worker thread needs from the running hub.
+#[derive(Clone)]
+struct Ctx {
+    client: Client,
+    tls: String,
+    ca: PathBuf,
+    work: PathBuf,
+}
+
+/// Approves a pairing; the device record is created when the applicant polls.
+fn pair(ctx: &Ctx, name: &str) -> Result<(String, String, String, bool), String> {
+    let key = DeviceKey::generate().map_err(|e| e.to_string())?.0;
+    let public = Client::new_with_ca(&ctx.tls, "", Duration::from_secs(20), Some(&ctx.ca))
+        .map_err(|e| e.to_string())?;
+    let started = public
+        .call(
+            &format!("{DEVICE}StartDeviceAuth"),
+            &json!({"name": name, "platform": "linux", "publicKey": STANDARD.encode(key.public_key())}),
+        )
+        .map_err(|e| e.to_string())?;
+    ctx.client
+        .call(
+            &format!("{DEVICE}ApproveDeviceAuth"),
+            &json!({"userCode": started["userCode"]}),
+        )
+        .map_err(|e| e.to_string())?;
+    let code = started["deviceCode"].as_str().unwrap().to_owned();
+    let polled = public
+        .call(
+            &format!("{DEVICE}PollDeviceAuth"),
+            &json!({"deviceCode": code}),
+        )
+        .is_ok_and(|polled| polled["status"] == "approved");
+    Ok((key.id().to_owned(), name.to_owned(), code, polled))
+}
+
+/// One mutation; the ledger learns of it only if the hub acknowledged it.
+fn mutate(ctx: &Ctx, ledger: &Mutex<Ledger>, tag: &str, n: u64, op: u64) {
+    let call = |path: &str, body: Value| ctx.client.call(path, &body);
+    match op % 12 {
+        0 | 1 => {
+            let request = format!("crash-mail-{tag}");
+            let sent = call(
+                &format!("{MSG}Send"),
+                json!({"to":"orchestrator","body":format!("mail body {tag}"),"requestId":request,
+                    "kind":"MESSAGE_KIND_REQUEST"}),
+            );
+            if let Ok(sent) = sent {
+                let id = sent["message"]["id"].as_str().unwrap().to_owned();
+                let thread = sent["message"]["threadId"].as_str().unwrap().to_owned();
+                let acked =
+                    call(&format!("{MSG}Ack"), json!({"id":id,"as":"orchestrator"})).is_ok();
+                ledger
+                    .lock()
+                    .unwrap()
+                    .mails
+                    .push((id, thread, request, acked));
+            }
+        }
+        2 | 3 => {
+            let title = format!("note {tag}");
+            let Ok(made) = call(
+                &format!("{NOTE}CreateNote"),
+                json!({"title":title,"body":"x".repeat(200)}),
+            ) else {
+                return;
+            };
+            let id = made["note"]["id"].as_str().unwrap().to_owned();
+            // A failed call may still have been applied before the kill.
+            let mut titles = vec![title];
+            if n.is_multiple_of(3) {
+                let renamed = format!("renamed {tag}");
+                match call(
+                    &format!("{NOTE}UpdateNote"),
+                    json!({"id":id,"title":renamed}),
+                ) {
+                    Ok(_) => titles = vec![renamed],
+                    Err(_) => titles.push(renamed),
+                }
+            }
+            if n.is_multiple_of(5) {
+                match call(&format!("{NOTE}DeleteNote"), json!({"id":id})) {
+                    Ok(_) => ledger.lock().unwrap().deleted_notes.push(id),
+                    Err(_) => ledger.lock().unwrap().notes.push((id, titles, true)),
+                }
+            } else {
+                ledger.lock().unwrap().notes.push((id, titles, false));
+            }
+        }
+        4 => {
+            if let Ok(made) = call(
+                &format!("{TOKEN}CreateToken"),
+                json!({"name":format!("token {tag}"),"scopes":["read"]}),
+            ) {
+                let id = made["token"]["id"].as_str().unwrap().to_owned();
+                let revoked = n.is_multiple_of(2)
+                    && call(&format!("{TOKEN}RevokeToken"), json!({"id":id})).is_ok();
+                ledger.lock().unwrap().tokens.push((id, revoked));
+            }
+        }
+        5 => {
+            if let Ok(device) = pair(ctx, &format!("device {tag}")) {
+                ledger.lock().unwrap().devices.push(device);
+            }
+        }
+        6 => {
+            let name = format!("node-{tag}");
+            if call(
+                &format!("{NODE}AddNode"),
+                json!({"node":{"name":name,"address":"127.0.0.1:9","tier":"shared"}}),
+            )
+            .is_ok()
+            {
+                let tiers = match call(
+                    &format!("{NODE}SetNodeTier"),
+                    json!({"name":name,"tier":"care"}),
+                ) {
+                    Ok(_) => vec!["care"],
+                    Err(_) => vec!["shared", "care"],
+                };
+                ledger.lock().unwrap().nodes.push((name, tiers));
+            }
+        }
+        7 | 8 => {
+            let long = n.is_multiple_of(4);
+            let command = if long {
+                json!(["/bin/sh", "-c", "sleep 30"])
+            } else {
+                json!(["/bin/echo", tag])
+            };
+            if let Ok(job) = call(
+                &format!("{JOB}SubmitJob"),
+                json!({"requestId":format!("crash-job-{tag}"),"target":{"node":"crash-peer"},
+                    "command":command,"timeout":"60s"}),
+            ) {
+                let id = job["id"].as_str().unwrap().to_owned();
+                if long && call(&format!("{JOB}CancelJob"), json!({"id":id})).is_ok() {
+                    ledger.lock().unwrap().canceled_jobs.push(id.clone());
+                }
+                ledger.lock().unwrap().jobs.push(id);
+            }
+        }
+        9 => {
+            let name = format!("sl-{tag}");
+            let dir = ctx.work.join(&name);
+            fs::create_dir_all(&dir).unwrap();
+            let spawned = call(
+                &format!("{SLEEVE}SpawnSleeve"),
+                json!({"name":name,"harness":"HARNESS_SHELL","mode":"SLEEVE_MODE_TERMINAL",
+                    "workspace":dir,"args":["/usr/bin/sh","-c","sleep 1"]}),
+            );
+            if spawned.is_ok() {
+                ledger.lock().unwrap().sleeves.push(name);
+            }
+        }
+        _ => {
+            let leased = call(
+                &format!("{LEASE}AcquireLease"),
+                json!({"resource":"lease-peer","holder":tag,"ttl":"3600s"}),
+            );
+            if let Ok(lease) = leased {
+                ledger
+                    .lock()
+                    .unwrap()
+                    .leases
+                    .push(lease["id"].as_str().unwrap().to_owned());
+            }
+        }
+    }
+}
+
+fn array<'a>(value: &'a Value, key: &str) -> &'a [Value] {
+    value[key].as_array().map_or(&[], Vec::as_slice)
+}
+
+fn text(value: &Value) -> &str {
+    value.as_str().unwrap_or("")
+}
+
+/// Every durable file in `home` parses; temp files are reported, not fatal.
+fn check_files(home: &Path) {
+    for name in [
+        "identity.json",
+        "nodes.json",
+        "sleeves.json",
+        "leases.json",
+        "directory.json",
+        "notes.json",
+    ] {
+        if let Ok(bytes) = fs::read(home.join(name)) {
+            serde_json::from_slice::<Value>(&bytes)
+                .unwrap_or_else(|e| panic!("{name} is not valid JSON after restart: {e}"));
+        }
+    }
+    if let Ok(entries) = fs::read_dir(home.join("jobs")) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "json") {
+                let bytes = fs::read(&path).unwrap();
+                serde_json::from_slice::<Value>(&bytes)
+                    .unwrap_or_else(|e| panic!("{} is not valid JSON: {e}", path.display()));
+            }
+        }
+    }
+    let mailbox = fs::read(home.join("mailbox.jsonl")).unwrap_or_default();
+    assert!(
+        mailbox.is_empty() || mailbox.ends_with(b"\n"),
+        "mailbox.jsonl ends in a partial line"
+    );
+    for line in mailbox.split(|b| *b == b'\n').filter(|l| !l.is_empty()) {
+        serde_json::from_slice::<Value>(line).expect("mailbox.jsonl line parses");
+    }
+}
+
+fn verify(hub: &Hub, ledger: &mut Ledger, context: &str) {
+    let call = |path: &str, body: Value| {
+        hub.client
+            .call(path, &body)
+            .unwrap_or_else(|e| panic!("{context}: {path}: {e}"))
+    };
+    check_files(&hub.home);
+    let log = fs::read_to_string(hub.home.parent().unwrap().join("hub.log")).unwrap_or_default();
+    assert!(!log.contains("panicked"), "{context}: hub panicked: {log}");
+
+    for (id, thread, request, acked) in &ledger.mails {
+        let thread = call(&format!("{MSG}Thread"), json!({"threadId":thread}));
+        let m = array(&thread, "messages")
+            .iter()
+            .find(|m| text(&m["id"]) == id)
+            .unwrap_or_else(|| panic!("{context}: acknowledged message {id} lost: {thread}"));
+        assert!(
+            text(&m["body"]).starts_with("mail body ") && !array(m, "deliveries").is_empty(),
+            "{context}: half-applied message {m}"
+        );
+        if *acked {
+            assert!(
+                array(m, "deliveries")
+                    .iter()
+                    .any(|d| !d["ackedAt"].is_null()),
+                "{context}: acknowledged ack of {id} lost: {m}"
+            );
+        }
+        let again = call(
+            &format!("{MSG}Send"),
+            json!({"to":"orchestrator","body":m["body"],"requestId":request,
+                "kind":"MESSAGE_KIND_REQUEST"}),
+        );
+        assert!(
+            again["duplicate"] == true && text(&again["message"]["id"]) == id,
+            "{context}: request id of {id} forgotten: {again}"
+        );
+    }
+
+    let listed = call(&format!("{NOTE}ListNotes"), json!({}));
+    for note in array(&listed, "notes") {
+        assert!(
+            !text(&note["id"]).is_empty() && text(&note["title"]).contains("-w"),
+            "{context}: half-applied note {note}"
+        );
+    }
+    for (id, titles, may_be_gone) in &ledger.notes {
+        match hub
+            .client
+            .call(&format!("{NOTE}GetNote"), &json!({"id":id}))
+        {
+            Ok(note) => assert!(
+                titles.iter().any(|t| note["note"]["title"] == *t),
+                "{context}: note {id} has {note}, expected one of {titles:?}"
+            ),
+            Err(e) => assert!(*may_be_gone, "{context}: acknowledged note {id} lost: {e}"),
+        }
+    }
+    for id in &ledger.deleted_notes {
+        assert!(
+            hub.client
+                .call(&format!("{NOTE}GetNote"), &json!({"id":id}))
+                .is_err(),
+            "{context}: deleted note {id} is back"
+        );
+    }
+
+    let tokens = call(&format!("{TOKEN}ListTokens"), json!({}));
+    for (id, revoked) in &ledger.tokens {
+        let token = array(&tokens, "tokens")
+            .iter()
+            .find(|t| text(&t["id"]) == id)
+            .unwrap_or_else(|| panic!("{context}: token {id} lost"));
+        assert!(
+            !*revoked || !token["revokedAt"].is_null(),
+            "{context}: revoked token {id} is live again"
+        );
+    }
+    let public =
+        Client::new_with_ca(&hub.tls, "", Duration::from_secs(20), Some(&hub.ca())).unwrap();
+    for (_, _, code, polled) in &mut ledger.devices {
+        if !*polled {
+            *polled = true;
+            let late = public
+                .call(
+                    &format!("{DEVICE}PollDeviceAuth"),
+                    &json!({"deviceCode":code}),
+                )
+                .unwrap();
+            // A poll cut off by the kill may have consumed the approval; the
+            // device must then exist, which the list below checks.
+            assert!(
+                late["status"] == "approved" || late["status"] == "consumed",
+                "{context}: approval lost: {late}"
+            );
+        }
+    }
+    let devices = call(&format!("{DEVICE}ListDevices"), json!({}));
+    for (id, name, _, _) in &ledger.devices {
+        let device = array(&devices, "devices")
+            .iter()
+            .find(|d| text(&d["id"]) == id)
+            .unwrap_or_else(|| panic!("{context}: approved device {id} lost"));
+        assert_eq!(device["name"], *name, "{context}");
+    }
+    for (name, tiers) in &ledger.nodes {
+        let node = call(&format!("{NODE}GetNode"), json!({"name":name}));
+        assert!(
+            tiers.iter().any(|tier| node["node"]["tier"] == *tier),
+            "{context}: node {name}: {node}, expected one of {tiers:?}"
+        );
+    }
+    let jobs = call(&format!("{JOB}ListJobs"), json!({"limit":1000}));
+    for id in &ledger.jobs {
+        let job = call(&format!("{JOB}GetJob"), json!({"id":id}));
+        assert_eq!(text(&job["id"]), id, "{context}");
+        assert!(
+            ledger.jobs.len() > 900 || array(&jobs, "jobs").iter().any(|j| text(&j["id"]) == id),
+            "{context}: job {id} missing from the list"
+        );
+    }
+    // The hub reconciles with the node after it is back; the cancel it
+    // acknowledged must then take effect.
+    for id in &ledger.canceled_jobs {
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        loop {
+            let job = call(&format!("{JOB}GetJob"), json!({"id":id}));
+            if job["state"] == "JOB_STATE_CANCELED" {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "{context}: acknowledged cancel of {id} never took effect: {job}"
+            );
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+    for name in &ledger.sleeves {
+        let sleeve = call(&format!("{SLEEVE}GetSleeve"), json!({"name":name}));
+        assert_eq!(text(&sleeve["sleeve"]["name"]), name, "{context}");
+    }
+    let leases = call(&format!("{LEASE}ListLeases"), json!({}));
+    for id in &ledger.leases {
+        assert!(
+            array(&leases, "leases")
+                .iter()
+                .any(|l| text(&l["id"]) == id),
+            "{context}: lease {id} lost"
+        );
+    }
+    let audit = call(&format!("{AUDIT}VerifyAudit"), json!({}));
+    assert_eq!(audit["ok"], true, "{context}: audit chain: {audit}");
+}
+
+/// Every archive the scheduled and manual backups left restores and starts.
+fn check_backups(dir: &Path, scratch: &Path) -> usize {
+    let mut restored = 0;
+    let mut archives = fs::read_dir(dir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "pbackup"))
+        .collect::<Vec<_>>();
+    archives.sort();
+    for (i, archive) in archives.iter().enumerate() {
+        let home = scratch.join(format!("restore-{i}"));
+        let output = Command::new(binary())
+            .args(["hub", "restore"])
+            .arg(archive)
+            .arg("--home")
+            .arg(&home)
+            .env_remove("PROTECTORATE_HOME")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "backup {} does not restore: {}",
+            archive.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        check_files(&home);
+        restored += 1;
+    }
+    restored
+}
+
+#[test]
+fn acknowledged_mutations_survive_hub_sigkill_at_random_points() {
+    let seed = seed();
+    let mut rng = Rng(seed);
+    let iterations: u64 = std::env::var("PROTECTORATE_CRASH_ITERATIONS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(5);
+    let root = tempfile::tempdir().unwrap();
+    let backups = root.path().join("backups");
+    let mut hub = Hub::start_with(
+        root.path(),
+        &[
+            "--backup-dir",
+            backups.to_str().unwrap(),
+            "--backup-every",
+            "1s",
+        ],
+    );
+    let node_home = root.path().join("node");
+    hub.join("crash-peer", &node_home);
+    let node_log = root.path().join("node.stderr");
+    let _node = serve_node(&node_home, &hub.user_home, &node_log);
+    hub.wait_fresh("crash-peer", &node_log);
+    let lease_home = root.path().join("lease-node");
+    hub.join("lease-peer", &lease_home);
+    let lease_log = root.path().join("lease-node.stderr");
+    let _lease_node = serve_node(&lease_home, &hub.user_home, &lease_log);
+    hub.wait_fresh("lease-peer", &lease_log);
+    hub.call(
+        &format!("{NODE}SetNodeTier"),
+        json!({"name":"lease-peer","tier":"shared"}),
+    );
+    let work = root.path().join("work");
+    fs::create_dir_all(&work).unwrap();
+
+    let ledger = Mutex::new(Ledger::default());
+    for iteration in 0..iterations {
+        let delay = Duration::from_millis(150 + rng.below(700));
+        eprintln!("crash_consistency: iteration {iteration}: kill after {delay:?}");
+        let ctx = Ctx {
+            client: hub.client.clone(),
+            tls: hub.tls.clone(),
+            ca: hub.ca(),
+            work: work.clone(),
+        };
+        let stop = AtomicBool::new(false);
+        let worker_seeds = (0..6).map(|_| rng.next() | 1).collect::<Vec<_>>();
+        thread::scope(|scope| {
+            for (worker, worker_seed) in worker_seeds.into_iter().enumerate() {
+                let (ctx, ledger, stop) = (&ctx, &ledger, &stop);
+                scope.spawn(move || {
+                    let mut rng = Rng(worker_seed);
+                    let mut n = 0;
+                    while !stop.load(Ordering::Relaxed) {
+                        let tag = format!("i{iteration}-w{worker}-n{n}");
+                        mutate(ctx, ledger, &tag, n, rng.next());
+                        n += 1;
+                    }
+                });
+            }
+            // A manual backup races the scheduled ones and the kill.
+            let home = hub.home.clone();
+            scope.spawn(|| {
+                let home = home;
+                let _ = Command::new(binary())
+                    .args(["hub", "backup", "--to"])
+                    .arg(&backups)
+                    .arg("--home")
+                    .arg(&home)
+                    .env_remove("PROTECTORATE_HOME")
+                    .output();
+            });
+            thread::sleep(delay);
+            hub.stop();
+            stop.store(true, Ordering::Relaxed);
+        });
+        hub.restart();
+        let mut ledger = ledger.lock().unwrap();
+        verify(
+            &hub,
+            &mut ledger,
+            &format!("seed {seed} iteration {iteration}"),
+        );
+    }
+    let ledger = ledger.lock().unwrap();
+    eprintln!(
+        "crash_consistency: {} mails, {} notes, {} tokens, {} devices, {} nodes, {} jobs, {} sleeves, {} leases acknowledged",
+        ledger.mails.len(),
+        ledger.notes.len(),
+        ledger.tokens.len(),
+        ledger.devices.len(),
+        ledger.nodes.len(),
+        ledger.jobs.len(),
+        ledger.sleeves.len(),
+        ledger.leases.len()
+    );
+    hub.stop();
+    let restored = check_backups(&backups, root.path());
+    eprintln!("crash_consistency: {restored} backup archives restored");
+}

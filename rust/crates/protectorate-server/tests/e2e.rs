@@ -6,6 +6,7 @@ mod support;
 mod auth;
 mod backup_cli;
 mod backup_state;
+mod crash_consistency;
 mod driver_run;
 mod flutter_client;
 mod hub_self_update;
