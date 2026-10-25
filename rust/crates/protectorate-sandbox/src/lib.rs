@@ -16,7 +16,7 @@ pub mod runtime;
 
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::BTreeMap,
     fmt, fs, io,
     path::{Component, Path, PathBuf},
 };
@@ -1316,14 +1316,16 @@ fn existing_dir_if_present(path: &Path) -> Option<PathBuf> {
 }
 
 fn reject_overlapping_targets(grants: &[BindGrant]) -> Result<()> {
-    let mut seen = HashSet::new();
     for (index, grant) in grants.iter().enumerate() {
-        if !seen.insert(&grant.target)
-            || grants[..index]
-                .iter()
-                .any(|other| overlaps(&grant.target, &other.target))
+        if let Some(other) = grants[..index]
+            .iter()
+            .find(|other| overlaps(&grant.target, &other.target))
         {
-            return Err(invalid("bind targets overlap or shadow each other"));
+            return Err(invalid(format!(
+                "bind targets overlap or shadow each other: {} and {}",
+                other.target.display(),
+                grant.target.display()
+            )));
         }
     }
     Ok(())
