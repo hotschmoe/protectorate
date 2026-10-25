@@ -507,6 +507,36 @@ Round 4 (merged on rust-yolo; warm `make check` 70 s, was 139 s):
   builds fell from 686 to 492, and a sequential `-p` sweep grows target/ by
   1.2 GB instead of 3.6 GB. ureq and flate2 lost unused defaults.
 
+Round 5, reliability before the cutover (merged on rust-yolo; `make check`
+83 s):
+- No std lock in product code unwraps a poisoned guard; every store builds
+  its next state before assigning it, so recovery is safe. A panicking task
+  is logged and audited; its caller sees only "internal panic".
+- In-process watchdog in hub and node: a runtime heartbeat, a blocking-pool
+  round trip and the main store locks must progress within 90 s, or the
+  process writes a per-thread diagnostic and exits 70. Units set
+  `StartLimitIntervalSec=0`.
+- Crash and full-disk lanes (SIGKILL at random points; a 3 MiB tmpfs home in
+  a user namespace) found and fixed a torn mailbox append, stale temp files of
+  killed writers, error messages without the file, and a hub that would not
+  start on a full disk. A later run found an acknowledged job cancel turned
+  into "node no longer has the job" after a restart; fixed.
+- A node follows its machine's address: when its recorded IP is gone it
+  rebinds to the address that routes to the hub and reports it with
+  `ReportNodeAddress`, accepted only over mutual TLS with that node's
+  certificate and only when the IP is the connection's source.
+- Fuzz campaigns (15 min per parser target, 17 min per driver target; three
+  new targets: backup_archive, handoff_transcript, inventory_nodes) fixed IP
+  literals in egress allow entries, a mailbox id counter overflow on replay
+  and an event logged after a chat's EXITED state. `cargo audit` runs in CI;
+  zip 0.6's three extract advisories are ignored there until the zip 9
+  upgrade because we never call `ZipArchive::extract`.
+- Tests: processes a test starts die with the test binary; the Flutter
+  invite fixture is a tempdir. Under heavy oversubscription (load 25+), a
+  trivial Flutter widget test with no app code also fails with NaN layout
+  sizes about 1 run in 18 here, while a C SVE/NEON floating-point stress test
+  shows no fault; it points at the Dart JIT test runtime, not product code.
+
 Build profile (round 3, 12-core CIX P1: 8 Cortex-A720 + 4 Cortex-A520):
 - Cold, fresh target dir: dev bins 40 s, + tests 16 s, clippy all-targets
   26 s, release 91 s, dist 336 s (release and dist measured with other
