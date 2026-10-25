@@ -317,6 +317,11 @@ async fn payload_path(hub: &Hub, os: &str, arch: &str) -> Result<Payload> {
         host_binary = Some(binary);
     }
     if let Some(source) = &hub.releases {
+        // A hub installed from a release keeps the node assets it lists.
+        let staged = source.release_dir(&hub.version).join(&name);
+        if staged.is_file() {
+            return local_payload(staged, &hub.version, os, arch, staging_root);
+        }
         let info = source.current();
         if info.version == hub.version && info.asset_url(&name).is_ok() {
             let source = Arc::clone(source);
