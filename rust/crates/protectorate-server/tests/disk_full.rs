@@ -611,6 +611,18 @@ fn full_disk_fails_writes_cleanly_keeps_reads_and_recovers_without_restart() {
     let left = fs::read_dir(disk.outside(&backups)).unwrap().count();
     assert_eq!(left, 0, "a failed backup left files behind");
 
+    // A restart on the still-full disk comes up and serves what it has.
+    hub.process = None;
+    let mut hub = start_hub(&disk, root.path(), 1);
+    hub.alive();
+    check_reads(&hub, &acked, "restarted full");
+    check_disk(&disk, "restarted full");
+    let refused = hub.call(
+        &format!("{NOTE}CreateNote"),
+        json!({"title":"too late","body":"n".repeat(6000)}),
+    );
+    assert_clear(&refused.expect_err("a write on a full disk"));
+
     // Space returns: the hub takes writes again on the same process.
     fs::File::create(&filler).unwrap();
     assert!(disk.free_bytes() > 1 << 20);
@@ -628,7 +640,7 @@ fn full_disk_fails_writes_cleanly_keeps_reads_and_recovers_without_restart() {
 
     // And a kill and restart on the same disk loses nothing.
     hub.process = None;
-    let mut hub = start_hub(&disk, root.path(), 1);
+    let mut hub = start_hub(&disk, root.path(), 2);
     check_reads(&hub, &acked, "restarted");
     check_disk(&disk, "after restart");
     let audit = hub.ok(&format!("{AUDIT}VerifyAudit"), json!({}));
