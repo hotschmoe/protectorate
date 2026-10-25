@@ -363,7 +363,10 @@ pub fn inventory_nodes(data: &[u8]) {
     if let Ok(node) = serde_json::from_slice::<Node>(parts[1]) {
         if let Ok(added) = inventory.add(node, true) {
             let reopened = Inventory::open(&path, "local").expect("reopen a written inventory");
-            assert!(reopened.list().contains(&added), "added node lost on reopen");
+            assert!(
+                reopened.list().contains(&added),
+                "added node lost on reopen"
+            );
             assert_eq!(reopened.list(), inventory.list());
         }
     }

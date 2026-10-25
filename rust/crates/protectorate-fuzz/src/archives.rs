@@ -212,7 +212,11 @@ pub fn backup_archive(data: &[u8]) {
         }
         Err(_) => {
             assert!(!home.exists(), "failed restore published a destination");
-            assert_eq!(names(&parent), ["fuzz.pbackup"], "failed restore left residue");
+            assert_eq!(
+                names(&parent),
+                ["fuzz.pbackup"],
+                "failed restore left residue"
+            );
         }
     }
 }
