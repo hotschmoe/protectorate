@@ -5,7 +5,7 @@
 //! once. Requests bind to the caller and the exact request (or launch
 //! inputs), live in hub memory and expire. Launch pins (rug-pull detection)
 //! use the same requests.
-use super::{proto_time, Hub};
+use super::{lock, proto_time, Hub};
 use axum::http::HeaderMap;
 use chrono::{DateTime, Utc};
 use prost_reflect::Value as FieldValue;
@@ -107,7 +107,7 @@ impl Approvals {
                 .finalize()
         );
         let now = Utc::now();
-        let mut requests = self.requests.lock().unwrap();
+        let mut requests = lock(&self.requests);
         self.sweep(hub, &mut requests, now);
         let found = requests
             .get(&ask.hint)
@@ -194,7 +194,7 @@ impl Approvals {
     }
 
     fn decide(&self, hub: &Hub, id: &str, approve: bool, decider: &str) -> Result<Request> {
-        let mut requests = self.requests.lock().unwrap();
+        let mut requests = lock(&self.requests);
         self.sweep(hub, &mut requests, Utc::now());
         let request = requests
             .get_mut(id)
@@ -488,7 +488,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             let hub = Arc::clone(&list);
             async move {
                 let all = call.request.all;
-                let mut requests = hub.approvals.requests.lock().unwrap();
+                let mut requests = lock(&hub.approvals.requests);
                 hub.approvals.sweep(&hub, &mut requests, Utc::now());
                 let mut rows = requests
                     .values()

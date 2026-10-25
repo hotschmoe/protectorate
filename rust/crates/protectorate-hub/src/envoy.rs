@@ -1,11 +1,11 @@
-use crate::{sleeves, Hub};
+use crate::{lock, sleeves, Hub};
 use protectorate_sleeve_registry::State;
 use protectorate_wire::{Code, Result, RpcError};
 use std::{fs, path::Path};
 
 /// Keeps a running Envoy's `hosts.md` in step with the hub's inventory.
 pub(super) fn write_hosts(hub: &Hub) -> Result<()> {
-    let _guard = hub.envoy_spawn_lock.lock().unwrap();
+    let _guard = lock(&hub.envoy_spawn_lock);
     let Ok(row) = hub.sleeves.get("envoy") else {
         return Ok(());
     };

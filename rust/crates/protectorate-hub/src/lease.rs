@@ -1,6 +1,6 @@
 //! Lease RPCs backed by the persistent lease table. Node admission is supplied
 //! by a chooser once the node monitor is connected to this hub.
-use super::{EventBus, Hub};
+use super::{lock, EventBus, Hub};
 use chrono::{DateTime, SecondsFormat, Utc};
 use protectorate_fsutil::unix_millis;
 use protectorate_inventory::{Inventory, SHARED};
@@ -75,7 +75,7 @@ pub(super) fn open_table(
     let guarded: Chooser = Arc::new(move |request, blocked| {
         let resource = chooser(request, blocked)?;
         let name = &resource.node;
-        if draining.lock().unwrap().contains(name) {
+        if lock(&draining).contains(name) {
             return Err(leases::Error::Unavailable(format!(
                 "node {name} is being removed"
             )));

@@ -1,4 +1,4 @@
-use super::Hub;
+use super::{lock, Hub};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use protectorate_fsutil::{hex, random_hex, unix_millis, unix_seconds};
 use protectorate_inventory::{Error, Node, CARE, SHARED};
@@ -87,7 +87,7 @@ struct Drain<'a> {
 }
 impl Drop for Drain<'_> {
     fn drop(&mut self) {
-        self.hub.node_draining.lock().unwrap().remove(&self.name);
+        lock(&self.hub.node_draining).remove(&self.name);
     }
 }
 
@@ -96,7 +96,7 @@ fn start_drain<'a>(hub: &'a Hub, name: &str) -> Result<Drain<'a>> {
         .node_admission
         .write()
         .unwrap_or_else(|error| error.into_inner());
-    let mut draining = hub.node_draining.lock().unwrap();
+    let mut draining = lock(&hub.node_draining);
     if !draining.insert(name.to_owned()) {
         return Err(RpcError::new(
             Code::FailedPrecondition,
@@ -155,7 +155,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 let draining = Arc::clone(&hub.node_draining);
                 let node = tokio::task::spawn_blocking(move || {
                     let _admission = admission.read().unwrap_or_else(|error| error.into_inner());
-                    if draining.lock().unwrap().contains(&node.name) {
+                    if lock(&draining).contains(&node.name) {
                         return Err(RpcError::new(
                             Code::FailedPrecondition,
                             "node is being removed",
@@ -213,7 +213,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 let name_for_store = name.clone();
                 let node = tokio::task::spawn_blocking(move || {
                     let _admission = admission.read().unwrap_or_else(|error| error.into_inner());
-                    if draining.lock().unwrap().contains(&name_for_store) {
+                    if lock(&draining).contains(&name_for_store) {
                         return Err(RpcError::new(
                             Code::FailedPrecondition,
                             "node is being removed",
@@ -431,7 +431,7 @@ async fn invite_node(hub: Arc<Hub>, body: v1::InviteNodeRequest) -> Result<v1::I
     let draining = Arc::clone(&hub.node_draining);
     let node = tokio::task::spawn_blocking(move || {
         let _admission = admission.write().unwrap_or_else(|error| error.into_inner());
-        if draining.lock().unwrap().contains(&node.name) {
+        if lock(&draining).contains(&node.name) {
             return Err(RpcError::new(
                 Code::FailedPrecondition,
                 "node is being removed",
@@ -901,11 +901,7 @@ fn status(hub: &Arc<Hub>, node: v1::NodeInfo) -> Result<v1::NodeStatus> {
     let mut status = hub
         .node_monitor
         .status(&node.name, &node.address, node.invited);
-    status.draining = hub
-        .node_draining
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .contains(&node.name.to_ascii_lowercase());
+    status.draining = lock(&hub.node_draining).contains(&node.name.to_ascii_lowercase());
     if let Some(metrics) = &mut status.metrics {
         status.alerts.extend(resource_alerts(metrics));
         if node.local {
@@ -935,7 +931,7 @@ fn renew_if_due(hub: &Arc<Hub>, name: &str) {
     };
     if node.cert_id.is_empty()
         || node.cert_expires - unix_seconds() > protectorate_tls::RENEW_BEFORE.as_secs() as i64
-        || !hub.renewing.lock().unwrap().insert(node.name.clone())
+        || !lock(&hub.renewing).insert(node.name.clone())
     {
         return;
     }
@@ -964,7 +960,7 @@ fn renew_if_due(hub: &Arc<Hub>, name: &str) {
         if let Err(error) = result {
             eprintln!("renew certificate for {}: {error}", node.name);
         }
-        hub.renewing.lock().unwrap().remove(&node.name);
+        lock(&hub.renewing).remove(&node.name);
     });
 }
 
