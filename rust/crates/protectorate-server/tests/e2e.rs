@@ -11,6 +11,7 @@ mod disk_full;
 mod driver_run;
 mod flutter_client;
 mod hub_self_update;
+mod job_cancel_restart;
 mod job_restart;
 mod mtls;
 mod node_address;

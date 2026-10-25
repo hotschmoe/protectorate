@@ -30,6 +30,9 @@ scenario's name is `<file>::<test>`, so `cargo test -p protectorate-hub
   The `watchdog::` scenarios stop every thread of a real hub except its
   watchdog with ptrace from outside and expect exit 70 with the diagnostic,
   and freeze it with SIGSTOP for longer than the limit and expect no exit.
+  `job_cancel_restart::` kills the hub (and the node) right after an
+  acknowledged `CancelJob`, early (node never got the job) and while running,
+  and expects the job to end canceled.
 - `protectorate-cli`: the real `protectorate` binary against a real hub,
   node and private tmux server, plus the installed-companion forwarding.
 - `protectorate-hub`: the hub's HTTP API with real sandboxed sleeves, sleeve
