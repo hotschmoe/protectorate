@@ -231,6 +231,7 @@ async fn claude_stream_json_sandbox_approval_compaction_and_replay() {
     assert_eq!(status, 200, "{compacted}");
     assert_eq!(compacted["compaction"]["tokensBefore"], "120");
     let events = protectorate_chatlog::read_all(&path).unwrap();
+    crate::support::chatlog::assert_decodable(&events);
     assert!(events
         .iter()
         .any(|e| e.payload["approvalResolved"]["allow"] == true));

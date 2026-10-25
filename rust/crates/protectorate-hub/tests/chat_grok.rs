@@ -186,6 +186,7 @@ async fn grok_acp_sandbox_gate_approvals_events_and_resume() {
         assert_eq!(status, 200, "{idle}");
     }
     let events = protectorate_chatlog::read_all(state.join("sleeves/grok-one/chat.jsonl")).unwrap();
+    crate::support::chatlog::assert_decodable(&events);
     assert!(events
         .iter()
         .any(|e| e.payload["toolResult"]["output"] == "ok"));

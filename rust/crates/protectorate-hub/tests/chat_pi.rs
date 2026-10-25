@@ -840,6 +840,7 @@ async fn pi_prompt_larger_than_a_pipe_while_pi_floods_stdout() {
     .await;
     assert_eq!(status, 200, "{idle}");
     let events = protectorate_chatlog::read_all(state.join("sleeves/pi-flood/chat.jsonl")).unwrap();
+    crate::support::chatlog::assert_decodable(&events);
     assert!(
         events
             .iter()

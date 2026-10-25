@@ -651,8 +651,7 @@ impl Session {
             "inputTokens": input.to_string(),
             "outputTokens": output.to_string(),
             "cacheReadTokens": read.to_string(),
-            "cacheWriteTokens": write.to_string(),
-            "provider": "xai"
+            "cacheWriteTokens": write.to_string()
         }})));
     }
 

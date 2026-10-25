@@ -2,6 +2,7 @@
 //! scenarios run in parallel threads.
 mod support {
     pub mod capability;
+    pub mod chatlog;
     pub mod executable;
     pub mod fleet;
     #[cfg(unix)]

@@ -243,10 +243,8 @@ async fn codex_app_server_sandbox_turns_approvals_selection_compaction_and_resum
     .await;
     assert_eq!(status, 200, "{selected}");
     assert_eq!(selected["chat"]["model"], "gpt-alt");
-    // Every logged event must be a ChatEvent field, or watchers stall on it.
     let logged =
         protectorate_chatlog::read_all(state.join("sleeves/codex-one/chat.jsonl")).unwrap();
-    assert!(logged.iter().all(|e| e.payload.get("selection").is_none()));
     assert!(logged
         .iter()
         .any(|e| e.payload["settings"]["requested"]["model"] == "gpt-alt"));
@@ -383,6 +381,7 @@ async fn codex_app_server_sandbox_turns_approvals_selection_compaction_and_resum
     assert!(events
         .iter()
         .any(|e| e.payload["usage"]["cacheReadTokens"] == "4"));
+    crate::support::chatlog::assert_decodable(&events);
     let (status, killed) = call(
         addr,
         "SleeveService/KillSleeve",

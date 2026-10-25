@@ -794,13 +794,11 @@ impl Session {
                     s.context_window = p["tokenUsage"]["modelContextWindow"]
                         .as_u64()
                         .unwrap_or(s.context_window);
-                    let model = s.model.clone();
                     let window = s.context_window;
                     drop(s);
                     let _ = self.log.append(Event::new(json!({"usage":{"contextTokens":input.to_string(),"contextWindow":window.to_string(),
                         "inputTokens":input.saturating_sub(cached).to_string(),"outputTokens":output.to_string(),
-                        "cacheReadTokens":cached.to_string(),"cacheWriteTokens":last["cacheWriteInputTokens"].as_u64().unwrap_or_default().to_string(),
-                        "model":model,"provider":"openai"}})));
+                        "cacheReadTokens":cached.to_string(),"cacheWriteTokens":last["cacheWriteInputTokens"].as_u64().unwrap_or_default().to_string()}})));
                 }
             }
             "turn/completed" => {
