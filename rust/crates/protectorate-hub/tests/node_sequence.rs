@@ -113,6 +113,7 @@ async fn late_samples_are_dropped_and_a_restarted_agent_is_accepted() {
             Arc::clone(&hub.inventory),
             hub.hostname.clone(),
             dir.path().to_path_buf(),
+            "v-test".into(),
         )
         .with_timing(Timing {
             stale_after: Duration::from_secs(30),

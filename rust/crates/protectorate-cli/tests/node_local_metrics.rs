@@ -32,7 +32,12 @@ fn local_metrics_collects_without_hub_or_token() {
     ]);
     let json: Value = serde_json::from_str(&output).unwrap();
     assert_eq!(json["os"], std::env::consts::OS);
-    assert_eq!(json["arch"], std::env::consts::ARCH);
+    let arch = match std::env::consts::ARCH {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        other => other,
+    };
+    assert_eq!(json["arch"], arch);
     assert!(!json["hostname"].as_str().unwrap_or_default().is_empty());
     assert_eq!(json["watchDirs"][0]["path"], watched);
     assert!(

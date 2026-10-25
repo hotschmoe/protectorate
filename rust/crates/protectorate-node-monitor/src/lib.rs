@@ -166,21 +166,28 @@ pub struct Monitor {
 }
 
 impl Monitor {
-    pub fn new(inventory: Arc<Inventory>, local_name: String, home: std::path::PathBuf) -> Self {
-        Self::new_with_watch_paths(inventory, local_name, home, Vec::new())
+    /// `version` is the hub build reported for its own node.
+    pub fn new(
+        inventory: Arc<Inventory>,
+        local_name: String,
+        home: std::path::PathBuf,
+        version: String,
+    ) -> Self {
+        Self::new_with_watch_paths(inventory, local_name, home, version, Vec::new())
     }
 
     pub fn new_with_watch_paths(
         inventory: Arc<Inventory>,
         local_name: String,
         home: std::path::PathBuf,
+        version: String,
         watch_paths: Vec<std::path::PathBuf>,
     ) -> Self {
         let local = cfg!(target_os = "linux").then(|| {
             Collector::linux(Options {
                 home,
                 watch_paths,
-                version: env!("CARGO_PKG_VERSION").into(),
+                version,
                 ..Options::default()
             })
         });

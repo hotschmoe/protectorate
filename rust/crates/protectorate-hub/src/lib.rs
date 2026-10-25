@@ -202,6 +202,7 @@ impl Hub {
         version: impl Into<String>,
     ) -> protectorate_identity::Result<Self> {
         let home = home.into();
+        let version = version.into();
         // Temp files of writers killed before their rename; best effort.
         for dir in [home.clone(), home.join("jobs"), home.join("ca")] {
             let _ = protectorate_fsutil::remove_stale_temps(&dir);
@@ -250,6 +251,7 @@ impl Hub {
             Arc::clone(&inventory),
             hostname.clone(),
             home.clone(),
+            version.clone(),
         ));
         let node_admission = Arc::new(std::sync::RwLock::new(()));
         let node_draining = Arc::new(std::sync::Mutex::new(std::collections::BTreeSet::new()));
@@ -346,7 +348,7 @@ impl Hub {
                     .unwrap_or_default()
             });
         Ok(Self {
-            version: version.into(),
+            version,
             hostname,
             owner_token: Arc::new(Zeroizing::new(owner_token.into())),
             identity,

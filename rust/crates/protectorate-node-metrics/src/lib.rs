@@ -204,7 +204,13 @@ impl<P: Probe> Collector<P> {
         }
         let mut out = NodeMetrics {
             os: self.os.to_owned(),
-            arch: std::env::consts::ARCH.to_owned(),
+            // Release assets, inventory and job selectors use Go's names.
+            arch: match std::env::consts::ARCH {
+                "x86_64" => "amd64",
+                "aarch64" => "arm64",
+                other => other,
+            }
+            .to_owned(),
             agent_version: self.options.version.clone(),
             collected_at: Some(SystemTime::now()),
             ..NodeMetrics::default()

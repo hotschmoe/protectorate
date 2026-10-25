@@ -2824,7 +2824,7 @@ pub fn run_with_status(
 fn local_metrics(watch: &[PathBuf], json: bool) -> Result<String> {
     use protectorate_node_metrics::{metrics_proto, Collector, Options};
     let options = Options {
-        version: env!("CARGO_PKG_VERSION").to_owned(),
+        version: client_version().to_owned(),
         watch_paths: watch.to_vec(),
         ..Options::default()
     };

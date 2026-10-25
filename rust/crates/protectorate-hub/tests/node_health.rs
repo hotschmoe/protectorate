@@ -80,6 +80,7 @@ async fn poll_events_alerts_down_transitions_and_drain_mark() {
             Arc::clone(&hub.inventory),
             hub.hostname.clone(),
             root.path().join("hub"),
+            "v-test".into(),
         )
         .with_timing(Timing {
             stale_after: STALE_AFTER,

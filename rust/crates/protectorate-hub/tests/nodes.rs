@@ -83,6 +83,7 @@ async fn live_agent_poll_controls_status_and_lease_admission() {
             Arc::clone(&hub.inventory),
             hub.hostname.clone(),
             dir.path().to_path_buf(),
+            "v-test".into(),
         )
         .with_timing(Timing {
             stale_after: Duration::from_secs(1),

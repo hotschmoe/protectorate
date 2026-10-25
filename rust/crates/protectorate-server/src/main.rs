@@ -1087,6 +1087,7 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
         Arc::clone(&hub.inventory),
         hub.hostname.clone(),
         home.clone(),
+        build_version().to_owned(),
         options.hub_watch_paths.clone(),
     )
     .with_timing(node_timing(options.node_interval));
