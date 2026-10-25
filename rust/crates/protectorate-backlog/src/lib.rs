@@ -202,6 +202,7 @@ impl Patch {
 
 pub struct Store {
     dir: PathBuf,
+    /// Serializes writers; readers see the atomically replaced file.
     mu: Mutex<()>,
 }
 impl Store {
@@ -234,7 +235,6 @@ impl Store {
         if !["", "open", "done", "all"].contains(&f.state.as_str()) {
             return invalid("state must be open, done or all");
         }
-        let _guard = self.mu.lock().unwrap_or_else(|e| e.into_inner());
         let state = if f.state.is_empty() { "open" } else { &f.state };
         let q = simple_lower(&f.query);
         let mut notes: Vec<_> = self
@@ -257,7 +257,6 @@ impl Store {
         Ok(notes)
     }
     pub fn get(&self, id: &str) -> Result<Note> {
-        let _guard = self.mu.lock().unwrap_or_else(|e| e.into_inner());
         self.snapshot()?
             .into_iter()
             .find(|n| n.id == id)
