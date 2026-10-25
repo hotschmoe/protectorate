@@ -1348,7 +1348,16 @@ impl Jobs {
             match result {
                 Ok(()) if self.snapshot(&id).is_ok_and(|j| terminal(&j)) => return,
                 Err(e) if e.code == Code::NotFound => {
-                    let _ = self.fail(&id, "node no longer has the job");
+                    if self.cancel_requested(&id) {
+                        let _ = self.finish(
+                            &id,
+                            JobEnd::Canceled,
+                            -1,
+                            "canceled; the node never received the job",
+                        );
+                    } else {
+                        let _ = self.fail(&id, "node no longer has the job");
+                    }
                     return;
                 }
                 Err(e)
@@ -1436,6 +1445,16 @@ impl Jobs {
         artifacts: Option<(Vec<v1::JobArtifact>, u64)>,
     ) -> Result<()> {
         let code = finished.exit_code;
+        // An acknowledged cancel outlives a node that lost the job (restart,
+        // never received): the job ended because the caller stopped it.
+        let finished = if finished.end() == JobEnd::Error && self.cancel_requested(id) {
+            v1::JobFinished {
+                end: JobEnd::Canceled as i32,
+                ..finished
+            }
+        } else {
+            finished
+        };
         let state = match finished.end() {
             JobEnd::Exited if code == 0 => JobState::Succeeded,
             JobEnd::TimedOut => JobState::TimedOut,
@@ -1457,6 +1476,11 @@ impl Jobs {
             }
         })
         .map(|_| ())
+    }
+    fn cancel_requested(&self, id: &str) -> bool {
+        lock(&self.state)
+            .get(id)
+            .is_some_and(|s| s.cancel_requested)
     }
     fn fail(&self, id: &str, error: &str) -> Result<()> {
         self.finish(id, JobEnd::Error, -1, error)
