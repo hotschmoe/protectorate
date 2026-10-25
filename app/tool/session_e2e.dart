@@ -30,8 +30,28 @@ Future<void> main(List<String> args) async {
     if (!condition) throw StateError(message);
   }
 
+  // tmux drops pty output still in flight when a pane's process exits, so the
+  // command stays alive until its output is on the pane and the script
+  // releases it.
+  final scratch = io.Directory.systemTemp.createTempSync(
+    'protectorate-session-e2e-',
+  );
+  final release = io.File('${scratch.path}/release');
+
+  Future<String> paneWith(String text) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 60));
+    while (DateTime.now().isBefore(deadline)) {
+      final pane = await sessions.capturePane(
+        CapturePaneRequest(name: name, lines: 1),
+      );
+      if (pane.text.contains(text)) return pane.text;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    throw StateError('pane never showed $text');
+  }
+
   Future<Session> exited() async {
-    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    final deadline = DateTime.now().add(const Duration(seconds: 60));
     while (DateTime.now().isBefore(deadline)) {
       final listed = await sessions.listSessions(ListSessionsRequest());
       for (final session in listed.sessions) {
@@ -53,10 +73,18 @@ Future<void> main(List<String> args) async {
     final created = await sessions.createSession(
       CreateSessionRequest(
         name: name,
-        command: ['/bin/sh', '-c', 'printf "flutter-session-ok\\n"; exit 7'],
+        command: [
+          '/bin/sh',
+          '-c',
+          r'printf "flutter-session-ok\n"; while [ ! -e "$1" ]; do sleep 0.05; done; exit 7',
+          'sh',
+          release.path,
+        ],
       ),
     );
     check(created.session.name == name, 'create lost the session name');
+    await paneWith('flutter-session-ok');
+    release.createSync();
     var ended = await exited();
     check(ended.exitCode == 7, 'session exit code was lost');
     check(ended.hasExitedAt(), 'session exit timestamp was lost');
@@ -65,10 +93,13 @@ Future<void> main(List<String> args) async {
     );
     check(pane.text.contains('flutter-session-ok'), 'final pane was lost');
 
+    release.deleteSync();
     final restarted = await sessions.respawnSession(
       RespawnSessionRequest(name: name),
     );
     check(restarted.session.name == name, 'respawn lost the session name');
+    await paneWith('flutter-session-ok');
+    release.createSync();
     ended = await exited();
     check(ended.exitCode == 7, 'respawn did not run the saved command');
     pane = await sessions.capturePane(CapturePaneRequest(name: name, lines: 1));
@@ -83,6 +114,7 @@ Future<void> main(List<String> args) async {
       'Dart session create, list, exit, capture, respawn and removal passed.',
     );
   } finally {
+    scratch.deleteSync(recursive: true);
     http.close(force: true);
   }
 }
