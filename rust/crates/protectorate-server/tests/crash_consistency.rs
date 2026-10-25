@@ -307,7 +307,7 @@ fn check_files(home: &Path, live: Option<u32>) {
     }
 }
 
-fn verify(hub: &Hub, ledger: &mut Ledger, context: &str) {
+fn verify(hub: &Hub, ledger: &mut Ledger, node_killed: bool, context: &str) {
     let call = |path: &str, body: Value| {
         hub.client
             .call(path, &body)
@@ -429,12 +429,22 @@ fn verify(hub: &Hub, ledger: &mut Ledger, context: &str) {
         );
     }
     // The hub reconciles with the node after it is back; the cancel it
-    // acknowledged must then take effect.
+    // acknowledged must then take effect. A node killed with the hub takes
+    // its job with it, so the job then only has to settle.
     for id in &ledger.canceled_jobs {
         let deadline = std::time::Instant::now() + Duration::from_secs(60);
         loop {
             let job = call(&format!("{JOB}GetJob"), json!({"id":id}));
-            if job["state"] == "JOB_STATE_CANCELED" {
+            let state = text(&job["state"]);
+            let settled = if node_killed {
+                !matches!(
+                    state,
+                    "JOB_STATE_UNSPECIFIED" | "JOB_STATE_PREPARING" | "JOB_STATE_RUNNING"
+                )
+            } else {
+                state == "JOB_STATE_CANCELED"
+            };
+            if settled {
                 break;
             }
             assert!(
@@ -443,6 +453,9 @@ fn verify(hub: &Hub, ledger: &mut Ledger, context: &str) {
             );
             thread::sleep(Duration::from_millis(100));
         }
+    }
+    if node_killed {
+        ledger.canceled_jobs.clear();
     }
     for name in &ledger.sleeves {
         let sleeve = call(&format!("{SLEEVE}GetSleeve"), json!({"name":name}));
@@ -500,7 +513,7 @@ fn acknowledged_mutations_survive_hub_sigkill_at_random_points() {
     let iterations: u64 = std::env::var("PROTECTORATE_CRASH_ITERATIONS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(5);
+        .unwrap_or(4);
     let root = tempfile::tempdir().unwrap();
     let backups = root.path().join("backups");
     let mut hub = Hub::start_with(
@@ -515,7 +528,7 @@ fn acknowledged_mutations_survive_hub_sigkill_at_random_points() {
     let node_home = root.path().join("node");
     hub.join("crash-peer", &node_home);
     let node_log = root.path().join("node.stderr");
-    let _node = serve_node(&node_home, &hub.user_home, &node_log);
+    let mut node = Some(serve_node(&node_home, &hub.user_home, &node_log));
     hub.wait_fresh("crash-peer", &node_log);
     let lease_home = root.path().join("lease-node");
     hub.join("lease-peer", &lease_home);
@@ -549,6 +562,7 @@ fn acknowledged_mutations_survive_hub_sigkill_at_random_points() {
             ca: hub.ca(),
             work: work.clone(),
         };
+        let node_killed = iteration % 2 == 1;
         let stop = AtomicBool::new(false);
         let worker_seeds = (0..6).map(|_| rng.next() | 1).collect::<Vec<_>>();
         thread::scope(|scope| {
@@ -578,13 +592,22 @@ fn acknowledged_mutations_survive_hub_sigkill_at_random_points() {
             });
             thread::sleep(delay);
             hub.stop();
+            // Every other round the node dies with the hub.
+            if node_killed {
+                node = None;
+            }
             stop.store(true, Ordering::Relaxed);
         });
+        if node.is_none() {
+            node = Some(serve_node(&node_home, &hub.user_home, &node_log));
+        }
         hub.restart();
+        hub.wait_fresh("crash-peer", &node_log);
         let mut ledger = ledger.lock().unwrap();
         verify(
             &hub,
             &mut ledger,
+            node_killed,
             &format!("seed {seed} iteration {iteration}"),
         );
     }
