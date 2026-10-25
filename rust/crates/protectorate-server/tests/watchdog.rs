@@ -179,8 +179,11 @@ fn watchdog_exits_a_hub_whose_runtime_is_wedged() {
         "exited after {:?}, before the limit: {log}",
         wedged.elapsed()
     );
+    // Every probe stalls at once, so whichever the watchdog reads first names
+    // the exit; the dump lists the runtime heartbeat with the rest.
+    assert!(log.contains("made no progress for"), "{log}");
     assert!(
-        log.contains("watchdog: runtime heartbeat made no progress for"),
+        log.contains("watchdog:   runtime heartbeat: last progress"),
         "{log}"
     );
     assert!(log.contains("watchdog:   thread "), "no thread dump: {log}");
