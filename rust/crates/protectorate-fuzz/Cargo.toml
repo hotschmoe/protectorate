@@ -7,6 +7,7 @@ description = "Fuzz targets over the parsers that read untrusted input; rust/fuz
 [target.'cfg(target_os = "linux")'.dependencies]
 protectorate-audit = { path = "../protectorate-audit" }
 protectorate-auth = { path = "../protectorate-auth" }
+protectorate-backup = { path = "../protectorate-backup" }
 protectorate-backlog = { path = "../protectorate-backlog" }
 protectorate-chatlog = { path = "../protectorate-chatlog" }
 protectorate-claude-driver = { path = "../protectorate-claude-driver" }
@@ -14,7 +15,9 @@ protectorate-cli = { path = "../protectorate-cli" }
 protectorate-codex-driver = { path = "../protectorate-codex-driver" }
 protectorate-directory = { path = "../protectorate-directory" }
 protectorate-grok-driver = { path = "../protectorate-grok-driver" }
+protectorate-handoff = { path = "../protectorate-handoff" }
 protectorate-identity = { path = "../protectorate-identity" }
+protectorate-inventory = { path = "../protectorate-inventory" }
 protectorate-mailbox = { path = "../protectorate-mailbox" }
 protectorate-mcpbridge = { path = "../protectorate-mcpbridge" }
 protectorate-node-metrics = { path = "../protectorate-node-metrics" }

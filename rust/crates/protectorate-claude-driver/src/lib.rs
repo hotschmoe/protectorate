@@ -100,11 +100,7 @@ impl Session {
         thread::spawn(move || {
             let result = child.wait();
             let _gate = lock(&waiter.event_gate);
-            let _ = waiter.log.append_exit("claude", &result);
-            let _ = waiter
-                .log
-                .append(Event::new(json!({"state":{"state":"CHAT_STATE_EXITED"}})));
-            let _ = waiter.log.close();
+            let _ = waiter.log.end_session("claude", &result);
             let mut state = lock(&waiter.state);
             state.exited = true;
             state.busy = false;

@@ -244,14 +244,16 @@ impl Log {
         self.stopping.store(true, Ordering::Relaxed);
     }
 
-    /// Appends the error event for a harness process that ended. A signal the
-    /// owner did not ask for is a kill, which is how a resource limit or the
-    /// kernel's OOM killer ends a process; any other exit is a plain exit.
-    pub fn append_exit<E: fmt::Display>(
+    /// Ends the session of a harness process that ended: appends its error
+    /// event and the exited state, then closes the log, all under one lock so
+    /// no event can follow the exited state. A signal the owner did not ask
+    /// for is a kill, which is how a resource limit or the kernel's OOM
+    /// killer ends a process; any other exit is a plain exit.
+    pub fn end_session<E: fmt::Display>(
         &self,
         harness: &str,
         result: &Result<std::process::ExitStatus, E>,
-    ) -> Result<u64, Error> {
+    ) -> Result<(), Error> {
         let error = match result {
             Err(error) => json!({"text": format!("{harness} wait failed: {error}")}),
             Ok(status) => match signal(status).filter(|_| !self.stopping.load(Ordering::Relaxed)) {
@@ -265,7 +267,16 @@ impl Log {
                 }),
             },
         };
-        self.append(Event::new(json!({ "error": error })))
+        let mut inner = lock(&self.inner);
+        if inner.closed {
+            return Err(Error::Closed);
+        }
+        let ended = inner.flush().and_then(|()| {
+            inner.append(Event::new(json!({ "error": error })))?;
+            inner.append(Event::new(json!({"state":{"state":"CHAT_STATE_EXITED"}})))
+        });
+        let closed = inner.close();
+        ended.map(drop).and(closed)
     }
 
     /// Prompt-cache telemetry in the ChatStatus `cache` JSON shape.
@@ -291,16 +302,8 @@ impl Log {
             return Err(Error::Closed);
         }
         inner.flush()?;
-        let mut event = build(inner.last + 1);
-        event.seq = inner.last + 1;
-        if event.time_ms == 0 {
-            event.time_ms = now_ms();
-        }
-        inner.cache.observe(&mut event.payload);
-        inner.persist(&event)?;
-        inner.last = event.seq;
-        inner.fanout(&event);
-        Ok(event)
+        let event = build(inner.last + 1);
+        inner.append(event)
     }
 
     /// Streams a delta now and stores one complete message when it closes.
@@ -346,17 +349,7 @@ impl Log {
     }
 
     pub fn close(&self) -> Result<(), Error> {
-        let mut inner = lock(&self.inner);
-        if inner.closed {
-            return Ok(());
-        }
-        let flush = inner.flush();
-        inner.closed = true;
-        for watcher in inner.watchers.values() {
-            watcher.close();
-        }
-        let sync = inner.file.sync_all().map_err(Error::Io);
-        flush.and(sync)
+        lock(&self.inner).close()
     }
 
     /// Replays seq > `after`, then follows live events. A caller resuming
@@ -482,6 +475,29 @@ impl Inner {
         self.offsets.push(self.size);
         self.size += line.len() as u64;
         Ok(())
+    }
+    fn append(&mut self, mut event: Event) -> Result<Event, Error> {
+        event.seq = self.last + 1;
+        if event.time_ms == 0 {
+            event.time_ms = now_ms();
+        }
+        self.cache.observe(&mut event.payload);
+        self.persist(&event)?;
+        self.last = event.seq;
+        self.fanout(&event);
+        Ok(event)
+    }
+    fn close(&mut self) -> Result<(), Error> {
+        if self.closed {
+            return Ok(());
+        }
+        let flush = self.flush();
+        self.closed = true;
+        for watcher in self.watchers.values() {
+            watcher.close();
+        }
+        let sync = self.file.sync_all().map_err(Error::Io);
+        flush.and(sync)
     }
     fn flush(&mut self) -> Result<(), Error> {
         if let Some(open) = self.open.as_ref() {

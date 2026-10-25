@@ -1,0 +1,3 @@
+{"type":"user","message":{"role":"user","content":"<tag>wrapped</tag>"}}
+not json
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result"}]}}

@@ -352,7 +352,10 @@ fn egress_policy(egress: Egress, credential: Option<Provider>) -> Result<EgressP
     }
     for spec in egress.allow {
         let (host, port) = split_host_port(&spec)
-            .filter(|(host, _)| valid_hostname(host.strip_prefix("*.").unwrap_or(host)))
+            .filter(|(host, _)| {
+                let name = host.strip_prefix("*.").unwrap_or(host);
+                valid_hostname(name) && name.parse::<std::net::IpAddr>().is_err()
+            })
             .ok_or_else(|| {
                 invalid(format!(
                     "egress allow entry must be a host name pattern, not {spec:?}"

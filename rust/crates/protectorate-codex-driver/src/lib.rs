@@ -179,11 +179,7 @@ impl Session {
             state.busy = false;
             waiter.changed.notify_all();
             drop(state);
-            let _ = waiter.log.append_exit("codex", &result);
-            let _ = waiter
-                .log
-                .append(Event::new(json!({"state":{"state":"CHAT_STATE_EXITED"}})));
-            let _ = waiter.log.close();
+            let _ = waiter.log.end_session("codex", &result);
         });
         let init = session.rpc(
             "initialize",

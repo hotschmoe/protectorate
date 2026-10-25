@@ -119,7 +119,10 @@ fn check_log(path: &Path) {
         assert_eq!(event.seq, i as u64 + 1, "chat log sequence gap");
     }
     let last = events.last().expect("an exited session logged its exit");
-    assert_eq!(last.payload["state"]["state"], "CHAT_STATE_EXITED");
+    assert_eq!(
+        last.payload["state"]["state"], "CHAT_STATE_EXITED",
+        "the last event of an exited session, in {events:?}"
+    );
     Log::open(path).expect("reopen the chat log");
 }
 

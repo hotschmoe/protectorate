@@ -1,4 +1,5 @@
 use crate::{fields, text};
+use protectorate_backup::{restore, verify, Cancellation};
 use protectorate_release::{
     extract_web, parse_checksums, resolve_url, resolved_version, safe_web_path, valid_version,
     validate_api, validate_channel, validate_repo, validate_url, verify_checksum, Info,
@@ -180,5 +181,42 @@ pub fn release_manifest(data: &[u8]) {
             "web path {name:?} became {}",
             path.display()
         );
+    }
+}
+
+/// A backup archive file, verified and restored: both agree on the manifest,
+/// a restore holds exactly the manifest files, and a refusal leaves nothing
+/// beside the destination.
+pub fn backup_archive(data: &[u8]) {
+    let scratch = tempfile::tempdir().unwrap();
+    let parent = scratch.path().join("parent");
+    fs::create_dir(&parent).unwrap();
+    let archive = parent.join("fuzz.pbackup");
+    fs::write(&archive, data).unwrap();
+    let cancel = Cancellation::default();
+    let verified = verify(&archive, &cancel);
+    let home = parent.join("home");
+    match restore(&archive, &home, &cancel) {
+        Ok(manifest) => {
+            assert_eq!(
+                verified.expect("restore succeeded where verify failed"),
+                manifest
+            );
+            check_tree(&home);
+            for file in &manifest.files {
+                let bytes = fs::read(home.join(&file.path)).expect("manifest file restored");
+                assert_eq!(bytes.len() as u64, file.size);
+                assert_eq!(hex(&Sha256::digest(&bytes)), file.sha256);
+            }
+            assert_eq!(names(&parent), ["fuzz.pbackup", "home"]);
+        }
+        Err(_) => {
+            assert!(!home.exists(), "failed restore published a destination");
+            assert_eq!(
+                names(&parent),
+                ["fuzz.pbackup"],
+                "failed restore left residue"
+            );
+        }
     }
 }
