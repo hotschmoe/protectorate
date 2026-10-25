@@ -406,11 +406,7 @@ impl Session {
 
     fn note_exit<E: std::fmt::Display>(&self, result: &Result<std::process::ExitStatus, E>) {
         let _gate = self.event_gate.lock().unwrap();
-        let _ = self.log.append_exit("grok", result);
-        let _ = self
-            .log
-            .append(Event::new(json!({"state":{"state":"CHAT_STATE_EXITED"}})));
-        let _ = self.log.close();
+        let _ = self.log.end_session("grok", result);
         let mut state = self.state.lock().unwrap();
         state.exited = true;
         state.busy = false;
