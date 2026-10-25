@@ -483,7 +483,7 @@ fn uninstall_node(command: Uninstall) -> Result<(), Box<dyn Error>> {
 
 async fn serve_node(options: Serve) -> Result<ServeExit, Box<dyn Error>> {
     let home = fs::canonicalize(&options.home)?;
-    let (address, tls, renew) = node_join::serve_tls(&home, options.listen)?;
+    let (tls, renew) = node_join::serve_tls(&home)?;
     let collector: Arc<dyn protectorate_node::MetricsCollector> = Arc::new(
         protectorate_node_metrics::Collector::linux(protectorate_node_metrics::Options {
             version: build_version().to_owned(),
@@ -534,12 +534,14 @@ async fn serve_node(options: Serve) -> Result<ServeExit, Box<dyn Error>> {
     if agent.start_update_trial()? {
         return Ok(ServeExit::Restart);
     }
-    let listener = tokio::net::TcpListener::bind(address).await?;
+    let (listener, follow) = node_join::bind(&home, options.listen).await?;
+    let (swap, rebind) = tokio::sync::mpsc::channel(1);
     eprintln!("protectorate-rs node serving on {}", listener.local_addr()?);
+    follow.spawn(swap);
     let shutdown_requested = Arc::clone(&restart_requested);
     let uninstall_shutdown = Arc::clone(&uninstall_requested);
     axum::serve(
-        transport::TlsListener::new(listener, tls)?,
+        transport::TlsListener::new(listener, tls, Some(rebind))?,
         transport::peer_router(agent.router()?)
             .into_make_service_with_connect_info::<transport::Peer>(),
     )

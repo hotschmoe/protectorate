@@ -13,6 +13,7 @@ mod flutter_client;
 mod hub_self_update;
 mod job_restart;
 mod mtls;
+mod node_address;
 mod service_job_restart;
 mod sleeve_guards;
 mod watchdog;

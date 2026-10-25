@@ -617,8 +617,12 @@ impl Hub {
         let require_device_peer = self.require_device_peer;
         let trusted_proxies = self.trusted_proxies.clone();
         let device_rates = Arc::clone(&self.device_rates);
+        let node_inventory = Arc::clone(&self.inventory);
         let authorize = Arc::new(
             move |method: &Method, headers: &HeaderMap, peer: Option<wire::Peer>| {
+                if method.node_only {
+                    return nodes::authenticate_node(&node_inventory, peer.as_ref());
+                }
                 if !device::public_procedure(&method.procedure) {
                     let caller = access::authenticate(
                         &owner,
@@ -627,7 +631,7 @@ impl Hub {
                         headers,
                         "POST",
                         &method.procedure,
-                        peer.is_some_and(|peer| peer.tls),
+                        peer.as_ref().is_some_and(|peer| peer.tls),
                     )
                     .map_err(|error| {
                         Box::new(wire::Denied {
@@ -643,6 +647,7 @@ impl Hub {
                 // A loopback-only listener may omit peer metadata in embedded
                 // routers. TLS listeners must always provide it.
                 let ip = peer
+                    .as_ref()
                     .map(|peer| device::source_ip(peer.addr.ip(), headers, &trusted_proxies))
                     .or_else(|| {
                         (!require_device_peer)

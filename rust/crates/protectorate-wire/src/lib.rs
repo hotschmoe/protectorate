@@ -313,6 +313,8 @@ pub struct Method {
     pub read_only: bool,
     pub owner_only: bool,
     pub device_allowed: bool,
+    /// Callable only by a joined node, authenticated by its client certificate.
+    pub node_only: bool,
     pub node_local: bool,
     pub destructive: bool,
     pub client_streaming: bool,
@@ -415,6 +417,7 @@ impl Catalog {
                     owner_only: extension(&service_options, "owner_only")
                         || extension(&options, "owner_only_rpc"),
                     device_allowed: extension(&options, "device_allowed"),
+                    node_only: extension(&options, "node_only_rpc"),
                     node_local: extension(&service_options, "node_local"),
                     destructive: extension(&options, "destructive"),
                     client_streaming: descriptor.is_client_streaming(),
@@ -455,10 +458,13 @@ pub struct AuthContext {
 /// The transport peer, inserted as a request extension by the listener and
 /// never taken from a header. `tls` is false only on the hub's loopback
 /// listener.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Peer {
     pub addr: SocketAddr,
     pub tls: bool,
+    /// The DER client certificate the TLS handshake verified against the hub
+    /// CA, when the peer presented one.
+    pub client_cert: Option<Arc<[u8]>>,
 }
 /// An admission failure, with whatever identity was established before it.
 #[derive(Clone, Debug)]
@@ -1036,12 +1042,12 @@ async fn dispatch_inner(
             .status(StatusCode::UNSUPPORTED_MEDIA_TYPE),
         ));
     }
-    let peer = request.extensions().get::<Peer>().copied();
+    let peer = request.extensions().get::<Peer>().cloned();
     let admission = match &server.authorize {
         Admission::Headers(authorize) => {
             authorize(&method, request.headers()).map_err(Box::<Denied>::from)
         }
-        Admission::Peer(authorize) => authorize(&method, request.headers(), peer),
+        Admission::Peer(authorize) => authorize(&method, request.headers(), peer.clone()),
     };
     let auth = match admission {
         Ok(auth) => auth,

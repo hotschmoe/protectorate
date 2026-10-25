@@ -1054,7 +1054,7 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
     }
     names.extend(options.tls_names.iter().cloned());
     let identity = ca.hub_identity(&names)?;
-    let tls = protectorate_tls::hub_server_config(&identity)?;
+    let tls = protectorate_tls::hub_server_config(&identity, ca.pem().as_bytes())?;
     let node_tls = protectorate_connect_client::NodeTls::from_pem(
         ca.pem().as_bytes(),
         identity.cert_pem.as_bytes(),
@@ -1397,7 +1397,7 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
     };
     let mut servers = tokio::task::JoinSet::new();
     for listener in tls_listeners {
-        let listener = transport::TlsListener::new(listener, Arc::clone(&tls))?;
+        let listener = transport::TlsListener::new(listener, Arc::clone(&tls), None)?;
         let service = router
             .clone()
             .into_make_service_with_connect_info::<transport::Peer>();
@@ -1482,7 +1482,7 @@ async fn serve_node(options: Options) -> Result<NodeServeExit, Box<dyn Error>> {
         None => default_home()?,
     };
     let home = fs::canonicalize(home)?;
-    let (address, tls, renew) = node_join::serve_tls(&home, options.listen)?;
+    let (tls, renew) = node_join::serve_tls(&home)?;
     let metrics_options = protectorate_node_metrics::Options {
         version: build_version().to_owned(),
         home: home.clone(),
@@ -1600,7 +1600,8 @@ async fn serve_node(options: Options) -> Result<NodeServeExit, Box<dyn Error>> {
     if agent.start_update_trial()? {
         return Ok(NodeServeExit::Restart);
     }
-    let listener = tokio::net::TcpListener::bind(address).await?;
+    let (listener, follow) = node_join::bind(&home, options.listen).await?;
+    let (swap, rebind) = tokio::sync::mpsc::channel(1);
     let mut dog = watchdog::Watchdog::new("node", parse_interval)?;
     if let Some(jobs) = agent.jobs() {
         dog.async_probe("job table locks", move || {
@@ -1612,10 +1613,11 @@ async fn serve_node(options: Options) -> Result<NodeServeExit, Box<dyn Error>> {
     }
     let _watchdog = dog.arm()?;
     eprintln!("protectorate-rs node serving on {}", listener.local_addr()?);
+    follow.spawn(swap);
     let shutdown_requested = Arc::clone(&restart_requested);
     let uninstall_shutdown = Arc::clone(&uninstall_requested);
     axum::serve(
-        transport::TlsListener::new(listener, tls)?,
+        transport::TlsListener::new(listener, tls, Some(rebind))?,
         transport::peer_router(agent.router()?)
             .into_make_service_with_connect_info::<transport::Peer>(),
     )

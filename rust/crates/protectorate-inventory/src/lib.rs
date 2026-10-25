@@ -289,6 +289,26 @@ impl Inventory {
         node.cert_expires = cert_expires;
         self.commit(next)
     }
+    /// Records the address a node reported for itself, for the enrollment
+    /// `cert_id` names. Returns the previous address when it changed.
+    pub fn set_address(&self, name: &str, cert_id: &str, address: &str) -> Result<Option<String>> {
+        let _writer = lock(&self.writer);
+        let nodes = lock(&self.nodes).clone();
+        let mut next = nodes.clone();
+        let Some(node) = next
+            .iter_mut()
+            .find(|node| node.name == name && !node.cert_id.is_empty() && node.cert_id == cert_id)
+        else {
+            return Err(Error::NotFound(name.to_owned()));
+        };
+        if node.address == address {
+            return Ok(None);
+        }
+        let previous = std::mem::replace(&mut node.address, address.to_owned());
+        *node = normalize(node.clone())?;
+        self.commit(next)?;
+        Ok(Some(previous))
+    }
     /// Caches OS and architecture reported by a successful metrics poll.
     pub fn set_platform(&self, name: &str, os: &str, arch: &str) -> Result<()> {
         let name = name.trim().to_ascii_lowercase();
