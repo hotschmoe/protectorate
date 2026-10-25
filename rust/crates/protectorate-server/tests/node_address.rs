@@ -7,8 +7,9 @@
 //! report is refused when the IP is not the connection's, and that no other
 //! caller can make it.
 //!
-//! The scenario re-runs this test binary inside the namespaces. When the host
-//! forbids unprivileged namespaces or veth links the test says so and passes.
+//! The scenario re-runs this test binary inside the namespaces. A host that
+//! forbids unprivileged namespaces or veth links fails it, like the sandbox
+//! scenarios.
 
 #[cfg(target_os = "linux")]
 mod linux {
@@ -62,8 +63,7 @@ mod linux {
             return;
         }
         if let Err(reason) = available() {
-            eprintln!("skipping node_address: unprivileged namespaces with veth are unavailable here: {reason}");
-            return;
+            panic!("node_address needs unprivileged user, network and PID namespaces with veth links: {reason}");
         }
         let exe = std::env::current_exe().unwrap();
         let output = namespaces(&[
