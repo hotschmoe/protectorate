@@ -345,12 +345,14 @@ mod linux {
         let joined: Value =
             serde_json::from_slice(&fs::read(node_home.join("node.json")).unwrap()).unwrap();
         assert_eq!(joined["address"], "10.77.0.3:7475", "{joined}");
+        support::until("node confirms the report", &node_log, || {
+            fs::read_to_string(&node_log)
+                .unwrap()
+                .contains("told the hub it serves on 10.77.0.3:7475")
+        });
         let log = fs::read_to_string(&node_log).unwrap();
         assert!(log.contains("now serving on 10.77.0.3:7475"), "{log}");
-        assert!(
-            log.contains("told the hub it serves on 10.77.0.3:7475"),
-            "{log}"
-        );
+        support::until("audit entry", &hub_log, || audit(&owner, "ok").len() == 1);
         let entries = audit(&owner, "ok");
         assert_eq!(entries.len(), 1, "{entries:?}");
         assert_eq!(entries[0]["actor"], "node:mover");
