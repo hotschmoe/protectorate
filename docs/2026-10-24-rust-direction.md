@@ -527,6 +527,15 @@ Build profile (round 3, 12-core CIX P1: 8 Cortex-A720 + 4 Cortex-A520):
   Kingston OM8TAP4 drive under write load, not from the journal. Smaller
   dirty-writeback limits did not remove them. So the code must never hold
   a lock across fsync.
+- Round 4 build setup (quiet host, touch hub then `cargo build --workspace
+  --tests`): GNU ld 7.9 s wall / 26.5 s CPU, lld 14 3.9 / 14.2, rust-lld 22
+  3.7 / 14.5, mold 1.10 3.4 / 6.3. The dev host now links with mold
+  (`~/.cargo/config.toml`). target/ is a 10 GiB tmpfs from /etc/fstab: a
+  cold tests build is 45 s and clippy 27 s, the output is 2.7 GB, and the
+  build itself needed about 1 GB more memory; rebuild times match the SSD.
+  earlyoom (`-m 8,4`, preferring rustc, linkers and test binaries, avoiding
+  the hub, Headscale, desktop and agent sessions) guards the 30 GB, swapless
+  host. Worktree targets stay on disk.
 
 Sleeve model (owner's direction, to build after polish):
 - A sleeve is a long-lived owner of one repository directory, not a

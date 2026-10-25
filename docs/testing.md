@@ -43,23 +43,45 @@ hosted workflows set `CARGO_INCREMENTAL=0` themselves. Setting it locally
 costs about 2.4x the CPU to rebuild after a hub edit, and switching it
 between runs recompiles every workspace crate.
 
-The default `cc` linker on aarch64 Linux is GNU ld. Linking with lld cuts
-link CPU after a hub edit from about 23 s to 7 s and the wall time of
-`cargo build --workspace --tests` from 8-10 s to 5-7 s. It is a per-user setting, so hosts
-without lld are unaffected; with lld installed, add to `~/.cargo/config.toml`
-(x86_64 Linux already links with rust-lld by default):
+The default `cc` linker on aarch64 Linux is GNU ld. On the 12-core dev host,
+`cargo build --workspace --tests` after touching the hub takes:
+
+| Linker | Wall | CPU |
+|---|---|---|
+| GNU ld 2.40 | 7.9 s | 26.5 s |
+| lld 14 (Debian) | 3.9 s | 14.2 s |
+| rust-lld 22 (toolchain, `-B .../gcc-ld`) | 3.7 s | 14.5 s |
+| mold 1.10 (Debian) | 3.4 s | 6.3 s |
+
+The linker is a per-user setting, so hosts without mold are unaffected. With
+mold installed (`apt install mold`), add to `~/.cargo/config.toml` (x86_64
+Linux already links with rust-lld by default):
 
 ```toml
 [target.aarch64-unknown-linux-gnu]
-rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 ```
 
-Changing rustflags rebuilds everything once.
+Changing rustflags rebuilds everything once; a `RUSTFLAGS` environment
+variable replaces this setting.
+
+`target/` can live on a size-capped tmpfs. A cold `cargo build --workspace
+--tests` plus clippy writes 2.7 GB and needs about 1 GB of memory beyond that;
+rebuild times match the SSD, but builds stop writing tens of GB a day to it
+and stop competing with the hub's fsyncs. A full tmpfs fails the build with
+ENOSPC instead of exhausting memory. The dev host mounts one from
+`/etc/fstab` with earlyoom as a backstop that prefers build processes:
+
+```
+tmpfs /path/to/protectorate/target tmpfs rw,nosuid,nodev,noatime,size=10g,mode=0755,uid=<you>,gid=<you> 0 0
+```
 
 Prefer `--workspace` builds and select tests by name. A `-p <crate>` build
 resolves features for that crate alone, so it recompiles tokio, serde, hyper
 and axum under new hashes and stores a second copy of them. Cargo never
 removes stale artifacts from `target/`; reclaim space with `cargo clean`.
+Every worktree has its own `target/`, so clean it before removing a merged
+worktree.
 
 ## Host-only lanes
 
