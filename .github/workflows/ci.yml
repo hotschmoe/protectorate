@@ -33,6 +33,31 @@ jobs:
       - name: Rust Linux installer checks
         run: bash scripts/test-rust-installers.sh
 
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}-v1
+      - name: Install cargo-audit
+        run: command -v cargo-audit || cargo install cargo-audit --locked
+      # zip 0.6 is used only to read and write archives; protectorate-node
+      # extracts entries itself (no ZipArchive::extract), rejecting symlinks,
+      # unsafe paths and stripping set-id bits. Drop these ignores with the
+      # upgrade to zip 9.
+      - name: RustSec advisories
+        run: >-
+          cargo audit
+          --ignore RUSTSEC-2026-0367
+          --ignore RUSTSEC-2026-0368
+          --ignore RUSTSEC-2026-0369
+
   rust-arm64:
     runs-on: ubuntu-24.04-arm
     env:
