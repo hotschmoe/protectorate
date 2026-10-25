@@ -294,10 +294,11 @@ fn req_key(from: &str, id: &str) -> String {
     format!("{}\u{0}", from) + id
 }
 
+/// Counters stay far below i64::MAX: ids this store did not issue count as 0.
 fn id_number(id: &str) -> i64 {
     id.trim_start_matches(['m', 't'])
-        .parse::<i64>()
-        .unwrap_or(0)
+        .parse::<u32>()
+        .map_or(0, i64::from)
 }
 
 fn delivery_pending(delivery: &Delivery) -> bool {
