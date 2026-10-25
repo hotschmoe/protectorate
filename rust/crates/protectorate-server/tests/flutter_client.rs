@@ -21,10 +21,22 @@ mod unix {
 
     /// A process group of its own; dropping it stops the whole tree, so a
     /// guardian's hub child or `flutter`'s tester cannot outlive the test.
+    /// If the test binary is killed before the drop runs, the kernel sends
+    /// the leader SIGTERM, and `flutter` and the hub guardian stop their
+    /// children on it.
     struct Group(Child);
 
     impl Group {
         fn spawn(command: &mut Command) -> Self {
+            // SAFETY: prctl is async-signal-safe and touches no memory.
+            unsafe {
+                command.pre_exec(|| {
+                    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
             Self(command.process_group(0).spawn().unwrap())
         }
 
@@ -230,34 +242,39 @@ mod unix {
         );
     }
 
-    #[test]
-    fn checked_in_flutter_client_connects_to_rust_hub() {
-        let require_flutter =
-            std::env::var("PROTECTORATE_REQUIRE_FLUTTER_TEST").as_deref() == Ok("1");
-        if Command::new("dart").arg("--version").output().is_err() {
-            assert!(
-                !require_flutter,
-                "dart is required for the Flutter client trial"
-            );
-            eprintln!("skipping Flutter client trial: dart is unavailable");
-            return;
+    /// The app directory when the toolchain for `tool` and the package config
+    /// are present; `None` skips the trial unless Flutter is required.
+    fn app_for(tool: &str, trial: &str) -> Option<PathBuf> {
+        let required = std::env::var("PROTECTORATE_REQUIRE_FLUTTER_TEST").as_deref() == Ok("1");
+        if Command::new(tool).arg("--version").output().is_err() {
+            assert!(!required, "{tool} is required for the {trial}");
+            eprintln!("skipping {trial}: {tool} is unavailable");
+            return None;
         }
         let app = app();
         if !app.join(".dart_tool/package_config.json").is_file() {
             assert!(
-                !require_flutter,
+                !required,
                 "Flutter package config is required: run make app-check first"
             );
-            eprintln!("skipping Flutter client trial: run make app-check first");
-            return;
+            eprintln!("skipping {trial}: run make app-check first");
+            return None;
         }
+        Some(app)
+    }
 
+    /// Runs each Dart script against one fresh hub; each test has a hub of
+    /// its own so the trials run side by side.
+    fn dart_scripts(trial: &str, names: &[&str]) {
+        let Some(app) = app_for("dart", trial) else {
+            return;
+        };
         let root = tempfile::tempdir().unwrap();
         let root = root.path();
         let token = "rust-flutter-real-binary-e2e-token";
-        let hub = Hub::start(root, token, &[]);
+        let hub = Hub::start(root, token, &["--device-interval", "1s"]);
         let url = hub.url();
-        for name in ["hub_connection_e2e", "backlog_e2e", "session_e2e"] {
+        for name in names {
             scenario(
                 &hub,
                 root,
@@ -271,28 +288,52 @@ mod unix {
                 Duration::from_secs(300),
             );
         }
-        if Command::new("flutter").arg("--version").output().is_ok() {
-            for name in ["note_draft_e2e", "nodes_ui_e2e"] {
-                scenario(
-                    &hub,
-                    root,
-                    name,
-                    Command::new("flutter")
-                        .arg("test")
-                        .arg("--no-pub")
-                        .arg(format!("--dart-define=PROTECTORATE_E2E_HUB_URL={url}"))
-                        .arg(format!("--dart-define=PROTECTORATE_E2E_TOKEN={token}"))
-                        .arg(format!("tool/{name}.dart"))
-                        .current_dir(&app),
-                    Duration::from_secs(600),
-                );
-            }
-        } else {
-            assert!(
-                !require_flutter,
-                "flutter is required for the NoteDraft integration test"
-            );
-            eprintln!("skipping NoteDraft trial: flutter is unavailable");
-        }
+    }
+
+    fn flutter_test(trial: &str, name: &str) {
+        let Some(app) = app_for("flutter", trial) else {
+            return;
+        };
+        let root = tempfile::tempdir().unwrap();
+        let root = root.path();
+        let token = "rust-flutter-real-binary-e2e-token";
+        let hub = Hub::start(root, token, &[]);
+        let url = hub.url();
+        scenario(
+            &hub,
+            root,
+            name,
+            Command::new("flutter")
+                .arg("test")
+                .arg("--no-pub")
+                .arg(format!("--dart-define=PROTECTORATE_E2E_HUB_URL={url}"))
+                .arg(format!("--dart-define=PROTECTORATE_E2E_TOKEN={token}"))
+                .arg(format!("tool/{name}.dart"))
+                .current_dir(&app),
+            Duration::from_secs(600),
+        );
+    }
+
+    #[test]
+    fn checked_in_dart_client_pairs_and_signs_against_rust_hub() {
+        dart_scripts("Dart hub connection trial", &["hub_connection_e2e"]);
+    }
+
+    #[test]
+    fn checked_in_dart_client_runs_backlog_and_sessions_against_rust_hub() {
+        dart_scripts(
+            "Dart backlog and session trial",
+            &["backlog_e2e", "session_e2e"],
+        );
+    }
+
+    #[test]
+    fn checked_in_flutter_note_draft_autosaves_to_rust_hub() {
+        flutter_test("NoteDraft trial", "note_draft_e2e");
+    }
+
+    #[test]
+    fn checked_in_flutter_nodes_tab_renders_rust_inventory() {
+        flutter_test("Nodes tab trial", "nodes_ui_e2e");
     }
 }
