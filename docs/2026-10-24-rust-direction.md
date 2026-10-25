@@ -491,6 +491,22 @@ Round 3 (merged on rust-yolo; `make check` 227 passed, 0 failed, 6 ignored):
   aarch64 host; release binary 5.3 MB, stripped, `/system/bin/linker64`,
   API 24. Not run on a device yet.
 
+Round 4 (merged on rust-yolo; warm `make check` 70 s, was 139 s):
+- Mailbox, directory, inventory, hub job records and backlog reads no longer
+  wait on a writer's fsync (same writer-lock split as identity). The audit
+  writer does no fsync; measured contention did not justify group commit.
+- Sandbox: a launcher SIGKILLed after systemd-run registered the scope but
+  before systemd attached its process left an empty scope active forever.
+  The first systemd launch of every process stops scopes whose launcher pid
+  is gone and that hold no task.
+- Server e2e 52 s to 23 s: hub `--device-interval` and `--disk-interval`
+  knobs (defaults unchanged), conditions instead of fixed waits, the Flutter
+  client test split into four parallel tests, and the `flutter` group gets
+  PR_SET_PDEATHSIG so a killed test binary leaves no flutter_tester behind.
+- One `[workspace.dependencies]` table: third-party units rebuilt by `-p`
+  builds fell from 686 to 492, and a sequential `-p` sweep grows target/ by
+  1.2 GB instead of 3.6 GB. ureq and flate2 lost unused defaults.
+
 Build profile (round 3, 12-core CIX P1: 8 Cortex-A720 + 4 Cortex-A520):
 - Cold, fresh target dir: dev bins 40 s, + tests 16 s, clippy all-targets
   26 s, release 91 s, dist 336 s (release and dist measured with other
