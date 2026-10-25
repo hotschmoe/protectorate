@@ -163,6 +163,10 @@ impl Agent {
             .as_ref()
             .map_or(Ok(false), |updater| updater.start())
     }
+    /// The job table, for the server's hang watchdog to list like a poll.
+    pub fn jobs(&self) -> Option<Arc<Jobs>> {
+        self.jobs.clone()
+    }
     pub fn router(self) -> wire::Result<Router> {
         let catalog = Catalog::embedded()?;
         let authorize = Arc::new(|method: &Method, _: &HeaderMap| {
