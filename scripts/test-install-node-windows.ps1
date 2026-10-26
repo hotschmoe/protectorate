@@ -40,7 +40,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $bundle "SHA256SUMS"), $lines, [Text.Encoding]::ASCII)
     $pin = Pin-Manifest
     & $installer -Version $version -ManifestSha256 $pin -BundleDir $bundle -Architecture amd64 -VerifyOnly | Out-Null
-    if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() -eq "X64") {
+    if ((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment').PROCESSOR_ARCHITECTURE -eq "AMD64") {
         & $installer -Version $version -ManifestSha256 $pin -BundleDir $bundle -VerifyOnly | Out-Null
     }
 
@@ -79,7 +79,7 @@ try {
     [IO.File]::WriteAllText((Join-Path $bundle "SHA256SUMS"), $armLines, [Text.Encoding]::ASCII)
     $armPin = Pin-Manifest
     & $installer -Version $version -ManifestSha256 $armPin -BundleDir $bundle -Architecture arm64 -VerifyOnly | Out-Null
-    if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() -eq "Arm64") {
+    if ((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment').PROCESSOR_ARCHITECTURE -eq "ARM64") {
         & $installer -Version $version -ManifestSha256 $armPin -BundleDir $bundle -VerifyOnly | Out-Null
     }
     Expect-Failure "Wrong architecture assets" $armPin "amd64"

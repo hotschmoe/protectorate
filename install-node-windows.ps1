@@ -63,9 +63,9 @@ if ($Version -cnotmatch '^v[A-Za-z0-9][A-Za-z0-9._+-]{0,79}$') { throw "Invalid 
 if ($ManifestSha256 -notmatch '^[0-9a-fA-F]{64}$') { throw "ManifestSha256 must be 64 hex digits from a trusted source" }
 if (-not $BundleDir -and (-not $Hub -or -not $CaCert)) { throw "Downloads come from the hub: pass Hub and CaCert, or BundleDir" }
 
-$nativeArchitecture = switch ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()) {
-    "X64" { "amd64" }
-    "Arm64" { "arm64" }
+$nativeArchitecture = switch ((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment').PROCESSOR_ARCHITECTURE) {
+    "AMD64" { "amd64" }
+    "ARM64" { "arm64" }
     default { throw "Unsupported Windows OS architecture" }
 }
 if ($Architecture) {
