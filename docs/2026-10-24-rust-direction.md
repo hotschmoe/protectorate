@@ -801,7 +801,7 @@ Line numbers below are in `docs/rust-migration.md` unless another file is named.
 #### 5. Build, packaging and CI
 - **Scripts:**
   - `scripts/build-rust-termux.sh [check|build|release]` cross-builds `aarch64-linux-android` with NDK r28 at API 24. It uses the NDK clang on x86_64 hosts and `clang-19` with lld on aarch64 hosts.
-  - `scripts/build-rust-windows.ps1` needs a native Windows runner (it throws if the host triple doesn't match the target). It runs `cargo build --locked --release` for node-windows, cli and mcpbridge. It then runs `cargo test` on `protectorate-node-windows`, copies the results to `dist/*-windows-{amd64,arm64}.exe`, and checks the version.
+  - `scripts/build-rust-windows.ps1` runs on Windows. A cross build (such as arm64 from an amd64 runner with the VS ARM64 tools) only builds and copies; the tests and the version check need a native runner. It runs `cargo build --locked --release` for node-windows, cli and mcpbridge. It then runs `cargo test` on `protectorate-node-windows`, copies the results to `dist/*-windows-{amd64,arm64}.exe`, and checks the version.
   - `scripts/package-rust-release.sh VERSION` assembles `dist/`. It requires 6 Linux components for each of amd64 and arm64, 3 Windows components for each architecture, the Flutter web build, `VERSION` and `SHA256SUMS`. The only amd64 Linux binaries it copies come from `target/release`. Every other file must already be in `dist/`.
   - `scripts/` also holds ten `test-rust-*` scripts for installers, bundles, and hub and node updates.
 - **`git diff Makefile`:** adds `rust-build`, `rust-test` and `rust-check` (15 lines). `rust-check` runs `cargo fmt --check`, then `clippy --all-targets -D warnings`, then `cargo test --workspace`. The Go targets are still present.

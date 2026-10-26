@@ -16,14 +16,14 @@ if (-not $Architecture) {
     }
 }
 $target = if ($Architecture -eq "arm64") { "aarch64-pc-windows-msvc" } else { "x86_64-pc-windows-msvc" }
-if ($hostTriple -cne $target) {
-    throw "Native Windows $Architecture runner required (Rust host: $hostTriple)"
-}
+$native = $hostTriple -ceq $target
 
 cargo build --locked --profile dist --target $target -p protectorate-node-windows -p protectorate-cli -p protectorate-mcpbridge --bins
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-cargo test --locked --target $target -p protectorate-node-windows -p protectorate-node -p protectorate-cli -p protectorate-mcpbridge
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($native) {
+    cargo test --locked --target $target -p protectorate-node-windows -p protectorate-node -p protectorate-cli -p protectorate-mcpbridge
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
 
 New-Item -ItemType Directory -Force -Path dist | Out-Null
 $release = Join-Path (Join-Path "target" $target) "dist"
@@ -31,6 +31,10 @@ Copy-Item -LiteralPath (Join-Path $release "protectorate-rs-windows.exe") -Desti
 Copy-Item -LiteralPath (Join-Path $release "protectorate.exe") -Destination "dist/protectorate-windows-$Architecture.exe"
 Copy-Item -LiteralPath (Join-Path $release "protectorate-mcpbridge.exe") -Destination "dist/protectorate-mcpbridge-windows-$Architecture.exe"
 
+if (-not $native) {
+    Write-Output "Rust Windows $Architecture node/CLI/MCP bridge cross-built on $hostTriple; tests and the version check need a native runner"
+    exit 0
+}
 $reported = & "dist/protectorate-rs-windows-$Architecture.exe" version --json | ConvertFrom-Json
 if ($LASTEXITCODE -ne 0 -or -not $reported.version) {
     throw "Rust Windows node version check failed"
