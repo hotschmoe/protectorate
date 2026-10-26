@@ -1290,11 +1290,17 @@ impl Jobs {
                 return;
             }
             let mut artifacts = ArtifactSink::new(&self.root, &id);
-            let _result = client.server_stream(node_agent_service::RUN_JOB, &request, |event| {
+            let result = client.server_stream(node_agent_service::RUN_JOB, &request, |event| {
                 self.event(&id, event, &mut artifacts)
             });
             if self.snapshot(&id).is_ok_and(|job| terminal(&job)) {
                 return;
+            }
+            if let Err(e) = result {
+                if node_refused(e.code) {
+                    let _ = self.fail(&id, &format!("node refused the job: {}", e.message));
+                    return;
+                }
             }
         }
         // RunJob may have started before transport dropped. The node can be
@@ -1360,16 +1366,7 @@ impl Jobs {
                     }
                     return;
                 }
-                Err(e)
-                    if matches!(
-                        e.code,
-                        Code::Unimplemented
-                            | Code::InvalidArgument
-                            | Code::FailedPrecondition
-                            | Code::PermissionDenied
-                            | Code::Unauthenticated
-                    ) =>
-                {
+                Err(e) if node_refused(e.code) => {
                     let _ = self.fail(&id, &format!("node cannot reattach job: {}", e.message));
                     return;
                 }
@@ -1726,6 +1723,18 @@ fn required<'a>(value: &'a str, name: &str) -> Result<&'a str> {
     }
     Ok(value)
 }
+/// The node answered and will not run or reattach the job; retrying cannot help.
+fn node_refused(code: Code) -> bool {
+    matches!(
+        code,
+        Code::Unimplemented
+            | Code::InvalidArgument
+            | Code::FailedPrecondition
+            | Code::PermissionDenied
+            | Code::Unauthenticated
+    )
+}
+
 fn recovery_deadline(job: &v1::Job) -> SystemTime {
     let submitted = job
         .submitted_at
