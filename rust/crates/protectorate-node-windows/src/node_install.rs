@@ -279,11 +279,30 @@ fn task_xml(
     )
 }
 
+// schtasks exports quotes literally, and install-node-windows.ps1 quotes the
+// home even without spaces, so compare the unescaped arguments in both forms.
 fn task_uses_home(xml: &str, home: &Path) -> bool {
-    let quoted_home = xml_escape(&win_quote(&home.display().to_string()));
-    [" ", "</Arguments>"]
-        .iter()
-        .any(|end| xml.contains(&format!("--home {quoted_home}{end}")))
+    let Some(arguments) = xml
+        .split_once("<Arguments>")
+        .and_then(|(_, rest)| rest.split_once("</Arguments>"))
+        .map(|(arguments, _)| xml_unescape(arguments).to_lowercase())
+    else {
+        return false;
+    };
+    let home = home.display().to_string().to_lowercase();
+    [win_quote(&home), format!("\"{home}\"")].iter().any(|form| {
+        let flag = format!("--home {form}");
+        arguments.ends_with(&flag) || arguments.contains(&format!("{flag} "))
+    })
+}
+
+fn xml_unescape(value: &str) -> String {
+    value
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
 }
 
 fn task_bytes(xml: &str) -> Vec<u8> {
