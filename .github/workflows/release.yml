@@ -24,14 +24,20 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
-      - name: Build Rust hub bundle
+      - name: Zig linker for the glibc floor
         run: |
-          PROTECTORATE_BUILD_VERSION="$GITHUB_REF_NAME" cargo build --locked --profile dist -p protectorate-server -p protectorate-sleeve-runner -p protectorate-cli -p protectorate-mcpbridge --bins
-          mkdir -p dist
-          for name in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate protectorate-mcpbridge; do
-            cp "target/dist/$name" "dist/$name-linux-arm64"
-          done
-          test "$(dist/protectorate-rs-linux-arm64 version --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')" = "$GITHUB_REF_NAME"
+          case "$(uname -m)" in
+            x86_64) sum=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00 ;;
+            aarch64) sum=ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17 ;;
+          esac
+          zig="zig-$(uname -m)-linux-0.16.0"
+          curl -fsSLo "$RUNNER_TEMP/$zig.tar.xz" "https://ziglang.org/download/0.16.0/$zig.tar.xz"
+          echo "$sum  $RUNNER_TEMP/$zig.tar.xz" | sha256sum --check
+          tar -xJf "$RUNNER_TEMP/$zig.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$zig" >> "$GITHUB_PATH"
+          cargo install cargo-zigbuild --version 0.24.0 --locked
+      - name: Build Rust hub bundle
+        run: bash scripts/build-rust-dist.sh "$GITHUB_REF_NAME" arm64
       - uses: actions/upload-artifact@v4
         with:
           name: rust-linux-arm64
@@ -73,13 +79,23 @@ jobs:
         run: make check
       - name: Rust Linux installer checks
         run: bash scripts/test-rust-installers.sh
+      - name: Zig linker for the glibc floor
+        run: |
+          case "$(uname -m)" in
+            x86_64) sum=70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00 ;;
+            aarch64) sum=ea4b09bfb22ec6f6c6ceac57ab63efb6b46e17ab08d21f69f3a48b38e1534f17 ;;
+          esac
+          zig="zig-$(uname -m)-linux-0.16.0"
+          curl -fsSLo "$RUNNER_TEMP/$zig.tar.xz" "https://ziglang.org/download/0.16.0/$zig.tar.xz"
+          echo "$sum  $RUNNER_TEMP/$zig.tar.xz" | sha256sum --check
+          tar -xJf "$RUNNER_TEMP/$zig.tar.xz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$zig" >> "$GITHUB_PATH"
+          cargo install cargo-zigbuild --version 0.24.0 --locked
       - name: Build Rust Linux amd64 bundle
-        run: PROTECTORATE_BUILD_VERSION="$BUILD_VERSION" cargo build --locked --profile dist -p protectorate-server -p protectorate-sleeve-runner -p protectorate-cli -p protectorate-mcpbridge --bins
-      - name: Verify embedded server version
-        run: test "$(target/dist/protectorate-rs version --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')" = "$BUILD_VERSION"
+        run: bash scripts/build-rust-dist.sh "$BUILD_VERSION" amd64
       - name: Exercise installed Rust bundle
         env:
-          PROTECTORATE_TEST_RUST_BIN_DIR: target/dist
+          PROTECTORATE_TEST_RUST_BIN_DIR: target/x86_64-unknown-linux-gnu/dist
         run: bash scripts/test-rust-installed-bundle.sh
       - uses: actions/download-artifact@v4
         with:

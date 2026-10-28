@@ -41,10 +41,10 @@ Releases are stored under `${XDG_DATA_HOME:-$HOME/.local/share}/protectorate/rel
 ## Build locally
 
 ```sh
-PROTECTORATE_BUILD_VERSION=vX.Y.Z cargo build --profile dist -p protectorate-server -p protectorate-sleeve-runner -p protectorate-cli -p protectorate-mcpbridge --bins
+bash scripts/build-rust-dist.sh vX.Y.Z arm64   # or amd64; needs zig and cargo-zigbuild
 ```
 
-Place the five resulting binaries from `target/dist` in one directory with the published platform names (`*-linux-amd64` or `*-linux-arm64`), create `VERSION`, and generate `SHA256SUMS` with `sha256sum`. Include the Flutter web archive named `protectorate-web-VERSION.tar.gz` in the checksums. Then pass `--bundle-dir /absolute/path`. Installing from local source without a checksum manifest is deliberately unsupported.
+This writes the five binaries with their published platform names into `dist/`. Create `VERSION` and generate `SHA256SUMS` with `sha256sum`. Include the Flutter web archive named `protectorate-web-VERSION.tar.gz` in the checksums. Then pass `--bundle-dir /absolute/path`. Installing from local source without a checksum manifest is deliberately unsupported.
 
 ## Connect a phone or another client
 

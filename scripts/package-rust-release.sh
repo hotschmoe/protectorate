@@ -9,7 +9,6 @@ version=${1:?usage: package-rust-release.sh VERSION}
 [[ "$version" != *-dirty ]] || { echo 'dirty release version' >&2; exit 2; }
 
 dist=${PROTECTORATE_RELEASE_DIST:-dist}
-binary_dir=${PROTECTORATE_RELEASE_BINARY_DIR:-target/dist}
 web_dir=${PROTECTORATE_RELEASE_WEB_DIR:-app/build/web}
 [[ -d "$dist" && ! -L "$dist" ]] || { echo "missing dist directory: $dist" >&2; exit 1; }
 [[ -f "$web_dir/index.html" ]] || { echo "missing Flutter web build: $web_dir" >&2; exit 1; }
@@ -24,13 +23,7 @@ for arch in amd64 arm64; do
   for component in "${components[@]}"; do
     name="$component-linux-$arch"
     expected_assets+=("$name")
-    if [[ "$arch" == amd64 ]]; then
-      [[ -f "$binary_dir/$component" && ! -L "$binary_dir/$component" ]] || { echo "missing build: $binary_dir/$component" >&2; exit 1; }
-      [[ ! -e "$dist/$name" ]] || { echo "asset already exists: $dist/$name" >&2; exit 1; }
-      cp -- "$binary_dir/$component" "$dist/$name"
-    else
-      [[ -s "$dist/$name" && ! -L "$dist/$name" ]] || { echo "missing artifact: $dist/$name" >&2; exit 1; }
-    fi
+    [[ -s "$dist/$name" && ! -L "$dist/$name" ]] || { echo "missing artifact: $dist/$name" >&2; exit 1; }
   done
 done
 desktop="protectorate-desktop-windows-x64-$version.zip"
