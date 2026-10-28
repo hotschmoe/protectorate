@@ -53,20 +53,3 @@ abstract final class TokenService {
     protectoratev1token.RenewTokenResponse.new,
   );
 }
-/// GrantService mints task-scoped admin grants: capabilities whose scopes are
-/// job_* and node_admin:<node>. The owner may grant any node (or a glob over
-/// node names); the orchestrator may grant one shared node by name, and only
-/// when the hub runs with --orchestrator-admin-grants. Every call made with a
-/// grant is audited with its task.
-abstract final class GrantService {
-  /// Fully-qualified name of the GrantService service.
-  static const name = 'protectorate.v1.GrantService';
-
-  /// Admin mints a grant. The secret is returned once.
-  static const admin = connect.Spec(
-    '/$name/Admin',
-    connect.StreamType.unary,
-    protectoratev1token.GrantServiceAdminRequest.new,
-    protectoratev1token.GrantServiceAdminResponse.new,
-  );
-}

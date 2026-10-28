@@ -7,17 +7,8 @@ mod checkpoints;
 mod device;
 mod diagnostics;
 mod directory;
-mod distribution;
-mod download;
-mod envoy;
-mod grants;
-mod jobs;
-mod lease;
 mod local_model;
 mod mail;
-mod node_files;
-mod node_update;
-mod nodes;
 mod quota;
 mod release;
 mod session_monitor;
@@ -33,10 +24,7 @@ use protectorate_auth::{self as auth, Method as ScopeMethod};
 use protectorate_backlog::{self as backlog, Filter, NewNote, Note, Patch, Store as BacklogStore};
 use protectorate_directory::Directory;
 use protectorate_identity::{self as identity, Store as IdentityStore};
-use protectorate_inventory::Inventory;
-use protectorate_lease::{Chooser as LeaseChooser, LeaseTable};
 use protectorate_mailbox::Store as MailStore;
-use protectorate_node_monitor::Monitor as NodeMonitor;
 use protectorate_quota::{
     self as quotas, QuotaCache, Reader as QuotaReader, Transport as QuotaTransport,
 };
@@ -151,19 +139,6 @@ pub struct Hub {
     session_monitor: Arc<session_monitor::Monitor>,
     pub directory: Arc<Directory>,
     directory_kick: Arc<tokio::sync::Notify>,
-    pub leases: Arc<LeaseTable>,
-    pub inventory: Arc<Inventory>,
-    pub jobs: Arc<jobs::Jobs>,
-    node_admission: Arc<std::sync::RwLock<()>>,
-    node_draining: Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
-    renewing: std::sync::Mutex<std::collections::BTreeSet<String>>,
-    pub node_files: Arc<node_files::FileRelay>,
-    node_binary_dir: Option<std::path::PathBuf>,
-    node_update_lock: Arc<tokio::sync::Mutex<()>>,
-    node_update_timeout: std::time::Duration,
-    node_update_poll: std::time::Duration,
-    pub node_monitor: Arc<NodeMonitor>,
-    ca: Option<Arc<protectorate_tls::Ca>>,
     pub mail: Arc<MailStore>,
     msg_ack_timeout: std::time::Duration,
     pub sleeves: Arc<SleeveRegistry>,
@@ -177,7 +152,6 @@ pub struct Hub {
     sleeve_launch_lock: std::sync::Mutex<()>,
     resleeving: std::sync::Mutex<std::collections::BTreeSet<String>>,
     envoy_spawn_lock: std::sync::Mutex<()>,
-    lease_path: std::path::PathBuf,
     pub quota: Arc<QuotaCache>,
     pub quota_transport: Arc<dyn QuotaTransport>,
     pub releases: Option<Arc<ReleaseSource>>,
@@ -188,8 +162,6 @@ pub struct Hub {
     public_device_auth: bool,
     require_device_peer: bool,
     trusted_proxies: Vec<std::net::IpAddr>,
-    public_url: Option<String>,
-    orchestrator_admin_grants: bool,
     device_rates: Arc<device::Rates>,
     started_at: DateTime<Utc>,
     started: Instant,
@@ -204,7 +176,7 @@ impl Hub {
         let home = home.into();
         let version = version.into();
         // Temp files of writers killed before their rename; best effort.
-        for dir in [home.clone(), home.join("jobs"), home.join("ca")] {
+        for dir in [home.clone(), home.join("ca")] {
             let _ = protectorate_fsutil::remove_stale_temps(&dir);
         }
         let workspace_config = workspaces::Config::new(&home);
@@ -229,41 +201,6 @@ impl Hub {
                 error => identity::Error::Invalid(error.to_string()),
             })?;
         let events = Arc::new(EventBus::new());
-        let inventory = Arc::new(
-            Inventory::open_with_local(
-                home.join("nodes.json"),
-                protectorate_inventory::Node {
-                    name: hostname.clone(),
-                    address: "local".into(),
-                    os: platform_os().into(),
-                    arch: platform_arch().into(),
-                    tier: protectorate_inventory::SHARED.into(),
-                    ..protectorate_inventory::Node::default()
-                },
-            )
-            .map_err(|error| identity::Error::Invalid(error.to_string()))?,
-        );
-        // hosts.md is derived; a full disk must not keep the hub from serving.
-        if let Err(error) = inventory.write_hosts() {
-            eprintln!("write hosts.md: {error}");
-        }
-        let node_monitor = Arc::new(NodeMonitor::new(
-            Arc::clone(&inventory),
-            hostname.clone(),
-            home.clone(),
-            version.clone(),
-        ));
-        let node_admission = Arc::new(std::sync::RwLock::new(()));
-        let node_draining = Arc::new(std::sync::Mutex::new(std::collections::BTreeSet::new()));
-        let jobs = Arc::new(
-            jobs::Jobs::open(home.join("jobs"), Arc::clone(&inventory), hostname.clone())
-                .map_err(identity::Error::Io)?
-                .with_admission(Arc::clone(&node_admission), Arc::clone(&node_draining)),
-        );
-        let node_files = Arc::new(node_files::FileRelay::new(
-            Arc::clone(&inventory),
-            hostname.clone(),
-        ));
         let mail = Arc::new(
             MailStore::open(home.join("mailbox.jsonl"))
                 .map_err(|error| identity::Error::Invalid(error.to_string()))?,
@@ -312,22 +249,6 @@ impl Hub {
                 .cloned()
                 .collect::<Vec<_>>(),
         );
-        let lease_path = home.join("leases.json");
-        let leases = Arc::new(
-            lease::open_table(
-                &lease_path,
-                Arc::clone(&events),
-                Arc::clone(&mail),
-                lease::default_chooser(
-                    Arc::clone(&inventory),
-                    Arc::clone(&node_monitor),
-                    hostname.clone(),
-                ),
-                Arc::clone(&node_admission),
-                Arc::clone(&node_draining),
-            )
-            .map_err(|error| identity::Error::Invalid(error.to_string()))?,
-        );
         let quota = Arc::new(QuotaCache::new(
             quota::default_readers(),
             quotas::QuotaOptions::default(),
@@ -364,19 +285,6 @@ impl Hub {
             )),
             directory: Arc::new(directory),
             directory_kick: Arc::new(tokio::sync::Notify::new()),
-            leases,
-            inventory,
-            jobs,
-            node_admission,
-            node_draining,
-            renewing: std::sync::Mutex::new(std::collections::BTreeSet::new()),
-            node_files,
-            node_binary_dir: None,
-            node_update_lock: Arc::new(tokio::sync::Mutex::new(())),
-            node_update_timeout: std::time::Duration::from_secs(5 * 60),
-            node_update_poll: std::time::Duration::from_secs(2),
-            node_monitor,
-            ca: None,
             mail,
             msg_ack_timeout: std::time::Duration::from_secs(30 * 60),
             sleeves,
@@ -390,7 +298,6 @@ impl Hub {
             sleeve_launch_lock: std::sync::Mutex::new(()),
             resleeving: std::sync::Mutex::new(std::collections::BTreeSet::new()),
             envoy_spawn_lock: std::sync::Mutex::new(()),
-            lease_path,
             quota,
             quota_transport: Arc::new(quotas::UreqTransport::new()),
             releases: None,
@@ -401,8 +308,6 @@ impl Hub {
             public_device_auth: false,
             require_device_peer: false,
             trusted_proxies: Vec::new(),
-            public_url: None,
-            orchestrator_admin_grants: false,
             device_rates: Arc::new(device::Rates::default()),
             started_at: Utc::now(),
             started: Instant::now(),
@@ -416,21 +321,6 @@ impl Hub {
 
     pub fn with_release_restart(mut self, restart: Arc<dyn Fn() + Send + Sync>) -> Self {
         self.release_restart = Some(restart);
-        self
-    }
-
-    pub fn with_node_binary_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
-        self.node_binary_dir = Some(dir.into());
-        self
-    }
-
-    pub fn with_node_update_timing(
-        mut self,
-        timeout: std::time::Duration,
-        poll: std::time::Duration,
-    ) -> Self {
-        self.node_update_timeout = timeout;
-        self.node_update_poll = poll;
         self
     }
 
@@ -501,52 +391,7 @@ impl Hub {
         self.egress_allow = hosts;
         self
     }
-    /// The CA that issues node certificates when nodes join and renew.
-    pub fn with_ca(mut self, ca: Arc<protectorate_tls::Ca>) -> Self {
-        self.ca = Some(ca);
-        self
-    }
 
-    /// Reach nodes over mutual TLS with the hub's certificate. Call after
-    /// `with_node_monitor`.
-    pub fn with_node_tls(self, tls: protectorate_connect_client::NodeTls) -> Self {
-        self.node_monitor.dialer.set(tls.clone());
-        self.node_files.dialer.set(tls.clone());
-        self.jobs.set_node_tls(tls);
-        self
-    }
-    pub fn with_node_monitor(
-        mut self,
-        monitor: Arc<NodeMonitor>,
-    ) -> protectorate_lease::Result<Self> {
-        self.leases = Arc::new(lease::open_table(
-            &self.lease_path,
-            Arc::clone(&self.events),
-            Arc::clone(&self.mail),
-            lease::default_chooser(
-                Arc::clone(&self.inventory),
-                Arc::clone(&monitor),
-                self.hostname.clone(),
-            ),
-            Arc::clone(&self.node_admission),
-            Arc::clone(&self.node_draining),
-        )?);
-        self.node_monitor = monitor;
-        Ok(self)
-    }
-    /// Supply node admission and selector placement when a node monitor is available.
-    /// The request is an explicit resource string or a JSON selector object.
-    pub fn with_lease_chooser(mut self, chooser: LeaseChooser) -> protectorate_lease::Result<Self> {
-        self.leases = Arc::new(lease::open_table(
-            &self.lease_path,
-            Arc::clone(&self.events),
-            Arc::clone(&self.mail),
-            chooser,
-            Arc::clone(&self.node_admission),
-            Arc::clone(&self.node_draining),
-        )?);
-        Ok(self)
-    }
     pub fn with_quota(
         mut self,
         cache: Arc<QuotaCache>,
@@ -590,22 +435,11 @@ impl Hub {
         self.trusted_proxies = proxies.into_iter().map(device::normalize_ip).collect();
         self
     }
-    /// Public origin used when a caller does not provide an install URL.
-    pub fn with_public_url(mut self, url: String) -> protectorate_wire::Result<Self> {
-        self.public_url = Some(nodes::validate_install_base(&url)?);
-        Ok(self)
-    }
     /// How long an approval request waits for the owner.
     pub fn with_approval_ttl(mut self, ttl: std::time::Duration) -> Self {
         self.approvals = approvals::Approvals::new(ttl);
         self
     }
-    /// Allows the orchestrator token to mint task grants for one shared node.
-    pub fn with_orchestrator_admin_grants(mut self) -> Self {
-        self.orchestrator_admin_grants = true;
-        self
-    }
-
     pub fn emit(&self, kind: &str, subject: &str, payload: Value) {
         self.events.publish(kind, subject, payload);
     }
@@ -619,12 +453,8 @@ impl Hub {
         let require_device_peer = self.require_device_peer;
         let trusted_proxies = self.trusted_proxies.clone();
         let device_rates = Arc::clone(&self.device_rates);
-        let node_inventory = Arc::clone(&self.inventory);
         let authorize = Arc::new(
             move |method: &Method, headers: &HeaderMap, peer: Option<wire::Peer>| {
-                if method.node_only {
-                    return nodes::authenticate_node(&node_inventory, peer.as_ref());
-                }
                 if !device::public_procedure(&method.procedure) {
                     let caller = access::authenticate(
                         &owner,
@@ -694,9 +524,6 @@ impl Hub {
                 audit::record_completion(&completion_audit, method, auth, message, error);
             },
         );
-        // A 4 MiB file chunk expands to about 5.6 MiB in Connect JSON's
-        // base64 field. Keep the hub relay's request bound above that while
-        // preserving a fixed ceiling for every request.
         let server = UnaryServer::new_with_peer(catalog, authorize)
             .with_max_request_bytes(8 << 20)
             .with_max_stream_message_bytes(8 << 20)
@@ -711,30 +538,16 @@ impl Hub {
         let gate_hub = Arc::clone(&hub);
         let mut server =
             server.with_gate(Arc::new(move |request| approvals::gate(&gate_hub, request)));
-        let weak = Arc::downgrade(&hub);
-        hub.node_monitor.set_event_sink(Arc::new(move |event| {
-            if let Some(hub) = weak.upgrade() {
-                nodes::publish_poll_event(&hub, event);
-            }
-        }));
         hub.session_monitor.start(Arc::clone(&hub));
         device::start_expiry_sweep(&hub);
-        hub.jobs.resume();
-        let downloads = Arc::clone(&hub);
         audit::register(&mut server, Arc::clone(&hub))?;
         approvals::register(&mut server, Arc::clone(&hub))?;
         device::register(&mut server, Arc::clone(&hub))?;
-        grants::register(&mut server, Arc::clone(&hub))?;
         access::register(&mut server, Arc::clone(&hub))?;
         directory::register(&mut server, Arc::clone(&hub))?;
         quota::register(&mut server, Arc::clone(&hub))?;
         release::register(&mut server, Arc::clone(&hub))?;
-        lease::register(&mut server, Arc::clone(&hub))?;
         mail::register(&mut server, Arc::clone(&hub))?;
-        nodes::register(&mut server, Arc::clone(&hub))?;
-        node_files::register(&mut server, Arc::clone(&hub))?;
-        node_update::register(&mut server, Arc::clone(&hub))?;
-        jobs::register(&mut server, Arc::clone(&hub))?;
         sleeves::register(&mut server, Arc::clone(&hub))?;
         checkpoints::register(&mut server, Arc::clone(&hub))?;
         workspaces::register(&mut server, Arc::clone(&hub))?;
@@ -1052,16 +865,11 @@ impl Hub {
             },
         )?;
         let terminal_hub = Arc::clone(&hub);
-        let installer_ca = Arc::clone(&hub);
-        let installer_sh = Arc::clone(&hub);
-        let installer_termux = Arc::clone(&hub);
-        let installer_ps1 = Arc::clone(&hub);
         let debug_metrics = Arc::clone(&hub);
         let debug_profile = Arc::clone(&hub);
         let debug_snapshot = Arc::clone(&hub);
         let debug_unknown = Arc::clone(&hub);
         let debug_index = Arc::clone(&hub);
-        let debug_node = Arc::clone(&hub);
         server.unary(
             session_service::CAPTURE_PANE,
             move |call: Call<v1::CapturePaneRequest>| {
@@ -1097,12 +905,6 @@ impl Hub {
                 }),
             )
             .route(
-                "/debug/nodes/{name}/{kind}",
-                axum::routing::get(move |headers, path| {
-                    diagnostics::node(Arc::clone(&debug_node), headers, path)
-                }),
-            )
-            .route(
                 "/debug/pprof/profile",
                 axum::routing::get(move |headers, query| {
                     diagnostics::profile(Arc::clone(&debug_profile), headers, query)
@@ -1121,54 +923,15 @@ impl Hub {
                 }),
             )
             .route_layer(axum::middleware::from_fn(access::loopback_only));
-        Ok(server
-            .router()
-            .merge(debug)
-            .route(
-                "/dl/{file}",
-                axum::routing::get(
-                    move |axum::extract::Path(file): axum::extract::Path<String>| {
-                        let hub = Arc::clone(&downloads);
-                        async move { download::serve(hub, file).await }
-                    },
-                ),
-            )
-            .route(
-                "/ca.pem",
-                axum::routing::get(move || distribution::ca(Arc::clone(&installer_ca))),
-            )
-            .route(
-                "/install.sh",
-                axum::routing::get(move || distribution::linux(Arc::clone(&installer_sh))),
-            )
-            .route(
-                "/install-termux.sh",
-                axum::routing::get(move || distribution::termux(Arc::clone(&installer_termux))),
-            )
-            .route(
-                "/install.ps1",
-                axum::routing::get(move || distribution::windows(Arc::clone(&installer_ps1))),
-            )
-            .route(
-                "/ws/terminal/{name}",
-                axum::routing::get(
-                    move |path,
-                          peer: Option<axum::Extension<wire::Peer>>,
-                          headers,
-                          uri,
-                          upgrade| {
-                        let tls = peer.is_some_and(|peer| peer.0.tls);
-                        terminal::attach(
-                            Arc::clone(&terminal_hub),
-                            path,
-                            tls,
-                            headers,
-                            uri,
-                            upgrade,
-                        )
-                    },
-                ),
-            ))
+        Ok(server.router().merge(debug).route(
+            "/ws/terminal/{name}",
+            axum::routing::get(
+                move |path, peer: Option<axum::Extension<wire::Peer>>, headers, uri, upgrade| {
+                    let tls = peer.is_some_and(|peer| peer.0.tls);
+                    terminal::attach(Arc::clone(&terminal_hub), path, tls, headers, uri, upgrade)
+                },
+            ),
+        ))
     }
 }
 
@@ -1295,13 +1058,6 @@ fn session_error(error: session::Error) -> RpcError {
         session::Error::Tmux(_) | session::Error::Io(_) => Code::Internal,
     };
     RpcError::new(code, error.to_string())
-}
-
-fn no_local_agent() -> RpcError {
-    RpcError::new(
-        Code::FailedPrecondition,
-        "the hub's own machine runs no node agent; invite and join it as a node to run work there",
-    )
 }
 
 fn join_error(error: tokio::task::JoinError) -> RpcError {

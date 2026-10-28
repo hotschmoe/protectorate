@@ -9,10 +9,6 @@ import '../gen/protectorate/v1/events.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
-import '../gen/protectorate/v1/hub.pb.dart';
-import '../nodes/node_view.dart';
-import '../nodes/version_skew.dart';
-import '../version.dart' as ver;
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import '../vfd/panel.dart';
@@ -20,12 +16,9 @@ import '../mail/thread_view.dart' show orchestratorSleeve;
 import 'audit_screen.dart';
 import 'backlog_tab.dart';
 import 'devices_screen.dart';
-import 'node_detail_screen.dart';
-import 'nodes_tab.dart';
 import 'orchestrator_tab.dart';
 import 'overview_tab.dart';
 import 'phone_devices_tab.dart';
-import 'phone_nodes_tab.dart';
 import 'quota_tab.dart';
 import 'sleeves_screen.dart';
 
@@ -46,7 +39,6 @@ const _destinations = [
   _Destination('orchestrator', 'ENVOY', Icons.support_agent),
   _Destination('overview', 'OVERVIEW', Icons.grid_view),
   _Destination('sleeves', 'SLEEVES', Icons.smart_toy_outlined),
-  _Destination('nodes', 'NODES', Icons.memory),
   _Destination('notes', 'NOTES', Icons.sticky_note_2_outlined),
   _Destination('devices', 'DEVICES', Icons.phonelink_lock),
 ];
@@ -54,7 +46,6 @@ const _destinations = [
 const _phoneDestinations = [
   _Destination('orchestrator', 'ENVOY', Icons.support_agent),
   _Destination('quotas', 'QUOTAS', Icons.speed),
-  _Destination('nodes', 'NODES', Icons.memory),
   _Destination('devices', 'DEVICES', Icons.phonelink_lock),
 ];
 
@@ -75,17 +66,12 @@ class HubShell extends StatefulWidget {
     required this.clientFactory,
     this.initialTab,
     this.openSession,
-    this.openNode,
-    this.appVersion = ver.appVersion,
   });
-
-  final String appVersion;
 
   final HubProfile hub;
   final HubClient Function(HubProfile) clientFactory;
   final String? initialTab;
   final String? openSession;
-  final String? openNode;
 
   @override
   State<HubShell> createState() => _HubShellState();
@@ -101,76 +87,25 @@ class _HubShellState extends State<HubShell> {
   late int _index = usesPhoneShell
       ? _phoneDestinations
             .indexWhere((d) => d.id == widget.initialTab)
-            .clamp(0, 3)
+            .clamp(0, _phoneDestinations.length - 1)
       : tabIndex(widget.initialTab);
-  final _history = NodeHistory();
   String _orchestratorSleeve = orchestratorSleeve;
   late bool _orchestratorMail = widget.initialTab == mailTab;
-  String _hubVersion = '';
-  FeedState _lastFeedState = FeedState.connecting;
   DateTime _clock = DateTime.now();
   Timer? _tick;
 
   @override
   void initState() {
     super.initState();
-    _loadHubVersion();
-    _feed.addListener(_feedChanged);
     if (!usesPhoneShell) {
       _tick = Timer.periodic(const Duration(seconds: 15), (_) {
         if (mounted) _update(() => _clock = DateTime.now());
       });
     }
-    final node = widget.openNode;
-    if (node != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _navigation.currentState?.push(
-          PageRouteBuilder<void>(
-            transitionDuration: Duration.zero,
-            reverseTransitionDuration: Duration.zero,
-            pageBuilder: (_, _, _) => ListenableBuilder(
-              listenable: _revision,
-              builder: (_, _) => NodeDetailScreen(
-                hub: widget.hub,
-                client: _client,
-                feed: _feed,
-                name: node,
-                history: _history,
-                versions: _versions,
-                phone: usesPhoneShell,
-              ),
-            ),
-          ),
-        );
-      });
-    }
-  }
-
-  Versions get _versions => Versions(hub: _hubVersion, app: widget.appVersion);
-
-  Future<void> _loadHubVersion() async {
-    try {
-      final s = await _client.hub.getStatus(GetStatusRequest());
-      if (mounted) _update(() => _hubVersion = s.version);
-    } on Object {
-      // Skew is hidden until the hub's version is known.
-    }
-  }
-
-  // A hub that restarted may run another build; read it again when the event
-  // stream comes back.
-  void _feedChanged() {
-    final s = _feed.state;
-    if (s == FeedState.live && _lastFeedState != FeedState.live) {
-      _loadHubVersion();
-    }
-    _lastFeedState = s;
   }
 
   @override
   void dispose() {
-    _feed.removeListener(_feedChanged);
     _tick?.cancel();
     _feed.dispose();
     _revision.dispose();
@@ -186,25 +121,11 @@ class _HubShellState extends State<HubShell> {
       mail: _orchestratorMail,
       onMail: (m) => _update(() => _orchestratorMail = m),
     ),
-    'overview' => OverviewTab(
-      hub: widget.hub,
-      client: _client,
-      feed: _feed,
-      history: _history,
-      versions: _versions,
-    ),
-    'nodes' => NodesTab(
-      hub: widget.hub,
-      client: _client,
-      feed: _feed,
-      history: _history,
-      versions: _versions,
-    ),
+    'overview' => OverviewTab(client: _client, feed: _feed),
     'sleeves' => SleevesScreen(
       hub: widget.hub,
       client: _client,
       feed: _feed,
-      embedded: true,
       openSession: widget.openSession,
     ),
     'devices' => DevicesScreen(client: _client, feed: _feed, embedded: true),
@@ -222,15 +143,9 @@ class _HubShellState extends State<HubShell> {
       envoyOnly: true,
     ),
     'quotas' => QuotaTab(client: _client, feed: _feed),
-    'nodes' => PhoneNodesTab(
-      hub: widget.hub,
-      client: _client,
-      feed: _feed,
-      history: _history,
-      versions: _versions,
-    ),
     _ => PhoneDevicesTab(
       client: _client,
+      feed: _feed,
       devices: DevicesScreen(client: _client, feed: _feed, embedded: true),
     ),
   };

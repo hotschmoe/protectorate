@@ -5,7 +5,7 @@ import '../gen/protectorate/v1/sleeve.pb.dart';
 import '../gen/protectorate/v1/chat.pb.dart';
 import 'model_selection.dart';
 import '../hubs/hub_client.dart';
-import '../nodes/node_view.dart';
+import '../format.dart';
 import '../theme/tokens.dart';
 
 final _sleeveName = RegExp(r'^[a-z0-9][a-z0-9-]{0,39}$');

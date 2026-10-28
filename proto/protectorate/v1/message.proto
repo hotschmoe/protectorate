@@ -66,7 +66,7 @@ enum MessageKind {
   // sleeve it also becomes a backlog note.
   MESSAGE_KIND_REQUEST = 2;
   // NOTICE states facts, typically sent by the hub, such as a dependency
-  // release or a granted lease.
+  // release.
   MESSAGE_KIND_NOTICE = 3;
 }
 

@@ -77,22 +77,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "docker_engine"
-path = "fuzz_targets/docker_engine.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "egress_connect"
 path = "fuzz_targets/egress_connect.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "gpu_tools"
-path = "fuzz_targets/gpu_tools.rs"
 test = false
 doc = false
 bench = false
@@ -175,13 +161,6 @@ doc = false
 bench = false
 
 [[bin]]
-name = "xfer_archive"
-path = "fuzz_targets/xfer_archive.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
 name = "backup_archive"
 path = "fuzz_targets/backup_archive.rs"
 test = false
@@ -191,13 +170,6 @@ bench = false
 [[bin]]
 name = "handoff_transcript"
 path = "fuzz_targets/handoff_transcript.rs"
-test = false
-doc = false
-bench = false
-
-[[bin]]
-name = "inventory_nodes"
-path = "fuzz_targets/inventory_nodes.rs"
 test = false
 doc = false
 bench = false

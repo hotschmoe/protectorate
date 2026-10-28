@@ -18,7 +18,6 @@ use std::{
 
 const START: &str = device_service::START_DEVICE_AUTH.procedure;
 const POLL: &str = device_service::POLL_DEVICE_AUTH.procedure;
-const JOIN: &str = v1::node_service::JOIN_NODE.procedure;
 const EXPIRY_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 pub(super) fn start_expiry_sweep(hub: &Arc<Hub>) {
@@ -50,10 +49,9 @@ fn sweep_expired(hub: &Hub, now: i64) {
     }
 }
 
-/// Procedures callable without a token: device pairing, and a new node
-/// redeeming its single-use join code.
+/// Procedures callable without a token: device pairing.
 pub(super) fn public_procedure(procedure: &str) -> bool {
-    procedure == START || procedure == POLL || procedure == JOIN
+    procedure == START || procedure == POLL
 }
 
 #[derive(Clone)]
@@ -77,12 +75,11 @@ impl Rates {
         if !protectorate_tls::private_ip(ip) {
             return Err(RpcError::new(
                 Code::PermissionDenied,
-                "pairing and joining are available on the private network only",
+                "pairing is available on the private network only",
             ));
         }
         let (kind, local_limit, global_limit) = match procedure {
             START => ("start", 10, 60),
-            JOIN => ("join", 10, 60),
             _ => ("poll", 120, 1200),
         };
         let mut windows = self.0.lock().unwrap_or_else(|e| e.into_inner());

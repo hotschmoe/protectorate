@@ -10,9 +10,7 @@ import '../gen/protectorate/v1/directory.connect.client.dart';
 import '../gen/protectorate/v1/device.connect.client.dart';
 import '../gen/protectorate/v1/events.connect.client.dart';
 import '../gen/protectorate/v1/hub.connect.client.dart';
-import '../gen/protectorate/v1/lease.connect.client.dart';
 import '../gen/protectorate/v1/message.connect.client.dart';
-import '../gen/protectorate/v1/node.connect.client.dart';
 import '../gen/protectorate/v1/quota.connect.client.dart';
 import '../gen/protectorate/v1/release.connect.client.dart';
 import '../gen/protectorate/v1/session.connect.client.dart';
@@ -48,7 +46,6 @@ class HubClient {
   HubClient.withTransport(Transport transport)
     : hub = HubServiceClient(transport),
       events = EventServiceClient(transport),
-      node = NodeServiceClient(transport),
       quota = QuotaServiceClient(transport),
       releases = ReleaseServiceClient(transport),
       sessions = SessionServiceClient(transport),
@@ -59,12 +56,10 @@ class HubClient {
       directory = DirectoryServiceClient(transport),
       devices = DeviceServiceClient(transport),
       audit = AuditServiceClient(transport),
-      approvals = ApprovalServiceClient(transport),
-      leases = LeaseServiceClient(transport);
+      approvals = ApprovalServiceClient(transport);
 
   final HubServiceClient hub;
   final EventServiceClient events;
-  final NodeServiceClient node;
   final QuotaServiceClient quota;
   final ReleaseServiceClient releases;
   final SessionServiceClient sessions;
@@ -76,5 +71,4 @@ class HubClient {
   final DeviceServiceClient devices;
   final AuditServiceClient audit;
   final ApprovalServiceClient approvals;
-  final LeaseServiceClient leases;
 }

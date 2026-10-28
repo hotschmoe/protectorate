@@ -5,6 +5,10 @@ import 'package:flutter/foundation.dart';
 
 import '../gen/protectorate/v1/events.pb.dart';
 
+// The hub's keep-alive on the event stream; it shows as a lamp flicker, not a
+// log line.
+const heartbeatKind = 'heartbeat';
+
 enum FeedState { connecting, live, retrying }
 
 Duration reconnectBackoff(int attempt, Duration initial, Duration max) {

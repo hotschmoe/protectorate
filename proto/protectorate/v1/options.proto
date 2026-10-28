@@ -15,21 +15,11 @@ extend google.protobuf.MethodOptions {
   bool owner_only_rpc = 50004;
 
   // device_allowed admits approved devices to an owner_only_rpc, which no
-  // scope can grant. Used for updating the hub and nodes from the app.
+  // scope can grant. Used for updating the hub from the app.
   bool device_allowed = 50005;
-
-  // node_only_rpc marks an RPC only a joined node may call, authenticated by
-  // its own mutual TLS client certificate and by nothing else: no token,
-  // device or owner reaches it. It implies owner_only_rpc for clients that
-  // list RPCs.
-  bool node_only_rpc = 50006;
 }
 
 extend google.protobuf.ServiceOptions {
-  // node_local marks a service served by node agents, not by the hub. Hub
-  // clients such as the MCP bridge leave it out.
-  bool node_local = 50002;
-
   // owner_only marks a service only the owner may call, whatever scopes a
   // capability carries. The MCP bridge leaves it out.
   bool owner_only = 50003;

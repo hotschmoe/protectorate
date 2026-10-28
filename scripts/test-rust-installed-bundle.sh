@@ -22,7 +22,7 @@ chmod +x "$temp/mock-bin/systemctl" "$temp/mock-bin/systemd-run"
 export PATH="$temp/mock-bin:$PATH"
 case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) echo 'unsupported test architecture' >&2; exit 1 ;; esac
 source_bytes=0
-for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge; do
+for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate protectorate-mcpbridge; do
   [[ -x "$binary_dir/$component" ]] || { echo "missing Rust binary: $binary_dir/$component" >&2; exit 1; }
   source_bytes=$((source_bytes + $(stat -c %s "$binary_dir/$component")))
 done
@@ -36,7 +36,7 @@ version=$("$binary_dir/protectorate-rs" version --json | python3 -c 'import json
 printf '%s\n' "$version" > "$temp/bundle/VERSION"
 printf '%s\n' '<html>installed Rust hub</html>' > "$temp/web/index.html"
 tar -czf "$temp/bundle/protectorate-web-$version.tar.gz" -C "$temp/web" .
-for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge; do
+for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate protectorate-mcpbridge; do
   cp --reflink=auto -- "$binary_dir/$component" "$temp/bundle/$component-linux-$arch"
 done
 (cd "$temp/bundle" && sha256sum VERSION *-linux-"$arch" "protectorate-web-$version.tar.gz" > SHA256SUMS)
@@ -44,36 +44,17 @@ bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/state" --r
 unit="$HOME/.config/systemd/user/protectorate-hub.service"
 [[ "$(readlink "$HOME/releases/current")" == "$version" ]]
 [[ "$(stat -c %a "$HOME/state/token")" == 600 ]]
-for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge; do
+for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate protectorate-mcpbridge; do
   cmp -s "$binary_dir/$component" "$HOME/releases/$version/$component"
 done
 systemd-analyze verify "$unit" > "$temp/systemd-verify.log" 2>&1
 python3 - "$unit" "$HOME/state/token" "$version" <<'PY'
-import hashlib, json, os, pathlib, shlex, signal, socket, subprocess, sys, time, urllib.request
+import json, os, pathlib, shlex, signal, socket, subprocess, sys, time, urllib.request
 
 unit, token_path, expected = sys.argv[1:]
 line = next(line for line in pathlib.Path(unit).read_text().splitlines() if line.startswith('ExecStart='))
 command = shlex.split(line.removeprefix('ExecStart='))
 state = pathlib.Path(token_path).parent
-job_id = 'installed-restore-job'
-artifact_body = b'installed restore artifact\n'
-artifact_path = state / 'jobs' / f'{job_id}.artifacts' / 'nested' / 'result.txt'
-artifact_path.parent.mkdir(parents=True)
-artifact_path.write_bytes(artifact_body)
-(state / 'jobs' / f'{job_id}.log').write_bytes(b'installed job output\n')
-(state / 'jobs' / f'{job_id}.json').write_text(json.dumps({
-    'id': job_id,
-    'requestId': 'installed-restore-request',
-    'endpoint': '',
-    'cancelRequested': False,
-    'job': {
-        'id': job_id,
-        'state': 'JOB_STATE_SUCCEEDED',
-        'logBytes': '21',
-        'artifacts': [{'path': 'nested/result.txt', 'sizeBytes': str(len(artifact_body))}],
-    },
-}))
-artifact_hash = hashlib.sha256(artifact_body).hexdigest()
 sock = socket.socket()
 sock.bind(('127.0.0.1', 0))
 port = sock.getsockname()[1]
@@ -87,15 +68,6 @@ def request_for(procedure, body):
         headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
         method='POST',
     )
-
-def assert_job_restored(state_path):
-    with urllib.request.urlopen(request_for('JobService/GetJob', {'id': job_id}), timeout=5) as response:
-        job = json.load(response)
-    assert job['state'] == 'JOB_STATE_SUCCEEDED', job
-    assert job['artifacts'][0]['path'] == 'nested/result.txt', job
-    artifact = state_path / 'jobs' / f'{job_id}.artifacts' / 'nested' / 'result.txt'
-    assert hashlib.sha256(artifact.read_bytes()).hexdigest() == artifact_hash
-    assert (state_path / 'jobs' / f'{job_id}.log').read_bytes() == b'installed job output\n'
 
 try:
     token = pathlib.Path(token_path).read_text().strip()
@@ -116,7 +88,6 @@ try:
     with urllib.request.urlopen(request_for('BacklogService/CreateNote',
         {'title': 'installed restore fixture'}), timeout=5) as response:
         note_id = json.load(response)['note']['id']
-    assert_job_restored(state)
     archives = state.parent / 'archives'
     backup = subprocess.run([command[0], 'hub', 'backup', '--home', str(state),
         '--to', str(archives)], check=True, capture_output=True, text=True)
@@ -155,7 +126,6 @@ try:
         notes = json.load(response)['notes']
     assert any(note['id'] == note_id and note['title'] == 'installed restore fixture'
                for note in notes), notes
-    assert_job_restored(restored)
 finally:
     recovered.send_signal(signal.SIGTERM)
     recovered.communicate(timeout=10)
@@ -204,7 +174,6 @@ if os.environ.get('PROTECTORATE_TEST_SYSTEMD_RESTORE') == '1':
             notes = json.load(response)['notes']
         assert any(note['id'] == note_id and note['title'] == 'installed restore fixture'
                    for note in notes), notes
-        assert_job_restored(restored)
         os.kill(first_pid, signal.SIGKILL)
         restarted_pid = wait_manager_ready(first_pid)
         assert restarted_pid != first_pid
@@ -213,8 +182,7 @@ if os.environ.get('PROTECTORATE_TEST_SYSTEMD_RESTORE') == '1':
             notes = json.load(response)['notes']
         assert any(note['id'] == note_id and note['title'] == 'installed restore fixture'
                    for note in notes), notes
-        assert_job_restored(restored)
-        print(f'Real systemd user manager restarted restored Rust hub {first_pid} -> {restarted_pid} and retained note {note_id} and artifact {artifact_hash}')
+        print(f'Real systemd user manager restarted restored Rust hub {first_pid} -> {restarted_pid} and retained note {note_id}')
     finally:
         subprocess.run(['/usr/bin/systemctl', '--user', 'stop', name], check=False,
                        capture_output=True, text=True)

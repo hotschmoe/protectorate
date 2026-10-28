@@ -8,7 +8,7 @@ Guiding rules:
 - **Hands-off toward the harness.** Each LLM runs its own CLI untouched, driven
   only through its TUI or its official headless protocol, with its own config
   and auth. We never wrap, patch, proxy or re-prompt it.
-- **Correct, robust and fast everywhere else.** The hub, sleeves, nodes and API
+- **Correct, robust and fast everywhere else.** The hub, sleeves and API
   may be as sophisticated as correctness requires; "less code" is not a reason
   to pick a weaker design there. Speculative abstractions are.
 
@@ -25,37 +25,33 @@ Guiding rules:
                                     | + WebSocket terminals
                        +------------v-------------+
                        | HUB  protectorate-rs     |  quota, sleeves, chat,
-                       | serve                    |  sessions, nodes, leases,
-                       +----+----------------+----+  jobs, mail, audit
-                            |                |  mutual TLS, hub dials node :7475
-           sleeves on the hub machine     +--v------------------------------+
-           (namespace sandbox, one        | node agent: Linux, Windows,     |
-            harness per workspace)        | Termux (no sleeves off the hub) |
-                                          +---------------------------------+
+                       | serve                    |  sessions, mail, audit
+                       +------------+-------------+
+                                    |
+                   sleeves on the hub machine
+                   (namespace sandbox, one harness per workspace)
 ```
 
-The hub is a host binary, not a container: tmux, sandboxes, host metrics and
-the CA are simpler on the host, and a container holding the Docker socket
-isolates nothing.
+The hub is a host binary, not a container: tmux, sandboxes and the CA are
+simpler on the host, and a container holding the Docker socket isolates
+nothing. Everything runs on that one machine.
 
 ## Binaries
 
 | Binary | Crate | Role |
 |---|---|---|
-| `protectorate-rs` | protectorate-server | `serve` (the hub), `node join/install/serve/doctor/uninstall`, `hub backup/restore/publish-*`, `api call` |
+| `protectorate-rs` | protectorate-server | `serve` (the hub), `hub backup/restore/publish-*`, `api call` |
 | `protectorate` | protectorate-cli | every client command (`protectorate --help`); forwards `hub ...` to the server and `mcp` to the bridge. Mounted at `/opt/protectorate/bin/protectorate` inside sleeves |
 | `protectorate-mcpbridge` | protectorate-mcpbridge | MCP tools over stdio, loopback HTTP or HTTPS ([mcp](docs/mcp.md)) |
 | `protectorate-sleeve-runner` | protectorate-sleeve-runner | tmux pane process of a terminal sleeve; owns its sandbox for the session |
-| `protectorate-sleeve-sandbox-helper`, `protectorate-node-sandbox-helper` | protectorate-sleeve-runner, protectorate-node | the re-exec helper that builds namespaces and execs the workload |
-| `protectorate-rs-windows` | protectorate-node-windows | Windows node, shipped as `protectorate-rs-windows-<arch>.exe` and installed as `protectorate-rs.exe` |
-| `protectorate-rs-termux` | protectorate-node-termux | Android/Termux node, shipped as `protectorate-rs-android-arm64` |
+| `protectorate-sleeve-sandbox-helper` | protectorate-sleeve-runner | the re-exec helper that builds namespaces and execs the workload |
 
-The Linux release bundle holds the first six for amd64 and arm64; the server
+The Linux release bundle holds all five for amd64 and arm64; the server
 refuses to serve without the runner and sleeve helper beside it.
 
 ## Crates
 
-`rust/crates/`, one Cargo workspace (39 crates):
+`rust/crates/`, one Cargo workspace (30 crates):
 
 | Crate | Purpose |
 |---|---|
@@ -66,38 +62,30 @@ refuses to serve without the runner and sleeve helper beside it.
 | chatlog | per-sleeve append-only chat events, replay and live watch |
 | claude-driver, codex-driver, grok-driver, pi-driver | one harness's headless protocol inside a caller-supplied sandbox |
 | cli | the client CLI |
-| connect-client | blocking Connect JSON client (CLI, hub-to-node over mutual TLS) |
+| connect-client | blocking Connect JSON client (CLI, MCP bridge, `api call`) |
 | directory | workspace discovery, project dependency graph, release observations |
 | fsutil | crash-safe file replacement |
 | fuzz | fuzz targets; `rust/fuzz` runs them under libFuzzer |
 | handoff | resleeve facts, native transcripts, confined handoff files |
 | hub | the hub's Connect services over `PROTECTORATE_HOME` |
 | identity | devices and capabilities the hub issued |
-| inventory | node inventory (`nodes.json`, `hosts.md`) |
-| lease | persistent leases and priority/FIFO tickets |
 | mailbox | append-only JSONL message store |
 | mcpbridge | MCP bridge |
-| node | node agent: metrics, file transfer, jobs, updates behind mutual TLS |
-| node-client | verified file push and pull |
-| node-metrics | CPU, GPU, NPU, memory, filesystem probes (Linux, Windows) |
-| node-monitor | polls nodes, keeps last metrics for status and placement |
-| node-termux, node-windows | platform node executables |
 | pairing | pairing links and terminal QR |
+| protogen | writes the prost message types and typed procedure constants from the descriptor set |
 | quota | provider quota reads, caching and harness ranking |
-| release | GitHub release metadata, verified bundles, web archive extraction |
+| release | GitHub release metadata, verified hub bundles, web archive extraction |
 | sandbox | validated Linux sandbox plans, launcher and egress proxy |
 | server | `protectorate-rs` entry points |
 | session | tmux sessions |
 | sleeve-registry | durable sleeve lifecycle records |
 | sleeve-runner | terminal sleeve runner and sandbox helper |
-| svcgen | systemd, Windows task and Termux service definitions |
-| tls | hub CA, node certificates, private-address listener rule |
+| tls | hub CA and server certificate, private-address listener rule |
 | wire | descriptor-driven protobuf JSON and Connect unary endpoints |
-| xfer | bounded, verified file and directory transfer archives |
 
 ## API
 
-`proto/protectorate/v1/*.proto` is the only API definition (19 services, 100
+`proto/protectorate/v1/*.proto` is the only API definition (14 services, 65
 RPCs). `make gen` runs buf, writes the Dart client to `app/lib/gen` and the
 descriptor sets to `rust/crates/protectorate-wire/assets/`, and
 `protectorate-protogen` writes prost message types and typed procedure
@@ -129,20 +117,9 @@ location is not identity. Details: [install](docs/install.md#network-model),
 - Devices (app, remote CLI) pair through owner approval and sign every request
   with a P-256 key that never leaves them (Android Keystore, non-extractable
   WebCrypto, 0600 key file). No bearer tokens on clients, no `?token=`.
-- Sleeves, Envoy, admin grants and scripts hold hub-minted HMAC capabilities
+- Sleeves, Envoy and scripts hold hub-minted HMAC capabilities
   (`pc1.` macaroons): scoped, about one hour, renewable, attenuable offline,
   revocable by lineage. Delegated mints never exceed the minter's scopes.
-- Nodes join with a single-use code, get a certificate from the hub CA, and
-  accept only the hub's client certificate. The hub dials nodes on 7475 at
-  the address the node reported. The one call a node makes to the hub after
-  joining is `NodeService/ReportNodeAddress`, over mutual TLS with its own
-  certificate (the hub's TLS listeners accept an optional client certificate
-  that chains to the CA; the RPC is `node_only_rpc` and admits nothing else:
-  no token, device or owner). When the machine's IP changes the node rebinds
-  to the address its route to the hub leaves from (same port), stores it in
-  `node.json` and reports it; the hub requires the reported IP to equal the
-  connection's source IP (no NAT between hub and nodes), audits the old and
-  new address and re-polls the node there.
 
 ## Sleeves
 
@@ -202,35 +179,10 @@ machine. Details: [sleeves](docs/sleeves.md), [sandbox](docs/rust-sandbox.md),
 `ChatService.Respond`. Native compaction keeps each harness's defaults. One
 owner per native session id.
 
-## Nodes, leases and jobs
-
-Nodes report metrics (CPU, GPUs, NPUs, memory, filesystems, containers) to the
-hub's poller (P2, P9). Two tiers ([node work](docs/node-work.md)):
-`shared` (the pool: leased and scheduled, sandboxed jobs) and `care` (a family
-machine: never scheduled or leased; work only under an owner-minted
-`node_admin` grant).
-
-- **Leases** `(resource, holder, ttl)` in `leases.json`, swept every second,
-  exclusive, at most 24h; an optional FIFO queue with priorities.
-- **Jobs** (P3): the hub places by node, lease or selector (os, arch, free
-  memory, GPU/NPU name and VRAM, no busy GPU, least loaded, warm worktree
-  preferred), ships only missing git objects as a thin bundle (or an artifact
-  file or directory), and the node runs the command in a warm worktree.
-  Submit is idempotent by request id. Nodes keep output and results for an
-  hour, so a restarted hub reattaches. `job test-cross` runs `cargo test` on a
-  matching node.
-- **Job isolation:** Linux nodes run sandboxed jobs in the same namespace
-  sandbox; Windows nodes as a separate runner account in a Job Object; plain
-  jobs (care nodes) need `--allow-plain-jobs`; `--admin` runs elevated
-  (sudo or root, Linux nodes only) under a grant. Every job records how it ran.
-- **Files:** `node put/get`, sha256-verified, atomic, confined to the node's
-  file root (P11). Windows desktop control is shelved (tag `shelf/windows-desk`).
-
 ## Coordination and mail
 
 Deterministic hub code, no model ([coordination](docs/coordination.md)).
-Each sleeve's capability is its identity, so senders and lease holders are
-authenticated. The directory derives projects and dependency edges from git
+Each sleeve's capability is its identity, so senders are authenticated. The directory derives projects and dependency edges from git
 remotes and manifests. The mailbox is an append-only JSONL log; mail reaches
 an idle chat sleeve as an ordinary user message, unacked requests are
 re-delivered once and then escalated to Envoy. Tags and default-branch
@@ -242,25 +194,25 @@ External MCP clients use the same capability path.
 
 ## Governance
 
-- **Audit:** every mutating RPC, denial, terminal attach and grant call goes to
+- **Audit:** every mutating RPC, denial, terminal attach goes to
   `audit/audit-YYYY-MM.jsonl` as a hash chain (`seq`, `prev`, `hash`, head in
   `audit/head.json`); `audit verify` walks it.
-- **run_id:** every sleeve run gets one id carried by its audit entries, jobs,
-  leases, mail, approvals and checkpoints; `audit ls --run` follows a run.
-- **Approvals:** destructive RPCs, admin grants and jobs, and pin changes
+- **run_id:** every sleeve run gets one id carried by its audit entries,
+  mail, approvals and checkpoints; `audit ls --run` follows a run.
+- **Approvals:** destructive RPCs and pin changes
   requested by an agent fail with `aborted` and open a request; the owner
   approves on a device or with `approvals approve`, and the identical call
   then runs once.
 
 ## Hang detection and restarts
 
-A hung hub or node (deadlock, wedged runtime, stuck blocking pool) is
+A hung hub (deadlock, wedged runtime, stuck blocking pool) is
 restarted by its service manager, which only reacts to exits, so the process
 kills itself. `serve` runs a watchdog thread (`protectorate-server/src/
 watchdog.rs`) that expects progress from: a heartbeat task on the main
 runtime, a `spawn_blocking` round trip, and on the hub the identity,
-sleeve-registry, mailbox, inventory and directory locks (each probed by its own
-thread taking the lock and releasing it), on the node the job table locks. A
+sleeve-registry, mailbox and directory locks (each probed by its own
+thread taking the lock and releasing it). A
 probe that has not completed for 90 s (`PROTECTORATE_WATCHDOG_TIMEOUT`, for
 example `5s`, only shortens the bound for tests) makes it write the stalled
 probe and a thread list to stderr and `_exit(70)`, with no destructor that
@@ -268,9 +220,7 @@ could take the stuck lock. 90 s is 60 times the 1.5 s fsync tail seen on the
 dev host. A late watchdog wake-up (SIGSTOP, debugger, frozen cgroup) is
 treated as a freeze and forgiven, not as a hang. Status 70 is a failure
 everywhere: systemd `Restart=on-failure` (`StartLimitIntervalSec=0`, so no run
-of restarts can leave the unit stopped), the Windows task's
-`RestartOnFailure` (every minute, 999 times), and Termux's runit service,
-which restarts on any exit. systemd `WatchdogSec=` is not used: it adds
+of restarts can leave the unit stopped). systemd `WatchdogSec=` is not used: it adds
 `Type=notify`, startup and update-trial handshakes across the guardian and its
 child, and a second hang definition, for no case the in-process watchdog misses
 (a process stuck in uninterruptible I/O cannot be killed by either).
@@ -283,19 +233,16 @@ ranks harnesses by fresh spare capacity.
 
 ## Releases, updates and backups
 
-- GitHub releases carry the Linux bundles, Windows and Termux nodes, the web
+- GitHub releases carry the Linux amd64 and arm64 hub bundles, the web
   archive, the Windows desktop zip, `VERSION` and `SHA256SUMS`. Stable is the
   latest release, dev the rolling `dev` prerelease ([DEV](DEV.md)).
-- Installers and the hub verify every asset against `SHA256SUMS` and stage it
+- The installer and the hub verify every asset against `SHA256SUMS` and stage it
   under `releases/<version>/` with atomic `current` and `previous` links.
-- `hub update` (`ReleaseService.UpdateHub`, owner or device) verifies the whole
-  fleet release, writes a trial marker and restarts; the next start confirms
-  the trial or restores the previous release. `node update` pushes the hub's
-  release to a node, which keeps one rollback binary; Windows nodes update
-  through a guardian copy of the executable.
-- `hub backup` writes a verified `.pbackup` of state (identity, CA, inventory,
-  sleeves, leases, directory, mail, notes, audit, job records, handoffs, chat
-  logs; no workspaces, credentials or binaries); `serve --backup-dir
+- `hub update` (`ReleaseService.UpdateHub`, owner or device) downloads and
+  verifies the host's hub bundle and the web archive, writes a trial marker and restarts; the next start confirms the
+  trial or restores the previous release.
+- `hub backup` writes a verified `.pbackup` of state (identity, CA,
+  sleeves, directory, mail, notes, audit, handoffs, chat logs; no workspaces, credentials or binaries); `serve --backup-dir
   --backup-every` schedules it; `hub restore` fills an empty home.
 
 ## State
@@ -307,17 +254,13 @@ replacement, mode 0600:
 token            owner break-glass token (loopback only)
 ca/              hub CA and key
 identity.json    capability key, devices, lineages
-nodes.json       inventory; hosts.md is generated from it
 sleeves.json     sleeve records; sleeves/<name>/ homes and chat.jsonl
-leases.json  directory.json  mailbox.jsonl  notes.json
-jobs/            job records, logs, artifacts
+directory.json  mailbox.jsonl  notes.json
 audit/           audit chain
 handoffs/        archived HANDOFF.md per resleeve
 helpers/         checkpoint stores (not backed up)
 workspaces/      managed clones; orchestrator/ is Envoy's workspace
 ```
-
-A node keeps `node.json` and `tls/` in its own home.
 
 ## Flutter client
 
@@ -325,6 +268,6 @@ A node keeps `node.json` and `tls/` in its own home.
 hub from the release's web archive). It talks Connect JSON through the
 generated Dart client in `app/lib/gen` and signs each request with its device
 key. Desktop and web share a responsive shell (overview, sleeves and chat,
-terminals, nodes, quota, mail, notes, devices, audit); Android is Envoy-first
-(ENVOY, QUOTAS, NODES, DEVICES) with an emergency stop that kills every sleeve
+terminals, quota, mail, notes, devices, audit); Android is Envoy-first
+(ENVOY, QUOTAS, DEVICES) with an emergency stop that kills every sleeve
 directly. Visual design: [design](docs/design.md).

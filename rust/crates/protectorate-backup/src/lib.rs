@@ -150,47 +150,17 @@ fn keep(rel: &str) -> bool {
     let parts: Vec<_> = rel.split('/').collect();
     match parts[0] {
         "audit" | "ca" => true,
-        "jobs" => {
-            (parts.len() == 2
-                && (parts[1].ends_with(".json")
-                    || parts[1].ends_with(".log")
-                    || parts[1] == "canceled-requests"))
-                || (parts.len() >= 3 && parts[1].ends_with(".artifacts"))
-        }
         "handoffs" => parts.len() == 3 && parts[2].ends_with(".md"),
         "sleeves" => parts.len() == 3 && parts[2].starts_with("chat.jsonl"),
         _ => false,
     }
-}
-fn job_artifact_paths(record: impl Read, id: &str) -> Result<Vec<String>> {
-    let record: serde_json::Value = serde_json::from_reader(record)?;
-    let mut paths = Vec::new();
-    if let Some(artifacts) = record
-        .get("job")
-        .and_then(|job| job.get("artifacts"))
-        .and_then(serde_json::Value::as_array)
-    {
-        for artifact in artifacts {
-            let path = artifact
-                .get("path")
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| Error::Invalid("job artifact has no path".into()))?;
-            if !safe_relative(path) {
-                return invalid("job artifact has an unsafe path");
-            }
-            paths.push(format!("jobs/{id}.artifacts/{path}"));
-        }
-    }
-    Ok(paths)
 }
 fn plan(home: &Dir) -> Result<Vec<String>> {
     let mut paths = BTreeSet::new();
     for name in [
         "token",
         "identity.json",
-        "nodes.json",
         "sleeves.json",
-        "leases.json",
         "directory.json",
         "mailbox.jsonl",
         "notes.json",
@@ -219,12 +189,6 @@ fn plan(home: &Dir) -> Result<Vec<String>> {
                 if rel.starts_with("sleeves/") && rel.matches('/').count() >= 2 {
                     continue;
                 }
-                if let Some(jobs_path) = rel.strip_prefix("jobs/") {
-                    let job_dir = jobs_path.split('/').next().unwrap_or_default();
-                    if !job_dir.ends_with(".artifacts") {
-                        continue;
-                    }
-                }
                 if rel.starts_with("handoffs/") && rel.matches('/').count() >= 2 {
                     continue;
                 }
@@ -238,7 +202,7 @@ fn plan(home: &Dir) -> Result<Vec<String>> {
         }
         Ok(())
     }
-    for dir in ["audit", "ca", "jobs", "handoffs", "sleeves"] {
+    for dir in ["audit", "ca", "handoffs", "sleeves"] {
         if home.symlink_metadata(dir).is_ok_and(|m| m.is_symlink()) {
             continue;
         }
@@ -317,7 +281,6 @@ pub fn create(options: &Options, cancel: &Cancellation) -> Result<PathBuf> {
         home,
         files: Vec::new(),
     };
-    let mut required_artifacts = Vec::new();
     let sum;
     {
         let mut writer = HashWriter {
@@ -359,27 +322,6 @@ pub fn create(options: &Options, cancel: &Cancellation) -> Result<PathBuf> {
                 sha256,
                 mode,
             });
-            if let Some(id) = manifest
-                .files
-                .last()
-                .and_then(|file| file.path.strip_prefix("jobs/"))
-                .and_then(|name| name.strip_suffix(".json"))
-                .filter(|id| !id.contains('/'))
-            {
-                f.rewind()?;
-                required_artifacts.extend(job_artifact_paths(&mut f, id)?);
-            }
-        }
-        let archived: BTreeSet<_> = manifest
-            .files
-            .iter()
-            .map(|file| file.path.as_str())
-            .collect();
-        if required_artifacts
-            .iter()
-            .any(|path| !archived.contains(path.as_str()))
-        {
-            return invalid("job artifact missing from backup snapshot; retry backup");
         }
         header(&mut writer, &Header::Manifest { manifest })?;
         writer.flush()?;
@@ -561,29 +503,6 @@ pub fn restore(
     let mut file = File::open(archive)?;
     verify_sidecar(archive, &mut file, cancel)?;
     let manifest = scan(&mut file, Some(&stage_root), cancel)?;
-    let archived: BTreeSet<_> = manifest
-        .files
-        .iter()
-        .map(|file| file.path.as_str())
-        .collect();
-    for record in &manifest.files {
-        let Some(id) = record
-            .path
-            .strip_prefix("jobs/")
-            .and_then(|name| name.strip_suffix(".json"))
-            .filter(|id| !id.contains('/'))
-        else {
-            continue;
-        };
-        cancel.check()?;
-        let source = stage_root.open(&record.path)?;
-        if job_artifact_paths(source, id)?
-            .iter()
-            .any(|path| !archived.contains(path.as_str()))
-        {
-            return invalid("restored job record references a missing artifact");
-        }
-    }
     drop(stage_root);
     cancel.check()?;
     empty_destination(home)?;

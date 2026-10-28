@@ -79,8 +79,9 @@ fn scripts_use_the_matching_completion_hook() {
 
 #[test]
 fn completion_tracks_nested_commands_and_skips_flag_values() {
-    let root = String::from_utf8(cli(&["__complete", "no"]).stdout).unwrap();
-    assert!(root.contains("node\tManage nodes\n"));
+    let root = String::from_utf8(cli(&["__complete", "m"]).stdout).unwrap();
+    assert!(root.contains("msg\tUse the mailbox\n"));
+    assert!(!root.contains("node\t"));
     assert!(!root.contains("job\t"));
     let orchestrator =
         String::from_utf8(cli(&["__complete", "orchestrator", "sc"]).stdout).unwrap();
@@ -91,42 +92,6 @@ fn completion_tracks_nested_commands_and_skips_flag_values() {
     let scope_flags =
         String::from_utf8(cli(&["__complete", "orchestrator", "scopes", "--a"]).stdout).unwrap();
     assert!(scope_flags.contains("--add\tAdd scope"), "{scope_flags}");
-
-    let node = String::from_utf8(
-        cli(&["__complete", "--hub", "https://hub.example", "node", "sh"]).stdout,
-    )
-    .unwrap();
-    assert!(node.contains("show\tShow a node\n"), "{node}");
-    assert!(!node.contains("shell"));
-    let all_node = String::from_utf8(cli(&["__complete", "node", ""]).stdout).unwrap();
-    assert!(
-        all_node.contains("serve\tRun the node agent\n"),
-        "{all_node}"
-    );
-
-    let serve_flags =
-        String::from_utf8(cli(&["__complete", "node", "serve", "--job"]).stdout).unwrap();
-    assert!(
-        serve_flags.contains("--job-concurrency\tJobs at once\n"),
-        "{serve_flags}"
-    );
-    let serve_all = String::from_utf8(cli(&["__complete", "node", "serve", "--"]).stdout).unwrap();
-    assert!(
-        serve_all.contains("--listen\tListen address\n"),
-        "{serve_all}"
-    );
-    assert!(
-        serve_all.contains("--file-unconfined\tUnrestricted file transfers\n"),
-        "{serve_all}"
-    );
-
-    let flags = String::from_utf8(cli(&["__complete", "job", "run", "--art"]).stdout).unwrap();
-    assert!(flags.contains("--artifact\tLocal source\n"), "{flags}");
-    assert!(
-        flags.contains("--artifact-glob\tCollect artifacts\n"),
-        "{flags}"
-    );
-    assert!(!flags.contains("--all"));
 
     let restore_flags =
         String::from_utf8(cli(&["__complete", "hub", "restore", "--ho"]).stdout).unwrap();
@@ -140,7 +105,6 @@ fn completion_tracks_nested_commands_and_skips_flag_values() {
 #[tokio::test(flavor = "multi_thread")]
 async fn resource_completion_uses_authenticated_live_names() {
     use protectorate_hub::Hub;
-    use protectorate_inventory::Node;
     use protectorate_sleeve_registry::{Harness, Mode, Record};
 
     let root = tempfile::tempdir().unwrap();
@@ -161,16 +125,6 @@ async fn resource_completion_uses_authenticated_live_names() {
             )
             .unwrap();
     }
-    hub.inventory
-        .add(
-            Node {
-                name: "compute".into(),
-                address: "127.0.0.1:1".into(),
-                ..Node::default()
-            },
-            false,
-        )
-        .unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let task =
@@ -212,17 +166,12 @@ async fn resource_completion_uses_authenticated_live_names() {
             "alpha\tSleeve\nalpine\tSleeve\n:4\n",
         );
         live(&["chat", "wait", "be"], "beta\tSleeve\n:4\n");
-        live(&["node", "show", "com"], "compute\tNode\n:4\n");
-        live(
-            &["job", "test-cross", "--on=co"],
-            "--on=compute\tNode\n:4\n",
-        );
         assert_eq!(
-            complete("owner-secret", &["node", "show", "--timeout", ""]),
+            complete("owner-secret", &["sleeve", "show", "--timeout", ""]),
             ":4\n"
         );
-        assert_eq!(complete("wrong", &["node", "show", "com"]), ":4\n");
-        assert!(complete("wrong", &["node", "sh"]).contains("show\tShow a node"));
+        assert_eq!(complete("wrong", &["sleeve", "show", "al"]), ":4\n");
+        assert!(complete("wrong", &["sleeve", "sh"]).contains("show\tShow a sleeve"));
     })
     .await;
     task.abort();

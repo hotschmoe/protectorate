@@ -33,7 +33,7 @@ Forbidden unless I give the exact command and explicit approval in the same mess
 
 ```
 proto/protectorate/v1/   API schema (the only API definition)
-rust/crates/             Rust workspace: hub, node, CLI, MCP bridge, sandbox, drivers
+rust/crates/             Rust workspace: hub, CLI, MCP bridge, sandbox, drivers
 app/                     Flutter client (app/lib/gen is generated Dart, committed)
 ```
 

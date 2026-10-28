@@ -1,5 +1,4 @@
-//! Real-binary fixtures: a hub with a TLS listener, and nodes that join it
-//! with an invite code and serve mutual TLS.
+//! Real-binary fixtures: a hub with a TLS listener.
 #![allow(dead_code)]
 use protectorate_connect_client::Client;
 use serde_json::{json, Value};
@@ -96,9 +95,9 @@ impl Drop for Group {
     }
 }
 
-/// A loopback port for a listener that must be named before it binds, as a
-/// node's is when it joins. It lies below the ephemeral range, so neither an
-/// outgoing connection nor another test's port-0 listener takes it meanwhile.
+/// A loopback port for a listener that must be named before it binds. It
+/// lies below the ephemeral range, so neither an outgoing connection nor
+/// another test's port-0 listener takes it meanwhile.
 pub fn free_port() -> String {
     use std::hash::{BuildHasher, Hasher};
     loop {
@@ -124,8 +123,7 @@ fn command(args: &[&str], home: &Path) -> Command {
         .env_remove("PROTECTORATE_HOME")
         .env_remove("PROTECTORATE_HUB")
         .env_remove("PROTECTORATE_TOKEN")
-        .env_remove("PROTECTORATE_TOKEN_FILE")
-        .env_remove("PROTECTORATE_JOIN_CODE");
+        .env_remove("PROTECTORATE_TOKEN_FILE");
     command
 }
 
@@ -202,7 +200,7 @@ pub fn bound(log: &Path, label: &str) -> Option<String> {
 }
 
 /// A hub serving plain HTTP on loopback for the owner and HTTPS with its own
-/// CA for joining nodes. Each start binds fresh ports.
+/// CA. Each start binds fresh ports.
 pub struct Hub {
     pub process: Option<Process>,
     pub client: Client,
@@ -243,8 +241,6 @@ impl Hub {
             "127.0.0.1:0",
             "--tls-listen",
             "127.0.0.1:0",
-            "--node-interval",
-            "1s",
             "--device-interval",
             "1s",
             "--release-api-url",
@@ -291,53 +287,6 @@ impl Hub {
     pub fn call(&self, procedure: &str, input: Value) -> Value {
         self.client.call(procedure, &input).unwrap()
     }
-
-    /// Invites `name` and joins `node_home` to the hub with the invite code,
-    /// listening on a fresh loopback port. Returns the invite response.
-    pub fn join(&self, name: &str, node_home: &Path) -> Value {
-        let invite = self.call(
-            "/protectorate.v1.NodeService/InviteNode",
-            json!({"name": name, "tier": "care"}),
-        );
-        let output = run(
-            &[
-                "node",
-                "join",
-                "--hub",
-                invite["hubUrl"].as_str().unwrap(),
-                "--code",
-                invite["code"].as_str().unwrap(),
-                "--ca-cert",
-                self.ca().to_str().unwrap(),
-                "--name",
-                name,
-                "--listen",
-                &free_port(),
-                "--home",
-                node_home.to_str().unwrap(),
-            ],
-            &self.user_home,
-        );
-        assert!(
-            output.status.success(),
-            "node join: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        invite
-    }
-
-    pub fn status(&self, name: &str) -> Value {
-        self.call(
-            "/protectorate.v1.NodeService/GetNode",
-            json!({"name": name}),
-        )
-    }
-
-    pub fn wait_fresh(&self, name: &str, node_log: &Path) {
-        until("node poll over mutual TLS", node_log, || {
-            self.status(name)["freshness"] == "NODE_FRESHNESS_FRESH"
-        });
-    }
 }
 
 impl Drop for Hub {
@@ -376,22 +325,4 @@ fn launch(args: &[String], user_home: &Path, log: &Path) -> (Process, String, St
             .is_ok()
     });
     (process, plain, tls, client)
-}
-
-/// `node serve` for a joined node home, with plain jobs allowed.
-pub fn serve_node(node_home: &Path, user_home: &Path, log: &Path) -> Process {
-    let helper = Path::new(binary()).with_file_name("protectorate-node-sandbox-helper");
-    spawn(
-        &[
-            "node",
-            "serve",
-            "--home",
-            node_home.to_str().unwrap(),
-            "--allow-plain-jobs",
-            "--sandbox-helper",
-            helper.to_str().unwrap(),
-        ],
-        user_home,
-        log,
-    )
 }

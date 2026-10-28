@@ -2,10 +2,8 @@
 
 Every way into the hub goes through one decision point,
 `protectorate-hub/src/access.rs`: the Connect interceptor (unary and
-streaming) and the WebSocket terminal, on every hub listener. Node agents read
-no credential at all: their listener admits only the hub's client certificate
-(see [Node certificates](#node-certificates)). Network location is never
-identity; being on the LAN or the VPN grants nothing.
+streaming) and the WebSocket terminal, on every hub listener. Network location
+is never identity; being on the LAN or the VPN grants nothing.
 
 ## Credentials
 
@@ -25,10 +23,10 @@ There are no long-lived bearer secrets on clients.
   with the app's preferences. Approved devices have Full access: every
   ordinary RPC, host and sleeve terminals, and device management; owner-only
   RPCs stay excluded except those marked `device_allowed`.
-- **Capabilities**: everything else (sleeves, Envoy, admin grants, scripts)
+- **Capabilities**: everything else (sleeves, Envoy, scripts)
   holds a capability the hub minted: an HMAC-SHA256 macaroon,
   `pc1.<base64url caveats>.<base64url tag>`. Its caveats name the principal
-  (`sleeve:<name>`, `orchestrator-envoy`, `grant:<node>` or a script name),
+  (`sleeve:<name>`, `orchestrator-envoy` or a script name),
   the scopes, an optional task and the issue and expiry times. Only the hub
   holds the key (in `identity.json`), so only the hub can mint or verify one.
 
@@ -60,7 +58,7 @@ event streams and terminals close within a second.
 
 A capability expires: one hour for sleeves and Envoy (`hub serve
 --capability-ttl`), one hour by default and at most 24 hours for
-`token create` and admin grants (4 hours by default). Renew before expiry:
+`token create`. Renew before expiry:
 
 - **Held by the hub**: for sleeves and Envoy the hub writes the token file
   (`PROTECTORATE_TOKEN_FILE`, 0600, in the sleeve home or Envoy workspace)
@@ -86,9 +84,7 @@ token. A `scopes` caveat can only narrow: a call must be allowed by every
 scope set in the token, so appending `*` grants nothing. An `exp` caveat can
 only shorten the life, and renewal keeps it. When the hub mints on behalf of a
 caller, the result is limited to what the caller holds: a sleeve spawned by
-Envoy gets the sleeve scopes intersected with Envoy's, and an admin grant
-minted by Envoy gets only the `job_*` tools Envoy holds (plus the
-`node_admin:<node>` the grant rule gives).
+Envoy gets the sleeve scopes intersected with Envoy's.
 
 ## Scopes
 
@@ -103,24 +99,19 @@ Default deny: a capability has exactly its scopes, and nothing is implied
 | `terminal` | the WebSocket terminal on `sleeve-*` sessions, read-write or read-only |
 | `terminal:readonly` | the terminal only with `readonly=1` |
 | `terminal:host` | the terminal, also read-write on sessions outside a sleeve sandbox |
-| `node_admin:<glob>` | only on admin grants: work on `care` nodes the glob matches when the owner minted the grant, and `job run --admin` there; see [node-work.md](node-work.md) |
 | `<glob>` | `path.Match` glob over tool names |
 
 The canonical glob form is the MCP tool name: the snake_case service name
 without `Service`, an underscore and the snake_case method, for example
 `session_kill_session`, `backlog_*`, `*`. Globs must match at least one tool
 when the token is created. `*` covers every hub RPC except owner-only ones,
-but not the terminal. Treat `job_submit_job` as shell access on every node the
-caller can target. File transfer (`node_put_file`, `node_get_file`) is a
-separate grant, confined to the node's file root unless the agent runs with
-`--file-unconfined`.
+but not the terminal.
 
 RPCs marked `(protectorate.v1.owner_only_rpc)` (TokenService create, list and
-revoke, AuditService, `CreateSession`, `RespawnSession`, `AddNode`,
-`InviteNode`, `RemoveNode`, `SetNodeTier`, `SpawnEnvoy`, `UpdateNode`,
+revoke, AuditService, `CreateSession`, `RespawnSession`, `SpawnEnvoy`,
 `ReleaseService.UpdateHub`) accept only the owner whatever the scopes.
-`UpdateHub` and `UpdateNode` also carry `(protectorate.v1.device_allowed)`, so
-the app's update buttons work from a paired device. `RenewToken` admits only
+`UpdateHub` also carries `(protectorate.v1.device_allowed)`, so the app's
+update button works from a paired device. `RenewToken` admits only
 capabilities. DeviceService admits the owner and devices, never a
 capability.
 
@@ -139,11 +130,8 @@ session outside a sleeve sandbox needs the owner, a device or
 |-------------|-------|
 | Connect unary and server-streaming RPCs | authenticate, then scope for the procedure |
 | `DeviceService.StartDeviceAuth`, `PollDeviceAuth` | unauthenticated, private source address, source-IP and global rate limits |
-| `NodeService.JoinNode` | the single-use, expiring join code and a signature over it by the joining key |
-| `GET /ca.pem`, `/install.sh`, `/install.ps1`, `/dl/...` | none: public certificate, installers and builds |
 | `GET /ws/terminal/{name}` | device proof (header or subprotocol), owner token on loopback, or a capability with a terminal scope |
 | `GET /debug/...` | owner token, loopback listener only |
-| Node agent listener | mutual TLS with a hub-CA client certificate naming the hub |
 
 ## Device approval
 
@@ -170,14 +158,12 @@ Trusted devices share the owner's mailbox; their audit actor is the device.
 
 Agents are the holders of hub-minted capabilities whose principal is Envoy
 (`orchestrator-envoy`) or a sleeve (`sleeve:<name>`), and of any lineage Envoy
-minted, such as its admin grants. When an agent makes a high-impact call the hub opens
+minted. When an agent makes a high-impact call the hub opens
 an approval request instead of running it: any RPC marked `destructive` in
 the proto (`DeleteNote`, `KillSleeve` even of its own children,
-`RestoreCheckpoint` and the rest), minting an admin grant (after the grant's
-own checks pass), an admin job, and launching a sleeve whose harness
+`RestoreCheckpoint` and the rest), and launching a sleeve whose harness
 executable or profile changed (see harness pinning in `docs/sleeves.md`).
-Agents cannot reach care nodes at all: placement refuses them without an
-owner-minted grant. Calls by the owner, approved devices and capabilities the
+Calls by the owner, approved devices and capabilities the
 owner minted are never gated.
 
 The call fails with `aborted` and a detail naming the request id. Repeating
@@ -200,8 +186,7 @@ when it runs.
 
 `$PROTECTORATE_HOME/audit/audit-YYYY-MM.jsonl`, JSON lines opened `O_APPEND`
 with mode 0600. Logged: every mutating RPC (including denied and
-unauthenticated attempts), every terminal attach, and every call made with an
-admin grant. Fields: `time`, `actor` (`owner`, `token:<principal or device
+unauthenticated attempts), and every terminal attach. Fields: `time`, `actor` (`owner`, `token:<principal or device
 name>` or `unauthenticated`), `token_id` (the device ID, which is its key ID,
 or the capability lineage ID), `procedure`, `subject`, `outcome`, `code`,
 `task`, `detail`, `run_id` (the run of the sleeve that made the call or that
@@ -251,13 +236,3 @@ the device key `login` saved for the selected hub. On the hub host the
 installer's owner token is used as a last resort by `protectorate mcp`.
 `protectorate pair` prints a QR code and URL containing only the hub URL and
 its CA.
-
-## Node certificates
-
-A node has no shared secret with the hub. `node join` creates a P-256 key on
-the node, signs the invite code with it and sends the public key; the hub CA
-returns a certificate naming `ID.NAME.node.protectorate.internal`, where `ID`
-is new on every join. The hub trusts only the certificate of the node's
-current join, so `node rm` revokes it; it renews certificates in place a month
-before their one-year expiry. The join code works once and expires (default
-1h).

@@ -214,7 +214,7 @@ pub struct Record {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal: Option<serde_json::Value>,
     /// Minted at spawn, kept across resleeves and restarts; correlates the
-    /// sleeve's audit entries, jobs, mail, leases, checkpoints and egress.
+    /// sleeve's audit entries, mail, checkpoints and egress.
     #[serde(default)]
     pub run_id: String,
     /// Weighted tokens the run may use (zero: no cap) and has used, its own

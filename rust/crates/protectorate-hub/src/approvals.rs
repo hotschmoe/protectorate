@@ -8,7 +8,6 @@
 use super::{lock, proto_time, Hub};
 use axum::http::HeaderMap;
 use chrono::{DateTime, Utc};
-use prost_reflect::Value as FieldValue;
 use protectorate_audit::Entry as AuditEntry;
 use protectorate_sleeve_registry::Pin;
 use protectorate_wire::{
@@ -289,20 +288,11 @@ pub(crate) fn is_agent(hub: &Hub, actor: &str, token_id: &str) -> bool {
                 .any(|c| c.id == token_id && c.minted_by == crate::access::ENVOY))
 }
 
-/// The wire gate: destructive calls and admin jobs by agents need an
-/// approval first. Agents never reach care nodes: placement refuses them.
-/// Grant minting asks from its handler, after validation.
+/// The wire gate: destructive calls by agents need an approval first.
 pub(crate) fn gate(hub: &Hub, request: &RpcRequest) -> Result<()> {
     let method = &request.method;
     let reason = if method.destructive {
         "destructive"
-    } else if method.procedure == v1::job_service::SUBMIT_JOB.procedure
-        && matches!(
-            request.message.get_field_by_name("admin").as_deref(),
-            Some(FieldValue::Bool(true))
-        )
-    {
-        "node admin job"
     } else {
         return Ok(());
     };
@@ -345,7 +335,7 @@ pub(crate) fn require(hub: &Hub, call: Gated<'_>, reason: &str) -> Result<()> {
             token_id: auth.token_id.clone(),
             run_id: super::actor_run(hub, &auth.actor),
             procedure: method.procedure.clone(),
-            subject: crate::audit::subject(method, auth, message, false),
+            subject: crate::audit::subject(method, auth, message),
             reason: reason.into(),
             detail: String::new(),
             binding: encode_json(message)?,

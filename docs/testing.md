@@ -10,10 +10,7 @@ make check      # fmt, clippy -D warnings, make test, flutter analyze, check-ver
 ```
 
 `make test` needs Linux with unprivileged user namespaces, tmux and git. The
-`protectorate-server` scenario `node_address::` also needs `unshare`, `nsenter`
-and `ip` (iproute2) and a kernel that allows veth links in an unprivileged
-network namespace; when it does not, it prints why and passes without running.
-The scenarios live in `rust/crates/*/tests/`. A crate with several scenario
+scenarios live in `rust/crates/*/tests/`. A crate with several scenario
 files builds them into one test binary, `e2e` (`tests/e2e.rs` declares each
 file as a module), so the hub links once per crate and the scenarios run in
 parallel threads. Libraries and binaries have no unit-test harness
@@ -25,26 +22,18 @@ scenario's name is `<file>::<test>`, so `cargo test -p protectorate-hub
 
 - `protectorate-server`: the real `protectorate-rs` binary (backup and
   restore, harness drivers, the checked-in Flutter client against a Rust hub,
-  node job replay after a hub SIGKILL, crash and full-disk durability; see
-  below).
+  crash and full-disk durability; see below).
   The `watchdog::` scenarios stop every thread of a real hub except its
   watchdog with ptrace from outside and expect exit 70 with the diagnostic,
   and freeze it with SIGSTOP for longer than the limit and expect no exit.
-  `job_cancel_restart::` kills the hub (and the node) right after an
-  acknowledged `CancelJob`, early (node never got the job) and while running,
-  and expects the job to end canceled.
-- `protectorate-cli`: the real `protectorate` binary against a real hub,
-  node and private tmux server, plus the installed-companion forwarding.
+- `protectorate-cli`: the real `protectorate` binary against a real hub and
+  private tmux server, plus the installed-companion forwarding.
 - `protectorate-hub`: the hub's HTTP API with real sandboxed sleeves, sleeve
-  runner, tmux, git, protocol peers for each harness and an in-process node
-  agent.
-- `protectorate-node`: node jobs, files and git sources through the sandbox
-  helper over the node API.
+  runner, tmux, git and protocol peers for each harness.
 - `protectorate-sandbox`: real mount namespaces, cgroups, overlays and
   supervisor death.
 - `protectorate-mcpbridge`: the real bridge binary and its committed tool
   catalog.
-- `protectorate-node-windows`: the Windows binary (Windows hosts only).
 
 ## Crash and full-disk lane
 
@@ -52,9 +41,9 @@ scenario's name is `<file>::<test>`, so `cargo test -p protectorate-hub
 default run (about 15 s and 6 s).
 
 - `crash_consistency::acknowledged_mutations_survive_hub_sigkill_at_random_points`
-  runs a real hub with two nodes and six clients that mutate mail, notes,
-  tokens, device pairings, inventory, jobs, sleeves and leases while scheduled
-  and manual backups run. The hub (and every other round the node) is
+  runs a real hub with six clients that mutate mail, notes,
+  tokens, device pairings and sleeves while scheduled
+  and manual backups run. The hub is
   SIGKILLed after a random delay and restarted on the same home. Each restart
   must come up, keep every change a client saw succeed (an acknowledged ack,
   cancel, approval or request id included), hold no half-applied record,
@@ -69,7 +58,7 @@ default run (about 15 s and 6 s).
   own unprivileged user and mount namespace (`unshare --user --map-root-user
   --mount`; the hub joins it with `nsenter --preserve-credentials`), so the
   disk fills with real ENOSPC and no root. Writes of every store, a sleeve
-  spawn, a job, a lease and a backup must fail with an error that names the
+  spawn and a backup must fail with an error that names the
   failed write, change nothing in memory or on disk, and leave no torn log
   line or archive; reads keep working; a restart on the full disk comes up;
   after space returns the same process takes writes again, including the
@@ -137,10 +126,7 @@ worktree.
 To keep that rare, every third-party dependency is declared once in the root
 `[workspace.dependencies]` with the union of the features the workspace uses,
 and members write `dep = { workspace = true }`. Add a feature to the root
-entry, not to a member. Two features are enabled per crate on purpose so the
-Windows and Android nodes stay lean: axum `ws`/`json` (from `protectorate-wire`
-off Windows and Android, and `protectorate-hub`) and chrono `clock` (members
-that need the clock, and `protectorate-node` off Android). What still differs
+entry, not to a member. What still differs
 between `-p` and `--workspace` builds is features that only other third-party
 crates enable (memchr, once_cell, serde_core, syn, rustix, subtle, crc32fast and
 libc defaults); only the small crates beneath them rebuild.
@@ -150,8 +136,6 @@ libc defaults); only the small crates beneath them rebuild.
 These are `#[ignore]`d because they need host state; run them by name with
 `cargo test -p <crate> --test e2e <file>:: -- --ignored`:
 
-- `protectorate-server`, `service_job_restart::`: a working systemd user
-  manager.
 - `protectorate-sleeve-runner`, `pub_offline::`, `go_mod_offline::` or
   `flutter_offline::`, and `protectorate-hub`, `terminal_sleeve::`: published
   cache generations passed as `PROTECTORATE_TEST_PUB_LOWER`,

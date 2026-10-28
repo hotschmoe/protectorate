@@ -4,38 +4,28 @@ import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/events.pb.dart';
 import '../gen/protectorate/v1/hub.pb.dart';
-import '../gen/protectorate/v1/node.pb.dart';
+import '../gen/protectorate/v1/sleeve.pb.dart';
 import '../gen/protectorate/v1/quota.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
-import '../hubs/hub_profile.dart';
-import '../nodes/node_view.dart';
-import '../nodes/version_skew.dart';
 import '../theme/tokens.dart';
 import '../updates/hub_update_card.dart';
+import '../version.dart';
 import '../vfd/lamp.dart';
 import '../vfd/meter.dart';
 import '../vfd/panel.dart';
-import 'node_detail_screen.dart';
-import 'nodes_tab.dart';
 import 'quota_tab.dart';
 
 class OverviewTab extends StatefulWidget {
   const OverviewTab({
     super.key,
-    required this.hub,
     required this.client,
     required this.feed,
-    this.history,
     this.now,
-    this.versions = const Versions(),
   });
 
-  final Versions versions;
-  final HubProfile hub;
   final HubClient client;
   final EventFeed feed;
-  final NodeHistory? history;
   final DateTime Function()? now;
 
   @override
@@ -44,16 +34,11 @@ class OverviewTab extends StatefulWidget {
 
 class _OverviewTabState extends State<OverviewTab> {
   late Future<GetStatusResponse> _status = _loadStatus();
-  late final NodeHistory _history = widget.history ?? NodeHistory();
-  List<NodeStatus> _nodes = const [];
-  DateTime _receivedAt = DateTime.now();
-  Object? _nodesError;
-  bool _nodesLoaded = false;
+  List<Sleeve> _sleeves = const [];
   final Map<String, ProviderQuota> _quotas = {};
   Object? _quotaError;
   StreamSubscription<Event>? _sub;
   int _hubBeat = 0;
-  final Map<String, int> _nodeBeats = {};
   Timer? _poll;
   Timer? _debounce;
 
@@ -67,18 +52,13 @@ class _OverviewTabState extends State<OverviewTab> {
       final q = quotaFromEvent(e);
       if (q != null) setState(() => _quotas[q.provider] = q);
       if (e.kind == heartbeatKind) setState(() => _hubBeat++);
-      if (e.kind == 'node.metrics') {
-        setState(
-          () => _nodeBeats.update(e.subject, (n) => n + 1, ifAbsent: () => 1),
-        );
-      }
-      if (nodeEventKinds.contains(e.kind)) {
+      if (e.kind.startsWith('sleeve.')) {
         _debounce?.cancel();
-        _debounce = Timer(const Duration(milliseconds: 300), _loadNodes);
+        _debounce = Timer(const Duration(milliseconds: 300), _loadSleeves);
       }
     });
-    _poll = Timer.periodic(const Duration(seconds: 30), (_) => _loadNodes());
-    _loadNodes();
+    _poll = Timer.periodic(const Duration(seconds: 30), (_) => _loadSleeves());
+    _loadSleeves();
     _loadQuota();
   }
 
@@ -93,20 +73,12 @@ class _OverviewTabState extends State<OverviewTab> {
   Future<GetStatusResponse> _loadStatus() =>
       widget.client.hub.getStatus(GetStatusRequest());
 
-  Future<void> _loadNodes() async {
+  Future<void> _loadSleeves() async {
     try {
-      final r = await widget.client.node.listNodes(ListNodesRequest());
-      _history.recordAll(r.nodes);
-      if (!mounted) return;
-      setState(() {
-        _nodes = sortNodes(r.nodes);
-        _receivedAt = _now();
-        _nodesError = null;
-      });
-    } on Object catch (e) {
-      if (mounted) setState(() => _nodesError = e);
-    } finally {
-      if (mounted) setState(() => _nodesLoaded = true);
+      final r = await widget.client.sleeves.listSleeves(ListSleevesRequest());
+      if (mounted) setState(() => _sleeves = r.sleeves);
+    } on Object {
+      // The tile keeps its last count.
     }
   }
 
@@ -142,22 +114,6 @@ class _OverviewTabState extends State<OverviewTab> {
     );
   }
 
-  void _open(NodeStatus s) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => NodeDetailScreen(
-          hub: widget.hub,
-          client: widget.client,
-          feed: widget.feed,
-          name: s.node.name,
-          now: widget.now,
-          history: _history,
-          versions: widget.versions,
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final quotas = [for (final k in _quotas.keys.toList()..sort()) _quotas[k]!];
@@ -165,35 +121,12 @@ class _OverviewTabState extends State<OverviewTab> {
       builder: (context, box) {
         final wide = box.maxWidth >= 1100;
         final status = _StatusPanel(
-          nodes: _nodes,
+          sleeves: _sleeves,
           quotas: quotas,
           feed: _feed,
           hub: _status,
           onRetry: () => setState(() => _status = _loadStatus()),
           beat: _hubBeat,
-          hubCpu: _history.cpu(
-            _nodes.where((n) => n.node.local).firstOrNull?.node.name ?? '',
-          ),
-          wide: wide,
-          versions: widget.versions,
-        );
-        final board = Panel(
-          legend: 'MACHINE ROOM',
-          trailing: Text(
-            '${_nodes.length} NODES',
-            style: Tokens.of(context).legend(),
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-          child: _Board(
-            nodes: _nodes,
-            loaded: _nodesLoaded,
-            error: _nodesError,
-            ageOf: (s) => statusAge(s, _receivedAt, _now()),
-            beats: _nodeBeats,
-            wide: wide,
-            onOpen: _open,
-            hubVersion: widget.versions.hub,
-          ),
         );
         final quota = Panel(
           legend: 'SUBSCRIPTIONS',
@@ -230,7 +163,6 @@ class _OverviewTabState extends State<OverviewTab> {
                   ? column([
                       status,
                       HubUpdateCard(client: widget.client, feed: widget.feed),
-                      board,
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -243,7 +175,6 @@ class _OverviewTabState extends State<OverviewTab> {
                   : column([
                       status,
                       HubUpdateCard(client: widget.client, feed: widget.feed),
-                      board,
                       quota,
                       events,
                     ]),
@@ -257,46 +188,27 @@ class _OverviewTabState extends State<OverviewTab> {
 
 class _StatusPanel extends StatelessWidget {
   const _StatusPanel({
-    required this.nodes,
+    required this.sleeves,
     required this.quotas,
     required this.feed,
     required this.hub,
     required this.onRetry,
     required this.beat,
-    required this.hubCpu,
-    required this.wide,
-    required this.versions,
   });
 
-  final Versions versions;
-  final List<NodeStatus> nodes;
+  final List<Sleeve> sleeves;
   final List<ProviderQuota> quotas;
   final EventFeed feed;
   final Future<GetStatusResponse> hub;
   final VoidCallback onRetry;
   final int beat;
-  final List<double?> hubCpu;
-  final bool wide;
 
   @override
   Widget build(BuildContext context) {
     final t = Tokens.of(context);
-    final online = nodes
-        .where((n) => n.freshness == NodeFreshness.NODE_FRESHNESS_FRESH)
+    final running = sleeves
+        .where((s) => s.state == SleeveState.SLEEVE_STATE_RUNNING)
         .length;
-    final down = nodes
-        .where((n) => n.freshness == NodeFreshness.NODE_FRESHNESS_UNREACHABLE)
-        .length;
-    final stale = nodes
-        .where((n) => n.freshness == NodeFreshness.NODE_FRESHNESS_STALE)
-        .length;
-    final badges = [for (final n in nodes) ...alertBadges(n)];
-    final critical = badges.where((b) => b.critical).length;
-    final skew = versionSkew(
-      hubVersion: versions.hub,
-      appVersion: versions.app,
-      nodes: nodes,
-    );
     final fresh = quotas
         .where((q) => q.freshness == Freshness.FRESHNESS_FRESH)
         .length;
@@ -315,29 +227,14 @@ class _StatusPanel extends StatelessWidget {
       spacing: 28,
       runSpacing: 14,
       children: [
-        tile(
-          'NODES LIVE',
-          '$online',
-          'OF ${nodes.length}',
-          online < nodes.length ? Tone.warn : Tone.lit,
-        ),
-        tile(
-          'ALERTS',
-          '${badges.length}',
-          critical > 0 ? '$critical CRIT' : '',
-          critical > 0
-              ? Tone.alarm
-              : badges.isNotEmpty
-              ? Tone.warn
-              : Tone.lit,
-        ),
+        tile('SLEEVES RUNNING', '$running', 'OF ${sleeves.length}', Tone.lit),
         tile(
           'QUOTA FRESH',
           '$fresh',
           'OF ${quotas.length}',
           unknown > 0 ? Tone.warn : Tone.lit,
         ),
-        _HubTile(status: hub, onRetry: onRetry, appVersion: versions.app),
+        _HubTile(status: hub, onRetry: onRetry),
       ],
     );
     return Panel(
@@ -362,57 +259,16 @@ class _StatusPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (wide && hubCpu.length > 1)
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(child: tiles),
-                const SizedBox(width: Tokens.gapXL),
-                SizedBox(
-                  width: 360,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('HUB CPU HISTORY', style: t.legend()),
-                      const SizedBox(height: 8),
-                      DotMatrixGraph(samples: hubCpu, rows: 10, pitch: 7),
-                    ],
-                  ),
-                ),
-              ],
-            )
-          else
-            tiles,
+          tiles,
           const SizedBox(height: 14),
           Wrap(
             spacing: 6,
             runSpacing: 6,
             children: [
-              Annunciator(label: 'NODE DOWN', tone: Tone.alarm, lit: down > 0),
-              Annunciator(label: 'STALE', tone: Tone.warn, lit: stale > 0),
-              Annunciator(
-                label: 'DISK',
-                tone: Tone.alarm,
-                lit: badges.any((b) => b.label.startsWith('DISK')),
-              ),
-              Annunciator(
-                label: 'MEM',
-                tone: Tone.alarm,
-                lit: badges.any((b) => b.label.startsWith('MEM')),
-              ),
               Annunciator(
                 label: 'QUOTA UNKNOWN',
                 tone: Tone.alarm,
                 lit: unknown > 0,
-              ),
-              Tooltip(
-                message: skewMessage(skew, versions),
-                child: Annunciator(
-                  key: const ValueKey('skew-annunciator'),
-                  label: 'VERSION SKEW',
-                  tone: Tone.warn,
-                  lit: skew.any,
-                ),
               ),
               ListenableBuilder(
                 listenable: feed,
@@ -435,289 +291,6 @@ class _StatusPanel extends StatelessWidget {
                 : const SizedBox.shrink(),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _Cell extends StatelessWidget {
-  const _Cell(
-    this.label,
-    this.percent,
-    this.value, {
-    this.dim = false,
-    this.wide = false,
-  });
-
-  final String label;
-  final double? percent;
-  final String value;
-  final bool dim;
-  final bool wide;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Tokens.of(context);
-    final level = t.levelTone(percent);
-    return Row(
-      children: [
-        if (!wide) SizedBox(width: 38, child: Text(label, style: t.legend())),
-        Expanded(
-          child: SegmentMeter(
-            percent: percent,
-            segments: wide ? 20 : 12,
-            dim: dim,
-          ),
-        ),
-        SizedBox(
-          width: 48,
-          child: Text(
-            value,
-            textAlign: TextAlign.end,
-            style: t.data(
-              dim
-                  ? t.p.dim
-                  : level == Tone.lit || level == Tone.dim
-                  ? t.p.emph
-                  : t.tone(level),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _Board extends StatelessWidget {
-  const _Board({
-    required this.nodes,
-    required this.loaded,
-    required this.error,
-    required this.ageOf,
-    required this.beats,
-    required this.wide,
-    required this.onOpen,
-    required this.hubVersion,
-  });
-
-  final String hubVersion;
-  final List<NodeStatus> nodes;
-  final bool loaded;
-  final Object? error;
-  final Duration Function(NodeStatus) ageOf;
-  final Map<String, int> beats;
-  final bool wide;
-  final void Function(NodeStatus) onOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = Tokens.of(context);
-    if (!loaded) return const BusyBar();
-    if (nodes.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.all(8),
-        child: error != null
-            ? Text('Nodes unavailable: $error', style: t.small(t.p.alarm))
-            : Text('NO NODES', style: t.legend()),
-      );
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (error != null)
-          Padding(
-            padding: const EdgeInsets.all(8),
-            child: Text(
-              'Showing the last list. Refresh failed: $error',
-              style: t.small(t.p.warn),
-            ),
-          ),
-        if (wide)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(10, 6, 10, 4),
-            child: Row(
-              children: [
-                SizedBox(width: 128, child: Text('NODE', style: t.legend())),
-                const SizedBox(width: 12),
-                for (final (i, h) in ['CPU', 'GPU', 'MEM', 'DISK'].indexed) ...[
-                  if (i > 0) const SizedBox(width: 14),
-                  Expanded(child: Text(h, style: t.legend())),
-                ],
-              ],
-            ),
-          ),
-        for (var i = 0; i < nodes.length; i++) _row(context, t, i, nodes[i]),
-      ],
-    );
-  }
-
-  Widget _row(BuildContext context, Tokens t, int i, NodeStatus s) {
-    final f = s.freshness;
-    final down = f == NodeFreshness.NODE_FRESHNESS_UNREACHABLE;
-    final stale = f == NodeFreshness.NODE_FRESHNESS_STALE;
-    final m = s.hasMetrics() ? s.metrics : null;
-    final age = ageOf(s);
-    final gpu = m == null ? null : summarizeGpus(m);
-    final disk = m == null ? null : primaryFilesystem(m);
-    String pct(double? v) => v == null ? '--' : '${v.round()}%';
-    final cells = m == null || down
-        ? <Widget>[]
-        : [
-            _Cell(
-              'CPU',
-              m.cpu.usagePercent,
-              pct(m.cpu.usagePercent),
-              dim: stale,
-              wide: wide,
-            ),
-            _Cell(
-              'GPU',
-              gpu?.utilPercent,
-              pct(gpu?.utilPercent),
-              dim: stale,
-              wide: wide,
-            ),
-            _Cell(
-              'MEM',
-              m.memory.usedPercent,
-              pct(m.memory.usedPercent),
-              dim: stale,
-              wide: wide,
-            ),
-            _Cell(
-              'DISK',
-              disk?.usedPercent,
-              pct(disk?.usedPercent),
-              dim: stale,
-              wide: wide,
-            ),
-          ];
-    final name = Row(
-      children: [
-        Lamp(tone: freshnessTone(f), beat: beats[s.node.name]),
-        const SizedBox(width: 10),
-        Flexible(
-          child: Text(
-            s.node.name,
-            overflow: TextOverflow.ellipsis,
-            style: t
-                .data(down ? t.p.alarm : t.p.emph)
-                .copyWith(fontWeight: FontWeight.w700),
-          ),
-        ),
-        if (s.node.local) ...[
-          const SizedBox(width: 6),
-          Text('HUB', style: t.legend(t.p.info)),
-        ],
-      ],
-    );
-    final note = down
-        ? Text(
-            [
-              m == null ? 'never reached' : 'last seen ${formatAge(age)}',
-              if (s.error.isNotEmpty) s.error,
-            ].join('  '),
-            style: t.small(t.p.alarm),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          )
-        : m == null
-        ? Text('NO METRICS YET', style: t.legend())
-        : null;
-    final state = Text(
-      freshnessLabel(f, age),
-      style: t.legend(t.tone(freshnessTone(f))),
-      textAlign: TextAlign.end,
-    );
-    final Widget body;
-    if (wide) {
-      body = Row(
-        children: [
-          SizedBox(
-            width: 128,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                name,
-                const SizedBox(height: 3),
-                Padding(
-                  padding: const EdgeInsets.only(left: 20),
-                  child: Text(
-                    freshnessLabel(f, age),
-                    style: t.legend(t.tone(freshnessTone(f))),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          if (note != null)
-            Expanded(child: note)
-          else
-            for (var c = 0; c < cells.length; c++) ...[
-              if (c > 0) const SizedBox(width: 14),
-              Expanded(child: cells[c]),
-            ],
-        ],
-      );
-    } else {
-      body = Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(child: name),
-              state,
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (note != null)
-            note
-          else ...[
-            Row(
-              children: [
-                Expanded(child: cells[0]),
-                const SizedBox(width: 16),
-                Expanded(child: cells[1]),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Row(
-              children: [
-                Expanded(child: cells[2]),
-                const SizedBox(width: 16),
-                Expanded(child: cells[3]),
-              ],
-            ),
-          ],
-        ],
-      );
-    }
-    final skewed = nodeSkewed(s, hubVersion);
-    return InkWell(
-      key: ValueKey('board-${s.node.name}'),
-      borderRadius: BorderRadius.circular(Tokens.innerRadius),
-      onTap: () => onOpen(s),
-      child: BarRow(
-        index: i,
-        padding: EdgeInsets.symmetric(horizontal: 10, vertical: wide ? 10 : 12),
-        child: skewed
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  body,
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: SkewBadge(
-                      key: ValueKey('skew-${s.node.name}'),
-                      nodeVersion: nodeVersion(s),
-                      hubVersion: hubVersion,
-                    ),
-                  ),
-                ],
-              )
-            : body,
       ),
     );
   }
@@ -851,15 +424,10 @@ class _QuotaSummary extends StatelessWidget {
 }
 
 class _HubTile extends StatelessWidget {
-  const _HubTile({
-    required this.status,
-    required this.onRetry,
-    required this.appVersion,
-  });
+  const _HubTile({required this.status, required this.onRetry});
 
   final Future<GetStatusResponse> status;
   final VoidCallback onRetry;
-  final String appVersion;
 
   @override
   Widget build(BuildContext context) {
@@ -901,8 +469,7 @@ class _HubTile extends StatelessWidget {
             const SizedBox(height: 4),
             Text('${s.hostname} (${s.os}/${s.arch})', style: t.small(t.p.lit)),
             Text('version ${s.version}', style: t.small()),
-            if (appVersion.isNotEmpty)
-              Text('app $appVersion', style: t.small()),
+            Text('app $appVersion', style: t.small()),
           ],
         );
       },
@@ -927,10 +494,7 @@ class _EventLog extends StatelessWidget {
         listenable: feed,
         builder: (context, _) {
           final events = feed.events
-              .where(
-                (e) =>
-                    e.kind != heartbeatKind && !nodeEventKinds.contains(e.kind),
-              )
+              .where((e) => e.kind != heartbeatKind)
               .take(_shown)
               .toList();
           if (events.isEmpty) {

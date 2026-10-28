@@ -10,7 +10,6 @@ pub const SCOPE_EVENTS: &str = "events";
 pub const SCOPE_TERMINAL: &str = "terminal";
 pub const SCOPE_TERMINAL_READONLY: &str = "terminal:readonly";
 pub const SCOPE_TERMINAL_HOST: &str = "terminal:host";
-pub const SCOPE_NODE_ADMIN_PREFIX: &str = "node_admin:";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Method<'a> {
@@ -25,7 +24,6 @@ pub enum ScopeError {
     EmptyList,
     EmptyScope,
     FullReserved,
-    NodeAdminReserved(String),
     BadPattern(String),
     NoMatchingTool(String),
 }
@@ -36,7 +34,6 @@ impl std::fmt::Display for ScopeError {
             Self::EmptyList => write!(f, "at least one scope is required"),
             Self::EmptyScope => write!(f, "empty scope"),
             Self::FullReserved => write!(f, "Full access is issued through device approval"),
-            Self::NodeAdminReserved(s) => write!(f, "scope {s:?} is only issued per task"),
             Self::BadPattern(s) => write!(f, "bad scope {s:?}"),
             Self::NoMatchingTool(s) => write!(f, "scope {s:?} matches no tool"),
         }
@@ -46,7 +43,7 @@ impl std::fmt::Display for ScopeError {
 impl std::error::Error for ScopeError {}
 
 /// Shell-style globs (`*`, `?`, `[a-z]`, `[^x]`, `\\` escapes; `*` and `?`
-/// never match `/`) for scope and node names, without a glob dependency.
+/// never match `/`) for scope names, without a glob dependency.
 pub fn glob_matches(pattern: &str, name: &str) -> Result<bool, ScopeError> {
     let pat: Vec<char> = pattern.chars().collect();
     let text: Vec<char> = name.chars().collect();
@@ -144,28 +141,7 @@ fn class_match(p: &[char], c: char) -> (usize, bool) {
     parse_class(p, c).expect("validated class")
 }
 
-fn node_glob(scope: &str) -> Option<&str> {
-    scope.strip_prefix(SCOPE_NODE_ADMIN_PREFIX)
-}
-
-fn validate_node_glob(scope: &str) -> Result<(), ScopeError> {
-    let g = node_glob(scope).unwrap_or("");
-    if g.is_empty()
-        || g.len() > 63
-        || !g
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b".*?[]_-".contains(&b))
-    {
-        return Err(ScopeError::BadPattern(scope.into()));
-    }
-    glob_matches(g, "").map(|_| ())
-}
-
-fn normalize(
-    scopes: &[&str],
-    methods: &[Method<'_>],
-    allow_grants: bool,
-) -> Result<Vec<String>, ScopeError> {
+fn normalize(scopes: &[&str], methods: &[Method<'_>]) -> Result<Vec<String>, ScopeError> {
     if scopes.is_empty() {
         return Err(ScopeError::EmptyList);
     }
@@ -174,15 +150,10 @@ fn normalize(
         if s.is_empty() {
             return Err(ScopeError::EmptyScope);
         }
-        if s == SCOPE_FULL && !allow_grants {
+        if s == SCOPE_FULL {
             return Err(ScopeError::FullReserved);
         }
-        if node_glob(s).is_some() {
-            if !allow_grants {
-                return Err(ScopeError::NodeAdminReserved(s.into()));
-            }
-            validate_node_glob(s)?;
-        } else if ![
+        if ![
             SCOPE_FULL,
             SCOPE_READ,
             SCOPE_EVENTS,
@@ -209,19 +180,7 @@ fn normalize(
 }
 
 pub fn validate_scopes(scopes: &[&str], methods: &[Method<'_>]) -> Result<Vec<String>, ScopeError> {
-    normalize(scopes, methods, false)
-}
-
-pub fn grant_scopes(node: &str, methods: &[Method<'_>]) -> Result<Vec<String>, ScopeError> {
-    let grant = format!("{SCOPE_NODE_ADMIN_PREFIX}{node}");
-    normalize(&["job_*", &grant], methods, true)
-}
-
-pub fn admin_on(scopes: &[&str], node: &str) -> bool {
-    scopes
-        .iter()
-        .filter_map(|s| node_glob(s))
-        .any(|g| glob_matches(g, node).unwrap_or(false))
+    normalize(scopes, methods)
 }
 
 pub fn scopes_allow(scopes: &[&str], method: &Method<'_>) -> bool {
@@ -233,7 +192,6 @@ pub fn scopes_allow(scopes: &[&str], method: &Method<'_>) -> bool {
         SCOPE_READ => method.read_only,
         SCOPE_EVENTS => method.service == "EventService",
         SCOPE_TERMINAL | SCOPE_TERMINAL_READONLY | SCOPE_TERMINAL_HOST => false,
-        _ if node_glob(s).is_some() => false,
         _ => glob_matches(s, method.tool).unwrap_or(false),
     })
 }
@@ -272,11 +230,6 @@ pub fn intersect(a: &[String], b: &[String], methods: &[Method<'_>]) -> Vec<Stri
                     .get(rank.wrapping_sub(1))
                 {
                     out.insert((*scope).to_owned());
-                }
-            }
-            _ if node_glob(s).is_some() => {
-                if b_scopes.contains(&s.as_str()) {
-                    out.insert(s.clone());
                 }
             }
             _ => {

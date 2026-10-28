@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import '../gen/protectorate/v1/backlog.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
-import '../nodes/node_view.dart';
+import '../format.dart';
 import '../notes/note_draft.dart';
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';

@@ -122,45 +122,23 @@ pub(super) fn record_completion(
     if error.is_none()
         && matches!(
             method.procedure.as_str(),
-            "/protectorate.v1.JobService/SubmitJob"
-                | "/protectorate.v1.DeviceService/ApproveDeviceAuth"
+            "/protectorate.v1.DeviceService/ApproveDeviceAuth"
                 | "/protectorate.v1.DeviceService/DenyDeviceAuth"
                 | "/protectorate.v1.ReleaseService/UpdateHub"
                 | "/protectorate.v1.SleeveService/SpawnEnvoy"
                 | "/protectorate.v1.ApprovalService/DecideApproval"
-                | "/protectorate.v1.NodeService/ReportNodeAddress"
         )
     {
         return;
     }
-    // A node file download is sensitive even though it does not mutate
-    // state, so it is recorded though reads normally are not.
     if !panicked && !audited_method(method, auth) {
         return;
     }
-    if method.procedure == "/protectorate.v1.NodeService/PutFile" && error.is_none() {
-        let continuing = matches!(
-            message.get_field_by_name("offset").as_deref(),
-            Some(FieldValue::U64(offset)) if *offset > 0
-        );
-        if continuing
-            && !matches!(
-                message.get_field_by_name("last").as_deref(),
-                Some(FieldValue::Bool(true))
-            )
-        {
-            return;
-        }
-    }
-    let subject = subject(method, auth, message, error.is_none());
-    // The grant task is a validated, at-most-500-byte description of why the
-    // capability was minted. Never audit the response, which holds its secret.
+    let subject = subject(method, auth, message);
     let detail = if let Some(error) = error.filter(|_| panicked) {
         error.message.clone()
     } else if method.procedure == "/protectorate.v1.DeviceService/StartDeviceAuth" {
         pairing_detail(auth)
-    } else if method.procedure == "/protectorate.v1.GrantService/Admin" && error.is_none() {
-        format!("task: {}", field_string(message, "task").trim())
     } else {
         String::new()
     };
@@ -186,34 +164,21 @@ fn field_string(message: &DynamicMessage, key: &str) -> String {
     }
 }
 
-pub(super) fn subject(
-    method: &Method,
-    auth: &AuthContext,
-    request: &DynamicMessage,
-    success: bool,
-) -> String {
-    let subject = [
-        "name",
-        "sleeve",
-        "id",
-        "job_id",
-        "node",
-        "resource",
-        "transfer_id",
-    ]
-    .iter()
-    .find_map(|key| {
-        request
-            .get_field_by_name(key)
-            .and_then(|value| match value.as_ref() {
-                FieldValue::String(value) => Some(value.clone()),
-                FieldValue::I64(value) => Some(value.to_string()),
-                FieldValue::U64(value) => Some(value.to_string()),
-                FieldValue::Message(value) => Some(field_string(value, "name")),
-                _ => None,
-            })
-    })
-    .unwrap_or_default();
+pub(super) fn subject(method: &Method, auth: &AuthContext, request: &DynamicMessage) -> String {
+    let subject = ["name", "sleeve", "id"]
+        .iter()
+        .find_map(|key| {
+            request
+                .get_field_by_name(key)
+                .and_then(|value| match value.as_ref() {
+                    FieldValue::String(value) => Some(value.clone()),
+                    FieldValue::I64(value) => Some(value.to_string()),
+                    FieldValue::U64(value) => Some(value.to_string()),
+                    FieldValue::Message(value) => Some(field_string(value, "name")),
+                    _ => None,
+                })
+        })
+        .unwrap_or_default();
     let subject = if method.procedure == "/protectorate.v1.ReleaseService/UpdateHub" {
         "hub".to_owned()
     } else if method.procedure == "/protectorate.v1.DeviceService/StartDeviceAuth" {
@@ -224,8 +189,6 @@ pub(super) fn subject(
             | "/protectorate.v1.DeviceService/RevokeDevice"
     ) {
         field_string(request, "id")
-    } else if method.procedure == "/protectorate.v1.GrantService/Admin" && success {
-        field_string(request, "node").trim().to_ascii_lowercase()
     } else if method.procedure == "/protectorate.v1.ChatService/Report" {
         super::actor_sleeve(&auth.actor)
             .filter(|self_name| {
@@ -256,7 +219,7 @@ pub(super) fn record_denied(
         task: auth.task.clone(),
         procedure: method.procedure.clone(),
         subject: message
-            .map(|request| subject(method, auth, request, false))
+            .map(|request| subject(method, auth, request))
             .unwrap_or_default(),
         detail: if method.procedure == "/protectorate.v1.DeviceService/StartDeviceAuth" {
             pairing_detail(auth)
@@ -322,9 +285,7 @@ fn audited_method(method: &Method, auth: &AuthContext) -> bool {
     if method.procedure == "/protectorate.v1.DeviceService/PollDeviceAuth" {
         return false;
     }
-    !method.read_only
-        || !auth.task.is_empty()
-        || method.procedure == "/protectorate.v1.NodeService/GetFile"
+    !method.read_only || !auth.task.is_empty()
 }
 
 pub(super) fn record_terminal(

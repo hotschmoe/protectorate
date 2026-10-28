@@ -313,9 +313,6 @@ pub struct Method {
     pub read_only: bool,
     pub owner_only: bool,
     pub device_allowed: bool,
-    /// Callable only by a joined node, authenticated by its client certificate.
-    pub node_only: bool,
-    pub node_local: bool,
     pub destructive: bool,
     pub client_streaming: bool,
     pub server_streaming: bool,
@@ -417,8 +414,6 @@ impl Catalog {
                     owner_only: extension(&service_options, "owner_only")
                         || extension(&options, "owner_only_rpc"),
                     device_allowed: extension(&options, "device_allowed"),
-                    node_only: extension(&options, "node_only_rpc"),
-                    node_local: extension(&service_options, "node_local"),
                     destructive: extension(&options, "destructive"),
                     client_streaming: descriptor.is_client_streaming(),
                     server_streaming: descriptor.is_server_streaming(),
@@ -462,9 +457,6 @@ pub struct AuthContext {
 pub struct Peer {
     pub addr: SocketAddr,
     pub tls: bool,
-    /// The DER client certificate the TLS handshake verified against the hub
-    /// CA, when the peer presented one.
-    pub client_cert: Option<Arc<[u8]>>,
 }
 /// An admission failure, with whatever identity was established before it.
 #[derive(Clone, Debug)]

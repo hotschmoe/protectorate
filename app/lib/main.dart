@@ -231,7 +231,6 @@ class _ProtectorateAppState extends State<ProtectorateApp> {
             clientFactory: _factory,
             initialTab: req.tab,
             openSession: req.session,
-            openNode: req.node,
           ),
         ),
       ),

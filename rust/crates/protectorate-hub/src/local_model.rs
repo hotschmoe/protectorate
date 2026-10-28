@@ -1,10 +1,9 @@
-use protectorate_inventory::Inventory;
 use std::net::IpAddr;
 
-/// A model is local when its base URL names a `--local-model-host`, a node in
-/// the inventory, `localhost` or a private address. Any other name is not:
+/// A model is local when its base URL names a `--local-model-host`,
+/// `localhost` or a private address. Any other name is not:
 /// network location says nothing about who runs a DNS name.
-pub(super) fn served_locally(base_url: &str, hosts: &[String], inventory: &Inventory) -> bool {
+pub(super) fn served_locally(base_url: &str, hosts: &[String]) -> bool {
     let Ok(uri) = base_url.parse::<axum::http::Uri>() else {
         return false;
     };
@@ -21,13 +20,6 @@ pub(super) fn served_locally(base_url: &str, hosts: &[String], inventory: &Inven
     if hosts
         .iter()
         .any(|candidate| canonical_host(candidate) == host)
-    {
-        return true;
-    }
-    if inventory
-        .list()
-        .iter()
-        .any(|node| canonical_host(&node.name) == host || canonical_host(&node.address) == host)
     {
         return true;
     }

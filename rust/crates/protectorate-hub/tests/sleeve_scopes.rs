@@ -13,13 +13,12 @@ use tokio::{
 
 const OWNER: &str = "owner-secret";
 const ENVOY_SCOPES: [&str; 3] = ["message_*", "read", "sleeve_spawn_sleeve"];
-/// The sleeve scopes narrowed to Envoy's: the backlog, directory and lease
-/// tools that only read survive through Envoy's "read".
-const CHILD_SCOPES: [&str; 6] = [
+/// The sleeve scopes narrowed to Envoy's: the backlog and directory tools
+/// that only read survive through Envoy's "read".
+const CHILD_SCOPES: [&str; 5] = [
     "backlog_get_note",
     "backlog_list_notes",
     "directory_*",
-    "lease_list_leases",
     "message_*",
     "read",
 ];

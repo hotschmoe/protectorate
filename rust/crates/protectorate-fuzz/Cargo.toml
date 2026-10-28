@@ -17,17 +17,14 @@ protectorate-directory = { path = "../protectorate-directory" }
 protectorate-grok-driver = { path = "../protectorate-grok-driver" }
 protectorate-handoff = { path = "../protectorate-handoff" }
 protectorate-identity = { path = "../protectorate-identity" }
-protectorate-inventory = { path = "../protectorate-inventory" }
 protectorate-mailbox = { path = "../protectorate-mailbox" }
 protectorate-mcpbridge = { path = "../protectorate-mcpbridge" }
-protectorate-node-metrics = { path = "../protectorate-node-metrics" }
 protectorate-pi-driver = { path = "../protectorate-pi-driver" }
 protectorate-quota = { path = "../protectorate-quota", default-features = false }
 protectorate-release = { path = "../protectorate-release" }
 protectorate-sandbox = { path = "../protectorate-sandbox" }
 protectorate-session = { path = "../protectorate-session" }
 protectorate-wire = { path = "../protectorate-wire" }
-protectorate-xfer = { path = "../protectorate-xfer" }
 flate2 = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

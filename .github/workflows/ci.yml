@@ -47,16 +47,8 @@ jobs:
           key: cargo-audit-${{ runner.os }}-v1
       - name: Install cargo-audit
         run: command -v cargo-audit || cargo install cargo-audit --locked
-      # zip 0.6 is used only to read and write archives; protectorate-node
-      # extracts entries itself (no ZipArchive::extract), rejecting symlinks,
-      # unsafe paths and stripping set-id bits. Drop these ignores with the
-      # upgrade to zip 9.
       - name: RustSec advisories
-        run: >-
-          cargo audit
-          --ignore RUSTSEC-2026-0367
-          --ignore RUSTSEC-2026-0368
-          --ignore RUSTSEC-2026-0369
+        run: cargo audit
 
   rust-arm64:
     runs-on: ubuntu-24.04-arm
@@ -74,9 +66,9 @@ jobs:
       - name: Build Rust Linux arm64 bundle
         run: |
           version=$(git describe --tags --match 'v[0-9]*' --always)
-          PROTECTORATE_BUILD_VERSION="$version" cargo build --locked --profile dist -p protectorate-server -p protectorate-sleeve-runner -p protectorate-node -p protectorate-cli -p protectorate-mcpbridge --bins
+          PROTECTORATE_BUILD_VERSION="$version" cargo build --locked --profile dist -p protectorate-server -p protectorate-sleeve-runner -p protectorate-cli -p protectorate-mcpbridge --bins
           mkdir -p dist
-          for name in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge; do
+          for name in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate protectorate-mcpbridge; do
             cp "target/dist/$name" "dist/$name-linux-arm64"
           done
           test "$(dist/protectorate-rs-linux-arm64 version --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')" = "$version"
@@ -86,99 +78,8 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  rust-windows-amd64:
-    runs-on: windows-latest
-    env:
-      CARGO_INCREMENTAL: "0"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-      - name: Rust toolchain
-        shell: pwsh
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-      - name: Build native Windows Rust backend and CLI
-        shell: pwsh
-        run: |
-          $version = git describe --tags --match 'v[0-9]*' --always
-          ./scripts/build-rust-windows.ps1 -Version $version -Architecture amd64
-      - name: Verify Windows node installer with PowerShell 5.1
-        shell: pwsh
-        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-install-node-windows.ps1
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rust-windows-amd64
-          path: |
-            dist/protectorate-rs-windows-amd64.exe
-            dist/protectorate-windows-amd64.exe
-            dist/protectorate-mcpbridge-windows-amd64.exe
-          if-no-files-found: error
-
-  rust-windows-arm64:
-    runs-on: windows-11-arm
-    env:
-      CARGO_INCREMENTAL: "0"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-      - name: Rust toolchain
-        shell: pwsh
-        run: |
-          rustup toolchain install stable-aarch64-pc-windows-msvc --profile minimal
-          rustup default stable-aarch64-pc-windows-msvc
-      - name: Build native Windows ARM64 Rust backend and CLI
-        shell: pwsh
-        run: |
-          $version = git describe --tags --match 'v[0-9]*' --always
-          ./scripts/build-rust-windows.ps1 -Version $version -Architecture arm64
-      - name: Verify Windows node installer with PowerShell 5.1
-        shell: pwsh
-        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./scripts/test-install-node-windows.ps1
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rust-windows-arm64
-          path: |
-            dist/protectorate-rs-windows-arm64.exe
-            dist/protectorate-windows-arm64.exe
-            dist/protectorate-mcpbridge-windows-arm64.exe
-          if-no-files-found: error
-
-  rust-termux-arm64:
-    runs-on: ubuntu-latest
-    env:
-      CARGO_INCREMENTAL: "0"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-      - name: Rust toolchain
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-      - name: Rust Android target and pinned NDK
-        run: |
-          rustup target add aarch64-linux-android
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'ndk;28.2.13676358'
-      - name: Build Termux node
-        run: |
-          version=$(git describe --tags --match 'v[0-9]*' --always)
-          ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" PROTECTORATE_BUILD_VERSION="$version" bash scripts/build-rust-termux.sh release
-          mkdir -p dist
-          cp target/aarch64-linux-android/dist/protectorate-rs-termux dist/protectorate-rs-android-arm64
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rust-android-arm64
-          path: dist/protectorate-rs-android-arm64
-          if-no-files-found: error
-
   package:
-    needs: [rust, rust-arm64, rust-windows-amd64, rust-windows-arm64, rust-termux-arm64, desktop-windows]
+    needs: [rust, rust-arm64, desktop-windows]
     runs-on: ubuntu-latest
     env:
       CARGO_INCREMENTAL: "0"
@@ -202,7 +103,7 @@ jobs:
           echo "BUILD_VERSION=$version" >> "$GITHUB_ENV"
           echo "Rust package $version" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Build Rust Linux amd64 bundle
-        run: PROTECTORATE_BUILD_VERSION="$BUILD_VERSION" cargo build --locked --profile dist -p protectorate-server -p protectorate-sleeve-runner -p protectorate-node -p protectorate-cli -p protectorate-mcpbridge --bins
+        run: PROTECTORATE_BUILD_VERSION="$BUILD_VERSION" cargo build --locked --profile dist -p protectorate-server -p protectorate-sleeve-runner -p protectorate-cli -p protectorate-mcpbridge --bins
       - name: Verify embedded server version
         run: test "$(target/dist/protectorate-rs version --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')" = "$BUILD_VERSION"
       - name: Exercise installed Rust bundle
@@ -212,18 +113,6 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: rust-linux-arm64
-          path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: rust-windows-amd64
-          path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: rust-windows-arm64
-          path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: rust-android-arm64
           path: dist
       - uses: actions/download-artifact@v4
         with:

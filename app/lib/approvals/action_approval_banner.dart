@@ -10,8 +10,8 @@ import '../hubs/hub_client.dart';
 import '../theme/tokens.dart';
 import '../vfd/panel.dart';
 
-/// Agent calls the hub holds for the owner: destructive RPCs, admin grants
-/// and jobs, and launches whose harness or profile changed.
+/// Agent calls the hub holds for the owner: destructive RPCs and launches
+/// whose harness or profile changed.
 class ActionApprovalBanner extends StatefulWidget {
   const ActionApprovalBanner({
     super.key,

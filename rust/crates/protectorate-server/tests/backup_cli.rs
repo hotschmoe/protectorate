@@ -7,7 +7,7 @@ fn backup_and_restore_commands_round_trip_selected_hub_state() {
     let archives = root.path().join("archives");
     let restored = root.path().join("restored");
     fs::create_dir_all(home.join("auth")).unwrap();
-    fs::write(home.join("nodes.json"), b"node inventory").unwrap();
+    fs::write(home.join("directory.json"), b"workspace directory").unwrap();
     fs::write(home.join("identity.json"), b"device and token identities").unwrap();
     fs::write(home.join("auth/secret"), b"not in backup").unwrap();
     let binary = env!("CARGO_BIN_EXE_protectorate-rs");
@@ -44,8 +44,8 @@ fn backup_and_restore_commands_round_trip_selected_hub_state() {
         String::from_utf8_lossy(&result.stderr)
     );
     assert_eq!(
-        fs::read(restored.join("nodes.json")).unwrap(),
-        b"node inventory"
+        fs::read(restored.join("directory.json")).unwrap(),
+        b"workspace directory"
     );
     assert_eq!(
         fs::read(restored.join("identity.json")).unwrap(),

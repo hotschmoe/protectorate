@@ -1,4 +1,4 @@
-//! Blocking Connect JSON transport for the Rust CLI and hub-to-node calls.
+//! Blocking Connect JSON transport for the Rust CLI and MCP bridge.
 //! Callers in an async runtime should use `spawn_blocking` for these methods.
 use protectorate_auth::{capability, proof::DeviceKey};
 use protectorate_wire::{
@@ -8,14 +8,9 @@ use protectorate_wire::{
 use serde_json::Value;
 use std::{
     io::Read,
-    net::{SocketAddr, ToSocketAddrs},
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
-};
-use ureq::unversioned::{
-    resolver::{ResolvedSocketAddrs, Resolver},
-    transport::{DefaultConnector, NextTimeout},
 };
 use zeroize::Zeroizing;
 
@@ -24,12 +19,10 @@ const MAX_STREAM_MESSAGE_BYTES: usize = 8 << 20;
 const MAX_ERROR_BYTES: u64 = 64 << 10;
 /// How often a call the hub holds for owner approval is repeated.
 const APPROVAL_POLL: Duration = Duration::from_secs(2);
-/// Procedures a client without a token may call: device pairing and a new
-/// node redeeming its join code.
-const PUBLIC: [&str; 3] = [
+/// Procedures a client without a token may call: device pairing.
+const PUBLIC: [&str; 2] = [
     "/protectorate.v1.DeviceService/StartDeviceAuth",
     "/protectorate.v1.DeviceService/PollDeviceAuth",
-    "/protectorate.v1.NodeService/JoinNode",
 ];
 
 const RENEW_TOKEN: &str = "/protectorate.v1.TokenService/RenewToken";
@@ -37,11 +30,8 @@ const RENEW_TOKEN: &str = "/protectorate.v1.TokenService/RenewToken";
 /// How a client proves who it is on each request.
 #[derive(Clone)]
 pub enum Credential {
-    /// Only the public pairing and join procedures.
+    /// Only the public pairing procedures.
     None,
-    /// The connection authenticates the caller: the hub's client certificate
-    /// toward a node.
-    Transport,
     /// The owner token (loopback only) or a capability held in memory.
     Bearer(Zeroizing<String>),
     /// A capability file, read for every request. Past half its lifetime the
@@ -81,7 +71,7 @@ pub fn read_device_credential(path: &Path) -> Result<Credential> {
     device_key(&record).map(Credential::Device)
 }
 
-/// Parsed private CA bundle for explicit daemon-to-node TLS trust.
+/// Parsed private CA bundle for explicit TLS trust.
 #[derive(Clone)]
 pub struct TrustRoots(Vec<ureq::tls::Certificate<'static>>);
 
@@ -116,66 +106,12 @@ impl TrustRoots {
     }
 }
 
-/// What the hub presents to node agents: its certificate and key, and the hub
-/// CA that a node's certificate must chain to.
-#[derive(Clone)]
-pub struct NodeTls {
-    roots: TrustRoots,
-    identity: ureq::tls::ClientCert,
-}
-
-impl NodeTls {
-    pub fn from_pem(ca: &[u8], cert: &[u8], key: &[u8]) -> Result<Self> {
-        let certs = ureq::tls::parse_pem(cert)
-            .filter_map(|item| match item {
-                Ok(ureq::tls::PemItem::Certificate(cert)) => Some(cert),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        let key = ureq::tls::PrivateKey::from_pem(key)
-            .map_err(|e| RpcError::invalid(format!("hub key: {e}")))?;
-        if certs.is_empty() {
-            return Err(RpcError::invalid("hub certificate PEM is empty"));
-        }
-        Ok(Self {
-            roots: TrustRoots::from_pem(ca)?,
-            identity: ureq::tls::ClientCert::new_with_certs(&certs, key),
-        })
-    }
-}
-
-/// Dials one fixed address whatever host the URL names, so a node's
-/// certificate is checked against its identity rather than its address.
-#[derive(Debug)]
-struct Fixed(SocketAddr);
-
-impl Resolver for Fixed {
-    fn resolve(
-        &self,
-        _: &ureq::http::Uri,
-        _: &ureq::config::Config,
-        _: NextTimeout,
-    ) -> std::result::Result<ResolvedSocketAddrs, ureq::Error> {
-        let mut addrs = self.empty();
-        addrs.push(self.0);
-        Ok(addrs)
-    }
-}
-
 #[derive(Clone)]
 pub struct Client {
     base: String,
     credential: Credential,
-    dial: Option<SocketAddr>,
     agent: ureq::Agent,
     catalog: Catalog,
-}
-
-fn agent(config: ureq::config::Config, dial: Option<SocketAddr>) -> ureq::Agent {
-    match dial {
-        Some(addr) => ureq::Agent::with_parts(config, DefaultConnector::default(), Fixed(addr)),
-        None => config.into(),
-    }
 }
 
 impl Client {
@@ -186,8 +122,7 @@ impl Client {
         Self {
             base: self.base.clone(),
             credential: self.credential.clone(),
-            dial: self.dial,
-            agent: agent(self.agent.config().clone(), self.dial),
+            agent: self.agent.config().clone().into(),
             catalog: self.catalog.clone(),
         }
     }
@@ -197,84 +132,6 @@ impl Client {
         self.agent.shutdown();
     }
 
-    /// A hub-to-node client. With `tls` it dials `address` over mutual TLS
-    /// and requires the node's certificate to name `server_name`; without it
-    /// `address` must be a loopback agent that takes plain HTTP.
-    pub fn new_node(
-        server_name: &str,
-        address: &str,
-        tls: Option<&NodeTls>,
-        timeout: Duration,
-    ) -> Result<Self> {
-        let config = ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .max_redirects(0)
-            .max_redirects_will_error(false)
-            .timeout_global(Some(timeout));
-        let (base, config, dial) = match tls {
-            Some(tls) => {
-                let addr = address
-                    .to_socket_addrs()
-                    .ok()
-                    .and_then(|mut addrs| addrs.next())
-                    .ok_or_else(|| {
-                        RpcError::new(Code::Unavailable, format!("cannot resolve {address}"))
-                    })?;
-                let config = config.tls_config(
-                    ureq::tls::TlsConfig::builder()
-                        .root_certs(ureq::tls::RootCerts::new_with_certs(&tls.roots.0))
-                        .client_cert(Some(tls.identity.clone()))
-                        .build(),
-                );
-                (
-                    format!("https://{server_name}:{}", addr.port()),
-                    config,
-                    Some(addr),
-                )
-            }
-            None => (format!("http://{address}"), config, None),
-        };
-        if !valid_endpoint(&base) {
-            return Err(RpcError::invalid(
-                "a node without a certificate must be a loopback agent",
-            ));
-        }
-        Ok(Self {
-            base,
-            credential: Credential::Transport,
-            dial,
-            agent: agent(config.build(), dial),
-            catalog: Catalog::embedded()?,
-        })
-    }
-    /// A node-to-hub client: `base` is the hub's HTTPS URL, trusted through
-    /// the hub CA, and the node's own certificate is presented as the client
-    /// certificate. It is the only credential: it admits the calls a node
-    /// makes about itself.
-    pub fn new_for_node(base: &str, tls: &NodeTls, timeout: Duration) -> Result<Self> {
-        let base = base.trim_end_matches('/');
-        if !base.starts_with("https://") || !valid_endpoint(base) {
-            return Err(RpcError::invalid("a node reaches its hub over HTTPS"));
-        }
-        let config = ureq::Agent::config_builder()
-            .http_status_as_error(false)
-            .max_redirects(0)
-            .max_redirects_will_error(false)
-            .timeout_global(Some(timeout))
-            .tls_config(
-                ureq::tls::TlsConfig::builder()
-                    .root_certs(ureq::tls::RootCerts::new_with_certs(&tls.roots.0))
-                    .client_cert(Some(tls.identity.clone()))
-                    .build(),
-            );
-        Ok(Self {
-            base: base.into(),
-            credential: Credential::Transport,
-            dial: None,
-            agent: config.build().into(),
-            catalog: Catalog::embedded()?,
-        })
-    }
     pub fn new(base: &str, token: impl Into<String>, timeout: Duration) -> Result<Self> {
         if let Ok(pem) = std::env::var("PROTECTORATE_TLS_CA_PEM") {
             if pem.len() > 16 * 1024 {
@@ -286,7 +143,7 @@ impl Client {
         Self::new_with_ca(base, token, timeout, ca.as_deref().map(Path::new))
     }
 
-    /// Connect to the public device authorization and node join procedures
+    /// Connect to the public device authorization procedures
     /// without a bearer credential. The same endpoint, TLS and response limits
     /// apply.
     pub fn new_public(base: &str, timeout: Duration) -> Result<Self> {
@@ -373,7 +230,6 @@ impl Client {
             } else {
                 Credential::Bearer(token)
             },
-            dial: None,
             agent: config.build().into(),
             catalog: Catalog::embedded()?,
         })
@@ -468,7 +324,7 @@ impl Client {
         if self.public() && !PUBLIC.contains(&procedure) {
             return Err(RpcError::new(
                 Code::PermissionDenied,
-                "a client without a token may only pair a device or join a node",
+                "a client without a token may only pair a device",
             ));
         }
         let method = self.method(procedure)?;
@@ -551,7 +407,7 @@ impl Client {
         if self.public() {
             return Err(RpcError::new(
                 Code::PermissionDenied,
-                "a client without a token may only pair a device or join a node",
+                "a client without a token may only pair a device",
             ));
         }
         let method = self.method(procedure)?;
@@ -681,7 +537,7 @@ impl Client {
     pub fn authorization(&self, verb: &str, path: &str) -> Result<Option<Zeroizing<String>>> {
         let bearer = |token: &str| Some(Zeroizing::new(format!("Bearer {token}")));
         match &self.credential {
-            Credential::None | Credential::Transport => Ok(None),
+            Credential::None => Ok(None),
             Credential::Bearer(token) => Ok(bearer(token)),
             Credential::TokenFile(path) => Ok(bearer(&self.held_token(path)?)),
             Credential::Device(key) => key

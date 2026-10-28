@@ -104,7 +104,7 @@ pub struct LaunchOptions {
     /// Values travel through the private descriptor, never through argv.
     pub environment: BTreeMap<String, String>,
     pub setup_timeout: Duration,
-    /// A terminal sleeve needs the tmux pane's pty; jobs capture output.
+    /// A terminal sleeve needs the tmux pane's pty; other workloads capture output.
     pub stdio: StdioMode,
     /// Receives every egress proxy decision for a proxied plan.
     pub egress_log: Option<egress::Log>,
@@ -727,7 +727,7 @@ pub fn spawn_direct_harness(plan: &ValidatedPlan, options: &LaunchOptions) -> Re
 
 pub fn spawn(plan: &ValidatedPlan, options: &LaunchOptions) -> Result<ChildHandle> {
     if plan.kind() != PlanKind::Sandboxed {
-        return invalid("plain node jobs must use their explicit unsandboxed execution path");
+        return invalid("unsandboxed plans must use their explicit execution path");
     }
     if !plan.overlays().is_empty() && !host_supports_overlay() {
         return Err(LaunchError::Unsupported(

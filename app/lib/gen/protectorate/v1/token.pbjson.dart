@@ -16,53 +16,9 @@ import 'dart:core' as $core;
 import 'dart:typed_data' as $typed_data;
 
 import 'package:protobuf/well_known_types/google/protobuf/duration.pbjson.dart'
-    as $0;
-import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $1;
-
-@$core.Deprecated('Use grantServiceAdminRequestDescriptor instead')
-const GrantServiceAdminRequest$json = {
-  '1': 'GrantServiceAdminRequest',
-  '2': [
-    {'1': 'node', '3': 1, '4': 1, '5': 9, '10': 'node'},
-    {
-      '1': 'ttl',
-      '3': 2,
-      '4': 1,
-      '5': 11,
-      '6': '.google.protobuf.Duration',
-      '10': 'ttl'
-    },
-    {'1': 'task', '3': 3, '4': 1, '5': 9, '10': 'task'},
-  ],
-};
-
-/// Descriptor for `GrantServiceAdminRequest`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List grantServiceAdminRequestDescriptor = $convert.base64Decode(
-    'ChhHcmFudFNlcnZpY2VBZG1pblJlcXVlc3QSEgoEbm9kZRgBIAEoCVIEbm9kZRIrCgN0dGwYAi'
-    'ABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb25SA3R0bBISCgR0YXNrGAMgASgJUgR0YXNr');
-
-@$core.Deprecated('Use grantServiceAdminResponseDescriptor instead')
-const GrantServiceAdminResponse$json = {
-  '1': 'GrantServiceAdminResponse',
-  '2': [
-    {
-      '1': 'token',
-      '3': 1,
-      '4': 1,
-      '5': 11,
-      '6': '.protectorate.v1.TokenInfo',
-      '10': 'token'
-    },
-    {'1': 'secret', '3': 2, '4': 1, '5': 9, '10': 'secret'},
-  ],
-};
-
-/// Descriptor for `GrantServiceAdminResponse`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List grantServiceAdminResponseDescriptor =
-    $convert.base64Decode(
-        'ChlHcmFudFNlcnZpY2VBZG1pblJlc3BvbnNlEjAKBXRva2VuGAEgASgLMhoucHJvdGVjdG9yYX'
-        'RlLnYxLlRva2VuSW5mb1IFdG9rZW4SFgoGc2VjcmV0GAIgASgJUgZzZWNyZXQ=');
+import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
+    as $0;
 
 @$core.Deprecated('Use tokenInfoDescriptor instead')
 const TokenInfo$json = {
@@ -276,10 +232,10 @@ const $core.Map<$core.String, $core.dynamic> TokenServiceBase$json = {
 const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
     TokenServiceBase$messageJson = {
   '.protectorate.v1.CreateTokenRequest': CreateTokenRequest$json,
-  '.google.protobuf.Duration': $0.Duration$json,
+  '.google.protobuf.Duration': $1.Duration$json,
   '.protectorate.v1.CreateTokenResponse': CreateTokenResponse$json,
   '.protectorate.v1.TokenInfo': TokenInfo$json,
-  '.google.protobuf.Timestamp': $1.Timestamp$json,
+  '.google.protobuf.Timestamp': $0.Timestamp$json,
   '.protectorate.v1.ListTokensRequest': ListTokensRequest$json,
   '.protectorate.v1.ListTokensResponse': ListTokensResponse$json,
   '.protectorate.v1.RevokeTokenRequest': RevokeTokenRequest$json,
@@ -298,29 +254,3 @@ final $typed_data.Uint8List tokenServiceDescriptor = $convert.base64Decode(
     'Jldm9rZVRva2VuUmVzcG9uc2UiCIi1GAGgtRgBElUKClJlbmV3VG9rZW4SIi5wcm90ZWN0b3Jh'
     'dGUudjEuUmVuZXdUb2tlblJlcXVlc3QaIy5wcm90ZWN0b3JhdGUudjEuUmVuZXdUb2tlblJlc3'
     'BvbnNl');
-
-const $core.Map<$core.String, $core.dynamic> GrantServiceBase$json = {
-  '1': 'GrantService',
-  '2': [
-    {
-      '1': 'Admin',
-      '2': '.protectorate.v1.GrantServiceAdminRequest',
-      '3': '.protectorate.v1.GrantServiceAdminResponse'
-    },
-  ],
-};
-
-@$core.Deprecated('Use grantServiceDescriptor instead')
-const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
-    GrantServiceBase$messageJson = {
-  '.protectorate.v1.GrantServiceAdminRequest': GrantServiceAdminRequest$json,
-  '.google.protobuf.Duration': $0.Duration$json,
-  '.protectorate.v1.GrantServiceAdminResponse': GrantServiceAdminResponse$json,
-  '.protectorate.v1.TokenInfo': TokenInfo$json,
-  '.google.protobuf.Timestamp': $1.Timestamp$json,
-};
-
-/// Descriptor for `GrantService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
-final $typed_data.Uint8List grantServiceDescriptor = $convert.base64Decode(
-    'CgxHcmFudFNlcnZpY2USXgoFQWRtaW4SKS5wcm90ZWN0b3JhdGUudjEuR3JhbnRTZXJ2aWNlQW'
-    'RtaW5SZXF1ZXN0GioucHJvdGVjdG9yYXRlLnYxLkdyYW50U2VydmljZUFkbWluUmVzcG9uc2U=');

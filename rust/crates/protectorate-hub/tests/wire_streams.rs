@@ -1,29 +1,14 @@
 #![cfg(target_os = "linux")]
-//! Connect deadlines and client disconnects over the hub's real listener.
+//! Connect deadlines over the hub's real listener.
 use protectorate_hub::Hub;
-use protectorate_inventory::Node;
-use protectorate_node::{Agent, MetricsCollector};
-use protectorate_node_metrics::NodeMetrics;
 use serde_json::{json, Value};
-use std::{
-    io,
-    path::Path,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
 
 const OWNER: &str = "owner-secret";
-
-struct Metrics;
-impl MetricsCollector for Metrics {
-    fn collect(&self) -> io::Result<NodeMetrics> {
-        Ok(NodeMetrics::default())
-    }
-}
 
 async fn serve(router: axum::Router) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -164,75 +149,5 @@ async fn connect_deadlines_end_unary_waits_and_streams_with_deadline_exceeded() 
             started.elapsed() < Duration::from_secs(40),
             "stream {timeout} outlived its deadline"
         );
-    }
-}
-
-fn holds_open(file: &Path) -> bool {
-    std::fs::read_dir("/proc/self/fd")
-        .unwrap()
-        .filter_map(Result::ok)
-        .any(|fd| std::fs::read_link(fd.path()).is_ok_and(|target| target == file))
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_relayed_file_stream_lets_go_of_the_node_file_when_its_client_disconnects() {
-    let root = tempfile::tempdir().unwrap();
-    let files = root.path().join("node-files");
-    std::fs::create_dir_all(&files).unwrap();
-    // Sparse and far larger than a relay could push within the deadline, so
-    // only a torn-down stream releases it in time.
-    let big = std::fs::canonicalize(&files).unwrap().join("big.bin");
-    std::fs::File::create(&big)
-        .unwrap()
-        .set_len(4 << 30)
-        .unwrap();
-    let node = Agent::new(Arc::new(Metrics))
-        .with_files(&files, false)
-        .unwrap();
-    let node_addr = serve(node.router().unwrap()).await;
-    let hub = Hub::open(root.path().join("hub"), OWNER, "test").unwrap();
-    hub.inventory
-        .add(
-            Node {
-                name: "peer".into(),
-                address: node_addr,
-                ..Node::default()
-            },
-            false,
-        )
-        .unwrap();
-    let addr = serve(hub.router().unwrap()).await;
-
-    let request = envelope(
-        0,
-        &json!({"name":"peer","path":"big.bin","noCompress":true}),
-    );
-    let mut stream = open(
-        &addr,
-        "/protectorate.v1.NodeService/GetFile",
-        true,
-        None,
-        &request,
-    )
-    .await;
-    let mut received = vec![0_u8; 1 << 20];
-    let mut total = 0;
-    while total < received.len() {
-        let n = tokio::time::timeout(Duration::from_secs(30), stream.read(&mut received[total..]))
-            .await
-            .expect("no file data arrived")
-            .unwrap();
-        assert!(n > 0, "stream ended early");
-        total += n;
-    }
-    assert!(holds_open(&big), "the node is not streaming the file");
-    drop(stream);
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while holds_open(&big) {
-        assert!(
-            Instant::now() < deadline,
-            "the node still reads the file after the client went away"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }

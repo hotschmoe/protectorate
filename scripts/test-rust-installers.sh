@@ -45,7 +45,7 @@ printf '%s\n' v9.8.7 > "$temp/bundle/VERSION"
 mkdir -p "$temp/web"
 printf '%s\n' '<html>Rust bundle</html>' > "$temp/web/index.html"
 tar -czf "$temp/bundle/protectorate-web-v9.8.7.tar.gz" -C "$temp/web" .
-for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge; do
+for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate protectorate-mcpbridge; do
   name="$component-linux-$arch"
   if [[ "$component" == protectorate-rs ]]; then
     printf '#!/usr/bin/env bash\nprintf '\''{"version":"v9.8.7"}\\n'\''\n' > "$temp/bundle/$name"
@@ -54,14 +54,12 @@ for component in protectorate-rs protectorate-sleeve-runner protectorate-sleeve-
   fi
   chmod +x "$temp/bundle/$name"
 done
-printf 'MZ windows node\n' > "$temp/bundle/protectorate-rs-windows-arm64.exe"
-printf 'termux node\n' > "$temp/bundle/protectorate-rs-android-arm64"
-(cd "$temp/bundle" && sha256sum VERSION *-linux-"$arch" protectorate-rs-windows-arm64.exe protectorate-rs-android-arm64 protectorate-web-v9.8.7.tar.gz > SHA256SUMS)
+(cd "$temp/bundle" && sha256sum VERSION *-linux-"$arch" protectorate-web-v9.8.7.tar.gz > SHA256SUMS)
 
 bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/hub" --release-dir "$HOME/hub-releases" --dry-run > "$temp/dry.log"
 [[ ! -e "$HOME/hub-releases" && ! -e "$HOME/.config/systemd/user/protectorate-hub.service" ]]
 bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/hub" --release-dir "$HOME/hub-releases" \
-  --public-url https://example.test/ --trusted-proxy 127.0.0.2 --trusted-proxy 127.0.0.3 \
+  --trusted-proxy 127.0.0.2 --trusted-proxy 127.0.0.3 \
   --local-llm-url http://127.0.0.1:1234 --local-llm-url http://127.0.0.1:5678 \
   --local-model-host model.test --local-model-host backup.test --dead-retention 0 \
   --tls-listen 192.168.22.5:7470 --tls-name hub.lan --backup-dir "$HOME/hub-backups" --no-start > "$temp/hub.log"
@@ -69,9 +67,6 @@ bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/hub" --rel
 [[ -x "$HOME/hub-releases/v9.8.7/protectorate-sleeve-runner" ]]
 [[ -x "$HOME/hub-releases/v9.8.7/protectorate-mcpbridge" ]]
 [[ -f "$HOME/hub-releases/v9.8.7/web/index.html" ]]
-cmp "$temp/bundle/protectorate-rs-windows-arm64.exe" "$HOME/hub-releases/v9.8.7/protectorate-rs-windows-arm64.exe"
-cmp "$temp/bundle/protectorate-rs-android-arm64" "$HOME/hub-releases/v9.8.7/protectorate-rs-android-arm64"
-[[ ! -e "$HOME/hub-releases/v9.8.7/protectorate-rs-windows-amd64.exe" ]]
 grep -Fq '"version":"v9.8.7"' "$HOME/hub-releases/v9.8.7/release.json"
 [[ "$(readlink "$HOME/hub-releases/current")" == v9.8.7 ]]
 [[ "$(stat -c %a "$HOME/hub/token")" == 600 ]]
@@ -85,7 +80,6 @@ if bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --listen 192.168.22.5
   exit 1
 fi
 grep -Fq -- 'must be loopback' "$temp/hub-plain-lan.log"
-grep -Fq -- '--public-url "https://example.test/"' "$HOME/.config/systemd/user/protectorate-hub.service"
 grep -Fq -- '--dead-retention "0"' "$HOME/.config/systemd/user/protectorate-hub.service"
 grep -Fq -- "--backup-dir \"$HOME/hub-backups\"" "$HOME/.config/systemd/user/protectorate-hub.service"
 grep -Fq -- '--trusted-proxy "127.0.0.2"' "$HOME/.config/systemd/user/protectorate-hub.service"
@@ -192,41 +186,12 @@ assert '--user enable --now protectorate-hub.service' in calls
 assert '--user disable protectorate-hub.service' not in calls
 PY
 
-printf '%s\n' join-code > "$temp/code"
-printf '%s\n' ca > "$temp/ca.pem"
-join=(--hub https://hub.test:7470 --name n1 --code-file "$temp/code" --ca-cert "$temp/ca.pem")
-if bash "$root/install-node.sh" --bundle-dir "$temp/bundle" --home "$HOME/node" --release-dir "$HOME/node-releases" --no-start > "$temp/node-unjoined.log" 2>&1; then
-  echo 'node installed without joining a hub' >&2
-  exit 1
-fi
-grep -Fq 'a node must join a hub' "$temp/node-unjoined.log"
-bash "$root/install-node.sh" --bundle-dir "$temp/bundle" --home "$HOME/node" --release-dir "$HOME/node-releases" "${join[@]}" --no-start > "$temp/node.log"
-[[ -x "$HOME/node-releases/v9.8.7/protectorate-node-sandbox-helper" ]]
-grep -Fq -- 'node serve' "$HOME/.config/systemd/user/protectorate-node.service"
-! grep -Fq -- 'token' "$HOME/.config/systemd/user/protectorate-node.service"
-! grep -Fq -- '--allow-plain-jobs' "$HOME/.config/systemd/user/protectorate-node.service"
-bash "$root/install-node.sh" --bundle-dir "$temp/bundle" --home "$HOME/node" --release-dir "$HOME/node-releases" "${join[@]}" --allow-plain-jobs --no-start > "$temp/node-care.log"
-grep -Fq -- '--allow-plain-jobs' "$HOME/.config/systemd/user/protectorate-node.service"
-if bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --allow-plain-jobs --dry-run > "$temp/hub-care.log" 2>&1; then
-  echo 'hub accepted node-only plain job option' >&2
-  exit 1
-fi
-grep -Fq -- '--allow-plain-jobs requires --role node' "$temp/hub-care.log"
-
-bash "$root/install-node.sh" --bundle-dir "$temp/bundle" --home "$HOME/shared-node" --release-dir "$HOME/shared-releases" "${join[@]}" --no-start > "$temp/shared-node.log"
-[[ ! -e "$HOME/shared-releases/v9.8.7/web" ]]
-original_binary=$(sha256sum "$HOME/shared-releases/v9.8.7/protectorate-rs-linux-$arch")
-bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/shared-hub" --release-dir "$HOME/shared-releases" --no-start > "$temp/shared-hub.log"
-grep -Fq 'Added verified web archive to node-first release' "$temp/shared-hub.log"
-[[ -f "$HOME/shared-releases/v9.8.7/web/index.html" ]]
-[[ "$original_binary" == "$(sha256sum "$HOME/shared-releases/v9.8.7/protectorate-rs-linux-$arch")" ]]
-[[ "$(readlink "$HOME/shared-releases/current")" == v9.8.7 ]]
-printf '%s\n' 'changed' > "$HOME/shared-releases/v9.8.7/protectorate-web-v9.8.7.tar.gz"
-if bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/shared-hub" --release-dir "$HOME/shared-releases" --no-start > "$temp/shared-tamper.log" 2>&1; then
+printf '%s\n' 'changed' > "$HOME/hub-releases/v9.8.7/protectorate-web-v9.8.7.tar.gz"
+if bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/hub" --release-dir "$HOME/hub-releases" --no-start > "$temp/hub-tamper.log" 2>&1; then
   echo 'existing changed web archive was accepted' >&2
   exit 1
 fi
-grep -Fq 'existing web archive differs' "$temp/shared-tamper.log"
+grep -Fq 'existing web archive differs' "$temp/hub-tamper.log"
 
 bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --no-start > "$temp/default.log"
 [[ -f "$HOME/.protectorate/token" ]]

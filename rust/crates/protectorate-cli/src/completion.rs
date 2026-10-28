@@ -14,19 +14,14 @@ const ROOT: &[Candidate] = &[
     ("completion", "Generate shell completion"),
     ("devices", "Manage trusted devices"),
     ("events", "Stream hub events"),
-    ("grant", "Mint task grants"),
     ("hub", "Manage the local hub"),
-    ("job", "Run commands on nodes"),
-    ("lease", "Reserve resources"),
     ("login", "Pair this device"),
     ("mcp", "Run the MCP bridge"),
     ("msg", "Use the mailbox"),
-    ("node", "Manage nodes"),
     ("orchestrator", "Manage Envoy"),
     ("pair", "Show a pairing link"),
     ("quota", "Show subscription usage"),
     ("report", "Report a sleeve result"),
-    ("service", "Generate service definitions"),
     ("session", "Manage sessions"),
     ("sleeve", "Manage sleeves"),
     ("status", "Show hub status"),
@@ -190,7 +185,6 @@ fn children(path: &str) -> &'static [Candidate] {
             ("revoke", "Revoke a device"),
             ("rename", "Rename a device"),
         ],
-        "grant" => &[("admin", "Mint an admin grant")],
         "hub" => &[
             ("serve", "Run the hub"),
             ("backup", "Create a backup"),
@@ -201,20 +195,6 @@ fn children(path: &str) -> &'static [Candidate] {
             ("publish-go-mod-cache", "Publish Go module cache"),
             ("update", "Update the hub"),
         ],
-        "job" => &[
-            ("ls", "List jobs"),
-            ("show", "Show a job"),
-            ("cancel", "Cancel a job"),
-            ("run", "Run a command"),
-            ("test-cross", "Run cross-node tests"),
-            ("logs", "Show job output"),
-        ],
-        "lease" => &[
-            ("ls", "List leases"),
-            ("acquire", "Acquire a lease"),
-            ("renew", "Renew a lease"),
-            ("release", "Release leases"),
-        ],
         "msg" => &[
             ("send", "Send a message"),
             ("reply", "Reply to a message"),
@@ -224,35 +204,12 @@ fn children(path: &str) -> &'static [Candidate] {
             ("threads", "List threads"),
             ("wait", "Wait for reply"),
         ],
-        "node" => &[
-            ("ls", "List nodes"),
-            ("show", "Show a node"),
-            ("metrics", "Local metrics"),
-            ("add", "Add a node"),
-            ("rm", "Remove a node"),
-            ("tier", "Set tier"),
-            ("update", "Update node"),
-            ("invite", "Issue a join code"),
-            ("put", "Upload a file"),
-            ("get", "Download a file"),
-            ("join", "Join a hub"),
-            ("install", "Install node"),
-            ("uninstall", "Uninstall node"),
-            ("doctor", "Inspect local node"),
-            ("serve", "Run the node agent"),
-        ],
         "orchestrator" => &[
             ("spawn", "Spawn Envoy"),
             ("status", "Show Envoy"),
             ("scopes", "Change Envoy token scopes"),
         ],
         "quota" => &[("suggest", "Suggest harness capacity")],
-        "service" => &[
-            ("systemd", "Systemd unit"),
-            ("windows-task", "Task Scheduler XML"),
-            ("install-windows", "Windows service commands"),
-            ("termux", "Termux run and boot scripts"),
-        ],
         "session" => &[
             ("ls", "List sessions"),
             ("new", "Start a session"),
@@ -304,106 +261,6 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             ("--version", "Release version"),
         ],
         "hub restore" => &[("--home", "Empty destination directory")],
-        "service systemd" => &[
-            ("--binary", "Executable"),
-            ("--home", "State directory"),
-            ("--write", "Output path"),
-            ("--install", "Install unit"),
-            ("--user-name", "Service user"),
-            ("--path", "PATH"),
-            ("--tmux-socket", "Tmux socket"),
-        ],
-        "service windows-task" => &[
-            ("--binary", "Executable"),
-            ("--home", "State directory"),
-            ("--write", "Output path"),
-            ("--trigger", "Task trigger"),
-            ("--elevated", "Run elevated"),
-            ("--win-user", "Windows user"),
-        ],
-        "service install-windows" => &[
-            ("--binary", "Executable"),
-            ("--home", "State directory"),
-            ("--write", "Output path"),
-        ],
-        "service termux" => &[
-            ("--binary", "Executable"),
-            ("--home", "State directory"),
-            ("--write", "Output path"),
-            ("--install", "Install into Termux"),
-        ],
-        "node join" | "node install" => &[
-            ("--hub", "Hub HTTPS URL"),
-            ("--name", "Node name"),
-            ("--code", "Join code"),
-            ("--code-file", "Join code file"),
-            ("--ca-cert", "Hub CA certificate"),
-            ("--listen", "Listen address"),
-            ("--home", "State directory"),
-        ],
-        "node doctor" | "node uninstall" => &[("--home", "State directory")],
-        "node serve" => &[
-            ("--home", "State directory"),
-            ("--file-root", "File transfer root"),
-            ("--file-unconfined", "Unrestricted file transfers"),
-            ("--job-concurrency", "Jobs at once"),
-            ("--sandbox-helper", "Sandbox helper binary"),
-            ("--allow-plain-jobs", "Run jobs without the sandbox"),
-            ("--watch-dir", "Watched directory"),
-            ("--docker-host", "Docker host URL"),
-            ("--listen", "Listen address"),
-        ],
-        "job run" => &[
-            ("--on", "Node, lease or selector"),
-            ("--git", "Git source"),
-            ("--artifact", "Local source"),
-            ("--artifact-glob", "Collect artifacts"),
-            ("--workdir", "Working directory"),
-            ("--env", "Environment entry"),
-            ("--cpu", "CPU limit"),
-            ("--mem", "Memory limit"),
-            ("--admin", "Run elevated (Linux nodes)"),
-        ],
-        "job test-cross" => &[
-            ("--os", "Target OS"),
-            ("--arch", "Target architecture"),
-            ("--on", "Node, lease or selector"),
-            ("--git", "Git source"),
-            ("--artifact", "Local source"),
-            ("--artifact-glob", "Collect artifacts"),
-            ("--package", "Cargo package"),
-        ],
-        "node invite" => &[
-            ("--tier", "Node tier"),
-            ("--expires", "Code lifetime"),
-            ("--url", "Install URL"),
-        ],
-        "node add" => &[
-            ("--addr", "Node address"),
-            ("--update", "Change an existing node"),
-            ("--ssh", "SSH alias"),
-            ("--tier", "Node tier"),
-            ("--tag", "Node tag"),
-            ("--notes", "Notes"),
-        ],
-        "node rm" => &[
-            ("--jobs", "Wait or cancel jobs"),
-            ("--wait-timeout", "Drain deadline"),
-            ("--uninstall", "Uninstall service"),
-        ],
-        "node update" => &[
-            ("--all", "All nodes"),
-            ("--force", "Force update"),
-            ("--no-wait", "Do not wait"),
-        ],
-        "node metrics" => &[
-            ("--local", "Collect locally"),
-            ("--watch", "Watch directory"),
-        ],
-        "node put" | "node get" => &[
-            ("--force", "Replace target"),
-            ("--no-compress", "Disable compression"),
-        ],
         "sleeve spawn" => &[
             ("--workspace", "Workspace"),
             ("--harness", "Harness"),
@@ -493,19 +350,6 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             ("--body-file", "Body file"),
             ("--append", "Append body"),
         ],
-        "lease acquire" => &[
-            ("--node", "Node"),
-            ("--os", "OS"),
-            ("--arch", "Architecture"),
-            ("--min-free-mem", "Free memory"),
-            ("--gpu-vram", "GPU memory"),
-            ("--gpu", "GPU"),
-            ("--npu", "NPU"),
-            ("--holder", "Holder"),
-            ("--ttl", "Lifetime"),
-            ("--wait", "Wait for resource"),
-            ("--priority", "Priority"),
-        ],
         "msg send" => &[
             ("--thread", "Thread"),
             ("--kind", "Message kind"),
@@ -557,12 +401,6 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             ("--run", "Run id"),
             ("--page-token", "Page token"),
         ],
-        "grant admin" => &[
-            ("--node", "Node"),
-            ("--task", "Task"),
-            ("--ttl", "Lifetime"),
-            ("--out", "Output file"),
-        ],
         "quota" => &[("--refresh", "Refresh usage")],
         "quota suggest" => &[("--for", "Task size"), ("--refresh", "Refresh usage")],
         _ => &[],
@@ -577,18 +415,10 @@ fn takes_value(flag: &str) -> bool {
             | "--list"
             | "--no-descriptions"
             | "--all"
-            | "--force"
-            | "--no-wait"
-            | "--uninstall"
-            | "--local"
-            | "--no-compress"
-            | "--install"
-            | "--elevated"
             | "--readonly"
             | "--drop-caches"
             | "--lock-after"
             | "--off"
-            | "--admin"
             | "--supervised"
             | "--nested"
             | "--new-branch"
@@ -610,9 +440,6 @@ fn takes_value(flag: &str) -> bool {
             | "--peek"
             | "--ack"
             | "--refresh"
-            | "--file-unconfined"
-            | "--allow-plain-jobs"
-            | "--update"
             | "--double"
     )
 }
@@ -658,38 +485,16 @@ fn complete(args: &[String], leading: &[String], descriptions: bool) -> String {
         }
     }
     let mut output = String::new();
-    let value_target = match (path.as_str(), pending_flag) {
-        ("job run" | "job test-cross", Some("--on")) => Some(ResourceKind::JobTarget),
-        ("lease acquire", Some("--node")) => Some(ResourceKind::Node),
-        _ => None,
-    };
-    let (inline_target, lookup_prefix) = match prefix.split_once('=') {
-        Some(("--on", value)) if matches!(path.as_str(), "job run" | "job test-cross") => {
-            (Some(ResourceKind::JobTarget), value)
-        }
-        Some(("--node", value)) if path == "lease acquire" => (Some(ResourceKind::Node), value),
-        _ => (None, prefix),
-    };
-    if let Some(kind) = value_target.or(inline_target).or_else(|| {
-        (!prefix.starts_with('-') && pending_flag.is_none())
-            .then(|| resource_kind(&path, positionals))
-            .flatten()
-    }) {
-        let inline_flag = inline_target.map(|_| prefix.split_once('=').unwrap().0);
+    if !prefix.starts_with('-') && pending_flag.is_none() && completes_sleeve(&path, positionals) {
         let mut seen = HashSet::new();
-        for (name, label) in resource_names(kind, leading, words, lookup_prefix).unwrap_or_default()
-        {
+        for name in sleeve_names(leading, words, prefix).unwrap_or_default() {
             if !seen.insert(name.clone()) {
                 continue;
-            }
-            if let Some(flag) = inline_flag {
-                output.push_str(flag);
-                output.push('=');
             }
             output.push_str(&name);
             if descriptions {
                 output.push('\t');
-                output.push_str(label);
+                output.push_str("Sleeve");
             }
             output.push('\n');
         }
@@ -724,56 +529,19 @@ fn complete(args: &[String], leading: &[String], descriptions: bool) -> String {
     output
 }
 
-#[derive(Clone, Copy)]
-enum ResourceKind {
-    Node,
-    Sleeve,
-    Lease,
-    JobTarget,
-}
-
-impl ResourceKind {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Node => "Node",
-            Self::Sleeve => "Sleeve",
-            Self::Lease => "Lease",
-            Self::JobTarget => "Job target",
-        }
-    }
-}
-
-fn resource_kind(path: &str, positionals: usize) -> Option<ResourceKind> {
+fn completes_sleeve(path: &str, positionals: usize) -> bool {
     match path {
-        "node show" | "node rm" | "node tier" | "node update" | "node put" | "node get"
-            if positionals == 0 =>
-        {
-            Some(ResourceKind::Node)
-        }
         "sleeve show" | "sleeve status" | "sleeve kill" | "sleeve attach" | "sleeve resleeve"
-            if positionals == 0 =>
-        {
-            Some(ResourceKind::Sleeve)
-        }
-        "chat send" | "chat watch" | "chat respond" | "chat interrupt" | "chat compact"
-        | "chat status" | "chat settings" | "chat models"
-            if positionals == 0 =>
-        {
-            Some(ResourceKind::Sleeve)
-        }
-        "chat wait" => Some(ResourceKind::Sleeve),
-        _ => None,
+        | "chat send" | "chat watch" | "chat respond" | "chat interrupt" | "chat compact"
+        | "chat status" | "chat settings" | "chat models" => positionals == 0,
+        "chat wait" => true,
+        _ => false,
     }
 }
 
 /// Completion must stay quiet and fast when the hub is down or credentials are
 /// unavailable. The same auth resolution as ordinary CLI calls is used here.
-fn resource_names(
-    kind: ResourceKind,
-    leading: &[String],
-    words: &[String],
-    prefix: &str,
-) -> Option<Vec<(String, &'static str)>> {
+fn sleeve_names(leading: &[String], words: &[String], prefix: &str) -> Option<Vec<String>> {
     let mut globals = Vec::new();
     for tokens in [leading, words] {
         let mut at = 0;
@@ -794,65 +562,27 @@ fn resource_names(
             at += 1;
         }
     }
-    globals.extend(["node".to_owned(), "ls".to_owned()]);
+    globals.extend(["sleeve".to_owned(), "ls".to_owned()]);
     let mut invocation = protectorate_cli::parse(&globals).ok()?;
     invocation.timeout = Duration::from_millis(750);
     let client = protectorate_cli::client_for(&invocation).ok()?;
-    let mut names = if matches!(kind, ResourceKind::JobTarget) {
-        let mut names = fetch_names(&client, ResourceKind::Node, prefix);
-        names.extend(fetch_names(&client, ResourceKind::Lease, prefix));
-        names
-    } else {
-        fetch_names(&client, kind, prefix)
-    };
+    let mut names = client
+        .unary(v1::sleeve_service::LIST_SLEEVES, &v1::ListSleevesRequest {})
+        .map(|listing| {
+            listing
+                .sleeves
+                .into_iter()
+                .map(|sleeve| sleeve.name)
+                .filter(|name| {
+                    !name.is_empty()
+                        && name.starts_with(prefix)
+                        && !name.chars().any(char::is_control)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     names.sort();
-    names.dedup_by(|left, right| left.0 == right.0);
+    names.dedup();
     names.truncate(1024);
     Some(names)
-}
-
-fn fetch_names(
-    client: &protectorate_cli::Client,
-    kind: ResourceKind,
-    prefix: &str,
-) -> Vec<(String, &'static str)> {
-    let names = match kind {
-        ResourceKind::Node => client
-            .unary(v1::node_service::LIST_NODES, &v1::ListNodesRequest {})
-            .map(|listing| {
-                listing
-                    .nodes
-                    .into_iter()
-                    .filter_map(|status| status.node.map(|node| node.name))
-                    .collect()
-            }),
-        ResourceKind::Sleeve => client
-            .unary(v1::sleeve_service::LIST_SLEEVES, &v1::ListSleevesRequest {})
-            .map(|listing| {
-                listing
-                    .sleeves
-                    .into_iter()
-                    .map(|sleeve| sleeve.name)
-                    .collect()
-            }),
-        ResourceKind::Lease => client
-            .unary(v1::lease_service::LIST_LEASES, &v1::ListLeasesRequest {})
-            .map(|listing| {
-                listing
-                    .leases
-                    .into_iter()
-                    .filter(|lease| lease.state() != v1::LeaseState::Queued)
-                    .map(|lease| lease.id)
-                    .collect()
-            }),
-        ResourceKind::JobTarget => Ok(Vec::<String>::new()),
-    };
-    names
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|name| {
-            !name.is_empty() && name.starts_with(prefix) && !name.chars().any(char::is_control)
-        })
-        .map(|name| (name, kind.label()))
-        .collect()
 }

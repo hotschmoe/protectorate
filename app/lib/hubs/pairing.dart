@@ -11,7 +11,6 @@ class PairingRequest {
     required this.name,
     this.tab,
     this.session,
-    this.node,
     this.caPem = '',
   });
 
@@ -21,7 +20,6 @@ class PairingRequest {
   final String caPem;
   final String? tab;
   final String? session;
-  final String? node;
 }
 
 String _trimSlashes(String url) {
@@ -44,7 +42,6 @@ PairingRequest? _fromQuery(Map<String, String> q, String baseUrl) {
     name: name.isEmpty ? Uri.parse(base).host : name,
     tab: q['tab'],
     session: q['session'],
-    node: q['node'],
     caPem: caPem,
   );
 }

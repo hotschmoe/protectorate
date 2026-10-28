@@ -29,7 +29,7 @@ the token, including its expiry.
    (0600).
    The sleeve gets `PROTECTORATE_TOKEN_FILE` and `PROTECTORATE_HUB`, so the CLI
    inside needs no flags.
-3. Regenerates `AGENTS.md`, `CLAUDE.md` (a symlink to it) and `hosts.md`.
+3. Regenerates `AGENTS.md` and `CLAUDE.md` (a symlink to it).
 4. Starts the sleeve in chat mode. If anything fails after the token was
    minted, the new token is revoked.
 
@@ -65,8 +65,7 @@ is required. This feature does not require restarting the hub or Envoy.
 of every hub tool with whether this token may call it, and a short reference
 of the CLI commands Envoy uses most. It is rebuilt on every spawn; put standing
 notes in `NOTES.md` next to it. Claude Code reads
-`CLAUDE.md`; Codex, Grok and pi read `AGENTS.md`. `hosts.md` is the hub's node
-inventory.
+`CLAUDE.md`; Codex, Grok and pi read `AGENTS.md`.
 
 ## Staying cache-friendly
 
@@ -77,9 +76,6 @@ exact prefix, context files included. So the hub keeps that prefix still:
   expiry. It is byte-identical across respawns unless the CLI, the tool
   catalog, the hub URL or the scopes change (the harness is not named, so a resleeve keeps it too), and it is not even
   rewritten (mtime kept) when nothing changed.
-- `hosts.md` changes whenever a node does, so it is never part of the loaded
-  context: `AGENTS.md` only mentions it and Envoy reads it on demand. The hub
-  refreshes the copy in the workspace every minute.
 - The capability lives an hour (`hub serve --capability-ttl`) and is renewed in
   place: at half its life the hub writes a fresh token with the same caveats
   into the token file. The harness is not restarted: the CLI reads
@@ -99,21 +95,16 @@ The orchestrator can read and edit the owner's notes with `protectorate backlog 
 ## Scoping
 
 Default scopes are `read`, `events` and the explicit names of the mutating,
-non-destructive tools matching `backlog_*`, `lease_*`, `message_*`,
-`sleeve_spawn_sleeve`, `sleeve_resleeve_sleeve` and `grant_admin`. In
+non-destructive tools matching `backlog_*`, `message_*`,
+`sleeve_spawn_sleeve` and `sleeve_resleeve_sleeve`. In
 practice: read everything, stream events, create and update notes, send,
 reply to and ack mailbox messages (escalations land in Envoy's chat and must be
 answerable), spawn sleeves, and move a sleeve to another harness (`sleeve
-resleeve`, see [chat.md](chat.md#resleeve)), which Envoy may do without asking.
-`grant_admin` mints a task grant (`job_*` and `node_admin:<node>`, at most
-24h) for one `shared` node by name, and only when the hub runs with
-`--orchestrator-admin-grants` (off by default); `care` nodes are granted by
-the owner only ([node-work.md](node-work.md)). Not granted by
+resleeve`, see [chat.md](chat.md#resleeve)), which Envoy may do without asking. Not granted by
 default:
 
-- token management, raw session creation, respawn and node add (owner-only
-  whatever the scopes), `sleeve_kill_sleeve`, `session_kill_session` and
-  node remove;
+- token management, raw session creation and respawn (owner-only
+  whatever the scopes), `sleeve_kill_sleeve` and `session_kill_session`;
 - the terminal;
 - `session_*` creation. `session_create_session` and `session_respawn_session`
   start processes directly on the host, outside any sandbox, so a token that
