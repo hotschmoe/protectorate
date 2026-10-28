@@ -382,7 +382,7 @@ impl Bridge {
         };
         if self
             .hub_calls
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
                 (count < MAX_HUB_CALLS).then_some(count + 1)
             })
             .is_err()

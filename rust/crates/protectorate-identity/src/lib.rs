@@ -263,8 +263,10 @@ fn key_from_hex(text: &str) -> Option<Zeroizing<Vec<u8>>> {
     (digits.len() == 64).then_some(())?;
     let nibble = |digit: u8| char::from(digit).to_digit(16).map(|value| value as u8);
     let bytes = digits
-        .chunks_exact(2)
-        .map(|pair| Some(nibble(pair[0])? << 4 | nibble(pair[1])?))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&[high, low]| Some(nibble(high)? << 4 | nibble(low)?))
         .collect::<Option<Vec<u8>>>()?;
     Some(Zeroizing::new(bytes))
 }
