@@ -6,7 +6,7 @@ use crate::support;
 
 #[cfg(unix)]
 mod unix {
-    use super::support::{bound, free_port, kill_tmux, until, Group};
+    use super::support::{bound, kill_tmux, until, Group};
     use std::{
         fs,
         os::unix::fs::PermissionsExt,
@@ -71,10 +71,6 @@ mod unix {
 
         fn url(&self) -> String {
             format!("http://{}", bound(&self.log, "serving").unwrap())
-        }
-
-        fn tls_url(&self) -> String {
-            format!("https://{}", bound(&self.log, "serving TLS").unwrap())
         }
 
         fn output(&self) -> String {
@@ -142,70 +138,6 @@ mod unix {
 
     fn app() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../app")
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn checked_in_flutter_node_invite_reaches_ready() {
-        let required = std::env::var("PROTECTORATE_REQUIRE_FLUTTER_TEST").as_deref() == Ok("1");
-        if Command::new("flutter").arg("--version").output().is_err() {
-            assert!(
-                !required,
-                "flutter is required for the node invitation trial"
-            );
-            eprintln!("skipping node invitation trial: flutter is unavailable");
-            return;
-        }
-        let app = app();
-        assert!(
-            app.join(".dart_tool/package_config.json").is_file(),
-            "Flutter package config is required: run make app-check first"
-        );
-        let root = tempfile::Builder::new()
-            .prefix("protectorate-flutter-invite-")
-            .tempdir()
-            .unwrap();
-        let root = root.path();
-        let token = "rust-flutter-node-invite-e2e-token";
-        let hub = Hub::start(
-            root,
-            token,
-            &["--tls-listen", "127.0.0.1:0", "--node-interval", "1s"],
-        );
-        let bin = env!("CARGO_BIN_EXE_protectorate-rs");
-        scenario(
-            &hub,
-            root,
-            "node_invite_ui_e2e",
-            Command::new("flutter")
-                .args(["test", "--no-pub", "--reporter", "expanded"])
-                .arg(format!(
-                    "--dart-define=PROTECTORATE_E2E_HUB_URL={}",
-                    hub.url()
-                ))
-                .arg(format!("--dart-define=PROTECTORATE_E2E_TOKEN={token}"))
-                .arg(format!("--dart-define=PROTECTORATE_E2E_NODE_BINARY={bin}"))
-                .arg(format!(
-                    "--dart-define=PROTECTORATE_E2E_NODE_HOME={}",
-                    root.join("node").display()
-                ))
-                .arg(format!(
-                    "--dart-define=PROTECTORATE_E2E_TLS_URL={}",
-                    hub.tls_url()
-                ))
-                .arg(format!(
-                    "--dart-define=PROTECTORATE_E2E_CA_CERT={}",
-                    root.join("hub/ca/ca.pem").display()
-                ))
-                .arg(format!(
-                    "--dart-define=PROTECTORATE_E2E_NODE_LISTEN={}",
-                    free_port()
-                ))
-                .arg("tool/node_invite_ui_e2e.dart")
-                .current_dir(&app),
-            Duration::from_secs(600),
-            true,
-        );
     }
 
     /// The app directory when the toolchain for `tool` and the package config
@@ -298,10 +230,5 @@ mod unix {
     #[test]
     fn checked_in_flutter_note_draft_autosaves_to_rust_hub() {
         flutter_test("NoteDraft trial", "note_draft_e2e");
-    }
-
-    #[test]
-    fn checked_in_flutter_nodes_tab_renders_rust_inventory() {
-        flutter_test("Nodes tab trial", "nodes_ui_e2e");
     }
 }

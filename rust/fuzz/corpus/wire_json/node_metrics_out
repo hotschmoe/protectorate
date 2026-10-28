@@ -1,2 +1,0 @@
-/protectorate.v1.NodeAgentService/GetMetrics out
-{"hostname":"n","cpu":{"logicalCores":8,"usagePercent":12.5,"load1":1.0},"gpus":[{"index":1,"utilizationPercent":"NaN"}]}

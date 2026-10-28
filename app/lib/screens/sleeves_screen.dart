@@ -6,11 +6,10 @@ import '../gen/protectorate/v1/sleeve.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
-import '../nodes/node_view.dart';
+import '../mail/thread_view.dart' show orchestratorSleeve;
+import '../format.dart';
 import '../gen/protectorate/v1/chat.pb.dart';
 import '../chat/badges.dart';
-import '../gen/protectorate/v1/node.pb.dart';
-import '../sleeves/node_fence.dart';
 import '../sleeves/sleeve_card.dart';
 import '../sleeves/sleeve_info.dart';
 import '../sleeves/spawn_dialog.dart';
@@ -28,17 +27,12 @@ class SleevesScreen extends StatefulWidget {
     required this.hub,
     required this.client,
     required this.feed,
-    this.embedded = false,
     this.openSession,
   });
 
   final HubProfile hub;
   final HubClient client;
   final EventFeed feed;
-
-  // The hub shell's SLEEVES tab: no app bar, a node header and the entry to
-  // raw sessions. Otherwise the page reached from the hub node's detail.
-  final bool embedded;
 
   // A raw tmux session to open on arrival (deep links).
   final String? openSession;
@@ -49,7 +43,6 @@ class SleevesScreen extends StatefulWidget {
 
 class _SleevesScreenState extends State<SleevesScreen> {
   List<Sleeve> _sleeves = const [];
-  List<SleeveGroup> _groups = const [];
   Object? _error;
   bool _loading = true;
   StreamSubscription<dynamic>? _sub;
@@ -95,21 +88,14 @@ class _SleevesScreenState extends State<SleevesScreen> {
   Future<void> _refresh() async {
     try {
       final r = await widget.client.sleeves.listSleeves(ListSleevesRequest());
-      var nodes = const <NodeStatus>[];
-      if (widget.embedded) {
-        try {
-          nodes = (await widget.client.node.listNodes(
-            ListNodesRequest(),
-          )).nodes;
-        } on Object {
-          // The hub's own fence still shows.
-        }
-      }
-      final groups = groupSleeves(nodes, r.sleeves, widget.hub.name);
+      // Envoy is pinned first; the rest keep the hub's order.
+      final sleeves = [
+        ...r.sleeves.where((s) => s.name == orchestratorSleeve),
+        ...r.sleeves.where((s) => s.name != orchestratorSleeve),
+      ];
       if (mounted) {
         setState(() {
-          _groups = groups;
-          _sleeves = [for (final g in groups) ...g.sleeves];
+          _sleeves = sleeves;
           _error = null;
         });
       }
@@ -205,67 +191,31 @@ class _SleevesScreenState extends State<SleevesScreen> {
   Widget build(BuildContext context) {
     final t = Tokens.of(context);
     final wide = MediaQuery.sizeOf(context).width >= multiPaneBreakpoint;
-    final spawn = wide && !widget.embedded
-        ? Padding(
-            padding: const EdgeInsets.only(right: Tokens.gap),
-            child: FilledButton(
-              key: const ValueKey('spawn-sleeve'),
-              onPressed: _spawn,
-              child: const Text('SPAWN'),
-            ),
-          )
-        : null;
     return Scaffold(
-      appBar: widget.embedded
-          ? null
-          : AppBar(
-              title: Text('Sleeves'),
-              actions: [
-                if (!_loading)
-                  Padding(
-                    padding: const EdgeInsets.only(right: Tokens.gap),
-                    child: Center(
-                      child: Text(
-                        '${_sleeves.length} ON THIS HUB',
-                        style: t.legend(),
-                      ),
-                    ),
-                  ),
-                ?spawn,
-              ],
-            ),
-      floatingActionButton: wide && !widget.embedded
-          ? null
-          : FloatingActionButton.extended(
-              key: const ValueKey('spawn-sleeve'),
-              heroTag: null,
-              onPressed: _spawn,
-              icon: const Icon(Icons.add),
-              label: Text(widget.embedded ? 'NEW SLEEVE' : 'SPAWN'),
-            ),
+      floatingActionButton: FloatingActionButton.extended(
+        key: const ValueKey('spawn-sleeve'),
+        heroTag: null,
+        onPressed: _spawn,
+        icon: const Icon(Icons.add),
+        label: const Text('NEW SLEEVE'),
+      ),
       body: _loading
           ? const BusyBar()
           : Column(
               children: [
-                if (widget.embedded) _nodeHeader(),
+                _rawSessionsHeader(),
                 if (_error != null)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
                     child: NoteStrip('$_error', tone: Tone.alarm),
                   ),
-                Expanded(
-                  child: _sleeves.isEmpty && !widget.embedded
-                      ? Center(child: Text('NO SLEEVES', style: t.legend()))
-                      : wide
-                      ? _multiPane(t)
-                      : _list(),
-                ),
+                Expanded(child: wide ? _multiPane(t) : _list(t)),
               ],
             ),
     );
   }
 
-  Widget _nodeHeader() => Padding(
+  Widget _rawSessionsHeader() => Padding(
     padding: const EdgeInsets.fromLTRB(Tokens.gap, 4, 4, 0),
     child: Align(
       alignment: Alignment.centerRight,
@@ -287,29 +237,42 @@ class _SleevesScreenState extends State<SleevesScreen> {
         onKill: () => _kill(s),
       );
 
-  Widget _fence(SleeveGroup g, List<Widget> cards) =>
-      NodeFence(group: g, onNew: g.local ? _spawn : null, children: cards);
+  Widget _empty(Tokens t) => Padding(
+    padding: const EdgeInsets.all(Tokens.gap),
+    child: Text('NO SLEEVES. START ONE WITH NEW SLEEVE.', style: t.legend()),
+  );
 
-  Widget _list() => LayoutBuilder(
+  Widget _list(Tokens t) => LayoutBuilder(
     builder: (context, box) {
       const pad = Tokens.gap;
       final cols = (box.maxWidth / 440).floor().clamp(1, 3);
       final w = (box.maxWidth - 2 * pad - (cols - 1) * pad) / cols;
+      final running = _sleeves
+          .where((s) => s.state == SleeveState.SLEEVE_STATE_RUNNING)
+          .length;
       return SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(pad, pad, pad, 96),
-        child: Wrap(
-          spacing: pad,
-          runSpacing: pad,
-          children: widget.embedded
-              ? [
-                  for (final g in _groups)
-                    SizedBox(
-                      width: w,
-                      child: _fence(g, [for (final s in g.sleeves) _card(s)]),
-                    ),
-                ]
-              : [for (final s in _sleeves) SizedBox(width: w, child: _card(s))],
-        ),
+        child: _sleeves.isEmpty
+            ? _empty(t)
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${_sleeves.length} SLEEVES, $running RUNNING',
+                    key: const ValueKey('sleeve-count'),
+                    style: t.legend(),
+                  ),
+                  const SizedBox(height: pad),
+                  Wrap(
+                    spacing: pad,
+                    runSpacing: pad,
+                    children: [
+                      for (final s in _sleeves)
+                        SizedBox(width: w, child: _card(s)),
+                    ],
+                  ),
+                ],
+              ),
       );
     },
   );
@@ -324,25 +287,12 @@ class _SleevesScreenState extends State<SleevesScreen> {
           child: ListView(
             padding: const EdgeInsets.all(Tokens.gap),
             children: [
-              if (widget.embedded)
-                for (final g in _groups)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: Tokens.gap),
-                    child: _fence(g, [
-                      for (final s in g.sleeves)
-                        _card(s, compact: true, selected: s.name == cur?.name),
-                    ]),
-                  )
-              else
-                for (final s in _sleeves)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: Tokens.gap),
-                    child: _card(
-                      s,
-                      compact: true,
-                      selected: s.name == cur?.name,
-                    ),
-                  ),
+              if (_sleeves.isEmpty) _empty(t),
+              for (final s in _sleeves)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: Tokens.gap),
+                  child: _card(s, compact: true, selected: s.name == cur?.name),
+                ),
             ],
           ),
         ),

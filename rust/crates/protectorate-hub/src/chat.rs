@@ -11,7 +11,6 @@ use protectorate_chatlog::{Error as LogError, Event, Log};
 use protectorate_claude_driver::Session as ClaudeSession;
 use protectorate_codex_driver::Session as CodexSession;
 use protectorate_grok_driver::Session as GrokSession;
-use protectorate_inventory::Inventory;
 use protectorate_pi_driver::Session as PiSession;
 use protectorate_sandbox::{
     runtime::LaunchOptions, Access, BindGrant, Limits, Policy, Provider, Request, Workload,
@@ -227,7 +226,6 @@ fn run_handoff_summary(
                 local: crate::local_model::served_locally(
                     &session.model_base_url(),
                     &hub.local_model_hosts,
-                    &hub.inventory,
                 ),
                 err: String::new(),
             })
@@ -480,10 +478,10 @@ impl_session!(
 );
 
 fn chat_status(hub: &Hub, session: &dyn ChatSession) -> Value {
-    chat_status_with(session, &hub.local_model_hosts, &hub.inventory)
+    chat_status_with(session, &hub.local_model_hosts)
 }
 
-fn chat_status_with(session: &dyn ChatSession, hosts: &[String], inventory: &Inventory) -> Value {
+fn chat_status_with(session: &dyn ChatSession, hosts: &[String]) -> Value {
     let mut status = session.status();
     if let Some(object) = status.as_object_mut() {
         object.insert(
@@ -491,7 +489,6 @@ fn chat_status_with(session: &dyn ChatSession, hosts: &[String], inventory: &Inv
             Value::Bool(crate::local_model::served_locally(
                 &session.model_base_url(),
                 hosts,
-                inventory,
             )),
         );
     }
@@ -553,7 +550,6 @@ struct ChatStateWatcher {
     log: Arc<Log>,
     after: u64,
     events: Arc<EventBus>,
-    inventory: Arc<Inventory>,
     hosts: Vec<String>,
     name: String,
     run_id: String,
@@ -569,13 +565,13 @@ impl ChatStateWatcher {
 
     fn run(self) {
         let (session, name, events) = (&self.session, &self.name, &self.events);
-        let (hosts, inventory) = (&self.hosts, &self.inventory);
+        let hosts = &self.hosts;
         let mut previous = Value::Null;
         let mut last_publish = Instant::now();
         publish_chat_state(
             events,
             name,
-            &chat_status_with(session.as_ref(), hosts, inventory),
+            &chat_status_with(session.as_ref(), hosts),
             &mut previous,
             &mut last_publish,
         );
@@ -618,7 +614,7 @@ impl ChatStateWatcher {
                     crate::checkpoints::after_turn(self.checkpoints.clone(), row);
                 }
             }
-            let mut status = chat_status_with(session.as_ref(), hosts, inventory);
+            let mut status = chat_status_with(session.as_ref(), hosts);
             if let Some(state) = state {
                 status["state"] = json!(state);
             }
@@ -1755,7 +1751,6 @@ fn spawn_chat(
         log,
         after: state_event_cursor,
         events: Arc::clone(&hub.events),
-        inventory: Arc::clone(&hub.inventory),
         hosts: hub.local_model_hosts.clone(),
         name,
         run_id,

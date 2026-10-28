@@ -3,7 +3,6 @@ use protectorate_backlog::{Filter, NewNote, Patch};
 use protectorate_chatlog::{read_all, Event, Log};
 use protectorate_directory::{normalize_remote, read_manifests, Directory, RefState};
 use protectorate_handoff::parse_transcript;
-use protectorate_inventory::{Inventory, Node};
 use protectorate_mailbox::{Message, NewMessage, Store as Mailbox};
 use std::{fs, time::Duration};
 
@@ -332,42 +331,5 @@ pub fn handoff_transcript(data: &[u8]) {
     for turn in turns {
         assert!(turn.role == "user" || turn.role == "assistant");
         assert!(!turn.text.is_empty() && turn.text == turn.text.trim());
-    }
-}
-
-/// NUL-separated: an inventory file, a node (JSON) to add, a node name. A
-/// file that opens lists unique sorted nodes, and an added node survives a
-/// reopen.
-pub fn inventory_nodes(data: &[u8]) {
-    let parts = fields(data, 3);
-    let dir = scratch();
-    let path = dir.path().join("nodes.json");
-    fs::write(&path, parts[0]).unwrap();
-    let Ok(inventory) = Inventory::open(&path, "local") else {
-        return;
-    };
-    let listed = inventory.list();
-    assert!(
-        listed.windows(2).all(|w| w[0].name < w[1].name),
-        "nodes unsorted or duplicated"
-    );
-    for node in &listed {
-        assert_eq!(inventory.get(&node.name).as_ref().ok(), Some(node));
-    }
-    let _ = inventory.write_hosts();
-    let name = text(parts[2]);
-    let _ = inventory.get(&name);
-    let _ = inventory.set_tier(&name, "care");
-    let _ = inventory.clear_invited(&name);
-    let _ = inventory.remove(&name);
-    if let Ok(node) = serde_json::from_slice::<Node>(parts[1]) {
-        if let Ok(added) = inventory.add(node, true) {
-            let reopened = Inventory::open(&path, "local").expect("reopen a written inventory");
-            assert!(
-                reopened.list().contains(&added),
-                "added node lost on reopen"
-            );
-            assert_eq!(reopened.list(), inventory.list());
-        }
     }
 }

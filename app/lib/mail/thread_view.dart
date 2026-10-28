@@ -9,7 +9,7 @@ import '../gen/protectorate/v1/events.pb.dart';
 import '../gen/protectorate/v1/message.pb.dart';
 import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
-import '../nodes/node_view.dart';
+import '../format.dart';
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import '../vfd/panel.dart';

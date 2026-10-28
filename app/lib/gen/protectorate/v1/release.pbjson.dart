@@ -15,6 +15,29 @@ import 'dart:convert' as $convert;
 import 'dart:core' as $core;
 import 'dart:typed_data' as $typed_data;
 
+@$core.Deprecated('Use updatePhaseDescriptor instead')
+const UpdatePhase$json = {
+  '1': 'UpdatePhase',
+  '2': [
+    {'1': 'UPDATE_PHASE_UNSPECIFIED', '2': 0},
+    {'1': 'UPDATE_PHASE_SKIPPED', '2': 1},
+    {'1': 'UPDATE_PHASE_SENDING', '2': 2},
+    {'1': 'UPDATE_PHASE_VERIFYING', '2': 3},
+    {'1': 'UPDATE_PHASE_SWAPPING', '2': 4},
+    {'1': 'UPDATE_PHASE_RESTARTING', '2': 5},
+    {'1': 'UPDATE_PHASE_CONFIRMED', '2': 6},
+    {'1': 'UPDATE_PHASE_ROLLED_BACK', '2': 7},
+  ],
+};
+
+/// Descriptor for `UpdatePhase`. Decode as a `google.protobuf.EnumDescriptorProto`.
+final $typed_data.Uint8List updatePhaseDescriptor = $convert.base64Decode(
+    'CgtVcGRhdGVQaGFzZRIcChhVUERBVEVfUEhBU0VfVU5TUEVDSUZJRUQQABIYChRVUERBVEVfUE'
+    'hBU0VfU0tJUFBFRBABEhgKFFVQREFURV9QSEFTRV9TRU5ESU5HEAISGgoWVVBEQVRFX1BIQVNF'
+    'X1ZFUklGWUlORxADEhkKFVVQREFURV9QSEFTRV9TV0FQUElORxAEEhsKF1VQREFURV9QSEFTRV'
+    '9SRVNUQVJUSU5HEAUSGgoWVVBEQVRFX1BIQVNFX0NPTkZJUk1FRBAGEhwKGFVQREFURV9QSEFT'
+    'RV9ST0xMRURfQkFDSxAH');
+
 @$core.Deprecated('Use checkReleaseRequestDescriptor instead')
 const CheckReleaseRequest$json = {
   '1': 'CheckReleaseRequest',

@@ -176,11 +176,10 @@ a conversation makes every session pay a cache write. The hub injects only:
   guidance. They are appended mid-conversation and never rewrite earlier turns.
 - Envoy's `AGENTS.md` (`CLAUDE.md` links to it): built from the hub URL, the
   granted scopes and the method table, so it is byte-identical across
-  respawns and new tokens. `hosts.md`, which does change, is only named there
-  and read on demand.
+  respawns and new tokens.
 - Seeded harness config (`.claude.json`, `config.toml`) and environment
-  variables; no system prompt is added or appended, and no timestamps, node
-  names, lease ids or random ids are placed in any of them.
+  variables; no system prompt is added or appended, and no timestamps
+  or random ids are placed in any of them.
 
 Values that must change per run (the token, the sleeve name, the date) live in
 files or environment variables a harness reads on demand, never in the
@@ -196,7 +195,7 @@ the owner) or idle, with a small per-harness rule table in
 `protectorate-session/src/activity.rs` for claude, codex, grok and pi. The first
 matching rule wins and a blocking dialog outranks the working indicator. A
 change, once two scans agree, is announced as `sleeve.activity` and appears as
-`terminal` on the sleeve, in the fleet cards and in the `sleeve ls` state.
+`terminal` on the sleeve, in the sleeve cards and in the `sleeve ls` state.
 `protectorate sleeve status <name> --explain` reads the screen now and lists
 every rule, which one decided, and the lines examined. A screen no rule
 recognizes reads as unknown. When a harness changes its TUI, add the new pane

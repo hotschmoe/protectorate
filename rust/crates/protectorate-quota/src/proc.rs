@@ -3,13 +3,8 @@
 use std::io;
 use std::process::{Child, Command, ExitStatus};
 
-#[cfg(windows)]
-use protectorate_sandbox::job::Job;
-
 pub struct ManagedChild {
     child: Child,
-    #[cfg(windows)]
-    job: Job,
 }
 
 impl std::ops::Deref for ManagedChild {
@@ -71,27 +66,9 @@ fn exited_unreaped(pid: u32, flags: libc::c_int) -> io::Result<bool> {
 
 pub fn spawn(cmd: &mut Command) -> std::io::Result<ManagedChild> {
     configure(cmd);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
-
-        let job = Job::new()?;
-        cmd.creation_flags(CREATE_SUSPENDED | CREATE_NO_WINDOW);
-        let mut child = cmd.spawn()?;
-        if let Err(error) = attach(&job, &child) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(error);
-        }
-        Ok(ManagedChild { child, job })
-    }
-    #[cfg(not(windows))]
-    {
-        Ok(ManagedChild {
-            child: cmd.spawn()?,
-        })
-    }
+    Ok(ManagedChild {
+        child: cmd.spawn()?,
+    })
 }
 
 /// Puts the child in its own process group so wrapper scripts (the codex npm
@@ -114,24 +91,9 @@ pub fn kill_group(child: &mut ManagedChild) {
             libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL);
         }
     }
-    #[cfg(windows)]
+    #[cfg(not(unix))]
     {
-        if child.job.terminate().is_err() {
-            let _ = child.child.kill();
-        }
-    }
-}
-
-#[cfg(windows)]
-fn attach(job: &Job, child: &Child) -> std::io::Result<()> {
-    use std::os::windows::io::AsRawHandle;
-
-    let process = child.as_raw_handle();
-    // SAFETY: the child is suspended and its handle is live for both calls.
-    unsafe {
-        job.assign(process)?;
-        protectorate_sandbox::job::resume_process(process)
-            .map_err(|error| std::io::Error::other(format!("resume quota process failed: {error}")))
+        let _ = child.child.kill();
     }
 }
 

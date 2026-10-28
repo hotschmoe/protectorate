@@ -4,17 +4,12 @@
 use crate::support::capability;
 use crate::support::executable;
 use protectorate_hub::{ChatLauncher, ChatRuntime, Hub};
-use protectorate_inventory::{Node, SHARED};
-use protectorate_lease::{parse_resource, Chooser, Error};
-use protectorate_node::{Agent, Jobs, MetricsCollector};
-use protectorate_node_metrics::NodeMetrics;
 use serde_json::{json, Value};
 use std::{
     collections::BTreeMap,
-    fs, io,
+    fs,
     path::{Path, PathBuf},
     process::Command,
-    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{
@@ -192,25 +187,8 @@ async fn wait_idle(addr: std::net::SocketAddr, name: &str) {
     assert_eq!(status, 200, "{idle}");
 }
 
-struct Metrics;
-impl MetricsCollector for Metrics {
-    fn collect(&self) -> io::Result<NodeMetrics> {
-        Ok(NodeMetrics::default())
-    }
-}
-
-fn any_lease() -> Chooser {
-    Arc::new(|request, blocked| {
-        let resource = parse_resource(request)?;
-        if let Some(held) = blocked(&resource) {
-            return Err(Error::Busy(format!("held by {}", held.holder)));
-        }
-        Ok(resource)
-    })
-}
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn one_run_id_marks_the_sleeves_audit_jobs_mail_leases_checkpoints_and_egress() {
+async fn one_run_id_marks_the_sleeves_audit_mail_checkpoints_and_egress() {
     let (setup, hub) = setup();
     assert!(Command::new("git")
         .args(["init", "-q"])
@@ -219,22 +197,6 @@ async fn one_run_id_marks_the_sleeves_audit_jobs_mail_leases_checkpoints_and_egr
         .unwrap()
         .success());
     fs::write(setup.work.join("file.txt"), "one\n").unwrap();
-    let node_root = setup.state.join("node");
-    let node = Agent::new(Arc::new(Metrics))
-        .with_jobs(Jobs::new(&node_root, 2).unwrap().with_plain_mode());
-    let (node_addr, node_server) = serve(node.router().unwrap()).await;
-    hub.inventory
-        .add(
-            Node {
-                name: "peer".into(),
-                address: node_addr.to_string(),
-                tier: SHARED.into(),
-                ..Node::default()
-            },
-            false,
-        )
-        .unwrap();
-    let hub = hub.with_lease_chooser(any_lease()).unwrap();
     let identity = std::sync::Arc::clone(&hub.identity);
     let (addr, server) = serve(hub.router().unwrap()).await;
 
@@ -249,13 +211,7 @@ async fn one_run_id_marks_the_sleeves_audit_jobs_mail_leases_checkpoints_and_egr
     let run = spawned["sleeve"]["runId"].as_str().unwrap().to_owned();
     assert_eq!(run.len(), 16, "{spawned}");
     assert!(!sleeve_token(&setup.state, "runner").is_empty());
-    // Capability scopes are fixed, so the owner mints the runner a wider one.
-    let token = capability::mint_in(
-        &identity,
-        "sleeve:runner",
-        &sleeve_scopes_with(&["job_submit_job"]),
-    )
-    .1;
+    let token = capability::mint_in(&identity, "sleeve:runner", &sleeve_scopes_with(&[])).1;
 
     let (status, mail) = call(
         addr,
@@ -266,26 +222,6 @@ async fn one_run_id_marks_the_sleeves_audit_jobs_mail_leases_checkpoints_and_egr
     .await;
     assert_eq!(status, 200, "{mail}");
     assert_eq!(mail["message"]["runId"], run.as_str());
-    let (status, lease) = call(
-        addr,
-        "LeaseService/AcquireLease",
-        &token,
-        json!({"resource":"peer","ttl":"600s"}),
-    )
-    .await;
-    assert_eq!(status, 200, "{lease}");
-    assert_eq!(lease["runId"], run.as_str());
-    assert_eq!(lease["holder"], "runner");
-    let (status, job) = call(
-        addr,
-        "JobService/SubmitJob",
-        &token,
-        json!({"target":{"leaseId":lease["id"]},"command":["true"],"timeout":"30s"}),
-    )
-    .await;
-    assert_eq!(status, 200, "{job}");
-    assert_eq!(job["runId"], run.as_str());
-
     let (status, sent) = call(
         addr,
         "ChatService/Send",
@@ -305,7 +241,7 @@ async fn one_run_id_marks_the_sleeves_audit_jobs_mail_leases_checkpoints_and_egr
     assert_eq!(status, 200, "{checkpoint}");
     assert_eq!(checkpoint["checkpoint"]["runId"], run.as_str());
 
-    let page = until("egress and job audit entries", || async {
+    let page = until("egress audit entries", || async {
         let (status, page) = call(
             addr,
             "AuditService/ListAuditEntries",
@@ -327,8 +263,6 @@ async fn one_run_id_marks_the_sleeves_audit_jobs_mail_leases_checkpoints_and_egr
     for want in [
         "/protectorate.v1.SleeveService/SpawnSleeve",
         "/protectorate.v1.MessageService/Send",
-        "/protectorate.v1.LeaseService/AcquireLease",
-        "/protectorate.v1.JobService/SubmitJob",
         "/protectorate.v1.ChatService/Send",
         "/protectorate.v1.SleeveService/CreateCheckpoint",
         "egress",
@@ -344,7 +278,6 @@ async fn one_run_id_marks_the_sleeves_audit_jobs_mail_leases_checkpoints_and_egr
     assert!(entries.iter().all(|e| e["runId"] == run.as_str()));
 
     server.abort();
-    node_server.abort();
 }
 
 async fn call_approved(
@@ -374,7 +307,6 @@ fn sleeve_scopes_with(extra: &[&'static str]) -> Vec<&'static str> {
         "read",
         "backlog_*",
         "directory_*",
-        "lease_*",
         "message_*",
         "chat_report",
     ];

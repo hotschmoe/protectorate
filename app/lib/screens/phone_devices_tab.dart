@@ -2,18 +2,22 @@ import 'package:connectrpc/connect.dart';
 import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/sleeve.pb.dart';
+import '../hubs/event_feed.dart';
 import '../hubs/hub_client.dart';
 import '../mail/thread_view.dart' show orchestratorSleeve;
 import '../theme/tokens.dart';
+import '../updates/hub_update_card.dart';
 
 class PhoneDevicesTab extends StatefulWidget {
   const PhoneDevicesTab({
     super.key,
     required this.client,
+    required this.feed,
     required this.devices,
   });
 
   final HubClient client;
+  final EventFeed feed;
   final Widget devices;
 
   @override
@@ -143,6 +147,10 @@ class _PhoneDevicesTabState extends State<PhoneDevicesTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        Padding(
+          padding: const EdgeInsets.all(Tokens.gap),
+          child: HubUpdateCard(client: widget.client, feed: widget.feed),
+        ),
         Expanded(child: widget.devices),
         Container(
           decoration: BoxDecoration(

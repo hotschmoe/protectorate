@@ -627,7 +627,7 @@ class AuditEntry extends $pb.GeneratedMessage {
   @$pb.TagNumber(8)
   void clearCode() => $_clearField(8);
 
-  /// task is the task of the admin grant that made the call.
+  /// task is the task recorded in the capability that made the call.
   @$pb.TagNumber(9)
   $core.String get task => $_getSZ(7);
   @$pb.TagNumber(9)
@@ -637,7 +637,7 @@ class AuditEntry extends $pb.GeneratedMessage {
   @$pb.TagNumber(9)
   void clearTask() => $_clearField(9);
 
-  /// detail is what the handler added, such as a job's node and mode.
+  /// detail is what the handler added, such as the sleeve or session it acted on.
   @$pb.TagNumber(10)
   $core.String get detail => $_getSZ(8);
   @$pb.TagNumber(10)

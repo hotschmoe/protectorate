@@ -1,6 +1,6 @@
 use flate2::{write::GzEncoder, Compression};
 use protectorate_hub::Hub;
-use protectorate_release::{Source, BINARIES, RUST_BUNDLE};
+use protectorate_release::{Source, RUST_BUNDLE};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -31,9 +31,6 @@ impl ReleaseServer {
         listener.set_nonblocking(true).unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         let mut assets = BTreeMap::new();
-        for name in BINARIES {
-            assets.insert(name.to_owned(), format!("binary:{name}").into_bytes());
-        }
         for component in RUST_BUNDLE {
             let arch = match std::env::consts::ARCH {
                 "aarch64" => "arm64",
@@ -53,7 +50,6 @@ impl ReleaseServer {
         }
         assets.insert("SHA256SUMS".into(), sums.into_bytes());
         if corrupt {
-            assets.insert(BINARIES[0].into(), b"corrupt binary".to_vec());
             let arch = match std::env::consts::ARCH {
                 "aarch64" => "arm64",
                 "x86_64" => "amd64",

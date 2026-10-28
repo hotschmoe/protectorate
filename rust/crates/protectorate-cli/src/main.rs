@@ -1,8 +1,7 @@
 //! Thin binary over the dispatcher: argv in, text or JSON out.
 mod completion;
 mod harness_login;
-mod service;
-use protectorate_cli::{run_with_status, RpcError, RunError};
+use protectorate_cli::{run, RpcError};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -49,69 +48,6 @@ fn main() -> ExitCode {
             }
         };
     }
-    if let Some(result) = service::run_if_requested(&args) {
-        return match result {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(message) => {
-                eprintln!("error: {message}");
-                ExitCode::FAILURE
-            }
-        };
-    }
-    if let Some(forwarded) = doctor_alias_argv(&args) {
-        return match forwarded {
-            Ok(forwarded) => run_companion(&companion_executable(), &forwarded),
-            Err(message) => {
-                eprintln!("error: {message}");
-                ExitCode::FAILURE
-            }
-        };
-    }
-    if let Some(forwarded) = install_alias_argv(&args) {
-        return match forwarded {
-            Ok(forwarded) => run_companion(&companion_executable(), &forwarded),
-            Err(message) => {
-                eprintln!("error: {message}");
-                ExitCode::FAILURE
-            }
-        };
-    }
-    if let Some(forwarded) = uninstall_alias_argv(&args) {
-        return match forwarded {
-            Ok(forwarded) => run_companion(&companion_executable(), &forwarded),
-            Err(message) => {
-                eprintln!("error: {message}");
-                ExitCode::FAILURE
-            }
-        };
-    }
-    if let Some(forwarded) = install_runner_alias_argv(&args) {
-        return match forwarded {
-            Ok(forwarded) => run_companion(&companion_executable(), &forwarded),
-            Err(message) => {
-                eprintln!("error: {message}");
-                ExitCode::FAILURE
-            }
-        };
-    }
-    if let Some(forwarded) = node_join_alias_argv(&args) {
-        return match forwarded {
-            Ok(forwarded) => run_companion(&companion_executable(), &forwarded),
-            Err(message) => {
-                eprintln!("error: {message}");
-                ExitCode::FAILURE
-            }
-        };
-    }
-    if let Some(forwarded) = node_serve_alias_argv(&args) {
-        return match forwarded {
-            Ok(forwarded) => run_server_companion(&companion_executable(), &forwarded),
-            Err(message) => {
-                eprintln!("error: {message}");
-                ExitCode::FAILURE
-            }
-        };
-    }
     if let Some(forwarded) = hub_alias_argv(&args) {
         return match forwarded {
             Ok(forwarded) if forwarded.first().is_some_and(|arg| arg == "serve") => {
@@ -142,77 +78,17 @@ fn main() -> ExitCode {
             }
         };
     }
-    match run_with_status(&args) {
+    match run(&args) {
         Ok(text) => finish_stdout(&text),
-        Err(RunError::Rpc(error)) => {
+        Err(error) => {
             eprintln!("error: {}", short_message(&error));
             ExitCode::FAILURE
         }
-        Err(RunError::Status { code, message }) => {
-            eprintln!("error: {message}");
-            ExitCode::from(
-                u8::try_from(code)
-                    .ok()
-                    .filter(|code| *code != 0)
-                    .unwrap_or(1),
-            )
-        }
     }
 }
 
-/// The diagnostic belongs to protectorate-rs; the installed CLI forwards to
-/// its companion binary so there is one implementation of each check.
-fn doctor_alias_argv(args: &[String]) -> Option<Result<Vec<String>, String>> {
-    let at = args
-        .windows(2)
-        .position(|pair| pair == ["node", "doctor"])?;
-    let mut forwarded = vec!["node".to_owned(), "doctor".to_owned()];
-    let mut index = 0;
-    while index < at {
-        match args[index].as_str() {
-            "--json" => forwarded.push("--json".into()),
-            "--hub" | "--ca-cert" => {
-                let flag = args[index].clone();
-                index += 1;
-                if index >= at {
-                    return Some(Err(format!("{flag} requires a value")));
-                }
-                forwarded.extend([flag, args[index].clone()]);
-            }
-            flag if flag.starts_with("--hub=") || flag.starts_with("--ca-cert=") => {
-                forwarded.push(flag.into())
-            }
-            "--token-file" | "--timeout" => {
-                index += 1;
-                if index >= at {
-                    return Some(Err(format!("{} requires a value", args[index - 1])));
-                }
-            }
-            flag if flag.starts_with("--token-file=") || flag.starts_with("--timeout=") => {}
-            other => return Some(Err(format!("unknown option before node doctor: {other}"))),
-        }
-        index += 1;
-    }
-    index = at + 2;
-    while index < args.len() {
-        match args[index].as_str() {
-            "--token-file" | "--timeout" => {
-                index += 1;
-                if index >= args.len() {
-                    return Some(Err(format!("{} requires a value", args[index - 1])));
-                }
-            }
-            flag if flag.starts_with("--token-file=") || flag.starts_with("--timeout=") => {}
-            _ => forwarded.push(args[index].clone()),
-        }
-        index += 1;
-    }
-    Some(Ok(forwarded))
-}
-
-/// The node install and doctor diagnostics belong to the Rust node binary;
-/// the installed CLI forwards to the companion beside it, or to the bare
-/// name on PATH. On Windows the node-only companion is the Windows build.
+/// Hub and driver commands belong to the Rust hub binary; the installed CLI
+/// forwards to the companion beside it, or to the bare name on PATH.
 fn companion_name() -> &'static str {
     if cfg!(windows) {
         "protectorate-rs.exe"
@@ -229,18 +105,6 @@ fn companion_executable() -> PathBuf {
         .filter(|path| path.is_file());
     if let Some(sibling) = sibling {
         return sibling;
-    }
-    if cfg!(windows) {
-        if let Some(development_binary) = std::env::current_exe()
-            .ok()
-            .and_then(|path| {
-                path.parent()
-                    .map(|dir| dir.join("protectorate-rs-windows.exe"))
-            })
-            .filter(|path| path.is_file())
-        {
-            return development_binary;
-        }
     }
     name.into()
 }
@@ -409,91 +273,6 @@ fn run_mcp_companion(forwarded: &McpForward) -> ExitCode {
     }
 }
 
-/// `protectorate node install ...` forwards to the companion's node install.
-/// Install flags after the subcommand are passed through verbatim; the
-/// global RPC options are ignored; joining takes its own --hub HTTPS URL.
-fn install_alias_argv(args: &[String]) -> Option<Result<Vec<String>, String>> {
-    let at = args
-        .windows(2)
-        .position(|pair| pair == ["node", "install"])?;
-    let mut forwarded = vec!["node".to_owned(), "install".to_owned()];
-    let mut index = 0;
-    while index < at {
-        let token = args[index].as_str();
-        if !token.starts_with("--") {
-            // A bare word before node install belongs to another command,
-            // for example `backlog add node install`; let it dispatch.
-            return None;
-        }
-        match token {
-            "--json" => return Some(Err("node install does not support --json".into())),
-            "--hub" | "--token-file" | "--timeout" => {
-                let flag = args[index].clone();
-                index += 1;
-                if index >= at {
-                    return Some(Err(format!("{flag} requires a value")));
-                }
-            }
-            flag if flag.starts_with("--hub=")
-                || flag.starts_with("--token-file=")
-                || flag.starts_with("--timeout=") => {}
-            other => return Some(Err(format!("unknown option before node install: {other}"))),
-        }
-        index += 1;
-    }
-    forwarded.extend_from_slice(&args[at + 2..]);
-    Some(Ok(forwarded))
-}
-
-/// `protectorate node uninstall ...` forwards to the companion's node
-/// uninstall. Both the Linux and the Windows companion implement it locally:
-/// the machine stops its own node, which is not a hub call, so the RPC options
-/// are dropped. Uninstall flags after the subcommand pass through verbatim.
-fn uninstall_alias_argv(args: &[String]) -> Option<Result<Vec<String>, String>> {
-    node_local_alias_argv(args, "uninstall", UNINSTALL_LOCAL_OPTIONS, None)
-}
-
-/// `protectorate node install-runner ...` provisions the Windows runner
-/// account for shared-node jobs. Only the Windows companion has a runner
-/// account, so the Linux CLI says so instead of forwarding.
-fn install_runner_alias_argv(args: &[String]) -> Option<Result<Vec<String>, String>> {
-    let unsupported = if cfg!(windows) {
-        None
-    } else {
-        Some("node install-runner is supported on Windows only; the Linux node has no runner account")
-    };
-    node_local_alias_argv(
-        args,
-        "install-runner",
-        INSTALL_RUNNER_LOCAL_OPTIONS,
-        unsupported,
-    )
-}
-
-/// `protectorate node serve ...` forwards to the companion's node agent.
-/// The agent serves this machine locally, so the RPC options are dropped and
-/// `--json` is refused; the agent's own flags after the subcommand pass
-/// through verbatim.
-fn node_serve_alias_argv(args: &[String]) -> Option<Result<Vec<String>, String>> {
-    node_local_alias_argv(args, "serve", NODE_SERVE_LOCAL_OPTIONS, None)
-}
-
-/// Joining a hub creates this machine's key and certificate, so the companion
-/// runs it locally.
-fn node_join_alias_argv(args: &[String]) -> Option<Result<Vec<String>, String>> {
-    let at = local_root_at(args, "node")?;
-    if args.get(at + 1)? != "join" {
-        return None;
-    }
-    let leading = local_alias_leading(args, at, "node join", &[("--home", true)])?;
-    Some(leading.map(|leading| {
-        let mut forwarded = vec!["node".to_owned(), "join".to_owned()];
-        forwarded.extend(leading);
-        forwarded.extend_from_slice(&args[at + 2..]);
-        forwarded
-    }))
-}
-
 /// Hub startup, backup/restore and cache publication are local
 /// operations owned by the Rust hub companion. `hub update` remains an
 /// authenticated hub RPC.
@@ -551,48 +330,6 @@ fn local_root_at(args: &[String], root: &str) -> Option<usize> {
         }
     }
     None
-}
-
-/// Local node options accepted before the subcommand: (flag, takes a value).
-const UNINSTALL_LOCAL_OPTIONS: &[(&str, bool)] = &[("--home", true), ("--dry-run", false)];
-const NODE_SERVE_LOCAL_OPTIONS: &[(&str, bool)] = &[("--home", true)];
-const INSTALL_RUNNER_LOCAL_OPTIONS: &[(&str, bool)] = &[("--home", true), ("--job-root", true)];
-
-fn node_local_alias_argv(
-    args: &[String],
-    subcommand: &str,
-    local_options: &[(&str, bool)],
-    unsupported: Option<&str>,
-) -> Option<Result<Vec<String>, String>> {
-    let at = args
-        .windows(2)
-        .position(|pair| pair == ["node", subcommand])?;
-    let mut forwarded = vec!["node".to_owned(), subcommand.to_owned()];
-    let leading = match node_alias_leading(args, at, subcommand, local_options) {
-        None => return None,
-        Some(Ok(leading)) => leading,
-        Some(Err(message)) => return Some(Err(message)),
-    };
-    if let Some(message) = unsupported {
-        return Some(Err(message.to_owned()));
-    }
-    forwarded.extend(leading);
-    forwarded.extend_from_slice(&args[at + 2..]);
-    Some(Ok(forwarded))
-}
-
-/// Options written before a local node subcommand. The companion does not
-/// speak the hub API, so RPC credentials are dropped and `--json` is refused;
-/// the node's own options are forwarded. A bare word before the subcommand
-/// means the words belong to another command, for example `backlog add node
-/// uninstall`, and must keep dispatching normally.
-fn node_alias_leading(
-    args: &[String],
-    at: usize,
-    subcommand: &str,
-    local_options: &[(&str, bool)],
-) -> Option<Result<Vec<String>, String>> {
-    local_alias_leading(args, at, &format!("node {subcommand}"), local_options)
 }
 
 fn local_alias_leading(

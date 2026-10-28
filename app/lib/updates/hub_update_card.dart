@@ -5,17 +5,36 @@ import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/events.pb.dart';
 import '../gen/protectorate/v1/hub.pb.dart';
-import '../gen/protectorate/v1/node.pb.dart';
 import '../gen/protectorate/v1/release.pb.dart';
 import '../hubs/event_feed.dart';
+import '../format.dart';
 import '../hubs/hub_client.dart';
-import '../nodes/node_update.dart';
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';
 import '../vfd/meter.dart';
 import '../vfd/panel.dart';
 import 'open_release_io.dart'
     if (dart.library.js_interop) 'open_release_web.dart';
+
+String updatePhaseLabel(UpdateHubProgress p) => switch (p.phase) {
+  UpdatePhase.UPDATE_PHASE_SKIPPED => 'ALREADY CURRENT',
+  UpdatePhase.UPDATE_PHASE_SENDING =>
+    p.totalBytes > 0
+        ? 'SENDING  ${formatBytes(p.sentBytes.toInt())} / ${formatBytes(p.totalBytes.toInt())}'
+        : 'SENDING',
+  UpdatePhase.UPDATE_PHASE_VERIFYING => 'VERIFYING',
+  UpdatePhase.UPDATE_PHASE_SWAPPING =>
+    'SWAPPED  ${p.previousVersion} > ${p.version}',
+  UpdatePhase.UPDATE_PHASE_RESTARTING => 'RESTARTING',
+  UpdatePhase.UPDATE_PHASE_CONFIRMED => 'CONFIRMED  ${p.version}',
+  UpdatePhase.UPDATE_PHASE_ROLLED_BACK => 'ROLLED BACK',
+  _ => '',
+};
+
+double? updatePercent(UpdateHubProgress p) =>
+    p.phase == UpdatePhase.UPDATE_PHASE_SENDING && p.totalBytes > 0
+    ? p.sentBytes.toInt() * 100 / p.totalBytes.toInt()
+    : null;
 
 class HubUpdateCard extends StatefulWidget {
   const HubUpdateCard({super.key, required this.client, required this.feed});
@@ -231,15 +250,7 @@ class _HubUpdateCardState extends State<HubUpdateCard> {
         : release?.notesUrl ?? '';
     final newer = available.isNotEmpty && available != status?.version;
     final p = _progress;
-    final progress = p == null
-        ? null
-        : UpdateNodeProgress(
-            phase: p.phase,
-            version: p.version,
-            previousVersion: p.previousVersion,
-            sentBytes: p.sentBytes,
-            totalBytes: p.totalBytes,
-          );
+    final progress = p;
     return Panel(
       legend: 'HUB UPDATE',
       child: Column(
@@ -290,7 +301,8 @@ class _HubUpdateCardState extends State<HubUpdateCard> {
           if (progress != null && _updating) ...[
             const SizedBox(height: 8),
             Text(updatePhaseLabel(progress), style: t.data()),
-            if (p!.message.isNotEmpty) Text(p.message, style: t.small()),
+            if (progress.message.isNotEmpty)
+              Text(progress.message, style: t.small()),
           ],
           if (_result != null) ...[
             const SizedBox(height: 8),

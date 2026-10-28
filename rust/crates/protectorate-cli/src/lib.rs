@@ -1,6 +1,5 @@
 //! Reusable dispatcher for the basic owner CLI commands: `status`,
-//! `node ls`/`node show`, `backlog ls`/`show`/`add`/`done`/`reopen`, `lease ls`,
-//! `job ls`/`job show`/`job cancel`/`job run`/`job logs`,
+//! `backlog ls`/`show`/`add`/`done`/`reopen`,
 //! `chat send`/`chat watch`/`chat wait`/`chat respond`/`chat settings`,
 //! `sleeve ls`/`sleeve workspaces`/`sleeve browse`/`sleeve show`/
 //! `sleeve kill`/`sleeve spawn`/`sleeve envoy`/`sleeve resleeve`/
@@ -19,16 +18,13 @@ mod args;
 mod attach;
 mod format;
 mod hub_update;
-mod job;
 mod login;
 mod pair;
-mod transfer;
 #[cfg(windows)]
 #[path = "login_windows.rs"]
 pub mod windows_private;
 
 pub use args::{parse, Invocation};
-pub use job::RunError;
 pub use protectorate_connect_client::Client;
 use protectorate_connect_client::Credential;
 use protectorate_wire::{proto_duration, v1, ReflectMessage};
@@ -68,8 +64,8 @@ pub const MAX_WAIT: Duration = Duration::from_secs(24 * 3600);
 /// `chat settings` with a selection re-reads the native catalog and waits for
 /// the harness to confirm the new settings, so the transport has to outlast it.
 const SELECTION_TIMEOUT_FLOOR: Duration = Duration::from_secs(120);
-/// Release bundles can take longer than ten minutes to verify, transfer and
-/// confirm on a slow node. Keep the public update stream open for that work.
+/// Release bundles can take longer than ten minutes to verify and install.
+/// Keep the update stream open for that work.
 const UPDATE_TRANSFER_TIMEOUT: Duration = Duration::from_secs(3600);
 
 /// Which notes `backlog ls` returns.
@@ -97,22 +93,6 @@ pub struct BacklogFilter {
     pub project: String,
     pub query: String,
     pub state: NoteState,
-}
-
-/// A direct resource or a selector for `lease acquire`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LeaseAcquire {
-    pub resource: String,
-    pub os: String,
-    pub arch: String,
-    pub min_free_memory_bytes: u64,
-    pub gpu_vram_bytes: u64,
-    pub gpu: String,
-    pub npu: String,
-    pub holder: String,
-    pub ttl: Duration,
-    pub wait: bool,
-    pub priority: i32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -146,109 +126,6 @@ pub struct NoteEdit {
     pub body: Option<String>,
     pub body_file: Option<String>,
     pub append: Option<String>,
-}
-
-/// Which jobs `job ls --state` keeps.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum JobState {
-    Preparing,
-    Running,
-    Succeeded,
-    Failed,
-    Canceled,
-    TimedOut,
-    Killed,
-}
-
-impl JobState {
-    /// The name `job ls --state` takes.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Preparing => "preparing",
-            Self::Running => "running",
-            Self::Succeeded => "succeeded",
-            Self::Failed => "failed",
-            Self::Canceled => "canceled",
-            Self::TimedOut => "timed-out",
-            Self::Killed => "killed",
-        }
-    }
-
-    pub fn as_proto(&self) -> v1::JobState {
-        match self {
-            Self::Preparing => v1::JobState::Preparing,
-            Self::Running => v1::JobState::Running,
-            Self::Succeeded => v1::JobState::Succeeded,
-            Self::Failed => v1::JobState::Failed,
-            Self::Canceled => v1::JobState::Canceled,
-            Self::TimedOut => v1::JobState::TimedOut,
-            Self::Killed => v1::JobState::Killed,
-        }
-    }
-
-    pub fn parse(text: &str) -> Option<Self> {
-        match text.to_ascii_lowercase().replace('_', "-").as_str() {
-            "preparing" => Some(Self::Preparing),
-            "running" => Some(Self::Running),
-            "succeeded" => Some(Self::Succeeded),
-            "failed" => Some(Self::Failed),
-            "canceled" => Some(Self::Canceled),
-            "timed-out" => Some(Self::TimedOut),
-            "killed" => Some(Self::Killed),
-            _ => None,
-        }
-    }
-
-    pub fn names() -> String {
-        [
-            Self::Preparing,
-            Self::Running,
-            Self::Succeeded,
-            Self::Failed,
-            Self::Canceled,
-            Self::TimedOut,
-            Self::Killed,
-        ]
-        .map(|state| state.as_str())
-        .join("|")
-    }
-}
-
-/// The filters `job ls` accepts.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct JobFilter {
-    pub state: Option<JobState>,
-    /// Zero means the hub's own default.
-    pub limit: i32,
-}
-
-/// How long a `job run` command may run when `--timeout` is omitted.
-pub const DEFAULT_JOB_TIMEOUT: Duration = Duration::from_secs(60 * 60);
-/// The hub's longest job timeout.
-pub const MAX_JOB_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
-
-/// `job run`. Paths stay as the user typed them until the command runs, so a
-/// relative `--git` or `--artifact` is resolved in the working directory then.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct JobRun {
-    pub on: String,
-    pub git: String,
-    pub artifact: String,
-    pub workdir: String,
-    pub artifact_globs: Vec<String>,
-    pub env: Vec<(String, String)>,
-    pub timeout: Duration,
-    pub cpu_percent: u32,
-    pub memory_bytes: u64,
-    pub admin: bool,
-    pub command: Vec<String>,
-}
-
-/// `job logs`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct JobLogs {
-    pub id: String,
-    pub follow: bool,
 }
 
 /// The default `msg wait` deadline.
@@ -559,12 +436,6 @@ pub enum Command {
         scopes: Vec<String>,
         ttl: Option<Duration>,
     },
-    GrantAdmin {
-        node: String,
-        task: String,
-        ttl: Duration,
-        out: Option<PathBuf>,
-    },
     AuditList(AuditQuery),
     AuditVerify,
     ApprovalList {
@@ -606,59 +477,6 @@ pub enum Command {
         target: Option<String>,
     },
     Events,
-    NodeList,
-    /// `node metrics --local`: collect this machine's metrics without a hub.
-    NodeMetricsLocal {
-        watch: Vec<PathBuf>,
-    },
-    NodeShow {
-        name: String,
-    },
-    NodeAdd {
-        name: String,
-        address: String,
-        ssh_alias: String,
-        tier: String,
-        tags: Vec<String>,
-        notes: String,
-        update: bool,
-    },
-    NodeRemove {
-        name: String,
-        jobs: v1::RemoveJobs,
-        uninstall: bool,
-        wait_timeout: Option<Duration>,
-    },
-    NodeTier {
-        name: String,
-        tier: String,
-    },
-    NodeUpdate {
-        name: Option<String>,
-        all: bool,
-        force: bool,
-        no_wait: bool,
-    },
-    NodeInvite {
-        name: String,
-        tier: String,
-        ttl: Duration,
-        install_url: String,
-    },
-    NodePut {
-        name: String,
-        local: PathBuf,
-        remote: String,
-        force: bool,
-        no_compress: bool,
-    },
-    NodeGet {
-        name: String,
-        remote: String,
-        local: PathBuf,
-        force: bool,
-        no_compress: bool,
-    },
     BacklogList(BacklogFilter),
     BacklogShow {
         id: String,
@@ -679,26 +497,6 @@ pub enum Command {
     BacklogReopen {
         id: String,
     },
-    LeaseList,
-    LeaseAcquire(LeaseAcquire),
-    LeaseRenew {
-        id: String,
-        ttl: Option<Duration>,
-    },
-    LeaseRelease {
-        ids: Vec<String>,
-    },
-    JobList(JobFilter),
-    JobShow {
-        id: String,
-    },
-    JobCancel {
-        id: String,
-    },
-    JobRun(JobRun),
-    /// `job test-cross`: compile and execute Rust tests on a selected node.
-    JobTestCross(JobRun),
-    JobLogs(JobLogs),
     ChatSend {
         sleeve: String,
         text: String,
@@ -837,10 +635,6 @@ fn usage() -> &'static str {
      hub publish-pub-cache       publish the Pub package cache (--home, --pub-cache-root, --max-bytes)\n  \
      hub publish-go-mod-cache    publish the Go module cache (--home, --go-mod-cache-root, --max-bytes)\n  \
      hub update                 fetch a verified release and confirm restart (--channel, --version)\n  \
-     service systemd hub|node    print a systemd unit (--binary, --home, --write, --install; serve flags after --)\n  \
-     service windows-task       print Task Scheduler XML (--binary, --home, --trigger, --write)\n  \
-     service install-windows    print Windows service registration commands (--binary, --home, --write)\n  \
-     service termux             print Termux runit run and Termux:Boot scripts (--binary, --home, --write, --install; serve flags after --)\n  \
      quota [--refresh]           subscription usage, resets and projected unused capacity\n  \
      quota suggest [--for small|medium|large] [--refresh]  rank chat harness capacity\n  \
      token create <name>        mint a capability (--scope repeated, --ttl 1h, at most 24h; secret shown once)\n  \
@@ -859,24 +653,10 @@ fn usage() -> &'static str {
      devices rename <id> <name> rename a trusted device\n  \
      login [--name NAME] [--platform OS/ARCH] [--home DIR]  pair this machine with --hub through device approval\n  \
      pair [--url URL] [--app]  print a public pairing link and terminal QR; it carries the CA in PROTECTORATE_TLS_CA_CERT\n  \
-     grant admin               mint a task grant (--node NAME|GLOB, --task TEXT, --ttl 4h, --out FILE)\n  \
      audit ls | audit tail     query owner audit history (-n/--lines, --actor, --procedure, --subject, --outcome, --run, --page-token)\n  \
      audit verify               check the audit hash chain against the hub's recorded head\n  \
      who [project|sleeve]       show projects, owning sleeves and dependency edges\n  \
      events                     stream hub events until interrupted\n  \
-     node ls | node list        every node with its latest metrics summary\n  \
-     node show <name>           one node with full metrics\n  \
-     node metrics --local       collect this machine's metrics without a hub (--watch DIR repeated)\n  \
-     node add <name> --addr HOST  add a node, or with --update change a joined node's address (--ssh, --tier, --tag, --notes)\n  \
-     node rm <name>             drain, revoke and remove (--jobs wait|cancel, --wait-timeout, --uninstall)\n  \
-     node tier <name> shared|care  retag and change a node's tier\n  \
-     node update <name> | --all  push the hub release (--force, --no-wait)\n  \
-     node serve                run this machine's Rust node agent over mutual TLS (--home DIR, --listen IP:PORT, --file-root DIR, --file-unconfined, --job-concurrency N, --sandbox-helper FILE, --allow-plain-jobs, --watch-dir DIR, --docker-host URL)\n  \
-     node doctor               inspect this machine's Rust node install (--home DIR, --json)\n  \
-     node join                 join a hub with an invite code (--hub URL, --ca-cert FILE, --code CODE or PROTECTORATE_JOIN_CODE, --name, --listen IP:PORT, --home DIR)\n  \
-     node invite <name>         issue a single-use join code (--tier, --expires, --url)\n  \
-     node put <node> <local> <remote>  copy file or directory to a node (-f, --no-compress)\n  \
-     node get <node> <remote> <local>  copy file or directory from a node (-f, --no-compress)\n  \
      backlog ls | backlog list  notes, pinned first (--project, --query, --state open|done|all, --all)\n  \
      backlog show <id>          one note with its body\n  \
      backlog add [title]        add a note (--project, --pin, --body, --body-file FILE|-)\n  \
@@ -885,19 +665,6 @@ fn usage() -> &'static str {
      backlog pin <id>           pin a note (--off to unpin)\n  \
      backlog done <id>          mark a note done, with an optional --resolution line\n  \
      backlog reopen <id>        reopen a note and clear its completion\n  \
-     lease ls | lease list      live leases, then queued tickets\n  \
-     lease acquire             reserve a node or matching selector (--node, --os, --arch, --min-free-mem, --gpu-vram, --gpu, --npu, --holder, --ttl, --wait, --priority)\n  \
-     lease renew <id>           claim or extend a lease (--ttl DURATION)\n  \
-     lease release <id>...      free leases or withdraw queued tickets\n  \
-     job ls | job list          jobs, newest first (--state preparing|running|succeeded|failed|canceled|timed-out|killed, --limit N)\n  \
-     job show <id>              one job record\n  \
-     job cancel <id>            stop a job and its process tree\n  \
-     job run --on <target> -- <cmd...>\n                             \
-       run a command on a node, lease or selector and stream its output\n                             \
-       (--git repo[@commit] | --artifact file|dir, --workdir, --artifact-glob,\n                             \
-       --env K=V, --timeout, --cpu, --mem, --admin on Linux nodes)\n  \
-     job test-cross              run cargo test on a matching node (--os, --arch, --on, --git, --artifact, --artifact-glob, --package, --timeout; cargo args after --)\n  \
-     job logs <id>              print a job's output (--follow, -f)\n  \
      chat send <sleeve> <text>  send a message (- reads stdin; --request-id makes a retry safe; -- before leading-dash text)\n  \
      chat watch <sleeve>        replay and follow chat events (--after SEQ; --json emits one event per line)\n  \
      chat respond <sleeve> <id> answer an approval (--allow or --deny; --note TEXT)\n  \
@@ -944,13 +711,6 @@ fn usage() -> &'static str {
      1h30m; for chat wait 0 waits until the condition holds), not the request\n  \
      timeout. sleeve spawn and sleeve envoy wait at least 120s. sleeve\n  \
      resleeve waits at least its --wait (default 5m) plus 10m.\n\n\
-     job test-cross runs cargo test on a node with an installed Rust toolchain.\n  \
-     --os and --arch select a matching node; --on accepts a node, lease or\n  \
-     selector. The default --git . sends the hub's current commit and reuses\n  \
-     the node's build cache. --artifact DIR stages a hub-side directory.\n  \
-     --package and --artifact-glob may repeat; without a package Cargo tests\n  \
-     the workspace. Collected artifacts are stored with the hub job. Cargo\n  \
-     flags follow --.\n\n\
      session new, session respawn and session attach run or show unsandboxed
   \
      hub commands, so they need the owner token. session names are 1-64 of
@@ -987,40 +747,24 @@ fn command_usage(path: &str) -> Result<String> {
 fn execute(client: &Client, invocation: &Invocation) -> Result<String> {
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
-    match render(client, invocation, &mut stdout, &mut stderr, None, false) {
-        Ok(text) => {
-            let mut output = String::from_utf8(stdout).map_err(|error| {
-                RpcError::new(Code::Internal, format!("job output is not utf-8: {error}"))
-            })?;
-            output.push_str(&text);
-            Ok(output)
-        }
-        Err(RunError::Rpc(error)) => Err(error),
-        Err(RunError::Status { message, .. }) => Err(RpcError::new(Code::Unknown, message)),
-    }
+    let text = render(client, invocation, &mut stdout, &mut stderr)?;
+    let mut output = String::from_utf8(stdout).map_err(|error| {
+        RpcError::new(
+            Code::Internal,
+            format!("command output is not utf-8: {error}"),
+        )
+    })?;
+    output.push_str(&text);
+    Ok(output)
 }
 
-/// `signals` installs the process signal handler. The binary does; library
-/// callers do not, so a test process is not rewired.
 fn render(
     client: &Client,
     invocation: &Invocation,
     stdout: &mut dyn std::io::Write,
     stderr: &mut dyn std::io::Write,
-    cancel: Option<&Client>,
-    signals: bool,
-) -> std::result::Result<String, RunError> {
+) -> Result<String> {
     match &invocation.command {
-        Command::JobRun(spec) | Command::JobTestCross(spec) => job::run_job(
-            client,
-            cancel,
-            spec,
-            invocation.json,
-            signals,
-            stdout,
-            stderr,
-        ),
-        Command::JobLogs(spec) => job::logs(client, spec, signals, stdout, stderr),
         Command::ChatWatch { sleeve, after } => {
             let mut renderer = format::ChatRenderer::default();
             let request = v1::WatchRequest {
@@ -1068,52 +812,6 @@ fn render(
             )?;
             Ok(String::new())
         }
-        Command::NodeRemove {
-            name,
-            jobs,
-            uninstall,
-            wait_timeout,
-        } => {
-            let request = v1::RemoveNodeRequest {
-                name: name.clone(),
-                jobs: *jobs as i32,
-                uninstall: *uninstall,
-                wait_timeout: wait_timeout.map(proto_duration),
-            };
-            client.server_stream(v1::node_service::REMOVE_NODE, &request, |progress| {
-                let line = if invocation.json {
-                    json_line(&progress)?
-                } else {
-                    format!(
-                        "{}\t{}\n",
-                        format::word(progress.phase().as_str_name(), "REMOVE_PHASE_"),
-                        progress.message
-                    )
-                };
-                stdout
-                    .write_all(line.as_bytes())
-                    .and_then(|()| stdout.flush())
-                    .map_err(|e| RpcError::new(Code::Internal, format!("write node removal: {e}")))
-            })?;
-            Ok(String::new())
-        }
-        Command::NodeUpdate {
-            name,
-            all,
-            force,
-            no_wait,
-        } => {
-            update_nodes(
-                client,
-                name.as_deref(),
-                *all,
-                *force,
-                *no_wait,
-                invocation.json,
-                stdout,
-            )?;
-            Ok(String::new())
-        }
         Command::HubUpdate { channel, version } => {
             hub_update::run(
                 client,
@@ -1129,20 +827,16 @@ fn render(
             name,
             read_only,
             escape,
-        } => attach::run(client, invocation, name, *read_only, escape, stdout, stderr)
-            .map_err(RunError::from),
+        } => attach::run(client, invocation, name, *read_only, escape, stdout, stderr),
         Command::SessionAttach {
             name,
             read_only,
             escape,
-        } => attach::run_session(invocation, name, *read_only, escape, stdout, stderr)
-            .map_err(RunError::from),
+        } => attach::run_session(invocation, name, *read_only, escape, stdout, stderr),
         _ if matches!(invocation.command, Command::DeviceLogin { .. }) => {
-            login::run(invocation, stdout).map_err(RunError::from)
+            login::run(invocation, stdout)
         }
-        Command::Pair { url, app } => {
-            pair::run(invocation, url.as_deref(), *app).map_err(RunError::from)
-        }
+        Command::Pair { url, app } => pair::run(invocation, url.as_deref(), *app),
         Command::ChatWait {
             sleeves,
             until,
@@ -1151,7 +845,7 @@ fn render(
             chat_wait_multi(client, sleeves, *until, *timeout, invocation.json, stdout)?;
             Ok(String::new())
         }
-        _ => execute_commands(client, invocation, stderr).map_err(RunError::from),
+        _ => execute_commands(client, invocation),
     }
 }
 
@@ -1202,179 +896,6 @@ fn wait_request(sleeve: &str, until: WaitUntil, timeout: Duration) -> v1::WaitRe
         sleeve: sleeve.to_owned(),
         until: until.as_proto() as i32,
         timeout: Some(proto_duration(timeout)),
-    }
-}
-
-fn reserve_grant_file(path: &std::path::Path) -> Result<std::fs::File> {
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    options.open(path).map_err(|error| {
-        RpcError::new(
-            if error.kind() == std::io::ErrorKind::AlreadyExists {
-                Code::AlreadyExists
-            } else {
-                Code::Internal
-            },
-            format!("reserve grant secret {}: {error}", path.display()),
-        )
-    })
-}
-
-fn write_grant_secret(
-    file: &mut std::fs::File,
-    path: &std::path::Path,
-    secret: &str,
-) -> Result<()> {
-    use std::io::Write;
-    if secret.is_empty() {
-        return Err(RpcError::new(
-            Code::DataLoss,
-            "hub returned no grant secret",
-        ));
-    }
-    let result = file
-        .write_all(secret.as_bytes())
-        .and_then(|_| file.write_all(b"\n"))
-        .and_then(|_| file.sync_all());
-    if let Err(error) = result {
-        return Err(RpcError::new(
-            Code::Internal,
-            format!("write grant secret {}: {error}", path.display()),
-        ));
-    }
-    Ok(())
-}
-
-fn update_nodes(
-    client: &Client,
-    name: Option<&str>,
-    all: bool,
-    force: bool,
-    no_wait: bool,
-    json: bool,
-    stdout: &mut dyn std::io::Write,
-) -> Result<()> {
-    let listing = client.unary(v1::node_service::LIST_NODES, &v1::ListNodesRequest {})?;
-    let wanted = name.map(str::to_ascii_lowercase);
-    let mut matched = false;
-    let mut errors = Vec::new();
-    for status in &listing.nodes {
-        let Some(node) = &status.node else { continue };
-        let current = node.name.as_str();
-        if !all && Some(current) != wanted.as_deref() {
-            continue;
-        }
-        matched = true;
-        if node.local {
-            if all {
-                continue;
-            }
-            return Err(RpcError::new(
-                Code::InvalidArgument,
-                format!(
-                    "{current} is the hub's own node: replace the hub's binary and restart the hub"
-                ),
-            ));
-        }
-        if status.freshness() != v1::NodeFreshness::Fresh || status.metrics.is_none() {
-            let reason = format!(
-                "node is not reachable ({})",
-                status
-                    .freshness()
-                    .as_str_name()
-                    .trim_start_matches("NODE_FRESHNESS_")
-                    .to_ascii_lowercase()
-            );
-            if all {
-                writeln!(stdout, "{current}\tskipped: {reason}").map_err(RpcError::internal)?;
-                continue;
-            }
-            return Err(RpcError::new(Code::Unavailable, reason));
-        }
-        let mut last_phase = v1::UpdatePhase::Unspecified;
-        let request = v1::UpdateNodeRequest {
-            name: current.to_owned(),
-            force,
-        };
-        let result = client.server_stream(v1::node_service::UPDATE_NODE, &request, |progress| {
-            last_phase = progress.phase();
-            let line = if json {
-                json_line(&progress)?
-            } else {
-                update_line(current, &progress)
-            };
-            if !line.is_empty() {
-                stdout
-                    .write_all(line.as_bytes())
-                    .and_then(|()| stdout.flush())
-                    .map_err(RpcError::internal)?;
-            }
-            if no_wait && last_phase == v1::UpdatePhase::Swapping {
-                return Err(RpcError::new(Code::Canceled, "node update no-wait"));
-            }
-            Ok(())
-        });
-        if let Err(error) = result {
-            if !(no_wait && error.code == Code::Canceled && error.message == "node update no-wait")
-            {
-                if !all {
-                    return Err(error);
-                }
-                errors.push(format!("{current}: {}", error.message));
-            }
-        } else if last_phase == v1::UpdatePhase::RolledBack {
-            if !all {
-                return Err(RpcError::new(
-                    Code::Aborted,
-                    "the node came back on its previous version",
-                ));
-            }
-            errors.push(format!(
-                "{current}: the node came back on its previous version"
-            ));
-        }
-    }
-    if !matched && !all {
-        return Err(RpcError::new(
-            Code::NotFound,
-            format!("no node {:?} in the inventory", name.unwrap_or_default()),
-        ));
-    }
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(RpcError::new(Code::Unknown, errors.join("; ")))
-    }
-}
-
-fn update_line(name: &str, progress: &v1::UpdateNodeProgress) -> String {
-    use v1::UpdatePhase;
-    let detail = match progress.phase() {
-        UpdatePhase::Skipped => progress.message.clone(),
-        UpdatePhase::Sending
-            if progress.total_bytes > 0 && progress.sent_bytes >= progress.total_bytes =>
-        {
-            format!("sent {}", format::bytes(progress.sent_bytes))
-        }
-        UpdatePhase::Verifying => "verifying".into(),
-        UpdatePhase::Swapping => format!(
-            "swapped {} -> {}, restarting ({})",
-            progress.previous_version, progress.version, progress.restart
-        ),
-        UpdatePhase::Restarting => "waiting for the node to come back".into(),
-        UpdatePhase::Confirmed => format!("reports {}", progress.version),
-        UpdatePhase::RolledBack => format!("rolled back: {}", progress.message),
-        _ => String::new(),
-    };
-    if detail.is_empty() {
-        String::new()
-    } else {
-        format!("{name}\t{detail}\n")
     }
 }
 
@@ -1434,30 +955,20 @@ fn read_report_summary(path: Option<&str>) -> Result<String> {
         .map_err(|_| RpcError::new(Code::InvalidArgument, "report summary must be UTF-8"))
 }
 
-fn execute_commands(
-    client: &Client,
-    invocation: &Invocation,
-    stderr: &mut dyn std::io::Write,
-) -> Result<String> {
+fn execute_commands(client: &Client, invocation: &Invocation) -> Result<String> {
     let json = invocation.json;
     match &invocation.command {
-        Command::JobRun(_)
-        | Command::JobTestCross(_)
-        | Command::JobLogs(_)
-        | Command::ChatWatch { .. }
+        Command::ChatWatch { .. }
         | Command::Events
         | Command::SleeveAttach { .. }
         | Command::SessionAttach { .. }
-        | Command::NodeRemove { .. }
-        | Command::NodeUpdate { .. }
         | Command::HubUpdate { .. }
         | Command::DeviceLogin { .. } => Err(RpcError::new(
             Code::Internal,
-            "job run and job logs stream through a separate path",
+            "streaming commands run through a separate path",
         )),
         Command::Pair { url, app } => pair::run(invocation, url.as_deref(), *app),
         Command::Version => Ok(version_text(json)),
-        Command::NodeMetricsLocal { watch } => local_metrics(watch, json),
         Command::ApiCall { procedure, body } => api_call(client, procedure, body, json),
         Command::Help => Ok(usage().to_string()),
         Command::HelpPath(path) => command_usage(path),
@@ -1597,49 +1108,6 @@ fn execute_commands(
         Command::TokenAttenuate { .. } => Err(RpcError::invalid(
             "token attenuate runs without a hub client",
         )),
-        Command::GrantAdmin {
-            node,
-            task,
-            ttl,
-            out,
-        } => {
-            let mut reserved = out
-                .as_ref()
-                .map(|path| reserve_grant_file(path))
-                .transpose()?;
-            let issued = client.unary(
-                v1::grant_service::ADMIN,
-                &v1::GrantServiceAdminRequest {
-                    node: node.clone(),
-                    ttl: Some(proto_duration(*ttl)),
-                    task: task.clone(),
-                },
-            );
-            let mut issued = match issued {
-                Ok(issued) => issued,
-                Err(error) => {
-                    drop(reserved);
-                    if let Some(path) = out {
-                        let _ = std::fs::remove_file(path);
-                    }
-                    return Err(error);
-                }
-            };
-            if let (Some(path), Some(mut file)) = (out, reserved.take()) {
-                let saved = write_grant_secret(&mut file, path, &issued.secret);
-                drop(file);
-                if let Err(error) = saved {
-                    let _ = std::fs::remove_file(path);
-                    return Err(error);
-                }
-                issued.secret.clear();
-            }
-            if json {
-                json_line(&issued)
-            } else {
-                Ok(format::grant_admin_text(&issued, node, out.as_deref()))
-            }
-        }
         Command::AuditList(query) => {
             let page = client.unary(
                 v1::audit_service::LIST_AUDIT_ENTRIES,
@@ -1780,153 +1248,6 @@ fn execute_commands(
                 Ok(format!("renamed {id} to {name}\n"))
             }
         }
-        Command::NodeList => {
-            let nodes = client.unary(v1::node_service::LIST_NODES, &v1::ListNodesRequest {})?;
-            if json {
-                json_line(&nodes)
-            } else {
-                Ok(format::node_list_text(&nodes))
-            }
-        }
-        Command::NodeShow { name } => {
-            let node = client.unary(
-                v1::node_service::GET_NODE,
-                &v1::GetNodeRequest { name: name.clone() },
-            )?;
-            if json {
-                json_line(&node)
-            } else {
-                Ok(format::node_show_text(&node))
-            }
-        }
-        Command::NodeAdd {
-            name,
-            address,
-            ssh_alias,
-            tier,
-            tags,
-            notes,
-            update,
-        } => {
-            let request = v1::AddNodeRequest {
-                node: Some(v1::NodeInfo {
-                    name: name.clone(),
-                    address: address.clone(),
-                    ssh_alias: ssh_alias.clone(),
-                    tier: tier.clone(),
-                    tags: tags.clone(),
-                    notes: notes.clone(),
-                    ..Default::default()
-                }),
-                update: *update,
-            };
-            let node = client.unary(v1::node_service::ADD_NODE, &request)?;
-            if json {
-                json_line(&node)
-            } else {
-                Ok(format!(
-                    "added {} ({}, tier {})\n",
-                    or(&node.name, name),
-                    or(&node.address, address),
-                    or(&node.tier, tier)
-                ))
-            }
-        }
-        Command::NodeTier { name, tier } => {
-            let node = client.unary(
-                v1::node_service::SET_NODE_TIER,
-                &v1::SetNodeTierRequest {
-                    name: name.clone(),
-                    tier: tier.clone(),
-                },
-            )?;
-            if json {
-                json_line(&node)
-            } else {
-                Ok(format!(
-                    "{} is now tier {}\n",
-                    or(&node.name, name),
-                    or(&node.tier, tier)
-                ))
-            }
-        }
-        Command::NodeInvite {
-            name,
-            tier,
-            ttl,
-            install_url,
-        } => {
-            let invite = client.unary(
-                v1::node_service::INVITE_NODE,
-                &v1::InviteNodeRequest {
-                    name: name.clone(),
-                    tier: tier.clone(),
-                    ttl: Some(proto_duration(*ttl)),
-                    install_url: install_url.clone(),
-                },
-            )?;
-            if json {
-                json_line(&invite)
-            } else {
-                let invited_name = invite
-                    .node
-                    .as_ref()
-                    .map_or(name.as_str(), |node| or(&node.name, name));
-                let expiry = invite
-                    .expires_at
-                    .map_or_else(|| "unknown time".to_owned(), |at| at.to_string());
-                writeln!(stderr, "{invited_name} is in the inventory as invited; the key is single-use and expires {expiry}")
-                    .map_err(|error| RpcError::new(Code::Internal, format!("write invite status: {error}")))?;
-                Ok(format::node_invite_text(&invite))
-            }
-        }
-        Command::NodePut {
-            name,
-            local,
-            remote,
-            force,
-            no_compress,
-        } => {
-            let (response, total, wire, elapsed) =
-                transfer::put(client, name, local, remote, *force, *no_compress)?;
-            if json {
-                json_line(&response)
-            } else {
-                Ok(format!(
-                    "put\t{name}:{}\nbytes\t{total} ({wire} bytes sent, {elapsed:?})\n",
-                    or(&response.path, remote)
-                ))
-            }
-        }
-        Command::NodeGet {
-            name,
-            remote,
-            local,
-            force,
-            no_compress,
-        } => {
-            let (trailer, wire, elapsed) =
-                transfer::get(client, name, remote, local, *force, *no_compress)?;
-            if json {
-                json_line(&v1::FileTrailer {
-                    size: trailer.size,
-                    sha256: trailer.sha256,
-                    skipped: trailer.skipped,
-                })
-            } else {
-                let mut output = format!(
-                    "get\t{name}:{remote}\nbytes\t{} ({wire} bytes received, {elapsed:?})\n",
-                    trailer.size
-                );
-                if trailer.skipped > 0 {
-                    output.push_str(&format!(
-                        "skipped\t{} entries (symlinks or special files)\n",
-                        trailer.skipped
-                    ));
-                }
-                Ok(output)
-            }
-        }
         Command::BacklogList(filter) => {
             let notes = client.unary(
                 v1::backlog_service::LIST_NOTES,
@@ -2047,115 +1368,6 @@ fn execute_commands(
             },
             json,
         ),
-        Command::LeaseList => {
-            let leases = client.unary(v1::lease_service::LIST_LEASES, &v1::ListLeasesRequest {})?;
-            if json {
-                json_line(&leases)
-            } else {
-                Ok(format::lease_list_text(
-                    &leases,
-                    protectorate_fsutil::unix_millis(),
-                ))
-            }
-        }
-        Command::LeaseAcquire(spec) => {
-            use v1::acquire_lease_request::Target;
-            let target = if spec.resource.is_empty() {
-                Target::Selector(v1::NodeSelector {
-                    os: spec.os.clone(),
-                    arch: spec.arch.clone(),
-                    min_free_memory_bytes: spec.min_free_memory_bytes,
-                    gpu_vram_bytes: spec.gpu_vram_bytes,
-                    gpu: spec.gpu.clone(),
-                    npu: spec.npu.clone(),
-                })
-            } else {
-                Target::Resource(spec.resource.clone())
-            };
-            let lease = client.unary(
-                v1::lease_service::ACQUIRE_LEASE,
-                &v1::AcquireLeaseRequest {
-                    target: Some(target),
-                    holder: spec.holder.clone(),
-                    ttl: Some(proto_duration(spec.ttl)),
-                    wait: spec.wait,
-                    priority: spec.priority,
-                },
-            )?;
-            if json {
-                json_line(&lease)
-            } else {
-                Ok(format::lease_text(&lease))
-            }
-        }
-        Command::LeaseRenew { id, ttl } => {
-            let lease = client.unary(
-                v1::lease_service::RENEW_LEASE,
-                &v1::RenewLeaseRequest {
-                    id: id.clone(),
-                    ttl: ttl.map(proto_duration),
-                },
-            )?;
-            if json {
-                json_line(&lease)
-            } else {
-                Ok(format::lease_text(&lease))
-            }
-        }
-        Command::LeaseRelease { ids } => {
-            let mut output = String::new();
-            let mut failures = Vec::new();
-            for id in ids {
-                let request = v1::ReleaseLeaseRequest { id: id.clone() };
-                match client.unary(v1::lease_service::RELEASE_LEASE, &request) {
-                    Ok(reply) => {
-                        if json {
-                            output.push_str(&json_line(&reply)?);
-                        } else {
-                            output.push_str(&format!("released {id}\n"));
-                        }
-                    }
-                    Err(error) => failures.push((id, error)),
-                }
-            }
-            if failures.is_empty() {
-                Ok(output)
-            } else {
-                let code = failures[0].1.code;
-                let message = failures
-                    .into_iter()
-                    .map(|(id, error)| format!("{id}: {}", error.message))
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                Err(RpcError::new(code, message))
-            }
-        }
-        Command::JobList(filter) => {
-            let request = v1::ListJobsRequest {
-                state: filter.state.map_or(0, |state| state.as_proto() as i32),
-                limit: filter.limit,
-            };
-            let jobs = client.unary(v1::job_service::LIST_JOBS, &request)?;
-            if json {
-                json_lines(&jobs.jobs)
-            } else {
-                Ok(format::job_list_text(
-                    &jobs,
-                    protectorate_fsutil::unix_millis(),
-                ))
-            }
-        }
-        Command::JobShow { id } => {
-            let job = client.unary(
-                v1::job_service::GET_JOB,
-                &v1::GetJobRequest { id: id.clone() },
-            )?;
-            if json {
-                json_line(&job)
-            } else {
-                Ok(format::job_text(&job))
-            }
-        }
         Command::ChatSend {
             sleeve,
             text,
@@ -2310,20 +1522,6 @@ fn execute_commands(
                     "reported {status} at chat seq {}\n",
                     response.result.map_or(0, |result| result.chat_seq)
                 ))
-            }
-        }
-        Command::JobCancel { id } => {
-            let job = client.unary(
-                v1::job_service::CANCEL_JOB,
-                &v1::CancelJobRequest {
-                    id: id.clone(),
-                    ..Default::default()
-                },
-            )?;
-            if json {
-                json_line(&job)
-            } else {
-                Ok(format::job_cancel_text(&job))
             }
         }
         Command::SleeveList => {
@@ -2647,20 +1845,6 @@ fn transport_timeout(invocation: &Invocation) -> Duration {
         Command::ChatSettings(settings) if settings.writes() => {
             invocation.timeout.max(SELECTION_TIMEOUT_FLOOR)
         }
-        Command::NodeGet { .. } | Command::NodePut { .. } => {
-            invocation.timeout.max(Duration::from_secs(3600))
-        }
-        Command::NodeRemove {
-            jobs, wait_timeout, ..
-        } => {
-            let wait = if *jobs == v1::RemoveJobs::Wait {
-                wait_timeout.unwrap_or(Duration::from_secs(3600))
-            } else {
-                Duration::from_secs(120)
-            };
-            invocation.timeout.max(wait.saturating_add(WAIT_SLACK))
-        }
-        Command::NodeUpdate { .. } => invocation.timeout.max(UPDATE_TRANSFER_TIMEOUT),
         Command::HubUpdate { .. } => invocation.timeout.max(UPDATE_TRANSFER_TIMEOUT),
         Command::SleeveSpawn(_) | Command::SleeveEnvoy(_) => {
             invocation.timeout.max(SPAWN_TIMEOUT_FLOOR)
@@ -2683,19 +1867,6 @@ fn transport_timeout(invocation: &Invocation) -> Duration {
             };
             wait.saturating_add(WAIT_SLACK).max(invocation.timeout)
         }
-        // WatchJob stays open for the whole run. The transport has to outlast
-        // the job plus the follow window used when the stream drops.
-        Command::JobRun(spec) | Command::JobTestCross(spec) => (if spec.timeout.is_zero() {
-            DEFAULT_JOB_TIMEOUT
-        } else {
-            spec.timeout
-        })
-        .saturating_add(job::FOLLOW_WINDOW)
-        .saturating_add(Duration::from_secs(60))
-        .max(invocation.timeout),
-        Command::JobLogs(JobLogs { follow: true, .. }) => MAX_JOB_TIMEOUT
-            .saturating_add(job::FOLLOW_WINDOW)
-            .max(invocation.timeout),
         _ => invocation.timeout,
     }
 }
@@ -2775,103 +1946,48 @@ fn edit_in_editor(note: &v1::Note) -> Result<(String, String)> {
 }
 
 /// Parses `args`, resolves the hub endpoint and token from the flags and the
-/// environment, and runs the command. `job run` writes the log as it arrives
-/// and returns [`RunError::Status`] with the command's exit status.
-pub fn run_with_status(
-    args: impl IntoIterator<Item = impl AsRef<str>>,
-) -> std::result::Result<String, RunError> {
+/// environment, and runs the command.
+pub fn run(args: impl IntoIterator<Item = impl AsRef<str>>) -> Result<String> {
     let invocation = parse(args)?;
     match &invocation.command {
         Command::Help => return Ok(usage().to_string()),
-        Command::HelpPath(path) => return command_usage(path).map_err(RunError::from),
+        Command::HelpPath(path) => return command_usage(path),
         _ => {}
     }
     if invocation.command == Command::Version {
         return Ok(version_text(invocation.json));
     }
-    if let Command::NodeMetricsLocal { watch } = &invocation.command {
-        return local_metrics(watch, invocation.json).map_err(RunError::from);
-    }
     // Device login has no bearer token yet: it runs on its own public client
     // and writes its progress straight out so the code is visible while waiting.
     if matches!(invocation.command, Command::DeviceLogin { .. }) {
         let mut stdout = std::io::stdout();
-        return login::run(&invocation, &mut stdout).map_err(RunError::from);
+        return login::run(&invocation, &mut stdout);
     }
     if let Command::Pair { url, app } = &invocation.command {
-        return pair::run(&invocation, url.as_deref(), *app).map_err(RunError::from);
+        return pair::run(&invocation, url.as_deref(), *app);
     }
     if let Command::TokenAttenuate { scopes, ttl } = &invocation.command {
-        return attenuate(&invocation, scopes, *ttl).map_err(RunError::from);
+        return attenuate(&invocation, scopes, *ttl);
     }
     let client = client_for(&invocation)?;
     if streams(&invocation.command) {
-        let cancel = cancel_client(&invocation)?;
         let mut stdout = std::io::stdout();
         let mut stderr = std::io::stderr();
-        return render(
-            &client,
-            &invocation,
-            &mut stdout,
-            &mut stderr,
-            cancel.as_ref(),
-            true,
-        );
+        return render(&client, &invocation, &mut stdout, &mut stderr);
     }
-    execute(&client, &invocation).map_err(RunError::from)
-}
-
-fn local_metrics(watch: &[PathBuf], json: bool) -> Result<String> {
-    use protectorate_node_metrics::{metrics_proto, Collector, Options};
-    let options = Options {
-        version: client_version().to_owned(),
-        watch_paths: watch.to_vec(),
-        ..Options::default()
-    };
-    #[cfg(windows)]
-    let snapshot = Collector::windows(options).collect();
-    #[cfg(not(windows))]
-    let snapshot = Collector::linux(options).collect();
-    let snapshot = snapshot.map_err(|error| {
-        RpcError::new(Code::Internal, format!("collect local metrics: {error}"))
-    })?;
-    let metrics = metrics_proto(&snapshot);
-    if json {
-        json_line(&metrics)
-    } else {
-        Ok(format::local_metrics_text(&metrics))
-    }
+    execute(&client, &invocation)
 }
 
 fn streams(command: &Command) -> bool {
     matches!(command, Command::ChatWait { sleeves, .. } if sleeves.len() > 1)
         || matches!(
             command,
-            Command::JobRun(_)
-                | Command::JobTestCross(_)
-                | Command::JobLogs(_)
-                | Command::ChatWatch { .. }
+            Command::ChatWatch { .. }
                 | Command::Events
                 | Command::SleeveAttach { .. }
                 | Command::SessionAttach { .. }
-                | Command::NodeUpdate { .. }
                 | Command::HubUpdate { .. }
         )
-}
-
-/// A short-timeout client for CancelJob, so a dropped watch does not hold the
-/// only connection the cancel needs.
-fn cancel_client(invocation: &Invocation) -> Result<Option<Client>> {
-    if !matches!(
-        invocation.command,
-        Command::JobRun(_) | Command::JobTestCross(_)
-    ) {
-        return Ok(None);
-    }
-    Ok(Some(
-        Client::new(&hub_url(invocation), "", Duration::from_secs(20))?
-            .with_credential(credential(invocation)?),
-    ))
 }
 
 /// What `api call` prints: the hub's reply as one compact proto-JSON line
@@ -3453,21 +2569,6 @@ fn selection(selection: &ModelChoice) -> Option<v1::ModelSelection> {
 pub(crate) fn message_value<T: ReflectMessage>(message: &T) -> Result<Value> {
     serde_json::from_slice(&protectorate_wire::encode(message)?)
         .map_err(|error| RpcError::new(Code::Internal, format!("encode JSON: {error}")))
-}
-
-/// A disk path becomes absolute and cleaned. Unlike [`absolute_workspace`],
-/// `@` is not treated as a URL: job sources are files on the hub.
-pub(crate) fn absolute_disk_path(path: &str) -> Result<String> {
-    let path = if path.is_empty() { "." } else { path };
-    let path = std::path::Path::new(path);
-    let absolute = if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        env::current_dir()
-            .map_err(|error| RpcError::new(Code::Internal, format!("current directory: {error}")))?
-            .join(path)
-    };
-    Ok(normalize_path(&absolute))
 }
 
 /// A local path becomes absolute and cleaned. A git URL, recognized by

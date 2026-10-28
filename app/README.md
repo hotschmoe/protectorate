@@ -72,8 +72,7 @@ Reviewed on 2026-10-20:
 
 The remaining direct dependencies all have callers: connectrpc/protobuf/fixnum
 serve the generated API, shared_preferences stores hub profiles, web_socket_channel
-supports browser/native terminal sockets, app_links handles native pairing links,
-and qr renders node enrollment codes. None can be dropped without removing behavior
+supports browser/native terminal sockets, and app_links handles native pairing links. None can be dropped without removing behavior
 or reimplementing it.
 
 ## Hub auth
@@ -92,7 +91,7 @@ or reimplementing it.
 
 Either link opens the connect dialog with the hub URL filled in. You can also enter the URL under ADD HUB. Bare addresses default to HTTPS; specify `http://` for a hub without TLS and include `:7470` when using its default LAN port. Name this device, press CONNECT, then compare the large code with the request on a trusted device before approving. For the first device, run `protectorate devices approve <code>` on the hub. Denied or expired requests have a TRY AGAIN button. No link can bypass approval or carry a token; old token links are rejected.
 
-Connecting creates the profile's device key and registers its public half; approval gives that key Full access, including device approval and revocation but excluding owner-only operations. No secret is delivered or stored. The Devices screen shows platform, approver and last use, and supports rename and revoke. Revocation closes live streams immediately. Optional `tab`, `session` and `node` parameters still select a screen when the hub is already connected.
+Connecting creates the profile's device key and registers its public half; approval gives that key Full access, including device approval and revocation but excluding owner-only operations. No secret is delivered or stored. The Devices screen shows platform, approver and last use, and supports rename and revoke. Revocation closes live streams immediately. Optional `tab` and `session` parameters still select a screen when the hub is already connected.
 
 Native handling uses the `app_links` package. Android registers an intent filter for `protectorate://pair` in `AndroidManifest.xml`. Untested: Android (no device or SDK here), Windows/Linux/macOS scheme registration (the OS must launch the app with the URL; no installer registers the scheme yet), iOS (not scaffolded).
 

@@ -17,11 +17,7 @@ use protectorate_wire::{
     v1::{self, token_service},
     AuthContext, Call, Code, Denied, Method, Result, RpcError, UnaryServer,
 };
-use std::{
-    path::Path,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{path::Path, sync::Arc, time::Duration};
 use subtle::ConstantTimeEq;
 
 pub(crate) const ENVOY: &str = "orchestrator-envoy";
@@ -223,15 +219,6 @@ pub(crate) fn authorize(
     Ok(auth)
 }
 
-/// The scopes the hub may mint for a caller: what it asked for, cut down to
-/// what the caller holds itself. The owner and devices hold everything.
-pub(crate) fn delegate(hub: &Hub, wanted: &[String], holder: &AuthContext) -> Vec<String> {
-    if holder.owner || holder.device {
-        return wanted.to_vec();
-    }
-    auth::intersect(wanted, &holder.scopes, &scope_methods(&hub.methods))
-}
-
 /// Mints the capability `principal` holds in `path`, revoking any earlier
 /// one; the hub keeps the file fresh until the lineage is revoked.
 pub(crate) fn issue_held(
@@ -375,7 +362,7 @@ pub(crate) fn ttl(value: Option<&prost_types::Duration>, default: Duration) -> R
 }
 
 fn reserved(name: &str) -> bool {
-    name == ENVOY || name.starts_with("sleeve:") || name.starts_with("grant:")
+    name == ENVOY || name.starts_with("sleeve:")
 }
 
 pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
@@ -389,7 +376,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 let name = request.name.trim();
                 if name.is_empty() || reserved(name) {
                     return Err(RpcError::invalid(
-                        "a capability needs a name that is not a sleeve, grant or Envoy identity",
+                        "a capability needs a name that is not a sleeve or Envoy identity",
                     ));
                 }
                 let scopes = auth::validate_scopes(
@@ -470,23 +457,11 @@ pub(crate) fn start_refresh(runtime: &tokio::runtime::Handle, hub: &Arc<Hub>) {
     runtime.spawn(async move {
         let mut interval = tokio::time::interval(every);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let mut hosts = Instant::now();
         loop {
             interval.tick().await;
             let Some(hub) = weak.upgrade() else { break };
-            let write_hosts = hosts.elapsed() >= Duration::from_secs(60);
-            if write_hosts {
-                hosts = Instant::now();
-            }
-            let done = tokio::task::spawn_blocking(move || {
-                refresh_held(&hub, unix_seconds());
-                if write_hosts {
-                    if let Err(error) = crate::envoy::write_hosts(&hub) {
-                        eprintln!("Envoy hosts: {}", error.message);
-                    }
-                }
-            })
-            .await;
+            let done =
+                tokio::task::spawn_blocking(move || refresh_held(&hub, unix_seconds())).await;
             if done.is_err() {
                 break;
             }

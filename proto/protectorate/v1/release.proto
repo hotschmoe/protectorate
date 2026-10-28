@@ -2,7 +2,6 @@ syntax = "proto3";
 
 package protectorate.v1;
 
-import "protectorate/v1/node.proto";
 import "protectorate/v1/options.proto";
 
 service ReleaseService {
@@ -39,4 +38,24 @@ message UpdateHubProgress {
   string previous_version = 4;
   uint64 sent_bytes = 5;
   uint64 total_bytes = 6;
+}
+
+enum UpdatePhase {
+  UPDATE_PHASE_UNSPECIFIED = 0;
+  // UPDATE_PHASE_SKIPPED: the hub already runs the requested version.
+  UPDATE_PHASE_SKIPPED = 1;
+  // UPDATE_PHASE_SENDING: the release is downloading; sent_bytes of total_bytes.
+  UPDATE_PHASE_SENDING = 2;
+  // UPDATE_PHASE_VERIFYING: the downloaded release passed its SHA-256 checks.
+  UPDATE_PHASE_VERIFYING = 3;
+  // UPDATE_PHASE_SWAPPING: the new release is in place (version and
+  // previous_version are set) and the hub is about to restart.
+  UPDATE_PHASE_SWAPPING = 4;
+  // UPDATE_PHASE_RESTARTING: waiting for the hub to come back.
+  UPDATE_PHASE_RESTARTING = 5;
+  // UPDATE_PHASE_CONFIRMED: the hub runs the new version. Final.
+  UPDATE_PHASE_CONFIRMED = 6;
+  // UPDATE_PHASE_ROLLED_BACK: the hub came back on its previous release.
+  // Final.
+  UPDATE_PHASE_ROLLED_BACK = 7;
 }

@@ -16,9 +16,11 @@ import 'dart:core' as $core;
 import 'package:fixnum/fixnum.dart' as $fixnum;
 import 'package:protobuf/protobuf.dart' as $pb;
 
-import 'node.pbenum.dart' as $0;
+import 'release.pbenum.dart';
 
 export 'package:protobuf/protobuf.dart' show GeneratedMessageGenericExtensions;
+
+export 'release.pbenum.dart';
 
 class CheckReleaseRequest extends $pb.GeneratedMessage {
   factory CheckReleaseRequest({
@@ -257,7 +259,7 @@ class UpdateHubRequest extends $pb.GeneratedMessage {
 
 class UpdateHubProgress extends $pb.GeneratedMessage {
   factory UpdateHubProgress({
-    $0.UpdatePhase? phase,
+    UpdatePhase? phase,
     $core.String? message,
     $core.String? version,
     $core.String? previousVersion,
@@ -288,8 +290,8 @@ class UpdateHubProgress extends $pb.GeneratedMessage {
       package:
           const $pb.PackageName(_omitMessageNames ? '' : 'protectorate.v1'),
       createEmptyInstance: UpdateHubProgress.$_createMessage)
-    ..aE<$0.UpdatePhase>(1, _omitFieldNames ? '' : 'phase',
-        enumValues: $0.UpdatePhase.values)
+    ..aE<UpdatePhase>(1, _omitFieldNames ? '' : 'phase',
+        enumValues: UpdatePhase.values)
     ..aOS(2, _omitFieldNames ? '' : 'message')
     ..aOS(3, _omitFieldNames ? '' : 'version')
     ..aOS(4, _omitFieldNames ? '' : 'previousVersion')
@@ -324,9 +326,9 @@ class UpdateHubProgress extends $pb.GeneratedMessage {
   static UpdateHubProgress? _defaultInstance;
 
   @$pb.TagNumber(1)
-  $0.UpdatePhase get phase => $_getN(0);
+  UpdatePhase get phase => $_getN(0);
   @$pb.TagNumber(1)
-  set phase($0.UpdatePhase value) => $_setField(1, value);
+  set phase(UpdatePhase value) => $_setField(1, value);
   @$pb.TagNumber(1)
   $core.bool hasPhase() => $_has(0);
   @$pb.TagNumber(1)

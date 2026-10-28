@@ -21,10 +21,7 @@ use support::{binary, bound, die_with_parent, until, Process, OWNER};
 const MSG: &str = "/protectorate.v1.MessageService/";
 const NOTE: &str = "/protectorate.v1.BacklogService/";
 const TOKEN: &str = "/protectorate.v1.TokenService/";
-const NODE: &str = "/protectorate.v1.NodeService/";
 const SLEEVE: &str = "/protectorate.v1.SleeveService/";
-const JOB: &str = "/protectorate.v1.JobService/";
-const LEASE: &str = "/protectorate.v1.LeaseService/";
 const AUDIT: &str = "/protectorate.v1.AuditService/";
 const HUB: &str = "/protectorate.v1.HubService/GetStatus";
 
@@ -139,7 +136,6 @@ fn start_hub(disk: &SmallDisk, root: &Path, run: u32) -> DiskHub {
         .arg("--owner-token-file")
         .arg(&token)
         .args(["--listen", "127.0.0.1:0", "--tls-listen", "127.0.0.1:0"])
-        .args(["--node-interval", "1s"])
         .args(["--release-api-url", "http://127.0.0.1:1"])
         .args(["--tmux-socket", &tmux])
         .env("HOME", &user_home)
@@ -232,15 +228,13 @@ impl DiskHub {
 
 #[derive(Default)]
 struct Acked {
-    /// The first message, note, token and node get changed in place later;
+    /// The first message, note and token get changed in place later;
     /// these are what a failed or acknowledged change leaves them as.
     first_acked: bool,
     first_revoked: bool,
-    first_care: bool,
     mails: Vec<(String, String)>,
     notes: Vec<(String, String)>,
     tokens: Vec<String>,
-    nodes: Vec<String>,
 }
 
 /// A full disk reads as one, and says which write failed.
@@ -289,18 +283,10 @@ fn mutate_all(hub: &DiskHub, acked: &mut Acked, tag: &str, size: usize) -> Vec<S
         Ok(made) => acked.tokens.push(text(&made["token"]["id"]).to_owned()),
         Err(e) => errors.push(format!("create token: {e}")),
     }
-    let name = format!("node-{tag}");
-    match hub.call(
-        &format!("{NODE}AddNode"),
-        json!({"node":{"name":name,"address":"127.0.0.1:9","tier":"shared"}}),
-    ) {
-        Ok(_) => acked.nodes.push(name),
-        Err(e) => errors.push(format!("add node: {e}")),
-    }
     errors
 }
 
-/// Changes the first message, note, token and node in place; a change the
+/// Changes the first message, note and token in place; a change the
 /// hub refuses must leave the old value, one it accepts must stick.
 fn change_first(hub: &DiskHub, acked: &mut Acked, tag: &str) -> usize {
     let mut failed = 0;
@@ -334,23 +320,12 @@ fn change_first(hub: &DiskHub, acked: &mut Acked, tag: &str) -> usize {
     ) {
         acked.first_revoked = true;
     }
-    let node = acked.nodes[0].clone();
-    if outcome(
-        "set tier",
-        hub.call(
-            &format!("{NODE}SetNodeTier"),
-            json!({"name":node,"tier":"care"}),
-        ),
-    ) {
-        acked.first_care = true;
-    }
     failed
 }
 
-/// Spawns a sleeve, submits a job and takes a lease on the joined node.
-/// Each either fails with a clear error and leaves no trace, or succeeds.
+/// Spawns a sleeve; it either fails with a clear error and leaves no trace,
+/// or succeeds.
 fn heavy(hub: &DiskHub, work: &Path, tag: &str, must_succeed: bool) {
-    let local = "disk-peer";
     let sleeve = format!("sl-{tag}");
     let dir = work.join(&sleeve);
     fs::create_dir_all(&dir).unwrap();
@@ -359,25 +334,11 @@ fn heavy(hub: &DiskHub, work: &Path, tag: &str, must_succeed: bool) {
         json!({"name":sleeve,"harness":"HARNESS_SHELL","mode":"SLEEVE_MODE_TERMINAL",
             "workspace":dir,"args":["/usr/bin/sh","-c","sleep 1"]}),
     );
-    let request = format!("full-job-{tag}");
-    let job = hub.call(
-        &format!("{JOB}SubmitJob"),
-        json!({"requestId":request,"target":{"node":local},
-            "command":["/bin/echo","x"],"timeout":"60s"}),
-    );
-    let lease = hub.call(
-        &format!("{LEASE}AcquireLease"),
-        json!({"resource":local,"holder":tag,"ttl":"3600s"}),
-    );
     if must_succeed {
         spawned.as_ref().expect("spawn after recovery");
-        job.as_ref().expect("job after recovery");
-        lease.as_ref().expect("lease after recovery");
     }
-    for (what, result) in [("spawn", &spawned), ("job", &job), ("lease", &lease)] {
-        if let Err(e) = result {
-            assert_clear(&format!("{what}: {e}"));
-        }
+    if let Err(e) = &spawned {
+        assert_clear(&format!("spawn: {e}"));
     }
     let got = hub.call(&format!("{SLEEVE}GetSleeve"), json!({"name":sleeve}));
     assert_eq!(
@@ -385,16 +346,6 @@ fn heavy(hub: &DiskHub, work: &Path, tag: &str, must_succeed: bool) {
         spawned.is_ok(),
         "sleeve record vs spawn result: {got:?}"
     );
-    if let Ok(job) = &job {
-        hub.ok(&format!("{JOB}GetJob"), json!({"id":job["id"]}));
-    } else {
-        hub.ok(&format!("{JOB}ListJobs"), json!({"limit":1000}));
-    }
-    let leases = hub.ok(&format!("{LEASE}ListLeases"), json!({}));
-    let held = leases["leases"]
-        .as_array()
-        .is_some_and(|l| l.iter().any(|l| text(&l["holder"]) == tag));
-    assert_eq!(held, lease.is_ok(), "lease table vs acquire result");
 }
 
 /// Reads through the API: exactly the acknowledged state is visible.
@@ -458,24 +409,6 @@ fn check_reads(hub: &DiskHub, acked: &Acked, context: &str) {
         acked.tokens.len(),
         "{context}: a failed token is visible in memory"
     );
-    for (i, name) in acked.nodes.iter().enumerate() {
-        let node = hub.ok(&format!("{NODE}GetNode"), json!({"name":name}));
-        if i == 0 {
-            let want = if acked.first_care { "care" } else { "shared" };
-            assert_eq!(node["node"]["tier"], want, "{context}: tier of {name}");
-        }
-    }
-    let nodes = hub.ok(&format!("{NODE}ListNodes"), json!({}));
-    let added = nodes["nodes"].as_array().map_or(0, |all| {
-        all.iter()
-            .filter(|n| n["node"]["local"] != true && n["node"]["name"] != "disk-peer")
-            .count()
-    });
-    assert_eq!(
-        added,
-        acked.nodes.len(),
-        "{context}: a failed node add is visible in memory"
-    );
 }
 
 /// Every durable file parses and no store file is truncated or torn.
@@ -483,9 +416,7 @@ fn check_disk(disk: &SmallDisk, context: &str) {
     let home = disk.outside(&disk.mount);
     for name in [
         "identity.json",
-        "nodes.json",
         "sleeves.json",
-        "leases.json",
         "directory.json",
         "notes.json",
     ] {
@@ -547,40 +478,6 @@ fn full_disk_fails_writes_cleanly_keeps_reads_and_recovers_without_restart() {
 
     let work = root.path().join("work");
     fs::create_dir_all(&work).unwrap();
-    let node_home = root.path().join("node");
-    let invite = hub.ok(
-        &format!("{NODE}InviteNode"),
-        json!({"name":"disk-peer","tier":"shared"}),
-    );
-    let ca = root.path().join("ca.pem");
-    fs::copy(disk.outside(&disk.mount).join("ca/ca.pem"), &ca).unwrap();
-    let joined = Command::new(binary())
-        .args(["node", "join", "--hub"])
-        .arg(text(&invite["hubUrl"]))
-        .args(["--code", text(&invite["code"]), "--ca-cert"])
-        .arg(&ca)
-        .args([
-            "--name",
-            "disk-peer",
-            "--listen",
-            &support::free_port(),
-            "--home",
-        ])
-        .arg(&node_home)
-        .env("HOME", root.path().join("user"))
-        .output()
-        .unwrap();
-    assert!(
-        joined.status.success(),
-        "node join: {}",
-        String::from_utf8_lossy(&joined.stderr)
-    );
-    let node_log = root.path().join("node.stderr");
-    let _node = support::serve_node(&node_home, &root.path().join("user"), &node_log);
-    until("node poll", &node_log, || {
-        hub.call(&format!("{NODE}GetNode"), json!({"name":"disk-peer"}))
-            .is_ok_and(|n| n["freshness"] == "NODE_FRESHNESS_FRESH")
-    });
     let filler = disk.fill();
     let mut failures = 0;
     for round in 0..40 {
@@ -655,7 +552,7 @@ fn full_disk_fails_writes_cleanly_keeps_reads_and_recovers_without_restart() {
     // The names that failed on the full disk must be free again.
     heavy(&hub, &work, "full0", true);
     assert_eq!(change_first(&hub, &mut acked, "after"), 0);
-    assert!(acked.first_acked && acked.first_revoked && acked.first_care);
+    assert!(acked.first_acked && acked.first_revoked);
     hub.alive();
     check_reads(&hub, &acked, "recovered");
     check_disk(&disk, "after recovery");

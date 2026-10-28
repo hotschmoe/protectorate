@@ -267,7 +267,7 @@ fn render_enum(out: &mut String, e: &EnumDescriptor) {
     out.push_str("            _ => None,\n        }\n    }\n}\n");
 }
 
-/// LeaseState -> lease_state, matching the SCREAMING_SNAKE value prefix.
+/// SleeveState -> sleeve_state, matching the SCREAMING_SNAKE value prefix.
 fn screaming_to_snake(camel_name: &str) -> String {
     let mut out = String::new();
     for (i, c) in camel_name.chars().enumerate() {

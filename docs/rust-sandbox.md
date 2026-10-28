@@ -1,7 +1,7 @@
 # Rust sandbox runtime
 
-`protectorate-sandbox` is the Linux launcher for sleeves, read-only helpers and
-shared-node jobs. The boundary is the selected workspace, private sleeve home,
+`protectorate-sandbox` is the Linux launcher for sleeves and read-only helpers.
+The boundary is the selected workspace, private sleeve home,
 selected provider credentials, and explicitly granted references. It replaced
 the bwrap invocation of the Go hub; no bwrap is used.
 
@@ -27,9 +27,7 @@ through 2026-10-22 sleeve chat logs under
 
 The current state file contains chat sleeves for Codex and Pi, terminal shell
 sleeves, and several nested chat sleeves with 2–3 CPU cores and 5–8 GiB limits.
-The Rust runtime must serve these actual profiles. The same isolation plan is
-also used for shared-node jobs; care-node and admin jobs deliberately use a
-different execution policy ([node work](node-work.md#sandboxes-on-nodes)).
+The Rust runtime must serve these actual profiles.
 
 ## How sleeves are used
 
@@ -68,9 +66,7 @@ directory and confirms the sibling account file is hidden.
 |---|---|---|---|
 | Chat or terminal sleeve | Its workspace and private home | Its selected provider credential directory, read-only toolchain and named references | Private PID/IPC/UTS, mount and network namespaces; egress only through the allowlisting proxy; optional CPU/memory caps; terminate descendants with the supervisor |
 | Nested runtime sleeve | Same as a sleeve | One delegated cgroup subtree, mounted inside its own cgroup namespace | Parent caps remain effective; child scopes cannot write parent controls |
-| Shared-node job | Its job directory, warm worktree and private job home | Read-only system/tool directories; no hub or node identity | Same process boundary, with CPU/memory/task limits and cancellation of all descendants |
 | Read-only helper | Private temporary home, optional scratch directory | Only the named source repositories, selected tools and inputs | Short deadline and no writable source mount |
-| Care-node or admin job | As authorized by node job policy | Host access is explicit in the job record | Never label this execution as sandboxed |
 
 Every sandbox has its own network namespace with only loopback; the next
 section describes the egress proxy that is its only way out.
@@ -104,7 +100,7 @@ section describes the egress proxy that is its only way out.
 4. **Prove.** Run a real nested sleeve that builds sibling modules, verifies
    masks and secret denial, mounts and writes each cache, launches a child
    sandbox under parent limits, and confirms cleanup after normal exit,
-   cancellation and parent death. Run the shared-node job scenario separately.
+   cancellation and parent death.
    Cover this host's overlay and no-overlay configurations.
 
 ## Egress
@@ -113,7 +109,7 @@ A sandboxed workload has a private network namespace containing only
 loopback; it cannot open a socket to the host or the network. A plan with
 egress gets one host-side HTTP CONNECT proxy per sandbox, started by the
 launcher in the supervising process (the hub for chat sleeves and helpers,
-the sleeve runner for terminal sleeves, the node for jobs). If the proxy
+the sleeve runner for terminal sleeves). If the proxy
 cannot start, the launch fails. The proxy's Unix socket is bound read-only
 into the sandbox at `/run/protectorate/egress/proxy`, and its host name is
 unlinked once setup finishes, so a killed supervisor leaves nothing behind.
@@ -127,8 +123,7 @@ Node's own fetch needs.
 The proxy accepts only `CONNECT host:port`. It never terminates TLS. A
 target is admitted by, in order: the hub's own `host:port`; the API and
 token hosts of the plan's provider credential (`Provider::api_hosts`);
-operator entries from `hub serve --egress-allow` or `node serve
---egress-allow` (`host`, `host:port` or `*.domain`, port 443 by default);
+operator entries from `hub serve --egress-allow` (`host`, `host:port` or `*.domain`, port 443 by default);
 and, for Pi only, the hub's `--local-model-host` names on any port. IP
 literals are refused unless they are the hub or a local model host. The
 proxy resolves the name on the host and connects only to an address its rule
@@ -136,14 +131,12 @@ permits: provider and operator rules reach only globally routable addresses,
 so loopback, RFC 1918, CGNAT, link-local (including `169.254.169.254`),
 unique-local, documentation, multicast and reserved ranges are refused. Each
 decision (allow, deny, or allowed-but-unreachable) is appended to the hub
-audit log as procedure `egress` with actor `sleeve:NAME`; node jobs write it
-to the node's log. Plain HTTP requests through the proxy get `405`.
+audit log as procedure `egress` with actor `sleeve:NAME`. Plain HTTP requests through the proxy get `405`.
 
 When the hub listens on loopback, its port is also relayed inside the
 namespace to a plain tunnel to the hub, so `PROTECTORATE_HUB` stays
 unchanged for the CLI and MCP bridge. A non-loopback hub is reached through
-the proxy like any other destination. Git helpers have loopback only, and
-node jobs default to an empty allowlist. SSH remotes cannot work; use HTTPS
+the proxy like any other destination. Git helpers have loopback only. SSH remotes cannot work; use HTTPS
 remotes.
 
 Each harness was run in a real sandbox with a dummy key on this host
@@ -242,15 +235,15 @@ Delegated nested cgroups now work in a live host test: the outer scope has CPU,
 memory and task limits, while a child sandbox starts inside its delegated
 subtree without a second user systemd manager. The child can set its own
 cgroup controls and cannot reach the outer controls. The launcher now backs
-shell and Pi, Claude, Codex and Grok terminal sleeves, chat sleeves for those
-four harnesses, and shared-node jobs through the public Rust HTTP services.
+shell and Pi, Claude, Codex and Grok terminal sleeves, and chat sleeves for those
+four harnesses through the public Rust HTTP services.
 The agent terminal launcher uses the configured executable, keeps caller
 arguments, mounts only that provider's credentials, and disables Codex's
 managed daemon auto-start. A real sandbox and HTTP test launches fake TUIs
 for all four providers, verifies arguments and credential isolation, then
 kills them. Real authenticated vendor TUI sessions remain untested. Live
 server checks launched a shell sleeve, wrote in its
-workspace, killed it, streamed output from a sandboxed node job, and launched
+workspace, killed it, and launched
 the installed Pi package through a sandboxed RPC handshake. A fake Pi protocol
 test also exercises Send, Watch, model selection, compaction, Report, Wait,
 scoped-token revocation and Kill. Fake-protocol HTTP tests cover supervised
@@ -287,7 +280,7 @@ that a 900 MiB temporary write succeeds while a write past the ceiling through
 `/tmp` and then writes through `/var/tmp` survives with `ENOSPC` instead of
 being OOM-killed.
 
-Full live harness workloads and the remaining job policies need further work.
+Full live harness workloads need further work.
 Terminal sleeves now receive a scoped token and the actual
 hub URL. When the companion CLI exists, they see it on PATH via a narrow
 read-only file bind; if its MCP bridge companion exists, that binary gets a

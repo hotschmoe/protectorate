@@ -4,7 +4,7 @@ import '../chat/badges.dart';
 import '../gen/protectorate/v1/chat.pb.dart';
 import '../gen/protectorate/v1/sleeve.pb.dart';
 import '../mail/thread_view.dart' show orchestratorSleeve;
-import '../nodes/node_view.dart';
+import '../format.dart';
 import '../theme/tokens.dart';
 import '../vfd/meter.dart';
 import '../vfd/panel.dart';

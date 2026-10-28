@@ -109,8 +109,8 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                             .ok()
                             .is_some_and(|name| info.asset_url(&name).is_ok())
                     });
-                if restarting && !rust_bundle {
-                    return Err(RpcError::new(Code::FailedPrecondition, "release has no complete Rust hub bundle for this platform"));
+                if !rust_bundle {
+                    return Err(RpcError::new(Code::FailedPrecondition, "release has no complete hub bundle for this platform"));
                 }
                 let previous = source.current().version;
                 if restarting && !release::valid_version(&previous) {
@@ -140,8 +140,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                             release::Error::Invalid("release update stream closed".into())
                         })
                         };
-                        if rust_bundle { source.fetch_rust_release(&info, "linux", host_arch(), progress) }
-                        else { source.fetch(&info, progress) }
+                        source.fetch_rust_release(&info, "linux", host_arch(), progress)
                     }
                 });
                 while let Some((name, sent, total)) = tokio::select! {
@@ -160,7 +159,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                     RpcError::new(Code::FailedPrecondition, format!("fetch verified release: {error}"))
                 })?;
                 sender
-                    .send(&progress(UpdatePhase::Verifying, "all fleet assets verified"))
+                    .send(&progress(UpdatePhase::Verifying, "hub bundle and web archive verified"))
                     .await?;
                 if sender.is_cancelled() {
                     return Err(RpcError::new(Code::Canceled, "release update stream closed"));
@@ -194,7 +193,7 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
                 sender
                     .send(&progress(
                         UpdatePhase::Confirmed,
-                        "fleet assets now match the running hub",
+                        "release is now the active hub release",
                     ))
                     .await?;
                 record_update(&hub, audit, &info);

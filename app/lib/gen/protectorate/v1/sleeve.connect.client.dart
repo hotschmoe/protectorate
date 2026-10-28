@@ -203,7 +203,7 @@ extension type SleeveServiceClient (connect.Transport _transport) {
   /// one is given), stops a running Envoy, revokes every earlier orchestrator
   /// capability, mints a new one, writes the token file (which the hub keeps
   /// fresh while Envoy runs) and the generated context
-  /// files (AGENTS.md, CLAUDE.md, hosts.md) and starts the harness. AGENTS.md
+  /// files (AGENTS.md, CLAUDE.md) and starts the harness. AGENTS.md
   /// is byte-identical across respawns unless the CLI, the tool catalog, the
   /// hub URL, or the scopes change, so a resumed session keeps its
   /// prompt-cache prefix. Only the owner token may call it, and the token it

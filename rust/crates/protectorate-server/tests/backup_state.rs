@@ -64,10 +64,6 @@ fn restored_home_serves_the_state_a_running_hub_wrote() {
         "/protectorate.v1.BacklogService/CreateNote",
         json!({"title":"survives restore","body":"kept"}),
     );
-    hub.call(
-        "/protectorate.v1.NodeService/AddNode",
-        json!({"node":{"name":"desk","address":"127.0.0.1:9","tier":"care"}}),
-    );
     let mail = hub.call(
         "/protectorate.v1.MessageService/Send",
         json!({"to":"orchestrator","body":"read me after restore"}),
@@ -98,8 +94,6 @@ fn restored_home_serves_the_state_a_running_hub_wrote() {
     let restored = Hub::start(second.path());
     let notes = restored.call("/protectorate.v1.BacklogService/ListNotes", json!({}));
     assert_eq!(notes["notes"][0]["id"], note["note"]["id"], "{notes}");
-    let node = restored.status("desk");
-    assert_eq!(node["node"]["tier"], "care", "{node}");
     let thread = restored.call(
         "/protectorate.v1.MessageService/Thread",
         json!({"threadId":mail["message"]["threadId"]}),
@@ -166,7 +160,7 @@ fn restore_refuses_damaged_and_hostile_archives_without_touching_disk() {
     fs::write(home.join("notes.json"), br#"{"notes":[]}"#).unwrap();
     fs::write(home.join("audit/audit-2026-10.jsonl"), b"entry\n").unwrap();
     fs::write(&outside, b"credential outside the hub home").unwrap();
-    symlink(&outside, home.join("nodes.json")).unwrap();
+    symlink(&outside, home.join("directory.json")).unwrap();
     let archives = root.path().join("archives");
     let good = backup(&home, &archives);
     let sidecar = PathBuf::from(format!("{}.sha256", good.display()));
@@ -243,5 +237,5 @@ fn restore_refuses_damaged_and_hostile_archives_without_touching_disk() {
         fs::read(restored.join("audit/audit-2026-10.jsonl")).unwrap(),
         b"entry\n"
     );
-    assert!(fs::symlink_metadata(restored.join("nodes.json")).is_err());
+    assert!(fs::symlink_metadata(restored.join("directory.json")).is_err());
 }

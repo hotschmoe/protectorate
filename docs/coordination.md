@@ -11,7 +11,7 @@ decision record is `docs/memory-options.md`, section 4, decision 5.
 
 Every sleeve (except the orchestrator, which has its own token from
 `orchestrator spawn`) gets a token of its own at spawn, named `sleeve:<name>`.
-Scopes: `read`, `backlog_*`, `directory_*`, `lease_*`, `message_*`. It is
+Scopes: `read`, `backlog_*`, `directory_*`, `message_*`. It is
 written to `<sleeve home>/.protectorate-token` (mode 0600, inside the sandbox
 at `$HOME/.protectorate-token`, never in the workspace) and the sleeve's env
 has `PROTECTORATE_HUB` and `PROTECTORATE_TOKEN_FILE`, so the `protectorate`
@@ -22,8 +22,7 @@ a valid token until it is killed or respawned).
 
 The sender of a message is the authenticated caller: a sleeve token maps to
 its sleeve name, the orchestrator's to `envoy`, the owner token to `owner`, the
-hub itself to `hub`. There is no `from` field to claim. Leases follow the same
-rule: a sleeve's lease is always held by that sleeve.
+hub itself to `hub`. There is no `from` field to claim.
 
 ## Directory
 
@@ -134,8 +133,7 @@ reports. Detailed reports belong in referenced files or notes.
   Hub notices cannot be replied to, so they end with their own reply line in
   the body: `Reply: protectorate msg send project:<upstream> --thread <id>
   "..."` for a dependency notice, `... msg send <recipient> --thread <id>` for
-  an escalation, and the `lease renew` / `lease release` commands for a lease
-  grant.
+  an escalation.
 - A recipient in **terminal mode**, and the owner, get no injection; they read
   `msg inbox`.
 - **Idle wake-up:** all unread mail, regardless of kind, wakes any idle chat
@@ -198,21 +196,6 @@ independent write work; automatic worktree creation is not implemented.
 Killing a sleeve stops its scope and forgets its record while retaining its
 workspace and home. A disposable task does not imply deleting those files.
 Managed-child lifecycle controls remain proposed work.
-
-## Leases
-
-`protectorate lease acquire --wait [--priority N]` (`AcquireLease` with
-`wait`). Without `--wait` a held resource is an error, as before. With it the
-caller gets a ticket (`ticket-<id>`, state QUEUED) and is served first in first
-out, higher priority first, per resource (a waiter for a free resource is not
-stuck behind a waiter for a held one). When the resource frees (release or
-expiry) the hub creates the lease for the waiter at once, holds it for a claim
-window (2 minutes), and sends the sleeve a `notice` saying so. `lease renew
-<id>` with no `--ttl` claims it for the ttl originally asked for; unclaimed it
-expires and passes to the next ticket. `lease release <ticket>` leaves the
-queue; tickets older than a day are dropped. The queue is kept in
-`leases.json` and survives restarts. Events: `lease.queued`, `lease.granted`,
-`lease.dropped`. Agents never negotiate hardware between themselves.
 
 ## Dependency notices
 

@@ -29,7 +29,7 @@ class MessageKind extends $pb.ProtobufEnum {
       MessageKind._(2, _omitEnumNames ? '' : 'MESSAGE_KIND_REQUEST');
 
   /// NOTICE states facts, typically sent by the hub, such as a dependency
-  /// release or a granted lease.
+  /// release.
   static const MessageKind MESSAGE_KIND_NOTICE =
       MessageKind._(3, _omitEnumNames ? '' : 'MESSAGE_KIND_NOTICE');
 

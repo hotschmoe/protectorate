@@ -38,49 +38,22 @@ service TokenService {
   rpc RenewToken(RenewTokenRequest) returns (RenewTokenResponse);
 }
 
-// GrantService mints task-scoped admin grants: capabilities whose scopes are
-// job_* and node_admin:<node>. The owner may grant any node (or a glob over
-// node names); the orchestrator may grant one shared node by name, and only
-// when the hub runs with --orchestrator-admin-grants. Every call made with a
-// grant is audited with its task.
-service GrantService {
-  // Admin mints a grant. The secret is returned once.
-  rpc Admin(GrantServiceAdminRequest) returns (GrantServiceAdminResponse);
-}
-
-message GrantServiceAdminRequest {
-  // node is a node name, or (owner only) a path.Match glob over node names.
-  string node = 1;
-  // ttl is the grant's lifetime; unset means 4h, at most 24h.
-  google.protobuf.Duration ttl = 2;
-  // task says what the grant is for, e.g. "update the kids' machine". It is
-  // carried in the grant and written to every audit line the grant causes.
-  string task = 3;
-}
-
-message GrantServiceAdminResponse {
-  TokenInfo token = 1;
-  // secret is the capability. It is shown only in this response.
-  string secret = 2;
-}
-
 // TokenInfo describes one capability lineage. It never carries a secret.
 message TokenInfo {
   // id is the lineage identifier used to revoke it and in audit lines.
   string id = 1;
-  // name is the principal: sleeve:<name>, orchestrator-envoy, grant:<node>
-  // or the name given at creation.
+  // name is the principal: sleeve:<name>, orchestrator-envoy or the name
+  // given at creation.
   string name = 2;
-  // scopes are the grants: tool-name globs such as "session_*", the special
-  // scopes read, events, terminal and terminal:readonly, and on an admin
-  // grant node_admin:<node>.
+  // scopes are the grants: tool-name globs such as "session_*" and the
+  // special scopes read, events, terminal and terminal:readonly.
   repeated string scopes = 3;
   google.protobuf.Timestamp created_at = 4;
   // expires_at is the latest expiry of any token in the lineage.
   google.protobuf.Timestamp expires_at = 5;
   // revoked_at is unset while the lineage is not revoked.
   google.protobuf.Timestamp revoked_at = 6;
-  // task is set on an admin grant: what it was minted for.
+  // task says what the capability was minted for, when the minter gave one.
   string task = 7;
   // minted_by names who minted it: "owner" or a principal.
   string minted_by = 8;

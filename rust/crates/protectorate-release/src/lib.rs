@@ -32,44 +32,24 @@ pub const MAX_SUMS: u64 = 1 << 20;
 pub const MAX_VERSION_ASSET: u64 = 1024;
 pub const MAX_ASSET: u64 = 512 << 20;
 
-pub const BINARIES: [&str; 5] = [
-    "protectorate-linux-amd64",
-    "protectorate-linux-arm64",
-    "protectorate-windows-amd64.exe",
-    "protectorate-windows-arm64.exe",
-    "protectorate-android-arm64",
-];
-/// Rust server asset name in a published release. The architecture names are
-/// shared by the node updater and `protectorate-rs version --json`.
+/// Hub server asset name in a published release. The architecture names are
+/// shared with `protectorate-rs version --json`.
 pub fn rust_binary_name(os: &str, arch: &str) -> Result<String> {
-    if !matches!(
-        (os, arch),
-        ("linux" | "windows", "amd64" | "arm64") | ("android", "arm64")
-    ) {
-        return Err(invalid(format!("no Rust server build for {os}/{arch}")));
+    if os != "linux" || !matches!(arch, "amd64" | "arm64") {
+        return Err(invalid(format!("no hub build for {os}/{arch}")));
     }
-    let suffix = if os == "windows" { ".exe" } else { "" };
-    Ok(format!("protectorate-rs-{os}-{arch}{suffix}"))
+    Ok(format!("protectorate-rs-{os}-{arch}"))
 }
 
-pub const RUST_BUNDLE: [&str; 6] = [
+pub const RUST_BUNDLE: [&str; 5] = [
     "protectorate-rs",
     "protectorate-sleeve-runner",
     "protectorate-sleeve-sandbox-helper",
-    "protectorate-node-sandbox-helper",
     "protectorate",
     "protectorate-mcpbridge",
 ];
 
-/// The Windows node release: the server, the CLI and the MCP bridge.
-pub const RUST_WINDOWS: [&str; 3] = ["protectorate-rs", "protectorate", "protectorate-mcpbridge"];
-
 pub fn rust_bundle_name(component: &str, os: &str, arch: &str) -> Result<String> {
-    if os == "android" {
-        return Err(invalid(
-            "Android release contains a standalone Termux node, not a hub bundle",
-        ));
-    }
     if !RUST_BUNDLE.contains(&component) {
         return Err(invalid(format!(
             "unknown Rust release component {component}"
@@ -948,70 +928,17 @@ impl Source {
         Ok(self.transport.get(&raw, "", budget, limit)?.body)
     }
 
-    /// Publish a release directory only after every fleet platform and the web
-    /// archive have been downloaded and verified.
+    /// Publish a release directory only after the hub bundle for `os` and
+    /// `arch` and the web archive have been downloaded and verified.
     /// `progress` sees each asset before and after its download and can cancel
     /// the whole fetch by returning an error. Re-fetching verifies cached
     /// assets and adds only verified files missing from a partial release.
-    pub fn fetch<F>(&self, info: &Info, progress: F) -> Result<PathBuf>
-    where
-        F: FnMut(&str, u64, u64) -> Result<()>,
-    {
-        if !valid_version(&info.version) {
-            return Err(invalid(format!(
-                "invalid release version {:?}",
-                info.version
-            )));
-        }
-        create_dir_mode(&self.dir, 0o700)?;
-        let stage = self.dir.join(format!(".fetch-{}", tmp_suffix()));
-        create_dir_mode(&stage, 0o700)?;
-        let mut names: Vec<String> = BINARIES.iter().map(|name| name.to_string()).collect();
-        names.push(format!("protectorate-web-{}.tar.gz", info.version));
-        if info.asset_url("VERSION").is_ok() {
-            names.push("VERSION".into());
-        }
-        let result = self.fetch_staged(info, progress, &stage, &names, None, false);
-        let _ = fs::remove_dir_all(&stage);
-        result
-    }
-
     pub fn fetch_rust_release<F>(
         &self,
         info: &Info,
         os: &str,
         arch: &str,
         progress: F,
-    ) -> Result<PathBuf>
-    where
-        F: FnMut(&str, u64, u64) -> Result<()>,
-    {
-        self.fetch_rust_bundle(info, os, arch, progress, true)
-    }
-
-    /// Fetch a node update bundle into the shared release cache. The bundle
-    /// keeps only architecture-qualified names so it cannot replace the hub's
-    /// installed launch names when the node has another architecture.
-    pub fn fetch_rust_node_bundle<F>(
-        &self,
-        info: &Info,
-        os: &str,
-        arch: &str,
-        progress: F,
-    ) -> Result<PathBuf>
-    where
-        F: FnMut(&str, u64, u64) -> Result<()>,
-    {
-        self.fetch_rust_bundle(info, os, arch, progress, false)
-    }
-
-    fn fetch_rust_bundle<F>(
-        &self,
-        info: &Info,
-        os: &str,
-        arch: &str,
-        progress: F,
-        installed_launch_names: bool,
     ) -> Result<PathBuf>
     where
         F: FnMut(&str, u64, u64) -> Result<()>,
@@ -1030,54 +957,9 @@ impl Source {
         if info.asset_url("VERSION").is_ok() {
             names.push("VERSION".into());
         }
-        let result = self.fetch_staged(
-            info,
-            progress,
-            &stage,
-            &names,
-            Some((os, arch)),
-            installed_launch_names,
-        );
+        let result = self.fetch_staged(info, progress, &stage, &names, (os, arch));
         let _ = fs::remove_dir_all(&stage);
         result
-    }
-
-    /// Stage one Rust server executable alongside a previously verified
-    /// release. The name is platform constrained and the bytes must match the
-    /// release's SHA256SUMS before publication. An existing asset is verified
-    /// and never overwritten.
-    pub fn fetch_rust_binary(&self, info: &Info, os: &str, arch: &str) -> Result<PathBuf> {
-        self.fetch_named_binary(info, rust_binary_name(os, arch)?)
-    }
-
-    fn fetch_named_binary(&self, info: &Info, name: String) -> Result<PathBuf> {
-        let dir = self.release_dir(&info.version);
-        if !dir.join("release.json").is_file() {
-            return Err(invalid("fetch the release before its Rust binary"));
-        }
-        let sums = fs::read(dir.join("SHA256SUMS"))?;
-        let path = dir.join(&name);
-        if path.exists() {
-            verify_checksum(&name, &fs::read(&path)?, &sums)?;
-            return Ok(path);
-        }
-        let bytes = self.asset(info, &name, Budget::Fetch, MAX_ASSET)?;
-        verify_checksum(&name, &bytes, &sums)?;
-        let staged = dir.join(format!(".{name}-{}", tmp_suffix()));
-        let result = (|| -> Result<()> {
-            write_file(&staged, &bytes, 0o755)?;
-            match fs::hard_link(&staged, &path) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-                    verify_checksum(&name, &fs::read(&path)?, &sums)?;
-                }
-                Err(error) => return Err(error.into()),
-            }
-            Ok(())
-        })();
-        let _ = fs::remove_file(staged);
-        result?;
-        Ok(path)
     }
 
     /// Verify a complete local Rust bundle without network access before it
@@ -1096,8 +978,7 @@ impl Source {
         mut progress: F,
         stage: &Path,
         names: &[String],
-        rust_bundle: Option<(&str, &str)>,
-        installed_launch_names: bool,
+        (os, arch): (&str, &str),
     ) -> Result<PathBuf>
     where
         F: FnMut(&str, u64, u64) -> Result<()>,
@@ -1122,15 +1003,12 @@ impl Source {
         let metadata = serde_json::to_vec(info)?;
         write_file(&stage.join("release.json"), &metadata, 0o644)?;
         write_file(&stage.join("SHA256SUMS"), &sums, 0o644)?;
-        if installed_launch_names {
-            let (os, arch) = rust_bundle.expect("installed names require a Rust bundle");
-            link_installed_launch_names(stage, os, arch)?;
-        }
+        link_installed_launch_names(stage, os, arch)?;
 
         let dest = self.release_dir(&info.version);
         if existing_release(&dest, &info.version)?.is_some() {
-            // A cached release may contain only one Rust binary. Fill missing
-            // verified assets without replacing anything a service can use.
+            // A cached release may be partial. Fill missing verified assets
+            // without replacing anything a service can use.
             let cached = fs::read(dest.join("SHA256SUMS")).map_err(|_| {
                 invalid(format!(
                     "release version {} already exists with different checksums",
@@ -1154,8 +1032,7 @@ impl Source {
                                 "cached asset {name} is not a regular file"
                             )));
                         }
-                        if rust_bundle.is_some() && name != "VERSION" && !name.ends_with(".tar.gz")
-                        {
+                        if name != "VERSION" && !name.ends_with(".tar.gz") {
                             verify_executable_file(&path, name)?;
                         }
                         verify_checksum(name, &fs::read(&path)?, &sums)?;
@@ -1172,7 +1049,7 @@ impl Source {
                     Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
                     Err(error) => return Err(error.into()),
                 }
-                if rust_bundle.is_some() && name != "VERSION" && !name.ends_with(".tar.gz") {
+                if name != "VERSION" && !name.ends_with(".tar.gz") {
                     verify_executable_file(&path, name)?;
                 }
                 verify_checksum(name, &fs::read(&path)?, &sums)?;
@@ -1180,14 +1057,9 @@ impl Source {
             if stage.join("web").is_dir() {
                 publish_missing_tree(&stage.join("web"), &dest.join("web"))?;
             }
-            if let Some((os, arch)) = rust_bundle {
-                verify_rust_assets_dir(&dest, os, arch)?;
-            }
-            if installed_launch_names {
-                let (os, arch) = rust_bundle.expect("installed names require a Rust bundle");
-                link_installed_launch_names(&dest, os, arch)?;
-                self.verify_rust_bundle(&info.version, os, arch)?;
-            }
+            verify_rust_assets_dir(&dest, os, arch)?;
+            link_installed_launch_names(&dest, os, arch)?;
+            self.verify_rust_bundle(&info.version, os, arch)?;
             return Ok(dest);
         }
         fs::rename(stage, &dest).map_err(|e| invalid(format!("publish release: {e}")))?;

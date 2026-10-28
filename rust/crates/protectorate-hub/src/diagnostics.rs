@@ -6,7 +6,6 @@ use axum::{
     http::{header, HeaderMap, HeaderValue, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use protectorate_wire::ReflectMessage;
 use serde_json::json;
 use std::{fs, sync::Arc, time::Duration};
 use subtle::ConstantTimeEq;
@@ -158,30 +157,5 @@ pub(super) async fn index(hub: Arc<Hub>, headers: HeaderMap) -> Response {
         &headers,
         "Rust hub diagnostics: /debug/metrics, /debug/pprof/heap, /debug/pprof/goroutine, /debug/pprof/profile?seconds=1\n",
         "text/plain; charset=utf-8",
-    )
-}
-
-pub(super) async fn node(
-    hub: Arc<Hub>,
-    headers: HeaderMap,
-    Path((name, kind)): Path<(String, String)>,
-) -> Response {
-    if !authorized(&hub, &headers) {
-        return result(&hub, &headers, Body::empty(), "application/json");
-    }
-    if kind != "metrics" {
-        return status_response(StatusCode::NOT_IMPLEMENTED);
-    }
-    let Ok(node) = hub.inventory.get(&name) else {
-        return status_response(StatusCode::NOT_FOUND);
-    };
-    let current = hub.node_monitor.status(&name, &node.address, node.invited);
-    let current = serde_json::to_value(current.transcode_to_dynamic()).unwrap_or_default();
-    result(
-        &hub,
-        &headers,
-        json!({"node": name, "source": "cached NodeAgentService/GetMetrics", "status": current})
-            .to_string(),
-        "application/json",
     )
 }

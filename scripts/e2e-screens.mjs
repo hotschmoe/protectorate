@@ -6,8 +6,6 @@ import { setTimeout as delay } from 'node:timers/promises';
 const [chromium, profile, size, destination, theme, output, hub, credential, connected, interaction] = process.argv.slice(2);
 const semanticApproval = interaction === 'pair-approve' && process.env.PROTECTORATE_BROWSER_SEMANTICS === '1';
 const startupFailureMessage = 'Local storage is unavailable for startup verification.';
-const detailNode = new URLSearchParams(new URL(destination).hash.split('?')[1] || '').get('node');
-let detailVersion;
 const browser = spawn(chromium, [
   '--headless=new', '--disable-gpu', '--no-sandbox',
   `--user-data-dir=${profile}`, '--remote-debugging-port=0',
@@ -95,15 +93,6 @@ try {
     await call('Page.addScriptToEvaluateOnNewDocument', {
       source: `if (location.origin === ${JSON.stringify(new URL(hub).origin)}) localStorage.setItem('flutter.hubs', ${JSON.stringify(JSON.stringify(hubs))});`,
     });
-    if (interaction === 'node-detail') {
-      const status = await fetch(`${hub.replace(/\/$/, '')}/protectorate.v1.HubService/GetStatus`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: '{}', signal: AbortSignal.timeout(8000),
-      });
-      if (!status.ok) throw new Error(`Checking node-detail hub version failed: HTTP ${status.status}`);
-      detailVersion = (await status.json()).version;
-      if (!detailVersion || !detailNode) throw new Error('Node-detail capture requires a node name and reported hub version');
-    }
   }
   await call('Page.navigate', { url: destination });
   await delay(12_000);
@@ -132,12 +121,8 @@ try {
         .map(el => ({ label: label(el), selected: (el.getAttribute('aria-current') || el.getAttribute('aria-selected')) === 'true', ...bounds(el) })),
       inputs: elements.filter(el => el.matches('input, textarea') && !el.readOnly && !el.disabled)
         .map(el => ({ value: el.value, ...bounds(el) })),
-      updates: elements.filter(el => /^(?:HUB UPDATE|NODE UPDATES)(?: |$)/.test(label(el)))
-        .map(el => ({ label: label(el).startsWith('HUB UPDATE') ? 'HUB UPDATE' : 'NODE UPDATES', ...bounds(el) })),
       startupFailureTriggered: window.screenshotStorageFailure === true,
       startupErrors: elements.filter(el => /^Could not start Protectorate(?: |$)/.test(label(el)) || label(el).includes(${JSON.stringify(startupFailureMessage)}))
-        .map(el => ({ label: label(el), ...bounds(el) })),
-      nodeDetails: elements.filter(el => ['HUB', ${JSON.stringify(detailNode)}, ${JSON.stringify(detailVersion || '')}].includes(label(el)) || /^VERSION(?: |$)/.test(label(el)))
         .map(el => ({ label: label(el), ...bounds(el) })),
       active: { tag: active?.tagName, value: active?.value, readOnly: active?.readOnly },
     };
@@ -202,7 +187,7 @@ try {
   };
   if (interaction && (interaction !== 'pair-approve' || semanticApproval)) {
     await evaluate(`window.screenshotElements().find(el => el.tagName === 'FLT-SEMANTICS-PLACEHOLDER')?.click(); true`);
-    if (!['startup-failure', 'node-detail', 'pair-approve'].includes(interaction)) {
+    if (!['startup-failure', 'pair-approve'].includes(interaction)) {
       await waitFor('phone navigation semantics', state => state.tabs.some(tab => tab.label === 'ENVOY'));
     }
   }
@@ -227,14 +212,6 @@ try {
       node.properties?.some(property => ['disabled', 'readonly'].includes(property.name) && property.value.value === true))) {
       throw new Error('Startup error message is not exposed as noneditable accessible text');
     }
-  } else if (interaction === 'node-detail') {
-    const visible = (item, state) => item.width > 0 && item.height > 0 && item.x >= 0 && item.x + item.width <= state.viewport.width && item.y >= 0 && item.y + item.height <= state.viewport.height;
-    await waitFor('node detail and current hub version row', state =>
-      state.nodeDetails.some(item => item.label === detailNode && visible(item, state)) &&
-      (state.nodeDetails.some(item => /^VERSION(?: |$)/.test(item.label) && item.label.endsWith(` HUB ${detailVersion}`) && visible(item, state)) ||
-        state.nodeDetails.some(label => label.label === 'HUB' && visible(label, state) &&
-          state.nodeDetails.some(value => value.label === detailVersion && visible(value, state) && value.x >= label.x + label.width &&
-            Math.abs(value.y + value.height / 2 - label.y - label.height / 2) < 8))));
   } else if (interaction === 'pair-approve') {
     if (semanticApproval) {
       await tapAccessible('demo hub', 'group');
@@ -258,26 +235,12 @@ try {
       if (attempt === 49) throw new Error('Browser approval did not clear the pending request');
       await delay(200);
     }
-  } else if (interaction === 'nodes' || interaction === 'updates') {
-    await selectTab('NODES');
-    await delay(1000);
-    if (interaction === 'updates') {
-      const visible = (item, state) => item.y >= 0 && item.y + item.height <= state.viewport.height - 72;
-      const state = await inspect();
-      await call('Input.dispatchMouseEvent', {
-        type: 'mouseWheel', x: state.viewport.width / 2, y: state.viewport.height * 0.7,
-        deltaX: 0, deltaY: 10_000,
-      });
-      await delay(500);
-      await waitFor('visible hub update card', state => state.updates.some(item => item.label === 'HUB UPDATE' && visible(item, state)));
-      await delay(1000);
-    }
   } else if (interaction === 'draft') {
-    const text = 'Check the node again later.';
+    const text = 'Check the sleeve again later.';
     await focusComposer();
     await call('Input.insertText', { text });
     await waitFor('draft insertion', state => state.active.value === text);
-    await selectTab('NODES');
+    await selectTab('QUOTAS');
     await selectTab('ENVOY');
     await focusComposer();
     const after = await inspect();

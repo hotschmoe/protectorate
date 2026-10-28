@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../gen/protectorate/v1/chat.pb.dart';
 import '../gen/protectorate/v1/sleeve.pb.dart';
-import '../nodes/node_view.dart';
+import '../format.dart';
 import '../sleeves/sleeve_info.dart';
 import '../theme/tokens.dart';
 import '../vfd/lamp.dart';

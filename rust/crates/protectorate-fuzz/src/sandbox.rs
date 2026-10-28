@@ -23,7 +23,6 @@ const DIRS: &[&str] = &[
     "state/sleeves/s1/overlays/up",
     "state/sleeves/s1/overlays/work",
     "state/sleeves/s2/home",
-    "state/jobs/j1/home",
     "state/helpers/h1/home",
     "state/workspaces/w1/sub",
     "state/workspaces/w2",
@@ -69,7 +68,6 @@ const CANDIDATES: &[&str] = &[
     "state",
     "state/sleeves/s1/home",
     "state/sleeves/s2/home",
-    "state/jobs/j1/home",
     "state/helpers/h1/home",
     "state/sleeves/s1/overlays/up",
     "state/sleeves/s1/overlays/work",
@@ -154,15 +152,13 @@ fn tree(root: &Path) {
 }
 
 fn request(input: &mut Input) -> Request {
-    let workload = match input.byte() % 9 {
+    let workload = match input.byte() % 7 {
         0 => Workload::ChatSleeve,
         1 => Workload::TerminalSleeve,
         2 => Workload::NestedRuntimeTestSleeve,
-        3 => Workload::SharedNodeJob,
-        4 => Workload::ReadOnlyHelper(Helper::Git),
-        5 => Workload::ReadOnlyHelper(Helper::Handoff),
-        6 => Workload::ReadOnlyHelper(Helper::Catalog),
-        7 => Workload::PlainNodeJob,
+        3 => Workload::ReadOnlyHelper(Helper::Git),
+        4 => Workload::ReadOnlyHelper(Helper::Handoff),
+        5 => Workload::ReadOnlyHelper(Helper::Catalog),
         _ => Workload::DirectHarnessDriver,
     };
     let command = match input.byte() % 3 {
@@ -265,10 +261,7 @@ pub fn sandbox_plan(data: &[u8]) {
         return;
     };
     if plan.kind() != PlanKind::Sandboxed {
-        assert!(matches!(
-            workload,
-            Workload::PlainNodeJob | Workload::DirectHarnessDriver
-        ));
+        assert_eq!(workload, Workload::DirectHarnessDriver);
         assert!(plan.grants().is_empty() && plan.tool_grants().is_empty());
         assert!(plan.credential().is_none() && plan.private_home().is_none());
         assert!(plan.overlays().is_empty() && plan.masks().is_empty());
@@ -288,7 +281,6 @@ pub fn sandbox_plan(data: &[u8]) {
         home.join("secret"),
         state.join("auth"),
         state.join("sleeves"),
-        state.join("jobs"),
         state.join("helpers"),
     ];
     for grant in plan.grants().iter().chain(plan.tool_grants()) {
@@ -323,10 +315,7 @@ pub fn sandbox_plan(data: &[u8]) {
         );
     }
     if let Some(credential) = plan.credential() {
-        assert!(!matches!(
-            workload,
-            Workload::SharedNodeJob | Workload::ReadOnlyHelper(_)
-        ));
+        assert!(!matches!(workload, Workload::ReadOnlyHelper(_)));
         assert_eq!(credential.source, state.join("auth/claude"));
     }
     for overlay in plan.overlays() {

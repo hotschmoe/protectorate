@@ -5,13 +5,7 @@
 
 #[cfg(target_os = "linux")]
 pub mod egress;
-#[cfg(windows)]
-#[path = "job_windows.rs"]
-pub mod job;
 #[cfg(target_os = "linux")]
-pub mod runtime;
-#[cfg(windows)]
-#[path = "runtime_windows.rs"]
 pub mod runtime;
 
 use serde::{Deserialize, Serialize};
@@ -26,14 +20,10 @@ pub enum Workload {
     ChatSleeve,
     TerminalSleeve,
     NestedRuntimeTestSleeve,
-    SharedNodeJob,
     ReadOnlyHelper(Helper),
     /// Snapshots and restores a sleeve workspace into a private store kept in
     /// its home, so the workspace is writable and nothing else is.
     CheckpointHelper,
-    /// An administrator intentionally requested an unsandboxed job. A plan
-    /// carrying this variant never contains sandbox grants or credentials.
-    PlainNodeJob,
     /// The local developer command uses a harness's official headless
     /// interface with the user's own configuration, outside any sleeve.
     DirectHarnessDriver,
@@ -435,7 +425,6 @@ pub struct Policy {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PlanKind {
     Sandboxed,
-    IntentionallyUnsandboxedJob,
     IntentionallyUnsandboxedHarness,
 }
 
@@ -533,10 +522,7 @@ impl Policy {
         if state == user_home {
             return Err(invalid("state root cannot be the entire user home"));
         }
-        if matches!(
-            request.workload,
-            Workload::PlainNodeJob | Workload::DirectHarnessDriver
-        ) {
+        if request.workload == Workload::DirectHarnessDriver {
             if request.workspace.is_some()
                 || request.managed_workspace_name.is_some()
                 || request.private_home.is_some()
@@ -553,11 +539,7 @@ impl Policy {
                 ));
             }
             return Ok(ValidatedPlan {
-                kind: if request.workload == Workload::PlainNodeJob {
-                    PlanKind::IntentionallyUnsandboxedJob
-                } else {
-                    PlanKind::IntentionallyUnsandboxedHarness
-                },
+                kind: PlanKind::IntentionallyUnsandboxedHarness,
                 workload: request.workload,
                 command: request.command,
                 private_home: None,
@@ -747,13 +729,9 @@ impl Policy {
             .map(|provider| {
                 if matches!(
                     request.workload,
-                    Workload::SharedNodeJob
-                        | Workload::ReadOnlyHelper(_)
-                        | Workload::CheckpointHelper
+                    Workload::ReadOnlyHelper(_) | Workload::CheckpointHelper
                 ) {
-                    return Err(invalid(
-                        "jobs and helpers cannot receive provider credentials",
-                    ));
+                    return Err(invalid("helpers cannot receive provider credentials"));
                 }
                 let source = self.provider_credentials.get(&provider).ok_or_else(|| {
                     invalid("selected provider credential source is not configured")
@@ -1191,9 +1169,8 @@ fn validate_private_home(path: &Path, state: &Path, workload: Workload) -> Resul
         Workload::ChatSleeve | Workload::TerminalSleeve | Workload::NestedRuntimeTestSleeve => {
             "sleeves"
         }
-        Workload::SharedNodeJob => "jobs",
         Workload::ReadOnlyHelper(_) | Workload::CheckpointHelper => "helpers",
-        Workload::PlainNodeJob | Workload::DirectHarnessDriver => {
+        Workload::DirectHarnessDriver => {
             return Err(invalid("direct host processes have no private home"))
         }
     };

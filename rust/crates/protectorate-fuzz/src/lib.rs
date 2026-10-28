@@ -8,24 +8,22 @@ mod auth;
 mod cli;
 mod egress;
 mod harness;
-mod metrics;
 mod quota;
 mod sandbox;
 mod stores;
 mod terminal;
 mod wire;
 
-pub use archives::{backup_archive, release_manifest, release_web_archive, xfer_archive};
+pub use archives::{backup_archive, release_manifest, release_web_archive};
 pub use auth::{capability_tokens, device_proofs};
 pub use cli::{cli_args, mcp_stdio};
 pub use egress::egress_connect;
 pub use harness::{claude_stream, codex_rpc, grok_acp, pi_rpc};
-pub use metrics::{docker_engine, gpu_tools};
 pub use quota::quota_responses;
 pub use sandbox::sandbox_plan;
 pub use stores::{
     audit_log, backlog_notes, chatlog, directory_state, handoff_transcript, identity_store,
-    inventory_nodes, mailbox_log,
+    mailbox_log,
 };
 pub use terminal::terminal_pane;
 pub use wire::wire_json;
@@ -44,13 +42,10 @@ pub const TARGETS: &[(&str, Target)] = &[
     ("codex_rpc", codex_rpc),
     ("device_proofs", device_proofs),
     ("directory_state", directory_state),
-    ("docker_engine", docker_engine),
     ("egress_connect", egress_connect),
-    ("gpu_tools", gpu_tools),
     ("grok_acp", grok_acp),
     ("handoff_transcript", handoff_transcript),
     ("identity_store", identity_store),
-    ("inventory_nodes", inventory_nodes),
     ("mailbox_log", mailbox_log),
     ("mcp_stdio", mcp_stdio),
     ("pi_rpc", pi_rpc),
@@ -60,7 +55,6 @@ pub const TARGETS: &[(&str, Target)] = &[
     ("sandbox_plan", sandbox_plan),
     ("terminal_pane", terminal_pane),
     ("wire_json", wire_json),
-    ("xfer_archive", xfer_archive),
 ];
 
 /// Splits an input into NUL-separated fields, padding missing ones with "".

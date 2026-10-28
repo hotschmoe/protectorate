@@ -18,7 +18,7 @@ pub struct ToolDef {
 pub fn tool_defs(catalog: &Catalog) -> Result<Vec<ToolDef>> {
     let mut tools: Vec<ToolDef> = catalog
         .methods()
-        .filter(|method| !method.node_local && !method.owner_only && method.is_unary())
+        .filter(|method| !method.owner_only && method.is_unary())
         .map(|method| ToolDef {
             name: method.tool.clone(),
             procedure: method.procedure.clone(),

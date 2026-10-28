@@ -7,9 +7,8 @@ import "protectorate/v1/options.proto";
 
 // ApprovalService lists and decides the requests the hub opens instead of
 // running a high-impact call made by Envoy, a sleeve or a grant Envoy
-// minted: an RPC marked destructive, minting an admin grant, an admin job,
-// and launching a sleeve whose harness executable or profile changed since
-// its last launch. Agents never reach care nodes; placement refuses them.
+// minted: an RPC marked destructive, and launching a sleeve whose harness
+// executable or profile changed since its last launch.
 // Calls by the owner and approved devices are never gated. The caller gets
 // an aborted error carrying the request id; repeating the same call with the
 // protectorate-approval header set to that id runs it once approved, and

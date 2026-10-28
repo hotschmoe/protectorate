@@ -12,27 +12,20 @@ test = false
 [dependencies]
 protectorate-hub = { path = "../protectorate-hub" }
 protectorate-wire = { path = "../protectorate-wire" }
-protectorate-node = { path = "../protectorate-node" }
-protectorate-node-metrics = { path = "../protectorate-node-metrics" }
-protectorate-node-monitor = { path = "../protectorate-node-monitor" }
 protectorate-connect-client = { path = "../protectorate-connect-client" }
 protectorate-backup = { path = "../protectorate-backup" }
 protectorate-release = { path = "../protectorate-release" }
-protectorate-fsutil = { path = "../protectorate-fsutil" }
 protectorate-tls = { path = "../protectorate-tls" }
 protectorate-sandbox = { path = "../protectorate-sandbox" }
 protectorate-sleeve-runner = { path = "../protectorate-sleeve-runner" }
 protectorate-session = { path = "../protectorate-session" }
-protectorate-svcgen = { path = "../protectorate-svcgen" }
 axum = { workspace = true }
 tokio = { workspace = true }
 tokio-rustls = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
 futures-util = { workspace = true }
 sha2 = { workspace = true }
 libc = { workspace = true }
-ureq = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 protectorate-chatlog = { path = "../protectorate-chatlog" }
@@ -43,6 +36,7 @@ protectorate-grok-driver = { path = "../protectorate-grok-driver" }
 tempfile = { workspace = true }
 
 [dev-dependencies]
+ureq = { workspace = true }
 base64 = { workspace = true }
 protectorate-auth = { path = "../protectorate-auth" }
 tempfile = { workspace = true }

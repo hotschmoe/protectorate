@@ -115,10 +115,8 @@ configuration, so ambient helpers or SSH credentials may still be used.
 Public repositories need no added authentication; there is no dedicated
 private-repository credential-management UI. Do not embed tokens in URLs.
 
-In the app, the SLEEVES tab shows every sleeve in a fence per node (the hub's
-node first; sleeves run only on the hub's machine today, so other nodes get a
-fence only if they report sleeves). NEW SLEEVE, or the + on the hub's fence,
-opens the start dialog: EXISTING (the list above), CLONE (a git URL) or PATH
+In the app, the SLEEVES tab lists every sleeve on the hub, Envoy first. NEW
+SLEEVE opens the start dialog: EXISTING (the list above), CLONE (a git URL) or PATH
 (an absolute directory on the hub). The sleeve name is suggested from the
 repository or directory and the new sleeve opens when it starts. RAW SESSIONS
 on the same tab opens the owner-only unsandboxed tmux sessions.
@@ -246,8 +244,7 @@ update: claude `anthropic`, codex `openai`, grok `xai`. pi reports the
 message; a message with a different provider than `get_state` drops the
 `baseUrl`, since pi's message carries no endpoint. The hub sets `local_model`
 when the base URL host is a private address (the listener rule: loopback,
-RFC 1918, 100.64.0.0/10, fc00::/7, fe80::/10), `localhost`, a name or address
-in the node inventory, or a `hub serve --local-model-host` name (repeatable);
+RFC 1918, 100.64.0.0/10, fc00::/7, fe80::/10), `localhost`, or a `hub serve --local-model-host` name (repeatable);
 any other DNS name is not local. No base URL (a named hosted provider) is never local, so
 DeepSeek, GLM, Kimi and the like over API keys show no warning. Like the model
 name, both fields are empty until the first model call. Example: a pi provider `hotschmoe-local` with baseUrl

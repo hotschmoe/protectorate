@@ -15,23 +15,23 @@ import 'dart:core' as $core;
 
 import 'package:protobuf/protobuf.dart' as $pb;
 
-import 'release.pb.dart' as $1;
+import 'release.pb.dart' as $0;
 import 'release.pbjson.dart';
 
 export 'release.pb.dart';
 
 abstract class ReleaseServiceBase extends $pb.GeneratedService {
-  $async.Future<$1.ReleaseInfo> checkRelease(
-      $pb.ServerContext ctx, $1.CheckReleaseRequest request);
-  $async.Future<$1.UpdateHubProgress> updateHub(
-      $pb.ServerContext ctx, $1.UpdateHubRequest request);
+  $async.Future<$0.ReleaseInfo> checkRelease(
+      $pb.ServerContext ctx, $0.CheckReleaseRequest request);
+  $async.Future<$0.UpdateHubProgress> updateHub(
+      $pb.ServerContext ctx, $0.UpdateHubRequest request);
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
       case 'CheckRelease':
-        return $1.CheckReleaseRequest();
+        return $0.CheckReleaseRequest();
       case 'UpdateHub':
-        return $1.UpdateHubRequest();
+        return $0.UpdateHubRequest();
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }
@@ -41,9 +41,9 @@ abstract class ReleaseServiceBase extends $pb.GeneratedService {
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
       case 'CheckRelease':
-        return checkRelease(ctx, request as $1.CheckReleaseRequest);
+        return checkRelease(ctx, request as $0.CheckReleaseRequest);
       case 'UpdateHub':
-        return updateHub(ctx, request as $1.UpdateHubRequest);
+        return updateHub(ctx, request as $0.UpdateHubRequest);
       default:
         throw $core.ArgumentError('Unknown method: $methodName');
     }

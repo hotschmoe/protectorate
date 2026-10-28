@@ -4,7 +4,6 @@ use protectorate_release::{
     extract_web, parse_checksums, resolve_url, resolved_version, safe_web_path, valid_version,
     validate_api, validate_channel, validate_repo, validate_url, verify_checksum, Info,
 };
-use protectorate_xfer::{validate_entry_name, Chunk, Kind, Sink, Trailer, CHUNK_SIZE};
 use sha2::{Digest, Sha256};
 use std::{
     fs,
@@ -52,50 +51,6 @@ fn names(dir: &Path) -> Vec<String> {
         .collect();
     out.sort();
     out
-}
-
-/// A directory transfer archive (the PTXDIR1 format) sent as verified chunks:
-/// whatever it contains, nothing lands outside the destination and a failed
-/// extraction leaves nothing behind.
-pub fn xfer_archive(data: &[u8]) {
-    let scratch = tempfile::tempdir().unwrap();
-    let parent = scratch.path().join("parent");
-    let dest = parent.join("dest");
-    let mut sink = Sink::new_unknown_size(&dest, Kind::Directory, 0o755, false).unwrap();
-    for piece in data.chunks(CHUNK_SIZE) {
-        sink.write(Chunk {
-            data: piece.to_vec(),
-            compressed: false,
-            raw_size: piece.len() as u32,
-        })
-        .unwrap();
-    }
-    let trailer = Trailer {
-        size: data.len() as u64,
-        sha256: hex(&Sha256::digest(data)),
-        skipped: 0,
-    };
-    match sink.prepare_directory(trailer) {
-        Ok(prepared) => {
-            check_tree(prepared.path());
-            prepared.publish().expect("publish a verified directory");
-            check_tree(&dest);
-            assert_eq!(names(&parent), ["dest"], "extraction left residue");
-        }
-        Err(_) => {
-            check_tree(&parent);
-            assert!(names(&parent).is_empty(), "failed extraction left residue");
-        }
-    }
-    assert_eq!(names(scratch.path()), ["parent"]);
-    for part in String::from_utf8_lossy(data).split(['\0', '\n']) {
-        if let Ok(path) = validate_entry_name(part) {
-            assert!(
-                path.components().all(|c| matches!(c, Component::Normal(_))),
-                "entry name {part:?} is not a plain relative path"
-            );
-        }
-    }
 }
 
 /// An uncompressed tar stream, gzipped and unpacked as the release web

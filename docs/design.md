@@ -2,7 +2,7 @@
 
 ## Concept
 
-The client is the front panel of a machine room. A hub, its nodes, the
+The client is the front panel of a machine room. The hub, the
 subscriptions and the agents working in sleeves are instruments, and each
 screen is a panel of them. The display technology is the vacuum fluorescent
 display: warm amber filaments behind smoked glass, with the extra phosphors
@@ -86,14 +86,12 @@ caps beside them.
   spare capacity. MeterRow is legend, meter and a value column that never
   truncates.
 - **ArcGauge**: a segmented 270 degree arc with a segment readout in the
-  middle, for one headline value per pane (node CPU, chat context).
-- **DotMatrixGraph**: recent history as columns of dots (newest right),
-  zone-coloured by row; samples are collected by the client while it watches.
+  middle, for one headline value per pane (chat context).
 - **SegmentReadout**: DSEG7 digits over ghost 8s, unit legend.
 - **Lamp / LampLegend**: lit, dim, or blinking (attention). Blink is reserved
   for "needs you" (pending approval).
 - **Annunciator**: a strip of legend tiles that light in their state colour:
-  hub status, node alerts, approval prompts.
+  hub status, approval prompts.
 - **ChoiceKeys**: a row of annunciator keys of which one is lit, a selector
   switch (machine type, drain options).
 - **BusyBar**: a segment chaser in place of indeterminate progress.
@@ -102,11 +100,11 @@ caps beside them.
 
 - 4 px grid; gaps 8 / 12 / 16 / 24; bezel radius 10, inner radius 3.
 - Phone first (412): one column, 12 px margins, 48 px touch targets.
-- Wide (600+): navigation rail; 1200+: multi-pane (overview board plus quota
-  and events, sleeve list plus chat plus status, node detail in two columns).
+- Wide (600+): navigation rail; 1200+: multi-pane (overview status plus quota
+  and events, sleeve list plus chat plus status).
 - Numbers right aligned with tabular figures; legends left; values in a
   column per panel.
-- Identifiers (hub, node, sleeve, project names) keep their case; legends and
+- Identifiers (hub, sleeve, project names) keep their case; legends and
   states are uppercase.
 
 ## Motion

@@ -1439,7 +1439,7 @@ class Sleeve extends $pb.GeneratedMessage {
   TerminalStatus ensureTerminal() => $_ensure(27);
 
   /// run_id is minted at spawn and kept across resleeves and hub restarts. It
-  /// marks the sleeve's audit entries, jobs, mail, leases, checkpoints and
+  /// marks the sleeve's audit entries, mail, checkpoints and
   /// egress decisions; filter with ListAuditEntries.run_id.
   @$pb.TagNumber(32)
   $core.String get runId => $_getSZ(28);
@@ -3335,7 +3335,7 @@ class SpawnEnvoyRequest extends $pb.GeneratedMessage {
   void clearHarness() => $_clearField(1);
 
   /// scopes replaces the default scopes (read, events and the non-destructive
-  /// backlog, lease, message, sleeve spawn and resleeve tools) when not empty.
+  /// backlog, message, sleeve spawn and resleeve tools) when not empty.
   @$pb.TagNumber(2)
   $pb.PbList<$core.String> get scopes => $_getList(1);
 
@@ -3893,7 +3893,7 @@ class SleeveServiceApi {
   /// one is given), stops a running Envoy, revokes every earlier orchestrator
   /// capability, mints a new one, writes the token file (which the hub keeps
   /// fresh while Envoy runs) and the generated context
-  /// files (AGENTS.md, CLAUDE.md, hosts.md) and starts the harness. AGENTS.md
+  /// files (AGENTS.md, CLAUDE.md) and starts the harness. AGENTS.md
   /// is byte-identical across respawns unless the CLI, the tool catalog, the
   /// hub URL, or the scopes change, so a resumed session keeps its
   /// prompt-cache prefix. Only the owner token may call it, and the token it

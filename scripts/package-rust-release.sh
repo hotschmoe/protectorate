@@ -18,7 +18,7 @@ web_dir=${PROTECTORATE_RELEASE_WEB_DIR:-app/build/web}
   exit 1
 }
 
-components=(protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate-node-sandbox-helper protectorate protectorate-mcpbridge)
+components=(protectorate-rs protectorate-sleeve-runner protectorate-sleeve-sandbox-helper protectorate protectorate-mcpbridge)
 expected_assets=(VERSION)
 for arch in amd64 arm64; do
   for component in "${components[@]}"; do
@@ -33,40 +33,6 @@ for arch in amd64 arm64; do
     fi
   done
 done
-for arch in amd64 arm64; do
-  for component in protectorate-rs protectorate protectorate-mcpbridge; do
-    name="$component-windows-$arch.exe"
-    expected_assets+=("$name")
-    [[ -s "$dist/$name" && ! -L "$dist/$name" ]] || { echo "missing artifact: $dist/$name" >&2; exit 1; }
-  done
-done
-python3 - "$dist" <<'PY'
-from pathlib import Path
-import struct
-import sys
-
-dist = Path(sys.argv[1])
-for arch, machine in (("amd64", 0x8664), ("arm64", 0xAA64)):
-    for component in ("protectorate-rs", "protectorate", "protectorate-mcpbridge"):
-        path = dist / f"{component}-windows-{arch}.exe"
-        with path.open("rb") as binary:
-            header = binary.read(64)
-            if len(header) != 64 or header[:2] != b"MZ":
-                raise SystemExit(f"invalid Windows executable: {path}")
-            pe_offset = struct.unpack_from("<I", header, 0x3C)[0]
-            if pe_offset < 64 or pe_offset > 1_048_576:
-                raise SystemExit(f"invalid PE header offset: {path}")
-            binary.seek(pe_offset)
-            signature_and_machine = binary.read(6)
-            if signature_and_machine[:4] != b"PE\0\0" or len(signature_and_machine) != 6:
-                raise SystemExit(f"invalid PE header: {path}")
-            actual = struct.unpack_from("<H", signature_and_machine, 4)[0]
-            if actual != machine:
-                raise SystemExit(f"wrong Windows architecture for {path}: 0x{actual:04x}")
-PY
-android=protectorate-rs-android-arm64
-expected_assets+=("$android")
-[[ -s "$dist/$android" && ! -L "$dist/$android" ]] || { echo "missing Termux node artifact: $dist/$android" >&2; exit 1; }
 desktop="protectorate-desktop-windows-x64-$version.zip"
 expected_assets+=("$desktop")
 [[ -s "$dist/$desktop" && ! -L "$dist/$desktop" ]] || { echo "missing Flutter desktop artifact: $dist/$desktop" >&2; exit 1; }
