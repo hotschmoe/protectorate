@@ -267,6 +267,54 @@ async fn default_tool_roots_run_go_without_exposing_owner_credentials() {
     assert_eq!(status, 200, "{killed}");
     server.abort();
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn workload_that_cannot_exec_reports_the_exec_error() {
+    let root = tempfile::tempdir().unwrap();
+    let state = root.path().join("state");
+    let owner_home = root.path().join("owner");
+    let workspace = root.path().join("workspace");
+    let runtime = root.path().join("runtime");
+    for dir in [&state, &owner_home, &workspace, &runtime] {
+        fs::create_dir_all(dir).unwrap();
+    }
+    let missing = workspace.join("missing-interpreter");
+    executable::write_executable(&missing, "#!/nonexistent/interpreter\n");
+    let socket = format!("p-rust-exec-error-{}", std::process::id());
+    let _tmux = PrivateTmux::new(&socket);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let hub = Hub::open(&state, "owner-secret", "test")
+        .unwrap()
+        .with_sessions(Arc::new(Manager::new(&socket)))
+        .with_terminal_launcher(TerminalLauncher {
+            state_root: state,
+            user_home: owner_home.clone(),
+            runtime_dir: runtime,
+            runner: env!("CARGO_BIN_EXE_protectorate-hub-sleeve-runner").into(),
+            helper: env!("CARGO_BIN_EXE_protectorate-hub-sandbox-helper").into(),
+            hub_url: format!("http://{addr}"),
+            cli_executable: None,
+            tool_roots: protectorate_sleeve_runner::default_tool_roots(&owner_home),
+            flutter_sdk_root: None,
+            flutter_cache_lower: None,
+            flutter_tools_lower: None,
+            pub_cache_lower: None,
+            go_mod_cache_lower: None,
+            tasks_max: 64,
+        });
+    let (_, server) = serve(listener, hub).await;
+    let (status, spawned) = call(
+        addr,
+        "/protectorate.v1.SleeveService/SpawnSleeve",
+        json!({"name":"broken","harness":"HARNESS_SHELL","workspace":workspace,"args":[missing]}),
+    )
+    .await;
+    let message = spawned["message"].as_str().unwrap_or_default();
+    assert_ne!(status, 200, "{spawned}");
+    assert!(message.contains("exec isolated workload"), "{spawned}");
+    assert!(!message.contains("IO Safety"), "{spawned}");
+    server.abort();
+}
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},

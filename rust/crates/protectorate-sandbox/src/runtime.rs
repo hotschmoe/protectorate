@@ -1898,17 +1898,25 @@ fn setup_and_exec(
             "close inherited host descriptors",
         )?;
     }
-    syscall_ok(
-        unsafe { libc::syscall(libc::SYS_close_range, (error_fd + 1) as u32, u32::MAX, 0u32) },
-        "close inherited host descriptors",
-    )?;
+    // From here on the descriptors still owned by locals are closed, so a
+    // returned error would close them again while unwinding.
+    if unsafe { libc::syscall(libc::SYS_close_range, (error_fd + 1) as u32, u32::MAX, 0u32) } < 0 {
+        exec_failed(error_fd, "close inherited host descriptors");
+    }
     // The helper is a Rust binary, whose runtime ignores SIGPIPE, and an
     // ignored disposition survives execve.
     unsafe {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
         libc::execve(executable.as_ptr(), argv.as_ptr(), environ.as_ptr());
     }
-    Err(ioerr("exec isolated workload")(io::Error::last_os_error()))
+    exec_failed(error_fd, "exec isolated workload")
+}
+fn exec_failed(error_fd: RawFd, op: &str) -> ! {
+    let message = ioerr(op)(io::Error::last_os_error()).to_string();
+    unsafe {
+        libc::write(error_fd, message.as_ptr().cast(), message.len());
+        libc::_exit(125)
+    }
 }
 fn external_resolver_target(path: &Path) -> Result<Option<PathBuf>> {
     let resolved = match fs::canonicalize(path) {
