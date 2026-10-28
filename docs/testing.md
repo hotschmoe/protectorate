@@ -9,7 +9,8 @@ make test       # cargo test --locked --workspace: every e2e scenario plus every
 make check      # fmt, clippy -D warnings, make test, flutter analyze, check-version
 ```
 
-`make test` needs Linux with unprivileged user namespaces, tmux and git. The
+`make test` needs Linux with unprivileged user namespaces, tmux and git (on
+Ubuntu 24.04 and later, CI turns off `kernel.apparmor_restrict_unprivileged_userns`). The
 scenarios live in `rust/crates/*/tests/`. A crate with several scenario
 files builds them into one test binary, `e2e` (`tests/e2e.rs` declares each
 file as a module), so the hub links once per crate and the scenarios run in

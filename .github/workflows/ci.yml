@@ -26,6 +26,8 @@ jobs:
           cache: true
       - name: Prepare Flutter client for Rust hub integration tests
         run: cd app && flutter pub get
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Rust workspace
         env:
           PROTECTORATE_REQUIRE_FLUTTER_TEST: "1"
