@@ -185,7 +185,7 @@ async fn default_tool_roots_run_go_without_exposing_owner_credentials() {
     let owner_home = root.path().join("owner");
     let workspace = root.path().join("workspace");
     let runtime = root.path().join("runtime");
-    let go = owner_home.join(".local/go/bin/go");
+    let go = owner_home.join(".local/go/bin/protectorate-test-go");
     for dir in [
         &state,
         &workspace,
@@ -245,7 +245,7 @@ async fn default_tool_roots_run_go_without_exposing_owner_credentials() {
     let (status, spawned) = call(
         addr,
         "/protectorate.v1.SleeveService/SpawnSleeve",
-        json!({"name":"tools","harness":"HARNESS_SHELL","workspace":workspace,"args":["go"]}),
+        json!({"name":"tools","harness":"HARNESS_SHELL","workspace":workspace,"args":["protectorate-test-go"]}),
     )
     .await;
     assert_eq!(status, 200, "{spawned}");
