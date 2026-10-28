@@ -55,10 +55,11 @@ unit, token_path, expected = sys.argv[1:]
 line = next(line for line in pathlib.Path(unit).read_text().splitlines() if line.startswith('ExecStart='))
 command = shlex.split(line.removeprefix('ExecStart='))
 state = pathlib.Path(token_path).parent
-sock = socket.socket()
-sock.bind(('127.0.0.1', 0))
-port = sock.getsockname()[1]
-sock.close()
+def free_port():
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1', 0))
+        return sock.getsockname()[1]
+port = free_port()
 command[command.index('--listen') + 1] = f'127.0.0.1:{port}'
 process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 def request_for(procedure, body):
@@ -106,6 +107,9 @@ restored_token.chmod(0o600)
 recovered_command = command.copy()
 recovered_command[recovered_command.index('--home') + 1] = str(restored)
 recovered_command[recovered_command.index('--owner-token-file') + 1] = str(restored_token)
+port = free_port()
+recovered_command[recovered_command.index('--listen') + 1] = f'127.0.0.1:{port}'
+request = request_for('HubService/GetStatus', {})
 recovered = subprocess.Popen(recovered_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 try:
     deadline = time.monotonic() + 120
