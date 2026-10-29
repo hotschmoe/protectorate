@@ -56,9 +56,8 @@ protectorate mcp --token-file ~/.protectorate/claude-bridge.token --allow 'backl
 ```
 
 The bridge reads the token file for every call and renews it in place past
-half its life. Without a token file it uses `PROTECTORATE_TOKEN`, then the
-device key `protectorate login` saved for the hub, then (on the hub host) the
-owner token file. The HTTP endpoints need a token: their bearer is the token
+half its life. Without a token file it uses `PROTECTORATE_TOKEN` (a
+capability or a device token), then (on the hub host) the owner token file. The HTTP endpoints need a token: their bearer is the token
 the bridge started with. Scopes use the same tool names as this bridge. Only
 `token_renew_token` of TokenService is a tool.
 

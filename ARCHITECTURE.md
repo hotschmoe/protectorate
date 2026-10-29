@@ -21,7 +21,8 @@ Guiding rules:
  | (--json)  | | desktop, Android, web| |            | | driving the CLI    |
  +-----+-----+ +----------+-----------+ +-----+------+ +---------+----------+
        +------------------+---------+---------+------------------+
-                                    | Connect JSON over HTTPS (hub CA)
+                                    | Connect JSON over loopback HTTP, or
+                                    | HTTPS through the reverse proxy
                                     | + WebSocket terminals
                        +------------v-------------+
                        | HUB  protectorate-rs     |  quota, sleeves, chat,
@@ -32,8 +33,8 @@ Guiding rules:
                    (namespace sandbox, one harness per workspace)
 ```
 
-The hub is a host binary, not a container: tmux, sandboxes and the CA are
-simpler on the host, and a container holding the Docker socket isolates
+The hub is a host binary, not a container: tmux and sandboxes are simpler
+on the host, and a container holding the Docker socket isolates
 nothing. Everything runs on that one machine.
 
 ## Binaries
@@ -51,7 +52,7 @@ refuses to serve without the runner and sleeve helper beside it.
 
 ## Crates
 
-`rust/crates/`, one Cargo workspace (30 crates):
+`rust/crates/`, one Cargo workspace (29 crates):
 
 | Crate | Purpose |
 |---|---|
@@ -80,8 +81,7 @@ refuses to serve without the runner and sleeve helper beside it.
 | session | tmux sessions |
 | sleeve-registry | durable sleeve lifecycle records |
 | sleeve-runner | terminal sleeve runner and sandbox helper |
-| tls | hub CA and server certificate, private-address listener rule |
-| wire | descriptor-driven protobuf JSON and Connect unary endpoints |
+| wire | descriptor-driven protobuf JSON and Connect unary endpoints, the private-address listener rule |
 
 ## API
 
@@ -112,11 +112,13 @@ location is not identity. Details: [install](docs/install.md#network-model),
 - Every listener binds an explicit private address (loopback, RFC 1918,
   100.64.0.0/10, fc00::/7, fe80::/10); wildcard and public addresses are refused.
 - The hub serves plain HTTP on loopback `--listen` (local tools, sleeves, the
-  break-glass owner token) and HTTPS on each `--tls-listen` with a certificate
-  from its own CA (`HOME/ca/`).
-- Devices (app, remote CLI) pair through owner approval and sign every request
-  with a P-256 key that never leaves them (Android Keystore, non-extractable
-  WebCrypto, 0600 key file). No bearer tokens on clients, no `?token=`.
+  break-glass owner token) and on each `--proxy-listen` for the reverse proxy
+  that terminates TLS with a public certificate (Traefik on stronghold in
+  production). A proxy listener closes every connection that does not come
+  from a `--trusted-proxy` address and never accepts the owner token.
+- Devices (app, remote CLI) are named bearer tokens (`pd1.`) that the owner or
+  another device adds; the client keeps the token, the hub only its SHA-256.
+  Revoking a device closes its streams and terminals. No `?token=`.
 - Sleeves, Envoy and scripts hold hub-minted HMAC capabilities
   (`pc1.` macaroons): scoped, about one hour, renewable, attenuable offline,
   revocable by lineage. Delegated mints never exceed the minter's scopes.
@@ -241,7 +243,7 @@ ranks harnesses by fresh spare capacity.
 - `hub update` (`ReleaseService.UpdateHub`, owner or device) downloads and
   verifies the host's hub bundle and the web archive, writes a trial marker and restarts; the next start confirms the
   trial or restores the previous release.
-- `hub backup` writes a verified `.pbackup` of state (identity, CA,
+- `hub backup` writes a verified `.pbackup` of state (identity,
   sleeves, directory, mail, notes, audit, handoffs, chat logs; no workspaces, credentials or binaries); `serve --backup-dir
   --backup-every` schedules it; `hub restore` fills an empty home.
 
@@ -252,8 +254,7 @@ replacement, mode 0600:
 
 ```
 token            owner break-glass token (loopback only)
-ca/              hub CA and key
-identity.json    capability key, devices, lineages
+identity.json    capability key, device token hashes, lineages
 sleeves.json     sleeve records; sleeves/<name>/ homes and chat.jsonl
 directory.json  mailbox.jsonl  notes.json
 audit/           audit chain
@@ -266,8 +267,8 @@ workspaces/      managed clones; orchestrator/ is Envoy's workspace
 
 `app/` is one Flutter codebase for desktop, Android and web (served by the
 hub from the release's web archive). It talks Connect JSON through the
-generated Dart client in `app/lib/gen` and signs each request with its device
-key. Desktop and web share a responsive shell (overview, sleeves and chat,
+generated Dart client in `app/lib/gen` and sends its device token with each
+request. Desktop and web share a responsive shell (overview, sleeves and chat,
 terminals, quota, mail, notes, devices, audit); Android is Envoy-first
 (ENVOY, QUOTAS, DEVICES) with an emergency stop that kills every sleeve
 directly. Visual design: [design](docs/design.md).

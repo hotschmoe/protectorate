@@ -37,7 +37,7 @@ and a Flutter client for desktop, Android and web.
 | Coordination ([coordination](docs/coordination.md)) | `who`, `msg send/reply/ack/inbox/thread/wait` |
 | Orchestrator | `sleeve envoy`, `orchestrator status` |
 | Notes | `backlog add/ls/show/edit/done/rm/pin` |
-| Auth and audit | `login`, `pair`, `devices`, `token`, `approvals`, `audit ls/tail/verify` |
+| Auth and audit | `devices add/ls/rename/revoke`, `token`, `approvals`, `audit ls/tail/verify` |
 | Ops | `hub update`, `hub backup/restore` |
 | MCP ([mcp](docs/mcp.md)) | `mcp [--allow GLOB] [--http ADDR]` |
 
@@ -49,12 +49,13 @@ Hub (Linux amd64 or arm64, per user, no sudo):
 
 ```
 curl -fsSLO https://raw.githubusercontent.com/hotschmoe/protectorate/master/install-hub.sh
-bash install-hub.sh --tls-listen 192.168.22.5:7470 --tls-name stronghold.lan
+bash install-hub.sh --proxy-listen 192.168.10.44:7470 --trusted-proxy 192.168.10.50
 ```
 
-Then pair the phone with `protectorate pair --app`. The
-[install guide](docs/install.md) covers the network model (private addresses,
-router WireGuard, hub CA and TLS) and the recommended router firewall.
+Then add the phone with `protectorate devices add phone --url https://HUB --app`
+and scan the QR. The [install guide](docs/install.md) covers the network model
+(private addresses, router WireGuard, the TLS-terminating reverse proxy) and
+the recommended router firewall.
 
 The CLI is `protectorate` in the release directory
 (`~/.local/share/protectorate/releases/current/`), the same name it has

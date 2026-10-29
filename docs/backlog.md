@@ -67,7 +67,7 @@ its notes before upgrading.
 `resolution`, `state: "open"` reopens), `DeleteNote` (destructive, so the
 orchestrator is not granted it by default). MCP tools: `backlog_list_notes`,
 `backlog_get_note`, `backlog_create_note`, `backlog_update_note`,
-`backlog_delete_note`. Scopes stay `backlog_*`: device pairing grants it, and
+`backlog_delete_note`. Scopes stay `backlog_*`: devices have it, and
 so do sleeve tokens. Mutations publish `note.created|updated|deleted` events
 (subject = note id, payload includes state). Closing and reopening use the
 existing `backlog_update_note` scope, with no creator or owner restriction:

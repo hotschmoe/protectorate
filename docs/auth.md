@@ -5,54 +5,84 @@ Every way into the hub goes through one decision point,
 streaming) and the WebSocket terminal, on every hub listener. Network location
 is never identity; being on the LAN or the VPN grants nothing.
 
+## Network
+
+The hub is reachable two ways only, and never from the internet:
+
+- **Loopback**: plain HTTP on `hub serve --listen` (default
+  `127.0.0.1:7470`) on the hub machine, for the CLI, sleeves, Envoy and the
+  MCP bridge. The owner token and `/debug/` work only here.
+- **Through the trusted proxy**: a reverse proxy on the LAN terminates TLS
+  with an ordinary public certificate and forwards plain HTTP to each
+  `hub serve --proxy-listen IP:PORT` (a private address). That listener
+  closes every TCP connection whose peer is not a `--trusted-proxy` address
+  before reading a byte, so a client can never send a token to the hub in the
+  clear, and it refuses the owner token. Production: Traefik on stronghold
+  (192.168.10.50) serves `https://protectorate.hotschmoe.com` with its Let's
+  Encrypt certificate behind its lan-only middleware, and the hub runs with
+  `--proxy-listen 192.168.10.44:7470 --trusted-proxy 192.168.10.50`.
+
+Clients use the platform's public roots for HTTPS; there is no private CA.
+
 ## Credentials
 
-There are no long-lived bearer secrets on clients.
+Every credential travels as `Authorization: Bearer <token>`, and the hub
+tells them apart by prefix.
 
 - **Owner token**: `$PROTECTORATE_HOME/token`, created by the installer and
   passed with `hub serve --owner-token-file`. It is break-glass: the hub
-  accepts it only on its plain loopback `--listen`, never on a TLS listener,
-  so it works only from the hub host. It never leaves that machine.
-- **Devices** (the app on web and Android, desktop builds, a remote CLI):
-  during pairing the client creates a P-256 key and registers its public
-  half. Every request then carries a proof instead of a token (below). The
-  private key never leaves the device: a non-extractable WebCrypto key kept in
-  IndexedDB on the web, the Android Keystore on Android, a 0600 key file for
-  the CLI (`$HOME/.protectorate/credentials/`, owner-only ACL on Windows).
-  Desktop app builds have no OS key store the app can rely on and keep the key
-  with the app's preferences. Approved devices have Full access: every
-  ordinary RPC, host and sleeve terminals, and device management; owner-only
-  RPCs stay excluded except those marked `device_allowed`.
-- **Capabilities**: everything else (sleeves, Envoy, scripts)
+  accepts it only on its loopback `--listen`, never through the proxy, so it
+  works only from the hub host. It never leaves that machine.
+- **Device tokens** (`pd1.<base64url of 32 random bytes>`): the app on web
+  and Android, desktop builds and a remote CLI. A device token is a bearer
+  secret kept by the client: the app stores it with the hub's profile (on the
+  web in that origin's local storage), the CLI reads it from
+  `PROTECTORATE_TOKEN` or a 0600 `--token-file`. Anyone holding it is that
+  device until it is revoked. The hub stores only `hex(SHA-256(token))`; the
+  device ID is the first 16 hex digits of that hash, and a presented token is
+  checked by hashing it, finding the device by ID and comparing the full hash
+  in constant time. Devices have Full access: every ordinary RPC, host and
+  sleeve terminals, and device management; owner-only RPCs stay excluded
+  except those marked `device_allowed`.
+- **Capabilities** (`pc1.`): everything else (sleeves, Envoy, scripts)
   holds a capability the hub minted: an HMAC-SHA256 macaroon,
   `pc1.<base64url caveats>.<base64url tag>`. Its caveats name the principal
   (`sleeve:<name>`, `orchestrator-envoy` or a script name),
   the scopes, an optional task and the issue and expiry times. Only the hub
   holds the key (in `identity.json`), so only the hub can mint or verify one.
 
-Unknown, expired, revoked, replayed and malformed credentials all fail as
+Unknown, expired, revoked and malformed credentials all fail as
 `unauthenticated` (HTTP 401). A valid credential without the needed scope
 fails as `permission_denied` (HTTP 403 on the terminal), and the message names
 the tool.
 
-### Device proofs
+Streams and the terminal authenticate once at connect. A browser cannot set
+WebSocket headers, so the terminal also takes the token as the subprotocol
+`bearer.<token>` offered next to `protectorate.v1`; the hub never selects it.
+There is no `?token=` fallback.
 
-```
-Authorization: Proof <device id>.<unix seconds>.<nonce>.<signature>
-```
+## Devices
 
-The signature (ECDSA P-256 SHA-256, raw r||s or DER) covers
-`<METHOD>\n<path>\n<unix seconds>\n<nonce>`; Connect calls sign `POST` and the
-procedure path. The device ID is the first 8 bytes of SHA-256 over the public
-key, in hex. The hub rejects a proof more than 60 seconds from its clock and
-any nonce it has seen in that window (a bounded in-memory cache). Streams and
-the terminal authenticate once at connect. A browser cannot set WebSocket
-headers, so the terminal also takes the proof as the subprotocol
-`proof.<proof>` next to `protectorate.v1`; the hub never selects it. There is
-no `?token=` fallback.
+DeviceService admits the owner and devices, never a capability.
 
-Revoking a device deletes its record: the next request fails and its open
-event streams and terminals close within a second.
+1. Add a device: `protectorate devices add NAME` on the hub, or "Add device"
+   in the app's DEVICES view on any device. The hub returns the token once.
+   With `--url https://HUB` the CLI also prints a web link
+   (`https://HUB/#/pair?url=...&token=...`), an app link
+   (`protectorate://pair?url=...&token=...`) and a terminal QR of the web
+   link, or of the app link with `--app`. The links carry the token, so they
+   are bearer secrets as well.
+2. Open the link on the new device, or paste the token. The app saves the
+   hub and its token and removes the token from the address bar.
+3. Review DEVICES or `protectorate devices ls` (name, when and by whom added,
+   last use, flushed at most about once a minute). Rename entries; names need
+   not be unique and cannot use sleeve or orchestrator identities (`envoy`,
+   `orchestrator-envoy`, `sleeve:...`).
+4. Revoke a lost device immediately: its record is deleted, its next request
+   fails and its open event streams and terminals close within a second.
+
+Devices share the owner's mailbox; their audit actor is the device
+(`token:<name>`).
 
 ### Capability lifetime, renewal and revocation
 
@@ -93,7 +123,7 @@ Default deny: a capability has exactly its scopes, and nothing is implied
 
 | Scope | Grants |
 |-------|--------|
-| `full` | approved devices only |
+| `full` | devices only |
 | `read` | every RPC marked `NO_SIDE_EFFECTS`, derived from the proto descriptors |
 | `events` | the EventService stream |
 | `terminal` | the WebSocket terminal on `sleeve-*` sessions, read-write or read-only |
@@ -111,7 +141,7 @@ RPCs marked `(protectorate.v1.owner_only_rpc)` (TokenService create, list and
 revoke, AuditService, `CreateSession`, `RespawnSession`, `SpawnEnvoy`,
 `ReleaseService.UpdateHub`) accept only the owner whatever the scopes.
 `UpdateHub` also carries `(protectorate.v1.device_allowed)`, so the app's
-update button works from a paired device. `RenewToken` admits only
+update button works from a device. `RenewToken` admits only
 capabilities. DeviceService admits the owner and devices, never a
 capability.
 
@@ -128,31 +158,11 @@ session outside a sleeve sandbox needs the owner, a device or
 
 | Entry point | Check |
 |-------------|-------|
-| Connect unary and server-streaming RPCs | authenticate, then scope for the procedure |
-| `DeviceService.StartDeviceAuth`, `PollDeviceAuth` | unauthenticated, private source address, source-IP and global rate limits |
-| `GET /ws/terminal/{name}` | device proof (header or subprotocol), owner token on loopback, or a capability with a terminal scope |
+| Connect unary and server-streaming RPCs | authenticate the bearer, then scope for the procedure |
+| `GET /ws/terminal/{name}` | device token or capability with a terminal scope (header or `bearer.` subprotocol), or the owner token on loopback |
 | `GET /debug/...` | owner token, loopback listener only |
 
-## Device approval
-
-1. On the new app, enter or scan the hub URL and connect. For another
-   machine's CLI, run `protectorate login --hub URL --name NAME`.
-2. The new device shows a short code. On an already trusted device compare
-   the code, name, platform and source IP, then approve or deny; or run
-   `protectorate devices approve CODE` on the hub host.
-3. The poll that reports `approved` also returns the device record once. The
-   device code only learns the outcome: what the device can do still needs its
-   private key. Requests expire after ten minutes.
-4. Review DEVICES or `protectorate devices ls`; rename entries, and revoke a
-   lost device immediately.
-
-Start is limited to ten requests per source IP and sixty globally per minute,
-polling to 120 per IP and 1,200 globally; at most 100 requests may be pending.
-The source IP is the TCP peer, or with `hub serve --trusted-proxy ADDR` the
-rightmost `X-Forwarded-For` address from that proxy. Device names cannot use
-sleeve or orchestrator identities.
-
-Trusted devices share the owner's mailbox; their audit actor is the device.
+Nothing is unauthenticated.
 
 ## Approval gates
 
@@ -163,7 +173,7 @@ an approval request instead of running it: any RPC marked `destructive` in
 the proto (`DeleteNote`, `KillSleeve` even of its own children,
 `RestoreCheckpoint` and the rest), and launching a sleeve whose harness
 executable or profile changed (see harness pinning in `docs/sleeves.md`).
-Calls by the owner, approved devices and capabilities the
+Calls by the owner, devices and capabilities the
 owner minted are never gated.
 
 The call fails with `aborted` and a detail naming the request id. Repeating
@@ -174,7 +184,7 @@ approval binds to the caller and the exact request bytes and admits one
 execution. A call identical to a denied one is denied again for ten minutes.
 Requests expire after ten minutes and live only in hub memory.
 
-The owner decides from an approved device (the app's ACTION APPROVAL banner,
+The owner decides from a device (the app's ACTION APPROVAL banner,
 fed by `approval.requested` and `approval.decided` events) or with
 `protectorate approvals ls | approve <id> | deny <id>`
 (`ApprovalService`, owner and devices only). The audit log records each
@@ -187,11 +197,11 @@ when it runs.
 `$PROTECTORATE_HOME/audit/audit-YYYY-MM.jsonl`, JSON lines opened `O_APPEND`
 with mode 0600. Logged: every mutating RPC (including denied and
 unauthenticated attempts), and every terminal attach. Fields: `time`, `actor` (`owner`, `token:<principal or device
-name>` or `unauthenticated`), `token_id` (the device ID, which is its key ID,
-or the capability lineage ID), `procedure`, `subject`, `outcome`, `code`,
+name>` or `unauthenticated`), `token_id` (the device ID, the first 16 hex digits of
+its token's SHA-256, or the capability lineage ID), `procedure`, `subject`, `outcome`, `code`,
 `task`, `detail`, `run_id` (the run of the sleeve that made the call or that
 it concerns), `seq`, `prev` and `hash`; every field is part of the hashed
-line. Secrets, proofs, env values and request bodies are never written.
+line. Tokens, env values and request bodies are never written.
 `protectorate audit tail` reads it on the hub machine;
 `AuditService.ListAuditEntries` (owner only) serves the app's AUDIT view,
 filtered by actor, procedure, subject, outcome and run id.
@@ -222,17 +232,19 @@ protectorate token ls
 protectorate token revoke <id>
 protectorate --token-file FILE token renew
 protectorate --token-file FILE token attenuate --scope backlog_create_note --ttl 10m
-protectorate login --hub https://hub.example --name officepc
-protectorate devices ls | pending | approve CODE | deny CODE | rename ID NAME | revoke ID
+protectorate devices add NAME [--url https://HUB] [--app]
+protectorate devices ls | rename ID NAME | revoke ID
 protectorate audit tail -n 50
 protectorate audit ls --run RUN_ID
 protectorate audit verify
 protectorate approvals ls | approve ID | deny ID
 ```
 
-Every command authenticates with the capability in `--token-file` or
-`PROTECTORATE_TOKEN_FILE` (renewed in place), then `PROTECTORATE_TOKEN`, then
-the device key `login` saved for the selected hub. On the hub host the
-installer's owner token is used as a last resort by `protectorate mcp`.
-`protectorate pair` prints a QR code and URL containing only the hub URL and
-its CA.
+Every command authenticates with the token in `--token-file` or
+`PROTECTORATE_TOKEN_FILE`, then `PROTECTORATE_TOKEN`. A token file holding a
+capability is renewed in place past half its life; any other token in it,
+such as a device token, is used as it is. `--json devices add` prints
+`{"device", "token", "web", "app"}` (the links only with `--url`). From
+another machine, pass `--hub https://HUB` with a device token. On the hub
+host the installer's owner token is used as a last resort by
+`protectorate mcp`.

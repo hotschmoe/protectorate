@@ -23,7 +23,10 @@ scenario's name is `<file>::<test>`, so `cargo test -p protectorate-hub
 
 - `protectorate-server`: the real `protectorate-rs` binary (backup and
   restore, harness drivers, the checked-in Flutter client against a Rust hub,
-  crash and full-disk durability; see below).
+  crash and full-disk durability; see below). The `auth::` scenarios serve a
+  proxy listener on 127.0.0.2 that trusts 127.0.0.1, the source address of
+  an ordinary loopback client, and connect from 127.0.0.3 as a peer it must
+  drop.
   The `watchdog::` scenarios stop every thread of a real hub except its
   watchdog with ptrace from outside and expect exit 70 with the diagnostic,
   and freeze it with SIGSTOP for longer than the limit and expect no exit.
@@ -43,7 +46,7 @@ default run (about 15 s and 6 s).
 
 - `crash_consistency::acknowledged_mutations_survive_hub_sigkill_at_random_points`
   runs a real hub with six clients that mutate mail, notes,
-  tokens, device pairings and sleeves while scheduled
+  tokens, devices and sleeves while scheduled
   and manual backups run. The hub is
   SIGKILLed after a random delay and restarted on the same home. Each restart
   must come up, keep every change a client saw succeed (an acknowledged ack,
