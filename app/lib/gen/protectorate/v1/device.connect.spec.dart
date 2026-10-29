@@ -6,49 +6,17 @@
 import "package:connectrpc/connect.dart" as connect;
 import "device.pb.dart" as protectoratev1device;
 
-/// DeviceService connects new clients through approval by a trusted device.
-/// A device registers a P-256 public key when it starts; once approved it
-/// signs every request with the private half, which never leaves it.
+/// DeviceService manages the clients that may use the hub. Adding a device
+/// returns its bearer token once; the hub keeps only a hash of it.
 abstract final class DeviceService {
   /// Fully-qualified name of the DeviceService service.
   static const name = 'protectorate.v1.DeviceService';
 
-  /// StartDeviceAuth is unauthenticated and rate limited on the LAN.
-  static const startDeviceAuth = connect.Spec(
-    '/$name/StartDeviceAuth',
+  static const addDevice = connect.Spec(
+    '/$name/AddDevice',
     connect.StreamType.unary,
-    protectoratev1device.StartDeviceAuthRequest.new,
-    protectoratev1device.StartDeviceAuthResponse.new,
-  );
-
-  /// PollDeviceAuth reports the outcome, and the approved device once.
-  static const pollDeviceAuth = connect.Spec(
-    '/$name/PollDeviceAuth',
-    connect.StreamType.unary,
-    protectoratev1device.PollDeviceAuthRequest.new,
-    protectoratev1device.PollDeviceAuthResponse.new,
-  );
-
-  static const listDeviceAuth = connect.Spec(
-    '/$name/ListDeviceAuth',
-    connect.StreamType.unary,
-    protectoratev1device.ListDeviceAuthRequest.new,
-    protectoratev1device.ListDeviceAuthResponse.new,
-    idempotency: connect.Idempotency.noSideEffects,
-  );
-
-  static const approveDeviceAuth = connect.Spec(
-    '/$name/ApproveDeviceAuth',
-    connect.StreamType.unary,
-    protectoratev1device.ApproveDeviceAuthRequest.new,
-    protectoratev1device.ApproveDeviceAuthResponse.new,
-  );
-
-  static const denyDeviceAuth = connect.Spec(
-    '/$name/DenyDeviceAuth',
-    connect.StreamType.unary,
-    protectoratev1device.DenyDeviceAuthRequest.new,
-    protectoratev1device.DenyDeviceAuthResponse.new,
+    protectoratev1device.AddDeviceRequest.new,
+    protectoratev1device.AddDeviceResponse.new,
   );
 
   static const listDevices = connect.Spec(

@@ -7,89 +7,18 @@ import "package:connectrpc/connect.dart" as connect;
 import "device.pb.dart" as protectoratev1device;
 import "device.connect.spec.dart" as specs;
 
-/// DeviceService connects new clients through approval by a trusted device.
-/// A device registers a P-256 public key when it starts; once approved it
-/// signs every request with the private half, which never leaves it.
+/// DeviceService manages the clients that may use the hub. Adding a device
+/// returns its bearer token once; the hub keeps only a hash of it.
 extension type DeviceServiceClient (connect.Transport _transport) {
-  /// StartDeviceAuth is unauthenticated and rate limited on the LAN.
-  Future<protectoratev1device.StartDeviceAuthResponse> startDeviceAuth(
-    protectoratev1device.StartDeviceAuthRequest input, {
+  Future<protectoratev1device.AddDeviceResponse> addDevice(
+    protectoratev1device.AddDeviceRequest input, {
     connect.Headers? headers,
     connect.AbortSignal? signal,
     Function(connect.Headers)? onHeader,
     Function(connect.Headers)? onTrailer,
   }) {
     return connect.Client(_transport).unary(
-      specs.DeviceService.startDeviceAuth,
-      input,
-      signal: signal,
-      headers: headers,
-      onHeader: onHeader,
-      onTrailer: onTrailer,
-    );
-  }
-
-  /// PollDeviceAuth reports the outcome, and the approved device once.
-  Future<protectoratev1device.PollDeviceAuthResponse> pollDeviceAuth(
-    protectoratev1device.PollDeviceAuthRequest input, {
-    connect.Headers? headers,
-    connect.AbortSignal? signal,
-    Function(connect.Headers)? onHeader,
-    Function(connect.Headers)? onTrailer,
-  }) {
-    return connect.Client(_transport).unary(
-      specs.DeviceService.pollDeviceAuth,
-      input,
-      signal: signal,
-      headers: headers,
-      onHeader: onHeader,
-      onTrailer: onTrailer,
-    );
-  }
-
-  Future<protectoratev1device.ListDeviceAuthResponse> listDeviceAuth(
-    protectoratev1device.ListDeviceAuthRequest input, {
-    connect.Headers? headers,
-    connect.AbortSignal? signal,
-    Function(connect.Headers)? onHeader,
-    Function(connect.Headers)? onTrailer,
-  }) {
-    return connect.Client(_transport).unary(
-      specs.DeviceService.listDeviceAuth,
-      input,
-      signal: signal,
-      headers: headers,
-      onHeader: onHeader,
-      onTrailer: onTrailer,
-    );
-  }
-
-  Future<protectoratev1device.ApproveDeviceAuthResponse> approveDeviceAuth(
-    protectoratev1device.ApproveDeviceAuthRequest input, {
-    connect.Headers? headers,
-    connect.AbortSignal? signal,
-    Function(connect.Headers)? onHeader,
-    Function(connect.Headers)? onTrailer,
-  }) {
-    return connect.Client(_transport).unary(
-      specs.DeviceService.approveDeviceAuth,
-      input,
-      signal: signal,
-      headers: headers,
-      onHeader: onHeader,
-      onTrailer: onTrailer,
-    );
-  }
-
-  Future<protectoratev1device.DenyDeviceAuthResponse> denyDeviceAuth(
-    protectoratev1device.DenyDeviceAuthRequest input, {
-    connect.Headers? headers,
-    connect.AbortSignal? signal,
-    Function(connect.Headers)? onHeader,
-    Function(connect.Headers)? onTrailer,
-  }) {
-    return connect.Client(_transport).unary(
-      specs.DeviceService.denyDeviceAuth,
+      specs.DeviceService.addDevice,
       input,
       signal: signal,
       headers: headers,

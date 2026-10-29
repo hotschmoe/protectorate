@@ -14,7 +14,7 @@ extend google.protobuf.MethodOptions {
   // loopback listener. The MCP bridge leaves it out.
   bool owner_only_rpc = 50004;
 
-  // device_allowed admits approved devices to an owner_only_rpc, which no
+  // device_allowed admits devices to an owner_only_rpc, which no
   // scope can grant. Used for updating the hub from the app.
   bool device_allowed = 50005;
 }

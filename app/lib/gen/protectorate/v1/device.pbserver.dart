@@ -21,16 +21,8 @@ import 'device.pbjson.dart';
 export 'device.pb.dart';
 
 abstract class DeviceServiceBase extends $pb.GeneratedService {
-  $async.Future<$1.StartDeviceAuthResponse> startDeviceAuth(
-      $pb.ServerContext ctx, $1.StartDeviceAuthRequest request);
-  $async.Future<$1.PollDeviceAuthResponse> pollDeviceAuth(
-      $pb.ServerContext ctx, $1.PollDeviceAuthRequest request);
-  $async.Future<$1.ListDeviceAuthResponse> listDeviceAuth(
-      $pb.ServerContext ctx, $1.ListDeviceAuthRequest request);
-  $async.Future<$1.ApproveDeviceAuthResponse> approveDeviceAuth(
-      $pb.ServerContext ctx, $1.ApproveDeviceAuthRequest request);
-  $async.Future<$1.DenyDeviceAuthResponse> denyDeviceAuth(
-      $pb.ServerContext ctx, $1.DenyDeviceAuthRequest request);
+  $async.Future<$1.AddDeviceResponse> addDevice(
+      $pb.ServerContext ctx, $1.AddDeviceRequest request);
   $async.Future<$1.ListDevicesResponse> listDevices(
       $pb.ServerContext ctx, $1.ListDevicesRequest request);
   $async.Future<$1.RevokeDeviceResponse> revokeDevice(
@@ -40,16 +32,8 @@ abstract class DeviceServiceBase extends $pb.GeneratedService {
 
   $pb.GeneratedMessage createRequest($core.String methodName) {
     switch (methodName) {
-      case 'StartDeviceAuth':
-        return $1.StartDeviceAuthRequest();
-      case 'PollDeviceAuth':
-        return $1.PollDeviceAuthRequest();
-      case 'ListDeviceAuth':
-        return $1.ListDeviceAuthRequest();
-      case 'ApproveDeviceAuth':
-        return $1.ApproveDeviceAuthRequest();
-      case 'DenyDeviceAuth':
-        return $1.DenyDeviceAuthRequest();
+      case 'AddDevice':
+        return $1.AddDeviceRequest();
       case 'ListDevices':
         return $1.ListDevicesRequest();
       case 'RevokeDevice':
@@ -64,16 +48,8 @@ abstract class DeviceServiceBase extends $pb.GeneratedService {
   $async.Future<$pb.GeneratedMessage> handleCall($pb.ServerContext ctx,
       $core.String methodName, $pb.GeneratedMessage request) {
     switch (methodName) {
-      case 'StartDeviceAuth':
-        return startDeviceAuth(ctx, request as $1.StartDeviceAuthRequest);
-      case 'PollDeviceAuth':
-        return pollDeviceAuth(ctx, request as $1.PollDeviceAuthRequest);
-      case 'ListDeviceAuth':
-        return listDeviceAuth(ctx, request as $1.ListDeviceAuthRequest);
-      case 'ApproveDeviceAuth':
-        return approveDeviceAuth(ctx, request as $1.ApproveDeviceAuthRequest);
-      case 'DenyDeviceAuth':
-        return denyDeviceAuth(ctx, request as $1.DenyDeviceAuthRequest);
+      case 'AddDevice':
+        return addDevice(ctx, request as $1.AddDeviceRequest);
       case 'ListDevices':
         return listDevices(ctx, request as $1.ListDevicesRequest);
       case 'RevokeDevice':

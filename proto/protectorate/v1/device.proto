@@ -4,19 +4,10 @@ package protectorate.v1;
 
 import "google/protobuf/timestamp.proto";
 
-// DeviceService connects new clients through approval by a trusted device.
-// A device registers a P-256 public key when it starts; once approved it
-// signs every request with the private half, which never leaves it.
+// DeviceService manages the clients that may use the hub. Adding a device
+// returns its bearer token once; the hub keeps only a hash of it.
 service DeviceService {
-  // StartDeviceAuth is unauthenticated and rate limited on the LAN.
-  rpc StartDeviceAuth(StartDeviceAuthRequest) returns (StartDeviceAuthResponse);
-  // PollDeviceAuth reports the outcome, and the approved device once.
-  rpc PollDeviceAuth(PollDeviceAuthRequest) returns (PollDeviceAuthResponse);
-  rpc ListDeviceAuth(ListDeviceAuthRequest) returns (ListDeviceAuthResponse) {
-    option idempotency_level = NO_SIDE_EFFECTS;
-  }
-  rpc ApproveDeviceAuth(ApproveDeviceAuthRequest) returns (ApproveDeviceAuthResponse);
-  rpc DenyDeviceAuth(DenyDeviceAuthRequest) returns (DenyDeviceAuthResponse);
+  rpc AddDevice(AddDeviceRequest) returns (AddDeviceResponse);
   rpc ListDevices(ListDevicesRequest) returns (ListDevicesResponse) {
     option idempotency_level = NO_SIDE_EFFECTS;
   }
@@ -24,58 +15,24 @@ service DeviceService {
   rpc RenameDevice(RenameDeviceRequest) returns (RenameDeviceResponse);
 }
 
-message StartDeviceAuthRequest {
-  string name = 1;
-  string platform = 2;
-  // public_key is the device's uncompressed P-256 public key (65 bytes).
-  bytes public_key = 3;
-}
-message StartDeviceAuthResponse {
-  string device_code = 1;
-  string user_code = 2;
-  google.protobuf.Timestamp expires_at = 3;
-  int32 interval = 4;
-}
-message PollDeviceAuthRequest {
-  string device_code = 1;
-}
-message PollDeviceAuthResponse {
-  // status is pending, slow_down, approved, denied, expired or consumed.
-  string status = 1;
-  int32 interval = 2;
-  // device is set once, on the poll that reports approved.
-  DeviceInfo device = 3;
-}
-// DeviceInfo describes an approved device. Its id is derived from its public
-// key and names it in audit lines.
+// DeviceInfo describes a device. Its id is derived from its token and names
+// it in audit lines.
 message DeviceInfo {
   string id = 1;
   string name = 2;
-  string platform = 3;
-  google.protobuf.Timestamp approved_at = 4;
-  string approved_by = 5;
+  google.protobuf.Timestamp added_at = 3;
+  string added_by = 4;
   // last_used_at is persisted at most about once a minute.
-  google.protobuf.Timestamp last_used_at = 6;
+  google.protobuf.Timestamp last_used_at = 5;
 }
-message DeviceAuthInfo {
-  string user_code = 1;
-  string name = 2;
-  string platform = 3;
-  string requesting_ip = 4;
-  google.protobuf.Timestamp expires_at = 5;
+message AddDeviceRequest {
+  string name = 1;
 }
-message ListDeviceAuthRequest {}
-message ListDeviceAuthResponse {
-  repeated DeviceAuthInfo requests = 1;
+message AddDeviceResponse {
+  DeviceInfo device = 1;
+  // token is shown only here.
+  string token = 2;
 }
-message ApproveDeviceAuthRequest {
-  string user_code = 1;
-}
-message ApproveDeviceAuthResponse {}
-message DenyDeviceAuthRequest {
-  string user_code = 1;
-}
-message DenyDeviceAuthResponse {}
 message ListDevicesRequest {}
 message ListDevicesResponse {
   repeated DeviceInfo devices = 1;

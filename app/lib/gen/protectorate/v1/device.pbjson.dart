@@ -18,102 +18,24 @@ import 'dart:typed_data' as $typed_data;
 import 'package:protobuf/well_known_types/google/protobuf/timestamp.pbjson.dart'
     as $0;
 
-@$core.Deprecated('Use startDeviceAuthRequestDescriptor instead')
-const StartDeviceAuthRequest$json = {
-  '1': 'StartDeviceAuthRequest',
-  '2': [
-    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
-    {'1': 'platform', '3': 2, '4': 1, '5': 9, '10': 'platform'},
-    {'1': 'public_key', '3': 3, '4': 1, '5': 12, '10': 'publicKey'},
-  ],
-};
-
-/// Descriptor for `StartDeviceAuthRequest`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List startDeviceAuthRequestDescriptor =
-    $convert.base64Decode(
-        'ChZTdGFydERldmljZUF1dGhSZXF1ZXN0EhIKBG5hbWUYASABKAlSBG5hbWUSGgoIcGxhdGZvcm'
-        '0YAiABKAlSCHBsYXRmb3JtEh0KCnB1YmxpY19rZXkYAyABKAxSCXB1YmxpY0tleQ==');
-
-@$core.Deprecated('Use startDeviceAuthResponseDescriptor instead')
-const StartDeviceAuthResponse$json = {
-  '1': 'StartDeviceAuthResponse',
-  '2': [
-    {'1': 'device_code', '3': 1, '4': 1, '5': 9, '10': 'deviceCode'},
-    {'1': 'user_code', '3': 2, '4': 1, '5': 9, '10': 'userCode'},
-    {
-      '1': 'expires_at',
-      '3': 3,
-      '4': 1,
-      '5': 11,
-      '6': '.google.protobuf.Timestamp',
-      '10': 'expiresAt'
-    },
-    {'1': 'interval', '3': 4, '4': 1, '5': 5, '10': 'interval'},
-  ],
-};
-
-/// Descriptor for `StartDeviceAuthResponse`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List startDeviceAuthResponseDescriptor = $convert.base64Decode(
-    'ChdTdGFydERldmljZUF1dGhSZXNwb25zZRIfCgtkZXZpY2VfY29kZRgBIAEoCVIKZGV2aWNlQ2'
-    '9kZRIbCgl1c2VyX2NvZGUYAiABKAlSCHVzZXJDb2RlEjkKCmV4cGlyZXNfYXQYAyABKAsyGi5n'
-    'b29nbGUucHJvdG9idWYuVGltZXN0YW1wUglleHBpcmVzQXQSGgoIaW50ZXJ2YWwYBCABKAVSCG'
-    'ludGVydmFs');
-
-@$core.Deprecated('Use pollDeviceAuthRequestDescriptor instead')
-const PollDeviceAuthRequest$json = {
-  '1': 'PollDeviceAuthRequest',
-  '2': [
-    {'1': 'device_code', '3': 1, '4': 1, '5': 9, '10': 'deviceCode'},
-  ],
-};
-
-/// Descriptor for `PollDeviceAuthRequest`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List pollDeviceAuthRequestDescriptor = $convert.base64Decode(
-    'ChVQb2xsRGV2aWNlQXV0aFJlcXVlc3QSHwoLZGV2aWNlX2NvZGUYASABKAlSCmRldmljZUNvZG'
-    'U=');
-
-@$core.Deprecated('Use pollDeviceAuthResponseDescriptor instead')
-const PollDeviceAuthResponse$json = {
-  '1': 'PollDeviceAuthResponse',
-  '2': [
-    {'1': 'status', '3': 1, '4': 1, '5': 9, '10': 'status'},
-    {'1': 'interval', '3': 2, '4': 1, '5': 5, '10': 'interval'},
-    {
-      '1': 'device',
-      '3': 3,
-      '4': 1,
-      '5': 11,
-      '6': '.protectorate.v1.DeviceInfo',
-      '10': 'device'
-    },
-  ],
-};
-
-/// Descriptor for `PollDeviceAuthResponse`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List pollDeviceAuthResponseDescriptor = $convert.base64Decode(
-    'ChZQb2xsRGV2aWNlQXV0aFJlc3BvbnNlEhYKBnN0YXR1cxgBIAEoCVIGc3RhdHVzEhoKCGludG'
-    'VydmFsGAIgASgFUghpbnRlcnZhbBIzCgZkZXZpY2UYAyABKAsyGy5wcm90ZWN0b3JhdGUudjEu'
-    'RGV2aWNlSW5mb1IGZGV2aWNl');
-
 @$core.Deprecated('Use deviceInfoDescriptor instead')
 const DeviceInfo$json = {
   '1': 'DeviceInfo',
   '2': [
     {'1': 'id', '3': 1, '4': 1, '5': 9, '10': 'id'},
     {'1': 'name', '3': 2, '4': 1, '5': 9, '10': 'name'},
-    {'1': 'platform', '3': 3, '4': 1, '5': 9, '10': 'platform'},
     {
-      '1': 'approved_at',
-      '3': 4,
+      '1': 'added_at',
+      '3': 3,
       '4': 1,
       '5': 11,
       '6': '.google.protobuf.Timestamp',
-      '10': 'approvedAt'
+      '10': 'addedAt'
     },
-    {'1': 'approved_by', '3': 5, '4': 1, '5': 9, '10': 'approvedBy'},
+    {'1': 'added_by', '3': 4, '4': 1, '5': 9, '10': 'addedBy'},
     {
       '1': 'last_used_at',
-      '3': 6,
+      '3': 5,
       '4': 1,
       '5': 11,
       '6': '.google.protobuf.Timestamp',
@@ -124,111 +46,43 @@ const DeviceInfo$json = {
 
 /// Descriptor for `DeviceInfo`. Decode as a `google.protobuf.DescriptorProto`.
 final $typed_data.Uint8List deviceInfoDescriptor = $convert.base64Decode(
-    'CgpEZXZpY2VJbmZvEg4KAmlkGAEgASgJUgJpZBISCgRuYW1lGAIgASgJUgRuYW1lEhoKCHBsYX'
-    'Rmb3JtGAMgASgJUghwbGF0Zm9ybRI7CgthcHByb3ZlZF9hdBgEIAEoCzIaLmdvb2dsZS5wcm90'
-    'b2J1Zi5UaW1lc3RhbXBSCmFwcHJvdmVkQXQSHwoLYXBwcm92ZWRfYnkYBSABKAlSCmFwcHJvdm'
-    'VkQnkSPAoMbGFzdF91c2VkX2F0GAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIK'
-    'bGFzdFVzZWRBdA==');
+    'CgpEZXZpY2VJbmZvEg4KAmlkGAEgASgJUgJpZBISCgRuYW1lGAIgASgJUgRuYW1lEjUKCGFkZG'
+    'VkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcFIHYWRkZWRBdBIZCghhZGRl'
+    'ZF9ieRgEIAEoCVIHYWRkZWRCeRI8CgxsYXN0X3VzZWRfYXQYBSABKAsyGi5nb29nbGUucHJvdG'
+    '9idWYuVGltZXN0YW1wUgpsYXN0VXNlZEF0');
 
-@$core.Deprecated('Use deviceAuthInfoDescriptor instead')
-const DeviceAuthInfo$json = {
-  '1': 'DeviceAuthInfo',
+@$core.Deprecated('Use addDeviceRequestDescriptor instead')
+const AddDeviceRequest$json = {
+  '1': 'AddDeviceRequest',
   '2': [
-    {'1': 'user_code', '3': 1, '4': 1, '5': 9, '10': 'userCode'},
-    {'1': 'name', '3': 2, '4': 1, '5': 9, '10': 'name'},
-    {'1': 'platform', '3': 3, '4': 1, '5': 9, '10': 'platform'},
-    {'1': 'requesting_ip', '3': 4, '4': 1, '5': 9, '10': 'requestingIp'},
+    {'1': 'name', '3': 1, '4': 1, '5': 9, '10': 'name'},
+  ],
+};
+
+/// Descriptor for `AddDeviceRequest`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List addDeviceRequestDescriptor = $convert
+    .base64Decode('ChBBZGREZXZpY2VSZXF1ZXN0EhIKBG5hbWUYASABKAlSBG5hbWU=');
+
+@$core.Deprecated('Use addDeviceResponseDescriptor instead')
+const AddDeviceResponse$json = {
+  '1': 'AddDeviceResponse',
+  '2': [
     {
-      '1': 'expires_at',
-      '3': 5,
+      '1': 'device',
+      '3': 1,
       '4': 1,
       '5': 11,
-      '6': '.google.protobuf.Timestamp',
-      '10': 'expiresAt'
+      '6': '.protectorate.v1.DeviceInfo',
+      '10': 'device'
     },
+    {'1': 'token', '3': 2, '4': 1, '5': 9, '10': 'token'},
   ],
 };
 
-/// Descriptor for `DeviceAuthInfo`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List deviceAuthInfoDescriptor = $convert.base64Decode(
-    'Cg5EZXZpY2VBdXRoSW5mbxIbCgl1c2VyX2NvZGUYASABKAlSCHVzZXJDb2RlEhIKBG5hbWUYAi'
-    'ABKAlSBG5hbWUSGgoIcGxhdGZvcm0YAyABKAlSCHBsYXRmb3JtEiMKDXJlcXVlc3RpbmdfaXAY'
-    'BCABKAlSDHJlcXVlc3RpbmdJcBI5CgpleHBpcmVzX2F0GAUgASgLMhouZ29vZ2xlLnByb3RvYn'
-    'VmLlRpbWVzdGFtcFIJZXhwaXJlc0F0');
-
-@$core.Deprecated('Use listDeviceAuthRequestDescriptor instead')
-const ListDeviceAuthRequest$json = {
-  '1': 'ListDeviceAuthRequest',
-};
-
-/// Descriptor for `ListDeviceAuthRequest`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List listDeviceAuthRequestDescriptor =
-    $convert.base64Decode('ChVMaXN0RGV2aWNlQXV0aFJlcXVlc3Q=');
-
-@$core.Deprecated('Use listDeviceAuthResponseDescriptor instead')
-const ListDeviceAuthResponse$json = {
-  '1': 'ListDeviceAuthResponse',
-  '2': [
-    {
-      '1': 'requests',
-      '3': 1,
-      '4': 3,
-      '5': 11,
-      '6': '.protectorate.v1.DeviceAuthInfo',
-      '10': 'requests'
-    },
-  ],
-};
-
-/// Descriptor for `ListDeviceAuthResponse`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List listDeviceAuthResponseDescriptor =
-    $convert.base64Decode(
-        'ChZMaXN0RGV2aWNlQXV0aFJlc3BvbnNlEjsKCHJlcXVlc3RzGAEgAygLMh8ucHJvdGVjdG9yYX'
-        'RlLnYxLkRldmljZUF1dGhJbmZvUghyZXF1ZXN0cw==');
-
-@$core.Deprecated('Use approveDeviceAuthRequestDescriptor instead')
-const ApproveDeviceAuthRequest$json = {
-  '1': 'ApproveDeviceAuthRequest',
-  '2': [
-    {'1': 'user_code', '3': 1, '4': 1, '5': 9, '10': 'userCode'},
-  ],
-};
-
-/// Descriptor for `ApproveDeviceAuthRequest`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List approveDeviceAuthRequestDescriptor =
-    $convert.base64Decode(
-        'ChhBcHByb3ZlRGV2aWNlQXV0aFJlcXVlc3QSGwoJdXNlcl9jb2RlGAEgASgJUgh1c2VyQ29kZQ'
-        '==');
-
-@$core.Deprecated('Use approveDeviceAuthResponseDescriptor instead')
-const ApproveDeviceAuthResponse$json = {
-  '1': 'ApproveDeviceAuthResponse',
-};
-
-/// Descriptor for `ApproveDeviceAuthResponse`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List approveDeviceAuthResponseDescriptor =
-    $convert.base64Decode('ChlBcHByb3ZlRGV2aWNlQXV0aFJlc3BvbnNl');
-
-@$core.Deprecated('Use denyDeviceAuthRequestDescriptor instead')
-const DenyDeviceAuthRequest$json = {
-  '1': 'DenyDeviceAuthRequest',
-  '2': [
-    {'1': 'user_code', '3': 1, '4': 1, '5': 9, '10': 'userCode'},
-  ],
-};
-
-/// Descriptor for `DenyDeviceAuthRequest`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List denyDeviceAuthRequestDescriptor = $convert.base64Decode(
-    'ChVEZW55RGV2aWNlQXV0aFJlcXVlc3QSGwoJdXNlcl9jb2RlGAEgASgJUgh1c2VyQ29kZQ==');
-
-@$core.Deprecated('Use denyDeviceAuthResponseDescriptor instead')
-const DenyDeviceAuthResponse$json = {
-  '1': 'DenyDeviceAuthResponse',
-};
-
-/// Descriptor for `DenyDeviceAuthResponse`. Decode as a `google.protobuf.DescriptorProto`.
-final $typed_data.Uint8List denyDeviceAuthResponseDescriptor =
-    $convert.base64Decode('ChZEZW55RGV2aWNlQXV0aFJlc3BvbnNl');
+/// Descriptor for `AddDeviceResponse`. Decode as a `google.protobuf.DescriptorProto`.
+final $typed_data.Uint8List addDeviceResponseDescriptor = $convert.base64Decode(
+    'ChFBZGREZXZpY2VSZXNwb25zZRIzCgZkZXZpY2UYASABKAsyGy5wcm90ZWN0b3JhdGUudjEuRG'
+    'V2aWNlSW5mb1IGZGV2aWNlEhQKBXRva2VuGAIgASgJUgV0b2tlbg==');
 
 @$core.Deprecated('Use listDevicesRequestDescriptor instead')
 const ListDevicesRequest$json = {
@@ -329,30 +183,9 @@ const $core.Map<$core.String, $core.dynamic> DeviceServiceBase$json = {
   '1': 'DeviceService',
   '2': [
     {
-      '1': 'StartDeviceAuth',
-      '2': '.protectorate.v1.StartDeviceAuthRequest',
-      '3': '.protectorate.v1.StartDeviceAuthResponse'
-    },
-    {
-      '1': 'PollDeviceAuth',
-      '2': '.protectorate.v1.PollDeviceAuthRequest',
-      '3': '.protectorate.v1.PollDeviceAuthResponse'
-    },
-    {
-      '1': 'ListDeviceAuth',
-      '2': '.protectorate.v1.ListDeviceAuthRequest',
-      '3': '.protectorate.v1.ListDeviceAuthResponse',
-      '4': {'34': 1},
-    },
-    {
-      '1': 'ApproveDeviceAuth',
-      '2': '.protectorate.v1.ApproveDeviceAuthRequest',
-      '3': '.protectorate.v1.ApproveDeviceAuthResponse'
-    },
-    {
-      '1': 'DenyDeviceAuth',
-      '2': '.protectorate.v1.DenyDeviceAuthRequest',
-      '3': '.protectorate.v1.DenyDeviceAuthResponse'
+      '1': 'AddDevice',
+      '2': '.protectorate.v1.AddDeviceRequest',
+      '3': '.protectorate.v1.AddDeviceResponse'
     },
     {
       '1': 'ListDevices',
@@ -376,19 +209,10 @@ const $core.Map<$core.String, $core.dynamic> DeviceServiceBase$json = {
 @$core.Deprecated('Use deviceServiceDescriptor instead')
 const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
     DeviceServiceBase$messageJson = {
-  '.protectorate.v1.StartDeviceAuthRequest': StartDeviceAuthRequest$json,
-  '.protectorate.v1.StartDeviceAuthResponse': StartDeviceAuthResponse$json,
-  '.google.protobuf.Timestamp': $0.Timestamp$json,
-  '.protectorate.v1.PollDeviceAuthRequest': PollDeviceAuthRequest$json,
-  '.protectorate.v1.PollDeviceAuthResponse': PollDeviceAuthResponse$json,
+  '.protectorate.v1.AddDeviceRequest': AddDeviceRequest$json,
+  '.protectorate.v1.AddDeviceResponse': AddDeviceResponse$json,
   '.protectorate.v1.DeviceInfo': DeviceInfo$json,
-  '.protectorate.v1.ListDeviceAuthRequest': ListDeviceAuthRequest$json,
-  '.protectorate.v1.ListDeviceAuthResponse': ListDeviceAuthResponse$json,
-  '.protectorate.v1.DeviceAuthInfo': DeviceAuthInfo$json,
-  '.protectorate.v1.ApproveDeviceAuthRequest': ApproveDeviceAuthRequest$json,
-  '.protectorate.v1.ApproveDeviceAuthResponse': ApproveDeviceAuthResponse$json,
-  '.protectorate.v1.DenyDeviceAuthRequest': DenyDeviceAuthRequest$json,
-  '.protectorate.v1.DenyDeviceAuthResponse': DenyDeviceAuthResponse$json,
+  '.google.protobuf.Timestamp': $0.Timestamp$json,
   '.protectorate.v1.ListDevicesRequest': ListDevicesRequest$json,
   '.protectorate.v1.ListDevicesResponse': ListDevicesResponse$json,
   '.protectorate.v1.RevokeDeviceRequest': RevokeDeviceRequest$json,
@@ -399,18 +223,10 @@ const $core.Map<$core.String, $core.Map<$core.String, $core.dynamic>>
 
 /// Descriptor for `DeviceService`. Decode as a `google.protobuf.ServiceDescriptorProto`.
 final $typed_data.Uint8List deviceServiceDescriptor = $convert.base64Decode(
-    'Cg1EZXZpY2VTZXJ2aWNlEmQKD1N0YXJ0RGV2aWNlQXV0aBInLnByb3RlY3RvcmF0ZS52MS5TdG'
-    'FydERldmljZUF1dGhSZXF1ZXN0GigucHJvdGVjdG9yYXRlLnYxLlN0YXJ0RGV2aWNlQXV0aFJl'
-    'c3BvbnNlEmEKDlBvbGxEZXZpY2VBdXRoEiYucHJvdGVjdG9yYXRlLnYxLlBvbGxEZXZpY2VBdX'
-    'RoUmVxdWVzdBonLnByb3RlY3RvcmF0ZS52MS5Qb2xsRGV2aWNlQXV0aFJlc3BvbnNlEmYKDkxp'
-    'c3REZXZpY2VBdXRoEiYucHJvdGVjdG9yYXRlLnYxLkxpc3REZXZpY2VBdXRoUmVxdWVzdBonLn'
-    'Byb3RlY3RvcmF0ZS52MS5MaXN0RGV2aWNlQXV0aFJlc3BvbnNlIgOQAgESagoRQXBwcm92ZURl'
-    'dmljZUF1dGgSKS5wcm90ZWN0b3JhdGUudjEuQXBwcm92ZURldmljZUF1dGhSZXF1ZXN0GioucH'
-    'JvdGVjdG9yYXRlLnYxLkFwcHJvdmVEZXZpY2VBdXRoUmVzcG9uc2USYQoORGVueURldmljZUF1'
-    'dGgSJi5wcm90ZWN0b3JhdGUudjEuRGVueURldmljZUF1dGhSZXF1ZXN0GicucHJvdGVjdG9yYX'
-    'RlLnYxLkRlbnlEZXZpY2VBdXRoUmVzcG9uc2USXQoLTGlzdERldmljZXMSIy5wcm90ZWN0b3Jh'
-    'dGUudjEuTGlzdERldmljZXNSZXF1ZXN0GiQucHJvdGVjdG9yYXRlLnYxLkxpc3REZXZpY2VzUm'
-    'VzcG9uc2UiA5ACARJbCgxSZXZva2VEZXZpY2USJC5wcm90ZWN0b3JhdGUudjEuUmV2b2tlRGV2'
-    'aWNlUmVxdWVzdBolLnByb3RlY3RvcmF0ZS52MS5SZXZva2VEZXZpY2VSZXNwb25zZRJbCgxSZW'
-    '5hbWVEZXZpY2USJC5wcm90ZWN0b3JhdGUudjEuUmVuYW1lRGV2aWNlUmVxdWVzdBolLnByb3Rl'
-    'Y3RvcmF0ZS52MS5SZW5hbWVEZXZpY2VSZXNwb25zZQ==');
+    'Cg1EZXZpY2VTZXJ2aWNlElIKCUFkZERldmljZRIhLnByb3RlY3RvcmF0ZS52MS5BZGREZXZpY2'
+    'VSZXF1ZXN0GiIucHJvdGVjdG9yYXRlLnYxLkFkZERldmljZVJlc3BvbnNlEl0KC0xpc3REZXZp'
+    'Y2VzEiMucHJvdGVjdG9yYXRlLnYxLkxpc3REZXZpY2VzUmVxdWVzdBokLnByb3RlY3RvcmF0ZS'
+    '52MS5MaXN0RGV2aWNlc1Jlc3BvbnNlIgOQAgESWwoMUmV2b2tlRGV2aWNlEiQucHJvdGVjdG9y'
+    'YXRlLnYxLlJldm9rZURldmljZVJlcXVlc3QaJS5wcm90ZWN0b3JhdGUudjEuUmV2b2tlRGV2aW'
+    'NlUmVzcG9uc2USWwoMUmVuYW1lRGV2aWNlEiQucHJvdGVjdG9yYXRlLnYxLlJlbmFtZURldmlj'
+    'ZVJlcXVlc3QaJS5wcm90ZWN0b3JhdGUudjEuUmVuYW1lRGV2aWNlUmVzcG9uc2U=');

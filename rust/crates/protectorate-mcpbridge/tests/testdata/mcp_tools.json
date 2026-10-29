@@ -361,46 +361,13 @@
     "inputSchema": {
       "additionalProperties": false,
       "properties": {
-        "userCode": {
+        "name": {
           "type": "string"
         }
       },
       "type": "object"
     },
-    "name": "device_approve_device_auth"
-  },
-  {
-    "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
-    "description": "",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "userCode": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "name": "device_deny_device_auth"
-  },
-  {
-    "annotations": {
-      "idempotentHint": true,
-      "openWorldHint": false,
-      "readOnlyHint": true
-    },
-    "description": "",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {},
-      "type": "object"
-    },
-    "name": "device_list_device_auth"
+    "name": "device_add_device"
   },
   {
     "annotations": {
@@ -415,25 +382,6 @@
       "type": "object"
     },
     "name": "device_list_devices"
-  },
-  {
-    "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
-    "description": "PollDeviceAuth reports the outcome, and the approved device once.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "deviceCode": {
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "name": "device_poll_device_auth"
   },
   {
     "annotations": {
@@ -475,33 +423,6 @@
       "type": "object"
     },
     "name": "device_revoke_device"
-  },
-  {
-    "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": false,
-      "readOnlyHint": false
-    },
-    "description": "StartDeviceAuth is unauthenticated and rate limited on the LAN.",
-    "inputSchema": {
-      "additionalProperties": false,
-      "properties": {
-        "name": {
-          "type": "string"
-        },
-        "platform": {
-          "type": "string"
-        },
-        "publicKey": {
-          "contentEncoding": "base64",
-          "description": "public_key is the device's uncompressed P-256 public key (65 bytes).",
-          "type": "string"
-        }
-      },
-      "type": "object"
-    },
-    "name": "device_start_device_auth"
   },
   {
     "annotations": {

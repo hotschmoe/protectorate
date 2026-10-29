@@ -9,14 +9,14 @@ import "protectorate/v1/options.proto";
 // running a high-impact call made by Envoy, a sleeve or a grant Envoy
 // minted: an RPC marked destructive, and launching a sleeve whose harness
 // executable or profile changed since its last launch.
-// Calls by the owner and approved devices are never gated. The caller gets
+// Calls by the owner and devices are never gated. The caller gets
 // an aborted error carrying the request id; repeating the same call with the
 // protectorate-approval header set to that id runs it once approved, and
 // fails once denied or expired. The protectorate CLI and MCP bridge repeat
 // it themselves. Requests expire after ten minutes and live only in hub
 // memory. Changes are announced as "approval.requested" and
-// "approval.decided" (subject = request id). Only the owner and approved
-// devices may call this service.
+// "approval.decided" (subject = request id). Only the owner and devices
+// may call this service.
 service ApprovalService {
   option (protectorate.v1.owner_only) = true;
 

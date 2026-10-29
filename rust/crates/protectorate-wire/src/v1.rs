@@ -22,6 +22,28 @@ impl ::prost_reflect::ReflectMessage for AckResponse {
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AddDeviceRequest {
+    #[prost(string, tag = "1")]
+    pub name: ::std::string::String,
+}
+impl ::prost_reflect::ReflectMessage for AddDeviceRequest {
+    fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
+        crate::message("protectorate.v1.AddDeviceRequest")
+    }
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AddDeviceResponse {
+    #[prost(message, optional, tag = "1")]
+    pub device: ::core::option::Option<DeviceInfo>,
+    #[prost(string, tag = "2")]
+    pub token: ::std::string::String,
+}
+impl ::prost_reflect::ReflectMessage for AddDeviceResponse {
+    fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
+        crate::message("protectorate.v1.AddDeviceResponse")
+    }
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct Approval {
     #[prost(string, tag = "1")]
     pub id: ::std::string::String,
@@ -77,24 +99,6 @@ pub struct ApprovalResolved {
 impl ::prost_reflect::ReflectMessage for ApprovalResolved {
     fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
         crate::message("protectorate.v1.ApprovalResolved")
-    }
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ApproveDeviceAuthRequest {
-    #[prost(string, tag = "1")]
-    pub user_code: ::std::string::String,
-}
-impl ::prost_reflect::ReflectMessage for ApproveDeviceAuthRequest {
-    fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
-        crate::message("protectorate.v1.ApproveDeviceAuthRequest")
-    }
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ApproveDeviceAuthResponse {
-}
-impl ::prost_reflect::ReflectMessage for ApproveDeviceAuthResponse {
-    fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
-        crate::message("protectorate.v1.ApproveDeviceAuthResponse")
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -517,54 +521,16 @@ impl ::prost_reflect::ReflectMessage for DeleteNoteResponse {
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct DenyDeviceAuthRequest {
-    #[prost(string, tag = "1")]
-    pub user_code: ::std::string::String,
-}
-impl ::prost_reflect::ReflectMessage for DenyDeviceAuthRequest {
-    fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
-        crate::message("protectorate.v1.DenyDeviceAuthRequest")
-    }
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct DenyDeviceAuthResponse {
-}
-impl ::prost_reflect::ReflectMessage for DenyDeviceAuthResponse {
-    fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
-        crate::message("protectorate.v1.DenyDeviceAuthResponse")
-    }
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct DeviceAuthInfo {
-    #[prost(string, tag = "1")]
-    pub user_code: ::std::string::String,
-    #[prost(string, tag = "2")]
-    pub name: ::std::string::String,
-    #[prost(string, tag = "3")]
-    pub platform: ::std::string::String,
-    #[prost(string, tag = "4")]
-    pub requesting_ip: ::std::string::String,
-    #[prost(message, optional, tag = "5")]
-    pub expires_at: ::core::option::Option<::prost_types::Timestamp>,
-}
-impl ::prost_reflect::ReflectMessage for DeviceAuthInfo {
-    fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
-        crate::message("protectorate.v1.DeviceAuthInfo")
-    }
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct DeviceInfo {
     #[prost(string, tag = "1")]
     pub id: ::std::string::String,
     #[prost(string, tag = "2")]
     pub name: ::std::string::String,
-    #[prost(string, tag = "3")]
-    pub platform: ::std::string::String,
-    #[prost(message, optional, tag = "4")]
-    pub approved_at: ::core::option::Option<::prost_types::Timestamp>,
-    #[prost(string, tag = "5")]
-    pub approved_by: ::std::string::String,
-    #[prost(message, optional, tag = "6")]
+    #[prost(message, optional, tag = "3")]
+    pub added_at: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(string, tag = "4")]
+    pub added_by: ::std::string::String,
+    #[prost(message, optional, tag = "5")]
     pub last_used_at: ::core::option::Option<::prost_types::Timestamp>,
 }
 impl ::prost_reflect::ReflectMessage for DeviceInfo {
@@ -1029,24 +995,6 @@ impl ::prost_reflect::ReflectMessage for ListCheckpointsResponse {
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListDeviceAuthRequest {
-}
-impl ::prost_reflect::ReflectMessage for ListDeviceAuthRequest {
-    fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
-        crate::message("protectorate.v1.ListDeviceAuthRequest")
-    }
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ListDeviceAuthResponse {
-    #[prost(message, repeated, tag = "1")]
-    pub requests: ::std::vec::Vec<DeviceAuthInfo>,
-}
-impl ::prost_reflect::ReflectMessage for ListDeviceAuthResponse {
-    fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
-        crate::message("protectorate.v1.ListDeviceAuthResponse")
-    }
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListDevicesRequest {
 }
 impl ::prost_reflect::ReflectMessage for ListDevicesRequest {
@@ -1428,30 +1376,6 @@ pub struct NoteCompletion {
 impl ::prost_reflect::ReflectMessage for NoteCompletion {
     fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
         crate::message("protectorate.v1.NoteCompletion")
-    }
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct PollDeviceAuthRequest {
-    #[prost(string, tag = "1")]
-    pub device_code: ::std::string::String,
-}
-impl ::prost_reflect::ReflectMessage for PollDeviceAuthRequest {
-    fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
-        crate::message("protectorate.v1.PollDeviceAuthRequest")
-    }
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct PollDeviceAuthResponse {
-    #[prost(string, tag = "1")]
-    pub status: ::std::string::String,
-    #[prost(int32, tag = "2")]
-    pub interval: i32,
-    #[prost(message, optional, tag = "3")]
-    pub device: ::core::option::Option<DeviceInfo>,
-}
-impl ::prost_reflect::ReflectMessage for PollDeviceAuthResponse {
-    fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
-        crate::message("protectorate.v1.PollDeviceAuthResponse")
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -2174,36 +2098,6 @@ pub struct SpawnSleeveResponse {
 impl ::prost_reflect::ReflectMessage for SpawnSleeveResponse {
     fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
         crate::message("protectorate.v1.SpawnSleeveResponse")
-    }
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct StartDeviceAuthRequest {
-    #[prost(string, tag = "1")]
-    pub name: ::std::string::String,
-    #[prost(string, tag = "2")]
-    pub platform: ::std::string::String,
-    #[prost(bytes = "vec", tag = "3")]
-    pub public_key: ::std::vec::Vec<u8>,
-}
-impl ::prost_reflect::ReflectMessage for StartDeviceAuthRequest {
-    fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
-        crate::message("protectorate.v1.StartDeviceAuthRequest")
-    }
-}
-#[derive(Clone, PartialEq, ::prost::Message)]
-pub struct StartDeviceAuthResponse {
-    #[prost(string, tag = "1")]
-    pub device_code: ::std::string::String,
-    #[prost(string, tag = "2")]
-    pub user_code: ::std::string::String,
-    #[prost(message, optional, tag = "3")]
-    pub expires_at: ::core::option::Option<::prost_types::Timestamp>,
-    #[prost(int32, tag = "4")]
-    pub interval: i32,
-}
-impl ::prost_reflect::ReflectMessage for StartDeviceAuthResponse {
-    fn descriptor(&self) -> ::prost_reflect::MessageDescriptor {
-        crate::message("protectorate.v1.StartDeviceAuthResponse")
     }
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -3050,11 +2944,7 @@ pub mod chat_service {
     pub const WAIT: crate::Rpc<super::WaitRequest, super::WaitResponse> = crate::Rpc::new("/protectorate.v1.ChatService/Wait");
 }
 pub mod device_service {
-    pub const START_DEVICE_AUTH: crate::Rpc<super::StartDeviceAuthRequest, super::StartDeviceAuthResponse> = crate::Rpc::new("/protectorate.v1.DeviceService/StartDeviceAuth");
-    pub const POLL_DEVICE_AUTH: crate::Rpc<super::PollDeviceAuthRequest, super::PollDeviceAuthResponse> = crate::Rpc::new("/protectorate.v1.DeviceService/PollDeviceAuth");
-    pub const LIST_DEVICE_AUTH: crate::Rpc<super::ListDeviceAuthRequest, super::ListDeviceAuthResponse> = crate::Rpc::new("/protectorate.v1.DeviceService/ListDeviceAuth");
-    pub const APPROVE_DEVICE_AUTH: crate::Rpc<super::ApproveDeviceAuthRequest, super::ApproveDeviceAuthResponse> = crate::Rpc::new("/protectorate.v1.DeviceService/ApproveDeviceAuth");
-    pub const DENY_DEVICE_AUTH: crate::Rpc<super::DenyDeviceAuthRequest, super::DenyDeviceAuthResponse> = crate::Rpc::new("/protectorate.v1.DeviceService/DenyDeviceAuth");
+    pub const ADD_DEVICE: crate::Rpc<super::AddDeviceRequest, super::AddDeviceResponse> = crate::Rpc::new("/protectorate.v1.DeviceService/AddDevice");
     pub const LIST_DEVICES: crate::Rpc<super::ListDevicesRequest, super::ListDevicesResponse> = crate::Rpc::new("/protectorate.v1.DeviceService/ListDevices");
     pub const REVOKE_DEVICE: crate::Rpc<super::RevokeDeviceRequest, super::RevokeDeviceResponse> = crate::Rpc::new("/protectorate.v1.DeviceService/RevokeDevice");
     pub const RENAME_DEVICE: crate::Rpc<super::RenameDeviceRequest, super::RenameDeviceResponse> = crate::Rpc::new("/protectorate.v1.DeviceService/RenameDevice");
