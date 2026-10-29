@@ -7,8 +7,6 @@ import 'package:xterm2/xterm.dart';
 
 import '../hubs/hub_client.dart';
 import '../hubs/connection.dart';
-import '../hubs/device_key.dart';
-import '../hubs/device_keys.dart';
 import '../hubs/http_client_io.dart'
     if (dart.library.js_interop) '../hubs/http_client_web.dart';
 import '../hubs/hub_profile.dart';
@@ -75,23 +73,11 @@ class _TerminalScreenState extends State<TerminalScreen>
   // read-write handshake to any caller without terminal:host.
   bool get _hostSession => !widget.session.startsWith('sleeve-');
 
-  Future<void> _connect() async {
-    final uri = widget.hub.terminalUri(widget.session, readOnly: _readOnly);
-    final String proof;
-    try {
-      final key = widget.hub.deviceId.isEmpty
-          ? null
-          : await DeviceKeys.load(widget.hub.id);
-      proof = key == null ? '' : await deviceProof(key, 'GET', uri.path);
-    } on Object catch (e) {
-      if (mounted) setState(() => _status = 'device key unavailable: $e');
-      return;
-    }
-    if (!mounted) return;
+  void _connect() {
     final channel = connectWebSocket(
-      uri,
-      terminalSubprotocols(proof),
-      caPem: widget.hub.caPem,
+      widget.hub.terminalUri(widget.session, readOnly: _readOnly),
+      const [terminalSubprotocol],
+      widget.hub.token,
     );
     _channel = channel;
     channel.ready
@@ -207,7 +193,8 @@ class _TerminalScreenState extends State<TerminalScreen>
                     const Expanded(
                       child: NoteStrip(
                         'Typing into a session outside a sleeve needs a device '
-                        'paired with --host-shell. You can still watch it.',
+                        'token or a capability with terminal:host. You can '
+                        'still watch it.',
                       ),
                     ),
                     const SizedBox(width: 8),

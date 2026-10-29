@@ -16,11 +16,7 @@ import '../gen/protectorate/v1/release.connect.client.dart';
 import '../gen/protectorate/v1/session.connect.client.dart';
 import '../gen/protectorate/v1/sleeve.connect.client.dart';
 import 'connection.dart';
-import 'device_key.dart';
-import 'device_keys.dart';
 import 'hub_profile.dart';
-import 'http_client_io.dart'
-    if (dart.library.js_interop) 'http_client_web.dart';
 
 class HubClient {
   HubClient(HubProfile profile, {HttpClient? httpClient})
@@ -28,18 +24,8 @@ class HubClient {
         protocol.Transport(
           baseUrl: profile.baseUrl,
           codec: const JsonCodec(),
-          httpClient: hubHttpClient(
-            profile.baseUrl,
-            client:
-                httpClient ?? createPlatformHttpClient(caPem: profile.caPem),
-          ),
-          interceptors: [
-            proofInterceptor(
-              profile.deviceId.isEmpty
-                  ? Future.value()
-                  : DeviceKeys.load(profile.id),
-            ),
-          ],
+          httpClient: hubHttpClient(profile.baseUrl, client: httpClient),
+          interceptors: [bearerInterceptor(profile.token)],
         ),
       );
 

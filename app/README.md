@@ -72,26 +72,29 @@ Reviewed on 2026-10-20:
 
 The remaining direct dependencies all have callers: connectrpc/protobuf/fixnum
 serve the generated API, shared_preferences stores hub profiles, web_socket_channel
-supports browser/native terminal sockets, and app_links handles native pairing links. None can be dropped without removing behavior
+supports browser/native terminal sockets, app_links handles native pairing links,
+and crypto derives the device id of the app's own token. None can be dropped without removing behavior
 or reimplementing it.
 
 ## Hub auth
 
-- Each hub profile has a P-256 device key: a non-extractable WebCrypto key in IndexedDB on the web, the Android Keystore on Android (`MainActivity.kt`, channel `protectorate/device_key`), and a key kept with the app preferences on desktop builds (`lib/hubs/software_key.dart`).
-- RPC: `Authorization: Proof <device>.<seconds>.<nonce>.<signature>`, signed fresh for every call (see `docs/auth.md`).
-- Terminal WebSocket `ws(s)://<hub>/ws/terminal/<name>`: offered `Sec-WebSocket-Protocol` entries are `protectorate.v1` and `proof.<proof>` (browsers cannot set headers). The server selects `protectorate.v1`.
+- Each hub profile holds one bearer token, normally a device token (`pd1.`) minted by `DeviceService.AddDevice`. It is stored with the profile in shared_preferences (localStorage for the hub's origin on the web).
+- RPC: `Authorization: Bearer <token>` on every call. HTTPS uses the platform's public roots; the LAN hub sits behind a proxy with a public certificate.
+- Terminal WebSocket `ws(s)://<hub>/ws/terminal/<name>`: native builds send the Authorization header; browsers cannot set headers, so the web build offers `bearer.<token>` next to `protectorate.v1`. The server selects `protectorate.v1`.
 - Frames: binary; `0x30` + bytes for data, `0x31` + JSON `{"cols":N,"rows":M}` for resize.
 
 ## Pairing
 
-`protectorate pair [--url <LAN base url>] [--app]` on the hub machine prints a QR code and links containing only the hub URL:
+`protectorate devices add NAME --url <hub base url> [--app]` on the hub machine mints a device token and prints it with a QR code and these links:
 
-- web: `<base>/#/pair?url=<encoded base>` (served by `hub serve --web`)
-- app: `protectorate://pair?url=<encoded base>`
+- web: `<base>/#/pair?url=<encoded base>&token=<token>` (served by `hub serve --web`)
+- app: `protectorate://pair?url=<encoded base>&token=<token>`
 
-Either link opens the connect dialog with the hub URL filled in. You can also enter the URL under ADD HUB. Bare addresses default to HTTPS; specify `http://` for a hub without TLS and include `:7470` when using its default LAN port. Name this device, press CONNECT, then compare the large code with the request on a trusted device before approving. For the first device, run `protectorate devices approve <code>` on the hub. Denied or expired requests have a TRY AGAIN button. No link can bypass approval or carry a token; old token links are rejected.
+DEVICES > ADD DEVICE in a connected app does the same: it asks for a name and shows the token and both links, each with a copy button. The token is shown only once.
 
-Connecting creates the profile's device key and registers its public half; approval gives that key Full access, including device approval and revocation but excluding owner-only operations. No secret is delivered or stored. The Devices screen shows platform, approver and last use, and supports rename and revoke. Revocation closes live streams immediately. Optional `tab` and `session` parameters still select a screen when the hub is already connected.
+Opening either link checks the token with the hub, saves the profile and opens the hub; the web build first removes the token from the address bar. Under ADD HUB you can paste a link, or a hub URL and a token, and give the hub a label. Bare addresses default to HTTPS; specify `http://` for a hub without TLS. A rejected token leaves the dialog open with a TRY AGAIN button.
+
+A device token has Full access, including adding and revoking devices but excluding owner-only operations. The Devices screen marks this device, shows when each device was added, by whom and when it was last used, and supports rename and revoke. Revocation closes live streams immediately. Optional `tab` and `session` parameters still select a screen when the hub is already connected.
 
 Native handling uses the `app_links` package. Android registers an intent filter for `protectorate://pair` in `AndroidManifest.xml`. Untested: Android (no device or SDK here), Windows/Linux/macOS scheme registration (the OS must launch the app with the URL; no installer registers the scheme yet), iOS (not scaffolded).
 

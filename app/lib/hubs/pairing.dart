@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 
 import 'hub_profile.dart';
@@ -8,16 +6,14 @@ import 'hub_profile.dart';
 class PairingRequest {
   const PairingRequest({
     required this.baseUrl,
-    required this.name,
+    this.token = '',
     this.tab,
     this.session,
-    this.caPem = '',
   });
 
   final String baseUrl;
-  final String name;
-  // caPem is the hub CA carried in the link as base64url DER.
-  final String caPem;
+  // Empty when the link only opens a hub this app already holds a token for.
+  final String token;
   final String? tab;
   final String? session;
 }
@@ -32,38 +28,17 @@ String _trimSlashes(String url) {
 
 PairingRequest? _fromQuery(Map<String, String> q, String baseUrl) {
   final base = _trimSlashes(baseUrl);
-  if (q.containsKey('token')) return null;
   if (validateBaseUrl(base) != null) return null;
-  final name = (q['name'] ?? '').trim();
-  final caPem = _caPem(q['ca']);
-  if (caPem == null) return null;
   return PairingRequest(
     baseUrl: base,
-    name: name.isEmpty ? Uri.parse(base).host : name,
+    token: (q['token'] ?? '').trim(),
     tab: q['tab'],
     session: q['session'],
-    caPem: caPem,
   );
 }
 
-// Null when `ca` is present but not base64url; empty when absent.
-String? _caPem(String? ca) {
-  if (ca == null || ca.isEmpty) return '';
-  final List<int> der;
-  try {
-    der = base64Url.decode(base64Url.normalize(ca));
-  } on FormatException {
-    return null;
-  }
-  final body = base64.encode(der);
-  final lines = [
-    for (var i = 0; i < body.length; i += 64)
-      body.substring(i, i + 64 > body.length ? body.length : i + 64),
-  ];
-  return '-----BEGIN CERTIFICATE-----\n${lines.join('\n')}\n-----END CERTIFICATE-----\n';
-}
-
-/// Parses URL-only web and native connection links.
+/// Parses the web link `<base>/#/pair?url=..&token=..` and the app link
+/// `protectorate://pair?url=..&token=..`.
 PairingRequest? parsePairing(Uri uri) {
   if (uri.scheme == 'protectorate') {
     if (uri.host != 'pair') return null;
@@ -82,4 +57,12 @@ PairingRequest? parsePairing(Uri uri) {
     return null;
   }
   return _fromQuery(q, q['url'] ?? uri.origin);
+}
+
+/// The same links `protectorate devices add --url` prints.
+({String web, String app}) pairLinks(String baseUrl, String token) {
+  final base = _trimSlashes(baseUrl);
+  final query =
+      'url=${Uri.encodeComponent(base)}&token=${Uri.encodeComponent(token)}';
+  return (web: '$base/#/pair?$query', app: 'protectorate://pair?$query');
 }

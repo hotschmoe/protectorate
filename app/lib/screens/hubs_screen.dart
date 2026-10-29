@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../hubs/device_keys.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import '../version.dart';
@@ -77,7 +76,7 @@ class HubsScreen extends StatelessWidget {
                                 Text('NO HUBS', style: t.legend()),
                                 const SizedBox(height: 8),
                                 Text(
-                                  'Enter your hub URL, or scan the QR from protectorate pair. A trusted device approves your connection.',
+                                  'Open a pairing link from protectorate devices add, or paste it into ADD HUB.',
                                   textAlign: TextAlign.center,
                                   style: t.small(),
                                 ),
@@ -107,8 +106,9 @@ class HubsScreen extends StatelessWidget {
                       children: [
                         Text(
                           'On the hub, run the command below and scan its QR '
-                          'code, or open its link on this device. Compare the '
-                          'code shown here with the approval request on a trusted device.',
+                          'code or open its link on this device. A device '
+                          'that is already connected can add this one from '
+                          'DEVICES.',
                           style: t.small(),
                         ),
                         const SizedBox(height: 10),
@@ -129,7 +129,8 @@ class HubsScreen extends StatelessWidget {
                               children: [
                                 TextSpan(text: '> ', style: t.data(t.p.info)),
                                 TextSpan(
-                                  text: 'protectorate pair',
+                                  text:
+                                      'protectorate devices add NAME --url URL',
                                   style: t.data(t.p.emph),
                                 ),
                               ],
@@ -170,8 +171,6 @@ class HubsScreen extends StatelessWidget {
                   style: t.small(),
                   overflow: TextOverflow.ellipsis,
                 ),
-                if (hub.deviceId.isEmpty)
-                  Text('NOT PAIRED', style: t.legend(t.p.warn)),
               ],
             ),
           ),
@@ -183,10 +182,7 @@ class HubsScreen extends StatelessWidget {
           IconButton(
             tooltip: 'Remove',
             icon: const Icon(Icons.delete_outline),
-            onPressed: () async {
-              await store.remove(hub.id);
-              await DeviceKeys.forget(hub.id);
-            },
+            onPressed: () => store.remove(hub.id),
           ),
         ],
       ),
