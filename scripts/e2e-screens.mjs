@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const [chromium, profile, size, destination, theme, output, hub, credential, connected, interaction] = process.argv.slice(2);
-const semanticApproval = interaction === 'pair-approve' && process.env.PROTECTORATE_BROWSER_SEMANTICS === '1';
 const startupFailureMessage = 'Local storage is unavailable for startup verification.';
 const browser = spawn(chromium, [
   '--headless=new', '--disable-gpu', '--no-sandbox',
@@ -133,39 +132,6 @@ try {
     }
     await delay(250);
   };
-  const tapAccessible = async (label, role = 'button') => {
-    for (let attempt = 0; attempt < 50; attempt++) {
-      const tree = await call('Accessibility.getFullAXTree');
-      const button = tree.nodes.find(node =>
-        !node.ignored && node.role?.value === role &&
-        node.name?.value?.includes(label) && node.backendDOMNodeId);
-      if (button) {
-        const { model } = await call('DOM.getBoxModel', { backendNodeId: button.backendDOMNodeId });
-        const [left, top, right, , , bottom] = model.content;
-        await tap((left + right) / 2, (top + bottom) / 2);
-        return;
-      }
-      const box = await evaluate(`(() => {
-        const candidates = window.screenshotElements().filter(el => {
-          const name = String(el.getAttribute('aria-label') || el.textContent || '').trim();
-          const rect = el.getBoundingClientRect();
-          return name === ${JSON.stringify(label)} && rect.width > 0 && rect.height > 0;
-        });
-        candidates.sort((a, b) => {
-          const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
-          return ra.width * ra.height - rb.width * rb.height;
-        });
-        const rect = candidates[0]?.getBoundingClientRect();
-        return rect ? { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 } : null;
-      })()`);
-      if (box) {
-        await tap(box.x, box.y);
-        return;
-      }
-      await delay(200);
-    }
-    throw new Error(`Timed out waiting for ${label} ${role}`);
-  };
   const waitFor = async (description, test) => {
     for (let attempt = 0; attempt < 30; attempt++) {
       const state = await inspect();
@@ -185,9 +151,14 @@ try {
     const input = state.inputs.filter(input => input.width > 0 && input.height > 0).sort((a, b) => b.y - a.y)[0];
     await tap(input.x + input.width / 2, input.y + input.height / 2);
   };
-  if (interaction && (interaction !== 'pair-approve' || semanticApproval)) {
+  const pairState = () => evaluate(`(() => {
+    let hubs = [];
+    try { hubs = JSON.parse(JSON.parse(localStorage.getItem('flutter.hubs') || '"[]"')); } catch {}
+    return { href: location.href, hubs: hubs.map(h => ({ baseUrl: h.baseUrl, token: h.token })) };
+  })()`);
+  if (interaction && interaction !== 'pair') {
     await evaluate(`window.screenshotElements().find(el => el.tagName === 'FLT-SEMANTICS-PLACEHOLDER')?.click(); true`);
-    if (!['startup-failure', 'pair-approve'].includes(interaction)) {
+    if (interaction !== 'startup-failure') {
       await waitFor('phone navigation semantics', state => state.tabs.some(tab => tab.label === 'ENVOY'));
     }
   }
@@ -212,27 +183,18 @@ try {
       node.properties?.some(property => ['disabled', 'readonly'].includes(property.name) && property.value.value === true))) {
       throw new Error('Startup error message is not exposed as noneditable accessible text');
     }
-  } else if (interaction === 'pair-approve') {
-    if (semanticApproval) {
-      await tapAccessible('demo hub', 'group');
-      await tapAccessible('APPROVE');
-    } else {
-      await tap(500, 135);
-      await delay(1000);
-      await tap(240, 124);
-      await evaluate(`window.screenshotElements().find(el => el.tagName === 'FLT-SEMANTICS-PLACEHOLDER')?.click(); true`);
-    }
-    await tapAccessible('CODE MATCHES · APPROVE');
+  } else if (interaction === 'pair') {
+    // The destination is the hub's web pairing link carrying the device token.
     const token = (await readFile(credential, 'utf8')).trim();
-    for (let attempt = 0; attempt < 50; attempt++) {
-      const response = await fetch(`${hub.replace(/\/$/, '')}/protectorate.v1.DeviceService/ListDeviceAuth`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: '{}', signal: AbortSignal.timeout(8000),
-      });
-      if (!response.ok) throw new Error(`Checking browser approval failed: HTTP ${response.status}`);
-      const pending = (await response.json()).requests || [];
-      if (pending.length === 0) break;
-      if (attempt === 49) throw new Error('Browser approval did not clear the pending request');
+    const base = hub.replace(/\/$/, '');
+    for (let attempt = 0; ; attempt++) {
+      const state = await pairState();
+      const cleared = !state.href.includes(token);
+      const saved = state.hubs.some(item => item.baseUrl === base && item.token === token);
+      if (cleared && saved) break;
+      if (attempt === 100) {
+        throw new Error(cleared ? 'Browser pairing did not save the hub with its token' : 'Browser pairing left the token in the address bar');
+      }
       await delay(200);
     }
   } else if (interaction === 'draft') {
@@ -257,15 +219,9 @@ try {
       const screenshot = await call('Page.captureScreenshot', { format: 'png' });
       const failurePath = output.replace(/\.png$/, '-failure.png');
       await writeFile(failurePath, Buffer.from(screenshot.data, 'base64'));
-      const accessibility = ['startup-failure', 'pair-approve'].includes(interaction) ? await call('Accessibility.getFullAXTree') : undefined;
-      const approveElements = interaction === 'pair-approve' ? await call('Runtime.evaluate', {
-        expression: `window.screenshotElements().map(el => {
-          const rect = el.getBoundingClientRect();
-          return { tag: el.tagName, role: el.getAttribute('role'), aria: el.getAttribute('aria-label'), text: String(el.textContent || '').slice(0, 120), x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-        }).filter(el => /APPROVE|browser-approval/.test(String(el.aria || '') + el.text)).slice(0, 30)`,
-        returnByValue: true,
-      }) : undefined;
-      await writeFile(`${failurePath}.json`, JSON.stringify({ error: error.message, state: inspect ? await inspect() : null, accessibility, approveElements: approveElements?.result?.value }, null, 2));
+      const accessibility = interaction === 'startup-failure' ? await call('Accessibility.getFullAXTree') : undefined;
+      const pairing = interaction === 'pair' ? await pairState() : undefined;
+      await writeFile(`${failurePath}.json`, JSON.stringify({ error: error.message, state: inspect ? await inspect() : null, accessibility, pairing }, null, 2));
       console.error(`Screenshot failure evidence: ${failurePath}`);
     } catch (captureError) {
       console.error(`Could not capture screenshot failure: ${captureError.message}`);
