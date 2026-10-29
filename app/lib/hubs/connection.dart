@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:connectrpc/connect.dart';
+import 'package:crypto/crypto.dart';
 
 import '../gen/protectorate/v1/hub.connect.client.dart';
 import '../gen/protectorate/v1/hub.pb.dart';
@@ -53,6 +55,18 @@ HttpClient hubHttpClient(String baseUrl, {HttpClient? client}) {
     }
   };
 }
+
+Interceptor bearerInterceptor(String token) =>
+    <I extends Object, O extends Object>(AnyFn<I, O> next) =>
+        (Request<I, O> request) {
+          request.headers.set('authorization', ['Bearer $token']);
+          return next(request);
+        };
+
+/// The id the hub gives a device token: the first 8 bytes of its SHA-256, in
+/// hex.
+String tokenDeviceId(String token) =>
+    sha256.convert(utf8.encode(token)).toString().substring(0, 16);
 
 class HubProbeException implements Exception {
   const HubProbeException(this.message);

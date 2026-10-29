@@ -9,19 +9,15 @@ class HubProfile {
     required this.id,
     required this.name,
     required this.baseUrl,
-    this.deviceId = '',
-    this.caPem = '',
+    required this.token,
   });
 
   final String id;
   final String name;
   final String baseUrl;
-  // deviceId is set once the hub approved this profile's device key; the key
-  // itself stays in the platform key store under the profile id.
-  final String deviceId;
-  // caPem is the hub's private CA from its pairing link; empty trusts the
-  // platform roots.
-  final String caPem;
+  // The bearer token for every call, normally a device token minted by
+  // DeviceService.AddDevice.
+  final String token;
 
   Uri get baseUri => Uri.parse(baseUrl);
 
@@ -43,16 +39,14 @@ class HubProfile {
     'id': id,
     'name': name,
     'baseUrl': baseUrl,
-    'deviceId': deviceId,
-    'caPem': caPem,
+    'token': token,
   };
 
   factory HubProfile.fromJson(Map<String, Object?> json) => HubProfile(
     id: json['id'] as String,
     name: json['name'] as String,
     baseUrl: json['baseUrl'] as String,
-    deviceId: (json['deviceId'] as String?) ?? '',
-    caPem: (json['caPem'] as String?) ?? '',
+    token: json['token'] as String,
   );
 
   @override
@@ -61,11 +55,10 @@ class HubProfile {
       other.id == id &&
       other.name == name &&
       other.baseUrl == baseUrl &&
-      other.deviceId == deviceId &&
-      other.caPem == caPem;
+      other.token == token;
 
   @override
-  int get hashCode => Object.hash(id, name, baseUrl, deviceId, caPem);
+  int get hashCode => Object.hash(id, name, baseUrl, token);
 }
 
 String? validateBaseUrl(String value) {

@@ -1,24 +1,21 @@
-import 'package:connectrpc/connect.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../gen/protectorate/v1/device.pb.dart';
-import '../hubs/device_auth.dart';
-import '../hubs/device_key.dart';
-import '../hubs/device_keys.dart';
+import '../hubs/connection.dart';
 import '../hubs/hub_client.dart';
 import '../hubs/hub_profile.dart';
 import '../hubs/pairing.dart';
 import '../theme/tokens.dart';
 import '../vfd/panel.dart';
 
+/// Connects with a pasted pairing link or a hub URL and token. Given a
+/// `token`, the dialog connects at once.
 Future<HubProfile?> connectHub(
   BuildContext context, {
   required HubClient Function(HubProfile) clientFactory,
   required Future<void> Function(HubProfile) save,
   HubProfile? existing,
   String? baseUrl,
-  String caPem = '',
+  String token = '',
 }) => showDialog<HubProfile>(
   context: context,
   barrierDismissible: false,
@@ -27,11 +24,9 @@ Future<HubProfile?> connectHub(
     save: save,
     existing: existing,
     baseUrl: baseUrl,
-    caPem: caPem,
+    token: token,
   ),
 );
-
-String _platform() => kIsWeb ? 'web' : defaultTargetPlatform.name;
 
 String _normalizeUrl(String value) {
   var result = value.trim();
@@ -51,14 +46,14 @@ class _ConnectDialog extends StatefulWidget {
     required this.save,
     this.existing,
     this.baseUrl,
-    this.caPem = '',
+    this.token = '',
   });
 
   final HubClient Function(HubProfile) clientFactory;
   final Future<void> Function(HubProfile) save;
   final HubProfile? existing;
   final String? baseUrl;
-  final String caPem;
+  final String token;
 
   @override
   State<_ConnectDialog> createState() => _ConnectDialogState();
@@ -70,105 +65,74 @@ class _ConnectDialogState extends State<_ConnectDialog> {
   late final _url = TextEditingController(
     text: widget.baseUrl ?? widget.existing?.baseUrl ?? '',
   );
-  final _device = TextEditingController(text: '${_platform()} app');
-  CancelableSignal? _abort;
-  StartDeviceAuthResponse? _request;
+  late final _token = TextEditingController(
+    text: widget.token.isNotEmpty ? widget.token : widget.existing?.token ?? '',
+  );
   bool _working = false;
   String? _error;
-  DeviceInfo? _approved;
-  HubProfile? _connecting;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.token.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _connect();
+      });
+    }
+  }
 
   @override
   void dispose() {
-    _abort?.cancel();
     _name.dispose();
     _url.dispose();
-    _device.dispose();
+    _token.dispose();
     super.dispose();
+  }
+
+  // A pasted link fills both fields, so its token never shows in clear text.
+  void _absorbLink(String value) {
+    final uri = Uri.tryParse(value.trim());
+    final link = uri == null ? null : parsePairing(uri);
+    if (link == null || link.token.isEmpty) return;
+    _url.text = link.baseUrl;
+    _token.text = link.token;
   }
 
   Future<void> _connect() async {
     if (!_form.currentState!.validate()) return;
     final baseUrl = _normalizeUrl(_url.text);
-    final link = Uri.tryParse(_url.text.trim());
-    final linked = link == null ? null : parsePairing(link);
-    final caPem = linked?.caPem.isNotEmpty == true
-        ? linked!.caPem
-        : widget.caPem.isNotEmpty
-        ? widget.caPem
-        : widget.existing?.caPem ?? '';
-    final profile =
-        _connecting ??
-        HubProfile(
-          id:
-              widget.existing?.id ??
-              DateTime.now().microsecondsSinceEpoch.toString(),
-          name: _name.text.trim().isEmpty
-              ? Uri.parse(baseUrl).host
-              : _name.text.trim(),
-          baseUrl: baseUrl,
-          caPem: caPem,
-        );
-    _connecting = profile;
-    final abort = _abort = CancelableSignal();
+    final profile = HubProfile(
+      id:
+          widget.existing?.id ??
+          DateTime.now().microsecondsSinceEpoch.toString(),
+      name: _name.text.trim().isEmpty
+          ? Uri.parse(baseUrl).host
+          : _name.text.trim(),
+      baseUrl: baseUrl,
+      token: _token.text.trim(),
+    );
     setState(() {
       _working = true;
       _error = null;
     });
     try {
-      // A fresh key for every pairing: the hub binds the approval to it.
-      final key = _approved == null
-          ? await DeviceKeys.create(profile.id)
-          : (await DeviceKeys.load(profile.id))!;
-      final device = _approved ??= await authorizeDevice(
-        widget.clientFactory(profile).devices,
-        name: _device.text.trim(),
-        platform: _platform(),
-        publicKey: key.publicKey,
-        signal: abort,
-        onStarted: (request) {
-          if (mounted) setState(() => _request = request);
-        },
-      );
-      if (device.id != deviceId(key.publicKey)) {
-        throw const DeviceAuthException('invalid');
-      }
-      final approved = HubProfile(
-        id: profile.id,
-        name: profile.name,
-        baseUrl: profile.baseUrl,
-        deviceId: device.id,
-        caPem: profile.caPem,
-      );
-      await widget.save(approved);
-      if (mounted) Navigator.of(context).pop(approved);
+      await probeHub(widget.clientFactory(profile).hub, baseUrl);
+      if (!mounted) return;
+      await widget.save(profile);
+      if (mounted) Navigator.of(context).pop(profile);
     } on Object catch (error) {
-      if (mounted && _abort == abort) {
+      if (mounted) {
         setState(() {
           _working = false;
-          _error = error is ConnectException
-              ? error.code == Code.resourceExhausted
-                    ? 'The hub is busy. Wait a moment, then try again.'
-                    : '${error.message} Check the hub address and your LAN connection.'
-              : '$error';
+          _error = '$error';
         });
       }
     }
   }
 
-  void _retry() {
-    _abort?.cancel();
-    if (_approved == null) {
-      _request = null;
-      _connecting = null;
-    }
-    _connect();
-  }
-
   @override
   Widget build(BuildContext context) {
     final t = Tokens.of(context);
-    final request = _request;
     return AlertDialog(
       title: Text(
         widget.existing == null ? 'Connect to a hub' : 'Reconnect to hub',
@@ -182,82 +146,59 @@ class _ConnectDialogState extends State<_ConnectDialog> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (request == null) ...[
-                  TextFormField(
-                    key: const ValueKey('hub-url'),
-                    controller: _url,
-                    enabled: !_working,
-                    keyboardType: TextInputType.url,
-                    autocorrect: false,
-                    decoration: const InputDecoration(
-                      labelText: 'Hub URL or QR link',
-                      hintText: 'https://hub.example',
-                      helperText:
-                          'LAN hubs often use :7470. Scan a QR with your camera.',
-                      helperMaxLines: 2,
-                    ),
-                    validator: (value) =>
-                        validateBaseUrl(_normalizeUrl(value ?? '')),
+                TextFormField(
+                  key: const ValueKey('hub-url'),
+                  controller: _url,
+                  enabled: !_working,
+                  keyboardType: TextInputType.url,
+                  autocorrect: false,
+                  onChanged: _absorbLink,
+                  decoration: const InputDecoration(
+                    labelText: 'Pairing link or hub URL',
+                    hintText: 'https://hub.example',
+                    helperText:
+                        'Paste the link from protectorate devices add or from '
+                        'DEVICES on another device.',
+                    helperMaxLines: 2,
                   ),
-                  TextFormField(
-                    key: const ValueKey('hub-name'),
-                    controller: _name,
-                    enabled: !_working,
-                    decoration: const InputDecoration(
-                      labelText: 'Hub label (optional)',
-                    ),
+                  validator: (value) =>
+                      validateBaseUrl(_normalizeUrl(value ?? '')),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  key: const ValueKey('hub-token'),
+                  controller: _token,
+                  enabled: !_working,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  onChanged: _absorbLink,
+                  decoration: const InputDecoration(
+                    labelText: 'Device token',
+                    hintText: 'pd1.',
                   ),
-                  TextFormField(
-                    key: const ValueKey('device-name'),
-                    controller: _device,
-                    enabled: !_working,
-                    decoration: const InputDecoration(
-                      labelText: 'This device name',
-                    ),
-                    validator: (value) => (value ?? '').trim().isEmpty
-                        ? 'Name this device'
-                        : null,
+                  validator: (value) {
+                    final token = (value ?? '').trim();
+                    if (token.isEmpty) return 'Paste the device token';
+                    if (token.contains(RegExp(r'\s'))) {
+                      return 'A token has no spaces';
+                    }
+                    return null;
+                  },
+                ),
+                TextFormField(
+                  key: const ValueKey('hub-name'),
+                  controller: _name,
+                  enabled: !_working,
+                  decoration: const InputDecoration(
+                    labelText: 'Hub label (optional)',
                   ),
-                ] else ...[
-                  Text('CONFIRM THIS CODE', style: t.legend()),
-                  const SizedBox(height: 12),
-                  Center(
-                    child: SelectableText(
-                      request.userCode,
-                      key: const ValueKey('device-user-code'),
-                      style: t
-                          .data(t.p.info)
-                          .copyWith(fontSize: 36, letterSpacing: 3),
-                    ),
-                  ),
+                ),
+                if (_working) ...[
                   const SizedBox(height: 16),
-                  Text(
-                    'On a trusted device, open ${_connecting!.name} and approve only if this code matches. This grants Full access.',
-                    style: t.small(),
-                  ),
-                  const SizedBox(height: 12),
-                  Text('First device? Run on the hub:', style: t.small()),
-                  const SizedBox(height: 4),
-                  SelectableText(
-                    'protectorate devices approve ${request.userCode}',
-                    style: t.data(),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Expires at ${TimeOfDay.fromDateTime(request.expiresAt.toDateTime().toLocal()).format(context)}.',
-                    style: t.small(),
-                  ),
-                  if (_working) ...[
-                    const SizedBox(height: 12),
-                    const LinearProgressIndicator(),
-                    const SizedBox(height: 8),
-                    Text(
-                      _approved == null
-                          ? 'Waiting for approval...'
-                          : 'Approved. Saving connection...',
-                      style: t.small(),
-                    ),
-                  ],
+                  const LinearProgressIndicator(),
+                  const SizedBox(height: 8),
+                  Text('Checking the token with the hub...', style: t.small()),
                 ],
                 if (_error != null) ...[
                   const SizedBox(height: 12),
@@ -275,10 +216,10 @@ class _ConnectDialogState extends State<_ConnectDialog> {
         ),
         FilledButton(
           key: const ValueKey('hub-connect'),
-          onPressed: _working ? null : _retry,
+          onPressed: _working ? null : _connect,
           child: Text(
             _working
-                ? 'WAITING'
+                ? 'CONNECTING'
                 : _error != null
                 ? 'TRY AGAIN'
                 : 'CONNECT',
