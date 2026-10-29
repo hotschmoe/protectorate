@@ -73,17 +73,17 @@ PY
 main() {
   local channel=stable version='' repo=hotschmoe/protectorate base_url='' bundle_dir=''
   local release_root='' state_home='' listen='' token_file='' dead_retention='' backup_dir=''
-  local -a tls_listens=() tls_names=() trusted_proxies=() local_llm_urls=() local_model_hosts=()
+  local -a proxy_listens=() trusted_proxies=() local_llm_urls=() local_model_hosts=()
   local dry=0 no_start=0
   while (($#)); do
     case "$1" in
-      --channel|--version|--release-repo|--base-url|--bundle-dir|--release-dir|--home|--listen|--tls-listen|--tls-name|--token-file|--trusted-proxy|--local-llm-url|--local-model-host|--dead-retention|--backup-dir)
+      --channel|--version|--release-repo|--base-url|--bundle-dir|--release-dir|--home|--listen|--proxy-listen|--token-file|--trusted-proxy|--local-llm-url|--local-model-host|--dead-retention|--backup-dir)
         (($# >= 2)) && [[ -n "$2" ]] || die "missing value for $1"
         case "$1" in
           --channel) channel=$2 ;; --version) version=$2 ;;
           --release-repo) repo=$2 ;; --base-url) base_url=$2 ;; --bundle-dir) bundle_dir=$2 ;;
           --release-dir) release_root=$2 ;; --home) state_home=$2 ;; --listen) listen=$2 ;;
-          --tls-listen) tls_listens+=("$2") ;; --tls-name) tls_names+=("$2") ;;
+          --proxy-listen) proxy_listens+=("$2") ;;
           --token-file) token_file=$2 ;; --trusted-proxy) trusted_proxies+=("$2") ;;
           --local-llm-url) local_llm_urls+=("$2") ;; --local-model-host) local_model_hosts+=("$2") ;;
           --dead-retention) dead_retention=$2 ;; --backup-dir) backup_dir=$2 ;;
@@ -91,9 +91,9 @@ main() {
         shift 2 ;;
       --dry-run) dry=1; shift ;; --no-start) no_start=1; shift ;;
       --help|-h)
-        note "Usage: bash $(basename -- "$0") [--bundle-dir DIR | --version TAG] [--channel stable|dev] [--release-repo OWNER/REPO] [--base-url HTTPS_URL] [--release-dir DIR] [--home DIR] [--listen IP:PORT] [--token-file FILE] [--tls-listen IP:PORT] [--tls-name HOST] [--trusted-proxy IP] [--local-llm-url URL] [--local-model-host HOST] [--dead-retention 24h|0] [--backup-dir DIR] [--no-start] [--dry-run]"
+        note "Usage: bash $(basename -- "$0") [--bundle-dir DIR | --version TAG] [--channel stable|dev] [--release-repo OWNER/REPO] [--base-url HTTPS_URL] [--release-dir DIR] [--home DIR] [--listen IP:PORT] [--token-file FILE] [--proxy-listen IP:PORT --trusted-proxy IP] [--local-llm-url URL] [--local-model-host HOST] [--dead-retention 24h|0] [--backup-dir DIR] [--no-start] [--dry-run]"
         note "--dry-run verifies assets and writes nothing. --no-start stages the unit without starting it."
-        note "--listen is the hub's loopback HTTP listener (default 127.0.0.1:7470); each --tls-listen is a private address served over HTTPS with the hub CA."
+        note "--listen is the hub's loopback HTTP listener (default 127.0.0.1:7470), the only one that accepts the owner token. Each --proxy-listen is a private address served over plain HTTP to the reverse proxy that terminates TLS; it closes every connection that does not come from a --trusted-proxy address."
         return 0 ;;
       *) die "unknown option: $1" ;;
     esac
@@ -104,9 +104,11 @@ main() {
     [[ "$local_llm_url" == https://* || "$local_llm_url" == http://* ]] || die "--local-llm-url must be an HTTP or HTTPS URL"
   done
   local hub_option
-  for hub_option in "$listen" "${tls_listens[@]}" "${tls_names[@]}" "${trusted_proxies[@]}" "${local_llm_urls[@]}" "${local_model_hosts[@]}"; do
+  for hub_option in "$listen" "${proxy_listens[@]}" "${trusted_proxies[@]}" "${local_llm_urls[@]}" "${local_model_hosts[@]}"; do
     [[ "$hub_option" != *$'\n'* && "$hub_option" != *$'\r'* ]] || die "hub options must not contain newlines"
   done
+  (( ${#proxy_listens[@]} == 0 || ${#trusted_proxies[@]} > 0 )) || die "--proxy-listen requires at least one --trusted-proxy"
+  (( ${#trusted_proxies[@]} == 0 || ${#proxy_listens[@]} > 0 )) || die "--trusted-proxy applies only to a --proxy-listen"
   [[ "$channel" == stable || "$channel" == dev ]] || die "--channel must be stable or dev"
   [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "invalid --release-repo"
   [[ -z "$version" ]] || valid_version "$version" || die "invalid --version"
@@ -125,7 +127,7 @@ main() {
     [[ -z "$path" ]] || require_path path "$path"
   done
   listen=${listen:-127.0.0.1:7470}
-  [[ "$listen" == 127.0.0.1:* || "$listen" == '[::1]:'* ]] || die "the hub --listen is plain HTTP and must be loopback; use --tls-listen for private addresses"
+  [[ "$listen" == 127.0.0.1:* || "$listen" == '[::1]:'* ]] || die "the hub --listen must be loopback; use --proxy-listen for other private addresses"
   state_home=${state_home:-$HOME/.protectorate}
   release_root=${release_root:-${XDG_DATA_HOME:-$HOME/.local/share}/protectorate/releases}
   require_path home "$state_home"; require_path release-dir "$release_root"
@@ -265,8 +267,7 @@ PY
     printf 'serve --home '; systemd_quote "$state_home"
     printf ' --owner-token-file '; systemd_quote "$token_file"
     printf ' --listen '; systemd_quote "$listen"
-    for hub_option in "${tls_listens[@]}"; do printf ' --tls-listen '; systemd_quote "$hub_option"; done
-    for hub_option in "${tls_names[@]}"; do printf ' --tls-name '; systemd_quote "$hub_option"; done
+    for hub_option in "${proxy_listens[@]}"; do printf ' --proxy-listen '; systemd_quote "$hub_option"; done
     printf ' --release-repo '; systemd_quote "$repo"
     printf ' --update-channel '; systemd_quote "$channel"
     printf ' --release-dir '; systemd_quote "$release_root"
@@ -338,8 +339,7 @@ PY
   if [[ -e "$unit_backup" ]]; then rm -f -- "$unit_backup"; fi
   note "Installed Rust hub $build_version at $active"
   note "Owner token: $token_file"
-  note "Hub CA: $state_home/ca/ca.pem (created on first start)"
-  (( ${#tls_listens[@]} )) || note "No --tls-listen given: the hub is reachable only on loopback until one is added"
+  (( ${#proxy_listens[@]} )) || note "No --proxy-listen given: the hub is reachable only on loopback until one is added"
   (( no_start == 0 )) || note "Service staged; start with systemctl --user enable --now $service"
 }
 

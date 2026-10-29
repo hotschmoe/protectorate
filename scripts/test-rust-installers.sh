@@ -62,7 +62,7 @@ bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --home "$HOME/hub" --rel
   --trusted-proxy 127.0.0.2 --trusted-proxy 127.0.0.3 \
   --local-llm-url http://127.0.0.1:1234 --local-llm-url http://127.0.0.1:5678 \
   --local-model-host model.test --local-model-host backup.test --dead-retention 0 \
-  --tls-listen 192.168.22.5:7470 --tls-name hub.lan --backup-dir "$HOME/hub-backups" --no-start > "$temp/hub.log"
+  --proxy-listen 192.168.22.5:7470 --proxy-listen 127.0.0.4:7470 --backup-dir "$HOME/hub-backups" --no-start > "$temp/hub.log"
 [[ -x "$HOME/hub-releases/v9.8.7/protectorate-rs" ]]
 [[ -x "$HOME/hub-releases/v9.8.7/protectorate-sleeve-runner" ]]
 [[ -x "$HOME/hub-releases/v9.8.7/protectorate-mcpbridge" ]]
@@ -72,9 +72,23 @@ grep -Fq '"version":"v9.8.7"' "$HOME/hub-releases/v9.8.7/release.json"
 [[ "$(stat -c %a "$HOME/hub/token")" == 600 ]]
 grep -Fq -- '--owner-token-file' "$HOME/.config/systemd/user/protectorate-hub.service"
 grep -Fq -- '--listen "127.0.0.1:7470"' "$HOME/.config/systemd/user/protectorate-hub.service"
-grep -Fq -- '--tls-listen "192.168.22.5:7470"' "$HOME/.config/systemd/user/protectorate-hub.service"
-grep -Fq -- '--tls-name "hub.lan"' "$HOME/.config/systemd/user/protectorate-hub.service"
-grep -Fq 'Hub CA:' "$temp/hub.log"
+grep -Fq -- '--proxy-listen "192.168.22.5:7470"' "$HOME/.config/systemd/user/protectorate-hub.service"
+grep -Fq -- '--proxy-listen "127.0.0.4:7470"' "$HOME/.config/systemd/user/protectorate-hub.service"
+! grep -Eq -- '--tls-|/ca/' "$HOME/.config/systemd/user/protectorate-hub.service" "$temp/hub.log"
+! grep -Fq 'No --proxy-listen given' "$temp/hub.log"
+for flags in '--trusted-proxy 192.168.22.6' '--tls-listen 192.168.22.5:7470'; do
+  # shellcheck disable=SC2086
+  if bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" $flags --dry-run > "$temp/hub-proxy-flags.log" 2>&1; then
+    echo "hub accepted $flags" >&2
+    exit 1
+  fi
+done
+grep -Fq -- 'unknown option: --tls-listen' "$temp/hub-proxy-flags.log"
+if bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --proxy-listen 192.168.22.5:7470 --dry-run > "$temp/hub-proxy-alone.log" 2>&1; then
+  echo 'hub accepted a proxy listener without a trusted proxy' >&2
+  exit 1
+fi
+grep -Fq -- '--proxy-listen requires at least one --trusted-proxy' "$temp/hub-proxy-alone.log"
 if bash "$root/install-hub.sh" --bundle-dir "$temp/bundle" --listen 192.168.22.5:7470 --dry-run > "$temp/hub-plain-lan.log" 2>&1; then
   echo 'hub accepted a plain HTTP LAN listener' >&2
   exit 1
