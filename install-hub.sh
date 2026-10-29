@@ -174,6 +174,7 @@ with tarfile.open(archive, 'r:gz') as tf:
             raise SystemExit('web archive exceeds size limit')
 PY
   local binary="$stage/protectorate-rs-linux-$arch"
+  chmod 755 -- "$binary"
   if [[ -z "${PROTECTORATE_INSTALL_SKIP_BINARY_CHECK:-}" ]]; then
     local reported
     reported=$("$binary" version --json) || die "Rust binary version check failed"
