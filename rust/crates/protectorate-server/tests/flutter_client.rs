@@ -25,7 +25,7 @@ mod unix {
     }
 
     impl Hub {
-        fn start(root: &Path, token: &str, extra: &[&str]) -> Self {
+        fn start(root: &Path, token: &str) -> Self {
             let home = root.join("hub");
             fs::create_dir(&home).unwrap();
             let token_file = root.join("owner-token");
@@ -48,7 +48,6 @@ mod unix {
                     .args(["--listen", "127.0.0.1:0"])
                     .args(["--release-api-url", "http://127.0.0.1:1"])
                     .args(["--tmux-socket", &tmux])
-                    .args(extra)
                     .env("HOME", root)
                     .env_remove("PROTECTORATE_TOKEN")
                     .env_remove("PROTECTORATE_TOKEN_FILE")
@@ -57,14 +56,9 @@ mod unix {
                     .stderr(output),
             );
             let mut hub = Self { group, tmux, log };
-            let ready = if extra.contains(&"--tls-listen") {
-                "serving TLS"
-            } else {
-                "serving"
-            };
             until("hub start", &hub.log.clone(), || {
                 assert!(hub.group.alive(), "the hub exited: {}", hub.output());
-                bound(&hub.log, ready).is_some()
+                bound(&hub.log, "serving").is_some()
             });
             hub
         }
@@ -170,7 +164,7 @@ mod unix {
         let root = tempfile::tempdir().unwrap();
         let root = root.path();
         let token = "rust-flutter-real-binary-e2e-token";
-        let hub = Hub::start(root, token, &["--device-interval", "1s"]);
+        let hub = Hub::start(root, token);
         let url = hub.url();
         for name in names {
             scenario(
@@ -196,7 +190,7 @@ mod unix {
         let root = tempfile::tempdir().unwrap();
         let root = root.path();
         let token = "rust-flutter-real-binary-e2e-token";
-        let hub = Hub::start(root, token, &[]);
+        let hub = Hub::start(root, token);
         let url = hub.url();
         scenario(
             &hub,
@@ -215,7 +209,7 @@ mod unix {
     }
 
     #[test]
-    fn checked_in_dart_client_pairs_and_signs_against_rust_hub() {
+    fn checked_in_dart_client_adds_a_device_and_connects_with_its_token() {
         dart_scripts("Dart hub connection trial", &["hub_connection_e2e"]);
     }
 

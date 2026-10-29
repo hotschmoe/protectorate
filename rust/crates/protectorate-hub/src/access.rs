@@ -1,13 +1,13 @@
-//! Who is calling. The owner token works only on the loopback listener; an
-//! approved device signs each request with its key; everything else holds a
+//! Who is calling. The owner token works only on the loopback listener; a
+//! device presents the token it was added with; everything else holds a
 //! capability the hub minted. Every hub entry point admits callers here.
 use crate::{unix_time, Hub};
 use axum::http::{header, HeaderMap};
 use prost_reflect::prost_types;
+use protectorate_audit::Entry as AuditEntry;
 use protectorate_auth::{
     self as auth,
     capability::{self, Claims},
-    proof::{self, Proof},
     Method as ScopeMethod,
 };
 use protectorate_fsutil::unix_seconds;
@@ -55,15 +55,16 @@ pub(crate) fn bearer(headers: &HeaderMap) -> Option<&str> {
     (prefix.eq_ignore_ascii_case("Bearer ") && text.len() > 7).then(|| &text[7..])
 }
 
-/// A browser cannot set headers on a WebSocket, so it offers the proof as a
-/// subprotocol; the hub never selects it.
-fn websocket_proof(headers: &HeaderMap) -> Option<&str> {
+/// A browser cannot set headers on a WebSocket, so it offers the token as
+/// the subprotocol `bearer.<token>`; the hub never selects it.
+pub(crate) fn websocket_bearer(headers: &HeaderMap) -> Option<&str> {
     headers
         .get_all(header::SEC_WEBSOCKET_PROTOCOL)
         .iter()
         .filter_map(|value| value.to_str().ok())
         .flat_map(|line| line.split(','))
-        .find_map(|entry| entry.trim().strip_prefix(proof::SUBPROTOCOL))
+        .find_map(|entry| entry.trim().strip_prefix("bearer."))
+        .filter(|token| !token.is_empty())
 }
 
 /// The scopes a capability carries after every narrowing its holders added.
@@ -77,35 +78,28 @@ fn effective(claims: &Claims, methods: &[Method]) -> Vec<String> {
         })
 }
 
-/// Authenticates one request to `path` with HTTP `verb`. `tls` is whether it
-/// arrived on a TLS listener, where the owner token is refused.
+/// Authenticates one request bearing `secret`, from the Authorization header
+/// or, on the terminal, the `bearer.` subprotocol. `proxied` is whether it
+/// arrived through the trusted proxy, where the owner token is refused.
 pub(crate) fn authenticate(
     owner: &str,
     store: &Store,
     methods: &[Method],
-    headers: &HeaderMap,
-    verb: &str,
-    path: &str,
-    tls: bool,
+    secret: Option<&str>,
+    proxied: bool,
 ) -> Result<Caller> {
     let now = unix_seconds();
-    let signed = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix(proof::SCHEME))
-        .or_else(|| (verb == "GET").then(|| websocket_proof(headers)).flatten());
-    if let Some(text) = signed {
-        let proof = Proof::parse(text).ok_or_else(|| unauthenticated("malformed device proof"))?;
+    let Some(secret) = secret else {
+        return Err(unauthenticated(
+            "missing credential: present a device token or a capability",
+        ));
+    };
+    if secret.starts_with(identity::DEVICE_PREFIX) {
         return store
-            .verify_proof(&proof, verb, path, now)
+            .verify_device(secret, now)
             .map(Caller::Device)
             .map_err(|error| unauthenticated(error.to_string()));
     }
-    let Some(secret) = bearer(headers) else {
-        return Err(unauthenticated(
-            "missing credential: sign the request with a device key or present a capability",
-        ));
-    };
     if secret.starts_with(capability::PREFIX) {
         let (record, claims) = store
             .verify(secret, now)
@@ -113,7 +107,7 @@ pub(crate) fn authenticate(
         let scopes = effective(&claims, methods);
         return Ok(Caller::Capability { record, scopes });
     }
-    if tls {
+    if proxied {
         return Err(unauthenticated(
             "the owner token is accepted only on the hub's loopback listener",
         ));
@@ -124,8 +118,8 @@ pub(crate) fn authenticate(
     Err(unauthenticated("invalid credential"))
 }
 
-/// Refuses a request that arrived on a TLS listener, for the routes only
-/// the owner token opens.
+/// Refuses a request that arrived through the proxy, for the routes only the
+/// owner token opens.
 pub(crate) async fn loopback_only(
     request: axum::extract::Request,
     next: axum::middleware::Next,
@@ -134,7 +128,7 @@ pub(crate) async fn loopback_only(
     if request
         .extensions()
         .get::<protectorate_wire::Peer>()
-        .is_some_and(|peer| peer.tls)
+        .is_some_and(|peer| peer.proxied)
     {
         return axum::http::StatusCode::FORBIDDEN.into_response();
     }
@@ -449,6 +443,32 @@ pub(super) fn register(server: &mut UnaryServer, hub: Arc<Hub>) -> Result<()> {
             })
         }
     })
+}
+
+/// Forgets long-dead capability lineages once a minute.
+pub(crate) fn start_sweep(hub: &Arc<Hub>) {
+    let weak = Arc::downgrade(hub);
+    if let Err(error) = std::thread::Builder::new()
+        .name("identity-sweep".into())
+        .spawn(move || loop {
+            let Some(hub) = weak.upgrade() else {
+                break;
+            };
+            if let Err(error) = hub.identity.sweep(unix_seconds()) {
+                hub.audit.write(AuditEntry {
+                    actor: "hub".into(),
+                    procedure: "identity.sweep".into(),
+                    outcome: "error".into(),
+                    detail: error.to_string(),
+                    ..AuditEntry::default()
+                });
+            }
+            drop(hub);
+            std::thread::sleep(Duration::from_secs(60));
+        })
+    {
+        eprintln!("identity: start sweep: {error}");
+    }
 }
 
 pub(crate) fn start_refresh(runtime: &tokio::runtime::Handle, hub: &Arc<Hub>) {

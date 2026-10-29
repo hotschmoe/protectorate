@@ -135,7 +135,7 @@ fn start_hub(disk: &SmallDisk, root: &Path, run: u32) -> DiskHub {
         .arg(&disk.mount)
         .arg("--owner-token-file")
         .arg(&token)
-        .args(["--listen", "127.0.0.1:0", "--tls-listen", "127.0.0.1:0"])
+        .args(["--listen", "127.0.0.1:0"])
         .args(["--release-api-url", "http://127.0.0.1:1"])
         .args(["--tmux-socket", &tmux])
         .env("HOME", &user_home)
@@ -153,7 +153,7 @@ fn start_hub(disk: &SmallDisk, root: &Path, run: u32) -> DiskHub {
             "hub exited: {}",
             fs::read_to_string(&log).unwrap_or_default()
         );
-        bound(&log, "serving TLS").is_some()
+        bound(&log, "serving").is_some()
     });
     let url = format!("http://{}", bound(&log, "serving").unwrap());
     // Short timeouts: a write that hangs on a full disk fails the test.

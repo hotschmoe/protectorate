@@ -1,4 +1,4 @@
-//! Real-binary fixtures: a hub with a TLS listener.
+//! Real-binary fixtures: a hub with a loopback listener and a proxy listener.
 #![allow(dead_code)]
 use protectorate_connect_client::Client;
 use serde_json::{json, Value};
@@ -187,8 +187,8 @@ pub fn kill_tmux(socket: &str) {
     );
 }
 
-/// The address the hub logged for `label` ("serving" or "serving TLS")
-/// once it has bound that listener.
+/// The address the hub logged for `label` ("serving" or "serving the
+/// proxy") once it has bound that listener.
 pub fn bound(log: &Path, label: &str) -> Option<String> {
     let prefix = format!("protectorate-rs {label} on ");
     // The hub writes a line in several pieces; only a finished line counts.
@@ -199,15 +199,22 @@ pub fn bound(log: &Path, label: &str) -> Option<String> {
         .find_map(|line| line.strip_prefix(&prefix).map(str::to_owned))
 }
 
-/// A hub serving plain HTTP on loopback for the owner and HTTPS with its own
-/// CA. Each start binds fresh ports.
+/// The trusted proxy the fixture hub admits: a loopback client's source
+/// address. `PROXY_LISTEN` is a loopback address of its own, so a client
+/// bound to any other loopback address is a peer the hub must drop.
+pub const TRUSTED_PROXY: &str = "127.0.0.1";
+pub const PROXY_LISTEN: &str = "127.0.0.2:0";
+
+/// A hub serving its loopback listener for the owner, and a proxy listener
+/// that admits only `TRUSTED_PROXY`. Each start binds fresh ports.
 pub struct Hub {
     pub process: Option<Process>,
     pub client: Client,
     pub home: PathBuf,
     pub user_home: PathBuf,
     pub plain: String,
-    pub tls: String,
+    /// `http://` and the proxy listener's address.
+    pub proxy: String,
     args: Vec<String>,
     log: PathBuf,
     tmux: String,
@@ -239,10 +246,10 @@ impl Hub {
             token.to_str().unwrap(),
             "--listen",
             "127.0.0.1:0",
-            "--tls-listen",
-            "127.0.0.1:0",
-            "--device-interval",
-            "1s",
+            "--proxy-listen",
+            PROXY_LISTEN,
+            "--trusted-proxy",
+            TRUSTED_PROXY,
             "--release-api-url",
             "http://127.0.0.1:1",
             "--tmux-socket",
@@ -253,14 +260,14 @@ impl Hub {
         .chain(extra.iter().map(|arg| (*arg).to_owned()))
         .collect::<Vec<_>>();
         let log = root.join("hub.log");
-        let (process, plain, tls, client) = launch(&args, &user_home, &log);
+        let (process, plain, proxy, client) = launch(&args, &user_home, &log);
         Self {
             process: Some(process),
             client,
             home,
             user_home,
             plain,
-            tls,
+            proxy,
             args,
             log,
             tmux,
@@ -273,15 +280,11 @@ impl Hub {
 
     /// Starts the hub again on fresh ports; owner calls follow it there.
     pub fn restart(&mut self) {
-        let (process, plain, tls, client) = launch(&self.args, &self.user_home, &self.log);
+        let (process, plain, proxy, client) = launch(&self.args, &self.user_home, &self.log);
         self.process = Some(process);
         self.plain = plain;
-        self.tls = tls;
+        self.proxy = proxy;
         self.client = client;
-    }
-
-    pub fn ca(&self) -> PathBuf {
-        self.home.join("ca/ca.pem")
     }
 
     pub fn call(&self, procedure: &str, input: Value) -> Value {
@@ -297,8 +300,8 @@ impl Drop for Hub {
 }
 
 /// Runs the hub server itself, without its update guardian, so that stopping
-/// the process stops the listeners. Returns it with its plain and TLS URLs
-/// and an owner client, once it answers.
+/// the process stops the listeners. Returns it with its loopback and proxy
+/// URLs and an owner client, once it answers.
 fn launch(args: &[String], user_home: &Path, log: &Path) -> (Process, String, String, Client) {
     let args = args.iter().map(String::as_str).collect::<Vec<_>>();
     let mut process = Process(
@@ -314,15 +317,54 @@ fn launch(args: &[String], user_home: &Path, log: &Path) -> (Process, String, St
             "hub exited: {}",
             fs::read_to_string(log).unwrap_or_default()
         );
-        bound(log, "serving TLS").is_some()
+        bound(log, "serving the proxy").is_some()
     });
     let plain = format!("http://{}", bound(log, "serving").unwrap());
-    let tls = format!("https://{}", bound(log, "serving TLS").unwrap());
+    let proxy = format!("http://{}", bound(log, "serving the proxy").unwrap());
     let client = Client::new(&plain, OWNER, Duration::from_secs(60)).unwrap();
     until("hub status", log, || {
         client
             .call("/protectorate.v1.HubService/GetStatus", &json!({}))
             .is_ok()
     });
-    (process, plain, tls, client)
+    (process, plain, proxy, client)
+}
+
+/// One raw Connect call with `authorization` (empty for none), so a test
+/// can use any listener and control the header. Returns the HTTP status and
+/// the JSON body.
+pub fn post(base: &str, path: &str, authorization: &str, body: &str) -> (u16, Value) {
+    use std::io::{Read, Write};
+    let address = base.trim_start_matches("http://");
+    let mut stream = std::net::TcpStream::connect(address).unwrap();
+    let authorization = if authorization.is_empty() {
+        String::new()
+    } else {
+        format!("Authorization: {authorization}\r\n")
+    };
+    write!(
+        stream,
+        "POST {path} HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\n{authorization}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    let (head, body) = response.split_once("\r\n\r\n").unwrap();
+    (
+        head.split_whitespace().nth(1).unwrap().parse().unwrap(),
+        serde_json::from_str(body).unwrap_or(Value::Null),
+    )
+}
+
+/// Adds a device as the owner and returns its id and token.
+pub fn add_device(hub: &Hub, name: &str) -> (String, String) {
+    let added = hub.call(
+        "/protectorate.v1.DeviceService/AddDevice",
+        json!({"name": name}),
+    );
+    (
+        added["device"]["id"].as_str().unwrap().to_owned(),
+        added["token"].as_str().unwrap().to_owned(),
+    )
 }

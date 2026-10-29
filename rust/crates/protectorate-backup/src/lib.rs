@@ -149,7 +149,7 @@ pub fn safe_relative(name: &str) -> bool {
 fn keep(rel: &str) -> bool {
     let parts: Vec<_> = rel.split('/').collect();
     match parts[0] {
-        "audit" | "ca" => true,
+        "audit" => true,
         "handoffs" => parts.len() == 3 && parts[2].ends_with(".md"),
         "sleeves" => parts.len() == 3 && parts[2].starts_with("chat.jsonl"),
         _ => false,
@@ -202,7 +202,7 @@ fn plan(home: &Dir) -> Result<Vec<String>> {
         }
         Ok(())
     }
-    for dir in ["audit", "ca", "handoffs", "sleeves"] {
+    for dir in ["audit", "handoffs", "sleeves"] {
         if home.symlink_metadata(dir).is_ok_and(|m| m.is_symlink()) {
             continue;
         }
@@ -254,8 +254,8 @@ fn header(writer: &mut impl Write, h: &Header) -> Result<()> {
     writer.write_all(&bytes)?;
     Ok(())
 }
-/// Archives the hub state, including its CA. No credentials from harness
-/// homes are included.
+/// Archives the hub state, including its owner token and capability key. No
+/// credentials from harness homes are included.
 pub fn create(options: &Options, cancel: &Cancellation) -> Result<PathBuf> {
     cancel.check()?;
     let home = fs::canonicalize(&options.home)?;

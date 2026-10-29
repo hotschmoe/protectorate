@@ -1,69 +1,21 @@
 //! Interactive terminal attach over the hub's framed WebSocket protocol.
 use crate::{client_for, hub_url, Client, Code, Invocation, Result, RpcError};
-use rustls::pki_types::{pem::PemObject, CertificateDer};
 use std::{
     io::{Read, Write},
     net::TcpStream,
-    path::Path,
     sync::Arc,
 };
 use tungstenite::{client::IntoClientRequest, http::HeaderValue, Message};
 
-fn private_ca_pem() -> Result<Option<Vec<u8>>> {
-    if let Ok(pem) = std::env::var("PROTECTORATE_TLS_CA_PEM") {
-        if pem.len() > 16 * 1024 {
-            return Err(RpcError::invalid("TLS CA environment exceeds 16 KiB"));
-        }
-        return Ok(Some(pem.into_bytes()));
-    }
-    let Some(path) = std::env::var_os("PROTECTORATE_TLS_CA_CERT") else {
-        return Ok(None);
-    };
-    let path = Path::new(&path);
-    let metadata = std::fs::metadata(path)
-        .map_err(|e| RpcError::invalid(format!("TLS CA certificate: {e}")))?;
-    if !metadata.is_file() || metadata.len() > 1024 * 1024 {
-        return Err(RpcError::invalid(
-            "TLS CA must be a regular file under 1 MiB",
-        ));
-    }
-    let mut pem = Vec::new();
-    std::fs::File::open(path)
-        .map_err(|e| RpcError::invalid(format!("TLS CA certificate: {e}")))?
-        .take(1024 * 1024 + 1)
-        .read_to_end(&mut pem)
-        .map_err(|e| RpcError::invalid(format!("TLS CA certificate: {e}")))?;
-    if pem.len() > 1024 * 1024 {
-        return Err(RpcError::invalid("TLS CA exceeds 1 MiB"));
-    }
-    Ok(Some(pem))
-}
-
-fn tls_config(pem: Option<&[u8]>) -> Result<Arc<rustls::ClientConfig>> {
+/// HTTPS hubs sit behind a reverse proxy with a public certificate.
+fn tls_config() -> Arc<rustls::ClientConfig> {
     let mut roots = rustls::RootCertStore::empty();
-    match pem {
-        None => roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned()),
-        Some(pem) => {
-            if pem.is_empty() || pem.len() > 1024 * 1024 {
-                return Err(RpcError::invalid("TLS CA bundle must be under 1 MiB"));
-            }
-            for cert in CertificateDer::pem_slice_iter(pem) {
-                let cert =
-                    cert.map_err(|e| RpcError::invalid(format!("invalid TLS CA PEM: {e}")))?;
-                roots
-                    .add(cert)
-                    .map_err(|e| RpcError::invalid(format!("invalid TLS CA certificate: {e}")))?;
-            }
-            if roots.is_empty() {
-                return Err(RpcError::invalid("TLS CA bundle has no certificates"));
-            }
-        }
-    }
-    Ok(Arc::new(
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    Arc::new(
         rustls::ClientConfig::builder()
             .with_root_certificates(roots)
             .with_no_client_auth(),
-    ))
+    )
 }
 
 trait ReadWrite: Read + Write {}
@@ -71,8 +23,8 @@ impl<T: Read + Write> ReadWrite for T {}
 
 type Socket = tungstenite::WebSocket<Box<dyn ReadWrite>>;
 
-/// What can go wrong before a terminal frame is ever exchanged: a bad local
-/// CA bundle, or the hub refusing the upgrade.
+/// What can go wrong before a terminal frame is ever exchanged: a bad hub
+/// URL or connection, or the hub refusing the upgrade.
 #[derive(Debug)]
 enum ConnectError {
     Config(RpcError),
@@ -82,7 +34,6 @@ enum ConnectError {
 /// Returns the socket plus a handle on the underlying TCP stream for timeouts.
 fn connect_websocket(
     request: tungstenite::http::Request<()>,
-    pem: Option<&[u8]>,
 ) -> std::result::Result<(Socket, TcpStream), ConnectError> {
     let config_error = |message: String| ConnectError::Config(RpcError::invalid(message));
     let uri = request.uri().clone();
@@ -98,7 +49,7 @@ fn connect_websocket(
     };
     let tls_config = if tls {
         let _ = rustls::crypto::ring::default_provider().install_default();
-        Some(tls_config(pem).map_err(ConnectError::Config)?)
+        Some(tls_config())
     } else {
         None
     };
@@ -521,8 +472,7 @@ fn bridge(
     let mut request = url
         .into_client_request()
         .map_err(|e| RpcError::invalid(e.to_string()))?;
-    let path = request.uri().path().to_owned();
-    if let Some(authorization) = client_for(invocation)?.authorization("GET", &path)? {
+    if let Some(authorization) = client_for(invocation)?.authorization()? {
         request.headers_mut().insert(
             "Authorization",
             HeaderValue::from_str(&authorization).map_err(|e| RpcError::invalid(e.to_string()))?,
@@ -532,9 +482,8 @@ fn bridge(
         "Sec-WebSocket-Protocol",
         HeaderValue::from_static("protectorate.v1"),
     );
-    let ca_pem = private_ca_pem()?;
     let (mut socket, control) =
-        connect_websocket(request, ca_pem.as_deref()).map_err(|error| attach_error(name, error))?;
+        connect_websocket(request).map_err(|error| attach_error(name, error))?;
     control
         .set_read_timeout(Some(std::time::Duration::from_millis(50)))
         .map_err(|e| RpcError::new(Code::Internal, format!("attach socket timeout: {e}")))?;

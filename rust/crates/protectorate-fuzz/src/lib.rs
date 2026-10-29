@@ -15,7 +15,7 @@ mod terminal;
 mod wire;
 
 pub use archives::{backup_archive, release_manifest, release_web_archive};
-pub use auth::{capability_tokens, device_proofs};
+pub use auth::{capability_tokens, device_tokens};
 pub use cli::{cli_args, mcp_stdio};
 pub use egress::egress_connect;
 pub use harness::{claude_stream, codex_rpc, grok_acp, pi_rpc};
@@ -40,7 +40,7 @@ pub const TARGETS: &[(&str, Target)] = &[
     ("claude_stream", claude_stream),
     ("cli_args", cli_args),
     ("codex_rpc", codex_rpc),
-    ("device_proofs", device_proofs),
+    ("device_tokens", device_tokens),
     ("directory_state", directory_state),
     ("egress_connect", egress_connect),
     ("grok_acp", grok_acp),

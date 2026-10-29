@@ -2,7 +2,6 @@
 //! endpoint. The method catalog is supplied by the wire layer so generated API
 //! metadata remains the single source of truth.
 pub mod capability;
-pub mod proof;
 
 pub const SCOPE_FULL: &str = "full";
 pub const SCOPE_READ: &str = "read";
@@ -33,7 +32,7 @@ impl std::fmt::Display for ScopeError {
         match self {
             Self::EmptyList => write!(f, "at least one scope is required"),
             Self::EmptyScope => write!(f, "empty scope"),
-            Self::FullReserved => write!(f, "Full access is issued through device approval"),
+            Self::FullReserved => write!(f, "Full access belongs to devices only"),
             Self::BadPattern(s) => write!(f, "bad scope {s:?}"),
             Self::NoMatchingTool(s) => write!(f, "scope {s:?} matches no tool"),
         }

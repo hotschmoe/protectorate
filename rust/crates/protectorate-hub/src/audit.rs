@@ -122,8 +122,7 @@ pub(super) fn record_completion(
     if error.is_none()
         && matches!(
             method.procedure.as_str(),
-            "/protectorate.v1.DeviceService/ApproveDeviceAuth"
-                | "/protectorate.v1.DeviceService/DenyDeviceAuth"
+            "/protectorate.v1.DeviceService/AddDevice"
                 | "/protectorate.v1.ReleaseService/UpdateHub"
                 | "/protectorate.v1.SleeveService/SpawnEnvoy"
                 | "/protectorate.v1.ApprovalService/DecideApproval"
@@ -135,13 +134,10 @@ pub(super) fn record_completion(
         return;
     }
     let subject = subject(method, auth, message);
-    let detail = if let Some(error) = error.filter(|_| panicked) {
-        error.message.clone()
-    } else if method.procedure == "/protectorate.v1.DeviceService/StartDeviceAuth" {
-        pairing_detail(auth)
-    } else {
-        String::new()
-    };
+    let detail = error
+        .filter(|_| panicked)
+        .map(|error| error.message.clone())
+        .unwrap_or_default();
     audit.write(Entry {
         actor: auth.actor.clone(),
         token_id: auth.token_id.clone(),
@@ -181,8 +177,6 @@ pub(super) fn subject(method: &Method, auth: &AuthContext, request: &DynamicMess
         .unwrap_or_default();
     let subject = if method.procedure == "/protectorate.v1.ReleaseService/UpdateHub" {
         "hub".to_owned()
-    } else if method.procedure == "/protectorate.v1.DeviceService/StartDeviceAuth" {
-        String::new()
     } else if matches!(
         method.procedure.as_str(),
         "/protectorate.v1.DeviceService/RenameDevice"
@@ -221,20 +215,7 @@ pub(super) fn record_denied(
         subject: message
             .map(|request| subject(method, auth, request))
             .unwrap_or_default(),
-        detail: if method.procedure == "/protectorate.v1.DeviceService/StartDeviceAuth" {
-            pairing_detail(auth)
-        } else {
-            String::new()
-        },
-        // Public pairing admission can reject a LAN peer or throttle a busy
-        // source without authenticating a credential: an operation error.
-        // Only credential and scope failures are denials.
-        outcome: if method.procedure == "/protectorate.v1.DeviceService/StartDeviceAuth" {
-            "error"
-        } else {
-            "denied"
-        }
-        .into(),
+        outcome: "denied".into(),
         code: code(error.code),
         ..Entry::default()
     });
@@ -256,11 +237,6 @@ pub(super) fn record_rejection(
         token_id: auth.map_or("", |auth| auth.token_id.as_str()).into(),
         task: auth.map_or("", |auth| auth.task.as_str()).into(),
         procedure: method.procedure.clone(),
-        detail: if method.procedure == "/protectorate.v1.DeviceService/StartDeviceAuth" {
-            auth.map(pairing_detail).unwrap_or_default()
-        } else {
-            String::new()
-        },
         outcome: if matches!(error.code, Code::Unauthenticated | Code::PermissionDenied) {
             "denied"
         } else {
@@ -272,19 +248,7 @@ pub(super) fn record_rejection(
     });
 }
 
-fn pairing_detail(auth: &AuthContext) -> String {
-    auth.requesting_ip
-        .map(|ip| format!("requesting_ip={ip}"))
-        .unwrap_or_default()
-}
-
 fn audited_method(method: &Method, auth: &AuthContext) -> bool {
-    // The public poll request contains a bearer-like device code and may be
-    // repeated frequently while the user approves pairing; only
-    // StartDeviceAuth is recorded on this public path.
-    if method.procedure == "/protectorate.v1.DeviceService/PollDeviceAuth" {
-        return false;
-    }
     !method.read_only || !auth.task.is_empty()
 }
 

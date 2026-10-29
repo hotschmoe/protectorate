@@ -9,8 +9,6 @@
 #![cfg(target_os = "linux")]
 use crate::support;
 
-use base64::{engine::general_purpose::STANDARD, Engine};
-use protectorate_auth::proof::DeviceKey;
 use protectorate_connect_client::Client;
 use serde_json::{json, Value};
 use std::{
@@ -67,7 +65,7 @@ struct Ledger {
     notes: Vec<(String, Vec<String>, bool)>,
     deleted_notes: Vec<String>,
     tokens: Vec<(String, bool)>,
-    devices: Vec<(String, String, String, bool)>,
+    devices: Vec<(String, String, String)>,
     sleeves: Vec<String>,
 }
 
@@ -75,36 +73,20 @@ struct Ledger {
 #[derive(Clone)]
 struct Ctx {
     client: Client,
-    tls: String,
-    ca: PathBuf,
     work: PathBuf,
 }
 
-/// Approves a pairing; the device record is created when the applicant polls.
-fn pair(ctx: &Ctx, name: &str) -> Result<(String, String, String, bool), String> {
-    let key = DeviceKey::generate().map_err(|e| e.to_string())?.0;
-    let public = Client::new_with_ca(&ctx.tls, "", Duration::from_secs(20), Some(&ctx.ca))
+/// Adds a device; the ledger keeps its id, name and token.
+fn add_device(ctx: &Ctx, name: &str) -> Result<(String, String, String), String> {
+    let added = ctx
+        .client
+        .call(&format!("{DEVICE}AddDevice"), &json!({"name": name}))
         .map_err(|e| e.to_string())?;
-    let started = public
-        .call(
-            &format!("{DEVICE}StartDeviceAuth"),
-            &json!({"name": name, "platform": "linux", "publicKey": STANDARD.encode(key.public_key())}),
-        )
-        .map_err(|e| e.to_string())?;
-    ctx.client
-        .call(
-            &format!("{DEVICE}ApproveDeviceAuth"),
-            &json!({"userCode": started["userCode"]}),
-        )
-        .map_err(|e| e.to_string())?;
-    let code = started["deviceCode"].as_str().unwrap().to_owned();
-    let polled = public
-        .call(
-            &format!("{DEVICE}PollDeviceAuth"),
-            &json!({"deviceCode": code}),
-        )
-        .is_ok_and(|polled| polled["status"] == "approved");
-    Ok((key.id().to_owned(), name.to_owned(), code, polled))
+    Ok((
+        text(&added["device"]["id"]).to_owned(),
+        name.to_owned(),
+        text(&added["token"]).to_owned(),
+    ))
 }
 
 /// One mutation; the ledger learns of it only if the hub acknowledged it.
@@ -171,7 +153,7 @@ fn mutate(ctx: &Ctx, ledger: &Mutex<Ledger>, tag: &str, n: u64, op: u64) {
             }
         }
         5 => {
-            if let Ok(device) = pair(ctx, &format!("device {tag}")) {
+            if let Ok(device) = add_device(ctx, &format!("device {tag}")) {
                 ledger.lock().unwrap().devices.push(device);
             }
         }
@@ -214,20 +196,18 @@ fn check_files(home: &Path, live: Option<u32>) {
         }
     }
     // Only the running hub may have a replacement in flight.
-    for dir in [home.to_path_buf(), home.join("ca")] {
-        for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let pid = name.strip_prefix('.').and_then(|rest| {
-                let mut parts = rest.rsplitn(3, '.');
-                parts.next()?.parse::<u64>().ok()?;
-                parts.next()?.parse::<u32>().ok()
-            });
-            assert!(
-                pid.is_none_or(|pid| Some(pid) == live) && !name.starts_with(".tmp"),
-                "a dead writer's temp file survives: {}",
-                entry.path().display()
-            );
-        }
+    for entry in fs::read_dir(home).into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let pid = name.strip_prefix('.').and_then(|rest| {
+            let mut parts = rest.rsplitn(3, '.');
+            parts.next()?.parse::<u64>().ok()?;
+            parts.next()?.parse::<u32>().ok()
+        });
+        assert!(
+            pid.is_none_or(|pid| Some(pid) == live) && !name.starts_with(".tmp"),
+            "a dead writer's temp file survives: {}",
+            entry.path().display()
+        );
     }
     let mailbox = fs::read(home.join("mailbox.jsonl")).unwrap_or_default();
     assert!(
@@ -317,32 +297,17 @@ fn verify(hub: &Hub, ledger: &mut Ledger, context: &str) {
             "{context}: revoked token {id} is live again"
         );
     }
-    let public =
-        Client::new_with_ca(&hub.tls, "", Duration::from_secs(20), Some(&hub.ca())).unwrap();
-    for (_, _, code, polled) in &mut ledger.devices {
-        if !*polled {
-            *polled = true;
-            let late = public
-                .call(
-                    &format!("{DEVICE}PollDeviceAuth"),
-                    &json!({"deviceCode":code}),
-                )
-                .unwrap();
-            // A poll cut off by the kill may have consumed the approval; the
-            // device must then exist, which the list below checks.
-            assert!(
-                late["status"] == "approved" || late["status"] == "consumed",
-                "{context}: approval lost: {late}"
-            );
-        }
-    }
     let devices = call(&format!("{DEVICE}ListDevices"), json!({}));
-    for (id, name, _, _) in &ledger.devices {
+    for (id, name, token) in &ledger.devices {
         let device = array(&devices, "devices")
             .iter()
             .find(|d| text(&d["id"]) == id)
-            .unwrap_or_else(|| panic!("{context}: approved device {id} lost"));
+            .unwrap_or_else(|| panic!("{context}: added device {id} lost"));
         assert_eq!(device["name"], *name, "{context}");
+        Client::new(&hub.plain, token.as_str(), Duration::from_secs(20))
+            .unwrap()
+            .call("/protectorate.v1.HubService/GetStatus", &json!({}))
+            .unwrap_or_else(|error| panic!("{context}: device {id} token refused: {error:?}"));
     }
     for name in &ledger.sleeves {
         let sleeve = call(&format!("{SLEEVE}GetSleeve"), json!({"name":name}));
@@ -410,8 +375,6 @@ fn acknowledged_mutations_survive_hub_sigkill_at_random_points() {
     // Spawning is slow enough that few land inside a kill window.
     let seeding = Ctx {
         client: hub.client.clone(),
-        tls: hub.tls.clone(),
-        ca: hub.ca(),
         work: work.clone(),
     };
     for n in 0..3 {
@@ -422,8 +385,6 @@ fn acknowledged_mutations_survive_hub_sigkill_at_random_points() {
         eprintln!("crash_consistency: iteration {iteration}: kill after {delay:?}");
         let ctx = Ctx {
             client: hub.client.clone(),
-            tls: hub.tls.clone(),
-            ca: hub.ca(),
             work: work.clone(),
         };
         let stop = AtomicBool::new(false);

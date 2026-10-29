@@ -4,7 +4,6 @@
 use crate::common;
 
 use common::{installed_cli, write_executable};
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -52,44 +51,33 @@ fn forwards_bridge_exit_status() {
 }
 
 #[test]
-fn saved_device_key_precedes_private_local_owner_token() {
+fn a_token_in_the_environment_precedes_the_private_local_owner_token() {
     let temp = tempfile::tempdir().unwrap();
     let cli = installed_cli(temp.path());
     let state = temp.path().join("state");
-    let credentials = state.join("credentials");
-    fs::create_dir_all(&credentials).unwrap();
-    fs::set_permissions(&credentials, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::create_dir_all(&state).unwrap();
     write_executable(
         &temp.path().join("protectorate-mcpbridge"),
-        "#!/bin/sh\nprintf '%s|%s' \"$PROTECTORATE_DEVICE_CREDENTIAL\" \"$PROTECTORATE_TOKEN\"\n",
+        "#!/bin/sh\nprintf '%s|%s' \"$PROTECTORATE_TOKEN_FILE\" \"$PROTECTORATE_TOKEN\"\n",
     );
 
     let owner = state.join("token");
     fs::write(&owner, "owner-secret\n").unwrap();
     fs::set_permissions(&owner, fs::Permissions::from_mode(0o600)).unwrap();
-    let hub = "http://127.0.0.1:7470";
-    let digest = Sha256::digest(hub.as_bytes());
-    let name = digest
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    let credential = credentials.join(format!("{name}.json"));
-    let (_, pkcs8) = protectorate_auth::proof::DeviceKey::generate().unwrap();
-    use base64::Engine;
-    let key = base64::engine::general_purpose::STANDARD.encode(pkcs8);
-    fs::write(&credential, format!(r#"{{"hub":"{hub}","key":"{key}"}}"#)).unwrap();
-    fs::set_permissions(&credential, fs::Permissions::from_mode(0o600)).unwrap();
-
-    let run = || {
-        Command::new(&cli)
+    let run = |token: Option<&str>| {
+        let mut command = Command::new(&cli);
+        command
             .args(["--home", state.to_str().unwrap(), "mcp"])
-            .env_remove("PROTECTORATE_TOKEN")
             .env_remove("PROTECTORATE_TOKEN_FILE")
-            .env_remove("PROTECTORATE_HOME")
-            .output()
-            .unwrap()
+            .env_remove("PROTECTORATE_HOME");
+        match token {
+            Some(token) => command.env("PROTECTORATE_TOKEN", token),
+            None => command.env_remove("PROTECTORATE_TOKEN"),
+        };
+        command.output().unwrap()
     };
-    let output = run();
+    let device = "pd1.BwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyAhIiMkJSY";
+    let output = run(Some(device));
     assert!(
         output.status.success(),
         "{}",
@@ -97,11 +85,10 @@ fn saved_device_key_precedes_private_local_owner_token() {
     );
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
-        format!("{}|", credential.display())
+        format!("|{device}")
     );
 
-    fs::remove_file(&credential).unwrap();
-    let output = run();
+    let output = run(None);
     assert!(
         output.status.success(),
         "{}",
@@ -110,7 +97,7 @@ fn saved_device_key_precedes_private_local_owner_token() {
     assert_eq!(output.stdout, b"|owner-secret");
 
     fs::set_permissions(&owner, fs::Permissions::from_mode(0o644)).unwrap();
-    let output = run();
+    let output = run(None);
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("private regular file"));
 }

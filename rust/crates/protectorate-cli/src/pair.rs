@@ -1,41 +1,60 @@
-//! Render browser and app enrollment links from a public hub URL.
-use crate::{hub_url, Invocation};
-use protectorate_pairing::{new_pair_links, write_qr};
-use protectorate_wire::{Code, Result, RpcError};
+//! `devices add`: add a device and print its token once, with `--url` also
+//! the pairing links and a terminal QR of one of them.
+use crate::{message_value, value_line, Client};
+use protectorate_pairing::{check_base_url, new_pair_links, write_qr};
+use protectorate_wire::{v1, Code, Result, RpcError};
 use serde_json::json;
 
-pub(crate) fn run(invocation: &Invocation, url: Option<&str>, app_qr: bool) -> Result<String> {
-    let default_url;
-    let url = match url {
-        Some(url) => url,
-        None => {
-            default_url = hub_url(invocation);
-            &default_url
-        }
-    };
-    let ca = std::env::var_os("PROTECTORATE_TLS_CA_CERT")
-        .map(|path| {
-            std::fs::read_to_string(&path)
-                .map_err(|error| RpcError::invalid(format!("PROTECTORATE_TLS_CA_CERT: {error}")))
-        })
-        .transpose()?;
-    let links = new_pair_links(url, ca.as_deref())
-        .map_err(|error| RpcError::new(Code::InvalidArgument, error.to_string()))?;
-    if invocation.json {
-        return serde_json::to_string(&json!({"web": links.web, "app": links.app}))
-            .map(|line| format!("{line}\n"))
-            .map_err(|error| {
-                RpcError::new(Code::Internal, format!("encode pairing links: {error}"))
-            });
+pub(crate) fn add(
+    client: &Client,
+    name: &str,
+    url: Option<&str>,
+    app_qr: bool,
+    json: bool,
+) -> Result<String> {
+    let invalid = |error: protectorate_pairing::Error| RpcError::invalid(error.to_string());
+    if let Some(url) = url {
+        check_base_url(url).map_err(invalid)?;
     }
-    let qr_link = if app_qr { &links.app } else { &links.web };
-    let mut bytes = Vec::new();
-    write_qr(&mut bytes, qr_link).map_err(RpcError::internal)?;
-    let mut output = String::from_utf8(bytes)
-        .map_err(|error| RpcError::new(Code::Internal, format!("encode pairing QR: {error}")))?;
+    let added = client.unary(
+        v1::device_service::ADD_DEVICE,
+        &v1::AddDeviceRequest { name: name.into() },
+    )?;
+    let device = added.device.clone().unwrap_or_default();
+    let links = url
+        .map(|url| new_pair_links(url, &added.token))
+        .transpose()
+        .map_err(invalid)?;
+    if json {
+        let mut out = json!({
+            "device": message_value(&device)?,
+            "token": added.token,
+        });
+        if let Some(links) = &links {
+            out["web"] = json!(links.web);
+            out["app"] = json!(links.app);
+        }
+        return value_line(&out);
+    }
+    let mut output = String::new();
+    if let Some(links) = &links {
+        let mut bytes = Vec::new();
+        write_qr(&mut bytes, if app_qr { &links.app } else { &links.web })
+            .map_err(RpcError::internal)?;
+        output = String::from_utf8(bytes).map_err(|error| {
+            RpcError::new(Code::Internal, format!("encode pairing QR: {error}"))
+        })?;
+        output.push('\n');
+    }
     output.push_str(&format!(
-        "\nweb:  {}\napp:  {}\n\nOpen the link, connect, then approve the matching code on a trusted device.\n",
-        links.web, links.app
+        "added {} ({})\ntoken: {}\n",
+        device.name, device.id, added.token
     ));
+    if let Some(links) = &links {
+        output.push_str(&format!("web:   {}\napp:   {}\n", links.web, links.app));
+    }
+    output.push_str(
+        "\nThe token is shown only once and works until the device is revoked; anyone holding it or a link is that device.\n",
+    );
     Ok(output)
 }

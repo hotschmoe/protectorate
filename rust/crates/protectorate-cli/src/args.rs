@@ -16,7 +16,7 @@ pub struct Invocation {
     /// `--hub`; unset means the environment or the default.
     pub hub: Option<String>,
     pub token_file: Option<PathBuf>,
-    /// The state home holding this machine's saved device credential.
+    /// The state home holding the hub's local owner token.
     pub home: Option<PathBuf>,
     pub timeout: Duration,
 }
@@ -96,8 +96,6 @@ fn parse_tokens(args: &[String]) -> Result<Invocation> {
             "audit" => set(&mut command, audit(args, &mut index)?)?,
             "devices" => set(&mut command, devices(args, &mut index)?)?,
             "approvals" => set(&mut command, approvals(args, &mut index)?)?,
-            "login" => set(&mut command, login(args, &mut index)?)?,
-            "pair" => set(&mut command, pair(args, &mut index)?)?,
             "who" => {
                 let target = match next(args, index + 1) {
                     Some(next) if !next.starts_with('-') => {
@@ -142,12 +140,10 @@ fn move_global_options(args: &[String]) -> Vec<String> {
             break;
         }
         let (flag, inline) = option(token);
-        let local_collision = (flag == "--home"
-            && command_path.first().is_some_and(|s| s == "login"))
-            || (flag == "--timeout"
-                && matches!(command_path.as_slice(), [first, second, ..]
-                    if matches!(first.as_str(), "chat" | "msg" | "message")
-                        && second == "wait"));
+        let local_collision = flag == "--timeout"
+            && matches!(command_path.as_slice(), [first, second, ..]
+                if matches!(first.as_str(), "chat" | "msg" | "message")
+                    && second == "wait");
         if !local_collision
             && matches!(
                 flag,
@@ -505,115 +501,66 @@ fn approvals(args: &[String], index: &mut usize) -> Result<Command> {
     }
 }
 
-/// Trusted-device management: `devices ls`, `pending`, `approve <code>`,
-/// `deny <code>`, `revoke <id>` and `rename <id> <name>`.
+/// Device management: `devices add <name>`, `ls`, `revoke <id>` and
+/// `rename <id> <name>`.
 fn devices(args: &[String], index: &mut usize) -> Result<Command> {
     let action = next(args, *index + 1).ok_or_else(|| {
-        bad_argument("devices needs ls, pending, approve <code>, deny <code>, revoke <id> or rename <id> <name>")
+        bad_argument("devices needs add <name>, ls, revoke <id> or rename <id> <name>")
     })?;
     *index += 1;
+    let name_ok = |name: &str| {
+        if valid_label(name, 100) {
+            Ok(())
+        } else {
+            Err(bad_argument(
+                "device name must be 1-100 characters without control characters",
+            ))
+        }
+    };
     match action {
+        "add" => {
+            let name = argument(args, index, "devices add <name>")?;
+            name_ok(&name)?;
+            let mut url = None;
+            let mut app = false;
+            while let Some(item) = next(args, *index + 1) {
+                let (flag, inline) = option(item);
+                match flag {
+                    "--url" => {
+                        *index += 1;
+                        url = Some(value(args, index, flag, inline)?);
+                    }
+                    "--app" => {
+                        *index += 1;
+                        app = bool_flag(flag, inline)?;
+                    }
+                    "--json" | "--hub" | "--token-file" | "--home" | "--timeout" => break,
+                    _ => {
+                        return Err(bad_argument(format!(
+                            "unknown devices add argument {item:?}; use --url or --app"
+                        )))
+                    }
+                }
+            }
+            if app && url.is_none() {
+                return Err(bad_argument("--app needs --url"));
+            }
+            Ok(Command::DeviceAdd { name, url, app })
+        }
         "ls" | "list" => Ok(Command::DeviceList),
-        "pending" => Ok(Command::DevicePendingList),
-        "approve" => Ok(Command::DeviceApprove {
-            code: argument(args, index, "devices approve <code>")?,
-        }),
-        "deny" => Ok(Command::DeviceDeny {
-            code: argument(args, index, "devices deny <code>")?,
-        }),
         "revoke" => Ok(Command::DeviceRevoke {
             id: argument(args, index, "devices revoke <id>")?,
         }),
         "rename" => {
             let id = argument(args, index, "devices rename <id> <name>")?;
             let name = argument(args, index, "devices rename <id> <name>")?;
-            if name.is_empty() || name.len() > 100 || name.chars().any(char::is_control) {
-                return Err(bad_argument(
-                    "device name must be 1-100 characters without control characters",
-                ));
-            }
+            name_ok(&name)?;
             Ok(Command::DeviceRename { id, name })
         }
         other => Err(bad_argument(format!(
-            "unknown devices subcommand {other:?}; use ls, pending, approve <code>, deny <code>, revoke <id> or rename <id> <name>"
+            "unknown devices subcommand {other:?}; use add <name>, ls, revoke <id> or rename <id> <name>"
         ))),
     }
-}
-
-/// `login` with no harness: pair this machine with the hub through device
-/// approval. Harness login runs on the hub machine, so a harness name here is
-/// a usage error rather than a second implementation.
-fn login(args: &[String], index: &mut usize) -> Result<Command> {
-    let mut name = None;
-    let mut platform = None;
-    let mut home = None;
-    while let Some(item) = next(args, *index + 1) {
-        let (flag, inline) = option(item);
-        match flag {
-            "--name" => {
-                *index += 1;
-                name = Some(value(args, index, flag, inline)?);
-            }
-            "--platform" => {
-                *index += 1;
-                platform = Some(value(args, index, flag, inline)?);
-            }
-            "--home" => {
-                *index += 1;
-                home = Some(PathBuf::from(value(args, index, flag, inline)?));
-            }
-            "--json" | "--hub" | "--token-file" | "--timeout" => break,
-            _ if item.starts_with('-') => {
-                return Err(bad_argument(format!(
-                    "unknown login flag {item:?}; use --name, --platform or --home"
-                )))
-            }
-            _ => {
-                return Err(bad_argument(format!(
-                    "login {item} runs on the hub machine; login with no harness connects this device to the hub"
-                )))
-            }
-        }
-    }
-    if name.as_deref().is_some_and(|name| !valid_label(name, 100)) {
-        return Err(bad_argument(
-            "--name must be 1-100 characters without control characters",
-        ));
-    }
-    if platform
-        .as_deref()
-        .is_some_and(|platform| !valid_label(platform, 40))
-    {
-        return Err(bad_argument(
-            "--platform must be 1-40 characters without control characters",
-        ));
-    }
-    Ok(Command::DeviceLogin {
-        name,
-        platform,
-        home,
-    })
-}
-
-fn pair(args: &[String], index: &mut usize) -> Result<Command> {
-    let mut url = None;
-    let mut app = false;
-    while let Some(item) = next(args, *index + 1) {
-        let (flag, inline) = option(item);
-        match flag {
-            "--url" => {
-                *index += 1;
-                url = Some(value(args, index, flag, inline)?);
-            }
-            "--app" => {
-                *index += 1;
-                app = bool_flag(flag, inline)?;
-            }
-            "--json" | "--hub" | "--token-file" | "--home" | "--timeout" => break,
-            _ => return Err(bad_argument(format!("unknown pair argument {item:?}"))),
-        }
-    }
-    Ok(Command::Pair { url, app })
 }
 
 fn valid_label(text: &str, max: usize) -> bool {

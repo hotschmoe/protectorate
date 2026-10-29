@@ -135,12 +135,10 @@ fn stdio_initialize_and_list_are_json_rpc_only() {
 #[test]
 fn https_binds_only_explicit_private_addresses() {
     let dir = tempfile::tempdir().unwrap();
-    let ca = protectorate_tls::Ca::open_or_create(&dir.path().join("ca")).unwrap();
-    let identity = ca.hub_identity(&["127.0.0.1".to_owned()]).unwrap();
     let cert = dir.path().join("cert.pem");
     let key = dir.path().join("key.pem");
-    protectorate_fsutil::write_file(&cert, identity.cert_pem.as_bytes(), 0o644).unwrap();
-    protectorate_fsutil::write_file(&key, identity.key_pem.as_bytes(), 0o600).unwrap();
+    protectorate_fsutil::write_file(&cert, include_bytes!("testdata/tls-cert.pem"), 0o644).unwrap();
+    protectorate_fsutil::write_file(&key, include_bytes!("testdata/tls-key.pem"), 0o600).unwrap();
     let bridge = |listen: &str| {
         let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate-mcpbridge"));
         command

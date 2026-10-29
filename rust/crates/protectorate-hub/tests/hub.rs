@@ -219,128 +219,53 @@ async fn owner_manages_scoped_tokens_over_http() {
 }
 
 #[tokio::test]
-async fn loopback_device_pairing_approves_once_and_revokes() {
+async fn devices_are_bearer_tokens_the_owner_and_devices_manage() {
     let dir = tempfile::tempdir().unwrap();
-    let hub = Hub::open(dir.path(), "owner-secret", "v-rust")
-        .unwrap()
-        .with_loopback_device_auth();
+    let hub = Hub::open(dir.path(), "owner-secret", "v-rust").unwrap();
+    let (_, everything) = capability::mint(&hub, "script", &["*"]);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server =
         tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
-    let start = "/protectorate.v1.DeviceService/StartDeviceAuth";
-    let poll = "/protectorate.v1.DeviceService/PollDeviceAuth";
-    let pending = "/protectorate.v1.DeviceService/ListDeviceAuth";
-    let approve = "/protectorate.v1.DeviceService/ApproveDeviceAuth";
+    let add = "/protectorate.v1.DeviceService/AddDevice";
     let devices = "/protectorate.v1.DeviceService/ListDevices";
     let rename = "/protectorate.v1.DeviceService/RenameDevice";
     let revoke = "/protectorate.v1.DeviceService/RevokeDevice";
-    let key = protectorate_auth::proof::DeviceKey::generate().unwrap().0;
-    use base64::Engine;
-    let public_key = base64::engine::general_purpose::STANDARD.encode(key.public_key());
-    let now = || {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64
-    };
-    let proof = |path: &str, time: i64| format!("Proof {}", key.prove("POST", path, time).unwrap());
-    let (code, started) = call(
-        addr,
-        start,
-        "",
-        json!({"name":"phone", "platform":"android", "publicKey":public_key}),
-    )
-    .await;
-    assert_eq!(code, 200, "{started}");
-    let device_code = started["deviceCode"].as_str().unwrap();
-    let user_code = started["userCode"].as_str().unwrap();
-    let (code, body) = call(addr, pending, "owner-secret", json!({})).await;
-    assert_eq!(code, 200);
-    assert_eq!(body["requests"][0]["userCode"], user_code);
-    let (code, body) = call_as(addr, devices, &proof(devices, now()), json!({})).await;
-    assert_eq!(code, 401, "an unapproved key signed a call: {body}");
-    let (code, body) = call(addr, approve, "owner-secret", json!({"userCode":user_code})).await;
-    assert_eq!(code, 200, "{body}");
-    let (code, approved) = call(addr, poll, "", json!({"deviceCode":device_code})).await;
-    assert_eq!(code, 200, "{approved}");
-    assert_eq!(approved["status"], "approved");
-    let id = approved["device"]["id"].as_str().unwrap();
-    assert_eq!(id, key.id());
-    let (code, body) = call(addr, poll, "", json!({"deviceCode":device_code})).await;
-    assert_eq!(code, 200);
-    assert_eq!(body["status"], "consumed");
-    assert!(body.get("device").is_none());
-    let signed = proof(devices, now());
-    let (code, body) = call_as(addr, devices, &signed, json!({})).await;
+    for name in ["", "envoy", "orchestrator-envoy", "sleeve:worker", "a\nb"] {
+        let (code, body) = call(addr, add, "owner-secret", json!({"name":name})).await;
+        assert_eq!(code, 400, "{name:?}: {body}");
+    }
+    let (code, body) = call(addr, add, &everything, json!({"name":"script phone"})).await;
+    assert_eq!(code, 403, "a capability added a device: {body}");
+    let (code, added) = call(addr, add, "owner-secret", json!({"name":"phone"})).await;
+    assert_eq!(code, 200, "{added}");
+    let id = added["device"]["id"].as_str().unwrap();
+    let token = added["token"].as_str().unwrap();
+    assert_eq!(id.len(), 16);
+    assert!(token.starts_with("pd1."), "{added}");
+    assert_eq!(added["device"]["addedBy"], "owner");
+    let (code, body) = call(addr, devices, token, json!({})).await;
     assert_eq!(code, 200, "{body}");
     assert_eq!(body["devices"][0]["id"], id);
-    let (code, body) = call_as(addr, devices, &signed, json!({})).await;
-    assert_eq!(code, 401, "{body}");
-    assert!(
-        body["message"].as_str().unwrap().contains("replayed"),
-        "{body}"
-    );
-    let (code, body) = call_as(addr, devices, &proof(devices, now() - 120), json!({})).await;
-    assert_eq!(code, 401, "{body}");
-    assert!(
-        body["message"].as_str().unwrap().contains("clock skew"),
-        "{body}"
-    );
-    let (code, body) = call_as(addr, devices, &proof(pending, now()), json!({})).await;
-    assert_eq!(code, 401, "a proof for another path: {body}");
-    let (code, body) = call(
-        addr,
-        rename,
-        "owner-secret",
-        json!({"id":id,"name":"new phone"}),
-    )
-    .await;
+    assert!(body["devices"][0].get("token").is_none(), "{body}");
+    let (code, body) = call(addr, devices, &everything, json!({})).await;
+    assert_eq!(code, 403, "{body}");
+    // Names need not be unique; ids are.
+    let (code, twin) = call(addr, add, token, json!({"name":"phone"})).await;
+    assert_eq!(code, 200, "{twin}");
+    assert_ne!(twin["device"]["id"], id);
+    assert_eq!(twin["device"]["addedBy"], "token:phone");
+    let (code, body) = call(addr, rename, token, json!({"id":id,"name":"new phone"})).await;
     assert_eq!(code, 200, "{body}");
     assert_eq!(body["device"]["name"], "new phone");
     let (code, body) = call(addr, revoke, "owner-secret", json!({"id":id})).await;
     assert_eq!(code, 200, "{body}");
-    let (code, _) = call_as(addr, devices, &proof(devices, now()), json!({})).await;
-    assert_eq!(code, 401);
-    server.abort();
-}
-
-#[tokio::test]
-async fn device_pairing_is_disabled_without_loopback_admission() {
-    let dir = tempfile::tempdir().unwrap();
-    let hub = Hub::open(dir.path(), "owner-secret", "v-rust").unwrap();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server =
-        tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
-    let (code, body) = call(
-        addr,
-        "/protectorate.v1.DeviceService/StartDeviceAuth",
-        "",
-        json!({"name":"phone","platform":"android"}),
-    )
-    .await;
-    assert_eq!(code, 403, "{body}");
-    server.abort();
-}
-
-#[tokio::test]
-async fn tls_pairing_fails_closed_without_transport_peer() {
-    let dir = tempfile::tempdir().unwrap();
-    let hub = Hub::open(dir.path(), "owner-secret", "v-rust")
-        .unwrap()
-        .with_tls_device_auth();
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let server =
-        tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
-    let (code, body) = call(
-        addr,
-        "/protectorate.v1.DeviceService/StartDeviceAuth",
-        "",
-        json!({"name":"phone","platform":"android"}),
-    )
-    .await;
-    assert_eq!(code, 403, "{body}");
+    let (code, body) = call(addr, devices, token, json!({})).await;
+    assert_eq!(code, 401, "{body}");
+    let (code, body) = call(addr, revoke, "owner-secret", json!({"id":id})).await;
+    assert_eq!(code, 404, "{body}");
+    let twin_token = twin["token"].as_str().unwrap();
+    let (code, body) = call(addr, devices, twin_token, json!({})).await;
+    assert_eq!(code, 200, "{body}");
     server.abort();
 }

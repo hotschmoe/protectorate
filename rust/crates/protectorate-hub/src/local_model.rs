@@ -24,7 +24,7 @@ pub(super) fn served_locally(base_url: &str, hosts: &[String]) -> bool {
         return true;
     }
     match host.parse::<IpAddr>() {
-        Ok(ip) => protectorate_tls::private_ip(ip),
+        Ok(ip) => protectorate_wire::private_ip(ip),
         Err(_) => host == "localhost" || host.ends_with(".localhost"),
     }
 }

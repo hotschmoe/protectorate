@@ -12,14 +12,13 @@ const ROOT: &[Candidate] = &[
     ("backlog", "Manage notes"),
     ("chat", "Talk to a sleeve"),
     ("completion", "Generate shell completion"),
-    ("devices", "Manage trusted devices"),
+    ("devices", "Manage devices"),
     ("events", "Stream hub events"),
     ("hub", "Manage the local hub"),
-    ("login", "Pair this device"),
+    ("login", "Sign a harness in on the hub"),
     ("mcp", "Run the MCP bridge"),
     ("msg", "Use the mailbox"),
     ("orchestrator", "Manage Envoy"),
-    ("pair", "Show a pairing link"),
     ("quota", "Show subscription usage"),
     ("report", "Report a sleeve result"),
     ("session", "Manage sessions"),
@@ -178,10 +177,8 @@ fn children(path: &str) -> &'static [Candidate] {
             ("deny", "Deny a call"),
         ],
         "devices" => &[
+            ("add", "Add a device"),
             ("ls", "List devices"),
-            ("pending", "Pending requests"),
-            ("approve", "Approve a device"),
-            ("deny", "Deny a request"),
             ("revoke", "Revoke a device"),
             ("rename", "Rename a device"),
         ],
@@ -392,6 +389,10 @@ fn local_flags(path: &str) -> &'static [Candidate] {
             &[("--add", "Add scope"), ("--remove", "Remove scope")]
         }
         "approvals ls" => &[("--all", "Include decided calls")],
+        "devices add" => &[
+            ("--url", "Hub URL for pairing links"),
+            ("--app", "QR of the app link"),
+        ],
         "audit ls" | "audit tail" => &[
             ("--lines", "Line count"),
             ("--actor", "Actor"),
@@ -441,6 +442,7 @@ fn takes_value(flag: &str) -> bool {
             | "--ack"
             | "--refresh"
             | "--double"
+            | "--app"
     )
 }
 

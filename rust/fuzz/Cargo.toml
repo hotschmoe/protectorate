@@ -63,8 +63,8 @@ doc = false
 bench = false
 
 [[bin]]
-name = "device_proofs"
-path = "fuzz_targets/device_proofs.rs"
+name = "device_tokens"
+path = "fuzz_targets/device_tokens.rs"
 test = false
 doc = false
 bench = false

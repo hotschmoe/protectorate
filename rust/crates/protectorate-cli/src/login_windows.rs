@@ -1,13 +1,13 @@
-//! Windows credential storage. A protected DACL is installed at creation, so
-//! the temporary file never contains a secret under an inherited public ACL.
+//! Windows private files: owner-only DACL checks for the owner token and
+//! harness credentials, and private directories created with a protected
+//! DACL, so no secret ever sits under an inherited public ACL.
 use protectorate_wire::{Code, Result, RpcError};
 use std::{
     ffi::OsStr,
     fs::{self, File, OpenOptions},
-    io::{self, Read, Write},
+    io::{self, Read},
     os::windows::{ffi::OsStrExt, fs::MetadataExt, io::AsRawHandle},
-    path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    path::Path,
 };
 use windows_sys::Win32::{
     Foundation::{CloseHandle, LocalFree, ERROR_INSUFFICIENT_BUFFER},
@@ -21,13 +21,11 @@ use windows_sys::Win32::{
         TOKEN_USER,
     },
     Storage::FileSystem::{
-        CreateDirectoryW, FILE_ATTRIBUTE_REPARSE_POINT, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, READ_CONTROL, WRITE_DAC,
+        CreateDirectoryW, FILE_ATTRIBUTE_REPARSE_POINT, FILE_GENERIC_READ, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, READ_CONTROL,
     },
     System::Threading::{GetCurrentProcess, OpenProcessToken},
 };
-
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
 fn wide(value: &OsStr) -> Vec<u16> {
     value.encode_wide().chain(Some(0)).collect()
@@ -254,34 +252,6 @@ pub(super) fn check_private_directory(dir: &Path) -> Result<(File, File)> {
     Ok((home, credentials))
 }
 
-pub(super) fn ensure_private_directory(dir: &Path) -> Result<()> {
-    let home = dir
-        .parent()
-        .ok_or_else(|| denial(dir, "missing state home"))?;
-    for path in [home, dir] {
-        check_ancestors(path)?;
-        if !path.exists() {
-            let descriptor = private_descriptor(true)
-                .map_err(|error| internal("prepare ACL for", path, error))?;
-            let attributes = SECURITY_ATTRIBUTES {
-                nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-                lpSecurityDescriptor: descriptor.0,
-                bInheritHandle: 0,
-            };
-            let result = unsafe { CreateDirectoryW(wide(path.as_os_str()).as_ptr(), &attributes) };
-            if result == 0 && io::Error::last_os_error().kind() != io::ErrorKind::AlreadyExists {
-                return Err(internal(
-                    "create private directory",
-                    path,
-                    io::Error::last_os_error(),
-                ));
-            }
-        }
-        inspect_private(path, true)?;
-    }
-    Ok(())
-}
-
 /// Harness auth trees have variable depth (`auth/<provider>` and
 /// `login/claude`). Create each missing component with a protected DACL, then
 /// verify the requested directory's owner, DACL, and real file type.
@@ -343,75 +313,4 @@ pub(super) fn read_private_file(path: &Path) -> io::Result<String> {
         ));
     }
     String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
-}
-
-pub(super) fn write_private_file(path: &Path, data: &[u8]) -> io::Result<()> {
-    let dir = path.parent().unwrap_or(Path::new("."));
-    let _directory_guards = check_private_directory(dir)
-        .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.message))?;
-    match fs::symlink_metadata(path) {
-        Ok(_) => {
-            inspect_private(path, false)
-                .map_err(|error| io::Error::new(io::ErrorKind::PermissionDenied, error.message))?;
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
-    }
-    let descriptor = private_descriptor(false)?;
-    let basename = path.file_name().unwrap_or_default().to_string_lossy();
-    let (mut file, temp): (File, PathBuf) = loop {
-        let n = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let temp = dir.join(format!(".{basename}.{}.{}", std::process::id(), n));
-        // The parent has already passed an ACL check. CreateNew guarantees no
-        // existing link is followed, then we set an explicit DACL before data.
-        use std::os::windows::fs::OpenOptionsExt;
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .access_mode(FILE_GENERIC_WRITE | WRITE_DAC)
-            .open(&temp)
-        {
-            Ok(file) => break (file, temp),
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(error),
-        }
-    };
-    let result = (|| {
-        use windows_sys::Win32::{
-            Security::Authorization::{SetSecurityInfo, SE_FILE_OBJECT},
-            Security::{GetSecurityDescriptorDacl, PROTECTED_DACL_SECURITY_INFORMATION},
-        };
-        let mut present = 0;
-        let mut acl = std::ptr::null_mut();
-        let mut defaulted = 0;
-        if unsafe {
-            GetSecurityDescriptorDacl(descriptor.0, &mut present, &mut acl, &mut defaulted)
-        } == 0
-            || present == 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        let status = unsafe {
-            SetSecurityInfo(
-                file.as_raw_handle(),
-                SE_FILE_OBJECT,
-                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                acl,
-                std::ptr::null_mut(),
-            )
-        };
-        if status != 0 {
-            return Err(io::Error::from_raw_os_error(status as i32));
-        }
-        file.write_all(data)?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&temp, path)
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temp);
-    }
-    result
 }

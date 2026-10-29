@@ -1,24 +1,20 @@
-//! A real hub binary over real HTTP: devices sign every request with the key
-//! they registered while pairing, the owner token works only on the loopback
-//! listener, and capabilities renew, narrow and die when revoked.
+//! A real hub binary over real HTTP: devices present the bearer token the
+//! owner added them with, the proxy listener admits only the trusted proxy
+//! and never the owner token, and capabilities renew, narrow and die when
+//! revoked.
 #![cfg(target_os = "linux")]
 use crate::support;
 
-use base64::{engine::general_purpose::STANDARD, Engine};
-use protectorate_auth::{
-    capability::{self, Caveat},
-    proof::DeviceKey,
-};
+use protectorate_auth::capability::{self, Caveat};
 use protectorate_connect_client::{Client, Credential};
 use protectorate_wire::Code;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::{
     fs,
     io::{Read, Write},
-    net::TcpStream,
     os::unix::fs::PermissionsExt,
     path::Path,
-    sync::{mpsc, Arc},
+    sync::mpsc,
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -35,84 +31,56 @@ fn now() -> i64 {
         .as_secs() as i64
 }
 
-/// One raw Connect call, so a test controls the Authorization header.
-fn post(base: &str, path: &str, authorization: &str) -> (u16, Value) {
-    let address = base.trim_start_matches("http://");
-    let mut stream = TcpStream::connect(address).unwrap();
-    write!(
-        stream,
-        "POST {path} HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nAuthorization: {authorization}\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
-    )
-    .unwrap();
-    let mut response = String::new();
-    stream.read_to_string(&mut response).unwrap();
-    let (head, body) = response.split_once("\r\n\r\n").unwrap();
-    (
-        head.split_whitespace().nth(1).unwrap().parse().unwrap(),
-        serde_json::from_str(body).unwrap_or(Value::Null),
-    )
-}
-
-fn tls_client(hub: &Hub, token: &str) -> Client {
-    Client::new_with_ca(&hub.tls, token, Duration::from_secs(20), Some(&hub.ca())).unwrap()
-}
-
-/// Pairs a fresh key over the TLS listener; the owner approves on loopback.
-fn pair(hub: &Hub, name: &str) -> (Arc<DeviceKey>, String) {
-    let key = Arc::new(DeviceKey::generate().unwrap().0);
-    let public = tls_client(hub, "");
-    let started = public
-        .call(
-            &format!("{DEVICES}StartDeviceAuth"),
-            &json!({"name": name, "platform": "linux", "publicKey": STANDARD.encode(key.public_key())}),
-        )
-        .unwrap();
-    hub.call(
-        &format!("{DEVICES}ApproveDeviceAuth"),
-        json!({"userCode": started["userCode"]}),
-    );
-    let approved = public
-        .call(
-            &format!("{DEVICES}PollDeviceAuth"),
-            &json!({"deviceCode": started["deviceCode"]}),
-        )
-        .unwrap();
-    assert_eq!(approved["status"], "approved", "{approved}");
-    let id = approved["device"]["id"].as_str().unwrap().to_owned();
-    assert_eq!(id, key.id());
-    (key, id)
+fn bearer(token: &str) -> String {
+    format!("Bearer {token}")
 }
 
 #[test]
-fn devices_sign_every_request_and_revocation_closes_their_streams() {
+fn devices_use_their_token_through_the_proxy_until_revoked() {
     let root = tempfile::tempdir().unwrap();
     let hub = Hub::start(root.path());
-    let (key, id) = pair(&hub, "laptop");
-    let device = tls_client(&hub, "").with_credential(Credential::Device(Arc::clone(&key)));
-    assert!(device.call(STATUS, &json!({})).is_ok());
-    // Owner approvals take signed device requests as well as the owner.
+    let (id, token) = add_device(&hub, "laptop");
+    assert!(token.starts_with("pd1."), "{token}");
+    assert_eq!(token.len(), 4 + 43, "{token}");
+    let (status, body) = post(&hub.proxy, STATUS, &bearer(&token), "{}");
+    assert_eq!(status, 200, "{body}");
+    // Owner approvals and device management take devices as well as the owner.
     let approvals = "/protectorate.v1.ApprovalService/ListApprovals";
-    assert!(device.call(approvals, &json!({})).is_ok());
-    assert!(hub.client.call(approvals, &json!({})).is_ok());
-
-    let proof = format!("Proof {}", key.prove("POST", STATUS, now()).unwrap());
-    assert_eq!(post(&hub.plain, STATUS, &proof).0, 200);
-    let (status, body) = post(&hub.plain, STATUS, &proof);
-    assert_eq!(status, 401, "{body}");
-    assert!(
-        body["message"].as_str().unwrap().contains("replayed"),
-        "{body}"
+    assert_eq!(post(&hub.proxy, approvals, &bearer(&token), "{}").0, 200);
+    let (status, added) = post(
+        &hub.proxy,
+        &format!("{DEVICES}AddDevice"),
+        &bearer(&token),
+        r#"{"name":"phone"}"#,
     );
-    let stale = format!("Proof {}", key.prove("POST", STATUS, now() - 120).unwrap());
-    let (status, body) = post(&hub.plain, STATUS, &stale);
-    assert_eq!(status, 401, "{body}");
-    assert!(
-        body["message"].as_str().unwrap().contains("clock skew"),
-        "{body}"
-    );
-    let elsewhere = format!("Proof {}", key.prove("POST", "/elsewhere", now()).unwrap());
-    assert_eq!(post(&hub.plain, STATUS, &elsewhere).0, 401);
+    assert_eq!(status, 200, "{added}");
+    assert_eq!(added["device"]["addedBy"], "token:laptop", "{added}");
+    let listed = hub.call(&format!("{DEVICES}ListDevices"), json!({}));
+    let laptop = listed["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|device| device["id"] == id.as_str())
+        .unwrap_or_else(|| panic!("{listed}"));
+    assert_eq!(laptop["name"], "laptop");
+    assert_eq!(laptop["addedBy"], "owner");
+    assert!(laptop["lastUsedAt"].is_string(), "{laptop}");
+    // The hub keeps only a hash of each token.
+    let identity = fs::read_to_string(hub.home.join("identity.json")).unwrap();
+    assert!(!identity.contains(&token[4..]), "the token was stored");
 
+    // Anything but the exact token is refused, before any handler runs.
+    let mut forged = token.clone();
+    forged.replace_range(10..11, if &token[10..11] == "A" { "B" } else { "A" });
+    for wrong in [forged.as_str(), "pd1.", "pd1.not-a-token", "Proof x.1.2.3"] {
+        let (status, body) = post(&hub.proxy, STATUS, &bearer(wrong), "{}");
+        assert_eq!(status, 401, "{wrong}: {body}");
+    }
+    let (status, body) = post(&hub.proxy, STATUS, "", "{}");
+    assert_eq!(status, 401, "{body}");
+
+    // A device token works on loopback too; its open stream ends on revoke.
+    let device = Client::new(&hub.plain, token.as_str(), Duration::from_secs(20)).unwrap();
     let (events, received) = mpsc::channel();
     let stream = device.isolated();
     let watcher = thread::spawn(move || {
@@ -138,22 +106,141 @@ fn devices_sign_every_request_and_revocation_closes_their_streams() {
     assert_eq!(error.code, Code::Unauthenticated, "{error:?}");
     let error = device.call(STATUS, &json!({})).unwrap_err();
     assert!(error.message.contains("unknown credential"), "{error:?}");
+    let (status, body) = post(&hub.proxy, STATUS, &bearer(&token), "{}");
+    assert_eq!(status, 401, "{body}");
+    let phone = added["token"].as_str().unwrap();
+    assert_eq!(post(&hub.proxy, STATUS, &bearer(phone), "{}").0, 200);
 }
 
 #[test]
-fn the_owner_token_works_only_on_the_loopback_listener() {
+fn the_owner_token_and_debug_routes_work_only_on_the_loopback_listener() {
     let root = tempfile::tempdir().unwrap();
     let hub = Hub::start(root.path());
     assert!(hub.client.call(STATUS, &json!({})).is_ok());
-    let error = tls_client(&hub, OWNER)
-        .call(STATUS, &json!({}))
-        .unwrap_err();
-    assert_eq!(error.code, Code::Unauthenticated);
-    assert!(error.message.contains("loopback listener"), "{error:?}");
+    let (status, body) = post(&hub.proxy, STATUS, &bearer(OWNER), "{}");
+    assert_eq!(status, 401, "{body}");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("loopback listener"),
+        "{body}"
+    );
+    let debug = |base: &str| {
+        let address = base.trim_start_matches("http://");
+        let mut stream = std::net::TcpStream::connect(address).unwrap();
+        write!(
+            stream,
+            "GET /debug/pprof/ HTTP/1.1\r\nHost: {address}\r\nAuthorization: Bearer {OWNER}\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response.split_whitespace().nth(1).unwrap().to_owned()
+    };
+    assert_eq!(debug(&hub.plain), "200");
+    assert_eq!(debug(&hub.proxy), "403");
 }
 
 #[test]
-fn the_terminal_websocket_takes_the_proof_as_a_subprotocol() {
+fn the_proxy_listener_drops_every_peer_but_the_trusted_proxy() {
+    let root = tempfile::tempdir().unwrap();
+    let hub = Hub::start(root.path());
+    let (_, token) = add_device(&hub, "laptop");
+    let address: std::net::SocketAddr = hub.proxy.trim_start_matches("http://").parse().unwrap();
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    // A client on another address reaches the port but never the hub.
+    let mut stream = runtime.block_on(async {
+        let socket = tokio::net::TcpSocket::new_v4().unwrap();
+        socket.bind("127.0.0.3:0".parse().unwrap()).unwrap();
+        socket.connect(address).await.unwrap().into_std().unwrap()
+    });
+    stream.set_nonblocking(false).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let request = format!(
+        "POST {STATUS} HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nAuthorization: Bearer {token}\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+    );
+    let _ = stream.write_all(request.as_bytes());
+    let mut response = Vec::new();
+    match stream.read_to_end(&mut response) {
+        Ok(_) => assert!(
+            response.is_empty(),
+            "a peer that is not the proxy got: {}",
+            String::from_utf8_lossy(&response)
+        ),
+        Err(error) => assert_eq!(error.kind(), std::io::ErrorKind::ConnectionReset, "{error}"),
+    }
+    // The trusted proxy is still served.
+    assert_eq!(post(&hub.proxy, STATUS, &bearer(&token), "{}").0, 200);
+}
+
+#[test]
+fn proxy_listener_flags_are_checked_at_start() {
+    let root = tempfile::tempdir().unwrap();
+    let token = root.path().join("owner-token");
+    fs::write(&token, OWNER).unwrap();
+    fs::set_permissions(&token, fs::Permissions::from_mode(0o600)).unwrap();
+    let home = root.path().join("hub");
+    for (extra, expected) in [
+        (
+            vec!["--proxy-listen", "127.0.0.2:0"],
+            "--proxy-listen requires at least one --trusted-proxy",
+        ),
+        (
+            vec!["--trusted-proxy", "127.0.0.1"],
+            "--trusted-proxy applies only to a --proxy-listen",
+        ),
+        (
+            vec![
+                "--proxy-listen",
+                "0.0.0.0:7470",
+                "--trusted-proxy",
+                "127.0.0.1",
+            ],
+            "refusing to listen",
+        ),
+        (
+            vec![
+                "--proxy-listen",
+                "8.8.8.8:7470",
+                "--trusted-proxy",
+                "127.0.0.1",
+            ],
+            "refusing to listen",
+        ),
+        (
+            vec![
+                "--proxy-listen",
+                "127.0.0.2:0",
+                "--trusted-proxy",
+                "8.8.8.8",
+            ],
+            "not an explicit private address",
+        ),
+        (vec!["--tls-listen", "127.0.0.2:0"], "unknown argument"),
+    ] {
+        let mut args = vec![
+            "serve",
+            "--home",
+            home.to_str().unwrap(),
+            "--owner-token-file",
+            token.to_str().unwrap(),
+        ];
+        args.extend(&extra);
+        let output = run(&args, root.path());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success(), "{extra:?} was accepted");
+        assert!(stderr.contains(expected), "{extra:?}: {stderr}");
+    }
+}
+
+#[test]
+fn the_terminal_websocket_takes_the_token_as_a_subprotocol() {
     use tungstenite::{client::IntoClientRequest, http::HeaderValue, Message};
     let root = tempfile::tempdir().unwrap();
     let hub = Hub::start(root.path());
@@ -161,8 +248,8 @@ fn the_terminal_websocket_takes_the_proof_as_a_subprotocol() {
         "/protectorate.v1.SessionService/CreateSession",
         json!({"name": "term", "command": ["/bin/sh", "-c", "echo terminal-ready; exec cat"]}),
     );
-    let (key, _) = pair(&hub, "phone");
-    let url = format!("{}/ws/terminal/term", hub.plain.replace("http://", "ws://"));
+    let (id, token) = add_device(&hub, "phone");
+    let url = format!("{}/ws/terminal/term", hub.proxy.replace("http://", "ws://"));
     let attach = |protocols: String, url: &str| {
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
@@ -180,16 +267,20 @@ fn the_terminal_websocket_takes_the_proof_as_a_subprotocol() {
         401
     );
     assert_eq!(
-        status(attach("protectorate.v1".into(), &format!("{url}?token={OWNER}")).unwrap_err()),
+        status(attach("protectorate.v1".into(), &format!("{url}?token={token}")).unwrap_err()),
         401,
         "the query fallback is gone"
     );
-    let proof = key.prove("GET", "/ws/terminal/term", now()).unwrap();
-    let (mut socket, response) = attach(format!("protectorate.v1, proof.{proof}"), &url).unwrap();
+    assert_eq!(
+        status(attach(format!("protectorate.v1, bearer.{OWNER}"), &url).unwrap_err()),
+        401,
+        "the owner token is refused through the proxy"
+    );
+    let (mut socket, response) = attach(format!("protectorate.v1, bearer.{token}"), &url).unwrap();
     assert_eq!(
         response.headers()["sec-websocket-protocol"],
         "protectorate.v1",
-        "the hub never echoes the proof"
+        "the hub never echoes the token"
     );
     let deadline = Instant::now() + Duration::from_secs(120);
     let mut seen = Vec::new();
@@ -201,9 +292,23 @@ fn the_terminal_websocket_takes_the_proof_as_a_subprotocol() {
             }
         }
     }
-    let _ = socket.close(None);
-    let replayed = attach(format!("protectorate.v1, proof.{proof}"), &url).unwrap_err();
-    assert_eq!(status(replayed), 401);
+    // Revoking the device closes its open terminal.
+    hub.call(&format!("{DEVICES}RevokeDevice"), json!({"id": id}));
+    let deadline = Instant::now() + Duration::from_secs(120);
+    loop {
+        assert!(
+            Instant::now() < deadline,
+            "revocation left the terminal open"
+        );
+        match socket.read() {
+            Ok(Message::Close(_)) | Err(_) => break,
+            Ok(_) => {}
+        }
+    }
+    assert_eq!(
+        status(attach(format!("protectorate.v1, bearer.{token}"), &url).unwrap_err()),
+        401
+    );
 }
 
 fn write_private(path: &Path, token: &str) {

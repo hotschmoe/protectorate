@@ -240,7 +240,7 @@ fn run_mcp_companion(forwarded: &McpForward) -> ExitCode {
     command.args(&forwarded.argv);
     if forwarded.needs_token {
         // Resolve credentials in the CLI so the bridge receives the same
-        // capability file, saved device key or local hub token that ordinary
+        // token file, token or local hub owner token that ordinary
         // commands use.
         let (name, value) = match protectorate_cli::mcp_credential(
             forwarded.hub.as_deref(),

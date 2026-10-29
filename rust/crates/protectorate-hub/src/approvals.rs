@@ -277,7 +277,7 @@ fn approval(request: &Request) -> v1::Approval {
 }
 
 /// Envoy, a sleeve, or a capability lineage Envoy minted. The owner,
-/// approved devices and capabilities the owner minted are never gated.
+/// devices and capabilities the owner minted are never gated.
 pub(crate) fn is_agent(hub: &Hub, actor: &str, token_id: &str) -> bool {
     super::actor_sleeve(actor).is_some()
         || (!token_id.is_empty()

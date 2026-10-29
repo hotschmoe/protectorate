@@ -156,7 +156,7 @@ pub fn backlog_notes(data: &[u8]) {
 
 /// An identity file loads; a capability minted into it verifies after a
 /// reopen and after renewal, no other input verifies as it, and a probe
-/// proof or device code never panics the store.
+/// device token never panics the store.
 pub fn identity_store(data: &[u8]) {
     let [file, probe] = fields(data, 2)[..] else {
         unreachable!()
@@ -170,11 +170,7 @@ pub fn identity_store(data: &[u8]) {
     let now = 1_800_000_000;
     let probe = text(probe);
     let _ = store.verify(&probe, now);
-    if let Some(proof) = protectorate_auth::proof::Proof::parse(&probe) {
-        let _ = store.verify_proof(&proof, "POST", "/fuzz", proof.time);
-    }
-    let _ = store.poll_device(&probe, now);
-    let _ = store.pending_devices(now);
+    let _ = store.verify_device(&probe, now);
     let before = store.capabilities().len();
     let Ok((record, secret)) = store.mint(
         protectorate_identity::Mint {

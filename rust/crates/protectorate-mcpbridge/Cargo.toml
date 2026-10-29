@@ -8,7 +8,6 @@ description = "MCP bridge that serves the unary hub RPCs as tools over stdio or 
 [dependencies]
 protectorate-connect-client = { path = "../protectorate-connect-client" }
 protectorate-wire = { path = "../protectorate-wire" }
-protectorate-tls = { path = "../protectorate-tls" }
 protectorate-fsutil = { path = "../protectorate-fsutil" }
 prost-reflect = { workspace = true }
 serde_json = { workspace = true }

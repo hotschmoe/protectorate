@@ -1,6 +1,6 @@
 //! Blocking Connect JSON transport for the Rust CLI and MCP bridge.
 //! Callers in an async runtime should use `spawn_blocking` for these methods.
-use protectorate_auth::{capability, proof::DeviceKey};
+use protectorate_auth::capability;
 use protectorate_wire::{
     decode_json, encode, encode_envelope, encode_json, Catalog, Code, DynamicMessage, Method,
     ReflectMessage, Result, Rpc, RpcError, FLAG_END_STREAM,
@@ -9,7 +9,6 @@ use serde_json::Value;
 use std::{
     io::Read,
     path::{Path, PathBuf},
-    sync::Arc,
     time::Duration,
 };
 use zeroize::Zeroizing;
@@ -19,91 +18,20 @@ const MAX_STREAM_MESSAGE_BYTES: usize = 8 << 20;
 const MAX_ERROR_BYTES: u64 = 64 << 10;
 /// How often a call the hub holds for owner approval is repeated.
 const APPROVAL_POLL: Duration = Duration::from_secs(2);
-/// Procedures a client without a token may call: device pairing.
-const PUBLIC: [&str; 2] = [
-    "/protectorate.v1.DeviceService/StartDeviceAuth",
-    "/protectorate.v1.DeviceService/PollDeviceAuth",
-];
-
 const RENEW_TOKEN: &str = "/protectorate.v1.TokenService/RenewToken";
 
 /// How a client proves who it is on each request.
 #[derive(Clone)]
 pub enum Credential {
-    /// Only the public pairing procedures.
+    /// No Authorization header; the hub refuses every call.
     None,
-    /// The owner token (loopback only) or a capability held in memory.
+    /// The owner token (loopback only), a device token or a capability held
+    /// in memory.
     Bearer(Zeroizing<String>),
-    /// A capability file, read for every request. Past half its lifetime the
-    /// client renews it through the hub and rewrites the file in place.
+    /// A token file, read for every request. A capability past half its
+    /// lifetime is renewed through the hub and the file rewritten in place;
+    /// any other token is used as it is.
     TokenFile(PathBuf),
-    /// An approved device's key, which signs every request.
-    Device(Arc<DeviceKey>),
-}
-
-/// The key in a device credential record saved by `protectorate login`:
-/// `{"hub", "deviceId", "key": <base64 PKCS#8>, ...}`.
-pub fn device_key(record: &Value) -> Result<Arc<DeviceKey>> {
-    use base64::{engine::general_purpose::STANDARD, Engine};
-    let pkcs8 = record
-        .get("key")
-        .and_then(Value::as_str)
-        .filter(|key| !key.is_empty())
-        .and_then(|key| STANDARD.decode(key).ok())
-        .map(Zeroizing::new)
-        .ok_or_else(|| RpcError::new(Code::DataLoss, "device credential has no key"))?;
-    DeviceKey::from_pkcs8(&pkcs8)
-        .map(Arc::new)
-        .map_err(|error| RpcError::new(Code::DataLoss, error))
-}
-
-/// A device credential file another process chose, such as the CLI handing
-/// one to the MCP bridge.
-pub fn read_device_credential(path: &Path) -> Result<Credential> {
-    let raw = Zeroizing::new(std::fs::read(path).map_err(|error| {
-        RpcError::new(
-            Code::Unauthenticated,
-            format!("read device credential {}: {error}", path.display()),
-        )
-    })?);
-    let record: Value = serde_json::from_slice(&raw)
-        .map_err(|error| RpcError::new(Code::DataLoss, format!("device credential: {error}")))?;
-    device_key(&record).map(Credential::Device)
-}
-
-/// Parsed private CA bundle for explicit TLS trust.
-#[derive(Clone)]
-pub struct TrustRoots(Vec<ureq::tls::Certificate<'static>>);
-
-impl TrustRoots {
-    pub fn from_pem(pem: &[u8]) -> Result<Self> {
-        if pem.is_empty() || pem.len() > 1024 * 1024 {
-            return Err(RpcError::invalid("TLS CA bundle must be under 1 MiB"));
-        }
-        let mut roots = Vec::new();
-        let mut check = rustls::RootCertStore::empty();
-        for item in ureq::tls::parse_pem(pem) {
-            match item.map_err(|e| RpcError::invalid(format!("invalid TLS CA PEM: {e}")))? {
-                ureq::tls::PemItem::Certificate(cert) => {
-                    check
-                        .add(rustls::pki_types::CertificateDer::from(cert.der().to_vec()))
-                        .map_err(|e| {
-                            RpcError::invalid(format!("invalid TLS CA certificate: {e}"))
-                        })?;
-                    roots.push(cert);
-                }
-                _ => {
-                    return Err(RpcError::invalid(
-                        "TLS CA bundle must contain certificates only",
-                    ))
-                }
-            }
-        }
-        if roots.is_empty() {
-            return Err(RpcError::invalid("TLS CA bundle has no certificates"));
-        }
-        Ok(Self(roots))
-    }
 }
 
 #[derive(Clone)]
@@ -132,73 +60,8 @@ impl Client {
         self.agent.shutdown();
     }
 
+    /// HTTPS trusts the public web PKI roots.
     pub fn new(base: &str, token: impl Into<String>, timeout: Duration) -> Result<Self> {
-        if let Ok(pem) = std::env::var("PROTECTORATE_TLS_CA_PEM") {
-            if pem.len() > 16 * 1024 {
-                return Err(RpcError::invalid("TLS CA environment exceeds 16 KiB"));
-            }
-            return Self::new_with_ca_pem(base, token, timeout, Some(pem.as_bytes()));
-        }
-        let ca = std::env::var_os("PROTECTORATE_TLS_CA_CERT");
-        Self::new_with_ca(base, token, timeout, ca.as_deref().map(Path::new))
-    }
-
-    /// Connect to the public device authorization procedures
-    /// without a bearer credential. The same endpoint, TLS and response limits
-    /// apply.
-    pub fn new_public(base: &str, timeout: Duration) -> Result<Self> {
-        Self::new(base, "", timeout)
-    }
-
-    /// Add one trusted PEM certificate while retaining normal TLS name checks.
-    pub fn new_with_ca(
-        base: &str,
-        token: impl Into<String>,
-        timeout: Duration,
-        ca: Option<&Path>,
-    ) -> Result<Self> {
-        let pem = ca
-            .map(|path| {
-                let metadata = std::fs::metadata(path)
-                    .map_err(|e| RpcError::invalid(format!("TLS CA certificate: {e}")))?;
-                if !metadata.is_file() || metadata.len() > 1024 * 1024 {
-                    return Err(RpcError::invalid(
-                        "TLS CA must be a regular file under 1 MiB",
-                    ));
-                }
-                let mut pem = Vec::new();
-                std::fs::File::open(path)
-                    .map_err(|e| RpcError::invalid(format!("TLS CA certificate: {e}")))?
-                    .take(1024 * 1024 + 1)
-                    .read_to_end(&mut pem)
-                    .map_err(|e| RpcError::invalid(format!("TLS CA certificate: {e}")))?;
-                if pem.len() > 1024 * 1024 {
-                    return Err(RpcError::invalid("TLS CA exceeds 1 MiB"));
-                }
-                Ok(pem)
-            })
-            .transpose()?;
-        Self::new_with_ca_pem(base, token, timeout, pem.as_deref())
-    }
-
-    /// Trust a PEM certificate supplied by a confined process environment.
-    pub fn new_with_ca_pem(
-        base: &str,
-        token: impl Into<String>,
-        timeout: Duration,
-        pem: Option<&[u8]>,
-    ) -> Result<Self> {
-        let trust = pem.map(TrustRoots::from_pem).transpose()?;
-        Self::new_with_trust(base, token, timeout, trust.as_ref())
-    }
-
-    /// Creates a client with daemon-supplied roots, ignoring process CA env.
-    pub fn new_with_trust(
-        base: &str,
-        token: impl Into<String>,
-        timeout: Duration,
-        trust: Option<&TrustRoots>,
-    ) -> Result<Self> {
         let base = base.trim_end_matches('/');
         if !valid_endpoint(base) {
             return Err(RpcError::invalid(
@@ -209,20 +72,11 @@ impl Client {
         if token.contains(['\r', '\n']) {
             return Err(RpcError::invalid("invalid bearer token"));
         }
-        let mut config = ureq::Agent::config_builder()
+        let config = ureq::Agent::config_builder()
             .http_status_as_error(false)
             .max_redirects(0)
             .max_redirects_will_error(false)
             .timeout_global(Some(timeout));
-        if base.starts_with("https://") {
-            if let Some(trust) = trust {
-                config = config.tls_config(
-                    ureq::tls::TlsConfig::builder()
-                        .root_certs(ureq::tls::RootCerts::new_with_certs(&trust.0))
-                        .build(),
-                );
-            }
-        }
         Ok(Self {
             base: base.into(),
             credential: if token.is_empty() {
@@ -235,14 +89,10 @@ impl Client {
         })
     }
 
-    /// The same endpoint and TLS trust with another credential.
+    /// The same endpoint with another credential.
     pub fn with_credential(mut self, credential: Credential) -> Self {
         self.credential = credential;
         self
-    }
-
-    fn public(&self) -> bool {
-        matches!(self.credential, Credential::None)
     }
 
     /// Calls a unary RPC with generated request and response types.
@@ -321,12 +171,6 @@ impl Client {
         body: &[u8],
         timeout: Option<Duration>,
     ) -> Result<DynamicMessage> {
-        if self.public() && !PUBLIC.contains(&procedure) {
-            return Err(RpcError::new(
-                Code::PermissionDenied,
-                "a client without a token may only pair a device",
-            ));
-        }
         let method = self.method(procedure)?;
         if !method.is_unary() {
             return Err(RpcError::invalid("procedure is streaming"));
@@ -404,12 +248,6 @@ impl Client {
         timeout: Option<Duration>,
         on_message: &mut dyn FnMut(DynamicMessage) -> Result<()>,
     ) -> Result<()> {
-        if self.public() {
-            return Err(RpcError::new(
-                Code::PermissionDenied,
-                "a client without a token may only pair a device",
-            ));
-        }
         let method = self.method(procedure)?;
         if !method.server_streaming || method.client_streaming {
             return Err(RpcError::invalid("procedure is not server streaming"));
@@ -520,7 +358,7 @@ impl Client {
         if !approval.is_empty() {
             request = request.header("Protectorate-Approval", approval);
         }
-        if let Some(authorization) = self.authorization("POST", procedure)? {
+        if let Some(authorization) = self.authorization()? {
             request = request.header("Authorization", authorization.as_str());
         }
         if let Some(timeout) = timeout {
@@ -533,17 +371,13 @@ impl Client {
 }
 
 impl Client {
-    /// The Authorization header for one `verb` request to `path`.
-    pub fn authorization(&self, verb: &str, path: &str) -> Result<Option<Zeroizing<String>>> {
+    /// The Authorization header of the next request.
+    pub fn authorization(&self) -> Result<Option<Zeroizing<String>>> {
         let bearer = |token: &str| Some(Zeroizing::new(format!("Bearer {token}")));
         match &self.credential {
             Credential::None => Ok(None),
             Credential::Bearer(token) => Ok(bearer(token)),
             Credential::TokenFile(path) => Ok(bearer(&self.held_token(path)?)),
-            Credential::Device(key) => key
-                .prove(verb, path, protectorate_fsutil::unix_seconds())
-                .map(|proof| Some(Zeroizing::new(format!("Proof {proof}"))))
-                .map_err(|error| RpcError::new(Code::Internal, error)),
         }
     }
 

@@ -11,10 +11,8 @@ protectorate-connect-client = { path = "../protectorate-connect-client" }
 protectorate-pairing = { path = "../protectorate-pairing" }
 protectorate-wire = { path = "../protectorate-wire" }
 protectorate-fsutil = { path = "../protectorate-fsutil" }
-sha2 = { workspace = true }
 protectorate-mailbox = { path = "../protectorate-mailbox" }
 serde_json = { workspace = true }
-base64 = { workspace = true }
 chrono = { workspace = true, features = ["clock"] }
 tungstenite = { workspace = true }
 webpki-roots = { workspace = true }

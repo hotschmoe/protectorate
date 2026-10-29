@@ -8,10 +8,8 @@ description = "Bounded Connect JSON client for Protectorate RPCs"
 protectorate-auth = { path = "../protectorate-auth" }
 protectorate-fsutil = { path = "../protectorate-fsutil" }
 protectorate-wire = { path = "../protectorate-wire" }
-base64 = { workspace = true }
 serde_json = { workspace = true }
 ureq = { workspace = true }
-rustls = { workspace = true }
 zeroize = { workspace = true }
 
 [lib]

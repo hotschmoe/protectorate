@@ -14,7 +14,7 @@ use std::{
     process::{Command, Output},
     time::Duration,
 };
-use support::{binary, Hub};
+use support::{add_device, binary, Hub};
 
 fn hub_cli(args: &[&str]) -> Output {
     Command::new(binary())
@@ -75,6 +75,7 @@ fn restored_home_serves_the_state_a_running_hub_wrote() {
         )
     };
     let (live, revoked) = (token("live"), token("revoked"));
+    let (_, device) = add_device(&hub, "laptop");
     hub.call(
         "/protectorate.v1.TokenService/RevokeToken",
         json!({"id":revoked["token"]["id"]}),
@@ -113,10 +114,10 @@ fn restored_home_serves_the_state_a_running_hub_wrote() {
     };
     reader(&live).expect("a live capability still authenticates");
     assert_eq!(reader(&revoked).unwrap_err().code, Code::Unauthenticated);
-    assert_eq!(
-        fs::read(hub.home.join("ca/ca.pem")).unwrap(),
-        fs::read(restored.home.join("ca/ca.pem")).unwrap()
-    );
+    Client::new(&restored.plain, device.as_str(), Duration::from_secs(10))
+        .unwrap()
+        .call("/protectorate.v1.HubService/GetStatus", &json!({}))
+        .expect("a device token still authenticates");
     let verified = restored.call("/protectorate.v1.AuditService/VerifyAudit", json!({}));
     assert_eq!(verified["ok"], true, "{verified}");
     assert!(

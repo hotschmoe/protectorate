@@ -22,7 +22,6 @@ protectorate-session = { path = "../protectorate-session" }
 protectorate-directory = { path = "../protectorate-directory" }
 protectorate-quota = { path = "../protectorate-quota" }
 protectorate-release = { path = "../protectorate-release" }
-protectorate-tls = { path = "../protectorate-tls" }
 protectorate-fsutil = { path = "../protectorate-fsutil" }
 protectorate-mailbox = { path = "../protectorate-mailbox" }
 protectorate-sleeve-registry = { path = "../protectorate-sleeve-registry" }

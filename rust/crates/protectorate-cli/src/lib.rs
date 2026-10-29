@@ -5,10 +5,9 @@
 //! `sleeve kill`/`sleeve spawn`/`sleeve envoy`/`sleeve resleeve`/
 //! `sleeve prune`, the tmux sessions: `session ls`/`new`/`kill`/
 //! `respawn`/`capture`/`attach`, the `msg` mailbox: `send`, `inbox`,
-//! `reply`, `ack`, `thread`, `threads` and `wait`, and trusted-device
-//! management: `devices ls`/`pending`/`approve`/`deny`/`revoke`/`rename` and
-//! new-device `login`, plus the client's own `version` and a raw unary
-//! `api call`.
+//! `reply`, `ack`, `thread`, `threads` and `wait`, and device management:
+//! `devices add`/`ls`/`revoke`/`rename`, plus the client's own `version` and
+//! a raw unary `api call`.
 //!
 //! The dispatcher turns argv into authenticated Connect JSON calls through
 //! `protectorate-connect-client` and renders the replies as aligned text, or
@@ -18,7 +17,6 @@ mod args;
 mod attach;
 mod format;
 mod hub_update;
-mod login;
 mod pair;
 #[cfg(windows)]
 #[path = "login_windows.rs"]
@@ -43,9 +41,7 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(15);
 pub const HUB_URL_ENV: &str = "PROTECTORATE_HUB";
 pub const TOKEN_ENV: &str = "PROTECTORATE_TOKEN";
 pub const TOKEN_FILE_ENV: &str = "PROTECTORATE_TOKEN_FILE";
-/// A saved device credential file the MCP bridge signs requests with.
-pub const DEVICE_CREDENTIAL_ENV: &str = "PROTECTORATE_DEVICE_CREDENTIAL";
-/// The state home holding this machine's saved device credential.
+/// The state home holding the hub's local owner token.
 pub const HOME_ENV: &str = "PROTECTORATE_HOME";
 
 /// The transport slack added to a `chat wait` deadline so the hub answers
@@ -445,33 +441,20 @@ pub enum Command {
         id: String,
         approve: bool,
     },
+    /// `devices add`: a new device token, and with `url` the pairing links
+    /// and a QR of the web link, or of the app link with `app`.
+    DeviceAdd {
+        name: String,
+        url: Option<String>,
+        app: bool,
+    },
     DeviceList,
-    DevicePendingList,
-    DeviceApprove {
-        code: String,
-    },
-    DeviceDeny {
-        code: String,
-    },
     DeviceRevoke {
         id: String,
     },
     DeviceRename {
         id: String,
         name: String,
-    },
-    /// `login` with no harness: pair this machine with the hub. `name` and
-    /// `platform` unset mean this machine's hostname and its OS/arch, `home`
-    /// unset means the state home the credential is read from and saved to.
-    DeviceLogin {
-        name: Option<String>,
-        platform: Option<String>,
-        home: Option<PathBuf>,
-    },
-    /// Public links and a terminal QR for adding this hub on another device.
-    Pair {
-        url: Option<String>,
-        app: bool,
     },
     Who {
         target: Option<String>,
@@ -627,7 +610,7 @@ fn usage() -> &'static str {
      protectorate [--hub URL] [--token-file FILE] [--home DIR] [--json] [--timeout SECONDS] COMMAND\n\n\
      Commands:\n  \
      status                      hub version, host and uptime\n  \
-     hub serve                   run the local Rust hub (--home, --listen, --tls-listen, --tls-name, and serve flags)\n  \
+     hub serve                   run the local Rust hub (--home, --listen, --proxy-listen, --trusted-proxy, and serve flags)\n  \
      hub backup                  snapshot local hub state (--home, --to DIR)\n  \
      hub restore FILE            restore into an empty state directory (--home DIR required)\n  \
      hub publish-flutter-cache   publish the Flutter SDK download cache (--home, --flutter-sdk-root, --max-bytes)\n  \
@@ -645,14 +628,10 @@ fn usage() -> &'static str {
      approvals ls [--all]       agent calls waiting for the owner: id, actor, call, reason, expiry\n  \
      approvals approve <id>     run a gated agent call once\n  \
      approvals deny <id>        refuse a gated agent call\n  \
-     devices ls | devices list  trusted devices: name, platform, last use and approver\n  \
-     devices pending            pairing requests awaiting approval\n  \
-     devices approve <code>     approve a request after matching its code on the new device\n  \
-     devices deny <code>        deny a pairing request\n  \
+     devices add <name>         add a device and print its token once (--url URL adds the web and app links and a QR of the web link, --app a QR of the app link)\n  \
+     devices ls | devices list  devices: name, last use, when and by whom added\n  \
      devices revoke <id>        revoke a device and disconnect its streams immediately\n  \
-     devices rename <id> <name> rename a trusted device\n  \
-     login [--name NAME] [--platform OS/ARCH] [--home DIR]  pair this machine with --hub through device approval\n  \
-     pair [--url URL] [--app]  print a public pairing link and terminal QR; it carries the CA in PROTECTORATE_TLS_CA_CERT\n  \
+     devices rename <id> <name> rename a device\n  \
      audit ls | audit tail     query owner audit history (-n/--lines, --actor, --procedure, --subject, --outcome, --run, --page-token)\n  \
      audit verify               check the audit hash chain against the hub's recorded head\n  \
      who [project|sleeve]       show projects, owning sleeves and dependency edges\n  \
@@ -717,11 +696,11 @@ fn usage() -> &'static str {
   \
      A-Z a-z 0-9 _ -, and sleeve-* belongs to SleeveService.\n\n\
      Hub URL defaults to http://127.0.0.1:7470 or $PROTECTORATE_HUB. The\n  \
-     credential is the capability in --token-file or $PROTECTORATE_TOKEN_FILE\n  \
-     (renewed in place past half its life), then $PROTECTORATE_TOKEN, then the\n  \
-     device key login saved for that hub under --home, $PROTECTORATE_HOME or\n  \
-     $HOME/.protectorate. The owner token works only on the hub's loopback\n  \
-     listener.\n"
+     credential is the token in --token-file or $PROTECTORATE_TOKEN_FILE (a\n  \
+     capability is renewed in place past half its life), then\n  \
+     $PROTECTORATE_TOKEN: a device token from devices add, a capability, or\n  \
+     on the hub machine the owner token, which works only on the hub's\n  \
+     loopback listener.\n"
 }
 
 fn command_usage(path: &str) -> Result<String> {
@@ -833,10 +812,6 @@ fn render(
             read_only,
             escape,
         } => attach::run_session(invocation, name, *read_only, escape, stdout, stderr),
-        _ if matches!(invocation.command, Command::DeviceLogin { .. }) => {
-            login::run(invocation, stdout)
-        }
-        Command::Pair { url, app } => pair::run(invocation, url.as_deref(), *app),
         Command::ChatWait {
             sleeves,
             until,
@@ -962,12 +937,10 @@ fn execute_commands(client: &Client, invocation: &Invocation) -> Result<String> 
         | Command::Events
         | Command::SleeveAttach { .. }
         | Command::SessionAttach { .. }
-        | Command::HubUpdate { .. }
-        | Command::DeviceLogin { .. } => Err(RpcError::new(
+        | Command::HubUpdate { .. } => Err(RpcError::new(
             Code::Internal,
             "streaming commands run through a separate path",
         )),
-        Command::Pair { url, app } => pair::run(invocation, url.as_deref(), *app),
         Command::Version => Ok(version_text(json)),
         Command::ApiCall { procedure, body } => api_call(client, procedure, body, json),
         Command::Help => Ok(usage().to_string()),
@@ -1177,6 +1150,9 @@ fn execute_commands(client: &Client, invocation: &Invocation) -> Result<String> 
                 ))
             }
         }
+        Command::DeviceAdd { name, url, app } => {
+            pair::add(client, name, url.as_deref(), *app, json)
+        }
         Command::DeviceList => {
             let devices =
                 client.unary(v1::device_service::LIST_DEVICES, &v1::ListDevicesRequest {})?;
@@ -1184,43 +1160,6 @@ fn execute_commands(client: &Client, invocation: &Invocation) -> Result<String> 
                 json_line(&devices)
             } else {
                 Ok(format::device_list_text(&devices))
-            }
-        }
-        Command::DevicePendingList => {
-            let requests = client.unary(
-                v1::device_service::LIST_DEVICE_AUTH,
-                &v1::ListDeviceAuthRequest {},
-            )?;
-            if json {
-                json_line(&requests)
-            } else {
-                Ok(format::device_pending_text(&requests))
-            }
-        }
-        Command::DeviceApprove { code } => {
-            let response = client.unary(
-                v1::device_service::APPROVE_DEVICE_AUTH,
-                &v1::ApproveDeviceAuthRequest {
-                    user_code: code.clone(),
-                },
-            )?;
-            if json {
-                json_line(&response)
-            } else {
-                Ok(format!("approved {code}\n"))
-            }
-        }
-        Command::DeviceDeny { code } => {
-            let response = client.unary(
-                v1::device_service::DENY_DEVICE_AUTH,
-                &v1::DenyDeviceAuthRequest {
-                    user_code: code.clone(),
-                },
-            )?;
-            if json {
-                json_line(&response)
-            } else {
-                Ok(format!("denied {code}\n"))
             }
         }
         Command::DeviceRevoke { id } => {
@@ -1819,7 +1758,7 @@ fn exited_pane_tail(client: &Client, sleeve: &v1::Sleeve) -> Option<String> {
 }
 
 /// Builds the client for an invocation: the hub URL from `--hub` or
-/// `PROTECTORATE_HUB`, the bearer token from `--token-file`,
+/// `PROTECTORATE_HUB`, the token from `--token-file`,
 /// `PROTECTORATE_TOKEN_FILE` or `PROTECTORATE_TOKEN`, in that order.
 pub fn client_for(invocation: &Invocation) -> Result<Client> {
     Ok(
@@ -1957,15 +1896,6 @@ pub fn run(args: impl IntoIterator<Item = impl AsRef<str>>) -> Result<String> {
     if invocation.command == Command::Version {
         return Ok(version_text(invocation.json));
     }
-    // Device login has no bearer token yet: it runs on its own public client
-    // and writes its progress straight out so the code is visible while waiting.
-    if matches!(invocation.command, Command::DeviceLogin { .. }) {
-        let mut stdout = std::io::stdout();
-        return login::run(&invocation, &mut stdout);
-    }
-    if let Command::Pair { url, app } = &invocation.command {
-        return pair::run(&invocation, url.as_deref(), *app);
-    }
     if let Command::TokenAttenuate { scopes, ttl } = &invocation.command {
         return attenuate(&invocation, scopes, *ttl);
     }
@@ -2049,9 +1979,8 @@ pub(crate) fn hub_url(invocation: &Invocation) -> String {
         .unwrap_or_else(|| DEFAULT_HUB.to_owned())
 }
 
-/// The credential for an invocation: the capability file from --token-file
-/// or the environment, a token in the environment, then the device key saved
-/// by `login` for this hub.
+/// The credential for an invocation: the token file from --token-file or the
+/// environment, then a token in the environment.
 fn credential(invocation: &Invocation) -> Result<Credential> {
     let file = invocation.token_file.clone().or_else(|| {
         env::var(TOKEN_FILE_ENV)
@@ -2077,16 +2006,38 @@ fn credential(invocation: &Invocation) -> Result<Credential> {
     {
         return Ok(Credential::Bearer(token.into()));
     }
-    match login::saved_device(invocation)? {
-        Some(key) => Ok(Credential::Device(key)),
-        None => Err(RpcError::new(
-            Code::Unauthenticated,
-            format!(
-                "no credential: set --token-file, {TOKEN_FILE_ENV} or {TOKEN_ENV}, or run login --hub {}",
-                hub_url(invocation)
-            ),
-        )),
+    Err(RpcError::new(
+        Code::Unauthenticated,
+        format!("no credential: set --token-file, {TOKEN_FILE_ENV} or {TOKEN_ENV}"),
+    ))
+}
+
+/// The state home holding the hub's owner token: `--home`, then
+/// `PROTECTORATE_HOME`, then the user's profile directory.
+fn state_home(invocation: &Invocation) -> Result<PathBuf> {
+    if let Some(home) = invocation.home.clone() {
+        if home.as_os_str().is_empty() {
+            return Err(RpcError::invalid("--home is empty"));
+        }
+        return Ok(home);
     }
+    if let Some(home) = env::var_os(HOME_ENV) {
+        let home = PathBuf::from(home);
+        if home.as_os_str().is_empty() {
+            return Err(RpcError::invalid(format!("{HOME_ENV} is empty")));
+        }
+        return Ok(home);
+    }
+    let profile = env::var_os("HOME");
+    #[cfg(windows)]
+    let profile = profile.or_else(|| env::var_os("USERPROFILE"));
+    profile
+        .map(|home| PathBuf::from(home).join(".protectorate"))
+        .ok_or_else(|| {
+            RpcError::invalid(format!(
+                "no state home: pass --home DIR or set {HOME_ENV} or HOME/USERPROFILE"
+            ))
+        })
 }
 
 /// The capability or token an offline command such as `token attenuate`
@@ -2097,9 +2048,7 @@ fn presented_token(invocation: &Invocation) -> Result<zeroize::Zeroizing<String>
             .map(|raw| raw.trim().to_owned().into())
             .map_err(|error| RpcError::new(Code::Internal, format!("read token file: {error}"))),
         Ok(Credential::Bearer(token)) => Ok(token),
-        Ok(_) => Err(RpcError::invalid(
-            "a device key is not a capability; pass --token-file",
-        )),
+        Ok(Credential::None) => Err(RpcError::invalid("no capability presented")),
         Err(error) => Err(error),
     }
 }
@@ -2142,12 +2091,9 @@ pub fn mcp_credential(
     match credential(&invocation) {
         Ok(Credential::TokenFile(file)) => Ok((TOKEN_FILE_ENV, file.display().to_string())),
         Ok(Credential::Bearer(token)) => Ok((TOKEN_ENV, token.to_string())),
-        Ok(_) => Ok((
-            DEVICE_CREDENTIAL_ENV,
-            login::credential_file(&invocation)?.display().to_string(),
-        )),
+        Ok(Credential::None) => Err(RpcError::new(Code::Unauthenticated, "no credential")),
         Err(error) if error.code == Code::Unauthenticated => {
-            let home = login::state_home(&invocation)?;
+            let home = state_home(&invocation)?;
             private_owner_token(&home.join("token"))?
                 .map(|token| (TOKEN_ENV, token))
                 .ok_or(error)
@@ -2209,7 +2155,7 @@ fn private_owner_token(path: &Path) -> Result<Option<String>> {
         raw
     };
     #[cfg(windows)]
-    let raw = match login::read_private_token_file(path) {
+    let raw = match windows_private::read_private_file(path) {
         Ok(raw) => raw,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => {

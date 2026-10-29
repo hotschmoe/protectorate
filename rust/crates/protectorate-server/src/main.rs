@@ -142,7 +142,6 @@ struct Options {
     msg_ack_timeout: Duration,
     dead_retention: Duration,
     capability_ttl: Duration,
-    device_interval: Duration,
     disk_interval: Duration,
     quota_interval: Duration,
     local_llm_urls: Vec<String>,
@@ -156,8 +155,7 @@ struct Options {
     release_dir: Option<PathBuf>,
     web_dir: Option<PathBuf>,
     listen: Option<SocketAddr>,
-    tls_listen: Vec<SocketAddr>,
-    tls_names: Vec<String>,
+    proxy_listen: Vec<SocketAddr>,
     backup_dir: Option<PathBuf>,
     backup_every: Duration,
 }
@@ -188,7 +186,7 @@ struct ApiCall {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  protectorate-rs version --json\n  protectorate-rs serve --home DIR --owner-token-file FILE [--listen 127.0.0.1:7470] [--tls-listen IP:PORT]... [--tls-name HOST]... [--web DIR] [--workspace-root DIR] [--reference-dir DIR] [--sleeve-effort high] [--msg-ack-timeout 30m] [--dead-retention 24h|0] [--capability-ttl 1h] [--device-interval 5s] [--disk-interval 10s] [--quota-interval 5m] [--local-llm-url URL] [--local-model-host HOST] [--egress-allow HOST[:PORT]] [--trusted-proxy IP] [--tmux-socket NAME] [--release-repo OWNER/REPO] [--update-channel stable|dev] [--release-api-url URL] [--release-dir DIR] [--pi-executable FILE] [--pi-tool-root DIR] [--claude-executable FILE] [--claude-tool-root DIR] [--codex-executable FILE] [--codex-tool-root DIR] [--grok-executable FILE] [--grok-tool-root DIR] [--terminal-tool-root DIR] [--flutter-sdk-root DIR --flutter-cache-lower DIR] [--flutter-tools-lower DIR] [--pub-cache-lower DIR] [--go-mod-cache-lower DIR] [--backup-dir DIR] [--backup-every 6h]\n  protectorate-rs hub backup [--home DIR] [--to DIR]\n  protectorate-rs hub restore FILE --home DIR\n  protectorate-rs hub publish-flutter-cache --home DIR --flutter-sdk-root DIR [--max-bytes 3221225472]\n  protectorate-rs hub publish-flutter-tools --home DIR --flutter-sdk-root DIR [--max-bytes 4194304]\n  protectorate-rs hub publish-pub-cache --home DIR --pub-cache-root DIR [--max-bytes 3221225472]\n  protectorate-rs hub publish-go-mod-cache --home DIR --go-mod-cache-root DIR [--max-bytes 3221225472]\n  protectorate-rs api call Service/Method [JSON] [--hub URL] [--token-file FILE] [--json]\n\nListeners bind explicit private addresses only: loopback, RFC 1918, 100.64.0.0/10, fc00::/7 or fe80::/10. The hub serves plain HTTP on its loopback --listen and HTTPS with its own CA (HOME/ca/ca.pem) on each --tls-listen; --tls-name adds a DNS name to its certificate.\n"
+    "Usage:\n  protectorate-rs version --json\n  protectorate-rs serve --home DIR --owner-token-file FILE [--listen 127.0.0.1:7470] [--proxy-listen IP:PORT --trusted-proxy IP]... [--web DIR] [--workspace-root DIR] [--reference-dir DIR] [--sleeve-effort high] [--msg-ack-timeout 30m] [--dead-retention 24h|0] [--capability-ttl 1h] [--disk-interval 10s] [--quota-interval 5m] [--local-llm-url URL] [--local-model-host HOST] [--egress-allow HOST[:PORT]] [--tmux-socket NAME] [--release-repo OWNER/REPO] [--update-channel stable|dev] [--release-api-url URL] [--release-dir DIR] [--pi-executable FILE] [--pi-tool-root DIR] [--claude-executable FILE] [--claude-tool-root DIR] [--codex-executable FILE] [--codex-tool-root DIR] [--grok-executable FILE] [--grok-tool-root DIR] [--terminal-tool-root DIR] [--flutter-sdk-root DIR --flutter-cache-lower DIR] [--flutter-tools-lower DIR] [--pub-cache-lower DIR] [--go-mod-cache-lower DIR] [--backup-dir DIR] [--backup-every 6h]\n  protectorate-rs hub backup [--home DIR] [--to DIR]\n  protectorate-rs hub restore FILE --home DIR\n  protectorate-rs hub publish-flutter-cache --home DIR --flutter-sdk-root DIR [--max-bytes 3221225472]\n  protectorate-rs hub publish-flutter-tools --home DIR --flutter-sdk-root DIR [--max-bytes 4194304]\n  protectorate-rs hub publish-pub-cache --home DIR --pub-cache-root DIR [--max-bytes 3221225472]\n  protectorate-rs hub publish-go-mod-cache --home DIR --go-mod-cache-root DIR [--max-bytes 3221225472]\n  protectorate-rs api call Service/Method [JSON] [--hub URL] [--token-file FILE] [--json]\n\nListeners bind explicit private addresses only: loopback, RFC 1918, 100.64.0.0/10, fc00::/7 or fe80::/10. The hub serves plain HTTP on its loopback --listen, the only listener that accepts the owner token, and on each --proxy-listen for the reverse proxy that terminates TLS; a --proxy-listen closes every connection that does not come from a --trusted-proxy address.\n"
 }
 
 fn default_home() -> Result<PathBuf, String> {
@@ -383,7 +381,6 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
     let mut msg_ack_timeout = Duration::from_secs(30 * 60);
     let mut dead_retention = Duration::from_secs(24 * 3600);
     let mut capability_ttl = Duration::from_secs(60 * 60);
-    let mut device_interval = Duration::from_secs(5);
     let mut disk_interval = Duration::from_secs(10);
     let mut quota_interval = Duration::from_secs(5 * 60);
     let mut local_llm_urls = Vec::new();
@@ -401,8 +398,7 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
     let mut backup_every = Duration::from_secs(6 * 3600);
     let mut backup_every_set = false;
     let mut listen = None;
-    let mut tls_listen = Vec::new();
-    let mut tls_names = Vec::new();
+    let mut proxy_listen = Vec::new();
     while let Some(flag) = args.next() {
         match flag.as_str() {
             "--home" => home = Some(PathBuf::from(args.next().ok_or("--home requires DIR")?)),
@@ -439,10 +435,6 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
             "--capability-ttl" => {
                 capability_ttl =
                     parse_interval(&args.next().ok_or("--capability-ttl requires DURATION")?)?;
-            }
-            "--device-interval" => {
-                device_interval =
-                    parse_interval(&args.next().ok_or("--device-interval requires DURATION")?)?;
             }
             "--disk-interval" => {
                 disk_interval =
@@ -592,24 +584,12 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
                         .map_err(|_| "--listen requires IP:PORT")?,
                 )
             }
-            "--tls-listen" => tls_listen.push(
+            "--proxy-listen" => proxy_listen.push(
                 args.next()
-                    .ok_or("--tls-listen requires IP:PORT")?
+                    .ok_or("--proxy-listen requires IP:PORT")?
                     .parse()
-                    .map_err(|_| "--tls-listen requires IP:PORT")?,
+                    .map_err(|_| "--proxy-listen requires IP:PORT")?,
             ),
-            "--tls-name" => {
-                let name = args.next().ok_or("--tls-name requires HOST")?;
-                if name.is_empty()
-                    || name.len() > 253
-                    || !name
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
-                {
-                    return Err("--tls-name requires a DNS name".into());
-                }
-                tls_names.push(name);
-            }
             "--backup-dir" => {
                 backup_dir = Some(PathBuf::from(
                     args.next().ok_or("--backup-dir requires DIR")?,
@@ -624,11 +604,27 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
             _ => return Err(format!("unknown argument {flag:?}\n{}", usage())),
         }
     }
-    for address in listen.iter().chain(&tls_listen) {
-        protectorate_tls::check_listen(*address).map_err(|error| error.to_string())?;
+    for address in listen.iter().chain(&proxy_listen) {
+        protectorate_wire::check_listen(*address).map_err(|error| error.to_string())?;
     }
     if listen.is_some_and(|address| !address.ip().is_loopback()) {
-        return Err("--listen is the hub's plain HTTP listener and must be loopback; use --tls-listen for other private addresses".into());
+        return Err(
+            "--listen must be loopback; use --proxy-listen for other private addresses".into(),
+        );
+    }
+    if !proxy_listen.is_empty() && trusted_proxies.is_empty() {
+        return Err("--proxy-listen requires at least one --trusted-proxy".into());
+    }
+    if proxy_listen.is_empty() && !trusted_proxies.is_empty() {
+        return Err("--trusted-proxy applies only to a --proxy-listen".into());
+    }
+    if let Some(proxy) = trusted_proxies
+        .iter()
+        .find(|ip| ip.is_unspecified() || !protectorate_wire::private_ip(**ip))
+    {
+        return Err(format!(
+            "--trusted-proxy {proxy} is not an explicit private address"
+        ));
     }
     if home.is_none() {
         return Err("--home is required".into());
@@ -667,7 +663,6 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
         msg_ack_timeout,
         dead_retention,
         capability_ttl,
-        device_interval,
         disk_interval,
         quota_interval,
         local_llm_urls,
@@ -681,8 +676,7 @@ fn parse(args: impl Iterator<Item = String>) -> Result<Option<Command>, String> 
         release_dir,
         web_dir,
         listen,
-        tls_listen,
-        tls_names,
+        proxy_listen,
         backup_dir,
         backup_every,
     };
@@ -878,19 +872,11 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
             .as_ref()
             .expect("hub token checked by parser"),
     )?;
-    let ca = protectorate_tls::Ca::open_or_create(&home.join("ca"))?;
     let listener = tokio::net::TcpListener::bind(hub_listen(options.listen)).await?;
-    let mut tls_listeners = Vec::new();
-    for address in &options.tls_listen {
-        tls_listeners.push(tokio::net::TcpListener::bind(address).await?);
+    let mut proxy_listeners = Vec::new();
+    for address in &options.proxy_listen {
+        proxy_listeners.push(tokio::net::TcpListener::bind(address).await?);
     }
-    let mut names = Vec::new();
-    for listener in &tls_listeners {
-        names.push(listener.local_addr()?.ip().to_string());
-    }
-    names.extend(options.tls_names.iter().cloned());
-    let identity = ca.hub_identity(&names)?;
-    let tls = protectorate_tls::hub_server_config(&identity)?;
     let hub_url = format!("http://{}", listener.local_addr()?);
     if options.flutter_sdk_root.is_some() != options.flutter_cache_lower.is_some() {
         return Err("--flutter-sdk-root and --flutter-cache-lower must be given together".into());
@@ -914,8 +900,6 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
     hub = hub.with_egress_allow(options.egress_allow.clone());
     hub = hub.with_sleeve_effort(options.sleeve_effort.clone());
     hub = hub.with_dead_retention(options.dead_retention);
-    hub = hub.with_trusted_proxies(options.trusted_proxies.clone());
-    hub = hub.with_tls_device_auth();
     hub = hub
         .with_sessions(Arc::new(protectorate_session::Manager::new(
             &options.tmux_socket,
@@ -938,7 +922,6 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
         })
         .with_msg_ack_timeout(options.msg_ack_timeout)
         .with_capability_ttl(options.capability_ttl)
-        .with_device_interval(options.device_interval)
         .with_disk_interval(options.disk_interval);
     let release_dir = options
         .release_dir
@@ -1137,8 +1120,11 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = Arc::clone(&stop);
     eprintln!("protectorate-rs serving on {}", listener.local_addr()?);
-    for listener in &tls_listeners {
-        eprintln!("protectorate-rs serving TLS on {}", listener.local_addr()?);
+    for listener in &proxy_listeners {
+        eprintln!(
+            "protectorate-rs serving the proxy on {}",
+            listener.local_addr()?
+        );
     }
     let chat_runtime = hub.chat_runtime.clone();
     let mut dog = watchdog::Watchdog::new("hub", parse_interval)?;
@@ -1179,11 +1165,11 @@ async fn serve_hub(options: Options) -> Result<bool, Box<dyn Error>> {
         let _ = listening.wait_for(|stopped| *stopped).await;
     };
     let mut servers = tokio::task::JoinSet::new();
-    for listener in tls_listeners {
-        let listener = transport::TlsListener::new(listener, Arc::clone(&tls))?;
+    for listener in proxy_listeners {
+        let listener = transport::ProxyListener::new(listener, &options.trusted_proxies);
         let service = router
             .clone()
-            .into_make_service_with_connect_info::<transport::Peer>();
+            .into_make_service_with_connect_info::<transport::Proxied>();
         let stopped = until_stopped(listening.clone());
         servers.spawn(async move {
             axum::serve(listener, service)

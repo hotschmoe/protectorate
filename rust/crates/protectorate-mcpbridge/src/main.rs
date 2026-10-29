@@ -22,9 +22,8 @@ or HTTPS on an explicit private address. Network requests require the bridge tok
 a bearer. Without --allow only read-only tools are served; --allow replaces
 that default with globs over tool names and --deny always removes matches. The
 hub URL comes from --hub or PROTECTORATE_HUB. The bridge authenticates with the
-capability in --token-file or PROTECTORATE_TOKEN_FILE, read for each call and
-renewed in place, a token in PROTECTORATE_TOKEN, or the device key file in
-PROTECTORATE_DEVICE_CREDENTIAL; the network endpoints need a token.
+token in --token-file or PROTECTORATE_TOKEN_FILE, read for each call (a
+capability is renewed in place), or a token in PROTECTORATE_TOKEN.
 "#;
 
 struct Options {
@@ -200,16 +199,14 @@ fn credential(file: Option<PathBuf>) -> HubResult<Credential> {
         }
         return Ok(Credential::TokenFile(file));
     }
-    if let Some(token) = env("PROTECTORATE_TOKEN") {
-        return Ok(Credential::Bearer(token.into()));
-    }
-    match env("PROTECTORATE_DEVICE_CREDENTIAL") {
-        Some(path) => protectorate_connect_client::read_device_credential(path.as_ref()),
-        None => Err(RpcError::new(
-            Code::Unauthenticated,
-            "no credential: set --token-file, PROTECTORATE_TOKEN_FILE, PROTECTORATE_TOKEN or PROTECTORATE_DEVICE_CREDENTIAL",
-        )),
-    }
+    env("PROTECTORATE_TOKEN")
+        .map(|token| Credential::Bearer(token.into()))
+        .ok_or_else(|| {
+            RpcError::new(
+                Code::Unauthenticated,
+                "no credential: set --token-file, PROTECTORATE_TOKEN_FILE or PROTECTORATE_TOKEN",
+            )
+        })
 }
 
 fn parse(args: impl Iterator<Item = String>) -> std::result::Result<Options, String> {

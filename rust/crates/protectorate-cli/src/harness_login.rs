@@ -82,15 +82,6 @@ fn parse(args: &[String]) -> Result<Option<Request>, String> {
     if args.get(login_at).map(String::as_str) != Some("login") {
         return Ok(None);
     }
-    // `login` by itself remains the public device pairing command.
-    if args.len() == login_at + 1
-        || args
-            .iter()
-            .skip(login_at + 1)
-            .any(|arg| arg == "--name" || arg == "--platform")
-    {
-        return Ok(None);
-    }
     let mut home = global_home;
     let mut harness = None;
     let mut status = false;
@@ -111,10 +102,6 @@ fn parse(args: &[String]) -> Result<Option<Request>, String> {
                 harness = Harness::parse(name)
             }
             other if other.starts_with('-') => {
-                // Device login owns its flags, including --hub and --token-file.
-                if harness.is_none() && !status {
-                    return Ok(None);
-                }
                 return Err(format!("unknown harness login option {other:?}"));
             }
             other => {
@@ -126,7 +113,7 @@ fn parse(args: &[String]) -> Result<Option<Request>, String> {
         index += 1;
     }
     if harness.is_none() && !status {
-        return Ok(None);
+        return Err("login needs a harness: claude, codex, grok or pi, or --status".into());
     }
     if status && harness.is_some() {
         return Err("--status takes no harness".into());

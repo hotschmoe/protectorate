@@ -1,4 +1,5 @@
-//! Public pairing links and terminal QR rendering for enrolling another device.
+//! Pairing links that carry a hub URL and a device token, and terminal QR
+//! rendering for them.
 
 use http::Uri;
 use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
@@ -13,7 +14,7 @@ pub struct PairLinks {
 #[derive(Debug)]
 pub enum Error {
     InvalidUrl,
-    InvalidCa,
+    InvalidToken,
     QrTooLong,
     Io(io::Error),
 }
@@ -24,7 +25,7 @@ impl std::fmt::Display for Error {
             Self::InvalidUrl => f.write_str(
                 "pair URL must be http:// or https:// without credentials, query or fragment",
             ),
-            Self::InvalidCa => f.write_str("pair CA must be one PEM certificate"),
+            Self::InvalidToken => f.write_str("pair token must be a device token"),
             Self::QrTooLong => f.write_str("pair link is too long for a QR code"),
             Self::Io(error) => write!(f, "write pairing QR: {error}"),
         }
@@ -46,13 +47,10 @@ impl From<io::Error> for Error {
     }
 }
 
-/// Construct browser and native-app links from a public hub URL.
-///
-/// The URL may include a path prefix. An empty query or fragment is rejected as
-/// well, since it would be ambiguous when adding the pairing route. `ca_pem`
-/// is the hub CA the native app must trust; it travels as base64url DER in
-/// `ca`, so the link itself is the trust anchor.
-pub fn new_pair_links(base_url: &str, ca_pem: Option<&str>) -> Result<PairLinks, Error> {
+/// Checks a hub URL the way `new_pair_links` does. It may include a path
+/// prefix; an empty query or fragment is rejected as well, since it would be
+/// ambiguous when adding the pairing route.
+pub fn check_base_url(base_url: &str) -> Result<(), Error> {
     if base_url.is_empty()
         || base_url
             .chars()
@@ -72,29 +70,26 @@ pub fn new_pair_links(base_url: &str, ca_pem: Option<&str>) -> Result<PairLinks,
     if !valid_authority(authority.as_str()) {
         return Err(Error::InvalidUrl);
     }
-    let base = base_url.trim_end_matches('/');
-    let mut query = format!("url={}", utf8_percent_encode(base, NON_ALPHANUMERIC));
-    if let Some(pem) = ca_pem {
-        let pem = pem.trim();
-        let body = pem
-            .strip_prefix("-----BEGIN CERTIFICATE-----")
-            .and_then(|rest| rest.strip_suffix("-----END CERTIFICATE-----"))
-            .ok_or(Error::InvalidCa)?
-            .split_whitespace()
-            .collect::<String>();
-        if body.is_empty()
-            || !body
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/' | b'='))
-        {
-            return Err(Error::InvalidCa);
-        }
-        let der = body
-            .trim_end_matches('=')
-            .replace('+', "-")
-            .replace('/', "_");
-        query.push_str(&format!("&ca={der}"));
+    Ok(())
+}
+
+/// Browser and native-app links that add the hub at `base_url` with the
+/// device token `token`. The token is a bearer secret: the link is one too.
+pub fn new_pair_links(base_url: &str, token: &str) -> Result<PairLinks, Error> {
+    check_base_url(base_url)?;
+    if token.is_empty()
+        || token.len() > 256
+        || !token
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_' | b'~'))
+    {
+        return Err(Error::InvalidToken);
     }
+    let base = base_url.trim_end_matches('/');
+    let query = format!(
+        "url={}&token={token}",
+        utf8_percent_encode(base, NON_ALPHANUMERIC)
+    );
     Ok(PairLinks {
         web: format!("{base}/#/pair?{query}"),
         app: format!("protectorate://pair?{query}"),

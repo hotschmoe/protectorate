@@ -99,7 +99,6 @@ fn bridge(hub: &str) -> Bridge {
         .args(["--http", "127.0.0.1:0", "--hub", hub, "--timeout", "600"])
         .env("PROTECTORATE_TOKEN", TOKEN)
         .env_remove("PROTECTORATE_TOKEN_FILE")
-        .env_remove("PROTECTORATE_DEVICE_CREDENTIAL")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())

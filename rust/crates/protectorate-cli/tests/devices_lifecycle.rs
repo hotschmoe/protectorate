@@ -2,149 +2,134 @@
 
 use crate::common;
 
-use common::{cli, cli_device, device_home};
+use common::cli;
 use protectorate_hub::Hub;
 use serde_json::Value;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{fs, os::unix::fs::PermissionsExt};
 use tokio::net::TcpListener;
 
+fn token_line(output: &str) -> String {
+    output
+        .lines()
+        .find_map(|line| line.strip_prefix("token: "))
+        .unwrap_or_else(|| panic!("no token line: {output}"))
+        .to_owned()
+}
+
 #[tokio::test(flavor = "multi_thread")]
-async fn devices_commands_use_real_hub_connect_routes() {
+async fn devices_commands_add_list_rename_and_revoke_device_tokens() {
     let home = tempfile::tempdir().unwrap();
-    let hub = Hub::open(home.path(), "owner-secret", "test")
-        .unwrap()
-        .with_loopback_device_auth();
-    let identity = hub.identity.clone();
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64;
+    let hub = Hub::open(home.path(), "owner-secret", "test").unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
-    let (phone_home, phone_key) = device_home(&url);
-    let (_, laptop_key) = device_home(&url);
-    let (_, watch_key) = device_home(&url);
-    let phone = identity
-        .start_device("phone-a", "android/arm64", &phone_key, "127.0.0.1", now)
-        .unwrap();
-    let laptop = identity
-        .start_device("laptop-b", "linux/amd64", &laptop_key, "127.0.0.1", now)
-        .unwrap();
-    let watch = identity
-        .start_device("watch-c", "watchos/arm", &watch_key, "127.0.0.1", now)
-        .unwrap();
-    let phone_code = phone.request.user_code.clone();
-    let laptop_code = laptop.request.user_code.clone();
-    let watch_code = watch.request.user_code.clone();
-    let phone_pairing = phone.device_code.expose().to_owned();
     let server =
         tokio::spawn(async move { axum::serve(listener, hub.router().unwrap()).await.unwrap() });
+    let scratch = home.path().to_owned();
     let result = tokio::task::spawn_blocking(move || {
         let owner = |args: &[&str]| cli(&url, "owner-secret", args).unwrap();
 
-        let pending = owner(&["devices", "pending"]);
-        let rows: Vec<&str> = pending.lines().collect();
-        assert_eq!(rows[0], "CODE\tNAME\tPLATFORM\tREQUESTING IP\tEXPIRES");
-        assert_eq!(rows.len(), 4, "{pending}");
-        assert!(
-            rows.iter().any(|row| row.starts_with(&format!(
-                "{phone_code}\tphone-a\tandroid/arm64\t127.0.0.1\t"
-            ))),
-            "{pending}"
-        );
-        assert!(
-            rows.iter().any(|row| row.starts_with(&format!(
-                "{laptop_code}\tlaptop-b\tlinux/amd64\t127.0.0.1\t"
-            ))),
-            "{pending}"
-        );
-        assert!(
-            rows.iter()
-                .any(|row| row
-                    .starts_with(&format!("{watch_code}\twatch-c\twatchos/arm\t127.0.0.1\t"))),
-            "{pending}"
-        );
-
-        assert_eq!(
-            owner(&["devices", "approve", &phone_code]),
-            format!("approved {phone_code}\n")
-        );
-        assert_eq!(
-            owner(&["devices", "deny", &laptop_code]),
-            format!("denied {laptop_code}\n")
-        );
-        assert_eq!(
-            owner(&["--json", "devices", "approve", &watch_code]),
-            "{}\n"
-        );
-        assert_eq!(owner(&["devices", "pending"]).lines().count(), 1);
-        // proto3 JSON omits an empty repeated field.
-        assert_eq!(owner(&["--json", "devices", "pending"]), "{}\n");
-
-        // A decided or unknown code is gone from the pending set.
-        cli(&url, "owner-secret", ["devices", "approve", &laptop_code]).unwrap_err();
-        cli(&url, "owner-secret", ["devices", "deny", "XXXX-XXXX"]).unwrap_err();
-
-        // The approved pairing poll registers the phone's key; the CLI device
-        // commands then run as that device, signing with its key.
-        let polled = identity.poll_device(&phone_pairing, now + 1).unwrap();
-        polled
-            .device
-            .expect("approved pairing registers the device");
-        let phone_home = phone_home.path();
-
-        let listed = cli_device(&url, phone_home, ["devices", "ls"]).unwrap();
-        let rows: Vec<&str> = listed.lines().collect();
-        assert_eq!(rows[0], "ID\tNAME\tPLATFORM\tLAST USED\tAPPROVED\tAPPROVER");
-        assert_eq!(rows.len(), 2, "{listed}");
-        assert!(rows[1].contains("\tphone-a\tandroid/arm64\t"), "{listed}");
-        assert!(rows[1].ends_with("\towner"), "{listed}");
-
-        let raw: Value = serde_json::from_str(&owner(&["--json", "devices", "ls"])).unwrap();
-        let devices = raw["devices"].as_array().unwrap();
-        assert_eq!(devices.len(), 1, "{raw}");
-        assert_eq!(devices[0]["name"], "phone-a");
-        assert_eq!(devices[0]["approvedBy"], "owner");
-        let id = devices[0]["id"].as_str().unwrap().to_owned();
-
-        assert_eq!(
-            cli_device(
-                &url,
-                phone_home,
-                ["devices", "rename", id.as_str(), "desk desktop"]
-            )
-            .unwrap(),
-            format!("renamed {id} to desk desktop\n")
-        );
-        let listed = owner(&["devices", "ls"]);
-        assert!(
-            listed.contains(&format!("{id}\tdesk desktop\tandroid/arm64\t")),
-            "{listed}"
-        );
-        cli(
+        // A bad link base is refused before a device exists.
+        let error = cli(
             &url,
             "owner-secret",
-            ["devices", "rename", id.as_str(), "envoy"],
+            ["devices", "add", "phone", "--url", "ftp://hub"],
         )
         .unwrap_err();
+        assert!(error.contains("pair URL"), "{error}");
+        let error = cli(&url, "owner-secret", ["devices", "add", "phone", "--app"]).unwrap_err();
+        assert!(error.contains("--app needs --url"), "{error}");
+        cli(&url, "owner-secret", ["devices", "add", "envoy"]).unwrap_err();
+        // proto3 JSON omits an empty repeated field.
+        assert_eq!(owner(&["--json", "devices", "ls"]), "{}\n");
+
+        let added = owner(&["devices", "add", "laptop"]);
+        assert!(added.starts_with("added laptop ("), "{added}");
+        assert!(added.contains("shown only once"), "{added}");
+        let laptop = token_line(&added);
+        assert!(laptop.starts_with("pd1."), "{added}");
+        assert!(!added.contains("web:"), "{added}");
+
+        let base = "https://protectorate.example";
+        let raw: Value = serde_json::from_str(&owner(&[
+            "--json", "devices", "add", "phone", "--url", base,
+        ]))
+        .unwrap();
+        let phone = raw["token"].as_str().unwrap().to_owned();
+        assert_eq!(raw["device"]["name"], "phone", "{raw}");
+        assert_eq!(raw["device"]["addedBy"], "owner", "{raw}");
+        let query = format!("url=https%3A%2F%2Fprotectorate%2Eexample&token={phone}");
+        assert_eq!(raw["web"], format!("{base}/#/pair?{query}"), "{raw}");
+        assert_eq!(raw["app"], format!("protectorate://pair?{query}"), "{raw}");
+
+        let shown = owner(&["devices", "add", "tablet", "--url", base, "--app"]);
+        assert!(shown.starts_with("\x1b["), "no QR: {shown}");
+        let tablet = token_line(&shown);
+        assert!(
+            shown.contains(&format!(
+                "app:   protectorate://pair?url=https%3A%2F%2Fprotectorate%2Eexample&token={tablet}"
+            )),
+            "{shown}"
+        );
+
+        // Devices list and manage devices with their own tokens.
+        let listed = cli(&url, &laptop, ["devices", "ls"]).unwrap();
+        let rows: Vec<&str> = listed.lines().collect();
+        assert_eq!(rows[0], "ID\tNAME\tLAST USED\tADDED\tADDED BY");
+        assert_eq!(rows.len(), 4, "{listed}");
+        let laptop_row = rows
+            .iter()
+            .find(|row| row.contains("\tlaptop\t"))
+            .unwrap_or_else(|| panic!("{listed}"));
+        assert!(laptop_row.ends_with("\towner"), "{listed}");
+        let id = laptop_row.split('\t').next().unwrap().to_owned();
+        assert_eq!(id.len(), 16, "{listed}");
+
+        assert_eq!(
+            cli(&url, &laptop, ["devices", "rename", id.as_str(), "desk"]).unwrap(),
+            format!("renamed {id} to desk\n")
+        );
+        cli(&url, &laptop, ["devices", "rename", id.as_str(), "envoy"]).unwrap_err();
+        assert!(owner(&["devices", "ls"]).contains(&format!("{id}\tdesk\t")));
+
+        // A token file holding a device token is used as it is, never renewed.
+        let file = scratch.join("device.token");
+        fs::write(&file, format!("{phone}\n")).unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+        let path = file.to_str().unwrap();
+        cli(&url, "", ["--token-file", path, "devices", "ls"]).unwrap();
+        cli(&url, "", ["--token-file", path, "status"]).unwrap();
+        assert_eq!(fs::read_to_string(&file).unwrap(), format!("{phone}\n"));
 
         assert_eq!(
             owner(&["devices", "revoke", &id]),
             format!("revoked {id}\n")
         );
-        let listed = owner(&["devices", "ls"]);
-        assert!(!listed.contains(&id), "{listed}");
-        let error = cli_device(&url, phone_home, ["devices", "ls"]).unwrap_err();
+        assert!(!owner(&["devices", "ls"]).contains(&id));
+        let error = cli(&url, &laptop, ["devices", "ls"]).unwrap_err();
         assert!(error.contains("unknown credential"), "{error}");
+        cli(&url, &phone, ["devices", "ls"]).unwrap();
         cli(&url, "owner-secret", ["devices", "revoke", "no-such-id"]).unwrap_err();
+        for gone in ["pending", "approve"] {
+            let error = cli(&url, "owner-secret", ["devices", gone, "X"]).unwrap_err();
+            assert!(error.contains("unknown devices subcommand"), "{error}");
+        }
+        for gone in [&["pair"][..], &["login", "--name", "x"][..]] {
+            cli(&url, "owner-secret", gone).unwrap_err();
+        }
 
         // A capability, whatever its scopes, never reaches DeviceService.
         let issued: Value = serde_json::from_str(&owner(&[
-            "--json", "token", "create", "--scope", "read", "reader",
+            "--json",
+            "token",
+            "create",
+            "--scope",
+            "*",
+            "everything",
         ]))
         .unwrap();
-        let token_secret = issued["secret"].as_str().unwrap().to_owned();
-        cli(&url, &token_secret, ["devices", "ls"]).unwrap_err();
+        let capability = issued["secret"].as_str().unwrap().to_owned();
+        cli(&url, &capability, ["devices", "ls"]).unwrap_err();
+        cli(&url, &capability, ["devices", "add", "sneaky"]).unwrap_err();
     })
     .await;
     server.abort();

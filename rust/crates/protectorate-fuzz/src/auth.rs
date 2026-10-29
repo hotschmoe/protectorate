@@ -1,9 +1,6 @@
 use crate::{fields, text};
-use protectorate_auth::{
-    capability::{self, Caveat},
-    proof::{DeviceKey, Proof},
-};
-use std::sync::OnceLock;
+use protectorate_auth::capability::{self, Caveat};
+use protectorate_identity::Store;
 
 const KEY: &[u8] = b"protectorate fuzz capability key";
 
@@ -49,23 +46,29 @@ pub fn capability_tokens(data: &[u8]) {
     assert!(narrowed.narrowed.len() >= claims.narrowed.len());
 }
 
-/// `<proof>\0<method>\0<path>`: parsing never panics, and a fresh proof
-/// signed by a device key verifies for its own method and path only.
-pub fn device_proofs(data: &[u8]) {
-    static DEVICE: OnceLock<DeviceKey> = OnceLock::new();
-    let [proof, method, path] = fields(data, 3)[..] else {
+/// `<token>\0<name>`: verifying a token never panics, an empty store admits
+/// nothing, a store admits only the token it issued, and a removed device's
+/// token stops verifying.
+pub fn device_tokens(data: &[u8]) {
+    const NOW: i64 = 1_800_000_000;
+    let [token, name] = fields(data, 2)[..] else {
         unreachable!()
     };
-    let key = DEVICE.get_or_init(|| DeviceKey::generate().expect("device key").0);
-    let (method, path) = (text(method), text(path));
-    if let Some(proof) = Proof::parse(&text(proof)) {
-        let _ = proof.verify(key.public_key(), &method, &path);
-    }
-    let signed = key
-        .prove(&method, &path, 1_800_000_000)
-        .expect("sign a proof");
-    let parsed = Proof::parse(&signed).expect("a signed proof parses");
-    assert_eq!(parsed.device, key.id());
-    assert!(parsed.verify(key.public_key(), &method, &path));
-    assert!(!parsed.verify(key.public_key(), &method, &format!("{path}/")));
+    let presented = text(token);
+    let store = Store::memory();
+    assert!(store.verify_device(&presented, NOW).is_err());
+    let Ok((device, issued)) = store.add_device(&text(name), "owner", NOW) else {
+        return;
+    };
+    assert_eq!(
+        store.verify_device(&presented, NOW).is_ok(),
+        presented == issued.expose(),
+        "a token other than the issued one verified"
+    );
+    assert_eq!(
+        store.verify_device(issued.expose(), NOW).unwrap().id,
+        device.id
+    );
+    store.remove_device(&device.id).expect("remove the device");
+    assert!(store.verify_device(issued.expose(), NOW).is_err());
 }

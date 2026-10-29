@@ -28,7 +28,7 @@ const MAX_FRAME: usize = 64 << 10;
 pub(super) async fn attach(
     hub: Arc<Hub>,
     Path(name): Path<String>,
-    tls: bool,
+    proxied: bool,
     headers: HeaderMap,
     uri: Uri,
     upgrade: WebSocketUpgrade,
@@ -47,10 +47,8 @@ pub(super) async fn attach(
         &hub.owner_token,
         &hub.identity,
         &hub.methods,
-        &headers,
-        "GET",
-        uri.path(),
-        tls,
+        crate::access::bearer(&headers).or_else(|| crate::access::websocket_bearer(&headers)),
+        proxied,
     );
     let Ok(caller) = caller else {
         audit::record_terminal(

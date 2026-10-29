@@ -16,22 +16,6 @@ pub fn cli<S: AsRef<OsStr>>(
     run(command, args)
 }
 
-/// Runs the CLI binary with only the device credential saved under `home`.
-pub fn cli_device<S: AsRef<OsStr>>(
-    url: &str,
-    home: &Path,
-    args: impl IntoIterator<Item = S>,
-) -> Result<String, String> {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_protectorate"));
-    command
-        .env("PROTECTORATE_HUB", url)
-        .env("HOME", home)
-        .env_remove("PROTECTORATE_HOME")
-        .env_remove("PROTECTORATE_TOKEN")
-        .env_remove("PROTECTORATE_TOKEN_FILE");
-    run(command, args)
-}
-
 fn run<S: AsRef<OsStr>>(
     mut command: Command,
     args: impl IntoIterator<Item = S>,
@@ -105,30 +89,6 @@ impl Drop for PrivateTmux {
         let uid = unsafe { libc::getuid() };
         let _ = std::fs::remove_file(dir.join(format!("tmux-{uid}")).join(&self.0));
     }
-}
-
-/// A HOME holding a device key for `url` where `login` would save it; the
-/// key's public half is what the device registers with the hub.
-#[cfg(unix)]
-pub fn device_home(url: &str) -> (tempfile::TempDir, Vec<u8>) {
-    use base64::{engine::general_purpose::STANDARD, Engine};
-    use sha2::{Digest, Sha256};
-    use std::{fs, os::unix::fs::PermissionsExt};
-    let (key, pkcs8) = protectorate_auth::proof::DeviceKey::generate().unwrap();
-    let home = tempfile::tempdir().unwrap();
-    let dir = home.path().join(".protectorate/credentials");
-    fs::create_dir_all(&dir).unwrap();
-    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
-    let name: String = Sha256::digest(url.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-    let path = dir.join(format!("{name}.json"));
-    let record =
-        serde_json::json!({"hub": url, "deviceId": key.id(), "key": STANDARD.encode(pkcs8)});
-    fs::write(&path, record.to_string()).unwrap();
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
-    (home, key.public_key().to_vec())
 }
 
 /// A one-hour capability minted straight into the hub's store.

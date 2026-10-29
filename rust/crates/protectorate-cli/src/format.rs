@@ -302,24 +302,20 @@ pub(crate) fn token_revoked_text(response: &v1::RevokeTokenResponse) -> String {
     format!("revoked {} ({})\n", token.id, token.name)
 }
 
-/// `devices ls`: one row per trusted device.
+/// `devices ls`: one row per device.
 pub(crate) fn device_list_text(response: &v1::ListDevicesResponse) -> String {
-    let mut out = "ID\tNAME\tPLATFORM\tLAST USED\tAPPROVED\tAPPROVER\n".to_owned();
+    let mut out = "ID\tNAME\tLAST USED\tADDED\tADDED BY\n".to_owned();
     for device in &response.devices {
         let last_used = match &device.last_used_at {
             None => "never".into(),
             at => stamp(at.as_ref()),
         };
-        let approved = match &device.approved_at {
-            None => "unknown".into(),
-            at => stamp(at.as_ref()),
-        };
         out.push_str(&format!(
-            "{}\t{}\t{}\t{last_used}\t{approved}\t{}\n",
+            "{}\t{}\t{last_used}\t{}\t{}\n",
             device.id,
             device.name,
-            or_dash(device.platform.clone()),
-            or_dash(device.approved_by.clone())
+            stamp(device.added_at.as_ref()),
+            or_dash(device.added_by.clone())
         ));
     }
     out
@@ -347,22 +343,6 @@ pub(crate) fn approvals_text(response: &v1::ListApprovalsResponse) -> String {
             word(approval.state().as_str_name(), "APPROVAL_STATE_"),
             approval.actor,
             stamp(approval.expires_at.as_ref())
-        ));
-    }
-    out
-}
-
-/// `devices pending`: one row per pairing request still awaiting a decision.
-pub(crate) fn device_pending_text(response: &v1::ListDeviceAuthResponse) -> String {
-    let mut out = "CODE\tNAME\tPLATFORM\tREQUESTING IP\tEXPIRES\n".to_owned();
-    for request in &response.requests {
-        out.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\n",
-            request.user_code,
-            request.name,
-            or_dash(request.platform.clone()),
-            or_dash(request.requesting_ip.clone()),
-            stamp(request.expires_at.as_ref())
         ));
     }
     out

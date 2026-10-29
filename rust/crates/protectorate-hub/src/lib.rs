@@ -159,10 +159,6 @@ pub struct Hub {
     release_update_lock: Arc<tokio::sync::Mutex<()>>,
     release_last: std::sync::Mutex<Option<(String, String, String)>>,
     events: Arc<EventBus>,
-    public_device_auth: bool,
-    require_device_peer: bool,
-    trusted_proxies: Vec<std::net::IpAddr>,
-    device_rates: Arc<device::Rates>,
     started_at: DateTime<Utc>,
     started: Instant,
 }
@@ -176,9 +172,7 @@ impl Hub {
         let home = home.into();
         let version = version.into();
         // Temp files of writers killed before their rename; best effort.
-        for dir in [home.clone(), home.join("ca")] {
-            let _ = protectorate_fsutil::remove_stale_temps(&dir);
-        }
+        let _ = protectorate_fsutil::remove_stale_temps(&home);
         let workspace_config = workspaces::Config::new(&home);
         let hostname = std::env::var(if cfg!(windows) {
             "COMPUTERNAME"
@@ -305,10 +299,6 @@ impl Hub {
             release_update_lock: Arc::new(tokio::sync::Mutex::new(())),
             release_last: std::sync::Mutex::new(None),
             events,
-            public_device_auth: false,
-            require_device_peer: false,
-            trusted_proxies: Vec::new(),
-            device_rates: Arc::new(device::Rates::default()),
             started_at: Utc::now(),
             started: Instant::now(),
         })
@@ -330,13 +320,6 @@ impl Hub {
         self.capability_ttl = ttl.clamp(std::time::Duration::from_secs(2), identity::MAX_TTL);
         self
     }
-    /// How often a device waiting for approval may poll, which the hub tells
-    /// it and raises when it polls faster.
-    pub fn with_device_interval(self, interval: std::time::Duration) -> Self {
-        self.identity.set_device_interval(interval);
-        self
-    }
-
     /// How often running sleeves with a disk limit are measured and held to it.
     pub fn with_disk_interval(mut self, interval: std::time::Duration) -> Self {
         self.disk_interval = interval;
@@ -420,21 +403,6 @@ impl Hub {
         let transport = Arc::clone(&self.quota_transport);
         self.with_quota(cache, transport)
     }
-    /// Enables unauthenticated pairing on a listener restricted to loopback.
-    pub fn with_loopback_device_auth(mut self) -> Self {
-        self.public_device_auth = true;
-        self
-    }
-    /// Enables pairing on a TLS listener that supplies the actual TCP peer.
-    pub fn with_tls_device_auth(mut self) -> Self {
-        self.public_device_auth = true;
-        self.require_device_peer = true;
-        self
-    }
-    pub fn with_trusted_proxies(mut self, proxies: Vec<std::net::IpAddr>) -> Self {
-        self.trusted_proxies = proxies.into_iter().map(device::normalize_ip).collect();
-        self
-    }
     /// How long an approval request waits for the owner.
     pub fn with_approval_ttl(mut self, ttl: std::time::Duration) -> Self {
         self.approvals = approvals::Approvals::new(ttl);
@@ -449,68 +417,25 @@ impl Hub {
         let identity = Arc::clone(&self.identity);
         let owner = Arc::clone(&self.owner_token);
         let methods = Arc::clone(&self.methods);
-        let public_device_auth = self.public_device_auth;
-        let require_device_peer = self.require_device_peer;
-        let trusted_proxies = self.trusted_proxies.clone();
-        let device_rates = Arc::clone(&self.device_rates);
         let authorize = Arc::new(
             move |method: &Method, headers: &HeaderMap, peer: Option<wire::Peer>| {
-                if !device::public_procedure(&method.procedure) {
-                    let caller = access::authenticate(
-                        &owner,
-                        &identity,
-                        &methods,
-                        headers,
-                        "POST",
-                        &method.procedure,
-                        peer.as_ref().is_some_and(|peer| peer.tls),
-                    )
-                    .map_err(|error| {
-                        Box::new(wire::Denied {
-                            error,
-                            auth: AuthContext {
-                                actor: "unauthenticated".into(),
-                                ..AuthContext::default()
-                            },
-                        })
-                    })?;
-                    return access::authorize(&caller, method);
-                }
-                // A loopback-only listener may omit peer metadata in embedded
-                // routers. TLS listeners must always provide it.
-                let ip = peer
-                    .as_ref()
-                    .map(|peer| device::source_ip(peer.addr.ip(), headers, &trusted_proxies))
-                    .or_else(|| {
-                        (!require_device_peer)
-                            .then_some(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))
-                    });
-                let auth = AuthContext {
-                    actor: "unauthenticated".into(),
-                    requesting_ip: ip,
-                    ..AuthContext::default()
-                };
-                let refuse = |message: &str| {
+                let caller = access::authenticate(
+                    &owner,
+                    &identity,
+                    &methods,
+                    access::bearer(headers),
+                    peer.as_ref().is_some_and(|peer| peer.proxied),
+                )
+                .map_err(|error| {
                     Box::new(wire::Denied {
-                        error: RpcError::new(Code::PermissionDenied, message),
-                        auth: auth.clone(),
+                        error,
+                        auth: AuthContext {
+                            actor: "unauthenticated".into(),
+                            ..AuthContext::default()
+                        },
                     })
-                };
-                if !public_device_auth {
-                    return Err(refuse("device pairing is unavailable on this listener"));
-                }
-                let Some(ip) = ip else {
-                    return Err(refuse("device pairing requires a transport peer"));
-                };
-                device_rates
-                    .admit(&method.procedure, ip)
-                    .map(|_| auth.clone())
-                    .map_err(|error| {
-                        Box::new(wire::Denied {
-                            error,
-                            auth: auth.clone(),
-                        })
-                    })
+                })?;
+                access::authorize(&caller, method)
             },
         );
         let completion_audit = Arc::clone(&self.audit);
@@ -539,7 +464,7 @@ impl Hub {
         let mut server =
             server.with_gate(Arc::new(move |request| approvals::gate(&gate_hub, request)));
         hub.session_monitor.start(Arc::clone(&hub));
-        device::start_expiry_sweep(&hub);
+        access::start_sweep(&hub);
         audit::register(&mut server, Arc::clone(&hub))?;
         approvals::register(&mut server, Arc::clone(&hub))?;
         device::register(&mut server, Arc::clone(&hub))?;
@@ -927,8 +852,15 @@ impl Hub {
             "/ws/terminal/{name}",
             axum::routing::get(
                 move |path, peer: Option<axum::Extension<wire::Peer>>, headers, uri, upgrade| {
-                    let tls = peer.is_some_and(|peer| peer.0.tls);
-                    terminal::attach(Arc::clone(&terminal_hub), path, tls, headers, uri, upgrade)
+                    let proxied = peer.is_some_and(|peer| peer.0.proxied);
+                    terminal::attach(
+                        Arc::clone(&terminal_hub),
+                        path,
+                        proxied,
+                        headers,
+                        uri,
+                        upgrade,
+                    )
                 },
             ),
         ))

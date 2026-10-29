@@ -9,7 +9,6 @@ mod audit_chain;
 mod audit_query;
 mod backlog_mutations;
 mod completion;
-mod device_login;
 mod devices_lifecycle;
 mod harness_login_prefix;
 mod hub_local_alias;

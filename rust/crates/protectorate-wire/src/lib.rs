@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     future::Future,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -447,16 +447,41 @@ pub struct AuthContext {
     pub scopes: Vec<String>,
     pub owner: bool,
     pub device: bool,
-    /// Direct transport peer for public device pairing audit entries.
-    pub requesting_ip: Option<std::net::IpAddr>,
 }
 /// The transport peer, inserted as a request extension by the listener and
-/// never taken from a header. `tls` is false only on the hub's loopback
+/// never taken from a header. `proxied` is whether it arrived on a listener
+/// that admits only the trusted reverse proxy; false on the hub's loopback
 /// listener.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Peer {
     pub addr: SocketAddr,
-    pub tls: bool,
+    pub proxied: bool,
+}
+
+/// Loopback, RFC 1918, shared address space (100.64.0.0/10), unique local
+/// (fc00::/7) and link-local IPv6 (fe80::/10).
+pub fn private_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            v4.is_loopback() || v4.is_private() || (a == 100 && b & 0xc0 == 64)
+        }
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => private_ip(IpAddr::V4(v4)),
+            None => v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local(),
+        },
+    }
+}
+
+/// Listeners bind explicit private addresses only. There is no override.
+pub fn check_listen(addr: SocketAddr) -> std::io::Result<()> {
+    if addr.ip().is_unspecified() || !private_ip(addr.ip()) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("refusing to listen on {addr}: only an explicit loopback, RFC 1918, 100.64.0.0/10, fc00::/7 or fe80::/10 address is allowed"),
+        ));
+    }
+    Ok(())
 }
 /// An admission failure, with whatever identity was established before it.
 #[derive(Clone, Debug)]

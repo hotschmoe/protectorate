@@ -379,7 +379,6 @@ pub fn validate_env(env: &BTreeMap<String, String>) -> Result<()> {
                 | "PROTECTORATE_HOME"
                 | "PROTECTORATE_TOKEN"
                 | "PROTECTORATE_TOKEN_FILE"
-                | "PROTECTORATE_TLS_CA_PEM"
                 | "PROTECTORATE_SLEEVE"
                 | "PROTECTORATE_SLEEVE_PATH"
         ) {

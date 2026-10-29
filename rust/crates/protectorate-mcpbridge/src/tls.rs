@@ -99,7 +99,7 @@ pub async fn bind_tls(listen: &str, config: Arc<rustls::ServerConfig>) -> Result
             "--https {listen:?}: an IP address and a port are needed"
         ))
     })?;
-    protectorate_tls::check_listen(addr).map_err(|error| RpcError::invalid(error.to_string()))?;
+    protectorate_wire::check_listen(addr).map_err(|error| RpcError::invalid(error.to_string()))?;
     let listener = TcpListener::bind(addr)
         .await
         .map_err(|error| RpcError::new(Code::Unavailable, format!("bind {listen}: {error}")))?;
