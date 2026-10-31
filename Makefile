@@ -1,6 +1,6 @@
 VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build release test check check-deps fmt
+.PHONY: build release test test-paid check check-deps fmt
 
 build:
 	PROTECTORATE_BUILD_VERSION='$(VERSION)' cargo build --locked --workspace
@@ -10,6 +10,10 @@ release:
 
 test:
 	cargo test --locked --workspace
+
+# Also runs the Claude, Codex and Grok e2e tests, which spend a few small turns of quota.
+test-paid:
+	PT_E2E_PAID=1 cargo test --locked --workspace
 
 fmt:
 	cargo fmt --all

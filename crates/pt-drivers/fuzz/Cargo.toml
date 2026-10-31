@@ -1,0 +1,42 @@
+[package]
+name = "pt-drivers-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+pt-drivers = { path = ".." }
+
+[workspace]
+
+[[bin]]
+name = "claude_lines"
+path = "fuzz_targets/claude_lines.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "codex_lines"
+path = "fuzz_targets/codex_lines.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "grok_lines"
+path = "fuzz_targets/grok_lines.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pi_lines"
+path = "fuzz_targets/pi_lines.rs"
+test = false
+doc = false
+bench = false
