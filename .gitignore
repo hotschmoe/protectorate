@@ -9,3 +9,4 @@
 /crates/*/fuzz/artifacts/
 /crates/*/fuzz/corpus/
 /crates/*/fuzz/coverage/
+/.e2e/
