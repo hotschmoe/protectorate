@@ -662,7 +662,9 @@ shortcut is also in `REVISIT.md`.
   - each connection, child pipe and node link gets its own thread;
   - timeouts use deadlines on sockets and `poll`.
 
-  This avoids tokio, hyper and axum.
+  This avoids tokio, hyper and axum. The owner allows them if they turn out to be needed
+  (2026-11-01), "incredibly deliberate and cautious", but prefers a performant build without them.
+  The fallback is a pinned, trimmed fork, chosen only after our own code has measurably failed.
 - **Our own crates** for what we would otherwise import:
 
   | Crate | What it does |
