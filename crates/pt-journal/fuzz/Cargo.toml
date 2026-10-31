@@ -27,3 +27,10 @@ path = "fuzz_targets/crc_diff.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "ops"
+path = "fuzz_targets/ops.rs"
+test = false
+doc = false
+bench = false
