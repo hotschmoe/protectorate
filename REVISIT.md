@@ -83,3 +83,16 @@ Each entry: where, what was done, what right looks like.
   helper (a handler can set `Sec-WebSocket-Protocol` itself). Origin checks are the hub's job.
 - **pt-http is about 1950 lines** (about 1700 without blank and comment lines) against a 1500-line
   target. Right: trim when the hub's real use shows which parts can go.
+- **pt-sandbox: no automatic fallback without a scope.** `systemd-run --user --scope` works here
+  only with `XDG_RUNTIME_DIR` set (the builder sets it; it fails with "No medium found" without it
+  and needs a user manager, so a headless box needs `loginctl enable-linger`). `SandboxSpec.scope =
+  false` runs bwrap alone, but nothing probes and flips it yet, and then there are no limits and
+  no `cgroup.kill`. Right: the hub probes once at startup and records it in `doctor.json`.
+- **pt-sandbox masks skip missing paths and mask files with /dev/null.** bwrap cannot create a
+  mountpoint on the read-only root, so a credential dir that appears later in the owner's home is
+  not masked until the next incarnation. The mask list is also home-relative guesses; a harness
+  with a new credential location needs an entry in `default_masks`.
+- **pt-sandbox has no fuzz target** for `resolve_git_dirs` (the one parser). Right: add one with
+  the other crates' fuzz targets.
+- **Own namespaces helper instead of bwrap** stays a later option (host dependency on bwrap's
+  version; 0.13.1 here).
