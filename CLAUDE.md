@@ -26,8 +26,17 @@ overwrite code or data. Overwriting a file you created in this task with Write/E
 - No bulk-modifying scripts (codemods, giant sed/regex refactors).
 - Full migrations only: no compat shims, `_legacy`/`_old` names or "remove later" code.
 - Errors carry context at each layer; cancellation propagates.
-- Tests are real-binary e2e (`crates/*/tests/*.rs` driving built binaries or real sockets/files)
-  or fuzz targets (`crates/<crate>/fuzz/`), never unit tests (`#[cfg(test)]` modules are not allowed).
+- **No unit tests, ever** (owner: "unit tests are a waste and offered no value add"). Only:
+  - **complex end-to-end tests** that would show a future regression: they run our built binaries
+    (`protectorate`, `protectorate-node`) or real external programs (harness CLIs, curl, git,
+    headscale, member) against real sockets, files and processes, and check a whole scenario
+    across that boundary;
+  - **fuzz targets** (`crates/<crate>/fuzz/`) for parsers and state machines, differential
+    against a reference wherever one exists.
+
+  A test that calls a library function with crafted inputs and checks its return value is a unit
+  test, even under `tests/`. Put such edge cases into fuzz seeds instead. `#[cfg(test)]` modules
+  are not allowed.
 - `#![forbid(unsafe_code)]` in every crate except the explicitly exempted OS FFI crates.
 
 ## Layout and commands
