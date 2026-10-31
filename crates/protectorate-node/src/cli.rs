@@ -4,14 +4,22 @@ use pt_node::{Detector, Sampler, inventory};
 use std::io::Write;
 use std::time::Duration;
 
-const USAGE: &str = "usage: protectorate-node <command>
+fn usage() -> String {
+    format!(
+        "usage: protectorate-node <command>
+{}
+{}
   inventory                         print the machine inventory as JSON
   sample                            print one sample as JSON
   presence [--away-after SECS]      print presence as JSON
   watch-presence [--away-after SECS] [--interval SECS] [--limit N]
                                     print a JSON line each time presence changes
   lower-idle PID                    drop a running process tree to idle priority
-  --version";
+  --version",
+        crate::serve::USAGE,
+        crate::rpc::USAGE
+    )
+}
 
 pub fn run(args: Vec<String>) -> i32 {
     let result = match args.first().map(String::as_str) {
@@ -30,12 +38,14 @@ pub fn run(args: Vec<String>) -> i32 {
         }),
         Some("watch-presence") => Opts::parse(&args[1..]).and_then(watch),
         Some("lower-idle") => lower_idle(&args[1..]),
+        Some("serve") => crate::serve::run(&args[1..]),
+        Some("rpc") => return crate::rpc::run(&args[1..]),
         Some("-h") | Some("--help") | Some("help") => {
-            println!("{USAGE}");
+            println!("{}", usage());
             Ok(())
         }
-        Some(other) => Err(format!("unknown command '{other}'\n{USAGE}")),
-        None => Err(USAGE.to_string()),
+        Some(other) => Err(format!("unknown command '{other}'\n{}", usage())),
+        None => Err(usage()),
     };
     match result {
         Ok(()) => 0,
@@ -94,7 +104,7 @@ impl Opts {
     }
 }
 
-fn number(flag: &str, v: Option<&String>) -> Result<u64, String> {
+pub(crate) fn number(flag: &str, v: Option<&String>) -> Result<u64, String> {
     let v = v.ok_or_else(|| format!("{flag} needs a value"))?;
     v.parse()
         .map_err(|_| format!("{flag}: '{v}' is not a number"))

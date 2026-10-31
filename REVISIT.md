@@ -36,10 +36,11 @@ Each entry: where, what was done, what right looks like.
 - **Linux GPU names** (`pt-node`): from `pci.ids` when hwdata is installed (else the raw ids), SoC
   GPUs report only the kernel driver (`linlondp` on the CIX board), VRAM only for amdgpu and
   nvidia-smi. Right: per-vendor readers with the sample's utilisation and temperature.
-- **Job priority** (`pt-node`): `lower_to_idle` on Windows sets the class on one process; children
-  started later inherit it, running children are not touched. Right: set it on the job's Job
-  Object (`JOBOBJECT_BASIC_LIMIT_INFORMATION.PriorityClass`) when the job runner exists. On Linux
-  it walks the process tree once; a cgroup scope with `cpu.weight`/`io.weight` is the durable form.
+- **Job priority** (`pt-node`): jobs on Windows are lowered through their Job Object's priority
+  class (all processes, running and later). The `lower-idle PID` command still sets one process
+  only. On Linux lowering walks the process tree (plus the scope's `cgroup.procs`) once, so
+  processes forked afterwards keep normal priority, and nothing raises a job back when the person
+  leaves. Right: a cgroup with `cpu.weight`/`io.weight` set to idle, which covers later children.
 - **Windows build path**: no Windows SDK libs on the dev hub, so there is no cross-build; both
   Windows targets build natively on officewin (VS Build Tools 14.44 incl. ARM64 libs). x64:
   `cargo build --release -p protectorate-node`; arm64: `cargo +stable build --release --target
@@ -60,3 +61,39 @@ Each entry: where, what was done, what right looks like.
 - **pt-json numbers and maps** (crates/pt-json): each number is a heap `Box<str>` and object
   lookups are linear. Fast: inline storage for short number text, and an index for large
   objects if a hot path decodes many-keyed objects by key. No pretty writer yet either.
+- **Node job journal as JSON lines** (`pt-node`, `jobs/journal.rs`): one fsync per entry, no
+  CRC, no group commit, never compacted, so it grows with every job. A torn last line is
+  dropped; any other bad line stops the agent. Right: pt-journal (length and CRC frames, group
+  commit, torn-tail recovery), with compaction that drops collected jobs.
+- **Linux jobs without systemd-run** (`pt-node`, `sys/linux_job.rs`): when a trial
+  `systemd-run --scope` fails, jobs run in a plain process group. A job that calls `setsid`
+  escapes cancel, timeout and lowering, and nothing outlives a dead agent's timeout. `--no-scope`
+  forces this mode (the tests use it). Right: the system service's delegated cgroup subtree
+  (design report 1.3), one cgroup per job with `cgroup.kill`.
+- **Job isolation is limits only** (`pt-node`): a job gets its timeout, a capped log and a scope,
+  process group or Job Object, and runs as the agent's user with the agent's environment plus its
+  `env`. There is no `cpu.max`/`memory.max`/`pids.max`, no namespaces, no Windows runner account
+  and no `mode` (sandboxed, plain, admin). Right: design report 1.3.
+- **Node Update RPC is a stub** (`protectorate-node serve`): `Update{version, url, sha256}` answers
+  `unsupported`. Right: SPEC 6a: download from GitHub through curl, check SHA256SUMS, stage, keep
+  the previous binary, restart through the service manager, roll back after 10 min without hub
+  contact; or take verified bytes streamed over the hub's connection.
+- **Who may speak on the agent's listener** (`protectorate-node serve`): the unix socket is mode
+  0600, so `member` must run as the agent's user; `--listen-tcp` (Windows, tests) trusts any
+  local process to write an honest `tag:hub` header. Right: on Linux an installer-made group for
+  the socket; on Windows a named pipe whose ACL admits only member's account.
+- **Windows jobs** (`pt-node`, `sys/windows_job.rs`): cancel and timeout call
+  `TerminateJobObject` at once (no grace period). After an agent restart every running job is
+  Lost: kill-on-close ended it, or it ended unobserved, and the two cannot be told apart. The serve
+  e2e tests are Linux only; Windows was checked by hand on officewin. Right: a console-control
+  stop with a grace period for console jobs, a launch-time marker in the job (exit-code file) to
+  tell the cases apart, and the e2e suite ported with `cmd /c` scripts.
+- **Presence while a job runs** (`pt-node`, `jobs/mod.rs`): only PRESENT acts (lower or kill),
+  polled every `--presence-interval` (15 s default); UNKNOWN mid-job changes nothing, although it
+  blocks a start. Right: decide whether a detector failing mid-job should lower jobs too.
+- **Tombstones have no bound** (`pt-node`): every (job, attempt) and its log stay until
+  `AckCollected` (SPEC 12a item 5), so a hub that never acks fills the node's disk. Right: `doctor`
+  reports old uncollected jobs and the hub acks after collection as part of its job machine.
+- **Node ids and journal epochs from std's RandomState** (`pt-node`, `random_id`): SipHash keyed
+  by the OS once per process, not a CSPRNG. Fine for ids; never use it for secrets. Right: read
+  `getrandom`/`BCryptGenRandom` directly if a secret is ever needed on the node.
