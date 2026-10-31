@@ -267,7 +267,7 @@ class Meter extends StatelessWidget {
     return Line([
       sp(context, '[', color: p.dim),
       sp(context, '#' * n, color: zone),
-      sp(context, '.' * (cells - n), color: p.rule),
+      sp(context, '.' * (cells - n), color: p.edge),
       sp(context, ']', color: p.dim),
       if (pct) sp(context, lpad('${(v * 100).round()}%', 5), color: zone),
     ]);

@@ -97,7 +97,11 @@ TextStyle baseStyle(Palette p) => TextStyle(
   fontSize: kFontSize,
   height: kRow / kFontSize,
   color: p.fg,
-  fontFeatures: const [FontFeature.tabularFigures()],
+  fontFeatures: const [
+    FontFeature.tabularFigures(),
+    FontFeature.disable('calt'),
+    FontFeature.disable('liga'),
+  ],
   leadingDistribution: TextLeadingDistribution.even,
 );
 

@@ -290,8 +290,9 @@ class _ShellState extends State<Shell> {
               ],
             ),
           );
-    return ColoredBox(
+    return Material(
       color: p.bg,
+      textStyle: baseStyle(p),
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,

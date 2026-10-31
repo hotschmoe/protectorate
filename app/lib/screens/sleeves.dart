@@ -87,8 +87,6 @@ class _SleeveRowState extends State<_SleeveRow> {
     final st = sleeveStatus(p, s);
     final sel = widget.selected;
     final nameColor = sel ? p.info : p.fg;
-    final prefix = widget.child ? (widget.last ? '  └ ' : '  ├ ') : '  ';
-    final name = '$prefix${s.name}';
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hot = true),
@@ -100,7 +98,9 @@ class _SleeveRowState extends State<_SleeveRow> {
           color: sel || _hot ? p.hotFill : null,
           child: Row(children: [
             Cells(2, child: T(sel ? '>' : st.glyph, color: sel ? p.info : st.color)),
-            Expanded(child: T(name, color: nameColor)),
+            const Cells(2, child: SizedBox()),
+            if (widget.child) Branch(last: widget.last),
+            Expanded(child: T(s.name, color: nameColor)),
             Cells(10, child: T(harnessName(s.incarnation?.harness ?? Harness.unknown), color: p.dim)),
             Cells(10, child: Line([statusSpan(context, st)])),
           ]),
@@ -156,7 +156,8 @@ class SleevesTable extends StatelessWidget {
                     color: i.isOdd ? p.bar : null,
                     child: Row(children: [
                       Cells(2, child: T(st.glyph, color: st.color)),
-                      Expanded(child: T(x.parentId == null ? x.name : '${last ? '└' : '├'} ${x.name}')),
+                      if (x.parentId != null) Branch(last: last),
+                      Expanded(child: T(x.name)),
                       Cells(14, child: T(w.name, color: p.dim)),
                       Cells(10, child: T(harnessName(inc?.harness ?? Harness.unknown))),
                       Cells(22, child: T(inc?.model ?? '-', color: p.dim)),
@@ -177,4 +178,38 @@ class SleevesTable extends StatelessWidget {
       ],
     );
   }
+}
+
+/// A tree connector two cells wide, drawn as 1 px rules so it joins across rows.
+class Branch extends StatelessWidget {
+  const Branch({super.key, required this.last});
+
+  final bool last;
+
+  @override
+  Widget build(BuildContext context) => CustomPaint(
+    size: const Size(kCell * 2, kRow),
+    painter: _BranchPainter(pal(context).edge, last),
+  );
+}
+
+class _BranchPainter extends CustomPainter {
+  _BranchPainter(this.color, this.last);
+
+  final Color color;
+  final bool last;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1;
+    final x = (kCell / 2).floorToDouble() + 0.5;
+    final y = (size.height / 2).floorToDouble() + 0.5;
+    canvas.drawLine(Offset(x, 0), Offset(x, last ? y : size.height), paint);
+    canvas.drawLine(Offset(x, y), Offset(size.width - 2, y), paint);
+  }
+
+  @override
+  bool shouldRepaint(_BranchPainter old) => old.color != color || old.last != last;
 }

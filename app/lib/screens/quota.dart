@@ -34,7 +34,7 @@ class QuotaScreen extends StatelessWidget {
           Row(children: [
             const Cells(2, child: SizedBox()),
             Cells(7, child: T(w.label, color: p.dim)),
-            Cells(phone ? 15 : 23, child: Meter(w.usedPct == null ? null : w.usedPct! / 100,
+            Cells(phone ? 16 : 25, child: Meter(w.usedPct == null ? null : w.usedPct! / 100,
                 cells: phone ? 8 : 16)),
             Expanded(child: T(
               w.resetsAt == null
@@ -80,8 +80,8 @@ class QuotaMini extends StatelessWidget {
           Row(children: [
             Cells(8, child: T(q.subscription.name, color: p.fg)),
             Cells(4, child: T(q.tightest?.label ?? '-', color: p.dim)),
-            Cells(15, child: Meter(q.tightest?.usedPct == null ? null : q.tightest!.usedPct! / 100,
-                cells: 8)),
+            Cells(16, child: Meter(q.tightest?.usedPct == null ? null : q.tightest!.usedPct! / 100,
+                cells: 7)),
             Expanded(child: T(
               q.tightest?.resetsAt == null ? '' : 'r ${span(q.tightest!.resetsAt!.difference(now))}',
               color: q.reading == QuotaReading.stale ? p.warn : p.dim,

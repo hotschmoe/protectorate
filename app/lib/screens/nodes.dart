@@ -50,14 +50,14 @@ class NodesScreen extends StatelessWidget {
     Widget head(String t, int n, {bool right = false}) =>
         Cells(n, right: right, child: T(t, color: p.dim));
     return Wide(
-      cells: 120,
+      cells: 126,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(children: [
             head('NAME', 12), head('ARCH', 7), head('OS', 9), head('CPU', 5, right: true),
-            head('RAM', 6, right: true), const Cells(2, child: SizedBox()), head('GPU', 20),
-            head('DISK /', 15), head('LOAD', 17), head('PRESENCE', 15),
+            head('RAM', 6, right: true), const Cells(2, child: SizedBox()), head('GPU', 22),
+            head('DISK /', 17), head('LOAD', 19), head('PRESENCE', 15),
             Expanded(child: T('STATE', color: p.dim)),
           ]),
           Container(height: 1, color: p.edge),
@@ -83,9 +83,9 @@ class NodesScreen extends StatelessWidget {
                         Cells(5, right: true, child: T('${inv.cpuCount}c')),
                         Cells(6, right: true, child: T(bytes(inv.ramBytes))),
                         const Cells(2, child: SizedBox()),
-                        Cells(20, child: T(gpuShort(n), color: p.dim)),
-                        Cells(15, child: Meter(inv.disks.isEmpty ? null : inv.disks.first.usedFraction, cells: 8)),
-                        Cells(17, child: Meter(cpuLoad(n), cells: 10)),
+                        Cells(22, child: T(gpuShort(n), color: p.dim)),
+                        Cells(17, child: Meter(inv.disks.isEmpty ? null : inv.disks.first.usedFraction, cells: 8)),
+                        Cells(19, child: Meter(cpuLoad(n), cells: 10)),
                         Cells(15, child: T(pw, color: pc)),
                         Expanded(child: T(ow, color: oc)),
                       ]),
@@ -160,7 +160,7 @@ class NodesMini extends StatelessWidget {
               child: Row(children: [
                 Cells(11, child: T(n.name, color: n.online ? p.fg : p.alarm)),
                 Cells(7, child: T(n.inventory.arch, color: p.dim)),
-                Cells(13, child: Meter(cpuLoad(n), cells: 6)),
+                Cells(15, child: Meter(cpuLoad(n), cells: 6)),
                 Expanded(child: n.online
                     ? T(presenceWord(p, n.presence).$1.split(' ').first, color: presenceWord(p, n.presence).$2)
                     : T('OFFLINE', color: p.alarm)),
