@@ -1,0 +1,17 @@
+[package]
+name = "pt-node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# FFI-exempt presence/OS crate (SPEC 10, D19): unsafe is denied, then allowed only in the tiny
+# wrappers of `sys::ffi`, each with a SAFETY comment.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
