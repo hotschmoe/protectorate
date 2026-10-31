@@ -1,5 +1,5 @@
-use crate::json::{Obj, array};
 use crate::sys;
+use pt_frame::msg::Sample;
 use std::time::Duration;
 
 /// Cumulative CPU time counters; only ratios between two readings mean anything.
@@ -14,15 +14,6 @@ pub struct Mem {
     pub available: u64,
     pub swap_total: u64,
     pub swap_free: u64,
-}
-
-pub struct Sample {
-    pub taken_at: u64,
-    pub cpu_percent: Option<f64>,
-    pub load: Option<[f64; 3]>,
-    pub mem: Option<Mem>,
-    pub disks: Vec<crate::inventory::Disk>,
-    pub uptime_secs: Option<u64>,
 }
 
 /// Keeps the previous CPU reading so a long-running node gets a delta per sample.
@@ -51,52 +42,26 @@ impl Sampler {
             (Some(a), Some(b)) if b.total > a.total => {
                 let busy = b.busy.saturating_sub(a.busy) as f64;
                 let total = (b.total - a.total) as f64;
-                Some((busy / total * 100.0).clamp(0.0, 100.0))
+                Some(round2((busy / total * 100.0).clamp(0.0, 100.0)))
             }
             _ => None,
         };
+        let mem = sys::memory();
         Sample {
             taken_at: crate::unix_now(),
             cpu_percent,
-            load: sys::load_avg(),
-            mem: sys::memory(),
+            load: sys::load_avg().map(|l| l.iter().copied().map(round2).collect()),
+            mem_total_bytes: mem.as_ref().map(|m| m.total),
+            mem_available_bytes: mem.as_ref().map(|m| m.available),
+            mem_used_bytes: mem.as_ref().map(|m| m.total.saturating_sub(m.available)),
+            swap_total_bytes: mem.as_ref().map(|m| m.swap_total),
+            swap_free_bytes: mem.as_ref().map(|m| m.swap_free),
             disks: sys::disks(),
             uptime_secs: sys::uptime(),
         }
     }
 }
 
-impl Sample {
-    pub fn to_json(&self) -> String {
-        let mut o = Obj::new().uint("taken_at", self.taken_at);
-        o = match self.cpu_percent {
-            Some(p) => o.float("cpu_percent", p),
-            None => o.raw("cpu_percent", "null"),
-        };
-        o = match self.load {
-            Some(l) => o.raw("load", &array(l.iter().map(|v| format!("{v:.2}")))),
-            None => o.raw("load", "null"),
-        };
-        match &self.mem {
-            Some(m) => {
-                o = o
-                    .uint("mem_total_bytes", m.total)
-                    .uint("mem_available_bytes", m.available)
-                    .uint("mem_used_bytes", m.total.saturating_sub(m.available))
-                    .uint("swap_total_bytes", m.swap_total)
-                    .uint("swap_free_bytes", m.swap_free);
-            }
-            None => {
-                o = o
-                    .raw("mem_total_bytes", "null")
-                    .raw("mem_available_bytes", "null")
-                    .raw("mem_used_bytes", "null")
-                    .raw("swap_total_bytes", "null")
-                    .raw("swap_free_bytes", "null");
-            }
-        }
-        o.raw("disks", &array(self.disks.iter().map(|d| d.to_json())))
-            .opt_uint("uptime_secs", self.uptime_secs)
-            .finish()
-    }
+fn round2(v: f64) -> f64 {
+    (v * 100.0).round() / 100.0
 }

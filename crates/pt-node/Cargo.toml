@@ -13,5 +13,9 @@ unsafe_code = "deny"
 [lints.clippy]
 undocumented_unsafe_blocks = "deny"
 
+[dependencies]
+pt-frame = { path = "../pt-frame" }
+pt-json = { path = "../pt-json" }
+
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

@@ -1,3 +1,4 @@
+use pt_json::ToJson;
 use pt_node::presence::Config;
 use pt_node::{Detector, Sampler, inventory};
 use std::io::Write;

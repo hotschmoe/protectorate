@@ -1,25 +1,14 @@
 //! Human presence at the machine (SPEC 3.5). Only local seat input and lock state count; remote
 //! logins never do.
 
-use crate::json::Obj;
 use crate::sys;
+use pt_frame::msg::{Presence, PresenceState as State};
+use std::path::PathBuf;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum State {
-    Present,
-    Away,
-    Unknown,
-}
-
-impl State {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            State::Present => "PRESENT",
-            State::Away => "AWAY",
-            State::Unknown => "UNKNOWN",
-        }
-    }
-}
+/// Test override, read when the Detector is made: the variable names a file holding PRESENT,
+/// AWAY or UNKNOWN, re-read at every detection, which then replaces the platform probe (source
+/// `test-override`). A missing or unreadable file reads as UNKNOWN. Only the e2e tests set it.
+pub const OVERRIDE_ENV: &str = "PROTECTORATE_NODE_TEST_PRESENCE";
 
 #[derive(Clone, Copy)]
 pub struct Config {
@@ -36,19 +25,6 @@ impl Default for Config {
             locked_grace_secs: 60,
         }
     }
-}
-
-pub struct Presence {
-    pub state: State,
-    pub idle_secs: Option<u64>,
-    pub locked: Option<bool>,
-    pub source: &'static str,
-    pub detail: String,
-    /// A second, independent idle reading when one exists (Windows GetLastInputInfo from the console
-    /// session), for comparison only.
-    pub alt_idle_secs: Option<u64>,
-    pub away_after_secs: u64,
-    pub sampled_at: u64,
 }
 
 pub enum Gate {
@@ -88,6 +64,7 @@ pub(crate) struct Observation {
 pub struct Detector {
     cfg: Config,
     platform: sys::Platform,
+    override_file: Option<PathBuf>,
 }
 
 impl Detector {
@@ -95,11 +72,15 @@ impl Detector {
         Detector {
             cfg,
             platform: sys::Platform::new(),
+            override_file: std::env::var_os(OVERRIDE_ENV).map(PathBuf::from),
         }
     }
 
     /// Long-running callers keep the Detector so input devices stay open and watched.
     pub fn detect(&mut self) -> Presence {
+        if let Some(path) = &self.override_file {
+            return self.forced(path);
+        }
         let o = self.platform.observe(&self.cfg);
         let cfg = &self.cfg;
         let state = match o.session {
@@ -116,26 +97,30 @@ impl Detector {
             state,
             idle_secs: o.idle_secs,
             locked: o.locked,
-            source: o.source,
+            source: o.source.to_string(),
             detail: o.detail,
             alt_idle_secs: o.alt_idle_secs,
             away_after_secs: cfg.away_after_secs,
             sampled_at: crate::unix_now(),
         }
     }
-}
 
-impl Presence {
-    pub fn to_json(&self) -> String {
-        Obj::new()
-            .str("state", self.state.as_str())
-            .opt_uint("idle_secs", self.idle_secs)
-            .opt_bool("locked", self.locked)
-            .str("source", self.source)
-            .str("detail", &self.detail)
-            .opt_uint("alt_idle_secs", self.alt_idle_secs)
-            .uint("away_after_secs", self.away_after_secs)
-            .uint("sampled_at", self.sampled_at)
-            .finish()
+    fn forced(&self, path: &std::path::Path) -> Presence {
+        let text = std::fs::read_to_string(path);
+        let state = match text.as_deref().map(str::trim) {
+            Ok("PRESENT") => State::Present,
+            Ok("AWAY") => State::Away,
+            _ => State::Unknown,
+        };
+        Presence {
+            state,
+            idle_secs: None,
+            locked: None,
+            source: "test-override".to_string(),
+            detail: format!("{OVERRIDE_ENV}={}", path.display()),
+            alt_idle_secs: None,
+            away_after_secs: self.cfg.away_after_secs,
+            sampled_at: crate::unix_now(),
+        }
     }
 }

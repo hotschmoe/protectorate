@@ -8,9 +8,6 @@ Each entry: where, what was done, what right looks like.
 - **Outbound HTTPS through curl** (hub, nodes): no Rust TLS stack. Right: decide between
   curl forever, or a forked and trimmed rustls when curl's absence or output parsing bites.
 - **Sandbox through bwrap**: right is our own small namespaces helper (SPEC 3.4).
-- **Node JSON by hand** (`pt-node`): each collector has a hand-written `to_json` over a tiny
-  writer (`crates/pt-node/src/json.rs`). Right: swap for pt-json's `ToJson` once it lands, and
-  delete the writer.
 - **Windows presence has no idle time from a plain caller** (`pt-node`, `sys/windows_presence.rs`):
   `WTSINFOEXW.LastInputTime` is 0 for the console session when queried by an ordinary admin
   (`quser` shows "none"), so `presence` reports UNKNOWN unless the screen is locked (lock flag

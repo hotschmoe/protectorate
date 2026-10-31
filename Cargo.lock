@@ -16,6 +16,8 @@ version = "0.0.0"
 name = "protectorate-node"
 version = "0.0.0"
 dependencies = [
+ "pt-frame",
+ "pt-json",
  "pt-node",
 ]
 
@@ -35,4 +37,6 @@ name = "pt-node"
 version = "0.0.0"
 dependencies = [
  "libc",
+ "pt-frame",
+ "pt-json",
 ]
