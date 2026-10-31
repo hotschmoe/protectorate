@@ -150,7 +150,27 @@ pub fn gpus() -> Vec<Gpu> {
             driver: win32::hklm_string(&key, "DriverVersion"),
         });
     }
-    out
+    // The class key keeps ghost entries from replaced drivers: one adapter, the newest driver.
+    let mut unique: Vec<Gpu> = Vec::new();
+    for g in out {
+        match unique
+            .iter_mut()
+            .find(|u| u.vendor_id == g.vendor_id && u.device_id == g.device_id && u.name == g.name)
+        {
+            Some(u) if version_key(&g.driver) > version_key(&u.driver) => *u = g,
+            Some(_) => {}
+            None => unique.push(g),
+        }
+    }
+    unique
+}
+
+fn version_key(v: &Option<String>) -> Vec<u64> {
+    v.as_deref()
+        .unwrap_or("")
+        .split('.')
+        .map(|p| p.parse().unwrap_or(0))
+        .collect()
 }
 
 fn hex_after(s: &str, marker: &str) -> Option<u32> {

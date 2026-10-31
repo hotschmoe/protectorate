@@ -69,6 +69,14 @@ impl Platform {
             _ => None,
         };
         let idle = if info.last_input <= 0 {
+            // The console session's LastInputTime stays 0 for ordinary callers (quser shows
+            // "none"); without a locked screen to go on, presence cannot be told.
+            if locked != Some(true) {
+                return fail(format!(
+                    "console session {console} reports no LastInputTime (state {}, flags {})",
+                    info.state, info.flags
+                ));
+            }
             None
         } else if info.last_input > info.current {
             return fail("LastInputTime is in the future".into());
