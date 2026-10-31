@@ -1,0 +1,16 @@
+[package]
+name = "protectorate-node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "protectorate-node"
+path = "src/main.rs"
+
+[dependencies]
+pt-node = { path = "../pt-node" }
