@@ -17,6 +17,14 @@ name = "pt-hash"
 version = "0.0.0"
 
 [[package]]
+name = "pt-http"
+version = "0.0.0"
+dependencies = [
+ "pt-hash",
+ "pt-sys",
+]
+
+[[package]]
 name = "pt-sys"
 version = "0.0.0"
 dependencies = [
