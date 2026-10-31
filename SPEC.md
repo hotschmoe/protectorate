@@ -1,6 +1,8 @@
 # Protectorate SPEC (next)
 
-Status: draft, 2026-11-01. This file states the design intent for the rebuilt Protectorate on branch
+Status: decided 2026-11-01 (owner answers in `docs/sessions/2026-11-01-decisions.md`); development
+has started. Motto: **make it work, make it right, make it fast**, in that order. A shortcut taken to
+make something work is logged in `REVISIT.md` with what "right" would be. This file states the design intent for the rebuilt Protectorate on branch
 `next`. The reasoning, citations and rejected alternatives are in `docs/design/`. The owner's own words
 are in `docs/sessions/2026-11-01-redesign.md`. When this file and a design report disagree, this file
 wins, and the conflict is listed in section 12.
@@ -15,11 +17,15 @@ wins, and the conflict is listed in section 12.
 ## 1. What it is
 
 A self-hosted software factory on one hub machine. The owner, Envoy (our orchestrator agent) and
-vendor general agents (GrokBot, Claude Duet, ChatGPT Dot) dispatch coding work to sleeves. A sleeve is
+vendor general agents (GrokBot, Claude Duet, ChatGPT Dot) ask for coding work, and sleeves do it.
+**The product is chat-first:** the owner mostly talks to Envoy, and Envoy talks to the sleeves.
+Opening a sleeve's own chat is routine; dropping into its real terminal is an advanced, last-resort
+view. A sleeve is
 a vendor coding CLI or Pi, running untouched in a light sandbox, bound to one directory. The hub also
 reaches a fleet of untrusted machines (nodes) to inventory them, maintain them and run build and test
 jobs across architectures. It is a software factory only: no email, calendar or errand agent. General
-agents are the vendors' products, and they reach Protectorate through its CLI/MCP.
+agents are the vendors' products, and they reach Protectorate only by talking to Envoy, through a
+CLI on the hub machine (section 3.1).
 
 ## 2. Principles
 
@@ -42,8 +48,16 @@ agents are the vendors' products, and they reach Protectorate through its CLI/MC
    proof (sections 12a, 12b).
 5. **Record before effect.** Every write to a harness or node is an effect record, fsynced before the
    first byte leaves. An unconfirmed write is Uncertain, never silently retried or dropped.
-6. **Fewest binaries and dependencies.** Two binaries plus the Flutter apps. A new dependency needs a
-   reason that code cannot meet.
+6. **Fewest binaries and fewest dependencies we don't own.** Two binaries plus the Flutter apps.
+   Our own crates can be as many as the design wants. Third-party code is the supply-chain risk:
+   - a third-party crate, Go module or Dart package needs a reason that a few hundred lines of our
+     own code cannot meet;
+   - every one is pinned exactly (`=x.y.z`, a Go tag plus go.sum, an exact pubspec version), and
+     nothing updates without a hand-picked bump;
+   - where a dependency is large or only partly needed, we fork it under our control and trim it;
+   - no Python or Node in the product (the pi_durable experiment is the one exception, D14);
+   - the allowed list and its reasons live in `DEPENDENCIES.md`, and `make check` fails on a crate
+     that is not listed.
 7. **LAN only.** `protectorate.hotschmoe.com` resolves and answers only on the LAN and over the
    owner's WireGuard. WAN access is a later, separate design.
 8. **Repo rules carry over** from `dev-hotschmoe` CLAUDE.md: no emojis, full migrations with no
@@ -58,14 +72,19 @@ agents are the vendors' products, and they reach Protectorate through its CLI/MC
 |---|---|---|
 | Flutter desktop (Linux, Windows), Android, web | HTTPS through Traefik | `pd1.` device token |
 | Owner CLI on the hub, Envoy and sleeves | loopback | `pc1.` capability (sleeves), owner token (CLI) |
-| Vendor general agents on a user machine | remote MCP over streamable HTTP, through Traefik | **agent token**: a device token with a scope ceiling (no approvals, no device or node admin) |
+| Vendor general agents (GrokBot, Claude Duet, ChatGPT Dot) | installed **on the hub machine**, running `protectorate envoy ...` through their own shell tool, or the stdio `protectorate mcp --envoy` | the local **envoy-only** capability: it can talk to Envoy and read Envoy's replies, nothing else |
 
-- **CLI first, MCP as the same API.** Both are generated from the proto, so MCP costs no hand-written
-  code. The CLI is what shell-capable harnesses and Envoy use. MCP gives typed schemas,
-  validated arguments, read-only and destructive hints, and works for clients with no shell. Neither
-  gets a feature the other lacks.
-- What each vendor general agent can connect to is not verified. Nothing depends on a guess: anything
-  that speaks remote MCP gets the API, and we write no per-vendor plugin.
+- **Vendor general agents talk to Envoy, never to the API** (D9, D6 changed). They get no hub
+  token and no network path. The owner installs the vendor app on the hub, logs it in, and tells it
+  to use `protectorate envoy send|wait|read`. The narrow stdio MCP (`protectorate mcp --envoy`)
+  offers the same three tools for apps that prefer MCP. We write no per-vendor connector.
+- **Envoy holds the power.** Envoy (a root sleeve) uses the full CLI over loopback for sleeves,
+  nodes and jobs. When a general agent asks for something big, heavy or dangerous, Envoy raises an
+  approval that reaches the owner's phone and waits for it. A code rule makes this mandatory for a
+  list of actions (removing sleeves, node maintenance jobs, pushes to protected branches), so it does
+  not rest on Envoy's judgment alone.
+- **The CLI is the API.** Every CLI command maps onto one hub API method. Envoy and shell-capable
+  sleeves use the CLI.
 - The web build is embedded in the hub binary and served from the same origin.
 
 ### 3.2 Network
@@ -96,7 +115,7 @@ agents are the vendors' products, and they reach Protectorate through its CLI/MC
 - **Enrollment, "scan to join":**
   1. The README one-liner installs the node and runs `protectorate-node join <url>`.
   2. The node shows a QR code of its headscale registration plus a control-key fingerprint.
-  3. The owner scans or pastes it in the app, names the node, picks its tier and approves.
+  3. The owner scans or pastes it in the app, names the node and approves.
   4. The hub checks the fingerprint, then registers, tags and renames the node through the
      headscale CLI.
 
@@ -108,8 +127,12 @@ One Linux machine, one `protectorate` process plus its headscale and member chil
 
 - **The journal and state:** sleeves, incarnations, activity, queues, effects, guardrails, jobs,
   nodes and approvals. These are all owned by the core task.
-- **Panes:** the hub owns every PTY and pipe; tmux goes away. Each pane has a raw byte ring with
-  monotonic offsets and a VT screen model, used only for status rules and attach snapshots.
+- **Headless first, panes on demand.** Every sleeve runs headless by default, through the
+  harness's official protocol, and its transcript is the chat the app shows. tmux goes away. A
+  **terminal takeover** is the advanced view: at a turn boundary the hub ends the headless
+  incarnation and starts the harness TUI in a hub-owned PTY with the harness's own resume flag on the
+  same session. Handing back works the same way in reverse. Only a taken-over sleeve has a PTY, a
+  raw byte ring and a VT screen model. Antigravity, which is pane-only (D13), is the one exception.
 - **Events and waits:** `Wait(until idle|done|blocked|report|ended|parked)` reads the state channel.
 - **Quota:** read-only readers per subscription, which feed dispatch.
 - **Mail:** delivery, re-delivery and escalation.
@@ -151,18 +174,37 @@ crash, every incarnation goes to Recovering and resumes natively.
 | Claude Code | headless stream-json (with `--replay-user-messages` for prompt ack), or pane |
 | Codex | headless `codex app-server`, or pane |
 | Grok Build | headless `grok agent stdio` (ACP, with `--always-approve` when unsupervised), or pane |
-| Gemini CLI | headless ACP, reusing the Grok driver, or pane |
-| Antigravity `agy` | pane only, until approvals work headless and plan policy is clear |
-| Pi, two sleeve kinds | headless `pi --mode rpc`, Bun-built so the hub needs no Node. **`pi_vendor`** offers any login or API key Pi supports, from Pi's own provider catalog: xAI, OpenAI (ChatGPT sign-in), DeepSeek, Kimi/Moonshot, GLM (Z.ai), MiniMax, Qwen, OpenRouter and more. The sleeve picks provider and model. **`pi_local`** points at a local OpenAI-compatible endpoint. Anthropic through Pi bills as extra usage and is labelled so. Gemini and Antigravity logins are not offered (removed upstream, ban risk) |
+| Antigravity CLI | replaces Gemini CLI, which is dropped (D35). Pane only, until approvals work headless and plan policy is clear. A standalone binary is required; if it only ships through npm, it waits |
+| Pi, two sleeve kinds | headless `pi --mode rpc`, run as the standalone binary so the hub needs no Node. **`pi_vendor`** offers any login or API key Pi supports, from Pi's own provider catalog: xAI, OpenAI (ChatGPT sign-in), DeepSeek, Kimi/Moonshot, GLM (Z.ai), MiniMax, Qwen, OpenRouter and more. The sleeve picks provider and model. **`pi_local`** points at a local OpenAI-compatible endpoint. Anthropic through Pi bills as extra usage and is labelled so. Gemini and Antigravity logins are not offered (removed upstream, ban risk) |
 | Pi Durable | a time-boxed experiment: a ~500-line TypeScript bridge on `pi/durable` (Node >= 22.19), adopted only if it passes the kill tests in the sleeves report 1.7 |
 
 - **Default tools:** none beyond what each harness ships, plus our CLI mounted in the sandbox.
   Native tools are not replaced.
+- **Harness installs and updates are native** (D33). Each harness is installed by its vendor's
+  official method, a standalone binary wherever one is offered, and updates through its own
+  updater (its built-in auto-update or its own `update` command). We never pin, patch or repackage
+  a harness. Rules in code around that:
+  - an update never touches a running sleeve: the running process keeps its binary, and the next
+    launch or resume picks up the new one;
+  - the hub runs a harness's own update command only when no sleeve of that harness is mid-turn;
+  - `doctor` records the version and install method per harness, so a behavior change can be
+    traced to the version that brought it;
+  - a failed launch after an update marks that harness ineligible in `doctor.json` until a
+    launch succeeds, and resleeve skips it.
+- **The update check runs once every 24 hours** per harness, through the harness's own command.
+  On the dev hub on 2026-11-01 they are `claude update`, `codex update`, `grok update` and
+  `pi update self`. A harness without one is updated by its official installer, re-run.
+- **Pi is a standalone binary, not an npm package** (D34), updated with `pi update self`. If that
+  command can't update a standalone install, the hub fetches Pi's GitHub release itself, verifies the
+  checksum and stages it beside the old one. Pi Durable is the one path that needs Node, and Node is
+  accepted for it (D14).
+- **Codex** runs as its standalone release binary, not through the npm wrapper.
 
 ### 3.5 Nodes
 
-- **Two tiers:** shared (schedulable) and care (family machines, never scheduled). Tiers are tags,
-  and the scheduler enforces them.
+- **One kind of node** (D32). Node tiers are gone: the only reason for them was to keep jobs off
+  machines a person is using, and presence detection does that directly. Every node takes jobs
+  when idle and refuses them while someone is at it.
 - **One node binary** per OS. It runs as a system service on Linux and as a LocalSystem service with a
   runner account on Windows. It also builds for Android (Termux), and for macOS once a Mac exists.
   All RPCs are hub-initiated on tailnet port 7475.
@@ -172,16 +214,23 @@ crash, every incarnation goes to Recovering and resumes natively.
   - Linux: logind, then `/dev/input`.
   - Windows: `WTSQuerySessionInformation` from the service.
   - macOS: `HIDIdleTime`.
-  - UNKNOWN counts as present on care nodes and away on shared ones.
+  - UNKNOWN counts as present, so a node whose detector fails takes no jobs. `doctor` reports a
+    node that stays UNKNOWN.
+  - Remote logins (ssh, the hub's own job sessions) are not presence; only local seat input and
+    lock state are.
 - **Jobs** (maintenance, cross-arch build and test):
   - the node journals each job before exec, and limits each one: 1 h by default, 64 MiB of log,
     and a per-job cgroup or Job Object;
   - the hub pulls output as length-prefixed frames;
   - a job never re-runs by itself;
-  - scheduling, which is code, weighs tier, arch, toolchain, load, warm cache and human presence.
-- **Care nodes still get maintenance** (PROBLEMS P2: the NAS, the family PCs). The scheduler never
-  places work on them. An owner-granted maintenance job may run there, and the node refuses it
-  while a human is PRESENT unless the grant says otherwise.
+  - scheduling, which is code, weighs arch, toolchain, load and warm cache, and only among nodes
+    that are AWAY;
+  - the node itself refuses to start a job while PRESENT or UNKNOWN, so a stale hub view cannot
+    put work on a busy machine. The owner can override one job explicitly
+    (`--even-if-present`), which is how urgent maintenance reaches a machine in use (PROBLEMS P2);
+  - when a person arrives mid-job, the job drops to idle priority (nice 19 and idle I/O class on
+    Linux, IDLE_PRIORITY_CLASS on Windows) and keeps running. It is not killed, because jobs
+    never re-run by themselves. A job may declare `on_present: kill` instead.
 - **Leases** (PROBLEMS P9: reserve a GPU with a TTL) are not in the first build. When they come,
   they will be a hub-side table that expires unless renewed, not a node feature (D30).
 
@@ -258,14 +307,22 @@ protectorate-linux-{amd64,arm64}       hub: serve | cli | mcp | sleeve-runner | 
 protectorate-node-{linux-amd64,linux-arm64,windows-amd64,windows-arm64,android-arm64}
                                        node: serve | join | uninstall | doctor; embeds member
 protectorate-desktop-{linux,windows}-{amd64,arm64}, protectorate-android.apk
-install.sh, install-node.sh, install-node.ps1, VERSION, SHA256SUMS, SHA256SUMS.sig
+install.sh, install-node.sh, install-node.ps1, VERSION, SHA256SUMS
 ```
 
 - **Language: Rust and Go.** Rust for everything except `go/`, and Dart for the Flutter app. Zig is
   used only as the C toolchain behind cargo-zigbuild for glibc 2.31 linking. Neither the hub nor the
-  node needs cgo.
+  node needs cgo. Go is only the official headscale and our `member` glue on tailscale's tsnet.
 - The sleeve runner and sandbox helper are subcommands that re-exec `/proc/self/exe`.
-- **Signatures:** `ssh-keygen -Y` over `SHA256SUMS`, with no new tool.
+- **Releases are built locally, not in GitHub Actions** (owner, 2026-11-01). `make release` builds
+  every asset on the dev hub and on nodes over ssh for targets it cannot cross-build. It writes
+  `SHA256SUMS`, and `gh release create` uploads them. GitHub Actions runs no build, so a compromised
+  runner or action cannot inject code into a release.
+- **No signing key for now.** Updates verify each asset's sha256 against `SHA256SUMS`, fetched over
+  HTTPS from the same release. That catches corruption and truncation, but not someone who can
+  replace release assets, which takes the owner's GitHub account. GitHub immutable releases
+  (assets locked once published), where available, narrow that further. Signing stays in
+  `REVISIT.md`.
 - **Uninstall** removes exactly what the install manifest lists.
 
 ### 6a. Updates from GitHub releases
@@ -273,9 +330,8 @@ install.sh, install-node.sh, install-node.ps1, VERSION, SHA256SUMS, SHA256SUMS.s
 Updating should be one command or one button, and never a site visit. Both hub and nodes fetch
 straight from GitHub releases, on the stable or dev channel, as today.
 
-- **Verification:** every update verifies `SHA256SUMS.sig` against the signing key embedded in the
-  running binary, then the asset's sha256, before anything is staged. A key rotation is itself a
-  signed release that carries the next key.
+- **Verification:** every update checks the asset's sha256 against the release's `SHA256SUMS`
+  before anything is staged (no signing key for now; section 6).
 - **Hub:**
   - `protectorate update [--version]`, or the app's UPDATE key, downloads the release and stages it
     in `releases/<version>/`.
@@ -336,7 +392,7 @@ backup that recovers a dead hub moves a live one.
 - **Cross-arch CI** is a hub rule: dispatch `make test` as a node job to each required arch. Plain
   binaries; containers only when a job asks for them.
 - **`doctor`**, on hub and node, checks:
-  - harness CLIs present, with versions;
+  - harness CLIs present, with versions and install method (D33);
   - credentials valid, through the read-only quota readers, never printed;
   - `gh` auth;
   - sandbox prerequisites, disk and clock.
@@ -366,8 +422,11 @@ Amber on dark, cleaner, closer to an IBM 3270/System/370 console than a mobile a
 - character meters;
 - a function-key legend and a `===>` command line.
 
-The main screen has a workspaces/sleeves tree, panes in the herdr style (xterm.dart for PTYs, a chat
-log for headless), mail and events, nodes, and quota. The ten rules and an ASCII layout are in the
+Chat comes first (D38). The main screen is Envoy's chat, with a workspaces/sleeves tree beside it.
+Choosing a sleeve opens its chat log, built from the headless transcript, in the same simple pane
+layout herdr uses. Approvals appear inline in the chat and on the phone. Mail and events, nodes, and
+quota each have their own screen. A taken-over terminal (xterm.dart) is reached from a sleeve's
+chat, never as the default view. The ten rules and an ASCII layout are in the
 nodes report section 7.
 
 ## 10. Verus
@@ -413,8 +472,8 @@ Verus is phased (D28), so its cost is measured before it spreads:
 - **Enrollment:** scan to join (the network report) replaces the "code shown on the phone" sketch.
   That sketch needed an unauthenticated node-to-hub endpoint.
 - **CLI off the hub:** the nodes report keeps the CLI on the hub only; the network report allows a
-  CLI or MCP on user machines with an agent token. Resolved: remote MCP over HTTPS with an agent
-  token for off-hub clients. A CLI build for user machines is decision D9.
+  CLI or MCP on user machines with an agent token. Resolved by the owner: the CLI stays on the hub,
+  and vendor general agents are installed there too (D9).
 - **Linux node service:** a system service (the nodes report, needed for `/dev/input` and cgroups)
   over a user service (the network report's install sketch). Decision D10.
 - **Egress proxy:** the sleeves report cuts it, so sleeves reach the hub API on loopback directly,
@@ -455,9 +514,9 @@ These rules override the design reports wherever the reports say otherwise. The 
    closed and reports "control key changed", so it never silently re-registers.
 9. **Installers are fetched by commit, not by tag.** The README one-liner uses the raw URL at a
    full commit SHA, which is immutable, and prints that script's sha256 beside the line. The
-   script then verifies `SHA256SUMS.sig` before running anything it downloads.
+   script then checks `SHA256SUMS` before running anything it downloads.
 10. **Node results are attestations.** A cross-arch CI status says "node X reported exit 0", with
-    the node named. A release asset is built only by the hub, or by two shared nodes whose
+    the node named. A release asset is built only by the hub, or by two nodes whose
     outputs are bit-identical.
 11. **The light-isolation threat model is explicit.** The sandbox protects against accidents, not
     against a malicious agent or prompt injection. A sleeve can read unmasked host files, reach the
@@ -520,42 +579,40 @@ not repeated here.
 14. **Smaller fixes:**
     - Activity splits `NoMatch`, which goes to Unknown, from `Desync`, which trips G14. A changed
       TUI cannot get a pane killed.
-    - Gemini stays out of `resleeve_to` until its history reader exists.
+    - Gemini CLI is dropped (D35); Antigravity is pane-only and stays out of `resleeve_to`.
     - `doctor` drops its tmux and egress checks.
     - Mail delivery becomes an effect kind (`MailDeliver`, Keyed by message id) under the effect
       machine.
-15. **Vendor general agents get a client path that works today (D9 changed).** Remote MCP is
-    one path. The node binary also carries `protectorate-node client ...`, which speaks HTTPS with
-    an agent token, a separate identity from the node key. That covers apps that only run a local
-    CLI or stdio MCP, without a third binary. Before D9 is closed, verify what GrokBot, Claude
-    Duet and ChatGPT Dot can each actually call.
+15. **Vendor general agents get a client path that works today.** Superseded by the owner on
+    2026-11-01: they run on the hub machine and only talk to Envoy (section 3.1). There is no
+    remote MCP, no agent token and no `protectorate-node client`.
 
-## 13. Open decisions (owner)
+## 13. Decisions (owner, 2026-11-01)
 
-Each has a recommendation.
+All decided. The owner's answers are recorded in `docs/sessions/2026-11-01-decisions.md`.
 
-| # | Decision | Recommendation |
+| # | Decision | Outcome |
 |---|---|---|
 | D1 | Headscale inside the hub binary but outside the process (sandboxed child) | yes |
-| D2 | Build headscale from the pinned upstream source in CI, or embed the release binary | build from source |
-| D3 | Split-horizon DNS for `protectorate.hotschmoe.com` at both sites and in the phone's WireGuard DNS | yes; home-site nodes need it |
-| D4 | Agent VLAN for nodes, excluded from Traefik's API router | later; credentials hold until then |
+| D2 | Build headscale from the pinned upstream source, or embed the release binary | official headscale, built locally from the pinned tag |
+| D3 | Split-horizon DNS for `protectorate.hotschmoe.com` at both sites and in the phone's WireGuard DNS | yes |
+| D4 | Agent VLAN for nodes, excluded from Traefik's API router | later |
 | D5 | Scan to join with a QR plugin in the app (paste also works) | yes |
-| D6 | Agent tokens with a scope ceiling for vendor general agents | yes |
+| D6 | Agent tokens for vendor general agents | **dropped**: general agents get the envoy-only local capability instead |
 | D7 | Children survive a root crash; die on root Stop/Remove | yes |
 | D8 | Child workspace: git worktree by default | yes |
-| D9 | Client path for vendor general agents on user machines | remote MCP plus `protectorate-node client` (12b item 15); verify each app first |
+| D9 | Client path for vendor general agents | **on the hub machine**, `protectorate envoy ...` or the stdio `mcp --envoy`; talk to Envoy only; Envoy asks the owner before big, heavy or dangerous work |
 | D10 | Linux node as a system service (one sudo at install) | yes |
 | D11 | Windows node as LocalSystem plus runner account | yes |
 | D12 | Cut the sandbox network namespace and egress proxy | yes |
 | D13 | Antigravity pane-only until headless approvals work | yes |
-| D14 | Node.js on the hub for the time-boxed pi_durable experiment | yes, time-boxed |
+| D14 | Node.js on the hub for the pi_durable experiment | yes |
 | D15 | Resleeve target: ordered list per sleeve, default `[pi_local]` | yes |
 | D16 | Guardrail thresholds as listed; no auto-revert on forbidden-path edits | yes |
 | D17 | Hub updates by re-exec in place, keeping sleeves alive | yes |
 | D18 | The hub never types into a pane after launch | yes |
 | D19 | FFI `unsafe` exemption to Verus rule 6 for sandbox and presence crates | yes |
-| D20 | Push token location | hub only; sleeves push through `protectorate git push` (12b item 6) |
+| D20 | Push token location | hub only; sleeves push through `protectorate git push` |
 | D21 | Index the owner's own interactive CLI logs too, or hub-launched sessions only | hub-launched only |
 | D22 | Vectors off until keyword search falls short | yes |
 | D23 | Brief file `.protectorate/BRIEF.md`, LLM summary for planned resleeves only | yes |
@@ -564,24 +621,78 @@ Each has a recommendation.
 | D26 | `history.read` scope | Envoy, plus a continued sleeve for its own run; wider is owner-only |
 | D27 | Source of the task-size class for dispatch | code (median of the last N), Envoy may nudge one class, code clamps |
 | D28 | Verus phasing: phase 1 is journal and frame codec; presence, audit and brief math dropped | yes |
-| D29 | Backlog with a spare-quota trigger in code and a review inbox for public repos (PROBLEMS P6) | yes, after stage 3 |
-| D30 | GPU/resource leases with a TTL (PROBLEMS P9) | later; hub-side table when needed |
-| D31 | A network spike before the core: Traefik ts2021 and DERP, tsnet on Windows and Android, scan to join | yes, stage 0 |
+| D29 | Backlog with a spare-quota trigger in code and a review inbox for public repos (PROBLEMS P6) | yes, after resleeve works |
+| D30 | GPU/resource leases with a TTL (PROBLEMS P9) | later |
+| D31 | A network spike before the core | **no separate spike**: build straight away and fix roadblocks as they come |
+| D32 | One kind of node; presence gates jobs | yes |
+| D33 | Harnesses install and update natively, never pinned | yes |
+| D34 | Pi as a standalone binary, updated natively | yes; check every 24 h, `pi update self` preferred |
+| D35 | Gemini CLI | **dropped**; Antigravity CLI replaces it, as a standalone binary |
+| D36 | Release signing key | **none for now**; releases built locally and checked against SHA256SUMS; revisit |
+| D37 | Third-party dependencies | as few as possible, pinned exactly, forked and trimmed when large; listed in `DEPENDENCIES.md` |
+| D38 | Primary interface | chat with Envoy; sleeve chats next; terminal takeover is last resort |
 
 ## 14. Build order
 
-0. **Network spike, throwaway:** prove that headscale's ts2021 and DERP work through Traefik, that
-   `member` joins and answers on Windows, Linux and Android, and that the one-rule policy blocks a
-   node-initiated flow. It runs first because it is the least proven part, and a failure there
-   changes the design (D31).
-1. **Core:** the workspace skeleton, proto, journal codec, `core::apply` for lifecycle, activity
-   and effects, and the `sleeve_core` fuzz target with its reference model. No harness yet.
-2. **Panes and one harness:** hub-owned PTYs, attach over WebSocket, screen rules, the headless
-   Claude driver on the effect record, and the Flutter shell in the new look.
+No separate network spike (D31): roadblocks get fixed when they are hit. Stages may run in
+parallel where they don't touch the same code. dev-hotschmoe is unused (owner, 2026-11-01), so
+nothing has to stay compatible with it.
+
+1. **Core:** the workspace skeleton, API schema, journal codec, `core::apply` for lifecycle,
+   activity and effects, and the `sleeve_core` fuzz target with its reference model. No harness yet.
+2. **Chat and one harness:** the headless Claude driver on the effect record, Envoy as a root
+   sleeve, `protectorate envoy send|wait|read`, and the Flutter shell in the new look with Envoy's
+   chat first. Terminal takeover comes after the other headless drivers.
 3. **Resleeve:** guardrails, the history index, the continuation brief, `pi_local`, and forced
    resleeve end to end.
 4. **Network:** the `go/` module, embedded headscale and member, Traefik routes, scan to join, and
    inventory and presence.
 5. **Jobs:** node jobs, cross-arch CI, `doctor`.
-6. **Hardening:** the first Verus modules (journal codec, line framer), remote MCP with agent
-   tokens, the remaining harnesses, and the pi_durable experiment.
+6. **Hardening:** the first Verus modules (journal codec, node frame codec), the stdio
+   `mcp --envoy`, terminal takeover, the remaining harnesses, and the pi_durable experiment.
+
+## 15. Implementation choices (2026-11-01)
+
+How the code is built, chosen to keep third-party code near zero (D37). Each choice that is a
+shortcut is also in `REVISIT.md`.
+
+- **No async runtime.** The hub serves a few clients and a few dozen sleeves, so it uses std
+  threads and channels:
+  - one core thread owns all state and runs `apply`;
+  - each connection, child pipe and node link gets its own thread;
+  - timeouts use deadlines on sockets and `poll`.
+
+  This avoids tokio, hyper and axum.
+- **Our own crates** for what we would otherwise import:
+
+  | Crate | What it does |
+  |---|---|
+  | `pt-json` | JSON value, parser, writer, `ToJson`/`FromJson`; insertion-ordered objects so output is deterministic |
+  | `pt-hash` | SHA-1 (WebSocket handshake), SHA-256 (release sums), CRC-32C (journal) |
+  | `pt-http` | HTTP/1.1 server on TCP and unix sockets, WebSocket server, a small blocking client for loopback and unix sockets |
+  | `pt-journal` | the append-only journal: length, CRC and payload frames, group-commit fsync, torn-tail recovery (Verus phase 1) |
+  | `pt-core` | the pure state machines and `apply`, with no I/O |
+  | `pt-api` | API types and the method table, declared once in a macro; `pt-apigen` writes the Dart models from it |
+  | `pt-drivers` | headless harness adapters (Claude stream-json, Codex app-server, Grok ACP, Pi rpc) into one event stream |
+  | `pt-sandbox` | the bwrap argument builder and systemd scopes |
+  | `pt-frame` | the hub-node frame codec (Verus phase 1) |
+  | `pt-node` | inventory, samples, presence and jobs (the node side) |
+
+  Each is fuzzed against a reference where one exists: `serde_json`, `sha2` and `crc32c` are
+  dev-only fuzz dependencies.
+- **The API** is JSON over HTTP:
+  - `POST /api/<Method>` carries the request and response bodies;
+  - `GET /api/events` is a WebSocket of state changes;
+  - loopback and unix-socket listeners serve the CLI and sleeves; the trusted-proxy listener serves
+    Traefik.
+
+  There is no protobuf, buf or Connect. The Dart client is generated from `pt-api` and uses
+  `dart:io` and `package:web` sockets.
+- **Outbound HTTPS** (GitHub releases, quota readers) runs the system `curl`. There is no Rust TLS
+  stack.
+- **Sleeve sandbox** is bwrap plus a `systemd-run --user --scope` per incarnation.
+- **Go** (`go/`): `cmd/headscale` builds the official headscale at the pinned tag, unmodified;
+  `cmd/member` is our tsnet glue. `member` exposes a unix socket where the Rust side asks it to
+  dial `node:7475` (hub), or where accepted tailnet connections are handed over (node).
+- **Envoy** is a root sleeve running Claude Code headless in `$PROTECTORATE_HOME/envoy/`. That
+  directory's own `CLAUDE.md` describes the `protectorate` CLI, so no worked-on repo is touched.
