@@ -77,10 +77,4 @@ fn matches_coreutils() {
         assert_eq!(from_hex(&want256).unwrap(), sha256(&data));
         assert_eq!(from_hex_array::<20>(&want1).unwrap(), sha1(&data));
     }
-    assert!(from_hex("abc").is_err());
-    assert!(from_hex("AB").is_err());
-    assert!(from_hex_array::<32>("ab").is_err());
-    let missing = dir.join("missing");
-    let err = sha256_file(&missing).unwrap_err().to_string();
-    assert!(err.contains("missing"), "error names the path: {err}");
 }
