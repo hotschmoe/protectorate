@@ -1,0 +1,23 @@
+name: protectorate
+description: "Protectorate client: chat with Envoy and the sleeves, nodes, quota and approvals."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.12.1
+
+# Third-party packages: none. Each one added needs a row in ../DEPENDENCIES.md and an exact pin.
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  uses-material-design: false
+  assets:
+    - assets/fonts/OFL.txt
+  fonts:
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Regular.ttf
+        - asset: assets/fonts/JetBrainsMono-Bold.ttf
+          weight: 700
