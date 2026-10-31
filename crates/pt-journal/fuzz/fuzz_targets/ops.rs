@@ -91,7 +91,12 @@ fuzz_target!(|data: &[u8]| {
                 let last = m.frames.last().expect("frame").len() as u64 + 8;
                 let len = frames_len(&m.frames);
                 let keep = len - 1 - next().unwrap_or(0) as u64 % (last - 1);
-                OpenOptions::new().write(true).open(&path).expect("open").set_len(keep).expect("truncate");
+                OpenOptions::new()
+                    .write(true)
+                    .open(&path)
+                    .expect("open")
+                    .set_len(keep)
+                    .expect("truncate");
                 m.frames.pop();
                 let (j2, rec) = Journal::open(dir()).expect("reopen torn");
                 let cut = rec.cut.expect("torn tail reported");
@@ -108,7 +113,11 @@ fuzz_target!(|data: &[u8]| {
                 let len = frames_len(&m.frames);
                 let at = len - last + next().unwrap_or(0) as u64 % last;
                 let bit = 1u8 << (next().unwrap_or(0) % 8);
-                let f = OpenOptions::new().read(true).write(true).open(&path).expect("open");
+                let f = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(&path)
+                    .expect("open");
                 let mut byte = [0u8];
                 f.read_exact_at(&mut byte, at).expect("read");
                 byte[0] ^= bit;

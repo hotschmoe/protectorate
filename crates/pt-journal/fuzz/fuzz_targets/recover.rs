@@ -24,7 +24,11 @@ fuzz_target!(|data: &[u8]| {
     for f in &d.frames {
         encode_frame(f, &mut again).expect("decoded frames re-encode");
     }
-    assert_eq!(again, data[..d.valid_len], "frames are exactly the valid prefix");
+    assert_eq!(
+        again,
+        data[..d.valid_len],
+        "frames are exactly the valid prefix"
+    );
     assert_eq!(d.stop.is_none(), d.valid_len == data.len());
 
     // A stop decided by bytes already present is final: later appends never revive the tail.
