@@ -16,7 +16,8 @@ pub const USAGE: &str =
     "  rpc --connect SOCKET|HOST:PORT [--header JSON] [--timeout SECS] [--raw] METHOD [FIELDS-JSON]
                                     send one request as the hub would (exit 1 on an error answer,
                                     3 when the connection fails or closes unanswered); --raw sends
-                                    the fields unchecked, as a hostile hub might";
+                                    the fields unchecked, as a hostile hub might; JSON may be
+                                    given as @PATH";
 
 const DEFAULT_HEADER: &str = r#"{"peer_name":"rpc","tags":["tag:hub"],"ip":"127.0.0.1"}"#;
 
@@ -55,7 +56,7 @@ fn call(args: &[String]) -> Result<i32, Failure> {
         match a.as_str() {
             "--connect" => connect = Some(value()?),
             "--raw" => raw = true,
-            "--header" => header = value()?,
+            "--header" => header = text_arg(&value()?)?,
             "--timeout" => {
                 let v = value()?;
                 timeout = v
@@ -75,7 +76,8 @@ fn call(args: &[String]) -> Result<i32, Failure> {
             )));
         }
     };
-    let fields = pt_json::parse(fields).map_err(|e| Failure::Usage(format!("fields: {e}")))?;
+    let fields =
+        pt_json::parse(&text_arg(fields)?).map_err(|e| Failure::Usage(format!("fields: {e}")))?;
     let payload = if raw {
         let mut m = Map::new();
         m.insert("type", method);
@@ -135,6 +137,16 @@ fn call(args: &[String]) -> Result<i32, Failure> {
             }
             Kind::Request => return Err(Failure::Link("a request frame from the node".into())),
         }
+    }
+}
+
+/// JSON given inline, or as `@PATH` to read it from a file (shells that mangle quotes).
+fn text_arg(arg: &str) -> Result<String, Failure> {
+    match arg.strip_prefix('@') {
+        Some(path) => std::fs::read_to_string(path)
+            .map(|s| s.trim().to_string())
+            .map_err(|e| Failure::Usage(format!("reading {path}: {e}"))),
+        None => Ok(arg.to_string()),
     }
 }
 

@@ -24,7 +24,19 @@ fn a_peer_without_the_hub_tag_is_refused() {
         assert_eq!(out.status.code(), Some(3), "header {header} was served");
         assert!(out.stdout.is_empty(), "header {header} got an answer");
     }
+    std::fs::write(a.dir.join("header.json"), r#"{"tags":["tag:node"]}"#).unwrap();
+    let out = a.rpc_with(&["--header", "@header.json"], "Hello", "{}");
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "a header from a file was served"
+    );
     assert!(a.log().contains("not tag:hub"), "{}", a.log());
+    std::fs::write(a.dir.join("fields.json"), r#"{"hub_version":"test"}"#).unwrap();
+    assert_eq!(
+        a.rpc_with(&[], "Hello", "@fields.json").status.code(),
+        Some(0)
+    );
     let hello = a.ok("Hello", "{}");
     assert_eq!(num(&hello, "protocol"), 1);
     assert_eq!(text(&hello, "node_id").len(), 32);
