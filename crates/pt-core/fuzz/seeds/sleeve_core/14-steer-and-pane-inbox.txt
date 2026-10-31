@@ -1,0 +1,29 @@
+#scenario 4dba94e2b59e205e
+# Steer binds to an acked turn, waits in the slot while the prompt is in flight, and is refused
+# for a harness that cannot steer. Messages to a pane go to its inbox.
+spawn cx /w/a harness=codex
+run
+obs cx ready
+send cx m1
+send cx m2 steer
+expect cx activity=Delivering msg:m2=SteerHeld
+run
+expect cx activity=Working msg:m1=Delivered msg:m2=Delivered
+send cx m3 steer
+expect cx msg:m3=InFlight
+run
+expect cx msg:m3=Delivered
+spawn cl /w/b
+run
+obs cl ready
+send cl m1
+run
+send cl m2 steer
+expect cl queue=0
+spawn pane /w/c harness=antigravity pane
+run
+obs pane ready
+send pane m1
+expect pane msg:m1=InFlight
+run
+expect pane msg:m1=Delivered

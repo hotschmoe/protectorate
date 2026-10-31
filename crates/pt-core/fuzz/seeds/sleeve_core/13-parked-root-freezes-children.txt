@@ -1,0 +1,20 @@
+#scenario dfce3f90f23b486e
+# G10 on the root parks it; its children keep running but get no deliveries until it starts.
+spawn root /w/a budget=100
+run
+obs root ready
+spawn kid /wt/kid parent=root
+run
+obs kid ready
+obs kid usage=150
+expect root life=Parked
+expect kid life=Parked
+run
+start kid
+run
+obs kid ready
+send kid m1
+expect kid life=Running activity=Idle msg:m1=Queued
+run
+start root
+expect kid activity=Delivering msg:m1=InFlight

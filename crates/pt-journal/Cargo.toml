@@ -1,0 +1,12 @@
+[package]
+name = "pt-journal"
+description = "Append-only journal: CRC-32C frames, group-commit fsync, torn-tail recovery, snapshots"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]

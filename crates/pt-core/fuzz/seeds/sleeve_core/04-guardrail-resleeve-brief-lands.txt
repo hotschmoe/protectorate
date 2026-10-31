@@ -1,0 +1,26 @@
+#scenario 15740f168960aad5
+# G1 at a turn boundary: quiesce, wait for the old scope to die, brief, select, launch, and only
+# then Running once the brief prompt is confirmed; queued messages wait for it.
+spawn root /w/a to=pi_local
+run
+obs root ready
+send root m1
+expect root activity=Delivering msg:m1=InFlight
+run
+expect root activity=Working msg:m1=Delivered
+send root m2
+expect root queue=1
+obs root settled=usage
+expect root life=Resleeving guard=Quiescing
+run
+expect root life=Resleeving guard=Launching g=2 harness=pilocal activity=Booting
+expect-effect brief:0:2 state=Confirmed
+obs root ready
+expect root guard=Briefing activity=Delivering queue=1
+expect-effect resleeve:root:2 state=Intent attempt=1
+run
+expect root life=Running guard=Cooldown activity=Working msg:m2=Queued
+obs root settled
+expect root activity=Delivering msg:m2=InFlight
+tick 11m
+expect root guard=Armed

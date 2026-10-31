@@ -1,0 +1,26 @@
+#scenario 810cd3cab30bf87a
+# Stopping the root stops every child in the same apply step; Remove removes children first.
+spawn root /w/a
+run
+obs root ready
+spawn kid /wt/kid parent=root
+spawn kid2 /wt/kid2 parent=root
+run
+obs kid ready
+stop root
+expect root life=Stopping
+expect kid life=Stopping
+expect kid2 life=Stopping
+run
+expect root life=Stopped activity=Ended
+expect kid life=Stopped
+expect kid2 life=Stopped
+start kid
+expect kid life=Stopped
+remove root
+expect root life=Removed
+expect kid life=Removed
+expect kid2 life=Removed
+# The claims are released.
+spawn again /w/a
+expect again life=Provisioning

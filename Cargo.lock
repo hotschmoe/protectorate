@@ -20,6 +20,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-core"
+version = "0.0.0"
+
+[[package]]
 name = "pt-drivers"
 version = "0.0.0"
 dependencies = [
@@ -37,6 +41,10 @@ dependencies = [
  "pt-hash",
  "pt-sys",
 ]
+
+[[package]]
+name = "pt-journal"
+version = "0.0.0"
 
 [[package]]
 name = "pt-json"

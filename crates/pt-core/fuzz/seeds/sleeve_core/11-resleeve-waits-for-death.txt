@@ -1,0 +1,16 @@
+#scenario 3677827385f17819
+# Quiescing reaches Capturing only once the old scope is empty: stop, KillScope after 30 s.
+spawn root /w/a
+run
+obs root ready
+policy stop=linger
+resleeve root harness=codex
+expect root guard=Quiescing
+run
+expect root guard=Quiescing
+expect-effect brief:0:2 count=0
+tick 31s
+expect root guard=Quiescing
+policy stop=exit
+run
+expect root guard=Launching harness=codex g=2

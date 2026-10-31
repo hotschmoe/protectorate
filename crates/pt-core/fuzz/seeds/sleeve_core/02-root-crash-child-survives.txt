@@ -1,0 +1,18 @@
+#scenario eea1c601d8d3c423
+# A root crash resumes the root natively and leaves its child running (D7).
+spawn root /w/a
+run
+obs root ready
+spawn kid /wt/kid parent=root
+run
+obs kid ready
+send kid m1
+run
+expect kid activity=Working msg:m1=Delivered
+exit root
+expect root life=Launching g=2 guard=Resuming activity=Booting
+expect kid life=Running g=1 activity=Working
+run
+obs root ready
+expect root life=Running g=2 guard=Armed
+expect kid life=Running g=1 activity=Working

@@ -44,6 +44,9 @@ A bump is a hand-picked change to this file and `Cargo.lock` in the same commit.
 | typenum | 1.20.1 | generic-array dependency |
 | version_check | 0.9.5 | generic-array build |
 | cpufeatures | 0.2.17 | sha1 and sha2 dependency |
+| crc32c | 0.6.8 | reference implementation for the pt-journal `crc_diff` differential target |
+| rustc_version | 0.4.1 | transitive: crc32c build script |
+| semver | 1.0.28 | transitive: rustc_version |
 
 ## Go
 

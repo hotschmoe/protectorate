@@ -1,0 +1,19 @@
+#scenario 9ccf8c4c0757b4f1
+# A lost prompt is Uncertain; a "not applied" probe is unknowable for Unsafe kinds, so it is
+# never re-sent, not after a probe and not after a hub crash. The crash kills the live scope,
+# fences the record and resumes.
+spawn root /w/a
+run
+obs root ready
+policy prompt=lost probe=notapplied
+send root m1
+run
+expect-effect m1 state=Uncertain attempt=1 count=1
+expect root activity=Delivering msg:m1=InFlight
+crash
+run
+expect-effect m1 state=Fenced attempt=1 count=1
+expect root g=2 life=Launching msg:m1=MayHaveApplied
+policy prompt=ack
+obs root ready
+expect root life=Running activity=Idle queue=0

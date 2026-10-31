@@ -1,0 +1,15 @@
+#scenario 5a6ae1238bc27d68
+# A definitive Nack ends Delivering, reports to the sender and delivers the next message.
+spawn root /w/a
+run
+obs root ready
+policy prompt=nack
+send root m1
+send root m2
+expect root activity=Delivering msg:m1=InFlight queue=1
+step
+step
+expect root activity=Delivering msg:m1=Rejected msg:m2=InFlight queue=0
+policy prompt=ack
+run
+expect root activity=Working msg:m2=Delivered

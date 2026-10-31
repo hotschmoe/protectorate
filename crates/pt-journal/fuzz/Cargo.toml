@@ -1,0 +1,36 @@
+[package]
+name = "pt-journal-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+crc32c = "=0.6.8"
+pt-journal = { path = ".." }
+
+[workspace]
+
+[[bin]]
+name = "recover"
+path = "fuzz_targets/recover.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "crc_diff"
+path = "fuzz_targets/crc_diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ops"
+path = "fuzz_targets/ops.rs"
+test = false
+doc = false
+bench = false

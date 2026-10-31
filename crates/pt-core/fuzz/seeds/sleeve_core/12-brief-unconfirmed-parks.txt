@@ -1,0 +1,18 @@
+#scenario b9b9c80fd44abba6
+# The resleeve brief prompt must land: unknowable means Parked, not Running (12b item 7).
+spawn root /w/a
+run
+obs root ready
+obs root forbidden
+expect root life=Parked guard=Parked
+run
+start root
+run
+obs root ready
+resleeve root harness=pi_local
+run
+obs root ready
+expect root guard=Briefing
+policy prompt=lost probe=unknowable
+run
+expect root life=Parked activity=Ended

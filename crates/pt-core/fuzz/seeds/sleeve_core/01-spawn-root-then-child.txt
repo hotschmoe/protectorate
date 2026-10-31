@@ -1,0 +1,26 @@
+#scenario 24169e55ee68882a
+# A root, then a worktree child and a view child; claims that overlap are refused.
+spawn root /w/a
+expect root life=Provisioning g=0 activity=Ended
+run
+expect root life=Launching g=1 activity=Booting
+obs root ready
+expect root life=Running activity=Idle guard=Armed
+spawn kid /wt/kid parent=root
+spawn viewer /w/a parent=root view
+run
+obs kid ready
+obs viewer ready
+expect kid life=Running g=1
+expect viewer life=Running g=1
+# One root per directory; writable claims never overlap; children are depth 1.
+spawn other /w/a/sub
+expect-none other
+spawn upper /w
+expect-none upper
+spawn clash /wt/kid/deeper parent=root
+expect-none clash
+spawn grandkid /wt/gk parent=kid
+expect-none grandkid
+spawn second /w/b
+expect second life=Provisioning
