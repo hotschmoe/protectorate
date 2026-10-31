@@ -5,3 +5,7 @@
 /fuzz/Cargo.lock
 /dist/
 /go/bin/
+/crates/*/fuzz/target/
+/crates/*/fuzz/artifacts/
+/crates/*/fuzz/corpus/
+/crates/*/fuzz/coverage/

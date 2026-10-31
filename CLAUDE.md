@@ -27,14 +27,14 @@ overwrite code or data. Overwriting a file you created in this task with Write/E
 - Full migrations only: no compat shims, `_legacy`/`_old` names or "remove later" code.
 - Errors carry context at each layer; cancellation propagates.
 - Tests are real-binary e2e (`crates/*/tests/*.rs` driving built binaries or real sockets/files)
-  or fuzz targets (`fuzz/`), never unit tests (`#[cfg(test)]` modules are not allowed).
+  or fuzz targets (`crates/<crate>/fuzz/`), never unit tests (`#[cfg(test)]` modules are not allowed).
 - `#![forbid(unsafe_code)]` in every crate except the explicitly exempted OS FFI crates.
 
 ## Layout and commands
 
 ```
 crates/        Rust workspace (every crate here is ours; package names start with pt- or protectorate)
-fuzz/          cargo-fuzz targets (outside the workspace; dev-only deps allowed)
+crates/X/fuzz/ cargo-fuzz targets per crate (own [workspace], outside ours; dev-only deps allowed; cargo +nightly fuzz)
 go/            the only Go: official headscale main and our tsnet `member`
 app/           Flutter client (desktop, Android, web)
 ```
