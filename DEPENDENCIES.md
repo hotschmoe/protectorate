@@ -35,6 +35,15 @@ A bump is a hand-picked change to this file and `Cargo.lock` in the same commit.
 | itoa | 1.0.18 | serde_json dependency |
 | memchr | 2.8.3 | serde_json dependency |
 | zmij | 1.0.23 | serde_json dependency (float formatting) |
+| sha1 | 0.10.6 | reference for pt-hash's SHA-1 (pt-hash fuzz) |
+| sha2 | 0.10.9 | reference for pt-hash's SHA-256 (pt-hash fuzz) |
+| digest | 0.10.7 | sha1 and sha2 dependency |
+| block-buffer | 0.10.4 | digest dependency |
+| crypto-common | 0.1.7 | digest dependency |
+| generic-array | 0.14.7 | digest dependency |
+| typenum | 1.20.1 | generic-array dependency |
+| version_check | 0.9.5 | generic-array build |
+| cpufeatures | 0.2.17 | sha1 and sha2 dependency |
 
 ## Go
 

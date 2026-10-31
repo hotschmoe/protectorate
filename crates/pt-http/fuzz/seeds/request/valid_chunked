@@ -1,0 +1,10 @@
+POST /echo HTTP/1.1
+Transfer-Encoding: chunked
+
+4;ext=1
+wiki
+5
+pedia
+0
+Trailer: x
+

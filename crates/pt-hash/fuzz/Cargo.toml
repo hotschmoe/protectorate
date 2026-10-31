@@ -1,0 +1,23 @@
+[package]
+name = "pt-hash-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+pt-hash = { path = ".." }
+sha1 = "=0.10.6"
+sha2 = "=0.10.9"
+
+[[bin]]
+name = "differential"
+path = "fuzz_targets/differential.rs"
+test = false
+doc = false
+bench = false
