@@ -63,3 +63,52 @@ Each entry: where, what was done, what right looks like.
 - **pt-json numbers and maps** (crates/pt-json): each number is a heap `Box<str>` and object
   lookups are linear. Fast: inline storage for short number text, and an index for large
   objects if a hot path decodes many-keyed objects by key. No pretty writer yet either.
+- **Claude supervised approvals ride a hidden flag** (`pt-drivers`, claude.rs):
+  `--permission-prompt-tool stdio --permission-mode manual` works with Claude Code 2.1.316
+  (e2e `supervised_approval`: `control_request can_use_tool` arrives, `control_response allow`
+  runs the tool), but the flag is only named in `--permission-prompts` help. `allow_session`
+  sends the request's `permission_suggestions` as `updatedPermissions`, untested. Right:
+  `doctor` reruns that e2e after every Claude update; if it breaks, supervised Claude becomes
+  allowedTools-only (`--permission-prompts none` plus `--allowedTools`).
+- **Approval answers are unconfirmed except on Codex** (`pt-drivers`): only Codex acknowledges
+  an answer (`serverRequest/resolved`, emitted as `approval_decision` with `confirmed: true`).
+  Claude and Grok answers stay `confirmed: false`, so per SPEC 12a item 4 the hub must keep
+  them Uncertain. Right: take the matching `tool_result` (or its absence at `turn_settled`) as
+  the harness's evidence.
+- **Claude prompt ack is matched in order** (`pt-drivers`, claude.rs): the
+  `--replay-user-messages` echo carries no client id, so echoes pop the oldest unechoed request
+  id. Safe while only one send is in flight per sleeve (SPEC 12b item 3). Right: key by a
+  client id if Claude ever echoes one.
+- **Claude session_info before init** (`pt-drivers`): `system/init` arrives only after the first
+  input, so the driver reports the assigned (`--session-id`) or resumed id at spawn and checks it
+  at init and at each `result`; a mismatch is a protocol error, and the hub kills (G14).
+- **Untested permission paths** (`pt-drivers`): supervised Codex (`approvalPolicy untrusted`,
+  `sandbox workspace-write`, likely to clash with bwrap) and supervised Grok (no
+  `--always-approve`) have mappings but no e2e run yet, to save quota. Unsupervised Codex is
+  `never` plus `danger-full-access`: the hub's sandbox is the boundary. Pi has no gate, so a
+  supervised Pi spawn is refused. Right: one e2e each before supervised sleeves ship.
+- **Pi extension dialogs are cancelled** (`pt-drivers`, pi.rs): `extension_ui_request`
+  select/confirm/input/editor gets `cancelled: true` plus a notice. Right: route confirm and
+  select to `approval_request` if the owner runs a Pi extension gate.
+- **Cost and usage gaps** (`pt-drivers`): Grok reports `costUsdTicks` in an undocumented unit and
+  Codex reports no cost, so `cost_usd` is None for both; Grok has no context window in the
+  prompt reply. Codex per-turn usage is the difference of `thread/tokenUsage` totals. Right:
+  fill from the quota readers once their units are known.
+- **Error classes from text** (`pt-drivers`, event.rs `classify`): Codex uses `codexErrorInfo`
+  and Claude `api_error_status` when present; everything else is keyword matching on the
+  harness's message, and an unexpected exit is `crash` unless the stderr tail says auth or
+  quota. Right: structured fields as each harness exposes them; collect real auth and quota
+  failures into the fuzz seeds.
+- **Shutdown kills only the direct child** (`pt-drivers`, session.rs): `Session::shutdown`
+  closes stdin, waits, then `Child::kill`; descendants (MCP servers, shells) are the hub's
+  systemd scope to reap (`KillScope`). The exit waiter polls `try_wait` every 50 ms. Right:
+  wire the scope kill into shutdown once pt-sandbox lands, and a pidfd wait instead of polling.
+- **No driver-side handshake timeout** (`pt-drivers`): a Codex or Grok handshake that never
+  replies leaves the session without `session_info`; the hub's G5 (Booting 60 s) covers it.
+  Explicit compaction is not exposed either (native only, SPEC 3.7). Right: `compact()` per
+  harness (Codex `thread/compact/start`, Pi `compact`) when the hub asks for it.
+- **Text block ids** (`pt-drivers`, emit.rs): a late authoritative end for an already-closed
+  block is dropped (Pi ends thinking after its text began), but a late *delta* for a closed id
+  would open a second block with the same id. Grok sends no message id, so its blocks are
+  numbered per turn and tool call. Right: per-harness block identity from content indexes if
+  either shows up in real streams.
