@@ -17,8 +17,10 @@ A bump is a hand-picked change to this file and `Cargo.lock` in the same commit.
 
 ## Go
 
-`go/go.mod` requires only headscale; everything else is what headscale's own go.mod selects, pinned
-by the committed `go/go.sum`. Its `go 1.27.3` line is headscale's minimum toolchain.
+`go/go.mod` adds nothing of its own: its direct requires (headscale, plus termcolor, zerolog and
+tailscale.com, which headscale's main and `member` import) and every indirect module sit at the
+versions headscale v0.29.7's go.mod selects, pinned by the committed `go/go.sum`. Its `go 1.27.3`
+line is headscale's minimum toolchain.
 
 | Module | Version | Reason |
 |---|---|---|
