@@ -1,0 +1,16 @@
+[package]
+name = "pt-sys"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The OS FFI crate is exempt from the workspace's forbid(unsafe_code).
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
+[dependencies]
+libc = { workspace = true }
