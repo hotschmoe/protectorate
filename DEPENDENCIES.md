@@ -17,8 +17,13 @@ A bump is a hand-picked change to this file and `Cargo.lock` in the same commit.
 
 ## Go
 
+`go/go.mod` requires only headscale; everything else is what headscale's own go.mod selects, pinned
+by the committed `go/go.sum`. Its `go 1.27.3` line is headscale's minimum toolchain.
+
 | Module | Version | Reason |
 |---|---|---|
+| github.com/juanfont/headscale | v0.29.7 | the tailnet control server, built unmodified from its own main (SPEC 3.2) |
+| tailscale.com | v1.104.4 (pinned by headscale v0.29.7) | tsnet for `member`: userspace WireGuard, DERP, NAT traversal; the same version headscale is built against |
 
 ## Dart
 
