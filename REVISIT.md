@@ -97,3 +97,11 @@ Each entry: where, what was done, what right looks like.
 - **Node ids and journal epochs from std's RandomState** (`pt-node`, `random_id`): SipHash keyed
   by the OS once per process, not a CSPRNG. Fine for ids; never use it for secrets. Right: read
   `getrandom`/`BCryptGenRandom` directly if a secret is ever needed on the node.
+- **`serve --stdio` starts its own resident agent** (`protectorate-node`, `stdio.rs`): an ssh
+  session is a splice into the agent on `<state>/agent.sock`, which the first session spawns
+  detached (no service manager) and which exits after `--idle-exit` (300 s) with no job and no
+  connection; a connection arriving in the instant of that exit is cut. An agent serving the same
+  state dir through `--forward-socket` elsewhere holds the lock, so a stdio session then fails.
+  Under an sshd without PAM there is no logind session or user bus, so `systemd-run --user` fails
+  and jobs fall back to process groups. Not on Windows. Right: once SSH or member is chosen, the
+  system service owns the agent and always listens on `agent.sock`; `--stdio` stays a splice.

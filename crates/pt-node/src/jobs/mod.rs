@@ -66,6 +66,8 @@ pub struct Runner {
 }
 
 struct Inner {
+    /// Held for the agent's lifetime: one agent per state directory.
+    _lock: File,
     logs: PathBuf,
     work: PathBuf,
     epoch: String,
@@ -118,6 +120,7 @@ impl Runner {
         for d in [dir, &logs, &work] {
             fs::create_dir_all(d).map_err(|e| format!("creating {}: {e}", d.display()))?;
         }
+        let lock = lock_dir(dir)?;
         let opened = Journal::open(&dir.join("jobs.jsonl"))?;
         if opened.torn > 0 {
             eprintln!(
@@ -131,6 +134,7 @@ impl Runner {
             replay(&mut jobs, e);
         }
         let inner = Arc::new(Inner {
+            _lock: lock,
             logs,
             work,
             epoch: opened.epoch,
@@ -487,6 +491,15 @@ impl Runner {
         }
     }
 
+    /// Jobs whose processes the agent still supervises.
+    pub fn running(&self) -> usize {
+        self.table()
+            .jobs
+            .values()
+            .filter(|j| j.live.is_some())
+            .count()
+    }
+
     pub fn list(&self) -> Vec<JobInfo> {
         self.table().jobs.values().map(Job::current).collect()
     }
@@ -644,6 +657,23 @@ impl Job {
             info.log_truncated = live.log_truncated.load(Ordering::SeqCst);
         }
         info
+    }
+}
+
+fn lock_dir(dir: &Path) -> Result<File, String> {
+    let path = dir.join("agent.lock");
+    let file = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .map_err(|e| format!("opening {}: {e}", path.display()))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(fs::TryLockError::WouldBlock) => {
+            Err(format!("{} is in use by another node agent", dir.display()))
+        }
+        Err(fs::TryLockError::Error(e)) => Err(format!("locking {}: {e}", path.display())),
     }
 }
 

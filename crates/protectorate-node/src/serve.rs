@@ -1,15 +1,17 @@
 //! `protectorate-node serve`: the node end of the hub link. The tailnet `member` accepts each
 //! hub connection and splices it to this agent's unix socket (or loopback TCP port), after one
 //! header line naming the peer. Anything but a `tag:hub` peer is closed unanswered; then each
-//! connection gets a thread that answers request frames in order.
+//! connection gets a thread that answers request frames in order. With `--stdio` the hub
+//! reaches the agent through sshd instead (see `stdio.rs`).
 
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufWriter, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use pt_frame::Kind;
 use pt_frame::msg::{
@@ -26,24 +28,30 @@ const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
 const IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 pub const USAGE: &str =
-    "  serve --state-dir DIR (--forward-socket PATH | --listen-tcp 127.0.0.1:PORT)...
-        [--presence-interval SECS] [--away-after SECS] [--no-scope]
+    "  serve --state-dir DIR (--forward-socket PATH | --listen-tcp 127.0.0.1:PORT | --stdio)...
+        [--presence-interval SECS] [--away-after SECS] [--no-scope] [--idle-exit SECS]
                                     serve the hub link: one header line from member, then frames;
+                                    --stdio: frames on stdin/stdout for an sshd forced command,
+                                    through a resident agent that keeps jobs across sessions;
                                     PROTECTORATE_NODE_TEST_PRESENCE=FILE forces presence (tests)";
 
 struct Node {
     runner: Runner,
     sampler: Mutex<Sampler>,
     node_id: String,
+    connections: AtomicUsize,
 }
 
-struct Flags {
-    state_dir: Option<PathBuf>,
+pub struct Flags {
+    pub state_dir: Option<PathBuf>,
     sockets: Vec<PathBuf>,
     tcp: Vec<SocketAddr>,
-    presence_interval: u64,
-    away_after: u64,
-    allow_scope: bool,
+    stdio: bool,
+    pub presence_interval: u64,
+    pub away_after: u64,
+    pub allow_scope: bool,
+    /// Exit once no job runs and no connection is open for this long.
+    pub idle_exit: Option<u64>,
 }
 
 fn flags(args: &[String]) -> Result<Flags, String> {
@@ -51,9 +59,11 @@ fn flags(args: &[String]) -> Result<Flags, String> {
         state_dir: None,
         sockets: Vec::new(),
         tcp: Vec::new(),
+        stdio: false,
         presence_interval: 15,
         away_after: Config::default().away_after_secs,
         allow_scope: true,
+        idle_exit: None,
     };
     let mut it = args.iter();
     while let Some(flag) = it.next() {
@@ -76,11 +86,17 @@ fn flags(args: &[String]) -> Result<Flags, String> {
             }
             "--away-after" => f.away_after = crate::cli::number(flag, Some(value()?))?,
             "--no-scope" => f.allow_scope = false,
+            "--stdio" => f.stdio = true,
+            "--idle-exit" => f.idle_exit = Some(crate::cli::number(flag, Some(value()?))?),
             other => return Err(format!("serve: unknown option '{other}'")),
         }
     }
-    if f.sockets.is_empty() && f.tcp.is_empty() {
-        return Err("serve needs --forward-socket or --listen-tcp".into());
+    let listeners = f.sockets.len() + f.tcp.len();
+    if f.stdio && listeners > 0 {
+        return Err("--stdio takes no --forward-socket or --listen-tcp".into());
+    }
+    if !f.stdio && listeners == 0 {
+        return Err("serve needs --forward-socket, --listen-tcp or --stdio".into());
     }
     if f.presence_interval == 0 {
         return Err("--presence-interval must be at least 1".into());
@@ -90,7 +106,10 @@ fn flags(args: &[String]) -> Result<Flags, String> {
 
 pub fn run(args: &[String]) -> Result<(), String> {
     let f = flags(args)?;
-    let dir = f.state_dir.ok_or("serve needs --state-dir")?;
+    if f.stdio {
+        return crate::stdio::run(&f);
+    }
+    let dir = f.state_dir.clone().ok_or("serve needs --state-dir")?;
     let detector = Arc::new(Mutex::new(Detector::new(Config {
         away_after_secs: f.away_after,
         ..Config::default()
@@ -107,6 +126,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         node_id: node_id(&dir)?,
         sampler: Mutex::new(Sampler::new()),
         runner,
+        connections: AtomicUsize::new(0),
     });
     eprintln!(
         "protectorate-node: node {} journal epoch {}; jobs run in {}",
@@ -128,10 +148,29 @@ pub fn run(args: &[String]) -> Result<(), String> {
             accept_loop(&node, || l.accept().map(|(s, a)| (s, a.to_string())))
         }));
     }
+    if let Some(secs) = f.idle_exit {
+        let node = node.clone();
+        thread::spawn(move || idle_exit(&node, Duration::from_secs(secs)));
+    }
     for a in accepts {
         let _ = a.join();
     }
     Ok(())
+}
+
+/// Ends the process after `after` with no running job and no open connection. A connection
+/// accepted in the instant before the exit is cut (REVISIT).
+fn idle_exit(node: &Node, after: Duration) {
+    let mut idle_since = Instant::now();
+    loop {
+        thread::sleep(Duration::from_millis(200));
+        if node.connections.load(Ordering::SeqCst) > 0 || node.runner.running() > 0 {
+            idle_since = Instant::now();
+        } else if idle_since.elapsed() >= after {
+            eprintln!("protectorate-node: idle for {} s, exiting", after.as_secs());
+            std::process::exit(0);
+        }
+    }
 }
 
 #[cfg(unix)]
@@ -174,11 +213,14 @@ fn accept_loop<S: Conn>(node: &Arc<Node>, mut accept: impl FnMut() -> io::Result
     loop {
         match accept() {
             Ok((s, peer)) => {
-                let node = node.clone();
+                // Counted before the thread starts, so the idle exit never races an accept.
+                node.connections.fetch_add(1, Ordering::SeqCst);
+                let n = node.clone();
                 let spawned = thread::Builder::new()
                     .name("conn".into())
-                    .spawn(move || connection(&node, s, &peer));
+                    .spawn(move || connection(&n, s, &peer));
                 if let Err(e) = spawned {
+                    node.connections.fetch_sub(1, Ordering::SeqCst);
                     eprintln!("protectorate-node: starting a connection thread: {e}");
                 }
             }
@@ -219,6 +261,7 @@ fn connection<S: Conn>(node: &Node, mut stream: S, from: &str) {
     if let Err(e) = serve_conn(node, &mut stream) {
         eprintln!("protectorate-node: connection on {from}: {e}");
     }
+    node.connections.fetch_sub(1, Ordering::SeqCst);
 }
 
 fn serve_conn<S: Conn>(node: &Node, stream: &mut S) -> Result<(), String> {
