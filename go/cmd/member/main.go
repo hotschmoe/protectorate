@@ -141,7 +141,7 @@ func run(c config) error {
 			log.Debug("tsnet", "msg", fmt.Sprintf(format, args...))
 		}
 	}
-	defer srv.Close()
+	defer closeWithin(srv, 5*time.Second)
 	if err := srv.Start(); err != nil {
 		return fmt.Errorf("start tsnet: %w", err)
 	}
@@ -178,15 +178,24 @@ func run(c config) error {
 	select {
 	case <-ctx.Done():
 		log.Info("stopping", "reason", context.Cause(ctx))
-		// wireguard-go can block closing its UDP bind (seen with
-		// TS_DEBUG_ALWAYS_USE_DERP); a stop must not hang the parent.
-		time.AfterFunc(5*time.Second, func() {
-			log.Error("exit", "err", "tsnet close timed out")
-			os.Exit(1)
-		})
 		return nil
 	case err := <-errc:
 		return err
+	}
+}
+
+// closeWithin bounds tsnet's Close: wireguard-go can block forever closing its
+// UDP bind (seen with TS_DEBUG_ALWAYS_USE_DERP), and an exit must not hang.
+func closeWithin(srv *tsnet.Server, d time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		srv.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(d):
+		log.Warn("tsnet close timed out")
 	}
 }
 
