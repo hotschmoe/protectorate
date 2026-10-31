@@ -8,7 +8,7 @@ A bump is a hand-picked change to this file and `Cargo.lock` in the same commit.
 
 | Crate | Version | Reason |
 |---|---|---|
-| libc | 0.2.191 | the system call interface on Unix (namespaces, prctl, signals, pty) |
+| libc | 0.2.191 | the system call interface on Unix (namespaces, prctl, signals, pty, statvfs, setpriority, ioprio) |
 
 ## Rust (dev-only: fuzz targets, never in a shipped binary)
 
