@@ -469,3 +469,138 @@ pub fn hklm_uint(path: &str, name: &str) -> Option<u64> {
         _ => None,
     }
 }
+
+#[repr(C)]
+#[derive(Default)]
+struct JOBOBJECT_BASIC_LIMIT_INFORMATION {
+    per_process_user_time_limit: i64,
+    per_job_user_time_limit: i64,
+    limit_flags: u32,
+    minimum_working_set_size: usize,
+    maximum_working_set_size: usize,
+    active_process_limit: u32,
+    affinity: usize,
+    priority_class: u32,
+    scheduling_class: u32,
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+    basic: JOBOBJECT_BASIC_LIMIT_INFORMATION,
+    io_counters: [u64; 6],
+    process_memory_limit: usize,
+    job_memory_limit: usize,
+    peak_process_memory_used: usize,
+    peak_job_memory_used: usize,
+}
+
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() == 144);
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn CreateJobObjectW(attributes: *mut c_void, name: *const u16) -> isize;
+    fn SetInformationJobObject(job: isize, class: i32, info: *const c_void, len: u32) -> i32;
+    fn AssignProcessToJobObject(job: isize, process: isize) -> i32;
+    fn TerminateJobObject(job: isize, exit_code: u32) -> i32;
+}
+
+#[link(name = "ntdll")]
+unsafe extern "system" {
+    fn NtResumeProcess(process: isize) -> i32;
+}
+
+fn process_handle(child: &std::process::Child) -> isize {
+    use std::os::windows::io::AsRawHandle;
+    child.as_raw_handle() as isize
+}
+
+/// A Job Object that kills every process in it when its last handle closes, including when the
+/// agent dies.
+pub struct Job(isize);
+
+impl Job {
+    pub fn new() -> io::Result<Job> {
+        // SAFETY: null attributes and a null name are allowed (an unnamed, non-inheritable job).
+        let h = unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) };
+        if h == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let job = Job(h);
+        job.set_limits(false)?;
+        Ok(job)
+    }
+
+    fn set_limits(&self, idle: bool) -> io::Result<()> {
+        const KILL_ON_JOB_CLOSE: u32 = 0x2000;
+        const LIMIT_PRIORITY_CLASS: u32 = 0x20;
+        const IDLE_PRIORITY_CLASS: u32 = 0x40;
+        const EXTENDED_LIMIT_INFORMATION: i32 = 9;
+        let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        info.basic.limit_flags = KILL_ON_JOB_CLOSE;
+        if idle {
+            info.basic.limit_flags |= LIMIT_PRIORITY_CLASS;
+            info.basic.priority_class = IDLE_PRIORITY_CLASS;
+        }
+        // SAFETY: `self.0` is a job handle we own; `info` is a live, fully initialised struct of
+        // the size passed.
+        let ok = unsafe {
+            SetInformationJobObject(
+                self.0,
+                EXTENDED_LIMIT_INFORMATION,
+                (&info as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    pub fn assign(&self, child: &std::process::Child) -> io::Result<()> {
+        // SAFETY: both handles are valid: the job is ours, and `child` owns its process handle
+        // for the duration of the borrow.
+        let ok = unsafe { AssignProcessToJobObject(self.0, process_handle(child)) };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// Ends every process in the job with `code`.
+    pub fn terminate(&self, code: u32) -> io::Result<()> {
+        // SAFETY: `self.0` is a job handle we own.
+        let ok = unsafe { TerminateJobObject(self.0, code) };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// IDLE_PRIORITY_CLASS for every process in the job, running or started later.
+    pub fn lower(&self) -> io::Result<()> {
+        self.set_limits(true)
+    }
+}
+
+impl Drop for Job {
+    fn drop(&mut self) {
+        // SAFETY: `self.0` is a valid handle owned here, closed exactly once.
+        unsafe { CloseHandle(self.0) };
+    }
+}
+
+/// Resumes a process created with CREATE_SUSPENDED.
+pub fn resume(child: &std::process::Child) -> io::Result<()> {
+    // SAFETY: `child` owns a process handle with full access for the duration of the borrow.
+    let status = unsafe { NtResumeProcess(process_handle(child)) };
+    if status < 0 {
+        return Err(io::Error::other(format!(
+            "NtResumeProcess failed with NTSTATUS {:#010x}",
+            status as u32
+        )));
+    }
+    Ok(())
+}
