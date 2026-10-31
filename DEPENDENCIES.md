@@ -59,8 +59,20 @@ line is headscale's minimum toolchain.
 
 ## Dart
 
+`app/pubspec.yaml` depends on the Flutter SDK alone (no flutter_lints, no flutter_test: lint rules
+are listed in `app/analysis_options.yaml`). The packages below come in through the SDK, which pins
+them; they are not ours to bump and change only with a Flutter upgrade (now 3.44.1).
+
 | Package | Version | Reason |
 |---|---|---|
+| characters | 1.4.1 | transitive, Flutter SDK (grapheme clusters for text editing) |
+| collection | 1.19.1 | transitive, Flutter SDK |
+| material_color_utilities | 0.13.0 | transitive, Flutter SDK (Material colour schemes) |
+| meta | 1.18.0 | transitive, Flutter SDK (annotations) |
+| vector_math | 2.2.0 | transitive, Flutter SDK (transforms) |
+
+Bundled asset, not a package: JetBrains Mono 2.304 Regular and Bold (`app/assets/fonts/`, SIL OFL
+1.1, licence file beside it), the one typeface of the UI (SPEC 9).
 
 ## System tools the product calls
 
