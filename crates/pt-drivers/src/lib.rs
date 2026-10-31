@@ -196,17 +196,23 @@ fn plan(spec: &SpawnSpec) -> Result<(Vec<String>, Box<dyn Protocol>), DriverErro
     })
 }
 
-/// Drives a protocol mapper with arbitrary input for the fuzz targets. Lines starting with
-/// `!` are calls (`!send`, `!steer`, `!approve <id>`, `!deny <id>`, `!interrupt`); every
-/// other line goes through the same path as the harness's stdout. Not a stable API.
+/// Drives a protocol mapper with arbitrary input for the fuzz targets. An optional first
+/// line `#` with `resume=<id>` and `supervised` sets the spawn options. Lines starting with
+/// `!` are calls (`!send`, `!steer`, `!approve <id>`, `!session <id>`, `!deny <id>`,
+/// `!cancel <id>`, `!interrupt`); every other line goes through the same path as the
+/// harness's stdout. Every entry must survive a JSON round trip. Not a stable API.
 #[doc(hidden)]
 pub fn fuzz_feed(harness: Harness, input: &[u8]) -> usize {
     let mut spec = SpawnSpec::new(harness, "harness", "/work");
-    if input.first() == Some(&b'R') {
-        spec.resume = Some("0190a1b2-0000-7000-8000-000000000001".into());
-    }
-    if input.get(1) == Some(&b'S') && harness != Harness::Pi {
-        spec.permission = Permission::Supervised;
+    let mut lines = input.split(|b| *b == b'\n').peekable();
+    if let Some(header) = lines.next_if(|l| l.first() == Some(&b'#')) {
+        for word in String::from_utf8_lossy(&header[1..]).split_whitespace() {
+            if let Some(id) = word.strip_prefix("resume=") {
+                spec.resume = Some(id.to_owned());
+            } else if word == "supervised" && harness != Harness::Pi {
+                spec.permission = Permission::Supervised;
+            }
+        }
     }
     let Ok((_, mut proto)) = plan(&spec) else {
         return 0;
@@ -214,26 +220,29 @@ pub fn fuzz_feed(harness: Harness, input: &[u8]) -> usize {
     let mut out = Out::new(1);
     proto.start(&mut out);
     let mut n = 0;
-    for (i, line) in input.split(|b| *b == b'\n').enumerate() {
+    for (i, line) in lines.enumerate() {
         if let Some(call) = line.strip_prefix(b"!") {
             let call = String::from_utf8_lossy(call);
             let (verb, arg) = call.split_once(' ').unwrap_or((&call, ""));
             let req = format!("r{i}");
+            let p = proto.as_mut();
             let _ = match verb {
-                "send" => session::deliver(proto.as_mut(), &mut out, &req, "fuzz", "hi", false),
-                "steer" => session::deliver(proto.as_mut(), &mut out, &req, "fuzz", "hi", true),
-                "approve" => proto.respond_approval(arg, Decision::AllowOnce, &mut out),
-                "session" => proto.respond_approval(arg, Decision::AllowSession, &mut out),
-                "deny" => proto.respond_approval(arg, Decision::Deny, &mut out),
-                "interrupt" => proto.interrupt(&mut out),
+                "send" => session::deliver(p, &mut out, &req, "fuzz", "hi", false),
+                "steer" => session::deliver(p, &mut out, &req, "fuzz", "hi", true),
+                "approve" => p.respond_approval(arg, Decision::AllowOnce, &mut out),
+                "session" => p.respond_approval(arg, Decision::AllowSession, &mut out),
+                "deny" => p.respond_approval(arg, Decision::Deny, &mut out),
+                "cancel" => p.respond_approval(arg, Decision::Cancel, &mut out),
+                "interrupt" => p.interrupt(&mut out),
                 _ => Ok(()),
             };
         } else {
             session::handle_line(proto.as_mut(), &mut out, harness, line);
         }
         for event in out.events.drain(..) {
-            let mut text = String::new();
-            pt_json::ToJson::to_json(&event).write(&mut text);
+            let text = pt_json::ToJson::to_json(&event).to_string();
+            let back: Event = pt_json::from_str(&text).expect("an event parses back");
+            assert_eq!(back, event, "an event survives a JSON round trip");
             n += text.len();
         }
         for line in out.writes.drain(..) {
