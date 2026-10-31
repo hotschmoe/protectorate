@@ -1,0 +1,18 @@
+#scenario 6391ee5af1cf58ca
+# Observations from a dead generation are dropped.
+spawn root /w/a
+run
+obs root ready
+exit root
+run
+obs root ready
+expect root g=2 life=Running activity=Idle
+send root m1
+run
+expect root activity=Working
+obs root settled g=1
+obs root desync g=1
+obs root ready g=1
+expect root activity=Working life=Running g=2
+obs root settled g=2
+expect root activity=Idle

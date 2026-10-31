@@ -1,0 +1,28 @@
+[package]
+name = "pt-core-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+pt-core = { path = ".." }
+
+[workspace]
+
+[[bin]]
+name = "sleeve_core"
+path = "fuzz_targets/sleeve_core.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "event_codec"
+path = "fuzz_targets/event_codec.rs"
+test = false
+doc = false
+bench = false

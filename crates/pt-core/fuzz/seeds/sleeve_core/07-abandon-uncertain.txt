@@ -1,0 +1,16 @@
+#scenario be294f09a5fb5660
+# The owner abandons an Uncertain prompt: activity returns to Idle and the queue moves on.
+spawn root /w/a
+run
+obs root ready
+policy prompt=lost probe=unknowable
+send root m1
+send root m2
+run
+expect-effect m1 state=Uncertain
+abandon m1
+expect-effect m1 state=Abandoned attempt=1
+expect root msg:m1=MayHaveApplied msg:m2=InFlight
+policy prompt=ack
+run
+expect root activity=Working msg:m2=Delivered

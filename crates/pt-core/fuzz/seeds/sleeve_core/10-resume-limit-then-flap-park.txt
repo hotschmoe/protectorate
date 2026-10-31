@@ -1,0 +1,29 @@
+#scenario 1fb68dbb31c1f7ff
+# Two resumes in 10 minutes, then forced resleeves; the third resleeve within an hour parks.
+spawn root /w/a to=pi_local,codex
+run
+obs root ready
+exit root
+run
+obs root ready
+exit root
+run
+obs root ready
+expect root g=3 life=Running
+exit root
+expect root life=Resleeving guard=Capturing
+run
+obs root ready
+run
+expect root life=Running g=4 harness=pilocal guard=Cooldown
+exit root
+run
+obs root ready
+run
+expect root life=Running g=5 harness=codex
+exit root
+expect root life=Parked guard=Parked activity=Ended
+start root
+run
+obs root ready
+expect root life=Running g=6 guard=Armed

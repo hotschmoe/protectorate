@@ -1,0 +1,16 @@
+#scenario ed8e91092f33a7a0
+# After a hub crash a live g is killed and confirmed empty before g+1 starts (12b item 2).
+spawn root /w/a
+run
+obs root ready
+send root m1
+run
+crash
+expect root life=Running g=1
+policy stop=linger
+run
+expect root life=Running g=1
+tick 31s
+policy stop=exit
+run
+expect root life=Launching g=2 guard=Resuming msg:m1=Delivered

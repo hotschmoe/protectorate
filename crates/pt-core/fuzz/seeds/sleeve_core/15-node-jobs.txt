@@ -1,0 +1,25 @@
+#scenario e5daa0653baf760c
+# A lost submit with a changed node epoch needs an explicit new attempt (12a item 5); a submit
+# runs and collects; Cancelling times out to Lost (12a item 6).
+job j1
+policy other=lost poll=5
+run
+expect-job 0 state=SubmitUncertain
+requeue-job 0
+policy other=ack poll=1
+run
+expect-job 0 state=Running
+tick 10s
+run
+expect-job 0 state=Succeeded
+job j2
+policy poll=0
+run
+expect-job 1 state=Running
+cancel-job 1
+expect-job 1 state=Cancelling
+tick 6m
+expect-job 1 state=Lost
+crash
+run
+expect-job 1 state=Running
