@@ -272,3 +272,109 @@ fn lower_idle_missing_process_fails() {
     let out = run(&["lower-idle", "4000000"]);
     assert_eq!(out.status.code(), Some(2));
 }
+
+/// Presence through a stand-in `loginctl` on PATH, so every logind branch runs against the real
+/// binary without a desktop session. Sessions: "s1" (local seat) and "s2" (ssh, no seat).
+#[cfg(target_os = "linux")]
+mod fake_logind {
+    use super::{assert_valid_json, num, raw_field};
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+    use std::process::Command;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn now_usec() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64
+    }
+
+    fn presence(case: &str, s1: &str) -> String {
+        let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("fake-logind-{case}"));
+        fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("loginctl");
+        fs::write(
+            &script,
+            "#!/bin/sh\ncase \"$1\" in\n list-sessions) echo \"s1 1000 u seat0 tty1\"; echo \"s2 1000 u - pts/0\";;\n show-session) cat \"$FAKE_DIR/$2\";;\nesac\n",
+        )
+        .unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::write(dir.join("s1"), s1).unwrap();
+        fs::write(
+            dir.join("s2"),
+            "Id=s2\nSeat=\nClass=user\nActive=yes\nState=active\nRemote=yes\nIdleHint=no\nIdleSinceHint=0\nLockedHint=no\n",
+        )
+        .unwrap();
+        let path = format!(
+            "{}:{}",
+            dir.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let out = Command::new(env!("CARGO_BIN_EXE_protectorate-node"))
+            .args(["presence", "--away-after", "600"])
+            .env("PATH", path)
+            .env("FAKE_DIR", &dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        let json = String::from_utf8(out.stdout).unwrap();
+        assert_valid_json(&json);
+        json
+    }
+
+    fn session(idle_hint: &str, since_secs_ago: Option<u64>, locked: &str) -> String {
+        let since = since_secs_ago.map_or(0, |s| now_usec() - s * 1_000_000);
+        format!(
+            "Id=s1\nSeat=seat0\nClass=user\nActive=yes\nState=active\nRemote=no\nIdleHint={idle_hint}\nIdleSinceHint={since}\nLockedHint={locked}\n"
+        )
+    }
+
+    #[test]
+    fn long_idle_session_is_away() {
+        let j = presence("idle", &session("yes", Some(1200), "no"));
+        assert_eq!(raw_field(&j, "state"), "\"AWAY\"");
+        assert!(num(&j, "idle_secs") >= 1200);
+        assert_eq!(raw_field(&j, "source"), "\"logind\"");
+    }
+
+    #[test]
+    fn recent_idle_hint_is_present() {
+        let j = presence("recent", &session("yes", Some(30), "no"));
+        assert_eq!(raw_field(&j, "state"), "\"PRESENT\"");
+    }
+
+    #[test]
+    fn active_idle_hint_no_is_present() {
+        let j = presence("active", &session("no", None, "no"));
+        assert_eq!(raw_field(&j, "state"), "\"PRESENT\"");
+        assert_eq!(raw_field(&j, "idle_secs"), "null");
+    }
+
+    #[test]
+    fn locked_and_idle_past_grace_is_away() {
+        let j = presence("locked", &session("yes", Some(120), "yes"));
+        assert_eq!(raw_field(&j, "state"), "\"AWAY\"");
+        assert_eq!(raw_field(&j, "locked"), "true");
+    }
+
+    #[test]
+    fn future_idle_since_is_unknown() {
+        let s = format!(
+            "Id=s1\nSeat=seat0\nClass=user\nActive=yes\nState=active\nRemote=no\nIdleHint=yes\nIdleSinceHint={}\nLockedHint=no\n",
+            now_usec() + 3_600_000_000
+        );
+        let j = presence("future", &s);
+        assert_eq!(raw_field(&j, "state"), "\"UNKNOWN\"");
+    }
+
+    #[test]
+    fn greeter_only_is_away_and_ssh_never_counts() {
+        let j = presence(
+            "greeter",
+            "Id=s1\nSeat=seat0\nClass=greeter\nActive=yes\nState=active\nRemote=no\nIdleHint=no\nIdleSinceHint=0\nLockedHint=no\n",
+        );
+        assert_eq!(raw_field(&j, "state"), "\"AWAY\"");
+    }
+}
