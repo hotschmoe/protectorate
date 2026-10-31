@@ -1,0 +1,29 @@
+[package]
+name = "pt-json-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+pt-json = { path = ".." }
+serde_json = { version = "=1.0.154", features = ["float_roundtrip"] }
+
+[workspace]
+
+[[bin]]
+name = "parse_diff"
+path = "fuzz_targets/parse_diff.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "roundtrip"
+path = "fuzz_targets/roundtrip.rs"
+test = false
+doc = false
+bench = false
