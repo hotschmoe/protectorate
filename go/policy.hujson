@@ -1,0 +1,13 @@
+// Protectorate tailnet policy (SPEC 3.2). The hub may open TCP to port 7475 on
+// a node; nothing else is accepted, so no node can open a flow to the hub or to
+// another node. Empty tagOwners: no login can claim a tag, and only the admin
+// CLI (headscale nodes tag, over the unix socket) assigns one.
+{
+	"tagOwners": {
+		"tag:hub": [],
+		"tag:node": [],
+	},
+	"acls": [
+		{"action": "accept", "src": ["tag:hub"], "dst": ["tag:node:7475"]},
+	],
+}
