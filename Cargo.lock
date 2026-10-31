@@ -7,5 +7,9 @@ name = "protectorate"
 version = "0.0.0"
 
 [[package]]
+name = "pt-core"
+version = "0.0.0"
+
+[[package]]
 name = "pt-journal"
 version = "0.0.0"
