@@ -1,0 +1,1 @@
+{"type":"SubmitJob","job_id":"j1","attempt":1,"argv":["sh","-c","echo hi"],"env":{"A":"b"},"on_present":"kill"}

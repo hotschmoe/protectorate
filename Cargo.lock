@@ -20,6 +20,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-frame"
+version = "0.0.0"
+dependencies = [
+ "pt-json",
+]
+
+[[package]]
 name = "pt-json"
 version = "0.0.0"
 
