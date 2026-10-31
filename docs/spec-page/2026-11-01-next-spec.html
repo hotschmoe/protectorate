@@ -1,0 +1,727 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Snapshot of https://claude.ai/artifact/2iX1dHQ6RfHumbybW9SLQK (version 4) taken 2026-11-01. It may be out of date: SPEC.md is the source of truth. -->
+<title>Protectorate Next Spec</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=IBM+Plex+Sans:wght@400;600&display=swap">
+<style>
+/* Layout: a 3270 console session printed as a document. Pane legends as section rules, an F-key strip as the nav, line-printer light mode. */
+:root {
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --bg: #0e0c09; --panel: #16120c; --bar: #13100b;
+  --lit: #ffb547; --fg: #ecd7a9; --dim: #a08d69; --rule: #4c3f28; --edge: #85714c;
+  --accent: #ffb547; --hot-fill: rgba(255, 181, 71, 0.13);
+  --info: #86cbd9; --warn: #ffd84a; --alarm: #ff7a57; --ok: #a6d884;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f5edd6; --panel: #ece2c4; --bar: #e6efd9;
+    --lit: #1b1813; --fg: #2a261d; --dim: #6c634e; --rule: #c4b48b; --edge: #857451;
+    --accent: #b3261e; --hot-fill: rgba(179, 38, 30, 0.08);
+    --info: #1c4f86; --warn: #8f6100; --alarm: #b3261e; --ok: #2d6a28;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f5edd6; --panel: #ece2c4; --bar: #e6efd9;
+  --lit: #1b1813; --fg: #2a261d; --dim: #6c634e; --rule: #c4b48b; --edge: #857451;
+  --accent: #b3261e; --hot-fill: rgba(179, 38, 30, 0.08);
+  --info: #1c4f86; --warn: #8f6100; --alarm: #b3261e; --ok: #2d6a28;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.6 var(--sans); margin: 0; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+a { color: var(--info); text-underline-offset: 3px; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code, .mono { font-family: var(--mono); font-size: 0.9em; }
+code { color: var(--lit); }
+
+.fkeys { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); border-bottom: 1px solid var(--rule); }
+.fkeys nav { display: flex; gap: 18px; overflow-x: auto; white-space: nowrap; max-width: 1120px; margin: 0 auto;
+  padding-block: 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  font: 12px/1.4 var(--mono); scrollbar-width: thin; }
+.fkeys a { color: var(--dim); text-decoration: none; }
+.fkeys a b { color: var(--lit); font-weight: 600; margin-right: 6px; }
+.fkeys a:hover { color: var(--fg); }
+
+main { max-width: 1120px; margin: 0 auto; padding-block: 28px 64px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 56px; }
+
+.statusline { font: 12px/1.5 var(--mono); color: var(--dim); display: flex; flex-wrap: wrap; gap: 6px 22px; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); padding-block: 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+.statusline span b { color: var(--lit); font-weight: 600; }
+header.top { display: grid; gap: 18px; }
+header.top h1 { font: 700 clamp(28px, 4.4vw, 44px)/1.1 var(--mono); color: var(--lit); margin: 0; letter-spacing: -0.01em; text-wrap: balance; }
+header.top h1 span { color: var(--dim); font-weight: 400; }
+.lede { font-size: 17px; max-width: 70ch; margin: 0; }
+
+section { display: grid; gap: 18px; scroll-margin-top: 56px; }
+h2 { display: flex; align-items: center; gap: 10px; margin: 0; font: 600 13px/1.4 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--lit); }
+h2::before { content: "=--"; color: var(--rule); font-weight: 400; }
+h2 .line { flex: 1; border-top: 1px solid var(--rule); min-width: 24px; }
+h2 .st { color: var(--dim); font-weight: 400; letter-spacing: 0.06em; }
+h3 { margin: 0; font: 600 14px/1.4 var(--mono); color: var(--lit); }
+.say { font-size: 18px; line-height: 1.5; max-width: 72ch; margin: 0; color: var(--fg); text-wrap: pretty; }
+p { margin: 0; max-width: 72ch; }
+.cap { font-size: 13.5px; color: var(--dim); max-width: 80ch; }
+
+.cols { display: grid; gap: 18px 28px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.cols > * { min-width: 0; }
+.box { border: 1px solid var(--rule); padding: 14px 16px; display: grid; gap: 8px; align-content: start; }
+.box.hot { border-color: var(--accent); background: var(--hot-fill); }
+ul.tight { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+ul.tight li::marker { color: var(--edge); }
+ol.steps { margin: 0; padding-left: 0; list-style: none; counter-reset: s; display: grid; gap: 10px; }
+ol.steps li { counter-increment: s; display: grid; grid-template-columns: 34px 1fr; gap: 10px; }
+ol.steps li::before { content: counter(s); font: 600 13px/1.6 var(--mono); color: var(--lit); border: 1px solid var(--rule); text-align: center; height: 24px; line-height: 22px; }
+
+.principles { display: grid; gap: 0; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); border-top: 1px solid var(--rule); }
+.principles > div { padding: 12px 0 12px; border-bottom: 1px solid var(--rule); display: grid; grid-template-columns: 120px 1fr; gap: 14px; min-width: 0; }
+.principles > div:nth-child(odd) { padding-right: 24px; }
+.principles b { font: 600 12px/1.6 var(--mono); color: var(--lit); text-transform: uppercase; letter-spacing: 0.06em; }
+
+.scroll { overflow-x: auto; }
+.fig { border: 1px solid var(--rule); background: var(--panel); padding: 12px; overflow-x: auto; }
+.fig svg { display: block; width: 100%; height: auto; min-width: 640px; }
+.fig.small svg { min-width: 560px; }
+.fig + .cap { margin-top: -8px; }
+
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th { font: 600 11.5px/1.4 var(--mono); text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--edge); white-space: nowrap; }
+td { padding: 6px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+tbody tr:nth-child(even) td { background: var(--bar); }
+td.id { font: 600 12.5px/1.6 var(--mono); color: var(--lit); white-space: nowrap; }
+td.m { font-family: var(--mono); font-size: 12.5px; }
+
+.chip { display: inline-block; font: 600 11px/1.5 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; padding: 0 6px; border: 1px solid currentColor; white-space: nowrap; }
+.c-resleeve { color: var(--accent); }
+.c-park { color: var(--alarm); }
+.c-interrupt { color: var(--warn); }
+.c-resume { color: var(--info); }
+.c-notify, .c-later { color: var(--dim); }
+.c-yes { color: var(--ok); }
+
+.tiers { display: grid; gap: 0; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.tier { border: 1px solid var(--rule); margin: 0 -1px -1px 0; padding: 14px 16px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.tier .n { font: 600 12px/1.4 var(--mono); color: var(--dim); text-transform: uppercase; letter-spacing: 0.08em; }
+.tier h3 { font-size: 15px; }
+.tier.hot { background: var(--hot-fill); border-color: var(--accent); position: relative; z-index: 1; }
+
+.bins { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.bin { border: 1px solid var(--edge); display: grid; min-width: 0; }
+.bin > .hd { font: 600 13px/1.4 var(--mono); color: var(--lit); padding: 10px 14px; border-bottom: 1px solid var(--rule); display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.bin > .hd span { color: var(--dim); font-weight: 400; }
+.bin .row { display: grid; grid-template-columns: 112px 1fr; gap: 10px; padding: 7px 14px; border-bottom: 1px solid var(--rule); font-size: 14px; }
+.bin .row:last-child { border-bottom: 0; }
+.bin .row b { font: 600 12px/1.6 var(--mono); color: var(--dim); text-transform: uppercase; }
+.bin .row.go { background: var(--hot-fill); }
+
+pre.screen { margin: 0; font: 11.5px/1.45 var(--mono); color: var(--lit); background: var(--panel); border: 1px solid var(--edge); padding: 14px; overflow-x: auto; white-space: pre; }
+
+/* SVG diagram styles */
+svg text { font-family: var(--mono); }
+svg .b { fill: none; stroke: var(--edge); stroke-width: 1.25; }
+svg .b.hot { fill: var(--hot-fill); stroke: var(--accent); stroke-width: 2; }
+svg .b.dash { stroke-dasharray: 4 4; }
+svg .b.soft { stroke: var(--rule); }
+svg .t { fill: var(--fg); font-size: 13px; }
+svg .t.h { fill: var(--lit); font-weight: 600; }
+svg .e { fill: var(--dim); font-size: 11.5px; paint-order: stroke; stroke: var(--panel); stroke-width: 4px; stroke-linejoin: round; }
+svg .e.hot { fill: var(--accent); }
+svg .k { fill: var(--dim); font-size: 11px; letter-spacing: 0.1em; }
+svg .a { fill: none; stroke: var(--edge); stroke-width: 1.25; }
+svg .a.hot { stroke: var(--accent); stroke-width: 1.75; }
+svg .a.dash { stroke-dasharray: 5 4; }
+svg .life { stroke: var(--rule); stroke-dasharray: 3 5; fill: none; }
+svg .claim { stroke: var(--edge); stroke-width: 3; fill: none; }
+.mk { fill: var(--edge); }
+.mkhot { fill: var(--accent); }
+
+footer { border-top: 1px solid var(--rule); padding-top: 14px; font-size: 13.5px; color: var(--dim); display: grid; gap: 8px; }
+footer code { color: var(--fg); }
+
+@media (max-width: 560px) {
+  .principles > div { grid-template-columns: 1fr; gap: 2px; padding-right: 0 !important; }
+  .bin .row { grid-template-columns: 1fr; gap: 0; }
+  .say { font-size: 16.5px; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+html { scroll-behavior: smooth; }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="mk" d="M0 0L10 5L0 10z"/></marker>
+    <marker id="arrhot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path class="mkhot" d="M0 0L10 5L0 10z"/></marker>
+  </defs>
+</svg>
+
+<div class="fkeys">
+  <nav aria-label="Sections">
+    <a href="#map"><b>F1</b>MAP</a>
+    <a href="#trust"><b>F2</b>TRUST</a>
+    <a href="#enroll"><b>F3</b>ENROLL</a>
+    <a href="#sleeves"><b>F4</b>SLEEVES</a>
+    <a href="#states"><b>F5</b>STATES</a>
+    <a href="#guardrails"><b>F6</b>GUARDRAILS</a>
+    <a href="#history"><b>F7</b>HISTORY</a>
+    <a href="#nodes"><b>F8</b>NODES</a>
+    <a href="#ship"><b>F9</b>SHIP</a>
+    <a href="#verus"><b>F10</b>VERUS</a>
+    <a href="#ui"><b>F11</b>UI</a>
+    <a href="#decide"><b>F12</b>DECIDE</a>
+  </nav>
+</div>
+
+<main>
+<p style="margin:16px 0;padding:8px 12px;border:1px dashed currentColor;font-family:var(--mono, monospace);font-size:13px">SNAPSHOT 2026-11-01. This page may be out of date; SPEC.md on branch <code>next</code> is the source of truth.</p>
+
+<header class="top">
+  <div class="statusline">
+    <span>Branch <b>next</b></span><span>Spec <b>draft</b></span><span>Dated <b>2026-11-01</b></span><span>Binaries <b>2</b></span><span>Open decisions <b>31</b></span><span>Reviews <b>Codex, Grok</b></span>
+  </div>
+  <h1>PROTECTORATE <span>/</span> NEXT</h1>
+  <p class="lede">A self-hosted software factory on one hub machine. You, Envoy and vendor general agents dispatch coding work to sleeves. A sleeve is an untouched vendor CLI or Pi, bound to one directory in a light sandbox. The hub also reaches untrusted nodes to inventory them, maintain them and run builds and tests on other architectures. Nodes never reach back.</p>
+</header>
+
+<section id="principles" aria-labelledby="h-principles">
+  <h2 id="h-principles">Principles<span class="line"></span><span class="st">9 RULES</span></h2>
+  <div class="principles">
+    <div><b>Deterministic</b><span>If code can decide it, code decides it: dispatch, quota ranking, retries, guardrails, resleeves, scheduling, briefs. An LLM only judges.</span></div>
+    <div><b>Hands-off</b><span>Harnesses run through their TUI or official headless protocol, with their own config and auth. No wrappers, patches, hooks or typed keystrokes.</span></div>
+    <div><b>One writer</b><span>One core task owns all state. Every event goes through <code>apply(state, event)</code>, is journaled, then executed.</span></div>
+    <div><b>Untrusted devices</b><span>The hub reaches into nodes. Nodes never start application traffic to the hub; their only outbound traffic is control and DERP to the sandboxed headscale. Their bytes are parsed as hostile, and their job results are claims, not proof.</span></div>
+    <div><b>Record first</b><span>Every write to a harness or node is an fsynced effect record before its first byte leaves. An unconfirmed write is Uncertain, never blindly retried.</span></div>
+    <div><b>Fewest parts</b><span>Two binaries plus the Flutter apps. A new dependency needs a reason that code cannot meet.</span></div>
+    <div><b>LAN only</b><span><code>protectorate.hotschmoe.com</code> answers on the LAN and the owner's WireGuard only. WAN access is a separate, later design.</span></div>
+    <div><b>Repo rules</b><span>No emojis, full migrations, real-binary e2e and fuzz tests only, no hand-edited generated code.</span></div>
+    <div><b>Verus, narrow</b><span>Proofs only where bytes come from outside or offsets are computed, and nothing else to compare against.</span></div>
+  </div>
+</section>
+
+<section id="map" aria-labelledby="h-map">
+  <h2 id="h-map">System map<span class="line"></span><span class="st">3 PLANES</span></h2>
+  <p class="say">Clients come in through Traefik. The hub owns everything. Nodes get dialed and never dial back. The only thing a node may reach is the control plane.</p>
+  <div class="fig">
+    <svg viewBox="0 0 960 490" role="img" aria-label="System map: clients through Traefik to the hub; the hub member dials nodes one way; nodes reach only headscale control and DERP">
+      <text class="k" x="20" y="28">CLIENTS</text><text class="k" x="270" y="28">FRONT DOOR</text><text class="k" x="460" y="28">HUB</text><text class="k" x="800" y="28">NODES</text>
+      <rect class="b" x="20" y="48" width="210" height="64"/><text class="t h" x="32" y="72">Flutter app</text><text class="e" x="32" y="90">desktop, Android, web</text><text class="e" x="32" y="104">pd1. device token</text>
+      <rect class="b" x="20" y="132" width="210" height="64"/><text class="t h" x="32" y="156">Vendor agents</text><text class="e" x="32" y="174">GrokBot, Duet, Dot</text><text class="e" x="32" y="188">remote MCP, agent token</text>
+      <text class="e" x="32" y="226">LAN or owner WireGuard only</text>
+      <path class="a" d="M230 80H270" marker-end="url(#arr)"/><path class="a" d="M230 164H270" marker-end="url(#arr)"/>
+      <rect class="b" x="270" y="48" width="150" height="268"/><text class="t h" x="282" y="72">Traefik</text><text class="e" x="282" y="90">on stronghold</text><text class="e" x="282" y="126">TLS for</text><text class="e" x="282" y="142">protectorate.</text><text class="e" x="282" y="156">hotschmoe.com</text>
+      <text class="e" x="412" y="106" text-anchor="end">API</text><text class="e" x="412" y="290" text-anchor="end">control, DERP</text>
+      <path class="a" d="M420 112H476" marker-end="url(#arr)"/><path class="a" d="M420 296H476" marker-end="url(#arr)"/>
+      <rect class="b soft" x="460" y="40" width="300" height="286"/><text class="t h" x="472" y="62">protectorate serve</text>
+      <rect class="b hot" x="476" y="76" width="268" height="58"/><text class="t h" x="488" y="98">core: apply(state, event)</text><text class="e" x="488" y="118">one writer, journal, then executors</text>
+      <rect class="b" x="476" y="146" width="84" height="30"/><text class="t" x="518" y="166" text-anchor="middle">panes</text>
+      <rect class="b" x="568" y="146" width="84" height="30"/><text class="t" x="610" y="166" text-anchor="middle">quota</text>
+      <rect class="b" x="660" y="146" width="84" height="30"/><text class="t" x="702" y="166" text-anchor="middle">mail</text>
+      <rect class="b" x="476" y="184" width="84" height="30"/><text class="t" x="518" y="204" text-anchor="middle">approvals</text>
+      <rect class="b" x="568" y="184" width="84" height="30"/><text class="t" x="610" y="204" text-anchor="middle">history</text>
+      <rect class="b" x="660" y="184" width="84" height="30"/><text class="t" x="702" y="204" text-anchor="middle">audit</text>
+      <rect class="b" x="476" y="224" width="268" height="42"/><text class="t h" x="488" y="242">sleeves</text><text class="e" x="488" y="258">root + children, light namespaces</text>
+      <rect class="b dash" x="476" y="276" width="130" height="42"/><text class="t" x="488" y="294">headscale</text><text class="e" x="488" y="310">sandboxed child</text>
+      <rect class="b hot" x="614" y="276" width="130" height="42"/><text class="t" x="626" y="294">member</text><text class="e" x="626" y="310">tsnet, dial-only</text>
+      <path class="a hot" d="M744 297H780V80H800" marker-end="url(#arrhot)"/><path class="a hot" d="M780 164H800" marker-end="url(#arrhot)"/><path class="a hot" d="M780 248H800" marker-end="url(#arrhot)"/>
+      <rect class="b" x="800" y="48" width="150" height="64"/><text class="t h" x="812" y="72">node, shared</text><text class="e" x="812" y="90">arm64, build jobs</text><text class="e" x="812" y="104">listens :7475 only</text>
+      <rect class="b" x="800" y="132" width="150" height="64"/><text class="t h" x="812" y="156">node, shared</text><text class="e" x="812" y="174">amd64, build jobs</text><text class="e" x="812" y="188">listens :7475 only</text>
+      <rect class="b dash" x="800" y="216" width="150" height="64"/><text class="t h" x="812" y="240">node, care</text><text class="e" x="812" y="258">family machine</text><text class="e" x="812" y="272">never scheduled</text>
+      <text class="e hot" x="476" y="352">hub member dials tag:node:7475; nodes never initiate</text>
+      <path class="a dash" d="M875 280V404H345V316" marker-end="url(#arr)"/>
+      <text class="e" x="610" y="422" text-anchor="middle">nodes dial out only to control and DERP, through Traefik</text>
+      <path class="a" d="M24 466H60"/><text class="e" x="68" y="470">request path</text>
+      <path class="a hot" d="M180 466H216"/><text class="e" x="224" y="470">one-way dial</text>
+      <path class="a dash" d="M340 466H376"/><text class="e" x="384" y="470">control plane only</text>
+      <rect class="b dash" x="534" y="458" width="20" height="14"/><text class="e" x="562" y="470">sandboxed or never scheduled</text>
+    </svg>
+  </div>
+  <div class="cols">
+    <div class="box"><h3>Headscale, official and unmodified</h3><p>Built from upstream in CI at a pinned tag (v0.29.7 today). The hub binary embeds it and runs it as a sandboxed child from a sealed memfd. It is inside the hub binary, but not the hub process, because <code>Serve</code> takes over signals and calls <code>log.Fatal</code>. Admin goes through its own CLI over a unix socket. No API key ever exists.</p></div>
+    <div class="box"><h3>Go is two mains in one module</h3><p><code>go/cmd/headscale</code> is upstream's main. <code>go/cmd/member</code> is about 500 lines of tsnet glue: userspace, no TUN, no root, no tailscaled. Both are built with <code>CGO_ENABLED=0</code>. The rest is Rust, plus Dart for Flutter. Zig is only the C toolchain behind cargo-zigbuild.</p></div>
+  </div>
+</section>
+
+<section id="trust" aria-labelledby="h-trust">
+  <h2 id="h-trust">One-way trust<span class="line"></span><span class="st">7 LAYERS</span></h2>
+  <p class="say">"Nodes can't send to the hub" holds at the policy, the packet filter, the listener and the credential. One surface is irreducible: nodes must talk to headscale. So headscale holds none of the hub's secrets.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Principal</th><th>Credential</th><th>Reaches</th><th>Never</th></tr></thead>
+      <tbody>
+        <tr><td class="id">Hub member</td><td>WireGuard key, <code>tag:hub</code></td><td><code>tag:node:7475</code></td><td>listens on the tailnet</td></tr>
+        <tr><td class="id">Node</td><td>node key, <code>tag:node</code> + tier tag</td><td>headscale control and DERP</td><td>opens a tailnet flow; holds a hub credential</td></tr>
+        <tr><td class="id">Human client</td><td><code>pd1.</code> device token</td><td>hub API through Traefik</td><td>the tailnet (the phone's one VPN slot is WireGuard)</td></tr>
+        <tr><td class="id">Vendor agent</td><td>agent token with a scope ceiling</td><td>hub API (MCP) through Traefik</td><td>approvals, device or node admin, the tailnet</td></tr>
+        <tr><td class="id">Sleeve, Envoy</td><td><code>pc1.</code> capability</td><td>hub API on loopback</td><td>the tailnet, headscale and member sockets</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="cols">
+    <div class="box"><h3>Layers</h3>
+      <ol class="steps">
+        <li>One policy rule, <code>tag:hub -&gt; tag:node:7475</code>, in a static embedded file. Nodes cannot request tags.</li>
+        <li>The hub's own packet filter drops node-initiated SYNs and UDP.</li>
+        <li>The hub member has no tailnet listener, and peerAPI is compiled out.</li>
+        <li>The hub API binds loopback and the proxy listener only, and the listener check refuses <code>100.64.0.0/10</code>.</li>
+        <li>Nodes hold nothing the hub accepts.</li>
+        <li>The control plane runs as a separate sandboxed process.</li>
+        <li>Node output is hostile input: framed, capped, Verus-checked.</li>
+      </ol>
+    </div>
+    <div class="box"><h3>What a hostile node can still send</h3>
+      <ul class="tight">
+        <li>Control and DERP traffic to headscale. A headscale compromise means control of the nodes, but not of the hub's state or tokens.</li>
+        <li>Answers to hub requests, parsed by the frame codec under Verus.</li>
+        <li>Non-SYN TCP, ICMP and TSMP packets that reach a netstack with nothing listening.</li>
+        <li>On the LAN without an agent VLAN, the same front door as any host: static files and 401s.</li>
+      </ul>
+      <p class="cap">A machine can be a node and also host a client. Those are two unrelated identities: the node key lives in the service state dir, and the client token lives in the user's 0600 config.</p>
+    </div>
+  </div>
+</section>
+
+<section id="enroll" aria-labelledby="h-enroll">
+  <h2 id="h-enroll">Scan to join<span class="line"></span><span class="st">8 STEPS</span></h2>
+  <p class="say">The new machine shows a QR code, your phone approves, and the hub does the rest through headscale's own CLI. Nothing on the node ever calls a hub endpoint.</p>
+  <div class="fig">
+    <svg viewBox="0 0 930 470" role="img" aria-label="Enrollment sequence across the new machine, the owner's app, the hub and headscale">
+      <rect class="b" x="30" y="16" width="180" height="40"/><text class="t h" x="120" y="41" text-anchor="middle">New machine</text>
+      <rect class="b" x="260" y="16" width="180" height="40"/><text class="t h" x="350" y="41" text-anchor="middle">Owner's app</text>
+      <rect class="b hot" x="490" y="16" width="180" height="40"/><text class="t h" x="580" y="41" text-anchor="middle">Hub</text>
+      <rect class="b dash" x="720" y="16" width="180" height="40"/><text class="t h" x="810" y="41" text-anchor="middle">headscale</text>
+      <path class="life" d="M120 56V446"/><path class="life" d="M350 56V446"/><path class="life" d="M580 56V446"/><path class="life" d="M810 56V446"/>
+      <rect class="b" x="40" y="78" width="160" height="28"/><text class="e" x="120" y="96" text-anchor="middle">1 install, then join</text>
+      <path class="a" d="M120 136H810" marker-end="url(#arr)"/><text class="e" x="465" y="130" text-anchor="middle">2 ts2021 register, no key yet</text>
+      <path class="a" d="M810 180H120" marker-end="url(#arr)"/><text class="e" x="465" y="174" text-anchor="middle">3 auth URL /register/&lt;id&gt;</text>
+      <path class="a dash" d="M120 224H350" marker-end="url(#arr)"/><text class="e" x="235" y="218" text-anchor="middle">4 QR: id, key fp, host</text>
+      <path class="a" d="M350 268H580" marker-end="url(#arr)"/><text class="e" x="465" y="262" text-anchor="middle">5 approve: name, tier</text>
+      <rect class="b" x="500" y="296" width="160" height="28"/><text class="e" x="580" y="314" text-anchor="middle">6 fp = noise key?</text>
+      <path class="a" d="M580 356H810" marker-end="url(#arr)"/><text class="e" x="695" y="350" text-anchor="middle">7 register, tag, rename</text>
+      <path class="a hot" d="M580 400H120" marker-end="url(#arrhot)"/><text class="e hot" x="350" y="394" text-anchor="middle">8 hub dials :7475: hello, inventory</text>
+      <text class="e" x="30" y="462">Dashed arrow = optical (camera or paste), not network.</text>
+    </svg>
+  </div>
+  <p class="cap">Alternatives rejected: a code shown on the phone and typed on the node would need an unauthenticated node-to-hub endpoint. A pre-auth key in the one-liner is a bearer secret in shell history. SSH bootstrap would mean the hub holds SSH credentials for every machine.</p>
+</section>
+
+<section id="sleeves" aria-labelledby="h-sleeves">
+  <h2 id="h-sleeves">Sleeves<span class="line"></span><span class="st">ROOT + 8 CHILDREN MAX</span></h2>
+  <p class="say">A sleeve is a durable identity bound to one directory. Each harness process under it is an incarnation numbered by generation <code>g</code>. A resleeve swaps the process, and can swap its harness and mode, while the sleeve keeps its name, queue and children.</p>
+  <div class="fig">
+    <svg viewBox="0 0 760 476" role="img" aria-label="Sleeve tree: a root sleeve claims one directory, runs incarnations, and has up to 8 depth-1 children">
+      <rect class="b" x="24" y="24" width="176" height="72"/><text class="t h" x="36" y="48">Workspace dir</text><text class="e" x="36" y="66">exclusive writable claim</text><text class="e" x="36" y="82">claims never overlap</text>
+      <rect class="b hot" x="264" y="24" width="232" height="72"/><text class="t h" x="276" y="48">Root sleeve</text><text class="e" x="276" y="66">one per directory, never two</text><text class="e" x="276" y="82">resleeve_to: [pi_local]</text>
+      <rect class="b" x="560" y="24" width="176" height="72"/><text class="t h" x="572" y="48">Incarnations</text><text class="e" x="572" y="66">g1 Claude, pane: crashed</text><text class="e" x="572" y="82">g2 pi_local, headless</text>
+      <rect class="b dash" x="560" y="132" width="176" height="56"/><text class="t h" x="572" y="156">Native subagents</text><text class="e" x="572" y="174">inside g; hands-off</text>
+      <path class="claim" d="M200 60H264"/><path class="a" d="M496 60H560" marker-end="url(#arr)"/><path class="a dash" d="M648 96V132" marker-end="url(#arr)"/>
+      <path class="a" d="M340 96V160H216V224" marker-end="url(#arr)"/><path class="a" d="M420 96V160H520V224" marker-end="url(#arr)"/>
+      <text class="e" x="232" y="52" text-anchor="middle">claims</text><text class="e" x="528" y="52" text-anchor="middle">runs</text><text class="e" x="380" y="190" text-anchor="middle">depth 1, at most 8</text>
+      <rect class="b" x="96" y="224" width="240" height="72"/><text class="t h" x="108" y="248">Child A: git worktree</text><text class="e" x="108" y="266">branch root/a, its own claim</text><text class="e" x="108" y="282">any harness, own budget</text>
+      <rect class="b" x="400" y="224" width="240" height="72"/><text class="t h" x="412" y="248">Child B: read-only view</text><text class="e" x="412" y="266">reviewer or tester</text><text class="e" x="412" y="282">writes only home and /tmp</text>
+      <rect class="b hot" x="24" y="336" width="344" height="64"/><text class="t h" x="36" y="360">Stop or Remove the root</text><text class="e" x="36" y="382">children stop in the same step, then root</text>
+      <rect class="b dash" x="392" y="336" width="344" height="64"/><text class="t h" x="404" y="360">Root crash, resume, resleeve, park</text><text class="e" x="404" y="382">children keep running; reports queue</text>
+      <text class="e" x="24" y="436">Use a child for another harness, its own budget or worktree, or a life longer than one turn.</text>
+      <text class="e" x="24" y="456">Use native subagents for parallel reading inside one turn of one harness.</text>
+    </svg>
+  </div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Harness</th><th>Interface</th><th>Prompt ack</th><th>Steer</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td class="id">Claude Code</td><td>headless stream-json, or pane</td><td><code>--replay-user-messages</code></td><td>no, hub queues</td><td>we assign <code>--session-id</code></td></tr>
+        <tr><td class="id">Codex</td><td><code>codex app-server</code>, or pane</td><td><code>turn/start</code> result</td><td><code>turn/steer</code>, fenced</td><td>a <code>turn/start</code> timeout is Uncertain, not "not started"</td></tr>
+        <tr><td class="id">Grok Build</td><td><code>grok agent stdio</code> (ACP), or pane</td><td>first update</td><td>no</td><td><code>--always-approve</code> flag, never a typed prompt</td></tr>
+        <tr><td class="id">Gemini CLI</td><td>ACP via the Grok driver, or pane</td><td>ACP</td><td>no</td><td>not installed on the hub yet</td></tr>
+        <tr><td class="id">Antigravity</td><td>pane only</td><td>n/a</td><td>n/a</td><td>headless approvals do not work; plan policy unclear</td></tr>
+        <tr><td class="id">pi_vendor</td><td><code>pi --mode rpc</code></td><td><code>disposition</code></td><td><code>steer</code></td><td>any login or API key in Pi's catalog: xAI, OpenAI, DeepSeek, Kimi, GLM, MiniMax, Qwen, OpenRouter. Anthropic is labelled as extra usage. Bun build, so no Node</td></tr>
+        <tr><td class="id">pi_local</td><td><code>pi --mode rpc</code></td><td><code>disposition</code></td><td><code>steer</code></td><td>a local OpenAI-compatible endpoint; the default resleeve target</td></tr>
+        <tr><td class="id">Pi Durable</td><td>our ~500-line TS bridge</td><td><code>submission(requestId)</code></td><td>yes</td><td>time-boxed experiment, adopted only if it survives kill tests</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="cols">
+    <div class="box"><h3>Light isolation: keep</h3><ul class="tight"><li>user, mount, PID, IPC and UTS namespaces</li><li>host root read-only; workspace and private home writable</li><li>tmpfs masks over hub state, <code>~/.ssh</code> and other harnesses' credentials</li><li>a systemd scope per incarnation with limits, <code>cgroup.kill</code> and the reaper</li></ul></div>
+    <div class="box"><h3>Light isolation: cut</h3><ul class="tight"><li>the network namespace and egress proxy (security, not stomp prevention)</li><li>cache overlays (bind the shared download caches instead)</li><li>nested cgroup delegation and the pin-approval gate</li><li>about 4.8k lines down to 1.2k</li></ul></div>
+    <div class="box"><h3>Panes</h3><ul class="tight"><li>the hub owns every PTY; tmux goes</li><li>a byte ring with offsets, re-attachable from any client</li><li>status from herdr-style screen rules, never hooks; no match means Unknown</li><li>the hub never types into a pane after launch</li><li>updates re-exec in place and keep the pane fds</li></ul></div>
+  </div>
+</section>
+
+<section id="states" aria-labelledby="h-states">
+  <h2 id="h-states">State machines<span class="line"></span><span class="st">5 MACHINES, 1 WRITER</span></h2>
+  <p class="say">Every machine is a pure <code>apply(state, event)</code> with a fuzz target. The fuzz target compares it against a table-driven reference model and checks that replaying the journal equals the live state. Every observation carries <code>g</code> or <code>attempt</code>, and anything stale is dropped.</p>
+
+  <h3>Sleeve lifecycle</h3>
+  <div class="fig">
+    <svg viewBox="24 96 724 232" role="img" aria-label="Sleeve lifecycle state machine">
+      <rect class="b" x="40" y="124" width="128" height="36"/><rect class="b" x="208" y="124" width="128" height="36"/><rect class="b" x="376" y="124" width="128" height="36"/>
+      <rect class="b" x="208" y="204" width="128" height="36"/><rect class="b hot" x="376" y="204" width="128" height="36"/><rect class="b dash" x="584" y="204" width="120" height="36"/>
+      <rect class="b" x="40" y="284" width="128" height="36"/><rect class="b" x="208" y="284" width="128" height="36"/><rect class="b" x="376" y="284" width="128" height="36"/>
+      <text class="t" x="104" y="146" text-anchor="middle">Provisioning</text><text class="t" x="272" y="146" text-anchor="middle">Launching(g)</text><text class="t" x="440" y="146" text-anchor="middle">Running(g)</text>
+      <text class="t" x="272" y="226" text-anchor="middle">Recovering</text><text class="t h" x="440" y="226" text-anchor="middle">Resleeving</text><text class="t" x="644" y="226" text-anchor="middle">Parked</text>
+      <text class="t" x="104" y="306" text-anchor="middle">Stopping</text><text class="t" x="272" y="306" text-anchor="middle">Stopped</text><text class="t" x="440" y="306" text-anchor="middle">Removed</text>
+      <path class="a" d="M168 142H208" marker-end="url(#arr)"/><path class="a" d="M336 142H376" marker-end="url(#arr)"/>
+      <path class="a" d="M408 160V182H304V204" marker-end="url(#arr)"/><path class="a" d="M240 204V160" marker-end="url(#arr)"/>
+      <path class="a hot" d="M456 160V204" marker-end="url(#arrhot)"/><path class="a hot" d="M488 204V160" marker-end="url(#arrhot)"/>
+      <path class="a hot" d="M336 222H376" marker-end="url(#arrhot)"/><path class="a" d="M504 222H584" marker-end="url(#arr)"/>
+      <path class="a" d="M644 204V112H304V124" marker-end="url(#arr)"/>
+      <path class="a" d="M168 302H208" marker-end="url(#arr)"/><path class="a" d="M336 302H376" marker-end="url(#arr)"/>
+      <text class="e" x="356" y="134" text-anchor="middle">ready</text><text class="e" x="356" y="176" text-anchor="middle">crash</text>
+      <text class="e" x="232" y="188" text-anchor="end">resume, g+1</text><text class="e" x="450" y="188" text-anchor="end">trip</text><text class="e" x="494" y="188">done, g+1</text>
+      <text class="e" x="356" y="256" text-anchor="middle">forced</text><text class="e" x="544" y="214" text-anchor="middle">no target</text><text class="e" x="560" y="106" text-anchor="middle">Start</text>
+      <text class="e" x="528" y="298">Stop from any live state;</text><text class="e" x="528" y="314">children stop first.</text>
+    </svg>
+  </div>
+  <p class="cap">Invariants: at most one incarnation is not known dead, and <code>g+1</code> starts only after <code>g</code> is confirmed dead or never started. <code>g</code> only grows. Claims never overlap. A stopped parent has no live child.</p>
+
+  <h3>Activity of the current incarnation</h3>
+  <div class="fig">
+    <svg viewBox="24 416 724 156" role="img" aria-label="Activity state machine">
+      <rect class="b" x="40" y="428" width="112" height="36"/><rect class="b" x="184" y="428" width="120" height="36"/><rect class="b" x="352" y="428" width="120" height="36"/><rect class="b" x="520" y="428" width="120" height="36"/>
+      <rect class="b" x="160" y="508" width="120" height="36"/><rect class="b" x="352" y="508" width="120" height="36"/><rect class="b dash" x="520" y="508" width="120" height="36"/>
+      <text class="t" x="96" y="450" text-anchor="middle">Booting</text><text class="t" x="244" y="450" text-anchor="middle">Idle</text><text class="t" x="412" y="450" text-anchor="middle">Working</text><text class="t" x="580" y="450" text-anchor="middle">Blocked</text>
+      <text class="t" x="220" y="530" text-anchor="middle">Compacting</text><text class="t" x="412" y="530" text-anchor="middle">Interrupting</text><text class="t" x="580" y="530" text-anchor="middle">Unknown</text>
+      <path class="a" d="M152 446H184" marker-end="url(#arr)"/><path class="a" d="M304 440H352" marker-end="url(#arr)"/><path class="a" d="M352 454H304" marker-end="url(#arr)"/>
+      <path class="a" d="M472 440H520" marker-end="url(#arr)"/><path class="a" d="M520 454H472" marker-end="url(#arr)"/>
+      <path class="a" d="M208 464V508" marker-end="url(#arr)"/><path class="a" d="M232 508V464" marker-end="url(#arr)"/>
+      <path class="a" d="M412 464V508" marker-end="url(#arr)"/><path class="a" d="M352 526H292V464" marker-end="url(#arr)"/>
+      <text class="e" x="328" y="432" text-anchor="middle">send</text><text class="e" x="328" y="476" text-anchor="middle">settled</text>
+      <text class="e" x="496" y="432" text-anchor="middle">approval</text><text class="e" x="496" y="476" text-anchor="middle">resolved</text>
+      <text class="e" x="202" y="490" text-anchor="end">asked</text><text class="e" x="238" y="490">done</text><text class="e" x="418" y="490">interrupt</text>
+      <text class="e" x="322" y="544" text-anchor="middle">settled</text><text class="e" x="580" y="564" text-anchor="middle">desync or no rule</text>
+      <text class="e" x="660" y="450">Ended on</text><text class="e" x="660" y="466">exit, from</text><text class="e" x="660" y="482">any state</text>
+    </svg>
+  </div>
+  <p class="cap">After review, a Delivering{id} state sits between Idle and Working while a queued prompt is in flight. Headless sleeves read the protocol; panes use debounced screen rules. DONE is Idle not yet seen. <code>Send</code> takes a mode, steer or queue, with no silent downgrade. The queue lives on the sleeve, so it survives resleeves.</p>
+
+  <h3>Effect record: every write to a harness or node</h3>
+  <div class="fig">
+    <svg viewBox="24 96 724 194" role="img" aria-label="Effect record state machine">
+      <rect class="b" x="40" y="128" width="112" height="36"/><rect class="b" x="200" y="128" width="112" height="36"/><rect class="b" x="376" y="128" width="128" height="36"/><rect class="b" x="576" y="128" width="120" height="36"/>
+      <rect class="b hot" x="200" y="208" width="112" height="36"/><rect class="b" x="376" y="208" width="128" height="36"/><rect class="b" x="576" y="208" width="120" height="36"/>
+      <text class="t" x="96" y="150" text-anchor="middle">Intent</text><text class="t" x="256" y="150" text-anchor="middle">Sent</text><text class="t" x="440" y="150" text-anchor="middle">Confirmed</text><text class="t" x="636" y="150" text-anchor="middle">Rejected</text>
+      <text class="t h" x="256" y="230" text-anchor="middle">Uncertain</text><text class="t" x="440" y="230" text-anchor="middle">Probing</text><text class="t" x="636" y="230" text-anchor="middle">NotApplied</text>
+      <path class="a" d="M152 146H200" marker-end="url(#arr)"/><path class="a" d="M312 146H376" marker-end="url(#arr)"/><path class="a" d="M256 128V112H636V128" marker-end="url(#arr)"/>
+      <path class="a hot" d="M256 164V208" marker-end="url(#arrhot)"/><path class="a" d="M312 226H376" marker-end="url(#arr)"/><path class="a" d="M440 208V164" marker-end="url(#arr)"/>
+      <path class="a" d="M504 226H576" marker-end="url(#arr)"/><path class="a" d="M636 244V264H96V164" marker-end="url(#arr)"/>
+      <text class="e" x="96" y="120" text-anchor="middle">fsynced first</text><text class="e" x="344" y="138" text-anchor="middle">ack</text><text class="e" x="446" y="106" text-anchor="middle">definitive nack</text>
+      <text class="e" x="262" y="190">timeout, hub restart</text><text class="e" x="344" y="218" text-anchor="middle">probe</text><text class="e" x="446" y="190">applied</text>
+      <text class="e" x="540" y="218" text-anchor="middle">not applied</text><text class="e" x="366" y="280" text-anchor="middle">same id, attempt+1</text>
+    </svg>
+  </div>
+  <p class="cap">Any open record becomes Fenced when its target's <code>g</code> advances, and the brief lists it as "may have been applied". An unsafe send to a vendor CLI never goes back from Uncertain to Intent; only you or a guardrail can abandon it. A client retry with the same <code>request_id</code> gets the same record.</p>
+
+  <h3>Guardrail trip, then resleeve</h3>
+  <div class="fig">
+    <svg viewBox="24 372 724 160" role="img" aria-label="Resleeve state machine">
+      <rect class="b" x="40" y="404" width="120" height="36"/><rect class="b" x="200" y="404" width="120" height="36"/><rect class="b hot" x="360" y="404" width="120" height="36"/><rect class="b" x="520" y="404" width="120" height="36"/>
+      <rect class="b" x="200" y="484" width="120" height="36"/><rect class="b" x="360" y="484" width="120" height="36"/><rect class="b" x="520" y="484" width="120" height="36"/><rect class="b dash" x="664" y="484" width="72" height="36"/>
+      <text class="t" x="100" y="426" text-anchor="middle">Armed</text><text class="t" x="260" y="426" text-anchor="middle">Quiescing</text><text class="t h" x="420" y="426" text-anchor="middle">Capturing</text><text class="t" x="580" y="426" text-anchor="middle">Selecting</text>
+      <text class="t" x="260" y="506" text-anchor="middle">Cooldown</text><text class="t" x="420" y="506" text-anchor="middle">Briefing</text><text class="t" x="580" y="506" text-anchor="middle">Launching</text><text class="t" x="700" y="506" text-anchor="middle">Parked</text>
+      <path class="a" d="M160 422H200" marker-end="url(#arr)"/><path class="a" d="M320 422H360" marker-end="url(#arr)"/><path class="a" d="M480 422H520" marker-end="url(#arr)"/>
+      <path class="a hot" d="M100 404V388H420V404" marker-end="url(#arrhot)"/><path class="a" d="M580 440V484" marker-end="url(#arr)"/>
+      <path class="a" d="M520 502H480" marker-end="url(#arr)"/><path class="a" d="M360 502H320" marker-end="url(#arr)"/><path class="a" d="M200 502H100V440" marker-end="url(#arr)"/>
+      <path class="a" d="M640 422H700V484" marker-end="url(#arr)"/>
+      <text class="e" x="180" y="414" text-anchor="middle">trip</text><text class="e" x="340" y="414" text-anchor="middle">idle</text><text class="e" x="500" y="414" text-anchor="middle">brief</text>
+      <text class="e hot" x="260" y="382" text-anchor="middle">process already dead: forced</text><text class="e" x="586" y="466">target</text><text class="e" x="668" y="414" text-anchor="middle">none</text>
+      <text class="e" x="500" y="494" text-anchor="middle">ready</text><text class="e" x="340" y="494" text-anchor="middle">sent</text><text class="e" x="150" y="520" text-anchor="middle">quiet 10 min</text>
+    </svg>
+  </div>
+  <p class="cap">Planned and forced resleeves share one path through Capturing, which builds the brief. Before resleeving, a crash resumes the same harness up to twice in 10 minutes, and a loop or silence interrupts first. Targets come from the sleeve's ordered <code>resleeve_to</code> list, skipping unhealthy, excluded or quota-short ones. A third resleeve within an hour parks the sleeve.</p>
+
+  <h3>Node job: the hub asks, the node only answers</h3>
+  <div class="fig">
+    <svg viewBox="24 664 724 140" role="img" aria-label="Node job state machine">
+      <rect class="b" x="40" y="676" width="112" height="36"/><rect class="b" x="200" y="676" width="120" height="36"/><rect class="b" x="376" y="676" width="112" height="36"/><rect class="b" x="544" y="676" width="120" height="36"/>
+      <rect class="b hot" x="192" y="756" width="136" height="36"/><rect class="b dash" x="544" y="756" width="120" height="36"/>
+      <text class="t" x="96" y="698" text-anchor="middle">Queued</text><text class="t" x="260" y="698" text-anchor="middle">Submitting</text><text class="t" x="432" y="698" text-anchor="middle">Running</text><text class="t" x="604" y="698" text-anchor="middle">Collecting</text>
+      <text class="t h" x="260" y="778" text-anchor="middle">SubmitUncertain</text><text class="t" x="604" y="778" text-anchor="middle">Lost</text>
+      <text class="e" x="674" y="692">Succeeded</text><text class="e" x="674" y="708">or Failed</text>
+      <path class="a" d="M152 694H200" marker-end="url(#arr)"/><path class="a" d="M320 694H376" marker-end="url(#arr)"/><path class="a" d="M488 694H544" marker-end="url(#arr)"/>
+      <path class="a hot" d="M244 712V756" marker-end="url(#arrhot)"/><path class="a" d="M328 774H416V712" marker-end="url(#arr)"/><path class="a" d="M456 712V774H544" marker-end="url(#arr)"/>
+      <text class="e" x="176" y="686" text-anchor="middle">node</text><text class="e" x="348" y="686" text-anchor="middle">acked</text><text class="e" x="516" y="686" text-anchor="middle">exited</text>
+      <text class="e" x="238" y="738" text-anchor="end">timeout</text><text class="e" x="372" y="792" text-anchor="middle">status probe</text><text class="e" x="462" y="740">past lease</text>
+    </svg>
+  </div>
+  <p class="cap">The node journals <code>(job, attempt, digest)</code> before exec and treats an equal resubmit as a no-op. A job never re-runs by itself. A node that comes back from Lost reports what it knows, and an answer for an older attempt is dropped.</p>
+</section>
+
+<section id="guardrails" aria-labelledby="h-guardrails">
+  <h2 id="h-guardrails">Guardrails<span class="line"></span><span class="st">G1-G14, ALL CODE</span></h2>
+  <p class="say">Each guardrail is a pure predicate over the sleeve's view and the clock, evaluated on every relevant event and on a 10-second tick. No LLM sits in this loop.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Id</th><th>Trips when</th><th>Action</th></tr></thead>
+      <tbody>
+        <tr><td class="id">G1 quota</td><td>a fresh quota window is at or above 100%, or a turn fails as usage or rate limited</td><td><span class="chip c-resleeve">resleeve</span> provider excluded until reset</td></tr>
+        <tr><td class="id">G2 auth</td><td>the driver classifies an auth or login-required error</td><td><span class="chip c-resleeve">resleeve</span> notify</td></tr>
+        <tr><td class="id">G3 crash</td><td>unrequested exit, not OOM</td><td><span class="chip c-resume">resume</span> up to 2 in 10 min, then <span class="chip c-resleeve">resleeve</span></td></tr>
+        <tr><td class="id">G4 oom</td><td>SIGKILL plus an <code>oom_kill</code> increment in the cgroup</td><td><span class="chip c-resume">resume</span> once, then <span class="chip c-park">park</span></td></tr>
+        <tr><td class="id">G5 start</td><td>not Ready within 60 s, or exited while Booting</td><td><span class="chip c-resleeve">resleeve</span> harness excluded 30 min</td></tr>
+        <tr><td class="id">G6 silent</td><td>Working with no progress for 15 min</td><td><span class="chip c-interrupt">interrupt</span> 2 strikes in an hour, then resleeve; panes notify only</td></tr>
+        <tr><td class="id">G7 loop</td><td>6 or more identical tool calls in a row</td><td><span class="chip c-interrupt">interrupt</span> 2 strikes, then resleeve</td></tr>
+        <tr><td class="id">G8 wallclock</td><td>one turn Working for more than 90 min</td><td><span class="chip c-interrupt">interrupt</span> notify</td></tr>
+        <tr><td class="id">G9 approval</td><td>Blocked on an approval for more than 30 min</td><td><span class="chip c-notify">deny</span> with a note, through the official respond</td></tr>
+        <tr><td class="id">G10 budget</td><td>tokens used reach the sleeve's budget</td><td><span class="chip c-interrupt">interrupt</span> then <span class="chip c-park">park</span></td></tr>
+        <tr><td class="id">G11 path</td><td>the turn's diff touches deny globs (<code>.git/hooks</code>, <code>.github/workflows</code>, <code>.env*</code>)</td><td><span class="chip c-park">park</span> keep the diff, no auto-revert</td></tr>
+        <tr><td class="id">G12 disk</td><td>sampled usage at or above the disk limit</td><td><span class="chip c-park">stop, park</span></td></tr>
+        <tr><td class="id">G13 stuck</td><td>Interrupting for more than 30 s</td><td><span class="chip c-park">kill scope</span> then the G3 path</td></tr>
+        <tr><td class="id">G14 desync</td><td>an oversize or unparseable frame, or a session id mismatch</td><td><span class="chip c-park">kill scope</span> then the G3 path</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="cols">
+    <div class="box"><h3>Code decides</h3><ul class="tight"><li>dispatch by quota at spawn and guardrail time: <code>select_target(task_size, allow, mode, exclude, quota, health)</code></li><li>retries, probes, idempotency, steer and queue rules</li><li>every guardrail, resleeve, target choice and flap limit</li><li>mail delivery, cascades, budgets, approval timeouts</li><li>node scheduling, job submit, poll and collect, brief facts</li></ul></div>
+    <div class="box"><h3>Envoy decides</h3><ul class="tight"><li>goal decomposition and briefs</li><li>repo, workspace and whether to use children</li><li>the task-size estimate fed to dispatch</li><li>reading reports: accept, rework or escalate; reviewing diffs</li><li>which backlog item spare quota goes to</li></ul><p class="cap">Envoy never ranks harnesses, retries or runs a guardrail resleeve. Code never resleeves a healthy idle sleeve to chase quota, which would bust its prompt cache.</p></div>
+  </div>
+</section>
+
+<section id="history" aria-labelledby="h-history">
+  <h2 id="h-history">History and continuation<span class="line"></span><span class="st">3 TIERS</span></h2>
+  <p class="say">Handoff and forced resleeve are the same flow. Code builds a brief from facts in under a second. Only a planned resleeve waits for an LLM summary, because a crash has no time to.</p>
+  <div class="tiers">
+    <div class="tier"><span class="n">Tier 1, cheapest</span><h3>Native resume</h3><p>The session still exists and the same harness is wanted. Relaunch with the official resume flag. No brief, no model.</p></div>
+    <div class="tier hot"><span class="n">Tier 2, every other case</span><h3>Continuation brief</h3><p>Built by code in <code>.protectorate/BRIEF.md</code>: the task, where it stopped, git state, files touched, tests, open items, effects that may have been applied, and pre-run search hits. Planned resleeves add an LLM summary.</p></div>
+    <div class="tier"><span class="n">Tier 3, on demand</span><h3>Search</h3><p><code>protectorate history search | read</code> over a keyword index of every native log. The brief already carries the top hits, because <code>pi_local</code> is the weakest reader.</p></div>
+  </div>
+  <div class="cols">
+    <div class="box"><h3>Storage</h3><ul class="tight"><li>one SQLite file through <code>rusqlite</code> (bundled, FTS5): sessions, cursors, turns, chunks</li><li>derived and rebuildable; native logs stay authoritative and are only read</li><li>a framed tail reader per log, with the cursor written in the same transaction</li><li>vectors off until keyword search falls short; then a llama.cpp server over HTTP, with brute-force cosine in Rust</li></ul></div>
+    <div class="box"><h3>What mainplane actually does</h3><p>No index, no vectors, no compaction. At the context limit it fails the session. <code>/continue</code> starts a new one told to "retrieve key context from it as you go", and the agent runs <code>rg</code> over the old log. That works because mainplane owns the loop and runs frontier models. We take the shape as the future compaction replacement: end the session, then continue with a brief.</p></div>
+  </div>
+</section>
+
+<section id="nodes" aria-labelledby="h-nodes">
+  <h2 id="h-nodes">Nodes<span class="line"></span><span class="st">SHARED / CARE</span></h2>
+  <p class="say">One node binary per OS. It is inventoried every 10 minutes and sampled every 15 to 60 seconds, all on hub-initiated calls. Jobs run sandboxed, capped and journaled, and never re-run by themselves.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>OS</th><th>Human present</th><th>Service</th><th>Job isolation</th></tr></thead>
+      <tbody>
+        <tr><td class="id">Linux</td><td>logind <code>IdleSinceHint</code>, then <code>/dev/input</code> (input group, no root)</td><td>system service, one sudo at install</td><td>namespace sandbox plus a per-job cgroup, <code>cgroup.kill</code></td></tr>
+        <tr><td class="id">Windows</td><td><code>WTSQuerySessionInformation</code> from the service (<code>GetLastInputInfo</code> only sees its own session)</td><td>LocalSystem, jobs under a runner account</td><td>Job Object</td></tr>
+        <tr><td class="id">macOS</td><td>IOHIDSystem <code>HIDIdleTime</code></td><td>LaunchDaemon, once a Mac exists</td><td>later</td></tr>
+        <tr><td class="id">Android</td><td>n/a</td><td>Termux</td><td>process limits</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="cap">Care machines are never scheduled, but they still get owner-granted maintenance jobs, refused while someone is at the keyboard. Presence is reported as PRESENT, AWAY or UNKNOWN, with idle time, lock state and the source used. UNKNOWN counts as present on care machines and away on shared ones. Jobs default to 1 hour and 64 MiB of log. Output comes back as length-prefixed frames, never trusted as text. The old fleet's upkeep came from five causes: its own CA, address reports, firewall rules, the Windows logon task and uninstall ordering. Each one is gone in this design.</p>
+</section>
+
+<section id="ship" aria-labelledby="h-ship">
+  <h2 id="h-ship">What ships<span class="line"></span><span class="st">2 BINARIES + FLUTTER</span></h2>
+  <div class="bins">
+    <div class="bin">
+      <div class="hd">protectorate <span>linux amd64, arm64</span></div>
+      <div class="row"><b>serve</b><span>hub core, panes, API, MCP over HTTP</span></div>
+      <div class="row"><b>cli, mcp</b><span>owner CLI on the hub, stdio MCP for harnesses</span></div>
+      <div class="row"><b>runner</b><span>sleeve runner and sandbox helper, re-exec of <code>/proc/self/exe</code></span></div>
+      <div class="row"><b>doctor</b><span>fixed JSON, gates harness eligibility</span></div>
+      <div class="row go"><b>embeds</b><span>Flutter web build, headscale, member</span></div>
+    </div>
+    <div class="bin">
+      <div class="hd">protectorate-node <span>linux, windows, android</span></div>
+      <div class="row"><b>serve</b><span>tailnet :7475 only: inventory, presence, jobs</span></div>
+      <div class="row"><b>join</b><span>scan-to-join enrollment</span></div>
+      <div class="row"><b>uninstall</b><span>removes exactly what the install manifest lists</span></div>
+      <div class="row"><b>doctor</b><span>same shape as the hub's</span></div>
+      <div class="row go"><b>embeds</b><span>member</span></div>
+    </div>
+    <div class="bin">
+      <div class="hd">Flutter apps <span>one codebase</span></div>
+      <div class="row"><b>desktop</b><span>Linux, Windows (macOS once a Mac exists)</span></div>
+      <div class="row"><b>android</b><span>signed APK</span></div>
+      <div class="row"><b>web</b><span>served by the hub from the same origin</span></div>
+      <div class="row"><b>signing</b><span><code>ssh-keygen -Y</code> over <code>SHA256SUMS</code></span></div>
+    </div>
+  </div>
+  <div class="cols">
+    <div class="box"><h3>Git and CI</h3><p>GitHub stays the origin. Only the hub holds the push token: a sleeve asks it to push its own branch with <code>protectorate git push</code>. The hub keeps bare mirrors as backup. Cross-arch CI is a hub rule: dispatch <code>make test</code> as a node job to each arch. Plain binaries; containers only on request. No Forgejo, GitLab or Woodpecker.</p></div>
+    <div class="box"><h3>CLI and MCP</h3><p>Both are generated from the proto, so MCP costs no hand-written code. The CLI is for shells and Envoy. MCP gives typed schemas, validated arguments and hints, and works for clients with no shell. Vendor general agents use remote MCP with an agent token. What each vendor app supports is unverified, so nothing depends on it.</p></div>
+    <div class="box"><h3>Doctor</h3><p>Checks harness CLIs and versions, credentials through the read-only quota readers (never printed), <code>gh</code> auth, sandbox prerequisites, disk and clock. Results are cached in <code>doctor.json</code> and feed dispatch and resleeve eligibility. Failures mail you.</p></div>
+  </div>
+</section>
+
+<section id="update" aria-labelledby="h-update">
+  <h2 id="h-update">Updates and moving the hub<span class="line"></span><span class="st">GITHUB RELEASES</span></h2>
+  <p class="say">Hub and nodes both update straight from GitHub releases, and the hub triggers the nodes. Moving the hub to another machine is a restore of the same backup that recovers a dead one.</p>
+  <div class="cols">
+    <div class="box"><h3>Hub update</h3><ol class="steps"><li>Download the release and verify <code>SHA256SUMS.sig</code> with the key built into the running binary.</li><li>Snapshot headscale's database, because its migrations are one-way.</li><li>Re-exec in place, so sleeves keep running.</li><li>If the health check fails within 2 minutes, a supervisor switches back to the previous release.</li></ol></div>
+    <div class="box"><h3>Node update, triggered by the hub</h3><ol class="steps"><li>The hub sends <code>Update(version)</code> over its own connection.</li><li>The node fetches the release from GitHub itself, verifies it, stages it, and keeps the previous binary.</li><li>The node restarts through its service manager.</li><li>If the hub hasn't contacted it within 10 minutes, the node rolls itself back.</li></ol><p class="cap">Order: hub first, then a canary node per OS and arch, then the rest. A node with no internet gets the bytes streamed over a hub-opened connection.</p></div>
+    <div class="box hot"><h3>Moving the hub</h3><ol class="steps"><li><code>hub export</code>: quiesce sleeves at a turn boundary, stop headscale, write a <code>.pbackup</code>, and push unpushed branches. The old hub writes a tombstone and never starts headscale again.</li><li>Install the hub on the new machine and run <code>hub import</code>. The architecture may differ.</li><li>Point Traefik's routes and the firewall rule at the new address. Nodes keep working with no re-enrollment, because the noise key and the hub member key moved.</li><li>Sleeves come back through native resume or a brief. <code>doctor</code> flags any login that needs redoing.</li></ol></div>
+  </div>
+</section>
+
+<section id="verus" aria-labelledby="h-verus">
+  <h2 id="h-verus">Verus scope<span class="line"></span><span class="st">3 PHASES</span></h2>
+  <p class="say">Proofs go where bytes come from outside or offsets are computed, and nothing else exists to compare against. Verus is phased, so its cost is measured before it spreads. The state machines are excluded, because their tables are a perfect reference.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Phase</th><th>Modules</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td class="id">1</td><td>journal codec; node frame codec</td><td>the hub's durability rests on the first; the second is the only parser fed by hostile machines</td></tr>
+        <tr><td class="id">2</td><td>PTY ring; harness line framer; session-log tail reader</td><td>offset arithmetic with no reference implementation</td></tr>
+        <tr><td class="id">3</td><td>sums parser; artifact xfer; streaming envelope; backup format</td><td>only if phases 1 and 2 stay cheap to maintain</td></tr>
+        <tr><td class="id">dropped</td><td>presence math; audit walk; brief budget math</td><td>a saturating subtraction or a loop; fuzzing and overflow checks are enough</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Module</th><th>Bytes from</th><th>Property</th></tr></thead>
+      <tbody>
+        <tr><td class="id">frame</td><td>an untrusted node</td><td>never indexes past the buffer; an oversized length is an error, never an allocation; decode inverts encode; a prefix yields NeedMore</td></tr>
+        <tr><td class="id">journal</td><td>our own file after a crash</td><td>round trip; a torn tail is detected, never read as a record</td></tr>
+        <tr><td class="id">line framer</td><td>harness stdout</td><td>size arithmetic in bounds; a line over the cap trips G14, never a reallocation spiral</td></tr>
+        <tr><td class="id">pty ring</td><td>PTY output</td><td>offsets monotonic; attach from an offset returns exactly the retained bytes after it</td></tr>
+        <tr><td class="id">logtail</td><td>native session logs</td><td>offsets strictly increasing and within size; no u64 overflow; UTF-8 clipping never splits a char</td></tr>
+        <tr><td class="id">streaming</td><td>any client</td><td>same contract as frame, with the limit checked before any copy</td></tr>
+        <tr><td class="id">sums</td><td>release bytes</td><td>never panics; 64 hex digits; relative paths with no <code>..</code>; no duplicates</td></tr>
+        <tr><td class="id">xfer</td><td>node archives</td><td>entry and byte caps hold at every step; every path stays under the destination</td></tr>
+        <tr><td class="id">backup</td><td>our own files</td><td>round trip; truncation is detected before any file is written</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="cols">
+    <div class="box"><h3>Shape</h3><ul class="tight"><li>specs in <code>cfg_attr(verus_keep_ghost, verus_spec(..))</code>; <code>vstd</code> is an optional feature, so plain cargo needs no Verus</li><li><code>verify.sh</code> runs a pinned release at <code>--rlimit 20</code>, then again at 10 to flag fragile proofs</li><li><code>overflow-checks = true</code> in release for parser and writer crates</li><li>differential fuzzing against a second implementation</li></ul></div>
+    <div class="box"><h3>Excluded</h3><ul class="tight"><li>state machines, guardrails and dispatch (reference model plus fuzzing)</li><li>per-harness JSON extractors (differential fuzzing against real logs)</li><li>Flutter, RPC handlers, glue, headscale</li><li><code>unsafe</code> forbidden except Verus-proved helpers and the exempted OS FFI crates (D19)</li></ul></div>
+  </div>
+</section>
+
+<section id="ui" aria-labelledby="h-ui">
+  <h2 id="h-ui">UI direction<span class="line"></span><span class="st">3270, NOT AN APP</span></h2>
+  <p class="say">Same amber palette, drawn as a console. One monospace size. Single 1 px rules. No rounded cards, glow or seven-segment digits. Reverse video means "needs you", and every screen ends in a function-key legend.</p>
+  <pre class="screen" aria-label="Main screen mockup"> PROTECTORATE 0.7  hub stronghold  up 11d 04:12   quota C 62% X 41% O 88% L -   09:41:07
+=-- WORKSPACES ----------------------=-- PANE: herdr-port / claude ------- WORKING 00:14 -=
+ protectorate              2 sleeves |&gt; turn 9  tokens 41.2k  cache 93%  budget [####....]  |
+   envoy            claude  IDLE     |                                                      |
+   la/app           codex   WORKING  | user  run make test on arm64 and report              |
+     &gt; fuzz-wire    pi      WORKING  | tool  job run --on arch=arm64 -- make test           |
+ herdr-port                1 sleeve  |       job j-4f2a on ms-r1 ... exit 0 in 3m12s         |
+   herdr-port       claude  WORKING  | agent Tests pass on arm64. Opening PR #41.            |
+ notes                     3 open    |                                                      |
+                                     |-- INPUT ---------------------------------------------|
+=-- NODES ------------ 4 UP 1 AWAY -=| ===&gt; _                                               |
+ NAME       ARCH   LOAD  MEM   DISK  |=-- MAIL / EVENTS ------------------------ 2 UNREAD -=|
+ ms-r1      arm64  [##..] 41%  [#..] | 09:40 la/app -&gt; envoy   request: review fuzz report   |
+ officepc   amd64  [....]  8%  [##.] | 09:38 directory         main advanced: protectorate  |
+ officewin  amd64  PRESENT    [#..]  | 09:31 job j-4f2a        exited 0 (ms-r1)             |
+ kidsbox    arm64  CARE  PRESENT     |                                                      |
+=-- QUOTA --------------------------=|                                                      |
+ claude  5h [######..] 62%  r 02:11  |                                                      |
+ codex   wk [#######.] 88%  r 4d     |                                                      |
+ grok    wk [####....] 41%  r 2d     |                                                      |
+ F1 HELP  F2 SPAWN  F3 KILL  F5 REFRESH  F7/F8 PAGE  F9 NODES  F10 QUOTA  F12 ENVOY</pre>
+  <p class="cap">On the phone, the workspaces tree is the first screen and a pane opens on tap. Nodes and quota sit behind keys on the strip. Light mode is the line-printer rendering of the same screen.</p>
+</section>
+
+<section id="review" aria-labelledby="h-review">
+  <h2 id="h-review">Corrections from review<span class="line"></span><span class="st">CODEX 12 + GROK 15</span></h2>
+  <p class="say">Two adversarial reviews found real holes in the first draft. These rules now override the design reports. Codex's are listed first, then Grok's.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Area</th><th>Hole</th><th>Rule now</th></tr></thead>
+      <tbody>
+        <tr><td class="id">Resleeve</td><td>A new harness could launch while the old one still writes</td><td>Capturing waits until the old scope is confirmed empty: stop, kill after 30 s, then probe</td></tr>
+        <tr><td class="id">Launch</td><td>An absent scope was read as "never started"</td><td>A launch receipt is journaled at spawn. A receipt with no scope means started and gone, which goes to native resume</td></tr>
+        <tr><td class="id">Activity</td><td>A rejected prompt left the sleeve stuck in Working</td><td>A definitive Nack returns to Idle, reports the failure and delivers the next queued item</td></tr>
+        <tr><td class="id">Approvals</td><td>"No longer pending" was read as "our answer applied"</td><td>Confirmed only by the harness's acknowledgement; otherwise Uncertain</td></tr>
+        <tr><td class="id">Jobs</td><td>An expired record looked like a never-seen job, so it ran twice</td><td>Tombstones last until the hub acks collection, and "unknown" counts only when the node's journal epoch matches</td></tr>
+        <tr><td class="id">Jobs</td><td>Cancelling could wait forever</td><td>After the 5 min lease it goes to Lost and reconciles later</td></tr>
+        <tr><td class="id">Recovery</td><td>Probing, Collecting and Cancelling had no restart action</td><td>Every non-terminal state has a recovery action, and fuzzing crashes the hub at every journal boundary</td></tr>
+        <tr><td class="id">Enrollment</td><td>The key pin was checked only at approval</td><td><code>member</code> checks <code>/key</code> against the pin on every start and fails closed</td></tr>
+        <tr><td class="id">Install</td><td>The script ran before anything was verified</td><td>Fetch by full commit SHA (immutable), with the script's sha256 printed beside the line</td></tr>
+        <tr><td class="id">CI</td><td>A node's exit 0 was treated as proof</td><td>Statuses name the reporting node; release assets come from the hub or two bit-identical nodes</td></tr>
+        <tr><td class="id">Sandbox</td><td>The light-isolation threat model was left implicit</td><td>Stated: it guards against accidents only. Revisit D12 before any hostile code runs</td></tr>
+        <tr><td class="id">Count</td><td>"Two binaries" hid the runtime processes</td><td>The hub runs 3 processes and a node runs 2. Any additional process needs a decision</td></tr>
+        <tr><td class="id">Effects</td><td>An unsafe prompt could still be resent through Probing, then NotApplied</td><td>An unsafe effect leaves Uncertain only to Confirmed, Fenced or Abandoned</td></tr>
+        <tr><td class="id">Crash</td><td>Two machines could both start g+1, and g could still be alive after a hub crash</td><td>Only the sleeve machine starts incarnations, and a live g is killed and confirmed empty first</td></tr>
+        <tr><td class="id">Activity</td><td>Idle with a delivery in flight allowed a second prompt</td><td>New Delivering{id} state, with one keyed delivery in flight per sleeve</td></tr>
+        <tr><td class="id">Executors</td><td>Intents could run stale or before their fsync</td><td>Serial per sleeve, released after the fsync, with g re-checked before the syscall</td></tr>
+        <tr><td class="id">Headscale</td><td>A node dialling the LAN address skipped Traefik's path filter</td><td>One host-firewall rule admits only stronghold to headscale's port</td></tr>
+        <tr><td class="id">Tokens</td><td>Sleeves held a push token on the open host network</td><td>No push token in sleeves; <code>protectorate git push</code> has the hub push the sleeve's own branch</td></tr>
+        <tr><td class="id">Resleeve</td><td>A sleeve could go Running without its brief prompt</td><td>The brief prompt is keyed and must be confirmed or found in the native log, otherwise the sleeve parks</td></tr>
+        <tr><td class="id">Brief</td><td>The template had no uncertain effects and no children</td><td>Required sections: effects that may have been applied, and the child roster</td></tr>
+        <tr><td class="id">Children</td><td>A parked root's children kept spending, and hooks could be planted through the shared gitdir</td><td>Children are frozen with the root, budgets are checked live, and <code>.git/hooks</code> is read-only in children</td></tr>
+        <tr><td class="id">Dispatch</td><td>Envoy's task-size guess was a hidden ranking input</td><td>Code derives the size class, and Envoy may nudge it one step (D27)</td></tr>
+        <tr><td class="id">History</td><td>Who may read other sessions' logs was never decided</td><td>Envoy plus a sleeve's own run; wider reads are owner-only (D26)</td></tr>
+        <tr><td class="id">Clients</td><td>Remote MCP was the only path for vendor agents, and it's unverified</td><td><code>protectorate-node client</code> speaks HTTPS with an agent token; verify each app before D9 closes</td></tr>
+        <tr><td class="id">Small</td><td>A screen-rule miss could trip G14; Gemini had no history reader; doctor had stale checks; mail had no machine</td><td>NoMatch is split from Desync; Gemini is kept out of <code>resleeve_to</code>; doctor is fixed; mail becomes an effect kind</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="decide" aria-labelledby="h-decide">
+  <h2 id="h-decide">Decisions for you<span class="line"></span><span class="st">31 OPEN</span></h2>
+  <p class="say">Each decision has a recommendation. The ones that change the most are D1, D10, D12 and D14. The reviews changed D9 and D20 and added D26 and D27.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>Decision</th><th>Recommendation</th></tr></thead>
+      <tbody>
+        <tr><td class="id">D1</td><td>Headscale inside the hub binary but outside its process, as a sandboxed child</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D2</td><td>Build headscale from pinned upstream source in CI, or embed the release binary</td><td>build from source</td></tr>
+        <tr><td class="id">D3</td><td>Split-horizon DNS for the hub name at both sites and in the phone's WireGuard DNS</td><td><span class="chip c-yes">yes</span> home-site nodes need it</td></tr>
+        <tr><td class="id">D4</td><td>Agent VLAN for nodes, excluded from Traefik's API router</td><td><span class="chip c-later">later</span></td></tr>
+        <tr><td class="id">D5</td><td>Scan to join, with a QR plugin in the app (paste also works)</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D6</td><td>Agent tokens with a scope ceiling for vendor general agents</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D7</td><td>Children survive a root crash and stop on root Stop or Remove</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D8</td><td>Child workspace is a git worktree by default</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D9</td><td>Client path for vendor general agents on user machines</td><td>remote MCP plus <code>protectorate-node client</code>; verify each app first</td></tr>
+        <tr><td class="id">D10</td><td>Linux node as a system service (one sudo at install)</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D11</td><td>Windows node as LocalSystem plus a runner account</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D12</td><td>Cut the sandbox network namespace and egress proxy</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D13</td><td>Antigravity pane-only until headless approvals work</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D14</td><td>Node.js on the hub for the pi_durable experiment</td><td><span class="chip c-yes">yes</span> time-boxed</td></tr>
+        <tr><td class="id">D15</td><td>Resleeve target as an ordered list per sleeve, default <code>[pi_local]</code></td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D16</td><td>Guardrail thresholds as listed; no auto-revert on forbidden-path edits</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D17</td><td>Hub updates re-exec in place, keeping sleeves alive</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D18</td><td>The hub never types into a pane after launch</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D19</td><td>FFI <code>unsafe</code> exemption to Verus rule 6 for the sandbox and presence crates</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D20</td><td>Where the GitHub push token lives</td><td>hub only; sleeves use <code>protectorate git push</code></td></tr>
+        <tr><td class="id">D21</td><td>Index your own interactive CLI logs too, or hub-launched sessions only</td><td>hub-launched only</td></tr>
+        <tr><td class="id">D22</td><td>Vectors off until keyword search falls short</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D23</td><td>Brief file <code>.protectorate/BRIEF.md</code>, with an LLM summary for planned resleeves only</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D24</td><td><code>===&gt;</code> command line and F-key legend in the app</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D25</td><td>macOS node and desktop only once a Mac exists</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D26</td><td>Who may read history beyond their own session</td><td>Envoy; wider reads are owner-only</td></tr>
+        <tr><td class="id">D27</td><td>Where the dispatch task-size class comes from</td><td>code (median of the last N); Envoy may nudge one class</td></tr>
+        <tr><td class="id">D28</td><td>Verus phasing, starting with the journal and frame codecs</td><td><span class="chip c-yes">yes</span></td></tr>
+        <tr><td class="id">D29</td><td>Backlog with a spare-quota trigger in code, plus a review inbox for public repos</td><td><span class="chip c-yes">yes</span> after stage 3</td></tr>
+        <tr><td class="id">D30</td><td>GPU and resource leases with a TTL</td><td><span class="chip c-later">later</span></td></tr>
+        <tr><td class="id">D31</td><td>A throwaway network spike before the core</td><td><span class="chip c-yes">yes</span> stage 0</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="order" aria-labelledby="h-order">
+  <h2 id="h-order">Build order<span class="line"></span><span class="st">STAGES 0-6</span></h2>
+  <ol class="steps" style="counter-reset: s -1">
+    <li><span><b class="mono">Network spike, throwaway.</b> Prove headscale through Traefik, <code>member</code> on Windows, Linux and Android, and that the one-rule policy blocks a node-initiated flow. It runs first because it is the least proven part.</span></li>
+    <li><span><b class="mono">Core.</b> Workspace skeleton, proto, journal codec, <code>core::apply</code> for lifecycle, activity and effects, and the <code>sleeve_core</code> fuzz target with its reference model. No harness yet.</span></li>
+    <li><span><b class="mono">Panes and one harness.</b> Hub-owned PTYs, attach over WebSocket, screen rules, the headless Claude driver on the effect record, and the Flutter shell in the new look.</span></li>
+    <li><span><b class="mono">Resleeve.</b> Guardrails, the history index, the continuation brief, <code>pi_local</code>, and forced resleeve end to end.</span></li>
+    <li><span><b class="mono">Network.</b> The <code>go/</code> module, embedded headscale and member, Traefik routes, scan to join, inventory and presence.</span></li>
+    <li><span><b class="mono">Jobs.</b> Node jobs, cross-arch CI, <code>doctor</code>.</span></li>
+    <li><span><b class="mono">Hardening.</b> The first Verus modules, remote MCP with agent tokens, the remaining harnesses, and the pi_durable experiment.</span></li>
+  </ol>
+</section>
+
+<footer>
+  <span>Source: <code>SPEC.md</code> on branch <code>next</code>, worktree <code>~/github/protectorate-next</code>. Reasoning and citations are in <code>docs/design/</code>: network-trust-language, sleeves-state-machines, history-continuation, nodes-ci-deliverables-verus.</span>
+  <span>The comparison with jessfraz/agent and herdr is in <a href="https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd">Protectorate vs jessfraz/agent: lessons and map</a>.</span>
+</footer>
+
+</main>
+</body>
+</html>
