@@ -151,6 +151,9 @@ record! {
         pub on_present: OnPresent = OnPresent::Lower,
         /// Names this submit; echoed in every status of the job.
         pub token: Option<String>,
+        /// An owner-approved maintenance job: it runs with the agent's own rights (LocalSystem on
+        /// Windows) instead of the low-privilege job identity.
+        pub maintenance: bool = false,
     }
 
     /// Without `attempt`, the highest attempt the node holds.
