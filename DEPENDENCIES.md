@@ -47,6 +47,7 @@ A bump is a hand-picked change to this file and `Cargo.lock` in the same commit.
 | crc32c | 0.6.8 | reference implementation for the pt-journal `crc_diff` differential target |
 | rustc_version | 0.4.1 | transitive: crc32c build script |
 | semver | 1.0.28 | transitive: rustc_version |
+| qrcodegen | 1.8.0 | reference encoder for pt-qr's `encode` differential target (pt-qr is a trimmed port of it) |
 
 ## Go
 
