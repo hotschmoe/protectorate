@@ -1,0 +1,8 @@
+{"seq":1,"g":1,"time_ms":1000,"entry":{"type":"session_info","harness":"claude","native_id":"abc-123","cwd":"/work"}}
+{"seq":2,"g":1,"time_ms":1001,"entry":{"type":"user_message","request_id":"r1","from":"owner","text":"run the journal tests"}}
+{"seq":3,"g":1,"time_ms":1002,"entry":{"type":"tool_call","id":"t1","tool":"command","name":"Bash","summary":"cargo test -p pt-journal","input":{"command":"cargo test"}}}
+{"seq":4,"g":1,"time_ms":1003,"entry":{"type":"tool_result","id":"t1","status":"failed","output":"test torn_tail ... FAILED"}}
+{"seq":5,"g":1,"time_ms":1004,"entry":{"type":"file_change","tool_id":"t1","paths":[{"path":"crates/pt-journal/src/codec.rs","op":"edit"}]}}
+{"seq":6,"g":1,"time_ms":1005,"entry":{"type":"assistant_text","id":"a1","text":"The torn tail case fails.","final":true}}
+{"seq":7,"g":1,"time_ms":1006,"entry":{"type":"turn_settled","stop":"end_turn","usage":{"input":10,"output":5,"context_tokens":12000,"context_window":200000}}}
+{"seq":8,"g":1,"time_ms":1007,"entry":{"type":"compaction","trigger":"auto","tokens_before":190000}}

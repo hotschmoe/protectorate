@@ -1,0 +1,5 @@
+{"type":"system","content":"systemmarker prompt"}
+{"type":"user","content":[{"type":"text","text":"<user_info>contextmarker</user_info>"}]}
+{"type":"user","content":[{"type":"text","text":"<user_query>\nHow does headscale register a node?\n</user_query>"}],"prompt_index":0}
+{"type":"assistant","content":"Reading the headscale auth code.","tool_calls":[{"id":"g1","name":"grep","arguments":"{\"pattern\":\"func register\",\"path\":\"/go/headscale\"}"}]}
+{"type":"tool_result","tool_call_id":"g1","content":"resultmarker auth.go:12"}

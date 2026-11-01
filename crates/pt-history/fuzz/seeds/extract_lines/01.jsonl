@@ -1,0 +1,7 @@
+{"timestamp":"2026-10-30T11:00:00.000Z","type":"session_meta","payload":{"id":"bbbbbbbb-0000-4000-8000-000000000002","cwd":"/work"}}
+{"timestamp":"2026-10-30T11:00:01.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>envmarker</environment_context>"}]}}
+{"timestamp":"2026-10-30T11:00:02.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Run flutter analyze in app/ and fix what it reports"}]}}
+{"timestamp":"2026-10-30T11:00:03.000Z","type":"response_item","payload":{"type":"reasoning","summary":[],"encrypted_content":"gAAAA"}}
+{"timestamp":"2026-10-30T11:00:04.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\"cmd\":\"flutter analyze\",\"workdir\":\"/work/app\"}","call_id":"c1"}}
+{"timestamp":"2026-10-30T11:00:09.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"c1","output":"Chunk ID: 1\nProcess exited with code 1\nOutput:\n3 issues found"}}
+{"timestamp":"2026-10-30T11:00:10.000Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":5000},"model_context_window":258400}}}
