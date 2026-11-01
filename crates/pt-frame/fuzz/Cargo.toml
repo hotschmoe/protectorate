@@ -34,3 +34,10 @@ path = "fuzz_targets/request.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "reply"
+path = "fuzz_targets/reply.rs"
+test = false
+doc = false
+bench = false

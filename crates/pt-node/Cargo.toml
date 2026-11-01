@@ -15,6 +15,7 @@ undocumented_unsafe_blocks = "deny"
 
 [dependencies]
 pt-frame = { path = "../pt-frame" }
+pt-hash = { path = "../pt-hash" }
 pt-json = { path = "../pt-json" }
 
 [target.'cfg(unix)'.dependencies]

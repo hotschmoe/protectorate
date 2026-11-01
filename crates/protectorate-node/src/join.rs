@@ -59,7 +59,6 @@ pub fn run(args: &[String]) -> Result<(), String> {
         None => default_name(&pt_node::hostname())?,
     };
     let state = state_dir(state)?;
-    let member_bin = member::member_binary(member_bin.as_deref())?;
     if let Some(cfg) = member::read_config(&state)? {
         return Err(format!(
             "{} already joined {} as {}; to join again, uninstall and use a fresh state dir",
@@ -70,6 +69,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
     create_private(&state)?;
     create_private(&member::member_dir(&state))?;
+    let member_bin = member::member_binary(member_bin.as_deref(), &state)?;
 
     let log_path = state.join("join-member.log");
     let log = std::fs::OpenOptions::new()

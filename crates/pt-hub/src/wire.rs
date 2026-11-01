@@ -230,9 +230,7 @@ pub fn workspace(s: &Sleeve) -> api::Workspace {
 pub fn hub_info(hub: &Hub) -> api::HubInfo {
     api::HubInfo {
         name: "protectorate".into(),
-        version: option_env!("PROTECTORATE_BUILD_VERSION")
-            .unwrap_or("dev")
-            .into(),
+        version: pt_version::VERSION.into(),
         started_at_ms: EpochMs(hub.started_ms),
     }
 }

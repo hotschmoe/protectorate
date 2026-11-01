@@ -5,6 +5,11 @@
 //! A node's executor thread is the one ordered stream for that node's reports: it submits
 //! `Dispatched` before it writes, then the effect's outcome, then the node's status, in the
 //! order they happened.
+//!
+//! Each submit carries a token naming it (SPEC 12a fencing); a status whose token is not the
+//! current attempt's is ignored, and cancels, acks and fetches carry it so the node refuses them
+//! for any other submit. Artifacts come back through the node's `FetchArtifact`. A node below
+//! protocol 2 gets neither: no token check, and artifacts through `cat` jobs (REVISIT).
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
@@ -20,7 +25,10 @@ use pt_core::{
     EffectKind, EffectState, EventKind, Intent, Job, JobId, JobReport, JobSpec, JobState, NodeId,
 };
 use pt_fleet::NodeClient;
-use pt_frame::msg::{self, ErrorCode as NodeCode, ErrorReply, JobReply, OnPresent, SubmitJob};
+use pt_frame::msg::{
+    self, ErrorCode as NodeCode, ErrorReply, FetchArtifact, FetchLog, JobRef, JobReply, OnPresent,
+    SubmitJob,
+};
 use pt_json::ToJson;
 
 use crate::hub::{Hub, View};
@@ -35,6 +43,10 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 const SCHEDULE_EVERY: Duration = Duration::from_secs(2);
 const ARTIFACT_TIMEOUT_SECS: u64 = 300;
 const ARTIFACT_CAP: u64 = 64 << 20;
+/// Artifact bytes asked for per FetchArtifact.
+const ARTIFACT_FETCH: u64 = 4 << 20;
+/// The node protocol with submit tokens and FetchArtifact.
+const TOKEN_PROTOCOL: u32 = 2;
 
 pt_json::record! {
     /// What `RunJob` asked for. It rides through the core as the job spec's `command`, so the
@@ -88,6 +100,17 @@ impl JobRequest {
 /// The node's job id for a hub job: the hub tag keeps two hubs' jobs apart on one node.
 pub fn node_job_id(hub: &Hub, job: JobId) -> String {
     format!("{}-j{}", hub.tokens.hub_tag, job.0)
+}
+
+/// The submit's token: it names this hub, job, attempt and submit record, so a status about any
+/// other submit under the same node job id never passes for this one.
+fn submit_token(hub: &Hub, j: &Job) -> Option<String> {
+    let eff = j.submit?;
+    let text = format!(
+        "{}\n{}\n{}\n{}\n{}",
+        hub.tokens.hub_tag, j.id.0, j.attempt, eff.0, j.spec.digest
+    );
+    Some(pt_hash::to_hex(&pt_hash::sha256(text.as_bytes()))[..32].to_string())
 }
 
 /// The core's epoch for a node's journal epoch string.
@@ -392,6 +415,7 @@ impl JobExec {
                 node,
                 client: None,
                 epoch: String::new(),
+                protocol: 0,
                 pending_status: None,
             };
             thread::Builder::new()
@@ -500,6 +524,8 @@ enum Fail {
     Reach(String),
     /// The node answered with an error frame.
     Node(ErrorReply),
+    /// The bytes came, but are not the artifact the node described.
+    Check(String),
     /// Sent, then the connection failed: the call may have applied.
     Io(String),
     /// The node's refusal already went in as the job's status, which resolves the record.
@@ -509,7 +535,7 @@ enum Fail {
 impl Fail {
     fn text(&self) -> String {
         match self {
-            Fail::Reach(e) | Fail::Io(e) => e.clone(),
+            Fail::Reach(e) | Fail::Io(e) | Fail::Check(e) => e.clone(),
             Fail::Node(r) => format!("node refused ({}): {}", r.code, r.message),
             Fail::Answered => "answered".into(),
         }
@@ -522,6 +548,8 @@ struct NodeExec {
     client: Option<NodeClient>,
     /// The agent's journal epoch from its last Hello.
     epoch: String,
+    /// The agent's protocol from its last Hello.
+    protocol: u32,
     /// A status the node returned with a write, submitted after the write's outcome.
     pending_status: Option<(JobId, u32, JobReply)>,
 }
@@ -575,6 +603,7 @@ impl NodeExec {
             c.set_timeout(CALL_TIMEOUT).map_err(|e| e.to_string())?;
             let hello = c.hello().map_err(|e| e.to_string())?;
             self.epoch = hello.journal_epoch;
+            self.protocol = hello.protocol;
             self.client = Some(c);
         }
         self.client.as_mut().ok_or_else(|| "no connection".into())
@@ -603,7 +632,37 @@ impl NodeExec {
         self.hub.submit(kind);
     }
 
-    fn status(&self, job: JobId, attempt: u32, reply: &JobReply) {
+    fn token(&self, view: &View, job: JobId) -> Option<String> {
+        view.state
+            .jobs
+            .get(&job)
+            .and_then(|j| submit_token(&self.hub, j))
+    }
+
+    /// Why a status is about another submit than the job's current one, if it is.
+    fn stale(&self, view: &View, job: JobId, reply: &JobReply) -> Option<String> {
+        if self.protocol < TOKEN_PROTOCOL {
+            return None;
+        }
+        let info = reply.job.as_ref()?;
+        let want = self.token(view, job);
+        (info.token != want).then(|| {
+            format!(
+                "token {:?}, not this attempt's {:?}",
+                info.token.as_deref().unwrap_or("none"),
+                want.as_deref().unwrap_or("none")
+            )
+        })
+    }
+
+    fn status(&self, view: &View, job: JobId, attempt: u32, reply: &JobReply) {
+        if let Some(why) = self.stale(view, job, reply) {
+            return warning!(
+                "job {}: ignored a status of attempt {attempt} from node {}: {why}",
+                job.0,
+                self.node.0
+            );
+        }
         if let Some(t) = reply.job.as_ref().and_then(|i| i.started_at) {
             self.hub
                 .jobs
@@ -644,16 +703,24 @@ impl NodeExec {
                     EffectKind::NodeCancel {
                         job, attempt: a, ..
                     } => {
-                        let nid = node_job_id(&self.hub, job);
-                        self.call("CancelJob", |c| c.cancel_job(&nid, u64::from(a)))
+                        let r = self.job_ref(&view, job, a);
+                        self.call("CancelJob", |c| c.cancel_job(r))
                             .map(|r| self.pending_status = Some((job, a, r)))
                     }
                     EffectKind::NodeAckCollected {
                         job, attempt: a, ..
                     } => {
-                        let nid = node_job_id(&self.hub, job);
-                        match self.call("AckCollected", |c| c.ack_collected(&nid, u64::from(a))) {
-                            Err(Fail::Node(r)) if r.code == NodeCode::NotFound => Ok(()),
+                        // Nothing of ours to drop: gone, or another submit's.
+                        let r = self.job_ref(&view, job, a);
+                        match self.call("AckCollected", |c| c.ack_collected(r)) {
+                            Err(Fail::Node(r))
+                                if matches!(
+                                    r.code,
+                                    NodeCode::NotFound | NodeCode::StaleAttempt
+                                ) =>
+                            {
+                                Ok(())
+                            }
                             other => other.map(drop),
                         }
                     }
@@ -666,7 +733,7 @@ impl NodeExec {
                         attempt,
                         native: None,
                     },
-                    Err(Fail::Reach(reason)) => EventKind::Nacked {
+                    Err(Fail::Reach(reason) | Fail::Check(reason)) => EventKind::Nacked {
                         effect,
                         attempt,
                         reason,
@@ -689,7 +756,7 @@ impl NodeExec {
                     }
                 });
                 if let Some((job, a, reply)) = self.pending_status.take() {
-                    self.status(job, a, &reply);
+                    self.status(&view, job, a, &reply);
                 }
             }
             Intent::Probe {
@@ -709,19 +776,19 @@ impl NodeExec {
                     _ => None,
                 };
                 if let (true, Some((job, a))) = (probing, job) {
-                    self.poll(job, a);
+                    self.poll(&view, job, a);
                 }
             }
             Intent::PollJob { job, attempt, .. } => {
                 if self.current(&view, job, attempt) {
-                    self.poll(job, attempt);
+                    self.poll(&view, job, attempt);
                 }
             }
             Intent::ReadLog {
                 job, attempt, upto, ..
             } => {
                 if self.current(&view, job, attempt)
-                    && let Err(e) = self.pull_log(job, attempt, Some(upto))
+                    && let Err(e) = self.pull_log(&view, job, attempt, Some(upto))
                 {
                     debug!("job {}: reading the log: {e}", job.0);
                 }
@@ -767,9 +834,25 @@ impl NodeExec {
                 api::OnPresent::Idle => OnPresent::Lower,
                 api::OnPresent::Kill => OnPresent::Kill,
             },
+            token: submit_token(&self.hub, j),
         };
         match self.call("SubmitJob", |c| c.submit_job(spec)) {
             Ok(reply) => {
+                if let Some(why) = self.stale(view, job, &reply) {
+                    // The node already holds another submit under this id; ours never ran.
+                    warning!(
+                        "job {}: node {} holds another submit of attempt {attempt} ({why}); its status is ignored",
+                        job.0,
+                        self.node.0
+                    );
+                    self.submit(EventKind::JobStatus {
+                        job,
+                        attempt,
+                        node: self.node,
+                        report: JobReport::Refused { invalid: true },
+                    });
+                    return Err(Fail::Answered);
+                }
                 // The node journals before it answers: the submit is confirmed.
                 self.pending_status = Some((job, attempt, reply));
                 Ok(())
@@ -796,12 +879,20 @@ impl NodeExec {
         }
     }
 
-    fn poll(&mut self, job: JobId, attempt: u32) {
+    fn job_ref(&self, view: &View, job: JobId, attempt: u32) -> JobRef {
+        JobRef {
+            job_id: node_job_id(&self.hub, job),
+            attempt: u64::from(attempt),
+            token: self.token(view, job),
+        }
+    }
+
+    fn poll(&mut self, view: &View, job: JobId, attempt: u32) {
         let nid = node_job_id(&self.hub, job);
         match self.call("JobStatus", |c| {
             c.job_status(&nid, Some(u64::from(attempt)))
         }) {
-            Ok(reply) => self.status(job, attempt, &reply),
+            Ok(reply) => self.status(view, job, attempt, &reply),
             Err(Fail::Node(r)) if r.code == NodeCode::NotFound => {
                 let e = r
                     .journal_epoch
@@ -820,8 +911,15 @@ impl NodeExec {
 
     /// Appends the node's log to the hub copy, up to `upto` or to its end. True once the node
     /// says every byte has been sent.
-    fn pull_log(&mut self, job: JobId, attempt: u32, upto: Option<u64>) -> Result<bool, String> {
+    fn pull_log(
+        &mut self,
+        view: &View,
+        job: JobId,
+        attempt: u32,
+        upto: Option<u64>,
+    ) -> Result<bool, String> {
         let nid = node_job_id(&self.hub, job);
+        let token = self.token(view, job);
         let start = self.hub.jobs.log_len(job, attempt);
         let mut at = start;
         let mut done = false;
@@ -830,9 +928,14 @@ impl NodeExec {
                 break Ok(());
             }
             let max = upto.map_or(LOG_FETCH, |u| (u - at).min(LOG_FETCH));
-            let (bytes, end) = match self.call("FetchLog", |c| {
-                c.fetch_log(&nid, u64::from(attempt), at, max)
-            }) {
+            let q = FetchLog {
+                job_id: nid.clone(),
+                attempt: u64::from(attempt),
+                offset: at,
+                max,
+                token: token.clone(),
+            };
+            let (bytes, end) = match self.call("FetchLog", |c| c.fetch_log(q)) {
                 Ok(v) => v,
                 Err(e) => break Err(e.text()),
             };
@@ -859,7 +962,7 @@ impl NodeExec {
     /// Exited: the rest of the log, then each artifact, then `ArtifactsChecked`. A connection
     /// failure reports nothing: the lease makes the job Lost and its next status collects again.
     fn collect(&mut self, view: &View, job: JobId, attempt: u32) {
-        if let Err(e) = self.pull_log(job, attempt, None) {
+        if let Err(e) = self.pull_log(view, job, attempt, None) {
             return warning!("job {}: collecting the log: {e}", job.0);
         }
         let req = view
@@ -873,9 +976,15 @@ impl NodeExec {
             .unwrap_or_default();
         let mut fetched = Vec::new();
         let mut ok = true;
+        let token = self.token(view, job);
         for (n, path) in wanted.iter().enumerate() {
-            let cwd = req.as_ref().and_then(|r| r.cwd.clone());
-            match self.fetch_artifact(job, attempt, n, path, cwd) {
+            let got = if self.protocol >= TOKEN_PROTOCOL {
+                self.fetch_artifact(job, attempt, n, path, token.clone())
+            } else {
+                let cwd = req.as_ref().and_then(|r| r.cwd.clone());
+                self.cat_artifact(job, attempt, n, path, cwd)
+            };
+            match got {
                 Ok(f) => {
                     info!(
                         "job {}: artifact {path}: {} bytes, sha256 {}",
@@ -902,9 +1011,82 @@ impl NodeExec {
         self.submit(EventKind::ArtifactsChecked { job, attempt, ok });
     }
 
-    /// The node has no file transfer yet (REVISIT): a `cat` job writes the file into its log,
-    /// and the hub keeps that log as the artifact.
+    /// The file from the node's `FetchArtifact`, in slices, checked against the size and
+    /// SHA-256 the node read at the end.
     fn fetch_artifact(
+        &mut self,
+        job: JobId,
+        attempt: u32,
+        n: usize,
+        path: &str,
+        token: Option<String>,
+    ) -> Result<Fetched, Fail> {
+        let nid = node_job_id(&self.hub, job);
+        let file = n.to_string();
+        let dest = self.hub.jobs.artifact_path(job, attempt, &file);
+        let io = |e: io::Error| Fail::Reach(format!("{}: {e}", dest.display()));
+        if let Some(d) = dest.parent() {
+            fs::create_dir_all(d).map_err(io)?;
+        }
+        let mut out = File::create(&dest).map_err(io)?;
+        let mut sha = pt_hash::Sha256::new();
+        let mut at = 0u64;
+        let end = loop {
+            let q = FetchArtifact {
+                job_id: nid.clone(),
+                attempt: u64::from(attempt),
+                path: path.to_string(),
+                offset: at,
+                max: ARTIFACT_FETCH,
+                token: token.clone(),
+            };
+            let (bytes, end) = self.call("FetchArtifact", |c| c.fetch_artifact(q))?;
+            if end.size > ARTIFACT_CAP {
+                return Err(Fail::Check(format!(
+                    "{} bytes, over the {ARTIFACT_CAP} byte cap",
+                    end.size
+                )));
+            }
+            if end.offset != at + bytes.len() as u64 {
+                return Err(Fail::Check(format!(
+                    "the node sent {} bytes from {at} but says the next fetch starts at {}",
+                    bytes.len(),
+                    end.offset
+                )));
+            }
+            out.write_all(&bytes).map_err(io)?;
+            sha.update(&bytes);
+            at = end.offset;
+            if end.done {
+                break end;
+            }
+            if bytes.is_empty() {
+                return Err(Fail::Check(format!(
+                    "no bytes at {at} of {}, and not done",
+                    end.size
+                )));
+            }
+        };
+        out.sync_all().map_err(io)?;
+        let sha = pt_hash::to_hex(&sha.finalize());
+        if at != end.size || end.sha256.as_deref() != Some(sha.as_str()) {
+            return Err(Fail::Check(format!(
+                "got {at} bytes with SHA-256 {sha}; the node read {} bytes with SHA-256 {}",
+                end.size,
+                end.sha256.as_deref().unwrap_or("none")
+            )));
+        }
+        Ok(Fetched {
+            path: path.to_string(),
+            file,
+            size_bytes: at,
+            sha256: sha,
+        })
+    }
+
+    /// A protocol 1 node has no FetchArtifact: a `cat` job writes the file into its log, and
+    /// the hub keeps that log as the artifact. Removed once every node runs protocol 2 (REVISIT).
+    fn cat_artifact(
         &mut self,
         job: JobId,
         attempt: u32,
@@ -924,6 +1106,7 @@ impl NodeExec {
             log_cap: ARTIFACT_CAP,
             even_if_present: true,
             on_present: OnPresent::Lower,
+            token: None,
         };
         self.call("SubmitJob", |c| c.submit_job(spec))?;
         let deadline = Instant::now() + Duration::from_secs(ARTIFACT_TIMEOUT_SECS + 30);
@@ -954,8 +1137,14 @@ impl NodeExec {
             let mut out = File::create(&dest).map_err(io)?;
             let mut at = 0u64;
             loop {
-                let (bytes, end) =
-                    self.call("FetchLog", |c| c.fetch_log(&aid, 1, at, LOG_FETCH))?;
+                let q = FetchLog {
+                    job_id: aid.clone(),
+                    attempt: 1,
+                    offset: at,
+                    max: LOG_FETCH,
+                    token: None,
+                };
+                let (bytes, end) = self.call("FetchLog", |c| c.fetch_log(q))?;
                 out.write_all(&bytes).map_err(io)?;
                 at += bytes.len() as u64;
                 if end.truncated {
@@ -978,7 +1167,12 @@ impl NodeExec {
                 sha256: pt_hash::to_hex(&sha),
             })
         })();
-        let _ = self.call("AckCollected", |c| c.ack_collected(&aid, 1));
+        let ack = JobRef {
+            job_id: aid.clone(),
+            attempt: 1,
+            token: None,
+        };
+        let _ = self.call("AckCollected", |c| c.ack_collected(ack));
         result
     }
 }

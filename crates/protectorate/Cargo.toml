@@ -17,4 +17,6 @@ pt-hub = { path = "../pt-hub" }
 pt-json = { path = "../pt-json" }
 
 [build-dependencies]
+pt-embed = { path = "../pt-embed" }
 pt-hash = { path = "../pt-hash" }
+pt-version = { path = "../pt-version" }

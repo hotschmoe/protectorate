@@ -7,7 +7,6 @@
 
 mod child;
 mod client;
-mod embed;
 mod enroll;
 mod headscale;
 mod member;
@@ -23,11 +22,11 @@ use std::time::Duration;
 
 pub use child::ChildState;
 pub use client::NodeClient;
-pub use embed::Embedded;
 pub use enroll::{Enrolled, PENDING_TTL_MS, Pending, Registration, valid_name};
 pub use headscale::{Admin, HsNode, TAG_HUB, TAG_NODE, USER};
 pub use member::{Peer, Status};
 pub use poller::{FleetEvent, NodeView, PollConfig, Poller};
+pub use pt_embed::Embedded;
 
 /// The tailnet port of the node agent (go/policy.hujson).
 pub const NODE_PORT: u16 = 7475;

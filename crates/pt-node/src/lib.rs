@@ -1,6 +1,7 @@
 //! The node side: inventory, samples, presence, job priority and the job runner. The wire types
 //! are pt-frame's.
 
+mod artifact;
 mod exec;
 pub mod inventory;
 pub mod jobs;

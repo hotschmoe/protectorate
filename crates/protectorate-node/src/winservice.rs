@@ -28,7 +28,8 @@ pub fn install(o: &Opts) -> Result<(), String> {
     if state(SERVICE)?.is_some() {
         return Err(format!("a service named {SERVICE} exists already"));
     }
-    let member_src = member::member_binary(o.member.as_deref())?;
+    // The service runs the embedded member; unpacking it now proves it is there.
+    member::member_binary(None, &o.state)?;
     let exe = std::env::current_exe().map_err(|e| format!("finding this binary: {e}"))?;
     let base = std::env::var_os("ProgramFiles").ok_or("ProgramFiles is not set")?;
     let prefix = PathBuf::from(base).join("protectorate-node");
@@ -56,16 +57,12 @@ pub fn install(o: &Opts) -> Result<(), String> {
     fs::create_dir(&prefix).map_err(|e| format!("creating {}: {e}", prefix.display()))?;
     record(&mut m, &prefix.display().to_string(), "dir")?;
     let bin = prefix.join("protectorate-node.exe");
-    let member_bin = prefix.join("member.exe");
-    for (src, dst) in [(&exe, &bin), (&member_src, &member_bin)] {
-        fs::copy(src, dst)
-            .map_err(|e| format!("copying {} to {}: {e}", src.display(), dst.display()))?;
-        record(&mut m, &dst.display().to_string(), "file")?;
-    }
+    fs::copy(&exe, &bin)
+        .map_err(|e| format!("copying {} to {}: {e}", exe.display(), bin.display()))?;
+    record(&mut m, &bin.display().to_string(), "file")?;
     let command = format!(
-        "{} serve --service --state-dir {state_dir} --listen-tcp {LISTEN} --member {}",
-        quotable(&bin)?,
-        quotable(&member_bin)?
+        "{} serve --service --state-dir {state_dir} --listen-tcp {LISTEN}",
+        quotable(&bin)?
     );
     sc(&[
         "create",

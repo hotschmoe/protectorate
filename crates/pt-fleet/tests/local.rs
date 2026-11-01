@@ -391,6 +391,7 @@ fn local_fleet_end_to_end() {
             log_cap: 1 << 20,
             even_if_present: false,
             on_present: pt_frame::msg::OnPresent::Lower,
+            token: None,
         })
         .expect("submit");
     assert_eq!(reply.journal_epoch, hello.journal_epoch);
@@ -399,7 +400,15 @@ fn local_fleet_end_to_end() {
         j.state.is_terminal().then_some(j)
     });
     assert_eq!(done.state, JobState::Succeeded, "{done:?}");
-    let (log, end) = c.fetch_log("e2e-uname", 1, 0, 1 << 20).unwrap();
+    let (log, end) = c
+        .fetch_log(pt_frame::msg::FetchLog {
+            job_id: "e2e-uname".into(),
+            attempt: 1,
+            offset: 0,
+            max: 1 << 20,
+            token: None,
+        })
+        .unwrap();
     let log = String::from_utf8_lossy(&log).into_owned();
     println!("job log: {}", log.trim());
     assert!(log.contains("Linux") && end.done, "{log:?} {end:?}");
@@ -410,7 +419,12 @@ fn local_fleet_end_to_end() {
             .iter()
             .any(|j| j.job_id == "e2e-uname")
     );
-    c.ack_collected("e2e-uname", 1).unwrap();
+    c.ack_collected(pt_frame::msg::JobRef {
+        job_id: "e2e-uname".into(),
+        attempt: 1,
+        token: None,
+    })
+    .unwrap();
     assert!(
         c.list_jobs().unwrap().jobs.is_empty(),
         "an acknowledged job is kept"

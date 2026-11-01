@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use pt_fleet::{Config, Fleet, FleetEvent, PollConfig, Poller};
-use pt_frame::msg::{OnPresent, SubmitJob};
+use pt_frame::msg::{FetchLog, JobRef, OnPresent, SubmitJob};
 use pt_json::{Map, ToJson, Value, obj};
 
 fn main() {
@@ -174,6 +174,7 @@ fn command(fleet: &Fleet, poller: &Poller, w: &[String]) -> Result<Value, String
                 log_cap: 1 << 20,
                 even_if_present: false,
                 on_present: OnPresent::Lower,
+                token: None,
             })
             .map_err(e)?;
             let deadline = Instant::now() + Duration::from_secs(150);
@@ -187,8 +188,21 @@ fn command(fleet: &Fleet, poller: &Poller, w: &[String]) -> Result<Value, String
                 }
                 std::thread::sleep(Duration::from_millis(300));
             };
-            let (log, end) = c.fetch_log(&job_id, 1, 0, 1 << 20).map_err(e)?;
-            c.ack_collected(&job_id, 1).map_err(e)?;
+            let (log, end) = c
+                .fetch_log(FetchLog {
+                    job_id: job_id.clone(),
+                    attempt: 1,
+                    offset: 0,
+                    max: 1 << 20,
+                    token: None,
+                })
+                .map_err(e)?;
+            c.ack_collected(JobRef {
+                job_id: job_id.clone(),
+                attempt: 1,
+                token: None,
+            })
+            .map_err(e)?;
             obj! { "node" => v.node.name.as_str(), "job" => job.to_json(), "log" => String::from_utf8_lossy(&log).into_owned(), "log_end" => end.to_json() }
         }
         _ => return Err(format!("unknown command {w:?}")),

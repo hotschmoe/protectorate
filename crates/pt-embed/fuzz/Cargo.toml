@@ -1,0 +1,22 @@
+[package]
+name = "pt-embed-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+miniz_oxide = { version = "=0.8.9", default-features = false, features = ["with-alloc"] }
+pt-embed = { path = ".." }
+
+[[bin]]
+name = "inflate"
+path = "fuzz_targets/inflate.rs"
+test = false
+doc = false
+bench = false

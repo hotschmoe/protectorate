@@ -6,7 +6,11 @@
 //!   its own timeout and a capped log of stdout and stderr together.
 //! - While jobs run, presence is watched: a person arriving lowers each job to idle priority, or
 //!   kills it when it asked for `on_present: kill`.
-//! - Every (job, attempt) stays as a tombstone until the hub acknowledges collection.
+//! - Every (job, attempt) stays as a tombstone until the hub acknowledges collection. A job
+//!   without a `cwd` runs in its own directory under `work/`, removed with the tombstone.
+//! - A job keeps the token it was submitted with and reports it in every status; a cancel, ack
+//!   or fetch carrying another token is refused (SPEC 12a fencing).
+//! - Artifacts are read only from inside the job's directory (`read_artifact`).
 //! - A job never re-runs by itself: after an agent restart, a job that was running is reported
 //!   Interrupted (its processes were still alive and were killed) or Lost (it ended unobserved).
 
@@ -23,7 +27,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use pt_frame::msg::{
-    self, ErrorCode, JobInfo, JobState, LogEnd, OnPresent, PresenceState, SubmitJob,
+    self, ArtifactEnd, ErrorCode, JobInfo, JobState, LogEnd, OnPresent, PresenceState, SubmitJob,
 };
 
 use crate::presence::{Detector, Gate, job_gate};
@@ -46,7 +50,7 @@ pub struct JobError {
 }
 
 impl JobError {
-    fn new(code: ErrorCode, message: impl Into<String>) -> JobError {
+    pub(crate) fn new(code: ErrorCode, message: impl Into<String>) -> JobError {
         JobError {
             code,
             message: message.into(),
@@ -84,6 +88,10 @@ struct Table {
 
 struct Job {
     info: JobInfo,
+    /// The job's directory: its `cwd`, or its own under `work/`.
+    dir: PathBuf,
+    /// The directory is the node's own, removed with the tombstone.
+    own_dir: bool,
     log_cap: u64,
     /// From the launch receipt, to tell the job's process from a reused pid after a restart.
     receipt_start: Option<u64>,
@@ -131,7 +139,7 @@ impl Runner {
         let (isolator, isolation_note) = Isolator::probe(opts.allow_scope);
         let mut jobs = BTreeMap::new();
         for e in opened.entries {
-            replay(&mut jobs, e);
+            replay(&mut jobs, &work, e);
         }
         let inner = Arc::new(Inner {
             _lock: lock,
@@ -226,11 +234,8 @@ impl Runner {
                 return Err(JobError::new(ErrorCode::Present, why));
             }
         }
-        let cwd = match &spec.cwd {
-            Some(c) => PathBuf::from(c),
-            None => self.inner.work.clone(),
-        };
-        if !cwd.is_dir() {
+        let (cwd, own_dir) = job_dir(&self.inner.work, &spec);
+        if !own_dir && !cwd.is_dir() {
             return Err(JobError::new(
                 ErrorCode::BadRequest,
                 format!("cwd {} is not a directory", cwd.display()),
@@ -240,6 +245,14 @@ impl Runner {
         let mut t = self.table();
         if let Some(info) = admit_locked(&t, &spec)? {
             return Ok(info);
+        }
+        if own_dir {
+            fs::create_dir_all(&cwd).map_err(|e| {
+                internal(io::Error::new(
+                    e.kind(),
+                    format!("creating {}: {e}", cwd.display()),
+                ))
+            })?;
         }
         let now = crate::unix_now();
         t.journal
@@ -251,6 +264,8 @@ impl Runner {
         let key = (spec.job_id.clone(), spec.attempt);
         let mut job = Job {
             info: new_info(&spec, now),
+            dir: cwd.clone(),
+            own_dir,
             log_cap: spec.log_cap,
             receipt_start: None,
             live: None,
@@ -504,7 +519,12 @@ impl Runner {
         self.table().jobs.values().map(Job::current).collect()
     }
 
-    pub fn cancel(&self, job_id: &str, attempt: u64) -> Result<JobInfo, JobError> {
+    pub fn cancel(
+        &self,
+        job_id: &str,
+        attempt: u64,
+        token: Option<&str>,
+    ) -> Result<JobInfo, JobError> {
         let mut t = self.table();
         let t = &mut *t;
         let key = (job_id.to_string(), attempt);
@@ -512,6 +532,7 @@ impl Runner {
             .jobs
             .get_mut(&key)
             .ok_or_else(|| not_found(job_id, attempt))?;
+        fence(job, token)?;
         if job.info.state == JobState::Running {
             let entry = Entry::Cancel {
                 job_id: job_id.to_string(),
@@ -527,11 +548,17 @@ impl Runner {
         Ok(job.current())
     }
 
-    /// Drops the tombstone and the log once the hub has what it needs.
-    pub fn ack(&self, job_id: &str, attempt: u64) -> Result<JobInfo, JobError> {
+    /// Drops the tombstone, the log and the job's own directory once the hub has what it needs.
+    pub fn ack(
+        &self,
+        job_id: &str,
+        attempt: u64,
+        token: Option<&str>,
+    ) -> Result<JobInfo, JobError> {
         let mut t = self.table();
         let key = (job_id.to_string(), attempt);
         let job = t.jobs.get(&key).ok_or_else(|| not_found(job_id, attempt))?;
+        fence(job, token)?;
         if !job.info.state.is_terminal() {
             return Err(JobError::new(
                 ErrorCode::NotFinished,
@@ -542,6 +569,7 @@ impl Runner {
             ));
         }
         let info = job.current();
+        let own_dir = job.own_dir.then(|| job.dir.clone());
         t.journal
             .append(&Entry::Collected {
                 job_id: job_id.to_string(),
@@ -557,24 +585,29 @@ impl Runner {
         {
             eprintln!("protectorate-node: removing {}: {e}", path.display());
         }
+        if let Some(dir) = own_dir
+            && let Err(e) = fs::remove_dir_all(&dir)
+            && e.kind() != io::ErrorKind::NotFound
+        {
+            eprintln!("protectorate-node: removing {}: {e}", dir.display());
+        }
         Ok(info)
     }
 
     /// Sends log bytes from `offset`, at most `max`, in chunks to `sink`.
     pub fn read_log(
         &self,
-        job_id: &str,
-        attempt: u64,
-        offset: u64,
-        max: u64,
+        q: &msg::FetchLog,
         mut sink: impl FnMut(&[u8]) -> io::Result<()>,
     ) -> Result<LogEnd, JobError> {
+        let (job_id, attempt, offset, max) = (q.job_id.as_str(), q.attempt, q.offset, q.max);
         let (finished, truncated) = {
             let t = self.table();
             let job = t
                 .jobs
                 .get(&(job_id.to_string(), attempt))
                 .ok_or_else(|| not_found(job_id, attempt))?;
+            fence(job, q.token.as_deref())?;
             let info = job.current();
             (info.state.is_terminal(), info.log_truncated)
         };
@@ -593,18 +626,7 @@ impl Runner {
         if let Some(f) = file.as_mut()
             && end > start
         {
-            f.seek(SeekFrom::Start(start)).map_err(internal)?;
-            let mut left = end - start;
-            let mut buf = vec![0u8; msg::CHUNK];
-            while left > 0 {
-                let want = buf.len().min(usize::try_from(left).unwrap_or(usize::MAX));
-                let n = f.read(&mut buf[..want]).map_err(internal)?;
-                if n == 0 {
-                    break;
-                }
-                sink(&buf[..n]).map_err(internal)?;
-                left -= n as u64;
-            }
+            send_range(f, start, end, &mut sink)?;
         }
         let next = end;
         Ok(LogEnd {
@@ -612,6 +634,63 @@ impl Runner {
             size,
             done: finished && next >= size,
             truncated,
+        })
+    }
+
+    /// Sends bytes of a file in the finished job's directory from `offset`, at most `max`, in
+    /// chunks to `sink`; at the end of the file, also its SHA-256.
+    pub fn read_artifact(
+        &self,
+        q: &msg::FetchArtifact,
+        mut sink: impl FnMut(&[u8]) -> io::Result<()>,
+    ) -> Result<ArtifactEnd, JobError> {
+        let dir = {
+            let t = self.table();
+            let job = t
+                .jobs
+                .get(&(q.job_id.clone(), q.attempt))
+                .ok_or_else(|| not_found(&q.job_id, q.attempt))?;
+            fence(job, q.token.as_deref())?;
+            let state = job.current().state;
+            if !state.is_terminal() {
+                return Err(JobError::new(
+                    ErrorCode::NotFinished,
+                    format!(
+                        "job {} attempt {} is {state}; artifacts are read once it ends",
+                        q.job_id, q.attempt
+                    ),
+                ));
+            }
+            job.dir.clone()
+        };
+        let mut f = crate::artifact::open(&dir, &q.path)?;
+        let size = f.metadata().map_err(internal)?.len();
+        let start = q.offset.min(size);
+        let end = start.saturating_add(q.max.min(msg::MAX_FETCH)).min(size);
+        if end > start {
+            send_range(&mut f, start, end, &mut sink)?;
+        }
+        let done = end >= size;
+        let sha256 = if done {
+            f.seek(SeekFrom::Start(0)).map_err(internal)?;
+            let mut h = pt_hash::Sha256::new();
+            let mut buf = vec![0u8; msg::CHUNK];
+            loop {
+                let n = f.read(&mut buf).map_err(internal)?;
+                if n == 0 {
+                    break;
+                }
+                h.update(&buf[..n]);
+            }
+            Some(pt_hash::to_hex(&h.finalize()))
+        } else {
+            None
+        };
+        Ok(ArtifactEnd {
+            offset: end,
+            size,
+            done,
+            sha256,
         })
     }
 
@@ -657,6 +736,50 @@ impl Job {
             info.log_truncated = live.log_truncated.load(Ordering::SeqCst);
         }
         info
+    }
+}
+
+/// Bytes `start..end` of `f` to `sink`, a chunk at a time.
+fn send_range(
+    f: &mut File,
+    start: u64,
+    end: u64,
+    sink: &mut impl FnMut(&[u8]) -> io::Result<()>,
+) -> Result<(), JobError> {
+    f.seek(SeekFrom::Start(start)).map_err(internal)?;
+    let mut left = end - start;
+    let mut buf = vec![0u8; msg::CHUNK];
+    while left > 0 {
+        let want = buf.len().min(usize::try_from(left).unwrap_or(usize::MAX));
+        let n = f.read(&mut buf[..want]).map_err(internal)?;
+        if n == 0 {
+            break;
+        }
+        sink(&buf[..n]).map_err(internal)?;
+        left -= n as u64;
+    }
+    Ok(())
+}
+
+/// A request naming another submit's token is not about this job.
+fn fence(job: &Job, token: Option<&str>) -> Result<(), JobError> {
+    match token {
+        Some(t) if job.info.token.as_deref() != Some(t) => Err(JobError::new(
+            ErrorCode::StaleAttempt,
+            format!(
+                "job {} attempt {} was submitted with another token",
+                job.info.job_id, job.info.attempt
+            ),
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// The job's directory, and whether it is the node's own (no `cwd`).
+fn job_dir(work: &Path, spec: &SubmitJob) -> (PathBuf, bool) {
+    match &spec.cwd {
+        Some(c) => (PathBuf::from(c), false),
+        None => (work.join(format!("{}.{}", spec.job_id, spec.attempt)), true),
     }
 }
 
@@ -798,18 +921,29 @@ fn validate(spec: &SubmitJob) -> Result<(), JobError> {
     {
         return bad(format!("cwd {c:?} is not absolute"));
     }
+    if let Some(t) = &spec.token
+        && (t.is_empty() || t.len() > msg::MAX_TOKEN || !t.bytes().all(|b| b.is_ascii_graphic()))
+    {
+        return bad(format!(
+            "token must be 1 to {} printable ASCII characters",
+            msg::MAX_TOKEN
+        ));
+    }
     Ok(())
 }
 
-fn replay(jobs: &mut BTreeMap<(String, u64), Job>, e: Entry) {
+fn replay(jobs: &mut BTreeMap<(String, u64), Job>, work: &Path, e: Entry) {
     let key = |id: &str, attempt: u64| (id.to_string(), attempt);
     match &e {
         Entry::Epoch { .. } => {}
         Entry::Submit { spec, at } => {
+            let (dir, own_dir) = job_dir(work, spec);
             jobs.insert(
                 key(&spec.job_id, spec.attempt),
                 Job {
                     info: new_info(spec, *at),
+                    dir,
+                    own_dir,
                     log_cap: spec.log_cap,
                     receipt_start: None,
                     live: None,
@@ -875,6 +1009,7 @@ fn new_info(spec: &SubmitJob, at: u64) -> JobInfo {
         lowered: false,
         on_present: spec.on_present,
         timeout_secs: spec.timeout_secs,
+        token: spec.token.clone(),
     }
 }
 

@@ -48,6 +48,8 @@ A bump is a hand-picked change to this file and `Cargo.lock` in the same commit.
 | rustc_version | 0.4.1 | transitive: crc32c build script |
 | semver | 1.0.28 | transitive: rustc_version; also the reference for pt-update's `tags` differential target |
 | qrcodegen | 1.8.0 | reference encoder for pt-qr's `encode` differential target (pt-qr is a trimmed port of it) |
+| miniz_oxide | 0.8.9 | reference inflate and deflate for pt-embed's `inflate` differential target |
+| adler2 | 2.0.1 | miniz_oxide dependency |
 
 ## Go
 

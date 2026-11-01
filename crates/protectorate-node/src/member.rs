@@ -45,29 +45,29 @@ pub fn read_config(state: &Path) -> Result<Option<NodeConfig>, String> {
     }
 }
 
-/// `member` next to this binary, unless given.
-pub fn member_binary(given: Option<&Path>) -> Result<PathBuf, String> {
-    let path = match given {
-        Some(p) => p.to_path_buf(),
-        None => {
-            let exe = std::env::current_exe().map_err(|e| format!("finding this binary: {e}"))?;
-            let name = if cfg!(windows) {
-                "member.exe"
-            } else {
-                "member"
-            };
-            exe.parent()
-                .map(|d| d.join(name))
-                .ok_or("this binary has no directory")?
-        }
-    };
-    if path.is_file() {
-        Ok(path)
-    } else {
-        Err(format!(
-            "no member binary at {} (pass --member PATH)",
-            path.display()
-        ))
+mod embedded {
+    include!(concat!(env!("OUT_DIR"), "/member.rs"));
+}
+
+/// The member to run: `given`, else the one this binary embeds, unpacked under `<state>/net`
+/// (content-addressed, checked on every start).
+pub fn member_binary(given: Option<&Path>, state: &Path) -> Result<PathBuf, String> {
+    match (given, embedded::MEMBER) {
+        (Some(p), _) if p.is_file() => Ok(p.to_path_buf()),
+        (Some(p), _) => Err(format!("no member binary at {}", p.display())),
+        (None, Some(m)) => m.unpack(&state.join("net")),
+        (None, None) => Err(format!(
+            "this protectorate-node does not embed member ({}); pass --member PATH",
+            embedded::MEMBER_MISSING
+        )),
+    }
+}
+
+/// What `--version` says about member.
+pub fn embedded_line() -> String {
+    match embedded::MEMBER {
+        Some(m) => format!("member: embedded, sha256 {}", m.sha256),
+        None => format!("member: missing ({})", embedded::MEMBER_MISSING),
     }
 }
 

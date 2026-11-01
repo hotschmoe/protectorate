@@ -1,8 +1,10 @@
 //! The hub runs the fleet, all real binaries: `protectorate serve` unpacks its embedded
 //! headscale and member and runs them; a real `protectorate-node` on this machine joins through
-//! the hub's headscale (`join`, `node add`, `node approve`) and serves jobs over the tailnet. The
-//! test drives everything through the CLI: node listing, a `uname -a` job and its log by
-//! offset, a job that leaves an artifact, presence gating, cancelling a long job, a hub crash
+//! the hub's headscale (`join`, `node add`, `node approve`) with the member it embeds, and serves
+//! jobs over the tailnet. The test drives everything through the CLI: node listing with the
+//! node's version, a `uname -a` job and its log by offset, artifacts through FetchArtifact (a
+//! 3 MB binary, and symlink and `..` escapes that fail the job), a status from another submit
+//! under the job's id that the hub ignores, presence gating, cancelling a long job, a hub crash
 //! mid-job that the restarted hub reconciles, and a planned stop that leaves no headscale or
 //! member behind.
 //!
@@ -107,6 +109,24 @@ fn run_job(hub: &Hub, extra: &[&str], argv: &[&str]) -> String {
     v["id"].as_str().expect("job id").to_string()
 }
 
+/// `protectorate-node rpc` straight to the agent's socket, as a hub would send it.
+fn node_rpc(node_bin: &Path, sock: &Path, method: &str, fields: &str) -> Value {
+    let out = Command::new(node_bin)
+        .arg("rpc")
+        .arg("--connect")
+        .arg(sock)
+        .args([method, fields])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "rpc {method} {fields}: {}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    pt_json::parse(String::from_utf8_lossy(&out.stdout).trim()).unwrap()
+}
+
 fn log_text(hub: &Hub, id: &str, offset: u64) -> String {
     let v = hub
         .cli(&["--json", "job", "log", id, "--offset", &offset.to_string()])
@@ -153,32 +173,23 @@ fn hub_runs_the_fleet_and_node_jobs() {
     assert_eq!(enrollment["server_url"].as_str(), Some(url.as_str()));
     let fp = enrollment["control_key"].as_str().unwrap().to_string();
     assert!(fp.starts_with("sha256:"), "{enrollment}");
-    let member = fs::read_dir(hub.home.join("net"))
-        .unwrap()
-        .flatten()
-        .map(|e| e.path())
-        .find(|p| {
-            p.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("member-"))
-        })
-        .expect("the hub unpacked member");
+    let unpacked = |dir: &Path| {
+        fs::read_dir(dir)
+            .ok()?
+            .flatten()
+            .filter_map(|e| e.file_name().into_string().ok())
+            .find(|n| n.starts_with("member-"))
+    };
+    let hub_member = unpacked(&hub.home.join("net")).expect("the hub unpacked member");
 
-    // The node joins: join shows its registration, the owner pastes it and approves.
+    // The node joins with the member it embeds: join shows its registration, the owner pastes
+    // it and approves.
     let node_dir = hub.home.with_file_name("node");
     fs::create_dir_all(&node_dir).unwrap();
-    // Its own copy, so the hub's member is told apart from the node's on the process list.
-    let member = {
-        let own = node_dir.with_file_name("node-member");
-        fs::copy(&member, &own).unwrap();
-        own
-    };
     let mut join = Kill(
         Command::new(&node_bin)
             .args(["join", &url, "--name", "e2e-hubfleet", "--state-dir"])
             .arg(&node_dir)
-            .arg("--member")
-            .arg(&member)
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
@@ -230,20 +241,24 @@ fn hub_runs_the_fleet_and_node_jobs() {
         join.0.try_wait().unwrap()
     });
     assert!(status.success(), "join exited {status}");
+    assert_eq!(
+        unpacked(&node_dir.join("net")).as_deref(),
+        Some(hub_member.as_str()),
+        "the node unpacked the same member the hub carries"
+    );
 
     let presence = node_dir.join("presence");
     fs::write(&presence, "AWAY").unwrap();
     let work = node_dir.join("jobs-cwd");
     fs::create_dir_all(&work).unwrap();
     let serve_log = fs::File::create(node_dir.join("serve.log")).unwrap();
+    let sock = node_dir.join("agent.sock");
     let _serve = Kill(
         Command::new(&node_bin)
             .args(["serve", "--state-dir"])
             .arg(&node_dir)
             .arg("--forward-socket")
-            .arg(node_dir.join("agent.sock"))
-            .arg("--member")
-            .arg(&member)
+            .arg(&sock)
             .args(["--no-scope", "--presence-interval", "1"])
             .env("PROTECTORATE_NODE_TEST_PRESENCE", &presence)
             .stdout(Stdio::null())
@@ -267,11 +282,30 @@ fn hub_runs_the_fleet_and_node_jobs() {
             .cloned()
     });
     assert_eq!(node["name"].as_str(), Some("e2e-hubfleet"));
-    assert!(!node["node_version"].as_str().unwrap_or("").is_empty());
+    let printed = Command::new(&node_bin).arg("--version").output().unwrap();
+    let printed = String::from_utf8_lossy(&printed.stdout).into_owned();
+    let version = printed
+        .lines()
+        .next()
+        .and_then(|l| l.strip_prefix("protectorate-node "))
+        .expect("protectorate-node --version")
+        .to_string();
+    assert_ne!(version, "0.0.0");
+    assert_eq!(node["node_version"].as_str(), Some(version.as_str()));
     let shown = hub.cli(&["--json", "node", "show", "e2e-hubfleet"]).json();
     assert_eq!(shown["id"].as_str(), Some(node_id.as_str()));
     let human = hub.cli(&["node", "ls"]);
-    assert!(human.ok().contains("e2e-hubfleet"), "{}", human.stdout);
+    let row = human
+        .ok()
+        .lines()
+        .find(|l| l.contains("e2e-hubfleet"))
+        .unwrap_or_else(|| panic!("{}", human.stdout))
+        .to_string();
+    assert!(
+        row.contains(&version),
+        "VERSION in node ls: {}",
+        human.stdout
+    );
     let state = hub.state();
     assert!(
         state["nodes"]
@@ -363,6 +397,111 @@ fn hub_runs_the_fleet_and_node_jobs() {
     let done = wait_job(&hub, &missing, &["succeeded", "failed"], 120);
     assert_eq!(done["state"].as_str(), Some("failed"), "{done}");
 
+    // A 3 MB binary artifact in FetchArtifact slices, from the job's own directory (no --cwd).
+    let big = run_job(
+        &hub,
+        &["--artifact", "big.bin", "--artifact", "./sub/small.txt"],
+        &[
+            "sh",
+            "-c",
+            "head -c 3000000 /dev/urandom > big.bin; mkdir sub; printf tiny > sub/small.txt; \
+             sha256sum big.bin",
+        ],
+    );
+    let done = wait_job(&hub, &big, &["succeeded", "failed"], 120);
+    assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
+    let node_sha = log_text(&hub, &big, 0)
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_string();
+    let a = &done["artifacts"][0];
+    assert_eq!(a["size_bytes"].as_u64(), Some(3_000_000), "{done}");
+    assert_eq!(a["sha256"].as_str(), Some(node_sha.as_str()), "{done}");
+    hub.cli(&[
+        "job",
+        "artifact",
+        &big,
+        "big.bin",
+        "--out",
+        got.to_str().unwrap(),
+    ])
+    .ok();
+    let bytes = fs::read(&got).unwrap();
+    assert_eq!(bytes.len(), 3_000_000);
+    assert_eq!(pt_hash::to_hex(&pt_hash::sha256(&bytes)), node_sha);
+    assert_eq!(done["artifacts"][1]["size_bytes"].as_u64(), Some(4));
+    assert!(
+        hub.log_text()
+            .contains(&format!("job {big}: artifact big.bin: 3000000 bytes")),
+        "{}",
+        tail(&hub.log_text(), 40)
+    );
+    let node_log = || fs::read_to_string(node_dir.join("serve.log")).unwrap_or_default();
+    assert!(
+        !node_log().contains(&format!("-j{big}-a")),
+        "an artifact went through a cat job"
+    );
+
+    // A symlink or `..` out of the job's directory is refused by the node; the job fails.
+    let outside = hub.home.with_file_name("outside.txt");
+    fs::write(&outside, "not for the hub").unwrap();
+    for (name, script) in [
+        ("esc", format!("ln -s {} esc", outside.display())),
+        ("../../logs/x", "true".to_string()),
+    ] {
+        let id = run_job(&hub, &["--artifact", name], &["sh", "-c", &script]);
+        let done = wait_job(&hub, &id, &["succeeded", "failed"], 120);
+        assert_eq!(done["state"].as_str(), Some("failed"), "{name}: {done}");
+        assert!(done["artifacts"][0]["sha256"].is_null(), "{done}");
+        assert!(
+            node_log().contains(&format!("artifact {name:?} refused")),
+            "{name}: {}",
+            tail(&node_log(), 20)
+        );
+    }
+    assert!(
+        hub.log_text().contains("outside the job's directory"),
+        "{}",
+        tail(&hub.log_text(), 40)
+    );
+
+    // Another submit already holds the node job id the hub's next job gets: its status (and
+    // its output) are not this job's, so the hub ignores it and the job fails.
+    let next: u64 = hub.cli(&["--json", "job", "ls"]).json()["jobs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|j| j["id"].as_str()?.parse::<u64>().ok())
+        .max()
+        .unwrap()
+        + 1;
+    let planted_id = format!("{}-j{next}", hub.hub_tag());
+    let planted = pt_json::obj! {
+        "job_id" => planted_id.as_str(), "attempt" => 1u64, "script" => "echo planted",
+        "token" => "planted", "even_if_present" => true,
+    };
+    node_rpc(&node_bin, &sock, "SubmitJob", &planted.to_string());
+    let real = run_job(&hub, &[], &["echo", "real"]);
+    assert_eq!(real, next.to_string(), "the hub's next job id");
+    let done = wait_job(&hub, &real, &["succeeded", "failed"], 90);
+    assert_eq!(done["state"].as_str(), Some("failed"), "{done}");
+    assert!(!log_text(&hub, &real, 0).contains("planted"));
+    assert!(
+        hub.log_text().contains(&format!(
+            "job {real}: node {node_id} holds another submit of attempt 1"
+        )),
+        "{}",
+        tail(&hub.log_text(), 40)
+    );
+    let held = node_rpc(
+        &node_bin,
+        &sock,
+        "JobStatus",
+        &format!(r#"{{"job_id":"{planted_id}","attempt":1}}"#),
+    );
+    assert_eq!(held["job"]["token"].as_str(), Some("planted"), "{held}");
+
     // Presence gates: nothing starts while someone is at the node, unless asked to.
     fs::write(&presence, "PRESENT").unwrap();
     eventually("the node PRESENT", Duration::from_secs(30), || {
@@ -402,7 +541,7 @@ fn hub_runs_the_fleet_and_node_jobs() {
         .iter()
         .filter_map(|j| j["id"].as_str())
         .collect();
-    for id in [&uname, &art, &gated, &urgent, &long, &slow] {
+    for id in [&uname, &art, &big, &real, &gated, &urgent, &long, &slow] {
         assert!(ids.contains(&id.as_str()), "job ls lists {id}: {ids:?}");
     }
     let human = hub.cli(&["job", "ls", "--node", "e2e-hubfleet"]);

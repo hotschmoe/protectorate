@@ -32,7 +32,8 @@ pub const USAGE: &str =
         [--presence-interval SECS] [--away-after SECS] [--no-scope] [--idle-exit SECS]
         [--member PATH | --no-member] [--service]
                                     serve the hub link: one header line from member, then frames;
-                                    once joined (DIR/node.json), also run member and restart it;
+                                    once joined (DIR/node.json), also run member (the embedded
+                                    one unless --member) and restart it;
                                     --stdio: frames on stdin/stdout for an sshd forced command,
                                     through a resident agent that keeps jobs across sessions;
                                     --service: Windows, run under the service manager (what
@@ -230,7 +231,7 @@ fn start_member(f: &Flags, dir: &Path) -> Result<(), String> {
             None => Ok(()),
         };
     };
-    let bin = crate::member::member_binary(f.member.as_deref())?;
+    let bin = crate::member::member_binary(f.member.as_deref(), dir)?;
     let forward = match (f.sockets.first(), f.tcp.first()) {
         (Some(p), _) => p.display().to_string(),
         (None, Some(a)) => a.to_string(),
@@ -435,7 +436,7 @@ fn answer(node: &Node, id: u64, payload: &[u8], w: &mut impl Write) -> io::Resul
             id,
             &HelloReply {
                 protocol: msg::PROTOCOL,
-                node_version: env!("CARGO_PKG_VERSION").into(),
+                node_version: pt_version::VERSION.into(),
                 node_id: node.node_id.clone(),
                 journal_epoch: epoch.clone(),
                 hostname: pt_node::hostname(),
@@ -477,15 +478,25 @@ fn answer(node: &Node, id: u64, payload: &[u8], w: &mut impl Write) -> io::Resul
             },
         ),
         Request::FetchLog(q) => {
-            match r.read_log(&q.job_id, q.attempt, q.offset, q.max, |chunk| {
-                write_frame(w, Kind::Chunk, id, chunk)
-            }) {
+            match r.read_log(&q, |chunk| write_frame(w, Kind::Chunk, id, chunk)) {
                 Ok(end) => write_frame(w, Kind::End, id, &msg::payload(&end)),
                 Err(e) => error(w, id, e.code, e.message, Some(epoch.clone())),
             }
         }
-        Request::CancelJob(j) => job_result(w, r.cancel(&j.job_id, j.attempt)),
-        Request::AckCollected(j) => job_result(w, r.ack(&j.job_id, j.attempt)),
+        Request::FetchArtifact(q) => {
+            match r.read_artifact(&q, |chunk| write_frame(w, Kind::Chunk, id, chunk)) {
+                Ok(end) => write_frame(w, Kind::End, id, &msg::payload(&end)),
+                Err(e) => {
+                    eprintln!(
+                        "protectorate-node: job {} attempt {} artifact {:?} refused: {}",
+                        q.job_id, q.attempt, q.path, e.message
+                    );
+                    error(w, id, e.code, e.message, Some(epoch.clone()))
+                }
+            }
+        }
+        Request::CancelJob(j) => job_result(w, r.cancel(&j.job_id, j.attempt, j.token.as_deref())),
+        Request::AckCollected(j) => job_result(w, r.ack(&j.job_id, j.attempt, j.token.as_deref())),
         Request::ListJobs => respond(
             w,
             id,

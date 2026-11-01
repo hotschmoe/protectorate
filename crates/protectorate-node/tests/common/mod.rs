@@ -260,20 +260,24 @@ impl Agent {
         }
     }
 
-    /// Log bytes from `offset` (stdout) and the end frame (stderr).
-    pub fn fetch(&self, job: &str, attempt: u64, offset: u64, max: u64) -> (Vec<u8>, Value) {
-        let out = self.rpc_with(
-            &[],
-            "FetchLog",
-            &format!(r#"{{"job_id":"{job}","attempt":{attempt},"offset":{offset},"max":{max}}}"#),
-        );
+    /// The bytes of a chunked answer (stdout) and its end frame (stderr).
+    pub fn stream(&self, method: &str, fields: &str) -> (Vec<u8>, Value) {
+        let out = self.rpc_with(&[], method, fields);
         assert!(
             out.status.success(),
-            "FetchLog failed: {}{}",
+            "{method} {fields} failed: {}{}",
             String::from_utf8_lossy(&out.stdout),
             String::from_utf8_lossy(&out.stderr)
         );
         (out.stdout, json(&String::from_utf8_lossy(&out.stderr)))
+    }
+
+    /// Log bytes from `offset` and the end frame.
+    pub fn fetch(&self, job: &str, attempt: u64, offset: u64, max: u64) -> (Vec<u8>, Value) {
+        self.stream(
+            "FetchLog",
+            &format!(r#"{{"job_id":"{job}","attempt":{attempt},"offset":{offset},"max":{max}}}"#),
+        )
     }
 
     pub fn journal(&self) -> String {

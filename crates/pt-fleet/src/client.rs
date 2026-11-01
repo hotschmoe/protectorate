@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use pt_frame::Kind;
 use pt_frame::msg::{
-    self, ErrorReply, FetchLog, Hello, HelloReply, Inventory, JobList, JobRef, JobReply, JobStatus,
-    LogEnd, Presence, Request, Sample, SubmitJob,
+    self, ArtifactEnd, ErrorReply, FetchArtifact, FetchLog, Hello, HelloReply, Inventory, JobList,
+    JobRef, JobReply, JobStatus, LogEnd, Presence, Request, Sample, SubmitJob,
 };
 use pt_frame::wire::{FrameReader, write_frame};
 use pt_json::FromJson;
@@ -17,7 +17,8 @@ use pt_json::FromJson;
 use crate::{Error, Result};
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
-/// Log bytes accepted per FetchLog beyond what was asked for, as slack for chunk framing.
+/// Bytes accepted per FetchLog or FetchArtifact beyond what was asked for, as slack for chunk
+/// framing.
 const FETCH_SLACK: u64 = 64 << 10;
 
 pub struct NodeClient {
@@ -31,7 +32,8 @@ pub struct NodeClient {
 
 enum Answer {
     Response(Vec<u8>),
-    Log(Vec<u8>, LogEnd),
+    /// Chunk bytes and the end frame's payload.
+    Stream(Vec<u8>, Vec<u8>),
 }
 
 impl NodeClient {
@@ -66,7 +68,7 @@ impl NodeClient {
 
     pub fn hello(&mut self) -> Result<HelloReply> {
         self.typed(&Request::Hello(Hello {
-            hub_version: Some(env!("CARGO_PKG_VERSION").into()),
+            hub_version: Some(pt_version::VERSION.into()),
         }))
     }
 
@@ -93,38 +95,26 @@ impl NodeClient {
         }))
     }
 
-    /// Up to `max` log bytes from `offset`, and the end frame saying where the next fetch starts.
-    pub fn fetch_log(
-        &mut self,
-        job_id: &str,
-        attempt: u64,
-        offset: u64,
-        max: u64,
-    ) -> Result<(Vec<u8>, LogEnd)> {
-        let req = Request::FetchLog(FetchLog {
-            job_id: job_id.into(),
-            attempt,
-            offset,
-            max,
-        });
-        match self.call(&req, max.saturating_add(FETCH_SLACK))? {
-            Answer::Log(bytes, end) => Ok((bytes, end)),
-            Answer::Response(_) => Err(self.poison("a response frame to FetchLog")),
-        }
+    /// Up to `q.max` log bytes from `q.offset`, and the end frame saying where the next fetch
+    /// starts.
+    pub fn fetch_log(&mut self, q: FetchLog) -> Result<(Vec<u8>, LogEnd)> {
+        let max = q.max;
+        self.stream(&Request::FetchLog(q), max)
     }
 
-    pub fn cancel_job(&mut self, job_id: &str, attempt: u64) -> Result<JobReply> {
-        self.typed(&Request::CancelJob(JobRef {
-            job_id: job_id.into(),
-            attempt,
-        }))
+    /// Up to `q.max` bytes of an artifact from `q.offset`, and the end frame with its size (and
+    /// its SHA-256 once the end is reached).
+    pub fn fetch_artifact(&mut self, q: FetchArtifact) -> Result<(Vec<u8>, ArtifactEnd)> {
+        let max = q.max;
+        self.stream(&Request::FetchArtifact(q), max)
     }
 
-    pub fn ack_collected(&mut self, job_id: &str, attempt: u64) -> Result<JobReply> {
-        self.typed(&Request::AckCollected(JobRef {
-            job_id: job_id.into(),
-            attempt,
-        }))
+    pub fn cancel_job(&mut self, job: JobRef) -> Result<JobReply> {
+        self.typed(&Request::CancelJob(job))
+    }
+
+    pub fn ack_collected(&mut self, job: JobRef) -> Result<JobReply> {
+        self.typed(&Request::AckCollected(job))
     }
 
     pub fn list_jobs(&mut self) -> Result<JobList> {
@@ -136,7 +126,19 @@ impl NodeClient {
         match self.call(req, 0)? {
             Answer::Response(payload) => pt_json::from_bytes(&payload)
                 .map_err(|e| self.poison(&format!("{method} answer: {e}"))),
-            Answer::Log(..) => Err(self.poison(&format!("log frames for {method}"))),
+            Answer::Stream(..) => Err(self.poison(&format!("chunk frames for {method}"))),
+        }
+    }
+
+    fn stream<T: FromJson>(&mut self, req: &Request, max: u64) -> Result<(Vec<u8>, T)> {
+        let method = req.method();
+        match self.call(req, max.saturating_add(FETCH_SLACK))? {
+            Answer::Stream(bytes, end) => {
+                let end = pt_json::from_bytes(&end)
+                    .map_err(|e| self.poison(&format!("{method} end frame: {e}")))?;
+                Ok((bytes, end))
+            }
+            Answer::Response(_) => Err(self.poison(&format!("a response frame to {method}"))),
         }
     }
 
@@ -203,16 +205,12 @@ impl NodeClient {
                 Kind::Chunk => {
                     if log.len() as u64 + frame.payload.len() as u64 > log_max {
                         return Err(
-                            self.poison(&format!("{method} sent more than {log_max} log bytes"))
+                            self.poison(&format!("{method} sent more than {log_max} bytes"))
                         );
                     }
                     log.extend_from_slice(&frame.payload);
                 }
-                Kind::End => {
-                    let end = pt_json::from_bytes::<LogEnd>(&frame.payload)
-                        .map_err(|e| self.poison(&format!("{method} end frame: {e}")))?;
-                    return Ok(Answer::Log(log, end));
-                }
+                Kind::End => return Ok(Answer::Stream(log, frame.payload)),
                 Kind::Request => return Err(self.poison("a request frame from the node")),
             }
         }
