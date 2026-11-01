@@ -19,5 +19,6 @@ pt-hash = { path = "../pt-hash" }
 pt-http = { path = "../pt-http" }
 pt-journal = { path = "../pt-journal" }
 pt-json = { path = "../pt-json" }
+pt-quota = { path = "../pt-quota" }
 pt-sandbox = { path = "../pt-sandbox" }
 pt-sys = { path = "../pt-sys" }

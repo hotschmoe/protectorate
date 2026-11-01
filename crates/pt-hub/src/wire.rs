@@ -237,28 +237,6 @@ pub fn hub_info(hub: &Hub) -> api::HubInfo {
     }
 }
 
-/// One "unknown" reading per subscription whose harness is installed: no reader exists yet.
-pub fn quotas(hub: &Hub) -> Vec<api::Quota> {
-    let installed = |h| crate::exec::program(hub, h).is_some();
-    let subs = [
-        (Harness::Claude, api::Subscription::Claude),
-        (Harness::Codex, api::Subscription::Codex),
-        (Harness::Grok, api::Subscription::Grok),
-        (Harness::PiLocal, api::Subscription::Local),
-    ];
-    subs.into_iter()
-        .filter(|(h, _)| installed(*h))
-        .map(|(_, subscription)| api::Quota {
-            subscription,
-            plan: String::new(),
-            reading: api::QuotaReading::Unknown,
-            fetched_at_ms: EpochMs(hub.started_ms),
-            windows: Vec::new(),
-            note: "no quota reader yet".into(),
-        })
-        .collect()
-}
-
 /// What the poller last learned of every node; none while the fleet is off or down.
 pub fn nodes(hub: &Hub) -> Vec<api::Node> {
     match hub.fleet.status() {
@@ -302,7 +280,7 @@ pub fn state(
             .values()
             .map(|j| crate::jobs::view(hub, j))
             .collect(),
-        quotas: quotas(hub),
+        quotas: hub.quotas.list(),
         events: hub.bus.events(),
     }
 }

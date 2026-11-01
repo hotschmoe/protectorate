@@ -84,6 +84,7 @@ pub struct Hub {
     pub transcripts: Transcripts,
     pub fleet: FleetSlot,
     pub jobs: JobStore,
+    pub quotas: crate::quota::Quotas,
     input: Sender<Input>,
     view: Mutex<Arc<View>>,
 }
@@ -125,6 +126,7 @@ impl Hub {
             transcripts,
             fleet: FleetSlot::default(),
             jobs,
+            quotas: Default::default(),
             input,
             view: Mutex::new(Arc::new(view)),
         }

@@ -974,7 +974,7 @@ fn cancel_job(c: &Ctx<'_>, r: api::JobRef) -> Result<api::Job> {
 
 fn list_quotas(c: &Ctx<'_>, _: api::Empty) -> Result<api::QuotaList> {
     Ok(api::QuotaList {
-        quotas: wire::quotas(c.hub),
+        quotas: c.hub.quotas.list(),
     })
 }
 

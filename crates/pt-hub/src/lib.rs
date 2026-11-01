@@ -22,6 +22,7 @@ mod http;
 mod hub;
 mod jobs;
 mod log;
+mod quota;
 mod rule;
 mod select;
 mod serve;

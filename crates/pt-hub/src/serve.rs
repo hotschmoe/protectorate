@@ -197,6 +197,7 @@ pub fn serve(o: ServeOptions) -> Result<(), String> {
     }
 
     crate::fleet::start(&hub, o.fleet, o.net);
+    crate::quota::start(&hub);
 
     let tick_hub = hub.clone();
     thread::Builder::new()

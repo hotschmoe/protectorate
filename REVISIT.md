@@ -313,9 +313,12 @@ Each entry: where, what was done, what right looks like.
   `Sleeve::probing`): a recovered Idle sleeve takes a `SendPrompt` before `ScopeProbed` answers,
   the executor holds no session for that g, and the Nack rejects the message (the sender is
   told). Right: `deliverable` is false while `probing`, so the message waits in the queue.
-- **select_target is first-eligible** (`pt-hub`, select.rs): it walks `resleeve_to` in order,
-  skipping a harness whose binary is missing or that `doctor.json` lists under `ineligible`. No
-  quota weighting, no task-size class (SPEC 8, D27).
+- **Resleeve selection is quota-weighted only among `resleeve_to`** (`pt-hub`, select.rs): the
+  candidates that are headless, not excluded, installed and not `ineligible` in `doctor.json` go
+  to `pt_quota::select_target` with task size Medium and no health list; with no fresh quota the
+  first in the owner's order wins. A new sleeve always names its harness (`SpawnSleeve.harness` is
+  required), so nothing else is chosen by quota, and G1 does not read quota yet. Right: the task
+  size from the sleeve's history (D27), node and probe health, and an optional harness on spawn.
 - **Artifacts come back through `cat` jobs** (`pt-hub`, jobs.rs): after a job exits, each named
   artifact is fetched by a collection job `cat -- <path>` on the same node (even if present,
   300 s, 64 MiB log cap), whose log is the file; a file over the cap fails the check, and the
@@ -500,8 +503,12 @@ Each entry: where, what was done, what right looks like.
   list and the event log (500 entries). The stream's seq starts at the start time in ms so a
   client resuming across a restart gets a fresh snapshot rather than a wrong delta. Right:
   journal approvals and events, or rebuild tool approvals from transcripts at start.
-- **Quota readings are `unknown`** (`pt-hub`, wire.rs): one row per installed harness program,
-  no reader yet. Right: the per-vendor quota readers of the design (and G1 from them).
+- **Quota readers run on one thread** (`pt-hub`, quota.rs): a `pt_quota::Cache` (5 min TTL,
+  stale after 10 min, backoff from 30 s) over the readers of installed harnesses, refreshed every
+  `quota_poll_secs` (default 60; 0 never reads, which the e2e suite uses so no test hub reads
+  the owner's vendor quotas); a changed row goes out as a `quota` message. Readings are not
+  journaled, so a restart starts at `unknown`. Right: fine; persist the last good reading if a
+  restart must keep dispatch weighting.
 - **pi_durable shows as pi_local in the API** (`pt-hub`, wire.rs): the experiment has no API
   harness. Right: add one if it outlives the experiment.
 - **The web app embedded is about 17.7 MB** (`crates/protectorate/build.rs`): the release binary
@@ -525,7 +532,9 @@ Each entry: where, what was done, what right looks like.
   Antigravity is pane-only, D13). Right: add a resets field to `Quota` when dispatch uses
   credits; revisit Codex `app-server` if wham breaks; Antigravity when it has a subscription.
 - **Local endpoint address is configuration** (`pt-quota`): the b70 URL comes from the probe flag
-  or `PT_LOCAL_URL`; the hub must pass it to `Local { base_url }`. Right: hub config key.
+  or `PT_LOCAL_URL`, and the hub's `config.json` key `local_url`, separate from Pi's own
+  models.json where `pi_local_provider` points. Right: read the base URL from Pi's provider entry
+  so the two cannot disagree.
 - **Quota selection constants are untuned** (`pt-quota`): usable-now minimums per task size
   (5, 15, 30 percent), the 48 h half-life and the 168 h stand-in for an unknown reset are the old
   dev-hotschmoe values; `TaskSize` thresholds and N are caller inputs with no defaults. Right: tune

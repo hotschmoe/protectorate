@@ -152,6 +152,8 @@ impl Hub {
             "envoy" => pt_json::obj! { "harness" => envoy },
             "pi_local_provider" => pi_provider(),
             "pi_local_model" => pi_model(),
+            // No suite hub reads the owner's vendor quotas unless a test turns it on.
+            "quota_poll_secs" => 0u64,
         };
         if let Some(m) = config_obj.as_object_mut() {
             for (k, v) in config {

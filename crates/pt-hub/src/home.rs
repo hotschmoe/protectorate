@@ -177,6 +177,11 @@ pt_json::record! {
         pub pi_local_provider: String = "hotschmoe".to_string(),
         pub pi_local_model: String =
             "qwen3.8-27b-FP8-official-W8A16-mtp3-r187-xpugraph-cacheon-ctx200000-daily".to_string(),
+        /// The same endpoint's base URL (with or without `/v1`), read for its health as the
+        /// local quota. Empty: the local row stays `unknown`.
+        pub local_url: String = String::new(),
+        /// How often the quota readers run (each reading is kept 5 min); 0 never reads.
+        pub quota_poll_secs: u64 = 60,
         pub envoy: TargetConf = TargetConf {
             harness: "claude".to_string(),
             provider: String::new(),

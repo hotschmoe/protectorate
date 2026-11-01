@@ -332,12 +332,24 @@ impl SleeveExec {
                 let eligible = |t: &Target| {
                     program(hub, t.harness).is_some() && !doctor_ineligible(hub, t.harness)
                 };
-                let target = crate::select::select_target(&candidates, &exclude, &eligible);
-                info!(
-                    "sleeve {}: resleeve target {:?}",
-                    sleeve.0,
-                    target.as_ref().map(|t| t.harness)
+                let quotas = hub.quotas.list();
+                let chosen = crate::select::select_target(
+                    now_ms(),
+                    &candidates,
+                    &exclude,
+                    &eligible,
+                    &quotas,
                 );
+                match &chosen {
+                    Some((t, why)) => {
+                        info!(
+                            "sleeve {}: resleeve target {:?}: {why}",
+                            sleeve.0, t.harness
+                        )
+                    }
+                    None => info!("sleeve {}: no eligible resleeve target", sleeve.0),
+                }
+                let target = chosen.map(|(t, _)| t);
                 self.submit(EventKind::TargetChosen { sleeve, g, target });
             }
             Intent::Checkpoint { sleeve, g } => {
