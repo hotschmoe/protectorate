@@ -99,6 +99,19 @@ Each entry: where, what was done, what right looks like.
   with a new credential location needs an entry in `default_masks`.
 - **pt-sandbox has no fuzz target** for `resolve_git_dirs` (the one parser). Right: add one with
   the other crates' fuzz targets.
+- **pt-sandbox: other roots are hidden only if the hub masks them** (SPEC 3.4 light isolation).
+  The read-only `/` shows every other workspace; the hub is to push every other sleeve's claim
+  onto `masks` (not a child's own root, which holds its git dirs; a View child needs its root
+  visible). A claim made after a launch stays visible until the next incarnation, like the
+  credential masks.
+- **pt-sandbox: the runtime dir is private and empty.** The host's `$XDG_RUNTIME_DIR` is covered
+  by a 0700 tmpfs, so the user bus and the systemd user manager (which would start units outside
+  the scope and sandbox) are gone, and so are the keyring, ssh-agent, gpg-agent and pipewire
+  sockets. Abstract unix sockets still reach the host, since the network namespace is shared
+  (X11 `@/tmp/.X11-unix`, other users' buses). Right: a network namespace or the own helper.
+- **pt-sandbox: the docker socket is always masked.** The owner's supplementary groups survive the
+  user namespace (shown as nogroup), so `/run/docker.sock` was root on the host from any sleeve.
+  A sleeve that needs docker has none. Right: an explicit per-sleeve opt-in if one is wanted.
 - **Own namespaces helper instead of bwrap** stays a later option (host dependency on bwrap's
   version; 0.13.1 here).
 - **Control-key pin is checked by a separate fetch** (`go/cmd/member`): member fetches `/key` and
@@ -238,7 +251,9 @@ Each entry: where, what was done, what right looks like.
   commit, torn-tail recovery), with compaction that drops collected jobs.
 - **Linux jobs without systemd-run** (`pt-node`, `sys/linux_job.rs`): when a trial
   `systemd-run --scope` fails, jobs run in a plain process group. A job that calls `setsid`
-  escapes cancel, timeout and lowering, and nothing outlives a dead agent's timeout. `--no-scope`
+  escapes cancel, timeout and lowering, and nothing outlives a dead agent's timeout. After a
+  restart the reaper kills only members it can prove (pidfds taken while the stopped leader holds
+  the group id), so the members of a job whose leader already died live on. `--no-scope`
   forces this mode (the tests use it). Right: the system service's delegated cgroup subtree
   (design report 1.3), one cgroup per job with `cgroup.kill`.
 - **Job isolation is limits only** (`pt-node`): a job gets its timeout, a capped log and a scope,

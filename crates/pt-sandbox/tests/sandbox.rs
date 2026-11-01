@@ -227,23 +227,23 @@ fn zombie(p: u32) -> bool {
         .unwrap_or(true)
 }
 
-#[test]
-fn worktree_hooks_are_read_only() {
-    let base = fixture("hooks");
-    let main = sub(&base, "main");
-    let git = |dir: &Path, args: &[&str]| {
-        let o = Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(args)
-            .output()
-            .unwrap();
-        assert!(
-            o.status.success(),
-            "git {args:?}: {}",
-            String::from_utf8_lossy(&o.stderr)
-        );
-    };
+fn git(dir: &Path, args: &[&str]) {
+    let o = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        o.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+}
+
+/// A repository `main` with one commit and a linked worktree `wt` on branch `branch`.
+fn worktree(base: &Path, branch: &str) -> (PathBuf, PathBuf) {
+    let main = sub(base, "main");
     if !main.join(".git").exists() {
         git(&main, &["init", "-q"]);
         git(
@@ -265,17 +265,17 @@ fn worktree_hooks_are_read_only() {
     if !wt.exists() {
         git(
             &main,
-            &[
-                "worktree",
-                "add",
-                "-q",
-                wt.to_str().unwrap(),
-                "-b",
-                "pt-hooks-test",
-            ],
+            &["worktree", "add", "-q", wt.to_str().unwrap(), "-b", branch],
         );
     }
-    let dirs = resolve_git_dirs(&wt).unwrap();
+    (main, wt)
+}
+
+#[test]
+fn worktree_hooks_are_read_only() {
+    let base = fixture("hooks");
+    let (main, wt) = worktree(&base, "pt-hooks-test");
+    let dirs = resolve_git_dirs(&wt, &main).unwrap();
     assert_eq!(dirs.len(), 2, "{dirs:?}");
 
     let mut s = SandboxSpec::new("hooks", 1, wt.clone(), sub(&base, "home"));
@@ -297,4 +297,183 @@ fn worktree_hooks_are_read_only() {
     }
     assert!(!hooks_main.join("pre-commit").exists());
     assert!(!hooks_wt.join("pre-commit").exists());
+}
+
+/// A worktree child rewrites its own `.git` file: to `/`, to the owner's home, and to a fake git
+/// dir whose `commondir` climbs out of the fixture. The next launch must refuse those git dirs
+/// instead of binding them writable over the masks.
+#[test]
+fn a_rewritten_gitdir_never_reaches_the_next_launch() {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let base = fixture(&format!("gitdir/{nanos}"));
+    let owner = sub(&base, "owner-home");
+    fs::create_dir_all(owner.join(".ssh")).unwrap();
+    fs::write(owner.join(".ssh/id_ed25519"), "SECRET").unwrap();
+    let (main, wt) = worktree(&base, "pt-gitdir-test");
+    let dot = wt.join(".git");
+    let honest = fs::read_to_string(&dot).unwrap();
+    let fake = sub(&base, "fake");
+    fs::write(fake.join("commondir"), "..").unwrap();
+
+    let mut s = SandboxSpec::new("sbxgitdir", 1, wt.clone(), sub(&base, "home"));
+    s.tmp_size_bytes = 16 << 20;
+    s.masks = default_masks(&owner);
+    let probe = format!(
+        "cat {o}/.ssh/id_ed25519 2>/dev/null; touch {o}/planted 2>/dev/null && echo PLANTED; \
+         echo ran",
+        o = owner.display()
+    );
+    s.git_dirs = resolve_git_dirs(&wt, &main).expect("the honest worktree resolves");
+    assert_eq!(stdout(&sh(&s, &probe)), "ran");
+
+    for evil in [Path::new("/"), &owner, &fake] {
+        let out = sh(
+            &s,
+            &format!(
+                "printf 'gitdir: {}\\n' > .git && echo REWROTE",
+                evil.display()
+            ),
+        );
+        assert_eq!(stdout(&out), "REWROTE");
+        if let Ok(dirs) = resolve_git_dirs(&wt, &main) {
+            let mut next = s.clone();
+            next.git_dirs = dirs;
+            if let Ok(mut cmd) = next.command() {
+                let o = cmd.args(["sh", "-c", &probe]).output().unwrap();
+                let out = String::from_utf8_lossy(&o.stdout);
+                assert!(
+                    !out.contains("SECRET"),
+                    "gitdir {evil:?} unmasked ~/.ssh: {out}"
+                );
+                assert!(
+                    !out.contains("PLANTED"),
+                    "gitdir {evil:?} opened the host: {out}"
+                );
+            }
+        }
+        assert!(!owner.join("planted").exists());
+        assert!(
+            resolve_git_dirs(&wt, &main).is_err(),
+            "gitdir {evil:?} was accepted"
+        );
+        fs::write(&dot, &honest).unwrap();
+    }
+}
+
+/// The hub layout with a root claimed at the owner's home: the workspace bind contains the
+/// credential masks, and the masked state dir contains the private home. Every mask must hold.
+#[test]
+fn binds_never_undo_masks() {
+    let base = fixture("nested");
+    let owner = sub(&base, "owner-home");
+    fs::create_dir_all(owner.join(".ssh")).unwrap();
+    fs::write(owner.join(".ssh/id_ed25519"), "SECRET").unwrap();
+    let state = sub(&owner, ".local/share/pt-state");
+    fs::write(state.join("owner.token"), "OWNER").unwrap();
+    let home = sub(&state, "sleeves/1/home");
+    let extra = sub(&base, "extra");
+
+    let mut s = SandboxSpec::new("sbxnested", 1, owner.clone(), home.clone());
+    s.tmp_size_bytes = 16 << 20;
+    s.masks = default_masks(&owner);
+    s.masks.push(state.clone());
+    // A writable path that holds the state dir must not uncover it either.
+    s.rw_paths.push(owner.join(".local"));
+    s.ro_paths.push(extra.clone());
+    let script = format!(
+        "cat .ssh/id_ed25519 2>/dev/null; cat {tok} 2>/dev/null; ls {st}; \
+         echo w > ws-file && echo WS_OK; echo h > $HOME/h && echo HOME_OK",
+        tok = state.join("owner.token").display(),
+        st = state.display(),
+    );
+    let out = stdout(&sh(&s, &script));
+    for secret in ["SECRET", "OWNER", "owner.token"] {
+        assert!(!out.contains(secret), "{secret} leaked:\n{out}");
+    }
+    for ok in ["WS_OK", "HOME_OK", "sleeves"] {
+        assert!(out.contains(ok), "missing {ok}:\n{out}");
+    }
+    assert_eq!(fs::read_to_string(home.join("h")).unwrap().trim(), "h");
+
+    let mut root = SandboxSpec::new("sbxslash", 1, owner.clone(), home.clone());
+    root.rw_paths.push(PathBuf::from("/"));
+    let refused = root.command().err().map(|e| e.to_string());
+    assert!(refused.is_some(), "a writable / was accepted");
+}
+
+/// Through the user bus or the systemd user manager a sleeve could start a transient unit that
+/// lives outside its scope and sandbox. The sandbox gets a private, empty runtime dir instead.
+#[test]
+fn a_sleeve_cannot_reach_the_user_manager() {
+    let base = fixture("bus");
+    let rt = std::env::var("XDG_RUNTIME_DIR").expect("XDG_RUNTIME_DIR is set for these tests");
+    assert!(Path::new(&rt).join("bus").exists(), "no user bus at {rt}");
+    let unit = format!("pt-sbxescape-{}.service", std::process::id());
+    let s = spec("sbxbus", &base);
+    let script = format!(
+        "ls -A {rt}; echo LISTED; echo $XDG_RUNTIME_DIR; touch $XDG_RUNTIME_DIR/x && echo RT_OK; \
+         for a in {rt}/bus {rt}/systemd/private; do \
+           busctl --address=unix:path=$a call org.freedesktop.systemd1 /org/freedesktop/systemd1 \
+             org.freedesktop.systemd1.Manager StartTransientUnit 'ssa(sv)a(sa(sv))' {unit} fail 1 \
+             ExecStart 'a(sasb)' 1 /bin/sleep 2 /bin/sleep 300 false 0 >/dev/null 2>&1 \
+             && echo ESCAPED; \
+         done; \
+         XDG_RUNTIME_DIR={rt} systemd-run --user --quiet --unit={unit} /bin/sleep 300 \
+           >/dev/null 2>&1 && echo ESCAPED; \
+         [ -S /run/docker.sock ] && echo DOCKER; true"
+    );
+    let out = stdout(&sh(&s, &script));
+    let active = Command::new("systemctl")
+        .args(["--user", "is-active", &unit])
+        .output()
+        .unwrap();
+    if String::from_utf8_lossy(&active.stdout).trim() != "inactive" {
+        let _ = Command::new("systemctl")
+            .args(["--user", "stop", &unit])
+            .status();
+    }
+    assert!(!out.contains("ESCAPED"), "a sleeve started {unit}:\n{out}");
+    assert!(
+        !out.contains("DOCKER"),
+        "the docker socket is reachable:\n{out}"
+    );
+    let listed = out.split("LISTED").next().unwrap().trim();
+    assert!(listed.is_empty(), "the runtime dir shows {listed}");
+    assert!(
+        out.contains("RT_OK"),
+        "no writable private runtime dir:\n{out}"
+    );
+}
+
+/// Light isolation between roots: the hub masks every other sleeve's claim, but not a child's own
+/// root, which holds the child's git dirs.
+#[test]
+fn other_roots_are_masked_and_a_worktree_child_still_commits() {
+    let base = fixture("roots");
+    let other = sub(&base, "other-root");
+    fs::write(other.join("plan.md"), "OTHER").unwrap();
+    let (main, wt) = worktree(&base, "pt-roots-test");
+    fs::write(main.join("root-file"), "ROOT").unwrap();
+
+    let mut s = SandboxSpec::new("sbxroots", 1, wt.clone(), sub(&base, "home"));
+    s.tmp_size_bytes = 16 << 20;
+    s.git_dirs = resolve_git_dirs(&wt, &main).unwrap();
+    s.masks = vec![other.clone()];
+    let script = format!(
+        "cat {o}/plan.md 2>/dev/null; ls {o}; cat {m}/root-file; \
+         git -c user.name=t -c user.email=t@t commit -q --allow-empty -m child && echo COMMIT_OK",
+        o = other.display(),
+        m = main.display()
+    );
+    let out = stdout(&sh(&s, &script));
+    assert!(!out.contains("OTHER") && !out.contains("plan.md"), "{out}");
+    assert!(out.contains("ROOT") && out.contains("COMMIT_OK"), "{out}");
+
+    // Masking the child's own root would hide its git dirs: refused, not half-mounted.
+    s.masks.push(main.clone());
+    let refused = s.command().err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(refused.contains("overlaps the mask"), "{refused}");
 }
