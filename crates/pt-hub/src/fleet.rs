@@ -128,6 +128,22 @@ impl FleetSlot {
     }
 }
 
+/// A trusted proxy as the prefix headscale requires: a bare address becomes its /32 or /128.
+fn proxy_prefix(p: &str) -> Result<String, String> {
+    let bad = || format!("fleet.trusted_proxies: {p:?} is not an IP address or prefix");
+    let (ip, len) = match p.split_once('/') {
+        Some((ip, len)) => (ip, Some(len)),
+        None => (p, None),
+    };
+    let ip: IpAddr = ip.parse().map_err(|_| bad())?;
+    let max = if ip.is_ipv4() { 32 } else { 128 };
+    let len = match len {
+        None => max,
+        Some(l) => l.parse::<u8>().ok().filter(|&l| l <= max).ok_or_else(bad)?,
+    };
+    Ok(format!("{ip}/{len}"))
+}
+
 /// The fleet config from `config.json` and the flags, or `None` when no fleet is configured.
 fn config(hub: &Hub, flags: &FleetFlags) -> Result<Option<pt_fleet::Config>, String> {
     let c = &hub.config.fleet;
@@ -156,7 +172,11 @@ fn config(hub: &Hub, flags: &FleetFlags) -> Result<Option<pt_fleet::Config>, Str
     let mut cfg = pt_fleet::Config::lan_direct(dir, PathBuf::new(), PathBuf::new(), listen);
     cfg.hub_udp_port = flags.udp_port.unwrap_or(c.udp_port);
     cfg.hub_name = c.hub_name.clone();
-    cfg.trusted_proxies = c.trusted_proxies.clone();
+    cfg.trusted_proxies = c
+        .trusted_proxies
+        .iter()
+        .map(|p| proxy_prefix(p))
+        .collect::<Result<_, _>>()?;
     let url = flags
         .server_url
         .clone()

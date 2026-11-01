@@ -158,7 +158,7 @@ its first start; restart it after editing. An excerpt:
   `http://<listen>` as the control URL and DERP runs over plain HTTP.
 - **Behind the TLS proxy** (untested with a real proxy): set `server_url` to
   `https://hub.example.lan`, `derp_ipv4` to the proxy's IPv4, and `trusted_proxies` to
-  `["192.0.2.20"]`, then have a host firewall admit only the proxy to the `listen` port.
+  `["192.0.2.20"]` (a bare address or a prefix such as `192.0.2.0/24`), then have a host firewall admit only the proxy to the `listen` port.
 
 `--fleet-dir DIR` points at an existing tailnet directory to adopt it; nodes keep their pinned
 control key. `--fleet-udp-port N` and `--fleet-server-url URL` override the config keys.

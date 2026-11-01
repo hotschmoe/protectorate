@@ -160,6 +160,8 @@ fn hub_runs_the_fleet_and_node_jobs() {
                 "listen" => listen.as_str(),
                 "dir" => tailnet.to_str().unwrap(),
                 "poll_secs" => 2u64,
+                // A bare address: headscale refuses to start unless the hub widens it to a prefix.
+                "trusted_proxies" => vec![Value::from("127.0.0.2")],
             },
         )],
         &[],
