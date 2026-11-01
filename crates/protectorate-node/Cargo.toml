@@ -16,6 +16,8 @@ path = "src/main.rs"
 pt-frame = { path = "../pt-frame" }
 pt-json = { path = "../pt-json" }
 pt-node = { path = "../pt-node" }
+pt-qr = { path = "../pt-qr" }
+pt-sys = { path = "../pt-sys" }
 
 [dev-dependencies]
 pt-json = { path = "../pt-json" }

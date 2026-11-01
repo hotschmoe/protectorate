@@ -66,6 +66,7 @@ fn start_resident(
         .arg("--state-dir")
         .arg(dir)
         .args(["--forward-socket", socket])
+        .arg("--no-member")
         .arg("--idle-exit")
         .arg(f.idle_exit.unwrap_or(300).to_string())
         .arg("--presence-interval")

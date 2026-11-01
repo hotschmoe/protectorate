@@ -24,6 +24,8 @@ dependencies = [
  "pt-frame",
  "pt-json",
  "pt-node",
+ "pt-qr",
+ "pt-sys",
 ]
 
 [[package]]
@@ -50,6 +52,19 @@ name = "pt-drivers"
 version = "0.0.0"
 dependencies = [
  "pt-json",
+]
+
+[[package]]
+name = "pt-fleet"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "pt-api",
+ "pt-frame",
+ "pt-hash",
+ "pt-http",
+ "pt-json",
+ "pt-sys",
 ]
 
 [[package]]
