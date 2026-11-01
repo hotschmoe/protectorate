@@ -512,7 +512,8 @@ Each entry: where, what was done, what right looks like.
 - **pi_durable shows as pi_local in the API** (`pt-hub`, wire.rs): the experiment has no API
   harness. Right: add one if it outlives the experiment.
 - **The web app embedded is about 17.7 MB** (`crates/protectorate/build.rs`): the release binary
-  is 19.4 MB with it and 1.7 MB without. Debug symbols, the experimental CanvasKit and the skwasm
+  is 19.4 MB with it and 1.7 MB without; with gzipped headscale and member too (25 MB) the
+  release hub assets are 44.9 MB (arm64) and 47.8 MB (amd64). Debug symbols, the experimental CanvasKit and the skwasm
   renderers are left out; both CanvasKit variants stay (Chromium and the full one for other
   browsers, only Chromium tested). Files go out uncompressed with an ETag. Right: precompressed
   gzip copies with `Content-Encoding` and a check in Firefox and Safari.
