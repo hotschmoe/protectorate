@@ -163,6 +163,8 @@ impl EffectKind {
 pub enum Reply {
     Spawned(SleeveId),
     JobCreated(JobId),
+    /// The id of a new pending approval.
+    ApprovalOpened(String),
     /// Accepted; the result arrives as state changes and notices.
     Accepted,
     Queued,
@@ -198,6 +200,7 @@ pub enum Notice {
     EffectUnknowable {
         effect: EffectId,
     },
+    /// `approval` is the id in `State::approvals`.
     ApprovalRequested {
         approval: String,
     },

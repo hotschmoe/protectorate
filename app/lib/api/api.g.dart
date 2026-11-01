@@ -207,6 +207,7 @@ final class Approval {
     this.decision,
     this.decidedBy,
     this.decidedAt,
+    this.note = '',
   });
 
   factory Approval.fromJson(Object? json) {
@@ -235,6 +236,7 @@ final class Approval {
         j['decided_at_ms'],
         (e0) => _time(e0, 'Approval.decided_at_ms'),
       ),
+      note: _or(j['note'], '', (e0) => _string(e0, 'Approval.note')),
     );
   }
 
@@ -265,6 +267,9 @@ final class Approval {
 
   final DateTime? decidedAt;
 
+  /// Why a decision did or will do nothing (the asker is gone), when that is so.
+  final String note;
+
   Map<String, Object?> toJson() => {
     'id': id,
     'sleeve_id': sleeveId,
@@ -279,6 +284,7 @@ final class Approval {
     if (decision case final v?) 'decision': v.toJson(),
     if (decidedBy case final v?) 'decided_by': v.toJson(),
     if (decidedAt case final v?) 'decided_at_ms': v.millisecondsSinceEpoch,
+    'note': note,
   };
 }
 
@@ -336,6 +342,13 @@ enum ApprovalState {
 
   /// The request went away first (turn interrupted, sleeve stopped).
   cancelled('cancelled'),
+
+  /// Decided, but the incarnation that asked was gone: nothing reached the harness.
+  fenced('fenced'),
+
+  /// An action approval decided or timed out after the call waiting on it ended (a hub
+  /// restart): nothing was done.
+  abandoned('abandoned'),
 
   /// A value this client does not know.
   unknown('unknown');

@@ -29,6 +29,7 @@ mod quota;
 mod rule;
 mod select;
 mod serve;
+mod stream;
 mod transcript;
 mod update;
 mod wire;

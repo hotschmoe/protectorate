@@ -470,7 +470,10 @@ fn approval_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 decision,
             };
             let v = c.call::<m::Decide>(&req)?;
-            o.show(&v, |v| println!("{} {}", v.id, v.state));
+            o.show(&v, |v| match v.note.as_str() {
+                "" => println!("{} {}", v.id, v.state),
+                note => println!("{} {}: {note}", v.id, v.state),
+            });
         }
         other => return Err(Fail::Usage(format!("unknown approval command {other:?}"))),
     }

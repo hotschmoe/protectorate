@@ -161,6 +161,15 @@ pub enum Verdict {
     NoMatch,
 }
 
+/// An answer to an approval.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Choice {
+    AllowOnce,
+    /// Tool approvals only: allow this tool for the rest of the session.
+    AllowSession,
+    Deny,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProbeResult {
     Applied,

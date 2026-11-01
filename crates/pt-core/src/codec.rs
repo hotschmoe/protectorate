@@ -1,6 +1,9 @@
 //! The journal encoding of [`Event`]: a version byte, then tag bytes, little-endian fixed-width
 //! integers and u32-length-prefixed UTF-8 strings. The encoding is canonical: `decode` accepts
 //! exactly the bytes `encode` produces, and fails loudly on an unknown tag or trailing bytes.
+//!
+//! Journals are never rewritten, so a tag keeps its layout forever: new variants and fields get
+//! new tags. `Obs::ApprovalRequested` is tag 2 without an ask and tag 11 with one.
 
 use crate::event::*;
 use crate::model::*;
@@ -224,6 +227,7 @@ unit_enum!(
     [Done, Interrupted, UsageLimit, AuthFailed, Error]
 );
 unit_enum!(Verdict, "verdict", [Idle, Working, Blocked, NoMatch]);
+unit_enum!(Choice, "choice", [AllowOnce, AllowSession, Deny]);
 unit_enum!(
     ProbeResult,
     "probe result",
@@ -329,6 +333,23 @@ impl Wire for SpawnSpec {
     }
 }
 
+impl Wire for Ask {
+    fn put(&self, w: &mut Vec<u8>) {
+        self.title.put(w);
+        self.summary.put(w);
+        self.detail.put(w);
+        self.options.put(w);
+    }
+    fn get(r: &mut Reader) -> Result<Self, DecodeError> {
+        Ok(Ask {
+            title: Wire::get(r)?,
+            summary: Wire::get(r)?,
+            detail: Wire::get(r)?,
+            options: Wire::get(r)?,
+        })
+    }
+}
+
 impl Wire for JobSpec {
     fn put(&self, w: &mut Vec<u8>) {
         self.digest.put(w);
@@ -400,9 +421,14 @@ impl Wire for Obs {
                 w.push(1);
                 tool.put(w);
             }
-            Obs::ApprovalRequested { id } => {
+            Obs::ApprovalRequested { id, ask: None } => {
                 w.push(2);
                 id.put(w);
+            }
+            Obs::ApprovalRequested { id, ask: Some(ask) } => {
+                w.push(11);
+                id.put(w);
+                ask.put(w);
             }
             Obs::ApprovalResolved { id } => {
                 w.push(3);
@@ -436,14 +462,17 @@ impl Wire for Obs {
         }
     }
     fn get(r: &mut Reader) -> Result<Self, DecodeError> {
-        Ok(match r.tag("observation", 10)? {
+        Ok(match r.tag("observation", 11)? {
             0 => Obs::Ready {
                 session: Wire::get(r)?,
             },
             1 => Obs::Progress {
                 tool: Wire::get(r)?,
             },
-            2 => Obs::ApprovalRequested { id: Wire::get(r)? },
+            2 => Obs::ApprovalRequested {
+                id: Wire::get(r)?,
+                ask: None,
+            },
             3 => Obs::ApprovalResolved { id: Wire::get(r)? },
             4 => Obs::TurnSettled { end: Wire::get(r)? },
             5 => Obs::CompactDone,
@@ -457,8 +486,12 @@ impl Wire for Obs {
             9 => Obs::Disk {
                 bytes: Wire::get(r)?,
             },
-            _ => Obs::ForbiddenPath {
+            10 => Obs::ForbiddenPath {
                 path: Wire::get(r)?,
+            },
+            _ => Obs::ApprovalRequested {
+                id: Wire::get(r)?,
+                ask: Some(Wire::get(r)?),
             },
         })
     }
@@ -670,12 +703,22 @@ impl Wire for EventKind {
             }
             E::Tick => w.push(28),
             E::HubRecovered => w.push(29),
+            E::RequestApproval {
+                sleeve,
+                ask,
+                timeout,
+            } => {
+                w.push(30);
+                sleeve.put(w);
+                ask.put(w);
+                timeout.put(w);
+            }
         }
     }
 
     fn get(r: &mut Reader) -> Result<Self, DecodeError> {
         use EventKind as E;
-        Ok(match r.tag("event", 29)? {
+        Ok(match r.tag("event", 30)? {
             0 => E::Spawn(Wire::get(r)?),
             1 => E::Send {
                 to: Wire::get(r)?,
@@ -790,7 +833,12 @@ impl Wire for EventKind {
                 cause: Wire::get(r)?,
             },
             28 => E::Tick,
-            _ => E::HubRecovered,
+            29 => E::HubRecovered,
+            _ => E::RequestApproval {
+                sleeve: Wire::get(r)?,
+                ask: Wire::get(r)?,
+                timeout: Wire::get(r)?,
+            },
         })
     }
 }

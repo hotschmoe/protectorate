@@ -56,6 +56,8 @@ pub struct Sim {
     pub emitted: BTreeMap<EffectId, usize>,
     /// Automatic resleeve briefs: (journal index, sleeve, time) (I10).
     pub briefs: Vec<(usize, SleeveId, Millis)>,
+    /// Approval responses that left the hub, with the sleeve's generation at that moment.
+    pub responses: BTreeMap<EffectId, Gen>,
     /// Intents of the most recent apply.
     pub last: Vec<Intent>,
     pub steps: usize,
@@ -83,6 +85,7 @@ impl Sim {
             dispatched: BTreeSet::new(),
             emitted: BTreeMap::new(),
             briefs: Vec::new(),
+            responses: BTreeMap::new(),
             last: Vec::new(),
             steps: 0,
         }
@@ -204,6 +207,9 @@ impl Sim {
                 }
                 self.apply(EventKind::Dispatched { effect, attempt });
                 self.dispatched.insert(effect);
+                if let EffectKind::RespondApproval { sleeve, .. } = kind {
+                    self.responses.insert(effect, self.st.sleeves[&sleeve].g);
+                }
                 if let EffectKind::NodeSubmit {
                     job, attempt, node, ..
                 } = kind

@@ -343,8 +343,8 @@ impl Core<'_> {
                 sleeve, request_id, ..
             } => self.on_message_effect(sleeve, &request_id, id),
             EffectKind::Compact { sleeve, .. } => self.on_compact(sleeve, id),
-            EffectKind::RespondApproval { .. }
-            | EffectKind::StopIncarnation { .. }
+            EffectKind::RespondApproval { .. } => self.on_response(id),
+            EffectKind::StopIncarnation { .. }
             | EffectKind::KillScope { .. }
             | EffectKind::Interrupt { .. } => {}
             EffectKind::ContinuationBrief { sleeve, .. } => self.on_brief(sleeve, id),

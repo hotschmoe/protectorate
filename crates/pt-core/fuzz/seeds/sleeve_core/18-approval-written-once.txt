@@ -1,4 +1,4 @@
-#scenario 5973a47191eed37c
+#scenario 6216318047b12051
 # An approval response whose ack is lost is Uncertain. Repeating the command, or G9 timing the
 # approval out, must not write a second decision (12b item 1).
 spawn root /w/a
@@ -20,11 +20,15 @@ tick 31m
 run
 expect-effect approval:0:1:a1:* state=Uncertain count=1
 expect root activity=Blocked
-# Once the owner abandons the uncertain write, a new decision may go out.
+# The decision was recorded once: abandoning its uncertain write releases the record but not
+# the decision, so neither a second answer nor G9 writes again.
 abandon approval:0:1:a1:*
 policy prompt=ack
 approve root a1 deny
 run
-expect-effect approval:0:1:a1:* state=Confirmed count=2
-obs root resolved=a1
-expect root activity=Working
+expect-effect approval:0:1:a1:* state=Abandoned count=1
+expect-approval 0:1:a1 state=Decided decision=allow by=Owner response=Abandoned
+tick 31m
+run
+expect-effect approval:0:1:a1:* count=1
+expect root activity=Blocked

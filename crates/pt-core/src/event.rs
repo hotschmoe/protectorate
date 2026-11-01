@@ -55,6 +55,16 @@ pub enum JobReport {
     },
 }
 
+/// What an approval asks, as the owner is shown it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Ask {
+    pub title: String,
+    pub summary: String,
+    pub detail: String,
+    /// The answers offered; empty means allow once or deny.
+    pub options: Vec<Choice>,
+}
+
 /// A harness observation, from a headless driver or a pane's screen rules.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Obs {
@@ -65,9 +75,12 @@ pub enum Obs {
     Progress {
         tool: Option<u64>,
     },
+    /// `id` is the harness's own; `ask` is `None` when the request carried no details.
     ApprovalRequested {
         id: String,
+        ask: Option<Ask>,
     },
+    /// The harness no longer waits on `id`: answered, or withdrawn by the harness.
     ApprovalResolved {
         id: String,
     },
@@ -110,11 +123,18 @@ pub enum EventKind {
     Compact {
         sleeve: SleeveId,
     },
+    /// Decides approval `approval` (its id in `State::approvals`) of `sleeve`.
     RespondApproval {
         sleeve: SleeveId,
         approval: String,
         allow: bool,
         note: String,
+    },
+    /// A code rule (D9) asks the owner on `sleeve`'s behalf; it times out `timeout` after `at`.
+    RequestApproval {
+        sleeve: SleeveId,
+        ask: Ask,
+        timeout: Millis,
     },
     Stop {
         sleeve: SleeveId,

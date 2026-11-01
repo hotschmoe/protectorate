@@ -1,0 +1,28 @@
+#scenario 6421dc46172e62dc
+# Approval timeouts run from journaled times: downtime counts, nothing restarts the clock.
+spawn root /w/a
+run
+obs root ready
+ask root timeout=15m
+commit
+crash down=20m
+expect-approval action:0 state=Abandoned decision=none
+run
+obs root ready
+expect root g=2
+ask root timeout=10m
+tick 9m
+expect-approval action:1 state=Pending
+tick 1m
+expect-approval action:1 state=Expired decision=deny by=Rule
+# A tool approval of an incarnation that died with the hub down times out on its deadline.
+send root m1
+run
+obs root approval=b1
+commit
+crash down=31m
+run
+tick 1s
+run
+expect-approval 0:2:b1 state=Expired orphan=IncarnationEnded decision=deny response=none
+expect-effect approval:* count=0

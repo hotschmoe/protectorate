@@ -201,7 +201,8 @@ Each entry: where, what was done, what right looks like.
   F-key screen meanwhile.
 - **Journal retention** (pt-journal): every snapshot and segment is kept forever, because product
   code deletes nothing yet (RULE 1). Right: a retention rule (keep the last N snapshots and their
-  segments, archive the rest into backups) once the owner approves deleting old segments.
+  segments, archive the rest into backups) once the owner approves deleting old segments. The
+  stream log is bounded on purpose (below): its messages are derived output, not the record.
 - **CRC-32C in pt-journal** (SPEC 15 lists it under `pt-hash`): a plain one-table loop. Right: move
   it to `pt-hash` when that crate exists; fast: slicing-by-8 or the SSE4.2/ARMv8 CRC instruction.
 - **pt-core records are kept forever** (State): every effect record, message request id and job
@@ -525,11 +526,37 @@ Each entry: where, what was done, what right looks like.
 - **`join` waits 15 minutes then gives up**: headscale keeps a registration that long in memory,
   so an unapproved node must run `join` again. Right: fine; the app's scan path approves in
   seconds.
-- **Approvals and hub events live in memory** (`pt-hub`, approvals.rs, bus.rs): a restart forgets
-  pending tool and D9 approvals (the waiting D9 call fails with the connection), the decided
-  list and the event log (500 entries). The stream's seq starts at the start time in ms so a
-  client resuming across a restart gets a fresh snapshot rather than a wrong delta. Right:
-  journal approvals and events, or rebuild tool approvals from transcripts at start.
+- **Approvals are core state and kept forever** (pt-core approval.rs): the ledger is journaled
+  like every other record and never pruned (see "pt-core records are kept forever"). A decision
+  is recorded once: abandoning an Uncertain answer releases its record but not the decision, so
+  the harness then waits until G8 or an interrupt. `allow_session` is recorded and sent as allow
+  once, since `RespondApproval` carries only allow or deny. Right: a decision kind in the event
+  and the record once a driver keeps session rules.
+- **A D9 call does not survive a restart** (pt-core `recover_approvals`): the API call waiting on
+  an action approval dies with the hub, so recovery marks the approval and a later decision is
+  recorded as `abandoned` and runs nothing; the agent must ask again. One past its deadline at
+  recovery ends `abandoned` with no decision. Right: fine while D9 calls are synchronous; a
+  durable action queue if they ever become requests the hub carries out later.
+- **A tool approval of a live incarnation outside G9 has no deadline** (pt-core
+  `tick_approvals`): one asked in a pane, or left pending once the turn moved on without a
+  settle, stays pending until the incarnation ends; its journaled deadline is shown but only G9
+  answers the harness. Right: let the core time those out (cancel, nothing written) once panes
+  report approvals.
+- **The stream log is a side file, not the journal** (`pt-hub`, stream.rs): kept messages go to
+  `<home>/stream.log` with one fdatasync per writer batch (a subscriber sees a message only
+  once it is on disk, so seqs continue exactly after a crash), and it is rewritten through a
+  temp file and rename once it holds twice what it keeps: the newest 10,000 messages or 7 days,
+  whichever is more, plus hub events by the same rule. Entry messages repeat transcript JSON,
+  so the file is larger than it needs to be. Right: store transcript references, or move the
+  stream into journal snapshots once pt-journal has retention.
+- **The first batch after a restart re-announces recent state** (`pt-hub`, core.rs): sleeves,
+  and jobs and approvals pending or changed in the 10 minutes before the journal's last event,
+  because a crash between the journal's fsync and the stream log's could lose their messages.
+  A sleeve removed in that window is not re-announced. Right: journal the stream position with
+  each batch, or a single fsync for both.
+- **`supervised` is new and mostly untested in the hub** (`pt-hub`, exec.rs): config
+  `supervised: ["claude"]` starts those harnesses with their approval gate on; only Claude is
+  run end to end (`tool_approval_across_restart_paid`). Right: run Codex and Grok the same way.
 - **Quota readers run on one thread** (`pt-hub`, quota.rs): a `pt_quota::Cache` (5 min TTL,
   stale after 10 min, backoff from 30 s) over the readers of installed harnesses, refreshed every
   `quota_poll_secs` (default 60; 0 never reads, which the e2e suite uses so no test hub reads

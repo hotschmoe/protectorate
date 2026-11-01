@@ -7,17 +7,12 @@
 //! (REVISIT). A node maintenance job from any sleeve, Envoy included, always waits for the
 //! owner (SPEC 3.1).
 
-use std::time::{Duration, Instant};
-
-use pt_api::{ApiError, ApprovalState, DecidedBy, Decision, ErrorCode, EventKind, Level};
+use pt_api::ApiError;
 use pt_core::SleeveId;
-use pt_drivers::{Entry, ToolKind};
 
-use crate::api::{Principal, err};
-use crate::home::now_ms;
+use crate::api::Principal;
 use crate::hub::Hub;
-use crate::log::info;
-use crate::transcript::{Note, lock};
+use crate::transcript::lock;
 
 pub enum Guarded<'a> {
     Remove(&'a str),
@@ -80,72 +75,12 @@ pub fn gate(hub: &Hub, who: &Principal, action: Guarded<'_>) -> Result<Option<St
     ask(hub, envoy, title, summary)
 }
 
-/// Opens an action approval for `sleeve`, records it in its transcript and on the stream, and
-/// waits for the owner.
+/// Opens an action approval for `sleeve` and waits for the owner.
 fn ask(
     hub: &Hub,
     sleeve: SleeveId,
     title: String,
     summary: String,
 ) -> Result<Option<String>, ApiError> {
-    let wait = Duration::from_secs(hub.config.d9_approval_timeout_secs);
-    let a = hub.approvals.open_action(
-        &hub.bus,
-        sleeve,
-        title.clone(),
-        summary.clone(),
-        wait.as_millis() as u64,
-    );
-    info!("{} waits for the owner: {title}", a.id);
-    let (g, source) = hub
-        .view()
-        .state
-        .sleeve(sleeve)
-        .map_or((0, String::new()), |s| (s.g.0, s.name.clone()));
-    hub.record(
-        sleeve,
-        g,
-        now_ms(),
-        Entry::ApprovalRequest {
-            id: a.id.clone(),
-            tool: ToolKind::Other,
-            name: title.clone(),
-            summary,
-            input: None,
-            options: Vec::new(),
-        },
-        Note::default(),
-    );
-    hub.event(
-        EventKind::Approval,
-        Level::Warn,
-        &source,
-        "owner",
-        &format!("approval {} requested: {title}", a.id),
-    );
-    let decided = hub.approvals.wait(&a.id, Instant::now() + wait);
-    match decided {
-        Some(d) if d.state == ApprovalState::Approved => Ok(Some(a.id)),
-        Some(d) => Err(err(
-            ErrorCode::Forbidden,
-            format!("the owner did not allow {title} ({}: {})", a.id, d.state),
-        )),
-        None => {
-            hub.approvals.resolve(
-                &hub.bus,
-                &a.id,
-                ApprovalState::Expired,
-                Some(Decision::Deny),
-                DecidedBy::Rule,
-            );
-            Err(err(
-                ErrorCode::Timeout,
-                format!(
-                    "no owner decision on {title} within {}s ({})",
-                    wait.as_secs(),
-                    a.id
-                ),
-            ))
-        }
-    }
+    crate::approvals::ask_owner(hub, sleeve, title, summary).map(Some)
 }

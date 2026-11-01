@@ -1,5 +1,5 @@
 //! What every thread shares: the published view, the core's input channel, the transcripts, the
-//! event bus, approvals, devices and Envoy's current turn origin (D9).
+//! event bus, devices and Envoy's current turn origin (D9).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -12,7 +12,6 @@ use pt_api::{EpochMs, EventKind as ApiEventKind, HubEvent, HubStreamMessage, Lev
 use pt_core::{EventKind, Gen, Millis, Party, Reply, SleeveId, State};
 use pt_drivers::Entry;
 
-use crate::approvals::Approvals;
 use crate::bus::Bus;
 use crate::devices::Devices;
 use crate::fleet::FleetSlot;
@@ -74,7 +73,6 @@ pub struct Hub {
     pub config: Config,
     pub tokens: Tokens,
     pub devices: Devices,
-    pub approvals: Approvals,
     pub envoy_turn: Mutex<EnvoyTurn>,
     pub uid: u32,
     pub started_ms: u64,
@@ -115,6 +113,7 @@ impl Hub {
         owner_home: PathBuf,
         input: Sender<Input>,
         view: View,
+        bus: Bus,
     ) -> Hub {
         let transcripts = Transcripts::new(home.clone());
         let jobs = JobStore::new(home.jobs());
@@ -128,13 +127,12 @@ impl Hub {
             config,
             tokens,
             devices,
-            approvals: Approvals::default(),
             envoy_turn: Mutex::new(EnvoyTurn::default()),
             uid,
             started_ms: now_ms(),
             owner_home,
             fault: Fault::from_env(),
-            bus: Bus::default(),
+            bus,
             transcripts,
             fleet: FleetSlot::default(),
             jobs,
