@@ -407,7 +407,7 @@ fn partial_responses_and_exhausted_selection() {
 }
 
 #[test]
-fn local_endpoint_rejects_non_loopback_http_and_missing_model() {
+fn local_endpoint_rejects_non_loopback_http_and_notes_an_unlisted_model() {
     let home = scratch(&format!("unsafe-local-{}", std::process::id()));
     write(
         &home.join(".pi/agent/models.json"),
@@ -442,8 +442,8 @@ fn local_endpoint_rejects_non_loopback_http_and_missing_model() {
         "wanted",
     ]);
     let local = line_of(&out, "local");
-    assert_eq!(state_of(local), "error", "{local}");
-    assert!(local.contains("absent"), "{local}");
+    assert_eq!(state_of(local), "fresh", "{local}");
+    assert!(local.contains("\"wanted\" is not listed"), "{local}");
 }
 
 #[test]

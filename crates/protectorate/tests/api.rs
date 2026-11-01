@@ -580,7 +580,7 @@ fn quota_readers_run() {
     let models = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let models_port = models.local_addr().unwrap().port();
     let (ready_tx, ready_rx) = mpsc::channel();
-    // The local reader requires the hub's configured Pi model to be listed.
+    // Lists the hub's configured Pi model too, as the owner's endpoint would.
     let model = pi_model();
     std::thread::spawn(move || {
         let mut ready = Some(ready_rx);

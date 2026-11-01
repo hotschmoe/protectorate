@@ -139,16 +139,15 @@ impl Reader for Local {
         })?;
         let latency = started.elapsed().as_millis();
         let models = parse_models(&body)?;
+        let mut note = format!("reachable in {latency} ms; models: {}", models.join(", "));
+        // Routers often serve models they do not list, so this is a note, not a failure.
         if !self.model.is_empty() && !models.contains(&self.model) {
-            return Err(Error::other(format!(
-                "configured Pi model {:?} is absent from the endpoint",
-                self.model
-            )));
+            note += &format!("; configured Pi model {:?} is not listed", self.model);
         }
         Ok(Snapshot {
             plan: String::new(),
             windows: Vec::new(),
-            note: format!("reachable in {latency} ms; models: {}", models.join(", ")),
+            note,
         })
     }
 }
