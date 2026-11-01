@@ -83,7 +83,10 @@ Each entry: where, what was done, what right looks like.
   has no timeout. Right, if the CLI ever gets chatty: keep-alive reuse for idempotent requests.
 - **WebSocket extras left out** (pt-http): no permessage-deflate and no subprotocol negotiation
   helper (a handler can set `Sec-WebSocket-Protocol` itself). Origin checks are the hub's job.
-- **pt-http is about 1950 lines** (about 1700 without blank and comment lines) against a 1500-line
+- **pt-http client `read_timeout` is a whole-request deadline** (sending the request and reading
+  all of the response) but keeps its per-read name, so callers in pt-hub, pt-fleet and
+  protectorate did not change with it. Right: rename it `timeout` in one commit with its callers.
+- **pt-http is about 2050 lines** (about 1780 without blank and comment lines) against a 1500-line
   target. Right: trim when the hub's real use shows which parts can go.
 - **pt-sandbox: no automatic fallback without a scope.** `systemd-run --user --scope` works here
   only with `XDG_RUNTIME_DIR` set (the builder sets it; it fails with "No medium found" without it

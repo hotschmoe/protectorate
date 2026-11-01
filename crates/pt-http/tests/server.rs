@@ -333,3 +333,63 @@ fn graceful_shutdown_finishes_in_flight_requests() {
     );
     assert!(TcpStream::connect(addr).is_err(), "listener closed");
 }
+
+#[test]
+fn panicking_handler_frees_its_slot() {
+    let s = start(Config {
+        max_connections: 2,
+        ..Config::default()
+    });
+    for _ in 0..4 {
+        let mut c = TcpStream::connect(s.addr.unwrap()).unwrap();
+        c.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        c.write_all(b"GET /panic HTTP/1.1\r\nHost: x\r\n\r\n")
+            .unwrap();
+        assert!(common::closed_by_peer(&mut c));
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while curl(&["-o", "/dev/null", "-w", "%{http_code}", &s.url("/hello")]).stdout != "200" {
+        assert!(
+            Instant::now() < deadline,
+            "panicked handlers kept their slots"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    s.stop();
+}
+
+/// A server that trickles its answer, or sends 100 Continue forever, cannot stretch a request
+/// past the client's timeout.
+#[test]
+fn client_deadline_covers_the_whole_response() {
+    let trickle = |interim: bool| {
+        common::fake_server(move |mut c, _| {
+            if !interim {
+                let _ = c.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n");
+            }
+            for _ in 0..100 {
+                std::thread::sleep(Duration::from_millis(50));
+                let bytes: &[u8] = if interim {
+                    b"HTTP/1.1 100 Continue\r\n\r\n"
+                } else {
+                    b"x"
+                };
+                if c.write_all(bytes).is_err() {
+                    return;
+                }
+            }
+        })
+    };
+    for interim in [false, true] {
+        let client = Client::tcp(trickle(interim)).read_timeout(Some(Duration::from_millis(400)));
+        let start = Instant::now();
+        let r = client.request("GET", "/", &[], b"");
+        let e = r.expect_err("a trickled response must time out");
+        assert_eq!(e.kind(), std::io::ErrorKind::TimedOut, "{e}");
+        assert!(
+            start.elapsed() < Duration::from_secs(2),
+            "{:?}",
+            start.elapsed()
+        );
+    }
+}
