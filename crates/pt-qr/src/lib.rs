@@ -451,7 +451,8 @@ impl FinderPenalty {
         let h = &self.history;
         let n = h[1];
         let core = n > 0 && h[2] == n && h[3] == n * 3 && h[4] == n && h[5] == n;
-        i32::from(core && h[0] >= n * 4 && h[6] >= n) + i32::from(core && h[6] >= n * 4 && h[0] >= n)
+        i32::from(core && h[0] >= n * 4 && h[6] >= n)
+            + i32::from(core && h[6] >= n * 4 && h[0] >= n)
     }
 
     fn terminate_and_count(mut self, color: bool, mut run: i32) -> i32 {
