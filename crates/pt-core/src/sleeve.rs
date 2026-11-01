@@ -1149,7 +1149,8 @@ impl Core<'_> {
                 }
             }
             Obs::TurnSettled { end } => {
-                self.prompt_evidence(sid);
+                // Not evidence for an in-flight prompt: a settle with no turn begun is the
+                // previous turn's, and is dropped below.
                 let s = self.sl(sid);
                 if !matches!(
                     s.activity,

@@ -1,0 +1,19 @@
+#scenario 718946c879ca82ff
+# A second TurnSettled for a turn that already settled arrives while the next prompt is Sent:
+# it does not confirm that prompt or end Delivering. Output of the new turn does.
+spawn root /w/a
+run
+obs root ready
+send root m1
+run
+expect root activity=Working msg:m1=Delivered
+send root m2
+policy prompt=none
+obs root settled
+run
+expect-effect m2 state=Sent
+obs root settled
+expect root activity=Delivering msg:m2=InFlight queue=0
+expect-effect m2 state=Sent
+obs root progress
+expect root activity=Working msg:m2=Delivered
