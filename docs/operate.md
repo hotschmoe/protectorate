@@ -220,8 +220,8 @@ probation window (`--probation`, default 600 s) reverts to its previous binary. 
 for every node unless `--no-wait`. Update the hub first, then one node per OS and arch, then the
 rest. A node with running jobs answers `busy`; a Windows node answers `unsupported`.
 
-Both update paths are tested end to end against a stand-in release server only; no release has
-been published yet.
+Both update paths are tested end to end against a stand-in release server. `hub update` has also
+run against a published pre-release (v0.7.0-dev.1 to v0.7.0-dev.2); `node update` has not yet.
 
 ## Devices
 
