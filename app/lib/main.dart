@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'api/api.g.dart';
 import 'fake_hub.dart';
 import 'hub.dart';
+import 'local.dart';
 import 'real_hub.dart';
 import 'scope.dart';
 import 'shell.dart';
@@ -18,7 +22,9 @@ void main() {
 }
 
 /// Deep links (`?screen=nodes&theme=light`, `?sleeve=la/app`, `?node=ms-r1`) open a screen
-/// directly; on desktop and Android the query is empty.
+/// directly; on desktop and Android the query is empty. On web the app talks to the hub that
+/// served it unless `?hub=<url>` names another or `?hub=fake` asks for the scripted FakeHub;
+/// `?pair=<code>` pairs this browser with a code from `protectorate device add`.
 class App extends StatefulWidget {
   const App({super.key});
 
@@ -29,21 +35,49 @@ class App extends StatefulWidget {
 class _AppState extends State<App> {
   final Map<String, String> _q = Uri.base.queryParameters;
   late bool _dark = _q['theme'] != 'light';
-  String _url = '';
-  String _token = '';
-  HubClient _hub = FakeHub();
+  late String _url = _q['hub'] == 'fake'
+      ? ''
+      : (_q['hub'] ?? loadSetting('hub_url') ?? pageOrigin() ?? '');
+  late String _token = _q['hub'] == 'fake' ? '' : (loadSetting('device_token') ?? '');
+  late HubClient _hub = _open(_url, _token);
 
-  /// An empty URL means the scripted FakeHub.
+  static HubClient _open(String url, String token) =>
+      url.isEmpty ? FakeHub() : RealHub(url, token: token.isEmpty ? null : token);
+
+  @override
+  void initState() {
+    super.initState();
+    final code = _q['pair'];
+    if (code != null && _url.isNotEmpty) {
+      dropQueryParam('pair');
+      unawaited(_pair(code).catchError((Object _) => ''));
+    }
+  }
+
+  /// An empty URL means the scripted FakeHub. A real hub's URL and token are kept on the device.
   void _connect(String url, String token) {
     final u = url.trim();
     final t = token.trim();
+    if (u.isNotEmpty) {
+      saveSetting('hub_url', u == pageOrigin() ? null : u);
+      saveSetting('device_token', t);
+    }
     if (u == _url && t == _token) return;
     _hub.close();
     setState(() {
       _url = u;
       _token = t;
-      _hub = u.isEmpty ? FakeHub() : RealHub(u, token: t.isEmpty ? null : t);
+      _hub = _open(u, t);
     });
+  }
+
+  /// Trades a pairing code for this device's token and connects with it.
+  Future<String> _pair(String code) async {
+    if (_url.isEmpty) throw StateError('set the hub URL first');
+    final r = await HubApi(Uri.parse(_url)).pairDevice(PairDeviceRequest(code: code.trim()));
+    saveSetting('device_id', r.device.id);
+    _connect(_url, r.token);
+    return r.device.name;
   }
 
   @override
@@ -81,6 +115,7 @@ class _AppState extends State<App> {
         hubUrl: _url,
         hubToken: _token,
         connect: _connect,
+        pair: _pair,
         initial: screen,
         initialSleeve: sleeveId,
         initialNode: nodeId,
