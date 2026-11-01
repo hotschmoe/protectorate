@@ -378,8 +378,8 @@ Each entry: where, what was done, what right looks like.
 - **Child stop signals go through the `kill` binary** (`pt-fleet`, child.rs): SIGTERM, then
   SIGKILL after 10 s, and bwrap's child is found through /proc. Right: `pt_sys` grows a `kill`
   wrapper (libc is already there) and pidfds to close the pid-reuse race.
-- **Fleet logs never rotate**: `tailnet/headscale.log`, `tailnet/member.log` and the node's
-  member log grow forever. Right: size-capped rotation shared with the hub's transcripts.
+- **Fleet logs never rotate**: `tailnet/headscale/headscale.log`, `tailnet/member.log` and the
+  node's member log grow forever. Right: size-capped rotation shared with the hub's transcripts.
 - **Stale sockets accumulate** (`pt-fleet`): a killed member leaves `member.sock`, so the next
   start uses `member-2.sock` and so on, and the stand-in hub makes `ctl-<pid>.sock` per run,
   because nothing here may unlink. Right: one path, unlinked at start after a failed connect (as
