@@ -48,7 +48,7 @@ pub fn scan(
     mut line: impl FnMut(usize, &[u8]),
 ) -> Scan {
     let mut pos = 0;
-    let mut overlong = 0;
+    let mut overlong = 0u32;
     if skipping {
         match buf.iter().position(|b| *b == b'\n') {
             None => {
@@ -108,7 +108,7 @@ pub fn advance(
     let window = window.max(max_line + 1);
     let mut buf = Vec::new();
     let mut pos = start;
-    let mut overlong = 0;
+    let mut overlong = 0u32;
     while pos < end {
         let want = (end - pos).min(window as u64) as usize;
         buf.resize(want, 0);
@@ -127,7 +127,7 @@ pub fn advance(
         }
         let s = scan(&buf, skipping, max_line, |o, l| line(pos + o as u64, l));
         skipping = s.skipping;
-        overlong += s.overlong;
+        overlong = overlong.saturating_add(s.overlong);
         let at_end = pos + buf.len() as u64 == end;
         pos += s.consumed as u64;
         if s.consumed < buf.len() && at_end {
@@ -164,7 +164,7 @@ pub struct Opened {
 
 pub fn open(path: &Path, cursor: &Cursor) -> io::Result<Opened> {
     let ctx = |e: io::Error| io::Error::new(e.kind(), format!("tail {}: {e}", path.display()));
-    let file = File::open(path).map_err(ctx)?;
+    let file = crate::safe_open::file(path).map_err(ctx)?;
     let meta = file.metadata().map_err(ctx)?;
     let len = meta.len();
     let reset = cursor.offset > 0
@@ -189,7 +189,7 @@ pub fn open(path: &Path, cursor: &Cursor) -> io::Result<Opened> {
 
 impl Opened {
     /// Reads the complete lines after the start, up to `limit` bytes into the file.
-    pub fn read(self, limit: Option<u64>, line: impl FnMut(u64, &[u8])) -> io::Result<Tail> {
+    pub fn read(&mut self, limit: Option<u64>, line: impl FnMut(u64, &[u8])) -> io::Result<Tail> {
         let path = &self.path;
         let ctx = |e: io::Error| io::Error::new(e.kind(), format!("tail {}: {e}", path.display()));
         let start = &self.start;
@@ -207,7 +207,7 @@ impl Opened {
             line,
         )
         .map_err(ctx)?;
-        Ok(Tail {
+        let tail = Tail {
             cursor: Cursor {
                 offset: a.offset,
                 skipping: a.skipping,
@@ -218,7 +218,10 @@ impl Opened {
             reset: self.reset,
             bytes: a.offset - start.offset,
             overlong: a.overlong,
-        })
+        };
+        self.start = tail.cursor.clone();
+        self.reset = false;
+        Ok(tail)
     }
 }
 

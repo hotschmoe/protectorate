@@ -7,8 +7,8 @@
 //! aside (never deleted) and rebuilt the same way, so the hub always starts.
 
 use std::collections::{BTreeMap, HashMap};
-use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader, Seek, SeekFrom};
+use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -64,7 +64,7 @@ struct Seen {
 #[derive(Default)]
 struct Track {
     /// Transcript bytes already scanned for `session_info` lines.
-    scanned: u64,
+    cursor: pt_history::tail::Cursor,
     seen: Vec<Seen>,
 }
 
@@ -196,7 +196,9 @@ impl History {
                 changed |= self.sleeve_pass(hub, &mut p, s);
             }
         }
-        if changed && let Ok(ix) = &mut *lock(&self.ix) {
+        if let Ok(ix) = &mut *lock(&self.ix)
+            && (changed || ix.has_uncommitted())
+        {
             match ix.commit() {
                 Ok(()) => p.commit_error = None,
                 Err(e) => {
@@ -217,7 +219,7 @@ impl History {
         if let Err(e) = scan(&transcript, track) {
             debug!("history: scan {}: {e}", transcript.display());
         }
-        if track.seen.is_empty() && track.scanned == 0 {
+        if track.seen.is_empty() && track.cursor.offset == 0 {
             return false;
         }
         let sleeve = s.id.0.to_string();
@@ -316,48 +318,46 @@ impl History {
 
 /// Reads the transcript's new complete lines for `session_info` entries.
 fn scan(path: &Path, track: &mut Track) -> io::Result<()> {
-    let f = match File::open(path) {
-        Ok(f) => f,
+    let mut opened = match pt_history::tail::open(path, &track.cursor) {
+        Ok(opened) => opened,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e),
     };
-    let len = f.metadata()?.len();
-    if len < track.scanned {
+    if opened.reset {
         *track = Track::default();
     }
-    if len == track.scanned {
-        return Ok(());
-    }
-    let mut r = BufReader::new(f);
-    r.seek(SeekFrom::Start(track.scanned))?;
-    let mut line = Vec::new();
     loop {
-        line.clear();
-        let n = r.read_until(b'\n', &mut line)?;
-        if n == 0 || line.last() != Some(&b'\n') {
-            return Ok(());
-        }
-        let at = track.scanned;
-        track.scanned += n as u64;
-        if !line.windows(14).any(|w| w == b"\"session_info\"") {
-            continue;
-        }
-        if let Ok(Line {
-            g,
-            harness: api,
-            entry: Entry::SessionInfo {
-                harness, native_id, ..
-            },
-            ..
-        }) = pt_json::from_bytes::<Line>(&line[..n - 1])
-        {
-            track.seen.push(Seen {
-                offset: at,
+        let start = opened.start.offset;
+        let end = start
+            .saturating_add(pt_history::tail::WINDOW as u64)
+            .min(opened.len);
+        let tail = opened.read(Some(end), |at, line| {
+            if !line.windows(14).any(|w| w == b"\"session_info\"") {
+                return;
+            }
+            if let Ok(Line {
                 g,
-                native_id,
-                kind: source_kind(harness),
                 harness: api,
-            });
+                entry:
+                    Entry::SessionInfo {
+                        harness, native_id, ..
+                    },
+                ..
+            }) = pt_json::from_bytes::<Line>(line)
+                && native_id.len() <= 1024
+            {
+                track.seen.push(Seen {
+                    offset: at,
+                    g,
+                    native_id,
+                    kind: source_kind(harness),
+                    harness: api,
+                });
+            }
+        })?;
+        track.cursor = tail.cursor;
+        if opened.start.offset >= opened.len || opened.start.offset == start {
+            return Ok(());
         }
     }
 }

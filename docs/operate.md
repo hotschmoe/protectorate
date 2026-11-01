@@ -146,8 +146,13 @@ quota list
 
 One row per subscription (Claude, Codex, Grok, the local endpoint): the reading, its windows with
 percent used, and a note. The readers are read-only: they use your existing logins and never
-refresh or print a token. They run every `quota_poll_secs` (60; 0 turns them off), and a
-reading is kept 5 minutes. Resleeve targets are weighted by them.
+refresh or print a token. They run every `quota_poll_secs` (60; 0 turns them off); a reading is
+refreshed after 5 minutes and becomes stale after 10. A response with a malformed usage window,
+or with no window at all, is reported as an error.
+Resleeve targets are weighted by fresh readings; known-exhausted candidates are skipped, and the
+sleeve parks if all eligible candidates are exhausted. When a reading is unavailable, an unknown
+candidate can still be selected. A local endpoint may use HTTPS or loopback HTTP; other HTTP
+endpoints are reported as misconfigured and are not contacted.
 
 ## History
 
@@ -161,7 +166,9 @@ history read --doc ID | history read <session> [--from TURN] [--to TURN]
 A keyword index over the native session logs of the sessions the hub launched, plus the hub's own
 transcripts. `--since` and `--until` take `7d`, `3h`, `30m`, `90s` or epoch milliseconds. The
 owner can search everything; Envoy too; a sleeve only its own runs. The index is derived and
-rebuilt in the background if it fails to open.
+rebuilt in the background if it fails to open. Catch-up commits bounded batches, and failed
+commits are retried. Below each configured root, discovery and reopening ignore symbolic links
+and non-regular files.
 
 ## Events
 

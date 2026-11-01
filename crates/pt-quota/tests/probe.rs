@@ -303,3 +303,217 @@ fn local_reader_sends_the_pi_provider_key() {
         "only the named provider's key is sent"
     );
 }
+
+#[test]
+fn partial_responses_and_exhausted_selection() {
+    let home = scratch(&format!("partial-quota-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"fixture-claude"}}"#,
+    );
+    write(
+        &home.join(".codex/auth.json"),
+        r#"{"tokens":{"access_token":"fixture-codex"}}"#,
+    );
+    write(
+        &home.join(".grok/auth.json"),
+        r#"{"https://auth.x.ai::fixture":{"key":"fixture-grok"}}"#,
+    );
+    let (full_port, _) = serve(vec![
+        (
+            "/api/oauth/usage",
+            r#"{"five_hour":{"utilization":99},"seven_day":{"utilization":10}}"#,
+        ),
+        (
+            "/wham/usage",
+            r#"{"rate_limit":{"primary_window":{"used_percent":98,"limit_window_seconds":18000},"secondary_window":{"used_percent":10,"limit_window_seconds":604800}}}"#,
+        ),
+        ("/v1/billing", r#"{"config":{"creditUsagePercent":100}}"#),
+    ]);
+    let full = format!("http://127.0.0.1:{full_port}");
+    let home_s = home.to_str().unwrap();
+    let args = |base: &str| {
+        vec![
+            "--home".to_string(),
+            home_s.to_string(),
+            "--claude-url".into(),
+            base.into(),
+            "--codex-url".into(),
+            base.into(),
+            "--grok-url".into(),
+            base.into(),
+            "--local".into(),
+            base.into(),
+            "--allow".into(),
+            "claude,codex,grok".into(),
+        ]
+    };
+    let run = |args: Vec<String>| probe(&args.iter().map(String::as_str).collect::<Vec<_>>());
+    let out = run(args(&full));
+    for name in ["claude", "codex", "grok"] {
+        assert_eq!(state_of(line_of(&out, name)), "fresh", "{out}");
+    }
+    assert!(
+        out.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{out}"
+    );
+
+    let (mixed_port, _) = serve(vec![
+        (
+            "/api/oauth/usage",
+            r#"{"five_hour":{"utilization":99},"seven_day":{"utilization":10}}"#,
+        ),
+        (
+            "/wham/usage",
+            r#"{"rate_limit":{"primary_window":{"used_percent":"n/a","limit_window_seconds":18000}}}"#,
+        ),
+        ("/v1/billing", r#"{"config":{"creditUsagePercent":100}}"#),
+    ]);
+    let mixed = format!("http://127.0.0.1:{mixed_port}");
+    let out = run(args(&mixed));
+    assert!(
+        out.contains("target Codex: first eligible in resleeve_to without a fresh quota reading"),
+        "{out}"
+    );
+
+    let (partial_port, _) = serve(vec![
+        (
+            "/api/oauth/usage",
+            r#"{"five_hour":{"utilization":"n/a"},"seven_day":{"utilization":10}}"#,
+        ),
+        (
+            "/wham/usage",
+            r#"{"rate_limit":{"primary_window":{"used_percent":99,"limit_window_seconds":18000},"secondary_window":{"used_percent":-1,"limit_window_seconds":604800}}}"#,
+        ),
+        ("/v1/billing", r#"{"config":{}}"#),
+        ("/v1/models", r#"{"data":[]}"#),
+    ]);
+    let partial = format!("http://127.0.0.1:{partial_port}");
+    let out = run(args(&partial));
+    for (name, reason) in [
+        ("claude", "5h"),
+        ("codex", "secondary_window"),
+        ("grok", "credit usage"),
+        ("local", "model ids"),
+    ] {
+        let line = line_of(&out, name);
+        assert_eq!(state_of(line), "error", "{line}");
+        assert!(line.contains(reason), "{line}");
+    }
+    assert!(
+        out.contains("target Claude: first eligible in resleeve_to without a fresh quota reading"),
+        "{out}"
+    );
+}
+
+#[test]
+fn local_endpoint_rejects_non_loopback_http_and_missing_model() {
+    let home = scratch(&format!("unsafe-local-{}", std::process::id()));
+    write(
+        &home.join(".pi/agent/models.json"),
+        r#"{"providers":{"lab":{"apiKey":"fixture-secret"}}}"#,
+    );
+    let home_s = home.to_str().unwrap();
+    let out = probe(&[
+        "--home",
+        home_s,
+        "--pi-provider",
+        "lab",
+        "--local",
+        "http://192.0.2.1:1234",
+    ]);
+    let local = line_of(&out, "local");
+    assert_eq!(state_of(local), "error", "{local}");
+    assert!(
+        local.contains("misconfigured") && local.contains("loopback"),
+        "{local}"
+    );
+    assert!(!out.contains("fixture-secret"));
+    let (port, _) = serve(vec![("/v1/models", r#"{"data":[{"id":"other"}]}"#)]);
+    let base = format!("http://localhost:{port}");
+    let out = probe(&[
+        "--home",
+        home_s,
+        "--pi-provider",
+        "lab",
+        "--local",
+        &base,
+        "--pi-model",
+        "wanted",
+    ]);
+    let local = line_of(&out, "local");
+    assert_eq!(state_of(local), "error", "{local}");
+    assert!(local.contains("absent"), "{local}");
+}
+
+#[test]
+fn fifo_login_does_not_block_other_readers() {
+    let home = scratch(&format!("fifo-quota-{}", std::process::id()));
+    let login = home.join(".claude/.credentials.json");
+    std::fs::create_dir_all(login.parent().unwrap()).unwrap();
+    assert!(
+        Command::new("mkfifo")
+            .arg(&login)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let (port, _) = serve(vec![("/v1/models", r#"{"data":[{"id":"ready"}]}"#)]);
+    let base = format!("http://127.0.0.1:{port}");
+    let start = std::time::Instant::now();
+    let out = probe(&["--home", home.to_str().unwrap(), "--local", &base]);
+    assert!(start.elapsed() < std::time::Duration::from_secs(5), "{out}");
+    assert!(
+        line_of(&out, "claude").contains("not a regular file"),
+        "{out}"
+    );
+    assert_eq!(state_of(line_of(&out, "local")), "fresh", "{out}");
+}
+
+#[test]
+#[cfg(debug_assertions)]
+fn cache_uses_monotonic_time_for_ttl_backoff_and_age() {
+    let home = scratch(&format!("cache-clock-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"clock-claude"}}"#,
+    );
+    write(
+        &home.join(".grok/auth.json"),
+        r#"{"https://auth.x.ai::fixture":{"key":"clock-grok"}}"#,
+    );
+    let (port, seen) = serve(vec![
+        (
+            "/api/oauth/usage",
+            r#"{"five_hour":{"utilization":10},"seven_day":{"utilization":20}}"#,
+        ),
+        ("/v1/billing", r#"{"config":{}}"#),
+    ]);
+    let base = format!("http://127.0.0.1:{port}");
+    let out = probe(&[
+        "--home",
+        home.to_str().unwrap(),
+        "--claude-url",
+        &base,
+        "--grok-url",
+        &base,
+        "--test-cache-ms",
+        "150",
+    ]);
+    assert_eq!(state_of(line_of(&out, "claude")), "fresh", "{out}");
+    assert_eq!(state_of(line_of(&out, "grok")), "error", "{out}");
+    assert!(out.contains("aged claude stale"), "{out}");
+    let seen = seen.lock().unwrap();
+    assert_eq!(
+        seen.iter()
+            .filter(|s| s.contains("/api/oauth/usage"))
+            .count(),
+        2,
+        "{seen:?}"
+    );
+    assert_eq!(
+        seen.iter().filter(|s| s.contains("/v1/billing")).count(),
+        2,
+        "{seen:?}"
+    );
+}

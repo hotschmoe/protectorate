@@ -140,6 +140,59 @@ fn fresh_for(quotas: &[Quota], sub: Subscription) -> Option<&Quota> {
         .find(|q| q.subscription == sub && state(q) == State::Fresh)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Availability {
+    Available,
+    Exhausted,
+    Unknown,
+}
+
+/// Whether a candidate has usable fresh quota, insufficient quota, or no usable reading.
+fn availability(now_ms: u64, size: TaskSize, harness: Harness, quotas: &[Quota]) -> Availability {
+    if harness == Harness::PiLocal {
+        return if fresh_for(quotas, Subscription::Local).is_some() {
+            Availability::Available
+        } else {
+            Availability::Unknown
+        };
+    }
+    let Some((_, subscription)) = SUBSCRIBED.iter().find(|(h, _)| *h == harness) else {
+        return Availability::Unknown;
+    };
+    match fresh_for(quotas, *subscription).and_then(|q| score(q, now_ms)) {
+        Some(s) if s.usable < size.min_usable_pct() => Availability::Exhausted,
+        Some(_) => Availability::Available,
+        None => Availability::Unknown,
+    }
+}
+
+/// Selects from already eligible candidates, retaining their order when readings are missing.
+pub fn select_with_fallback(
+    now_ms: u64,
+    size: TaskSize,
+    candidates: &[Harness],
+    quotas: &[Quota],
+) -> Result<(Harness, String), &'static str> {
+    if let Some(target) = select_target(now_ms, size, candidates, Mode::Headless, &[], quotas, &[])
+    {
+        return Ok((target.harness, target.reason));
+    }
+    if let Some(&harness) = candidates
+        .iter()
+        .find(|&&harness| availability(now_ms, size, harness, quotas) == Availability::Unknown)
+    {
+        return Ok((
+            harness,
+            "first eligible in resleeve_to without a fresh quota reading".into(),
+        ));
+    }
+    if candidates.is_empty() {
+        Err("no eligible resleeve target")
+    } else {
+        Err("all eligible resleeve targets have insufficient fresh quota")
+    }
+}
+
 /// Picks the harness for a new incarnation, or `None` when nothing is eligible.
 ///
 /// - A subscription is eligible when its harness is allowed, supports `mode`, is not excluded

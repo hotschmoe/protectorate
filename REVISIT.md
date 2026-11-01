@@ -394,8 +394,9 @@ Each entry: where, what was done, what right looks like.
   told). Right: `deliverable` is false while `probing`, so the message waits in the queue.
 - **Resleeve selection is quota-weighted only among `resleeve_to`** (`pt-hub`, select.rs): the
   candidates that are headless, not excluded, installed and not `ineligible` in `doctor.json` go
-  to `pt_quota::select_target` with task size Medium and no health list; with no fresh quota the
-  first in the owner's order wins. A new sleeve always names its harness (`SpawnSleeve.harness` is
+  to quota selection with task size Medium and no health list; when a reading is unavailable the
+  first unknown candidate in the owner's order can win, while known-exhausted candidates cannot.
+  A new sleeve always names its harness (`SpawnSleeve.harness` is
   required), so nothing else is chosen by quota, and G1 does not read quota yet. Right: the task
   size from the sleeve's history (D27), node and probe health, and an optional harness on spawn.
 - **FetchArtifact reads one file at a time and hashes it twice** (`pt-node` `read_artifact`,
@@ -665,6 +666,10 @@ Each entry: where, what was done, what right looks like.
   the owner's vendor quotas); a changed row goes out as a `quota` message. Readings are not
   journaled, so a restart starts at `unknown`. Right: fine; persist the last good reading if a
   restart must keep dispatch weighting.
+- **A stuck quota read can leave one worker behind** (`pt-quota`, cache.rs): publication has a
+  deadline and cached rows age monotonically, but an OS-blocked file read cannot be cancelled;
+  the cache allows at most one such worker per reader and retries only after it returns. Right:
+  use a killable helper process if network filesystems make this a practical problem.
 - **pi_durable shows as pi_local in the API** (`pt-hub`, wire.rs): the experiment has no API
   harness. Right: add one if it outlives the experiment.
 - **The web app embedded is about 17.7 MB** (`crates/protectorate/build.rs`): the release binary
@@ -793,8 +798,9 @@ Each entry: where, what was done, what right looks like.
   search needs a subagent's work.
 - **Merges re-tokenize stored text** (`pt-history`, index.rs): merging two segments decodes their
   texts and builds a new one from scratch. Fast: a k-way merge of postings, if merge time shows up.
-- **Leftover segments after a crash mid-merge** (`pt-history`, index.rs): a crash after the
-  manifest rename but before the merged segments are removed leaves unreferenced `seg-*` files.
+- **Leftover segments after a crash or failed commit** (`pt-history`, index.rs): a failure after a
+  segment is written, or a crash before obsolete merged segments are removed, can leave
+  unreferenced `seg-*` files.
   Right: sweep unreferenced segment files at open.
 - **One source per session, decided per hub run** (`pt-hub`, history.rs): a headless session
   is in both its native log and the transcript; the native log wins once found, the transcript
@@ -818,7 +824,8 @@ Each entry: where, what was done, what right looks like.
 - **Local quota key from Pi's models.json** (`pt-quota`, local.rs): the `pi_local_provider`
   entry's `apiKey`, as a set environment variable's name or a literal; a `!command` key is never
   run (the local row stays `unknown`). The key goes to `local_url` even when that is not the
-  provider's own `baseUrl`. Right: fine while both are the owner's endpoints.
+  provider's own `baseUrl`, but plain HTTP is restricted to loopback. Right: fine while both are
+  the owner's endpoints.
 - **One account per native harness** (future feature, owner 2026-11-01; not a top priority):
   `pt_api::Subscription` is a fixed enum (claude, codex, grok, local, api), and each quota reader
   reads the single login in the owner's home (`~/.claude`, `~/.codex`, `~/.grok`). Two Grok

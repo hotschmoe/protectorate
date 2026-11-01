@@ -23,6 +23,8 @@ pub struct Local {
     pub home: Option<PathBuf>,
     /// The provider in Pi's models.json that points at this endpoint.
     pub provider: String,
+    /// Configured Pi model, if one must be present in the endpoint's model list.
+    pub model: String,
 }
 
 /// What Pi's models.json says about one provider.
@@ -80,12 +82,16 @@ pub fn parse_models(body: &[u8]) -> Result<Vec<String>> {
         .get("data")
         .and_then(Value::as_array)
         .ok_or_else(|| Error::other("models response has no data array"))?;
-    Ok(data
+    let models: Vec<String> = data
         .iter()
         .filter_map(|m| m.get("id").and_then(Value::as_str))
         .filter(|id| !id.is_empty())
         .map(str::to_string)
-        .collect())
+        .collect();
+    if models.is_empty() {
+        return Err(Error::other("models response has no model ids"));
+    }
+    Ok(models)
 }
 
 impl Local {
@@ -133,6 +139,12 @@ impl Reader for Local {
         })?;
         let latency = started.elapsed().as_millis();
         let models = parse_models(&body)?;
+        if !self.model.is_empty() && !models.contains(&self.model) {
+            return Err(Error::other(format!(
+                "configured Pi model {:?} is absent from the endpoint",
+                self.model
+            )));
+        }
         Ok(Snapshot {
             plan: String::new(),
             windows: Vec::new(),

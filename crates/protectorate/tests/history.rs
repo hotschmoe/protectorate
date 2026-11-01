@@ -179,3 +179,49 @@ fn history_search_scope_and_rebuild() {
         "the original index is untouched"
     );
 }
+
+#[test]
+#[cfg(debug_assertions)]
+fn failed_history_commit_retries_without_new_transcript_data() {
+    use std::io::Write;
+
+    let arm = unique("history-arm");
+    let hub = Hub::start_with(
+        "history-retry",
+        "pi_local",
+        &[],
+        &[
+            ("PT_TEST_HISTORY_FAIL_COMMIT", "manifest"),
+            ("PT_TEST_HISTORY_FAIL_ARM", arm.to_str().unwrap()),
+        ],
+    );
+    let transcript = hub.home.join("sleeves/0/transcript.jsonl");
+    eventually("envoy transcript", Duration::from_secs(10), || {
+        transcript.is_file().then_some(())
+    });
+    std::thread::sleep(Duration::from_secs(2));
+    fs::write(&arm, "armed").unwrap();
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .open(&transcript)
+        .unwrap();
+    writeln!(file, "{{\"seq\":10000,\"g\":1,\"time_ms\":1000,\"entry\":{{\"type\":\"user_message\",\"request_id\":\"fixture\",\"from\":\"owner\",\"text\":\"historyretryquartz\"}}}}").unwrap();
+    drop(file);
+    eventually(
+        "the injected commit failure",
+        Duration::from_secs(15),
+        || {
+            hub.log_text()
+                .contains("history commit: injected history manifest commit failure")
+                .then_some(())
+        },
+    );
+    let len = fs::metadata(&transcript).unwrap().len();
+    let h = found(&hub, "historyretryquartz", 15);
+    assert_eq!(roles(&h, "user").len(), 1, "{h:?}");
+    assert_eq!(
+        fs::metadata(transcript).unwrap().len(),
+        len,
+        "retry did not need new transcript bytes"
+    );
+}

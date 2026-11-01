@@ -5,6 +5,7 @@ use pt_drivers::{Entry, Event, ToolStatus};
 
 use super::{Item, State, tool_call};
 use crate::Role;
+use crate::tail::clip;
 
 pub fn line(bytes: &[u8], st: &mut State, out: &mut Vec<Item>) -> bool {
     let Ok(e) = pt_json::from_bytes::<Event>(bytes) else {
@@ -16,7 +17,7 @@ pub fn line(bytes: &[u8], st: &mut State, out: &mut Vec<Item>) -> bool {
             harness, native_id, ..
         } => {
             st.harness = Some(harness);
-            st.session = native_id;
+            st.session = clip(&native_id, 1024).to_owned();
         }
         Entry::UserMessage { text, .. } => st.push(out, Role::User, &text, None),
         Entry::AssistantText {

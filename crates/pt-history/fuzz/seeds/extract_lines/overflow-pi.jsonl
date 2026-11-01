@@ -1,0 +1,1 @@
+{"type":"message","message":{"role":"assistant","usage":{"input":18446744073709551615,"cacheRead":1,"cacheWrite":2},"content":[{"type":"text","text":"overflow safe"}]}}

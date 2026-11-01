@@ -30,8 +30,10 @@ fn message(m: &Value, st: &mut State, out: &mut Vec<Item>) -> bool {
             let tokens = ["input", "cacheRead", "cacheWrite"]
                 .iter()
                 .filter_map(|k| u[*k].as_u64())
-                .sum();
-            st.usage(out, tokens, None);
+                .try_fold(0u64, u64::checked_add);
+            if let Some(tokens) = tokens {
+                st.usage(out, tokens, None);
+            }
             for b in m["content"].as_array().unwrap_or_default() {
                 match b["type"].as_str() {
                     Some("text") => {

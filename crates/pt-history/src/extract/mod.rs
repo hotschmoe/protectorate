@@ -117,7 +117,7 @@ impl State {
             return;
         }
         if role == Role::User {
-            self.turn += 1;
+            self.turn = self.turn.saturating_add(1);
         }
         let max = match role {
             Role::ToolCall | Role::ToolError => TOOL_MAX,
@@ -261,7 +261,19 @@ fn text_of(v: &Value) -> String {
 /// User text the harness wrapped in a tag (`<system-reminder>`, `<environment_context>`,
 /// command output) is context, not a prompt.
 fn is_wrapped(text: &str) -> bool {
-    text.trim_start().starts_with('<')
+    let text = text.trim_start();
+    [
+        "<system-reminder>",
+        "<environment_context>",
+        "<local-command-caveat>",
+        "<local-command-stdout>",
+        "<local-command-stderr>",
+        "<command-name>",
+        "<command-message>",
+        "<command-args>",
+    ]
+    .iter()
+    .any(|tag| text.starts_with(tag))
 }
 
 const PATH_KEYS: &[&str] = &[

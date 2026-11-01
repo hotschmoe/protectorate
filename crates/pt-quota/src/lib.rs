@@ -28,7 +28,8 @@ use pt_api::{Quota, QuotaReading, QuotaWindow, Subscription};
 pub use cache::{Cache, Options};
 pub use error::{Error, Result};
 pub use select::{
-    Health, Spare, Target, select_target, spare_quota, spare_trigger, window_length_ms,
+    Health, Spare, Target, select_target, select_with_fallback, spare_quota, spare_trigger,
+    window_length_ms,
 };
 pub use task_size::{TaskSize, Thresholds, derive, median_of_last};
 pub use time::{fmt_age, now_ms, parse_rfc3339};
@@ -90,10 +91,22 @@ pub(crate) fn home_dir(over: Option<&std::path::Path>) -> Result<std::path::Path
 
 pub(crate) fn read_login(path: &std::path::Path) -> Result<Vec<u8>> {
     use std::io::Read;
-    let file = std::fs::File::open(path).map_err(|e| match e.kind() {
-        std::io::ErrorKind::NotFound => Error::unavailable("not logged in (no login file)"),
-        _ => Error::other(format!("open login file: {e}")),
-    })?;
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => Error::unavailable("not logged in (no login file)"),
+            _ => Error::other(format!("open login file: {e}")),
+        })?;
+    if !file
+        .metadata()
+        .map_err(|e| Error::other(format!("stat login file: {e}")))?
+        .is_file()
+    {
+        return Err(Error::other("login file is not a regular file"));
+    }
     let mut buf = Vec::new();
     file.take(1 << 20)
         .read_to_end(&mut buf)

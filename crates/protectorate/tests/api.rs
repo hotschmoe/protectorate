@@ -580,6 +580,8 @@ fn quota_readers_run() {
     let models = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let models_port = models.local_addr().unwrap().port();
     let (ready_tx, ready_rx) = mpsc::channel();
+    // The local reader requires the hub's configured Pi model to be listed.
+    let model = pi_model();
     std::thread::spawn(move || {
         let mut ready = Some(ready_rx);
         for c in models.incoming() {
@@ -589,7 +591,10 @@ fn quota_readers_run() {
             if let Some(ready) = ready.take() {
                 ready.recv_timeout(Duration::from_secs(30)).unwrap();
             }
-            let body = r#"{"object":"list","data":[{"id":"stand-in-model"}]}"#;
+            let body = format!(
+                r#"{{"object":"list","data":[{{"id":"stand-in-model"}},{{"id":{}}}]}}"#,
+                Value::from(model.as_str())
+            );
             let _ = write!(
                 c,
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
@@ -608,13 +613,13 @@ fn quota_readers_run() {
                 "local_url",
                 format!("http://127.0.0.1:{models_port}/v1").into(),
             ),
-            ("quota_poll_secs", 1u64.into()),
+            ("quota_poll_secs", 60u64.into()),
             ("claude_program", none.into()),
             ("codex_program", none.into()),
             ("grok_program", none.into()),
         ],
         &["--listen", &listen],
-        &[],
+        &[("PT_TEST_QUOTA_STALE_MS", "2000")],
     );
     let owner = hub.printed("owner token (shown once): ");
     let mut s = ws(port, &format!("?access_token={owner}"), &[]).expect("events");
@@ -639,6 +644,15 @@ fn quota_readers_run() {
         state["quotas"][0]["reading"].as_str(),
         Some("ok"),
         "{state}"
+    );
+    #[cfg(debug_assertions)]
+    eventually(
+        "cached quota to expire without another poll",
+        Duration::from_secs(8),
+        || {
+            let (_, list) = post(port, "ListQuotas", Some(&owner), "{}");
+            (list["quotas"][0]["reading"].as_str() == Some("stale")).then_some(())
+        },
     );
 }
 

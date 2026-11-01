@@ -19,6 +19,9 @@ fn main() -> ExitCode {
     let mut home: Option<PathBuf> = None;
     let mut local = std::env::var("PT_LOCAL_URL").unwrap_or_default();
     let mut pi_provider = std::env::var("PT_E2E_PI_PROVIDER").unwrap_or_default();
+    let mut pi_model = String::new();
+    let mut allow = None;
+    let mut test_cache_ms = None;
     let (mut claude_url, mut codex_url, mut grok_url) = (None, None, None);
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {
@@ -30,6 +33,31 @@ fn main() -> ExitCode {
             "--home" => home = Some(PathBuf::from(value)),
             "--local" => local = value,
             "--pi-provider" => pi_provider = value,
+            "--pi-model" => pi_model = value,
+            "--test-cache-ms" if cfg!(debug_assertions) => {
+                test_cache_ms = value.parse::<u64>().ok().filter(|ms| *ms > 0);
+                if test_cache_ms.is_none() {
+                    eprintln!("pt-quota-probe: invalid test cache interval");
+                    return ExitCode::from(2);
+                }
+            }
+            "--allow" => {
+                let mut candidates = Vec::new();
+                for name in value.split(',') {
+                    let harness = match name {
+                        "claude" => Harness::Claude,
+                        "codex" => Harness::Codex,
+                        "grok" => Harness::Grok,
+                        "pi_local" => Harness::PiLocal,
+                        _ => {
+                            eprintln!("pt-quota-probe: unknown harness {name}");
+                            return ExitCode::from(2);
+                        }
+                    };
+                    candidates.push(harness);
+                }
+                allow = Some(candidates);
+            }
             "--claude-url" => claude_url = Some(value),
             "--codex-url" => codex_url = Some(value),
             "--grok-url" => grok_url = Some(value),
@@ -56,14 +84,43 @@ fn main() -> ExitCode {
             base_url: local,
             home,
             provider: pi_provider,
+            model: pi_model,
         }),
     ];
-    let mut cache = Cache::new(readers, Options::default());
+    let mut options = Options::default();
+    if let Some(ms) = test_cache_ms {
+        let interval = std::time::Duration::from_millis(ms);
+        options.ttl = interval;
+        options.backoff_base = interval;
+        options.stale_after = interval.saturating_mul(2);
+    }
+    let mut cache = Cache::new(readers, options);
     let now = pt_quota::now_ms();
     cache.refresh(now, false);
-    let quotas = cache.quotas(now);
+    if let Some(ms) = test_cache_ms {
+        let earlier = now.saturating_sub(86_400_000);
+        cache.refresh(earlier, true);
+        std::thread::sleep(std::time::Duration::from_millis(ms.saturating_add(50)));
+        cache.refresh(earlier, false);
+    }
+    let quotas = cache.quotas();
     for q in &quotas {
         println!("{}", line(q, now));
+    }
+    if let Some(ms) = test_cache_ms {
+        std::thread::sleep(std::time::Duration::from_millis(
+            ms.saturating_mul(2).saturating_add(50),
+        ));
+        for q in cache.quotas() {
+            println!("aged {}", line(&q, now));
+        }
+    }
+    if let Some(candidates) = allow {
+        match pt_quota::select_with_fallback(now, TaskSize::Medium, &candidates, &quotas) {
+            Ok((harness, reason)) => println!("target {harness:?}: {reason}"),
+            Err(reason) => println!("target none: {reason}"),
+        }
+        return ExitCode::SUCCESS;
     }
     let target = pt_quota::select_target(
         now,

@@ -90,22 +90,31 @@ pub fn parse_usage(body: &[u8]) -> Result<Snapshot> {
         ..Snapshot::default()
     };
     for key in ["primary_window", "secondary_window"] {
-        let Some(w) = v.pointer(&format!("/rate_limit/{key}")) else {
+        let Some(w) = v
+            .pointer(&format!("/rate_limit/{key}"))
+            .filter(|w| !w.is_null())
+        else {
             continue;
         };
-        let Some(pct) = w.get("used_percent").and_then(Value::as_f64) else {
-            continue;
-        };
+        let pct = w
+            .get("used_percent")
+            .and_then(Value::as_f64)
+            .filter(|n| n.is_finite() && *n >= 0.0)
+            .ok_or_else(|| Error::other(format!("usage response has invalid {key} usage")))?;
         let secs = w
             .get("limit_window_seconds")
             .and_then(Value::as_i64)
-            .unwrap_or(0);
+            .filter(|n| *n > 0)
+            .ok_or_else(|| Error::other(format!("usage response has invalid {key} length")))?;
         let reset = w
             .get("reset_at")
             .and_then(Value::as_i64)
             .and_then(secs_to_ms);
         snap.windows
             .push(window(window_label(secs / 60), pct, reset));
+    }
+    if snap.windows.is_empty() {
+        return Err(Error::other("usage response has no rate limit windows"));
     }
     Ok(snap)
 }
