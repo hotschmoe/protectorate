@@ -90,7 +90,18 @@ impl Core<'_> {
             E::RequeueJob { job } => self.requeue_job(*job),
 
             E::Dispatched { effect, attempt } => {
-                self.effect_report(*effect, *attempt, effect::Report::Dispatched)
+                // The answer lets an executor that asks write only what is still released.
+                let released = self
+                    .st
+                    .effects
+                    .get(effect)
+                    .is_some_and(|e| e.attempt == *attempt && e.state == EffectState::Intent);
+                self.effect_report(*effect, *attempt, effect::Report::Dispatched);
+                if released {
+                    self.reply(Reply::Accepted);
+                } else {
+                    self.refuse(Code::FailedPrecondition, "the effect is no longer released");
+                }
             }
             E::Acked {
                 effect,

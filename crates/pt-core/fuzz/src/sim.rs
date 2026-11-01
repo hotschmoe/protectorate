@@ -197,7 +197,9 @@ impl Sim {
                 let Some(e) = self.st.effects.get(&effect) else {
                     return;
                 };
-                if e.attempt != attempt || e.state != EffectState::Intent {
+                // A node executor asks: its check may have read a view from before a cancel.
+                let asks = kind.sleeve().is_none();
+                if !asks && (e.attempt != attempt || e.state != EffectState::Intent) {
                     return;
                 }
                 if let Some((s, g)) = kind.incarnation()
@@ -205,7 +207,14 @@ impl Sim {
                 {
                     return;
                 }
-                self.apply(EventKind::Dispatched { effect, attempt });
+                let out = self.apply(EventKind::Dispatched { effect, attempt });
+                // The answer goes back to the executor, not into the released intents.
+                if matches!(self.held.last(), Some(Intent::Reply(_))) {
+                    self.held.pop();
+                }
+                if asks && !out.contains(&Intent::Reply(Reply::Accepted)) {
+                    return;
+                }
                 self.dispatched.insert(effect);
                 if let EffectKind::RespondApproval { sleeve, .. } = kind {
                     self.responses.insert(effect, self.st.sleeves[&sleeve].g);

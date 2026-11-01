@@ -92,6 +92,17 @@ pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<I
                 }
             }
         }
+        let removed = view.state.sleeves.values().filter(|s| {
+            s.life == Life::Removed
+                && before
+                    .state
+                    .sleeve(s.id)
+                    .is_some_and(|o| o.life != Life::Removed)
+        });
+        for s in removed {
+            exec.release(s.id);
+            hub.transcripts.close(s.id);
+        }
     }
     info!("core stopped");
 }

@@ -2,9 +2,10 @@
 //! node scheduling, one serial executor per node, and the hub's copy of each job's log and
 //! artifacts.
 //!
-//! A node's executor thread is the one ordered stream for that node's reports: it submits
+//! A node's executor thread is the one ordered stream for that node's reports: it reports
 //! `Dispatched` before it writes, then the effect's outcome, then the node's status, in the
-//! order they happened.
+//! order they happened. `Dispatched` waits for the core's answer, and a refused one is not
+//! written: a job cancelled before its submit left has taken the submit back.
 //!
 //! Each submit carries a token naming it (SPEC 12a fencing); a status whose token is not the
 //! current attempt's is ignored, and cancels, acks and fetches carry it so the node refuses them
@@ -23,6 +24,7 @@ use std::time::{Duration, Instant};
 use pt_api::{self as api, EpochMs, HubStreamMessage};
 use pt_core::{
     EffectKind, EffectState, EventKind, Intent, Job, JobId, JobReport, JobSpec, JobState, NodeId,
+    Reply,
 };
 use pt_fleet::NodeClient;
 use pt_frame::msg::{
@@ -32,7 +34,7 @@ use pt_frame::msg::{
 use pt_json::ToJson;
 
 use crate::hub::{Hub, View};
-use crate::log::{debug, info, warning};
+use crate::log::{debug, error, info, warning};
 use crate::transcript::lock;
 
 /// Log bytes asked for per FetchLog.
@@ -40,6 +42,8 @@ pub const LOG_FETCH: u64 = 1 << 20;
 /// How long an executor waits for a fleet that is still starting (after a hub restart).
 const FLEET_WAIT: Duration = Duration::from_secs(120);
 const CALL_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a node executor waits for the core to take a `Dispatched`.
+const DISPATCH_TIMEOUT: Duration = Duration::from_secs(30);
 const SCHEDULE_EVERY: Duration = Duration::from_secs(2);
 const ARTIFACT_TIMEOUT_SECS: u64 = 300;
 const ARTIFACT_CAP: u64 = 64 << 20;
@@ -408,23 +412,32 @@ impl JobExec {
             let _ = self.sched.send(intent);
             return;
         };
-        let tx = self.nodes.entry(node).or_insert_with(|| {
-            let (tx, rx) = mpsc::channel();
-            let exec = NodeExec {
-                hub: self.hub.clone(),
-                node,
-                client: None,
-                epoch: String::new(),
-                protocol: 0,
-                pending_status: None,
-            };
-            thread::Builder::new()
-                .name(format!("pt-node-{}", node.0))
-                .spawn(move || exec.run(rx))
-                .expect("spawn a node executor");
-            tx
-        });
-        let _ = tx.send(intent);
+        if let Some(tx) = self.nodes.get(&node) {
+            let _ = tx.send(intent);
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let exec = NodeExec {
+            hub: self.hub.clone(),
+            node,
+            client: None,
+            epoch: String::new(),
+            protocol: 0,
+            pending_status: None,
+        };
+        match thread::Builder::new()
+            .name(format!("pt-node-{}", node.0))
+            .spawn(move || exec.run(rx))
+        {
+            Ok(_) => {
+                let _ = tx.send(intent);
+                self.nodes.insert(node, tx);
+            }
+            Err(e) => {
+                error!("node {}: spawn executor: {e}", node.0);
+                crate::exec::refuse(&self.hub, intent, &format!("spawn executor: {e}"));
+            }
+        }
     }
 }
 
@@ -695,7 +708,17 @@ impl NodeExec {
                 if !crate::exec::fresh(&view, effect, attempt, &kind) {
                     return debug!("node {}: dropped stale effect {}", self.node.0, effect.0);
                 }
-                self.submit(EventKind::Dispatched { effect, attempt });
+                // Asked, not told: a job cancelled before its submit left takes the submit back.
+                let dispatched = EventKind::Dispatched { effect, attempt };
+                match self.hub.command(dispatched, DISPATCH_TIMEOUT) {
+                    Ok(Reply::Accepted) => {}
+                    other => {
+                        return debug!(
+                            "node {}: effect {} not dispatched: {other:?}",
+                            self.node.0, effect.0
+                        );
+                    }
+                }
                 let outcome = match kind {
                     EffectKind::NodeSubmit {
                         job, attempt: a, ..
@@ -790,7 +813,7 @@ impl NodeExec {
                 if self.current(&view, job, attempt)
                     && let Err(e) = self.pull_log(&view, job, attempt, Some(upto))
                 {
-                    debug!("job {}: reading the log: {e}", job.0);
+                    debug!("job {}: reading the log: {}", job.0, e.text());
                 }
             }
             Intent::FetchArtifacts { job, attempt, .. } => {
@@ -911,14 +934,15 @@ impl NodeExec {
     }
 
     /// Appends the node's log to the hub copy, up to `upto` or to its end. True once the node
-    /// says every byte has been sent.
+    /// says every byte has been sent. A node that sends more than it was asked for, or past the
+    /// log cap the job was submitted with, fails the check.
     fn pull_log(
         &mut self,
         view: &View,
         job: JobId,
         attempt: u32,
         upto: Option<u64>,
-    ) -> Result<bool, String> {
+    ) -> Result<bool, Fail> {
         let nid = node_job_id(&self.hub, job);
         let token = self.token(view, job);
         let start = self.hub.jobs.log_len(job, attempt);
@@ -938,12 +962,19 @@ impl NodeExec {
             };
             let (bytes, end) = match self.call("FetchLog", |c| c.fetch_log(q)) {
                 Ok(v) => v,
-                Err(e) => break Err(e.text()),
+                Err(e) => break Err(e),
             };
+            let len = bytes.len() as u64;
+            if len > max || at.saturating_add(len) > msg::DEFAULT_LOG_CAP {
+                break Err(Fail::Check(format!(
+                    "the node sent {len} log bytes at {at}, asked for {max} of at most {}",
+                    msg::DEFAULT_LOG_CAP
+                )));
+            }
             if !bytes.is_empty() {
                 match self.hub.jobs.append(job, attempt, at, &bytes) {
                     Ok(n) => at = n,
-                    Err(e) => break Err(e.to_string()),
+                    Err(e) => break Err(Fail::Reach(e.to_string())),
                 }
             }
             if end.done {
@@ -963,8 +994,17 @@ impl NodeExec {
     /// Exited: the rest of the log, then each artifact, then `ArtifactsChecked`. A connection
     /// failure reports nothing: the lease makes the job Lost and its next status collects again.
     fn collect(&mut self, view: &View, job: JobId, attempt: u32) {
-        if let Err(e) = self.pull_log(view, job, attempt, None) {
-            return warning!("job {}: collecting the log: {e}", job.0);
+        match self.pull_log(view, job, attempt, None) {
+            Ok(_) => {}
+            Err(Fail::Check(e)) => {
+                warning!("job {}: the log: {e}", job.0);
+                return self.submit(EventKind::ArtifactsChecked {
+                    job,
+                    attempt,
+                    ok: false,
+                });
+            }
+            Err(e) => return warning!("job {}: collecting the log: {}", job.0, e.text()),
         }
         let req = view
             .state
@@ -1032,6 +1072,8 @@ impl NodeExec {
         let mut out = File::create(&dest).map_err(io)?;
         let mut sha = pt_hash::Sha256::new();
         let mut at = 0u64;
+        // The size the first answer gives: every later slice must agree and fit in it.
+        let mut size = None;
         let end = loop {
             let q = FetchArtifact {
                 job_id: nid.clone(),
@@ -1048,7 +1090,15 @@ impl NodeExec {
                     end.size
                 )));
             }
-            if end.offset != at + bytes.len() as u64 {
+            let declared = *size.get_or_insert(end.size);
+            let len = bytes.len() as u64;
+            if end.size != declared || len > ARTIFACT_FETCH || at.saturating_add(len) > declared {
+                return Err(Fail::Check(format!(
+                    "the node sent {len} bytes at {at} of {} (first said {declared})",
+                    end.size
+                )));
+            }
+            if end.offset != at + len {
                 return Err(Fail::Check(format!(
                     "the node sent {} bytes from {at} but says the next fetch starts at {}",
                     bytes.len(),
@@ -1147,8 +1197,14 @@ impl NodeExec {
                     token: None,
                 };
                 let (bytes, end) = self.call("FetchLog", |c| c.fetch_log(q))?;
+                let len = bytes.len() as u64;
+                if len > LOG_FETCH || at.saturating_add(len) > ARTIFACT_CAP {
+                    return Err(Fail::Check(format!(
+                        "the node sent {len} bytes at {at}, over the {ARTIFACT_CAP} byte cap"
+                    )));
+                }
                 out.write_all(&bytes).map_err(io)?;
-                at += bytes.len() as u64;
+                at += len;
                 if end.truncated {
                     return Err(Fail::Node(ErrorReply {
                         code: NodeCode::NotFinished,

@@ -279,6 +279,15 @@ impl Core<'_> {
         }
     }
 
+    /// Takes back a released record before any executor dispatched it: a later `Dispatched`
+    /// is refused, so it is never written.
+    pub(crate) fn withdraw(&mut self, id: EffectId) {
+        if self.effect_state(id) == Some(EffectState::Intent) {
+            self.set_effect(id, EffectState::Abandoned);
+            self.on_effect(id, None);
+        }
+    }
+
     pub(crate) fn abandon_cmd(&mut self, id: EffectId) {
         if self
             .st

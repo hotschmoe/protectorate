@@ -19,7 +19,9 @@ reads no clock, so `replay(journal) == live state`. The hub's core thread is its
   `Compact`, `RespondApproval`, `Stop`, `Remove`, `Start`, `Resleeve`, `Abandon`, `Viewed`,
   `CreateJob`, `CancelJob`, `AbandonJob`, `RequeueJob`, `RequestApproval` (a code rule asks the
   owner, D9). Each gets exactly one `Intent::Reply`.
-- Effect reports, carrying the record's `attempt`: `Dispatched` (sent before the first byte),
+- Effect reports, carrying the record's `attempt`: `Dispatched` (sent before the first byte;
+  it is answered `Accepted` only while the record is still `Intent`, so an executor that asks
+  writes nothing the core has taken back),
   `Acked` (with the native turn id for prompts), `Nacked` (definitive: nothing applied), `Lost`
   (timeout or channel lost), `Probed`.
 - `Launched` is the launch receipt (scope, pid), journaled as soon as spawn returns (12a item 2).
@@ -56,7 +58,9 @@ with the hub (`HubRecovered`), is marked `orphan`; an orphaned action approval d
 - Per sleeve (and per job) the executor is serial. Immediately before the syscall it re-checks
   the record in the current state: same `attempt`, still `Intent`, and for incarnation kinds the
   sleeve's `g` unchanged. Otherwise it drops the intent.
-- Report `Dispatched` before writing. An Unsafe kind (prompts, steers, approvals, compaction)
+- Report `Dispatched` before writing; node executors wait for its answer. A job cancelled while
+  its submit is still `Intent` is `Cancelled` at once and the submit `Abandoned`, with no cancel
+  sent. An Unsafe kind (prompts, steers, approvals, compaction)
   is never retried by any path: the core sends it once, and the hub must never resend it. A
   repeated `RespondApproval` while a response may apply answers `Duplicate` or is refused.
 - A sleeve's observations and its executor's reports reach the core in one ordered stream:

@@ -4,13 +4,16 @@
 //!
 //! A live incarnation's pump is the one ordered stream for its sleeve: the executor hands it
 //! its reports, and the pump submits each only after every harness event it has received, so
-//! output read before a write never reaches the core after the write's `Dispatched`.
+//! output read before a write never reaches the core after the write's `Dispatched`. A prompt
+//! is reported by the pump itself: `Dispatched` when the driver's entry for the write comes
+//! through (output read before it is the previous turn's) and the verdict when its ack does.
 
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -18,16 +21,16 @@ use std::time::{Duration, Instant};
 
 use pt_core::{
     Ask, Choice, EffectId, EffectKind, EffectState, EventKind, ExitCause, Gen, Harness, Intent,
-    Layout, Obs, ProbeResult, Proc, Sleeve, SleeveId, Target, TurnEnd,
+    Layout, Life, Obs, ProbeResult, Proc, Sleeve, SleeveId, Target, TurnEnd,
 };
-use pt_drivers::{Ack, Decision, Entry, ErrorClass, Session, Stop};
+use pt_drivers::{Ack, AckKind, Decision, Entry, ErrorClass, Session, Stop};
 use pt_json::obj;
 
 use crate::brief;
 use crate::git;
 use crate::home::now_ms;
 use crate::hub::{Hub, View};
-use crate::log::{debug, info, warning};
+use crate::log::{debug, error, info, warning};
 use crate::transcript::Note;
 use crate::wire;
 
@@ -36,8 +39,22 @@ const STOP_GRACE: Duration = Duration::from_secs(10);
 /// How long a pump waits on harness output before it looks for an executor report.
 const ORDER_POLL: Duration = Duration::from_millis(10);
 
-/// A report the pump submits in its stream, then acknowledges.
-type Ordered = (EventKind, Sender<()>);
+/// How long a confirmed prompt with no native turn id waits for the harness's turn start.
+const NATIVE_WAIT: Duration = Duration::from_secs(2);
+
+/// What the executor hands the pump, which acknowledges each once it is in.
+enum Ordered {
+    /// A report the pump submits in its stream.
+    Report(EventKind),
+    /// A prompt about to be written, which the pump reports from the driver's entries.
+    Expect {
+        request_id: String,
+        effect: EffectId,
+        attempt: u32,
+    },
+}
+
+type Order = (Ordered, Sender<()>);
 
 pub struct Executors {
     hub: Arc<Hub>,
@@ -69,33 +86,98 @@ impl Executors {
         let Some(id) = intent_sleeve(&intent) else {
             return self.jobs.route(intent);
         };
-        let tx = self.sleeves.entry(id).or_insert_with(|| {
-            let (tx, rx) = mpsc::channel();
-            let exec = SleeveExec {
-                hub: self.hub.clone(),
-                id,
-                live: None,
-            };
-            thread::Builder::new()
-                .name(format!("pt-exec-{}", id.0))
-                .spawn(move || exec.run(rx))
-                .expect("spawn sleeve executor");
-            tx
-        });
-        let _ = tx.send(intent);
+        if let Some(tx) = self.sleeves.get(&id) {
+            let _ = tx.send(intent);
+            return;
+        }
+        let view = self.hub.view();
+        if view
+            .state
+            .sleeve(id)
+            .is_none_or(|s| s.life == Life::Removed)
+        {
+            return refuse(&self.hub, intent, "the sleeve is removed");
+        }
+        let (tx, rx) = mpsc::channel();
+        let exec = SleeveExec {
+            hub: self.hub.clone(),
+            id,
+            live: None,
+        };
+        match thread::Builder::new()
+            .name(format!("pt-exec-{}", id.0))
+            .spawn(move || exec.run(rx))
+        {
+            Ok(_) => {
+                let _ = tx.send(intent);
+                self.sleeves.insert(id, tx);
+            }
+            Err(e) => {
+                error!("sleeve {}: spawn executor: {e}", id.0);
+                refuse(&self.hub, intent, &format!("spawn executor: {e}"));
+            }
+        }
     }
+
+    /// Lets a removed sleeve's executor finish what it was handed and end; later intents for it
+    /// are answered here.
+    pub fn release(&mut self, id: SleeveId) {
+        self.sleeves.remove(&id);
+    }
+}
+
+/// Answers an intent no executor will run: an effect is refused, a probe cannot tell.
+pub(crate) fn refuse(hub: &Hub, intent: Intent, why: &str) {
+    match intent {
+        Intent::Execute {
+            effect, attempt, ..
+        } => {
+            hub.submit(EventKind::Dispatched { effect, attempt });
+            hub.submit(EventKind::Nacked {
+                effect,
+                attempt,
+                reason: why.to_string(),
+            });
+        }
+        Intent::Probe {
+            effect, attempt, ..
+        } => hub.submit(EventKind::Probed {
+            effect,
+            attempt,
+            result: ProbeResult::Unknowable,
+        }),
+        other => debug!("dropped {other:?}: {why}"),
+    }
+}
+
+/// Runs `f` on a new named thread; the error says what could not start.
+fn spawn(name: String, f: impl FnOnce() + Send + 'static) -> Result<(), String> {
+    thread::Builder::new()
+        .name(name.clone())
+        .spawn(f)
+        .map(drop)
+        .map_err(|e| format!("spawn {name}: {e}"))
 }
 
 struct Live {
     g: Gen,
     session: Arc<Session>,
-    order: Sender<Ordered>,
+    order: Sender<Order>,
 }
 
 struct SleeveExec {
     hub: Arc<Hub>,
     id: SleeveId,
     live: Option<Live>,
+}
+
+struct Prompt<'a> {
+    g: Gen,
+    effect: EffectId,
+    attempt: u32,
+    request_id: &'a str,
+    text: &'a str,
+    steer: bool,
 }
 
 enum Outcome {
@@ -278,6 +360,51 @@ fn wait_scope_empty(scope: &str) {
     }
 }
 
+/// Kills any `systemd-run` of ours still about to register `scope`, and returns once it is
+/// gone: one that an earlier hub started would register the scope after a probe found none.
+fn kill_unregistered(scope: &str) {
+    let uid = fs::metadata("/proc/self").map(|m| m.uid()).ok();
+    let Ok(dir) = fs::read_dir("/proc") else {
+        return;
+    };
+    let pids: Vec<u32> = dir
+        .filter_map(|e| e.ok()?.file_name().to_str()?.parse().ok())
+        .filter(|pid| registering(*pid, scope, uid))
+        .collect();
+    for pid in &pids {
+        warning!("{scope}: killing systemd-run {pid}, which never registered it");
+        if let Err(e) = Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .status()
+        {
+            warning!("kill {pid}: {e}");
+        }
+    }
+    let start = Instant::now();
+    while pids.iter().any(|p| registering(*p, scope, uid)) {
+        if start.elapsed() > Duration::from_secs(10) {
+            return warning!("{scope}: systemd-run {pids:?} outlived SIGKILL");
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Whether `pid` is a `systemd-run --unit <scope>` of `uid` that has not yet become the command.
+fn registering(pid: u32, scope: &str, uid: Option<u32>) -> bool {
+    let dir = PathBuf::from(format!("/proc/{pid}"));
+    if fs::metadata(&dir).map(|m| m.uid()).ok() != uid {
+        return false;
+    }
+    let Ok(cmdline) = fs::read(dir.join("cmdline")) else {
+        return false;
+    };
+    let args: Vec<&[u8]> = cmdline.split(|b| *b == 0).collect();
+    args.first().is_some_and(|a| a.ends_with(b"systemd-run"))
+        && args
+            .windows(2)
+            .any(|w| w[0] == b"--unit" && w[1] == scope.as_bytes())
+}
+
 impl SleeveExec {
     fn run(mut self, rx: Receiver<Intent>) {
         for intent in rx {
@@ -290,11 +417,25 @@ impl SleeveExec {
     fn submit(&self, kind: EventKind) {
         if let Some(live) = &self.live {
             let (tx, rx) = mpsc::channel();
-            if live.order.send((kind.clone(), tx)).is_ok() && rx.recv().is_ok() {
+            if live.order.send((Ordered::Report(kind.clone()), tx)).is_ok() && rx.recv().is_ok() {
                 return;
             }
         }
         self.hub.submit(kind);
+    }
+
+    /// Tells incarnation `g`'s pump of a prompt about to be written; false when it has ended.
+    fn expect(&self, g: Gen, request_id: &str, effect: EffectId, attempt: u32) -> bool {
+        let Some(live) = self.live.as_ref().filter(|l| l.g == g) else {
+            return false;
+        };
+        let (tx, rx) = mpsc::channel();
+        let expect = Ordered::Expect {
+            request_id: request_id.to_string(),
+            effect,
+            attempt,
+        };
+        live.order.send((expect, tx)).is_ok() && rx.recv().is_ok()
     }
 
     fn handle(&mut self, intent: Intent) {
@@ -308,8 +449,13 @@ impl SleeveExec {
                 if !fresh(&view, effect, attempt, &kind) {
                     return debug!("sleeve {}: dropped stale effect {}", self.id.0, effect.0);
                 }
-                self.submit(EventKind::Dispatched { effect, attempt });
-                let outcome = self.execute(&view, kind);
+                if !matches!(
+                    kind,
+                    EffectKind::SendPrompt { .. } | EffectKind::Steer { .. }
+                ) {
+                    self.submit(EventKind::Dispatched { effect, attempt });
+                }
+                let outcome = self.execute(&view, effect, attempt, kind);
                 self.submit(match outcome {
                     Outcome::Acked(native) => EventKind::Acked {
                         effect,
@@ -415,6 +561,9 @@ impl SleeveExec {
             return self.live_for(g).is_some_and(|s| !s.is_exited());
         }
         let scope = self.hub.scope_name(self.id, g);
+        if self.live_for(g).is_none() {
+            kill_unregistered(&scope);
+        }
         for _ in 0..3 {
             match pt_sandbox::scope_alive(&scope) {
                 Ok(pids) => return pids.is_some(),
@@ -428,7 +577,13 @@ impl SleeveExec {
         true
     }
 
-    fn execute(&mut self, view: &View, kind: EffectKind) -> Outcome {
+    fn execute(
+        &mut self,
+        view: &View,
+        effect: EffectId,
+        attempt: u32,
+        kind: EffectKind,
+    ) -> Outcome {
         let Some(s) = view.state.sleeve(self.id) else {
             return Outcome::Nacked("no such sleeve".into());
         };
@@ -447,17 +602,16 @@ impl SleeveExec {
                 }
             },
             EffectKind::StopIncarnation { g, .. } => {
-                match self.live_for(g) {
-                    Some(session) => {
-                        thread::spawn(move || session.shutdown(STOP_GRACE));
-                    }
-                    None => {
-                        if let Err(e) = self.kill_and_watch(g) {
-                            return Outcome::Nacked(e);
-                        }
-                    }
+                let stopped = match self.live_for(g) {
+                    Some(session) => spawn(format!("pt-stop-{}-g{}", self.id.0, g.0), move || {
+                        session.shutdown(STOP_GRACE)
+                    }),
+                    None => self.kill_and_watch(g),
+                };
+                match stopped {
+                    Ok(()) => Outcome::Acked(None),
+                    Err(e) => Outcome::Nacked(e),
                 }
-                Outcome::Acked(None)
             }
             EffectKind::KillScope { g, .. } => match self.kill_and_watch(g) {
                 Ok(()) => Outcome::Acked(None),
@@ -472,16 +626,27 @@ impl SleeveExec {
             },
             EffectKind::SendPrompt {
                 g,
-                request_id,
-                text,
+                ref request_id,
+                ref text,
                 ..
-            } => self.prompt(view, g, &request_id, &text, false),
-            EffectKind::Steer {
+            }
+            | EffectKind::Steer {
                 g,
-                request_id,
-                text,
+                ref request_id,
+                ref text,
                 ..
-            } => self.prompt(view, g, &request_id, &text, true),
+            } => {
+                let steer = matches!(kind, EffectKind::Steer { .. });
+                let p = Prompt {
+                    g,
+                    effect,
+                    attempt,
+                    request_id,
+                    text,
+                    steer,
+                };
+                self.prompt(view, p)
+            }
             EffectKind::RespondApproval {
                 g, approval, allow, ..
             } => match self.live_for(g) {
@@ -715,49 +880,66 @@ impl SleeveExec {
         Ok(())
     }
 
+    /// Kills incarnation `g`. Its pump, when this hub runs one, reports `Exited` once the scope
+    /// is empty, after the output it read; otherwise a watcher does.
     fn kill_and_watch(&self, g: Gen) -> Result<(), String> {
-        if let Some(session) = self.live_for(g) {
-            thread::spawn(move || session.shutdown(Duration::ZERO));
+        let live = self.live_for(g);
+        if let Some(session) = live.clone() {
+            spawn(format!("pt-kill-{}-g{}", self.id.0, g.0), move || {
+                session.shutdown(Duration::ZERO)
+            })?;
         }
         if !self.hub.config.scopes {
             return Ok(());
         }
         let scope = self.hub.scope_name(self.id, g);
         pt_sandbox::kill_scope(&scope).map_err(|e| e.to_string())?;
+        if live.is_some() {
+            return Ok(());
+        }
         let hub = self.hub.clone();
         let id = self.id;
-        thread::spawn(move || {
+        spawn(format!("pt-watch-{}-g{}", id.0, g.0), move || {
             wait_scope_empty(&scope);
             hub.submit(EventKind::Exited {
                 sleeve: id,
                 g,
                 cause: ExitCause::Killed,
             });
-        });
-        Ok(())
+        })
     }
 
-    fn prompt(&self, view: &View, g: Gen, request_id: &str, text: &str, steer: bool) -> Outcome {
-        let Some(session) = self.live_for(g) else {
-            return Outcome::Nacked("no live session for that generation".into());
+    /// Writes a prompt. Its `Dispatched` and verdict come from the pump, which sees the write's
+    /// entry and the ack in order with the output; only a write that never happened, or an
+    /// ack that never came, is reported here.
+    fn prompt(&self, view: &View, p: Prompt) -> Outcome {
+        let refused = |why: String| {
+            self.submit(EventKind::Dispatched {
+                effect: p.effect,
+                attempt: p.attempt,
+            });
+            Outcome::Nacked(why)
         };
-        let from = Hub::from_label(&view.state, self.id, request_id);
-        if Hub::envoy_id(&view.state) == Some(self.id) {
-            self.note_envoy_origin(&from, steer);
+        let Some(session) = self.live_for(p.g) else {
+            return refused("no live session for that generation".into());
+        };
+        if !self.expect(p.g, p.request_id, p.effect, p.attempt) {
+            return refused("the incarnation has exited".into());
         }
-        let sent = if steer {
-            session.steer(request_id, &from, text)
+        let from = Hub::from_label(&view.state, self.id, p.request_id);
+        if Hub::envoy_id(&view.state) == Some(self.id) {
+            self.note_envoy_origin(&from, p.steer);
+        }
+        let sent = if p.steer {
+            session.steer(p.request_id, &from, p.text)
         } else {
-            session.send_user(request_id, &from, text)
+            session.send_user(p.request_id, &from, p.text)
         };
         if let Err(e) = sent {
-            return Outcome::Nacked(e.to_string());
+            return refused(e.to_string());
         }
-        match session.wait_ack(request_id, ACK_TIMEOUT) {
-            Ack::Confirmed { native_turn_id } => Outcome::Acked(native_turn_id),
-            Ack::Rejected { detail } => {
-                Outcome::Nacked(detail.unwrap_or_else(|| "rejected".into()))
-            }
+        match session.wait_ack(p.request_id, ACK_TIMEOUT) {
+            Ack::Confirmed { .. } | Ack::Rejected { .. } => Outcome::Reported,
             Ack::Pending => Outcome::Lost,
         }
     }
@@ -860,10 +1042,12 @@ fn input_text(input: &Option<pt_json::Value>) -> String {
 /// observations for the core, and reports `Exited` once the scope is confirmed empty.
 /// Records each harness event and submits its observations; between events (and every
 /// `ORDER_POLL`) it submits the executor's reports after draining what it has received.
-fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Receiver<Ordered>) {
+fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Receiver<Order>) {
     let mut p = Pump {
         last_error: None,
         cause: ExitCause::Killed,
+        expects: HashMap::new(),
+        held: None,
     };
     'run: loop {
         match events.recv_timeout(ORDER_POLL) {
@@ -875,21 +1059,28 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Rece
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
-        while let Ok((kind, done)) = ordered.try_recv() {
+        if p.held
+            .as_ref()
+            .is_some_and(|h| h.at.elapsed() >= NATIVE_WAIT)
+        {
+            p.flush_held(hub, None);
+        }
+        while let Ok((o, done)) = ordered.try_recv() {
             while let Ok(ev) = events.try_recv() {
                 if p.event(hub, run, ev) {
-                    hub.submit(kind);
+                    p.order(hub, o);
                     let _ = done.send(());
                     break 'run;
                 }
             }
-            hub.submit(kind);
+            p.order(hub, o);
             let _ = done.send(());
         }
     }
+    p.flush_held(hub, None);
     // Reports still queued come after all of this incarnation's output; later ones go direct.
-    while let Ok((kind, done)) = ordered.try_recv() {
-        hub.submit(kind);
+    while let Ok((o, done)) = ordered.try_recv() {
+        p.order(hub, o);
         let _ = done.send(());
     }
     drop(ordered);
@@ -915,9 +1106,135 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Rece
 struct Pump {
     last_error: Option<ErrorClass>,
     cause: ExitCause,
+    /// Prompts being written, by request id.
+    expects: HashMap<String, Expect>,
+    /// A confirmed prompt whose ack had no native turn id: the harness's turn start may.
+    held: Option<Held>,
+}
+
+struct Expect {
+    effect: EffectId,
+    attempt: u32,
+    dispatched: bool,
+}
+
+struct Held {
+    request_id: String,
+    effect: EffectId,
+    attempt: u32,
+    at: Instant,
 }
 
 impl Pump {
+    fn order(&mut self, hub: &Hub, o: Ordered) {
+        match o {
+            Ordered::Report(kind) => {
+                if let EventKind::Nacked { effect, .. } = &kind {
+                    self.expects.retain(|_, e| e.effect != *effect);
+                }
+                hub.submit(kind);
+            }
+            Ordered::Expect {
+                request_id,
+                effect,
+                attempt,
+            } => {
+                let e = Expect {
+                    effect,
+                    attempt,
+                    dispatched: false,
+                };
+                self.expects.insert(request_id, e);
+            }
+        }
+    }
+
+    fn flush_held(&mut self, hub: &Hub, native: Option<String>) {
+        if let Some(h) = self.held.take() {
+            hub.submit(EventKind::Acked {
+                effect: h.effect,
+                attempt: h.attempt,
+                native,
+            });
+        }
+    }
+
+    /// Reports a prompt from the driver's entries, before the observations of the same entry:
+    /// `Dispatched` at its write, the verdict at its ack, and a native turn id that only the
+    /// turn's start carries with the confirmation.
+    fn prompt_reports(&mut self, hub: &Hub, entry: &Entry) {
+        if let Some(h) = &self.held {
+            let native = match entry {
+                Entry::TurnStarted {
+                    request_id: Some(r),
+                    native_turn_id,
+                } if *r == h.request_id => native_turn_id.clone(),
+                _ => None,
+            };
+            self.flush_held(hub, native);
+        }
+        // A turn start ahead of its ack confirms the prompt and binds the turn.
+        if let Entry::TurnStarted {
+            request_id: Some(r),
+            native_turn_id: Some(native),
+        } = entry
+            && self.expects.get(r).is_some_and(|e| e.dispatched)
+            && let Some(e) = self.expects.remove(r)
+        {
+            return hub.submit(EventKind::Acked {
+                effect: e.effect,
+                attempt: e.attempt,
+                native: Some(native.clone()),
+            });
+        }
+        let (Entry::UserMessage { request_id, .. } | Entry::PromptAck { request_id, .. }) = entry
+        else {
+            return;
+        };
+        let Some(e) = self.expects.get_mut(request_id) else {
+            return;
+        };
+        let (effect, attempt) = (e.effect, e.attempt);
+        if !e.dispatched {
+            e.dispatched = true;
+            hub.submit(EventKind::Dispatched { effect, attempt });
+        }
+        let Entry::PromptAck {
+            ack,
+            native_turn_id,
+            detail,
+            ..
+        } = entry
+        else {
+            return;
+        };
+        self.expects.remove(request_id);
+        match (ack, native_turn_id) {
+            (AckKind::Confirmed, None) => {
+                self.held = Some(Held {
+                    request_id: request_id.clone(),
+                    effect,
+                    attempt,
+                    at: Instant::now(),
+                })
+            }
+            (AckKind::Confirmed, native) => hub.submit(EventKind::Acked {
+                effect,
+                attempt,
+                native: native.clone(),
+            }),
+            (AckKind::Rejected, _) => {
+                let reason = detail.clone().unwrap_or_else(|| "rejected".into());
+                info!("prompt {request_id} refused: {reason}");
+                hub.submit(EventKind::Nacked {
+                    effect,
+                    attempt,
+                    reason,
+                });
+            }
+        }
+    }
+
     /// Records one harness event and submits its observations; true once the harness exited.
     fn event(&mut self, hub: &Hub, run: &Run, ev: pt_drivers::Event) -> bool {
         let Run {
@@ -934,6 +1251,7 @@ impl Pump {
             hub.delta(id, g.0, ev.time_ms, entry);
             return false;
         }
+        self.prompt_reports(hub, &entry);
         let mut obs = Vec::new();
         match &entry {
             Entry::SessionInfo { native_id, .. } => obs.push(Obs::Ready {
