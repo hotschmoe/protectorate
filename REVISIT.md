@@ -713,3 +713,11 @@ Each entry: where, what was done, what right looks like.
   entry's `apiKey`, as a set environment variable's name or a literal; a `!command` key is never
   run (the local row stays `unknown`). The key goes to `local_url` even when that is not the
   provider's own `baseUrl`. Right: fine while both are the owner's endpoints.
+- **One account per native harness** (future feature, owner 2026-11-01; not a top priority):
+  `pt_api::Subscription` is a fixed enum (claude, codex, grok, local, api), and each quota reader
+  reads the single login in the owner's home (`~/.claude`, `~/.codex`, `~/.grok`). Two Grok
+  accounts, for example, can't be told apart. Right: accounts as data. Each one is a named login
+  (harness, a label, and the login home or config dir it lives in, such as `CLAUDE_CONFIG_DIR` or
+  `CODEX_HOME` where the harness supports one). There is one quota row and reader per account,
+  and the app's QUOTA screen lists every account. `select_target` weighs accounts rather than
+  harnesses, and a sleeve's incarnation records the account it draws on.
