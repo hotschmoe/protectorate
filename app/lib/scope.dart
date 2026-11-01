@@ -1,7 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import 'hub.dart';
-import 'model.dart';
+import 'api/api.g.dart';
 
 enum Screen { envoy, sleeves, approvals, nodes, quota, events, settings, sleeve, node }
 
@@ -17,6 +17,9 @@ class AppScope extends InheritedWidget {
     required this.say,
     required this.dark,
     required this.setDark,
+    required this.hubUrl,
+    required this.hubToken,
+    required this.connect,
     required super.child,
   });
 
@@ -28,6 +31,11 @@ class AppScope extends InheritedWidget {
   final void Function(String text, {Level level}) say;
   final bool dark;
   final void Function(bool) setDark;
+
+  /// The hub the app talks to; empty means the scripted FakeHub.
+  final String hubUrl;
+  final String hubToken;
+  final void Function(String url, String token) connect;
 
   static AppScope of(BuildContext context) {
     final s = context.dependOnInheritedWidgetOfExactType<AppScope>();
@@ -46,5 +54,6 @@ class AppScope extends InheritedWidget {
   }
 
   @override
-  bool updateShouldNotify(AppScope old) => old.state != state || old.dark != dark;
+  bool updateShouldNotify(AppScope old) =>
+      old.state != state || old.dark != dark || old.hub != hub || old.hubUrl != hubUrl;
 }

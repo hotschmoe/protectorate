@@ -5,7 +5,8 @@ import 'package:flutter/services.dart';
 
 import 'chat.dart';
 import 'hub.dart';
-import 'model.dart';
+import 'api/api.g.dart';
+import 'derived.dart';
 import 'scope.dart';
 import 'screens/approvals.dart';
 import 'screens/events.dart';
@@ -41,6 +42,9 @@ class Shell extends StatefulWidget {
     required this.hub,
     required this.dark,
     required this.setDark,
+    required this.hubUrl,
+    required this.hubToken,
+    required this.connect,
     this.initial = Screen.envoy,
     this.initialSleeve,
     this.initialNode,
@@ -49,6 +53,9 @@ class Shell extends StatefulWidget {
   final HubClient hub;
   final bool dark;
   final void Function(bool) setDark;
+  final String hubUrl;
+  final String hubToken;
+  final void Function(String url, String token) connect;
   final Screen initial;
   final String? initialSleeve;
   final String? initialNode;
@@ -213,7 +220,7 @@ class _ShellState extends State<Shell> {
         if (a != null) {
           final id = a.id;
           final ok = head == '/approve';
-          unawaited(app.act(() => widget.hub.decide(id, approve: ok),
+          unawaited(app.act(() => widget.hub.decide(id, ok ? Decision.allowOnce : Decision.deny),
               done: '${ok ? 'APPROVED' : 'DENIED'} $id'));
         }
       case '/interrupt' || '/stop' || '/resleeve':
@@ -224,7 +231,7 @@ class _ShellState extends State<Shell> {
         } else if (head == '/stop') {
           unawaited(app.act(() => widget.hub.stop(id)));
         } else {
-          final h = harnessFromWire(arg);
+          final h = Harness.fromJson(arg);
           if (h == Harness.unknown) {
             return _say('RESLEEVE TO WHAT? claude codex grok pi_local pi_vendor', level: Level.warn);
           }
@@ -253,6 +260,9 @@ class _ShellState extends State<Shell> {
             say: _say,
             dark: widget.dark,
             setDark: widget.setDark,
+            hubUrl: widget.hubUrl,
+            hubToken: widget.hubToken,
+            connect: widget.connect,
             child: Builder(builder: (context) => _frame(context, phone, box)),
           );
           return PopScope(
@@ -313,7 +323,7 @@ class _ShellState extends State<Shell> {
   }
 
   Color _msgColor(Palette p) => switch (_msgLevel) {
-    Level.info => p.lit,
+    Level.info || Level.unknown => p.lit,
     Level.warn => p.warn,
     Level.alarm => p.alarm,
   };

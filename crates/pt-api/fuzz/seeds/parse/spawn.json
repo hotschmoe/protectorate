@@ -1,0 +1,1 @@
+{"name":"fix-1","harness":"codex","parent_id":"s-proto","view":"worktree","mode":"headless","model":"gpt-5.1-codex","resleeve_to":["pi_local","claude"],"message":"Fix the flaky test."}

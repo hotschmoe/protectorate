@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import 'fake_hub.dart';
 import 'hub.dart';
+import 'real_hub.dart';
 import 'scope.dart';
 import 'shell.dart';
 import 'theme.dart';
@@ -13,15 +14,13 @@ void main() {
     final ofl = await rootBundle.loadString('assets/fonts/OFL.txt');
     yield LicenseEntryWithLineBreaks(const ['JetBrains Mono'], ofl);
   });
-  runApp(App(hub: FakeHub()));
+  runApp(const App());
 }
 
 /// Deep links (`?screen=nodes&theme=light`, `?sleeve=la/app`, `?node=ms-r1`) open a screen
 /// directly; on desktop and Android the query is empty.
 class App extends StatefulWidget {
-  const App({super.key, required this.hub});
-
-  final HubClient hub;
+  const App({super.key});
 
   @override
   State<App> createState() => _AppState();
@@ -30,17 +29,33 @@ class App extends StatefulWidget {
 class _AppState extends State<App> {
   final Map<String, String> _q = Uri.base.queryParameters;
   late bool _dark = _q['theme'] != 'light';
+  String _url = '';
+  String _token = '';
+  HubClient _hub = FakeHub();
+
+  /// An empty URL means the scripted FakeHub.
+  void _connect(String url, String token) {
+    final u = url.trim();
+    final t = token.trim();
+    if (u == _url && t == _token) return;
+    _hub.close();
+    setState(() {
+      _url = u;
+      _token = t;
+      _hub = u.isEmpty ? FakeHub() : RealHub(u, token: t.isEmpty ? null : t);
+    });
+  }
 
   @override
   void dispose() {
-    widget.hub.close();
+    _hub.close();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final p = _dark ? Palette.amber : Palette.printer;
-    final st = widget.hub.state;
+    final st = _hub.state;
     final sleeve = _q['sleeve'];
     final node = _q['node'];
     final sleeveId = sleeve == null
@@ -59,9 +74,13 @@ class _AppState extends State<App> {
       debugShowCheckedModeBanner: false,
       theme: buildTheme(p),
       home: Shell(
-        hub: widget.hub,
+        key: ObjectKey(_hub),
+        hub: _hub,
         dark: _dark,
         setDark: (v) => setState(() => _dark = v),
+        hubUrl: _url,
+        hubToken: _token,
+        connect: _connect,
         initial: screen,
         initialSleeve: sleeveId,
         initialNode: nodeId,

@@ -1,0 +1,1 @@
+{"target":{"type":"arch","arch":"arm64"},"argv":["make","test"],"even_if_present":true,"on_present":"kill","maintenance":false,"timeout_secs":3600}

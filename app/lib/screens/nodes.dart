@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../model.dart';
+import '../api/api.g.dart';
+import '../derived.dart';
 import '../scope.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -19,8 +20,9 @@ import '../widgets.dart';
     : ('OFFLINE ${span(now.difference(n.lastSeen))}', p.alarm);
 
 String gpuShort(Node n) {
-  if (n.inventory.gpus.isEmpty) return '-';
-  final g = n.inventory.gpus.first;
+  final gpus = n.inventory?.gpus ?? const <Gpu>[];
+  if (gpus.isEmpty) return '-';
+  final g = gpus.first;
   final vram = g.vramBytes == null ? '' : ' ${bytes(g.vramBytes)}';
   return '${g.name.replaceFirst('NVIDIA GeForce ', '').replaceFirst('Graphics ', '')}$vram';
 }
@@ -78,13 +80,13 @@ class NodesScreen extends StatelessWidget {
                       color: i.isOdd ? p.bar : null,
                       child: Row(children: [
                         Cells(12, child: T(n.name, color: p.lit)),
-                        Cells(7, child: T(inv.arch)),
-                        Cells(9, child: T(inv.os, color: p.dim)),
-                        Cells(5, right: true, child: T('${inv.cpuCount}c')),
-                        Cells(6, right: true, child: T(bytes(inv.ramBytes))),
+                        Cells(7, child: T(inv?.arch ?? '-')),
+                        Cells(9, child: T(inv?.os ?? '-', color: p.dim)),
+                        Cells(5, right: true, child: T(inv == null ? '-' : '${inv.cpuCount}c')),
+                        Cells(6, right: true, child: T(inv == null ? '-' : bytes(inv.ramBytes))),
                         const Cells(2, child: SizedBox()),
                         Cells(22, child: T(gpuShort(n), color: p.dim)),
-                        Cells(17, child: Meter(inv.disks.isEmpty ? null : inv.disks.first.usedFraction, cells: 8)),
+                        Cells(17, child: Meter(inv == null || inv.disks.isEmpty ? null : inv.disks.first.usedFraction, cells: 8)),
                         Cells(19, child: Meter(cpuLoad(n), cells: 10)),
                         Cells(15, child: T(pw, color: pc)),
                         Expanded(child: T(ow, color: oc)),
@@ -123,7 +125,7 @@ class _PhoneNodeRow extends StatelessWidget {
           Row(children: [
             Expanded(child: Line([
               sp(context, n.name, color: p.lit),
-              sp(context, '  ${n.inventory.arch} ${n.inventory.os}', color: p.dim),
+              sp(context, '  ${n.inventory?.arch ?? '-'} ${n.inventory?.os ?? ''}', color: p.dim),
             ])),
             T(ow, color: oc),
           ]),
@@ -159,7 +161,7 @@ class NodesMini extends StatelessWidget {
               cursor: SystemMouseCursors.click,
               child: Row(children: [
                 Cells(11, child: T(n.name, color: n.online ? p.fg : p.alarm)),
-                Cells(7, child: T(n.inventory.arch, color: p.dim)),
+                Cells(7, child: T(n.inventory?.arch ?? '-', color: p.dim)),
                 Cells(15, child: Meter(cpuLoad(n), cells: 6)),
                 Expanded(child: n.online
                     ? T(presenceWord(p, n.presence).$1.split(' ').first, color: presenceWord(p, n.presence).$2)
@@ -197,11 +199,15 @@ class NodeDetail extends StatelessWidget {
       return ListView(children: [
         Actions3270([Btn('BACK', color: p.dim, onTap: () => app.go(Screen.nodes))]),
         const HRule(label: 'INVENTORY'),
-        kv('HOST', T('${inv.hostname}  ${inv.os} ${inv.osVersion}')),
-        kv('ARCH', T(inv.arch)),
-        kv('CPU', T('${inv.cpuModel}  ${inv.cpuCount} threads')),
-        kv('RAM', T(bytes(inv.ramBytes))),
-        kv('NODE', T('${n.nodeVersion}  inventory ${span(now.difference(inv.collectedAt))} ago', color: p.dim)),
+        if (inv == null)
+          T('(no inventory yet)', color: p.dim)
+        else ...[
+          kv('HOST', T('${inv.hostname}  ${inv.os} ${inv.osVersion}')),
+          kv('ARCH', T(inv.arch)),
+          kv('CPU', T('${inv.cpuModel}  ${inv.cpuCount} threads')),
+          kv('RAM', T(bytes(inv.ramBytes))),
+        ],
+        kv('NODE', T('${n.nodeVersion}${inv == null ? '' : '  inventory ${span(now.difference(inv.collectedAt))} ago'}', color: p.dim)),
         kv('STATE', T(ow, color: oc)),
         const HRule(label: 'SAMPLE'),
         if (n.sample == null || !n.online)
@@ -211,7 +217,7 @@ class NodeDetail extends StatelessWidget {
           kv('LOAD 1M', T(n.sample!.load1?.toStringAsFixed(2) ?? '-')),
           kv('MEM', Row(children: [
             Meter(n.memUsedFraction),
-            T('  ${bytes(n.sample!.memAvailBytes)} free of ${bytes(inv.ramBytes)}', color: p.dim),
+            T('  ${bytes(n.sample!.memAvailBytes)} free of ${bytes(inv?.ramBytes)}', color: p.dim),
           ])),
         ],
         const HRule(label: 'PRESENCE'),
@@ -224,14 +230,14 @@ class NodeDetail extends StatelessWidget {
           PresenceState.unknown => 'refuses jobs (UNKNOWN counts as present)',
         }, color: p.dim)),
         const HRule(label: 'DISKS'),
-        for (final d in inv.disks)
+        for (final d in inv?.disks ?? const <Disk>[])
           kv(d.mount, Row(children: [
             Meter(d.usedFraction),
             T('  ${bytes(d.freeBytes)} free of ${bytes(d.sizeBytes)}', color: p.dim),
           ])),
         const HRule(label: 'GPUS'),
-        if (inv.gpus.isEmpty) T('(none)', color: p.dim),
-        for (final g in inv.gpus)
+        if (inv == null || inv.gpus.isEmpty) T('(none)', color: p.dim),
+        for (final g in inv?.gpus ?? const <Gpu>[])
           kv(g.driver.isEmpty ? '-' : g.driver.split(' ').first, Line([
             sp(context, g.name),
             if (g.vramBytes != null) sp(context, '  ${bytes(g.vramBytes)} VRAM', color: p.dim),
@@ -239,7 +245,7 @@ class NodeDetail extends StatelessWidget {
           ])),
         const HRule(label: 'TOOLCHAINS'),
         Wrap(spacing: kCell * 3, children: [
-          for (final t in inv.toolchains)
+          for (final t in inv?.toolchains ?? const <Toolchain>[])
             Line([sp(context, t.name, color: p.dim), sp(context, ' ${t.version}')]),
         ]),
         HRule(label: 'RECENT JOBS', status: '${jobs.length}'),
@@ -269,7 +275,7 @@ class _JobRow extends StatelessWidget {
     };
     final word = switch (j.state) {
       JobState.submitUncertain => 'SUBMIT?',
-      _ => j.state.name.toUpperCase(),
+      _ => j.state.wire.toUpperCase(),
     };
     final start = j.startedAt;
     final dur = start == null ? '-' : span((j.endedAt ?? now).difference(start));

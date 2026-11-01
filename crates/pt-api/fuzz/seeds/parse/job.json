@@ -1,0 +1,1 @@
+{"type":"job","seq":10,"job":{"id":"j-4f2a","node_id":"n-msr1","target":{"type":"arch","arch":"arm64"},"argv":["make","test"],"state":"succeeded","requested_by":"envoy","attempt":1,"even_if_present":false,"on_present":"idle","queued_at_ms":1793491368464,"started_at_ms":1793491368464,"ended_at_ms":1793491560464,"exit_code":0,"log_bytes":0}}

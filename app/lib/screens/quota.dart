@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../model.dart';
+import '../api/api.g.dart';
+import '../derived.dart';
 import '../scope.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -25,7 +26,7 @@ class QuotaScreen extends StatelessWidget {
     return Tick(builder: (c, now) => ListView(children: [
       for (final q in qs) ...[
         Row(children: [
-          Cells(9, child: T(q.subscription.name.toUpperCase(), color: p.lit, bold: true)),
+          Cells(9, child: T(q.subscription.wire.toUpperCase(), color: p.lit, bold: true)),
           Expanded(child: T(q.plan, color: p.fg)),
           T('fetched ${span(now.difference(q.fetchedAt))} ago  ', color: p.dim),
           T(readingWord(p, q.reading).$1, color: readingWord(p, q.reading).$2),
@@ -78,7 +79,7 @@ class QuotaMini extends StatelessWidget {
       children: [
         for (final q in app.state.quotas)
           Row(children: [
-            Cells(8, child: T(q.subscription.name, color: p.fg)),
+            Cells(8, child: T(q.subscription.wire, color: p.fg)),
             Cells(4, child: T(q.tightest?.label ?? '-', color: p.dim)),
             Cells(16, child: Meter(q.tightest?.usedPct == null ? null : q.tightest!.usedPct! / 100,
                 cells: 7)),

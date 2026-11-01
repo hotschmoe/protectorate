@@ -1,14 +1,18 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'api/api.g.dart';
 import 'hub.dart';
-import 'model.dart';
+
+typedef Json = Map<String, Object?>;
 
 const _gib = 1024 * 1024 * 1024;
 
-/// A scripted hub for judging the UI before the real one exists. It holds its state as the JSON
-/// the hub would send and hands it out through the models' `fromJson`, so the JSON shapes are
-/// exercised too. A 250 ms tick streams text, moves activity and jitters node samples.
+/// A scripted hub for judging the UI without a real one. It holds its state as the JSON the hub
+/// would send and hands it out through the generated `fromJson`, so the JSON shapes are
+/// exercised too. Transcripts are append-only like the hub's: a tool result is a new entry, and
+/// a streaming text is one delta entry that turns whole at the end. A 250 ms tick streams text,
+/// moves activity and jitters node samples.
 class FakeHub implements HubClient {
   FakeHub() : _t0 = DateTime.now().millisecondsSinceEpoch {
     _seed();
@@ -21,7 +25,9 @@ class FakeHub implements HubClient {
   late final Timer _timer;
   int _tick = 0;
   int _seq = 0;
+  int _hubSeq = 0;
   int _eventSeq = 0;
+  int _requestSeq = 0;
   int _approvalSeq = 32;
   int _jobSeq = 0x4f30;
   bool _dirty = false;
@@ -84,11 +90,11 @@ class FakeHub implements HubClient {
     if (life != 'running') {
       throw StateError('${s['name']} is ${(life as String).toUpperCase()}; message not sent');
     }
-    _entry(sleeveId, {'kind': 'user', 'from': 'owner', 'text': text});
+    final rid = _user(sleeveId, 'owner', text);
     if (s['role'] == 'envoy') {
-      _envoyTurn(text);
+      _envoyTurn(text, rid);
     } else {
-      _sleeveTurn(sleeveId, text);
+      _sleeveTurn(sleeveId, rid);
     }
   }
 
@@ -102,15 +108,11 @@ class FakeHub implements HubClient {
     _cancelTurn(sleeveId);
     _setActivity(sleeveId, 'interrupting');
     _after(1000, () {
-      for (final e in _tx[sleeveId] ?? <Json>[]) {
-        if (e['kind'] == 'tool' && e['status'] == 'running') {
-          e['status'] = 'error';
-          e['output'] = '(interrupted)';
-          e['ended_at_ms'] = _now;
-        }
-        if (e['kind'] == 'assistant' && e['streaming'] == true) e['streaming'] = false;
+      for (final call in _openCalls(sleeveId)) {
+        _finishTool(sleeveId, call, '(interrupted)', status: 'cancelled');
       }
-      _entry(sleeveId, {'kind': 'notice', 'level': 'warn', 'text': 'interrupted by owner'});
+      _notice(sleeveId, 'interrupted by owner', level: 'warn');
+      _settle(sleeveId, stop: 'cancelled');
       _setActivity(sleeveId, 'idle');
       _event('sleeve', s['name'] as String, 'interrupted by owner');
     });
@@ -136,11 +138,8 @@ class FakeHub implements HubClient {
       for (final id in targets) {
         _sleeve(id)['lifecycle'] = 'stopped';
         _setActivity(id, 'ended');
-        _entry(id, {
-          'kind': 'notice',
-          'level': 'warn',
-          'text': id == sleeveId ? 'stopped by owner' : 'stopped with its root',
-        });
+        _notice(id, id == sleeveId ? 'stopped by owner' : 'stopped with its root', level: 'warn');
+        _entry(id, {'type': 'exited', 'code': 0, 'requested': true});
       }
       _event('sleeve', s['name'] as String,
           targets.length > 1 ? 'stopped with ${targets.length - 1} children' : 'stopped');
@@ -152,41 +151,49 @@ class FakeHub implements HubClient {
     final s = _sleeve(sleeveId);
     final inc = s['incarnation'] as Json?;
     if (inc == null) throw StateError('${s['name']} has no incarnation');
+    if (target == Harness.unknown) throw StateError('resleeve to what?');
     final from = inc['harness'] as String;
     final g = inc['g'] as int;
     _cancelTurn(sleeveId);
     s['lifecycle'] = 'resleeving';
     _setActivity(sleeveId, 'ended');
+    _entry(sleeveId, {'type': 'exited', 'code': 0, 'requested': true});
     _after(2200, () {
       s['lifecycle'] = 'running';
-      s['incarnation'] = _incarnation(target.wire, g: g + 1, activity: 'booting', turn: 0);
-      _entry(sleeveId, {
-        'kind': 'notice',
-        'level': 'info',
-        'text': 'resleeved g$g -> g${g + 1}: $from -> ${target.wire} (owner); '
-            'brief written to .protectorate/BRIEF.md',
-      });
+      final next = s['incarnation'] = _incarnation(target.wire, g: g + 1, activity: 'booting', turn: 0);
+      _notice(sleeveId, 'resleeved g$g -> g${g + 1}: $from -> ${target.wire} (owner); '
+          'brief written to .protectorate/BRIEF.md');
+      _sessionInfo(sleeveId, next);
       _event('sleeve', s['name'] as String, 'resleeved g$g -> g${g + 1}: $from -> ${target.wire}');
       _after(1200, () => _setActivity(sleeveId, 'idle'));
     });
   }
 
   @override
-  Future<void> decide(String approvalId, {required bool approve}) async {
+  Future<void> decide(String approvalId, Decision decision) async {
     final a = _approvals.firstWhere(
       (a) => a['id'] == approvalId,
       orElse: () => throw StateError('no approval $approvalId'),
     );
     if (a['state'] != 'pending') throw StateError('$approvalId is already ${a['state']}');
+    if (decision == Decision.unknown) throw StateError('decide what?');
+    final approve = decision != Decision.deny;
     a['state'] = approve ? 'approved' : 'denied';
+    a['decision'] = decision.wire;
     a['decided_by'] = 'owner';
     a['decided_at_ms'] = _now;
     _dirty = true;
-    final sleeveName = _sleeve(a['sleeve_id'] as String)['name'] as String;
+    final sleeveId = a['sleeve_id'] as String;
+    final sleeveName = _sleeve(sleeveId)['name'] as String;
     _event('approval', 'owner', '${approve ? 'approved' : 'denied'} $approvalId (${a['summary']})',
         target: sleeveName);
+    _entry(sleeveId, {
+      'type': 'approval_decision',
+      'approval_id': approvalId,
+      'decision': decision.wire,
+      'by': 'owner',
+    });
     _onDecide.remove(approvalId)?.call(approve);
-    _touchTx(a['sleeve_id'] as String);
   }
 
   @override
@@ -199,7 +206,7 @@ class FakeHub implements HubClient {
 
   // ---- scripted turns ------------------------------------------------------------------------
 
-  void _envoyTurn(String text) {
+  void _envoyTurn(String text, String rid) {
     const id = 's-envoy';
     final t = text.toLowerCase();
     final gen = _beginTurn(id);
@@ -232,27 +239,22 @@ class FakeHub implements HubClient {
       reply = 'Passed that to protectorate as mail. I will watch for its report and tell you '
           'what changed.';
     }
-    _setActivity(id, 'delivering');
-    _step(gen, id, 500, () {
-      _setActivity(id, 'working');
-      _bumpTurn(id);
-    });
+    _deliver(gen, id, rid);
     final call = 'c-${_seq + 1}';
     _step(gen, id, 1000, () => _tool(id, call, 'Bash', cmd, cmd));
     _step(gen, id, 2400, () {
       _finishTool(id, call, out);
       effect?.call();
     });
-    _step(gen, id, 2800, () => _say(id, reply, then: () => _setActivity(id, 'idle')));
+    _step(gen, id, 2800, () => _say(id, reply, then: () {
+      _settle(id);
+      _setActivity(id, 'idle');
+    }));
   }
 
-  void _sleeveTurn(String id, String text) {
+  void _sleeveTurn(String id, String rid) {
     final gen = _beginTurn(id);
-    _setActivity(id, 'delivering');
-    _step(gen, id, 500, () {
-      _setActivity(id, 'working');
-      _bumpTurn(id);
-    });
+    _deliver(gen, id, rid);
     final call = 'c-${_seq + 1}';
     _step(gen, id, 1200, () => _tool(id, call, 'Bash', 'git status --short', 'git status --short'));
     _step(gen, id, 2200, () => _finishTool(id, call, ' M app/lib/theme.dart\n?? app/lib/model.dart'));
@@ -260,8 +262,22 @@ class FakeHub implements HubClient {
       id,
       'Read it. Two files are modified in the worktree; I will fold your note into the next '
       'commit and run the checks before reporting back to Envoy.',
-      then: () => _setActivity(id, 'idle', seen: false),
+      then: () {
+        _settle(id);
+        _setActivity(id, 'idle', seen: false);
+      },
     ));
+  }
+
+  /// The harness takes the message: ack, then the turn starts.
+  void _deliver(int gen, String id, String rid) {
+    _setActivity(id, 'delivering', requestId: rid);
+    _step(gen, id, 500, () {
+      _entry(id, {'type': 'prompt_ack', 'request_id': rid, 'ack': 'confirmed'});
+      _setActivity(id, 'working');
+      _bumpTurn(id);
+      _entry(id, {'type': 'turn_started', 'request_id': rid});
+    });
   }
 
   void _spawnChild(String name, String firstTurn) {
@@ -282,18 +298,20 @@ class FakeHub implements HubClient {
     _after(1200, () => _sleeve(id)['lifecycle'] = 'launching');
     _after(2600, () {
       _sleeve(id)['lifecycle'] = 'running';
-      _sleeve(id)['incarnation'] = _incarnation('codex', g: 1, activity: 'booting', turn: 0);
-      _entry(id, {'kind': 'user', 'from': 'envoy', 'text': firstTurn});
+      final inc = _sleeve(id)['incarnation'] = _incarnation('codex', g: 1, activity: 'booting', turn: 0);
+      _sessionInfo(id, inc);
+      final rid = _user(id, 'envoy', firstTurn);
+      _after(1200, () => _sleeveTurn(id, rid));
     });
-    _after(3800, () => _sleeveTurn(id, firstTurn));
   }
 
   void _runJob(String id, String nodeId, String command, String by, int ms) {
     _jobs.insert(0, {
       'id': id,
       'node_id': nodeId,
+      'target': {'type': 'node', 'node_id': nodeId},
+      'argv': command.split(' '),
       'state': 'queued',
-      'command': command,
       'requested_by': by,
       'attempt': 1,
       'queued_at_ms': _now,
@@ -311,8 +329,9 @@ class FakeHub implements HubClient {
       j['ended_at_ms'] = _now;
       j['exit_code'] = 0;
       _event('job', id, 'exited 0 ($node) in ${(ms / 1000).round()}s');
-      _entry('s-envoy', {'kind': 'user', 'from': 'hub', 'text': 'job $id exited 0 on $node'});
-      _say('s-envoy', '$id passed on $node (exit 0). Nothing else is waiting on it.');
+      _user('s-envoy', 'hub', 'job $id exited 0 on $node');
+      _say('s-envoy', '$id passed on $node (exit 0). Nothing else is waiting on it.',
+          then: () => _settle('s-envoy'));
     });
   }
 
@@ -328,13 +347,13 @@ class FakeHub implements HubClient {
       }
     }
     for (final st in List.of(_streams)) {
-      final e = st.entry;
+      final e = st.entry['entry'] as Json;
       final take = min(3, st.words.length - st.i);
       e['text'] = '${e['text']}${st.words.sublist(st.i, st.i + take).join()}';
       st.i += take;
       _touchTx(st.sleeve);
       if (st.i >= st.words.length) {
-        e['streaming'] = false;
+        e['delta'] = false;
         _streams.remove(st);
         st.then?.call();
       }
@@ -366,8 +385,10 @@ class FakeHub implements HubClient {
       _finishTool('s-fuzz', 'fz-${_tick - 48}',
           '#$execs\tDONE   cov: 2291 ft: 9120 corp: 611/48Kb exec/s: ${execs ~/ 12}\n'
           'Done $execs runs in 12 second(s)');
-      _say('s-fuzz', 'Round clean: $execs execs, no crashes, corpus at 611 inputs.',
-          then: () => _setActivity('s-fuzz', 'idle'));
+      _say('s-fuzz', 'Round clean: $execs execs, no crashes, corpus at 611 inputs.', then: () {
+        _settle('s-fuzz');
+        _setActivity('s-fuzz', 'idle');
+      });
       _event('mail', 'fuzz-wire', 'frame_codec round clean ($execs execs)', target: 'protectorate');
     }
     if (cycle == 20 && _alive('s-proto') && _activity('s-proto') == 'working') {
@@ -446,10 +467,10 @@ class FakeHub implements HubClient {
         (inc['activity'] as Json)['state'] == 'working';
   });
 
-  void _setActivity(String id, String state, {bool seen = true}) {
+  void _setActivity(String id, String state, {bool seen = true, String? requestId}) {
     final inc = _sleeve(id)['incarnation'] as Json?;
     if (inc == null) return;
-    inc['activity'] = {'state': state, 'since_ms': _now, 'seen': seen};
+    inc['activity'] = {'state': state, 'since_ms': _now, 'seen': seen, 'request_id': ?requestId};
     _dirty = true;
   }
 
@@ -480,11 +501,16 @@ class FakeHub implements HubClient {
     _dirty = true;
   }
 
-  Json _entry(String id, Json e) {
+  /// Appends one transcript entry, wrapped as a `ChatEntry`.
+  Json _entry(String id, Json body) {
     final inc = _sleeve(id)['incarnation'] as Json?;
-    e['seq'] = ++_seq;
-    e['at_ms'] = _now;
-    e['g'] = inc?['g'] ?? 0;
+    final e = <String, Object?>{
+      'seq': ++_seq,
+      'g': inc?['g'] ?? 0,
+      'turn': inc?['turn'] ?? 0,
+      'at_ms': _now,
+      'entry': body,
+    };
     final list = _tx.putIfAbsent(id, () => []);
     list.add(e);
     if (list.length > 300) list.removeAt(0);
@@ -492,28 +518,84 @@ class FakeHub implements HubClient {
     return e;
   }
 
-  void _tool(String id, String call, String tool, String summary, String input) => _entry(id, {
-    'kind': 'tool',
-    'call_id': call,
-    'tool': tool,
-    'text': summary,
-    'input': input,
-    'status': 'running',
-  });
-
-  void _finishTool(String id, String call, String output, {bool ok = true}) {
-    for (final e in _tx[id] ?? <Json>[]) {
-      if (e['kind'] == 'tool' && e['call_id'] == call && e['status'] == 'running') {
-        e['status'] = ok ? 'ok' : 'error';
-        e['output'] = output;
-        e['ended_at_ms'] = _now;
-        _touchTx(id);
-      }
-    }
+  String _user(String id, String from, String text) {
+    final rid = 'r-${++_requestSeq}';
+    _entry(id, {'type': 'user_message', 'request_id': rid, 'from': from, 'text': text});
+    return rid;
   }
 
+  void _notice(String id, String text, {String level = 'info'}) =>
+      _entry(id, {'type': 'notice', 'level': level, 'text': text});
+
+  void _sessionInfo(String id, Json inc) => _entry(id, {
+    'type': 'session_info',
+    'harness': inc['harness'],
+    'mode': inc['mode'],
+    'native_id': 'sess-${_rand.nextInt(1 << 30).toRadixString(16)}',
+    'model': inc['model'],
+    'provider': inc['provider'],
+  });
+
+  void _settle(String id, {String stop = 'end_turn'}) {
+    final inc = _sleeve(id)['incarnation'] as Json?;
+    _entry(id, {
+      'type': 'turn_settled',
+      'stop': stop,
+      'usage': {
+        'input': 2000 + _rand.nextInt(9000),
+        'output': 200 + _rand.nextInt(900),
+        'cache_read': 20000 + _rand.nextInt(20000),
+        'context_tokens': inc?['context_tokens'],
+        'context_window': inc?['context_window'],
+      },
+      'duration_ms': 2000 + _rand.nextInt(4000),
+    });
+  }
+
+  static String _toolKind(String name) => switch (name) {
+    'Bash' => 'command',
+    'Read' => 'read',
+    'Edit' || 'apply_patch' => 'edit',
+    'WebFetch' => 'web',
+    _ => 'other',
+  };
+
+  void _tool(String id, String call, String tool, String summary, String input) => _entry(id, {
+    'type': 'tool_call',
+    'id': call,
+    'tool': _toolKind(tool),
+    'name': tool,
+    'summary': summary,
+    'input': input,
+  });
+
+  /// Tool calls of this sleeve that have no result yet.
+  List<String> _openCalls(String id) {
+    final calls = <String>[];
+    for (final e in _tx[id] ?? <Json>[]) {
+      final b = e['entry'] as Json;
+      if (b['type'] == 'tool_call') calls.add(b['id'] as String);
+      if (b['type'] == 'tool_result') calls.remove(b['id']);
+    }
+    return calls;
+  }
+
+  void _finishTool(String id, String call, String output, {String status = 'completed'}) {
+    if (!_openCalls(id).contains(call)) return;
+    final at = (_tx[id] ?? <Json>[]).lastWhere((e) => (e['entry'] as Json)['id'] == call)['at_ms'] as int;
+    _entry(id, {
+      'type': 'tool_result',
+      'id': call,
+      'status': status,
+      'output': output,
+      'duration_ms': _now - at,
+    });
+  }
+
+  /// A streaming text: one delta entry that grows each tick and turns whole at the end, as a
+  /// hub client folds deltas that share the seq of their block.
   void _say(String id, String text, {void Function()? then}) {
-    final e = _entry(id, {'kind': 'assistant', 'text': '', 'streaming': true});
+    final e = _entry(id, {'type': 'assistant_text', 'id': 't-${_seq + 1}', 'text': '', 'delta': true});
     final words = RegExp(r'\S+\s*').allMatches(text).map((m) => m[0]!).toList();
     _streams.add(_Stream(id, e, words, then));
   }
@@ -528,19 +610,22 @@ class FakeHub implements HubClient {
       'title': title,
       'summary': summary,
       'detail': detail,
+      'options': kind == 'tool' ? ['allow_once', 'allow_session', 'deny'] : ['allow_once', 'deny'],
       'requested_at_ms': _now,
       'timeout_at_ms': _now + 30 * 60 * 1000,
       'state': 'pending',
     });
-    _entry(id, {'kind': 'approval', 'approval_id': aid});
+    _entry(id, {'type': 'approval_request', 'approval_id': aid, 'title': title, 'summary': summary});
     _setActivity(id, 'blocked');
     _event('approval', _sleeve(id)['name'] as String, 'asks: $title $summary ($aid)',
         level: 'warn');
     _onDecide[aid] = onDecide ??
         (ok) {
           _setActivity(id, 'working');
-          _say(id, ok ? 'Approved; continuing.' : 'Denied; skipping that step.',
-              then: () => _setActivity(id, 'idle', seen: false));
+          _say(id, ok ? 'Approved; continuing.' : 'Denied; skipping that step.', then: () {
+            _settle(id);
+            _setActivity(id, 'idle', seen: false);
+          });
         };
   }
 
@@ -625,6 +710,7 @@ class FakeHub implements HubClient {
   }
 
   Json _snapshot() => {
+    'seq': ++_hubSeq,
     'hub': _hub,
     'workspaces': _workspaces,
     'sleeves': _sleeves,
@@ -693,20 +779,43 @@ class FakeHub implements HubClient {
 
     final h = _ago(const Duration(minutes: 49));
     int at(int min) => h + min * 60000;
-    Json e(int min, Json body) => {...body, 'seq': ++_seq, 'at_ms': at(min), 'g': body['g'] ?? 4};
+    Json e(int min, Json body, {int g = 4, int turn = 0}) =>
+        {'seq': ++_seq, 'g': g, 'turn': turn, 'at_ms': at(min), 'entry': body};
+    Json user(String from, String text) =>
+        {'type': 'user_message', 'request_id': 'r-${++_requestSeq}', 'from': from, 'text': text};
+    Json say(String text) => {'type': 'assistant_text', 'id': 't-${_seq + 1}', 'text': text};
+    Json note(String text, [String level = 'info']) => {'type': 'notice', 'level': level, 'text': text};
+    List<Json> tool(int min, int endMin, String call, String name, String summary, Object input,
+        {String? status = 'completed', String output = '', int g = 4, int turn = 0}) => [
+      e(min, {
+        'type': 'tool_call', 'id': call, 'tool': _toolKind(name), 'name': name,
+        'summary': summary, 'input': input,
+      }, g: g, turn: turn),
+      if (status != null)
+        e(endMin, {
+          'type': 'tool_result', 'id': call, 'status': status, 'output': output,
+          'duration_ms': (endMin - min) * 60000 + 1400,
+        }, g: g, turn: turn),
+    ];
+    Json settled(int ctx, int window, {String stop = 'end_turn'}) => {
+      'type': 'turn_settled', 'stop': stop, 'duration_ms': 4200,
+      'usage': {'input': 3200, 'output': 640, 'cache_read': ctx - 3200, 'context_tokens': ctx,
+          'context_window': window},
+    };
 
     _approvals.addAll([
       {
         'id': 'a-29', 'sleeve_id': 's-proto', 'kind': 'tool', 'title': 'Bash',
         'summary': 'cargo +nightly fuzz build', 'detail': 'cargo +nightly fuzz build --fuzz-dir crates/pt-journal/fuzz',
-        'requested_at_ms': at(2), 'state': 'approved', 'decided_by': 'owner',
+        'requested_at_ms': at(2), 'state': 'approved', 'decision': 'allow_once',
+        'decided_by': 'owner',
         'decided_at_ms': at(3),
       },
       {
         'id': 'a-30', 'sleeve_id': 's-herdr', 'kind': 'action', 'title': 'protected_push',
         'summary': 'git push origin main (herdr-port)',
         'detail': 'Push 14 commits to the protected branch main of herdr-port.',
-        'requested_at_ms': at(5), 'state': 'denied', 'decided_by': 'owner',
+        'requested_at_ms': at(5), 'state': 'denied', 'decision': 'deny', 'decided_by': 'owner',
         'decided_at_ms': at(9),
       },
       {
@@ -714,6 +823,7 @@ class FakeHub implements HubClient {
         'summary': 'git push origin la/app',
         'detail': 'git push origin la/app\n\nla/app is 6 commits ahead of next. '
             'Codex asks before network writes.',
+        'options': ['allow_once', 'allow_session', 'deny'],
         'requested_at_ms': at(44), 'timeout_at_ms': at(44) + 30 * 60000, 'state': 'pending',
       },
       {
@@ -726,102 +836,88 @@ class FakeHub implements HubClient {
     ]);
 
     _tx['s-envoy'] = [
-      e(0, {'kind': 'user', 'from': 'owner', 'text': "morning. what's running?"}),
-      e(0, {
-        'kind': 'tool', 'call_id': 'c-e1', 'tool': 'Bash', 'text': 'protectorate sleeve list',
-        'input': 'protectorate sleeve list', 'status': 'ok', 'ended_at_ms': at(1),
-        'output': 'NAME           HARNESS    LIFECYCLE   ACTIVITY\n'
-            'envoy          claude     RUNNING     WORKING\n'
-            'protectorate   claude     RUNNING     WORKING\n'
-            'la/app         codex      RUNNING     WORKING\n'
-            'fuzz-wire      pi_local   RUNNING     IDLE\n'
-            'herdr-port     claude     RUNNING     IDLE\n'
-            'notes-site     pi_local   PARKED      ENDED',
-      }),
-      e(1, {
-        'kind': 'assistant',
-        'text': 'Five sleeves besides me. protectorate (claude) is on the journal codec; '
-            'la/app (codex) is building the app shell; fuzz-wire (pi_local) fuzzes the frame '
-            'codec between rounds; herdr-port finished its port overnight and you have not '
-            'looked yet. notes-site is PARKED after three crashes in an hour; it needs a look '
-            'from you before it runs again.\n\nNodes: ms-r1 is AWAY and free, officepc has '
-            'someone at it, officewin has been offline since 06:40.',
-      }),
-      e(30, {'kind': 'user', 'from': 'owner', 'text': 'run make test on arm64 for la/app and tell me'}),
-      e(30, {
-        'kind': 'tool', 'call_id': 'c-e2', 'tool': 'Bash',
-        'text': 'protectorate job run --on arch=arm64 --sleeve la/app -- make test',
-        'input': 'protectorate job run --on arch=arm64 --sleeve la/app -- make test',
-        'status': 'ok', 'ended_at_ms': at(34),
-        'output': 'job j-4f2a on ms-r1\n... 412 tests, 0 failed\nexit 0 in 3m12s',
-      }),
-      e(34, {
-        'kind': 'assistant',
-        'text': 'Tests pass on arm64: j-4f2a on ms-r1, 412 tests, exit 0 in 3m12s.',
-      }),
-      e(44, {'kind': 'user', 'from': 'la/app', 'text': 'Tests are green on amd64 and arm64. '
-          'Requesting approval to push la/app (a-31).'}),
-      e(45, {
-        'kind': 'assistant',
-        'text': 'la/app wants to push its branch; that approval is yours (a-31). While ms-r1 '
-            'is idle I would also like to run system updates on it.',
-      }),
-      e(47, {'kind': 'approval', 'approval_id': 'a-32'}),
+      e(0, {'type': 'session_info', 'harness': 'claude', 'mode': 'headless',
+          'native_id': '4f1c9a2e-envoy', 'model': 'claude-opus-4-5', 'provider': 'anthropic'}),
+      e(0, user('owner', "morning. what's running?"), turn: 29),
+      ...tool(0, 1, 'c-e1', 'Bash', 'protectorate sleeve list', 'protectorate sleeve list',
+          turn: 29,
+          output: 'NAME           HARNESS    LIFECYCLE   ACTIVITY\n'
+              'envoy          claude     RUNNING     WORKING\n'
+              'protectorate   claude     RUNNING     WORKING\n'
+              'la/app         codex      RUNNING     WORKING\n'
+              'fuzz-wire      pi_local   RUNNING     IDLE\n'
+              'herdr-port     claude     RUNNING     IDLE\n'
+              'notes-site     pi_local   PARKED      ENDED'),
+      e(1, say('Five sleeves besides me. protectorate (claude) is on the journal codec; '
+          'la/app (codex) is building the app shell; fuzz-wire (pi_local) fuzzes the frame '
+          'codec between rounds; herdr-port finished its port overnight and you have not '
+          'looked yet. notes-site is PARKED after three crashes in an hour; it needs a look '
+          'from you before it runs again.\n\nNodes: ms-r1 is AWAY and free, officepc has '
+          'someone at it, officewin has been offline since 06:40.'), turn: 29),
+      e(1, settled(58400, 200000), turn: 29),
+      e(30, user('owner', 'run make test on arm64 for la/app and tell me'), turn: 30),
+      ...tool(30, 34, 'c-e2', 'Bash',
+          'protectorate job run --on arch=arm64 --sleeve la/app -- make test',
+          'protectorate job run --on arch=arm64 --sleeve la/app -- make test',
+          turn: 30, output: 'job j-4f2a on ms-r1\n... 412 tests, 0 failed\nexit 0 in 3m12s'),
+      e(34, say('Tests pass on arm64: j-4f2a on ms-r1, 412 tests, exit 0 in 3m12s.'), turn: 30),
+      e(34, settled(59900, 200000), turn: 30),
+      e(44, user('mail:la/app', 'Tests are green on amd64 and arm64. '
+          'Requesting approval to push la/app (a-31).'), turn: 31),
+      e(45, say('la/app wants to push its branch; that approval is yours (a-31). While ms-r1 '
+          'is idle I would also like to run system updates on it.'), turn: 31),
+      e(47, {'type': 'approval_request', 'approval_id': 'a-32', 'title': 'node_job',
+          'summary': 'pacman -Syu on ms-r1'}, turn: 31),
     ];
 
     _tx['s-proto'] = [
-      e(0, {'g': 2, 'kind': 'user', 'from': 'envoy', 'text': 'Implement the pt-journal frame '
-          'codec: length, CRC-32C, payload, and torn-tail recovery. Keep it Verus-ready.'}),
-      e(1, {'g': 2, 'kind': 'assistant', 'text': 'Reading the spec section on the journal and '
-          'the old frame code first.'}),
-      e(2, {
-        'g': 2, 'kind': 'tool', 'call_id': 'c-p1', 'tool': 'Read', 'text': 'SPEC.md',
-        'input': '{"file_path": "SPEC.md", "offset": 432, "limit": 40}', 'status': 'ok',
-        'ended_at_ms': at(2), 'output': '## 10. Verus\n...(40 lines)',
-      }),
-      e(3, {'g': 2, 'kind': 'approval', 'approval_id': 'a-29'}),
-      e(12, {
-        'g': 2, 'kind': 'tool', 'call_id': 'c-p2', 'tool': 'Edit',
-        'text': 'crates/pt-journal/src/frame.rs',
-        'input': '{"file_path": "crates/pt-journal/src/frame.rs", "old_string": "", '
-            '"new_string": "pub fn encode(..."}',
-        'status': 'ok', 'ended_at_ms': at(12), 'output': '+148 -0',
-      }),
-      e(20, {'g': 2, 'kind': 'notice', 'level': 'info', 'text': 'context compacted 168.4k -> 41.2k'}),
-      e(21, {'g': 2, 'kind': 'assistant', 'text': 'Encoder and decoder are in. Writing the '
-          'torn-tail path: a short read at the tail truncates to the last whole frame.'}),
-      e(26, {
-        'g': 2, 'kind': 'tool', 'call_id': 'c-p3', 'tool': 'Bash', 'text': 'cargo clippy --workspace',
-        'input': 'cargo clippy --workspace --all-targets -- -D warnings', 'status': 'error',
-        'ended_at_ms': at(27),
-        'output': 'error: this `if` has identical blocks\n  --> crates/pt-journal/src/frame.rs:88:9',
-      }),
-      e(28, {'g': 2, 'kind': 'assistant', 'text': 'Fixed the duplicated branch; clippy is clean.'}),
+      e(0, user('envoy', 'Implement the pt-journal frame codec: length, CRC-32C, payload, and '
+          'torn-tail recovery. Keep it Verus-ready.'), g: 2, turn: 8),
+      e(1, {'type': 'reasoning', 'id': 'k-p1', 'text': 'The spec puts the journal in Verus phase '
+          '1, so the codec should be a pure function over byte slices. Read section 10 first.'},
+          g: 2, turn: 8),
+      e(1, say('Reading the spec section on the journal and the old frame code first.'), g: 2,
+          turn: 8),
+      ...tool(2, 2, 'c-p1', 'Read', 'SPEC.md', {'file_path': 'SPEC.md', 'offset': 432, 'limit': 40},
+          g: 2, turn: 8, output: '## 10. Verus\n...(40 lines)'),
+      e(3, {'type': 'approval_request', 'approval_id': 'a-29', 'title': 'Bash',
+          'summary': 'cargo +nightly fuzz build'}, g: 2, turn: 8),
+      e(3, {'type': 'approval_decision', 'approval_id': 'a-29', 'decision': 'allow_once',
+          'by': 'owner'}, g: 2, turn: 8),
+      ...tool(12, 12, 'c-p2', 'Edit', 'crates/pt-journal/src/frame.rs', {
+        'file_path': 'crates/pt-journal/src/frame.rs', 'old_string': '',
+        'new_string': 'pub fn encode(...',
+      }, g: 2, turn: 8, output: '+148 -0'),
+      e(12, {'type': 'file_change', 'tool_id': 'c-p2',
+          'files': [{'path': 'crates/pt-journal/src/frame.rs', 'op': 'add', 'added': 148,
+              'removed': 0}]}, g: 2, turn: 8),
+      e(20, {'type': 'compaction', 'trigger': 'auto', 'tokens_before': 168400,
+          'tokens_after': 41200}, g: 2, turn: 8),
+      e(21, say('Encoder and decoder are in. Writing the torn-tail path: a short read at the tail '
+          'truncates to the last whole frame.'), g: 2, turn: 8),
+      ...tool(26, 27, 'c-p3', 'Bash', 'cargo clippy --workspace',
+          'cargo clippy --workspace --all-targets -- -D warnings', g: 2, turn: 8, status: 'failed',
+          output: 'error: this `if` has identical blocks\n  --> crates/pt-journal/src/frame.rs:88:9'),
+      e(28, say('Fixed the duplicated branch; clippy is clean.'), g: 2, turn: 8),
+      e(28, settled(41200, 200000), g: 2, turn: 8),
     ];
 
     _tx['s-laapp'] = [
-      e(10, {'g': 3, 'kind': 'user', 'from': 'envoy', 'text': 'Build the Flutter shell in the '
-          'new look, Envoy chat first. Push la/app when the tests pass.'}),
-      e(11, {'g': 3, 'kind': 'assistant', 'text': 'Starting from the palette tokens on the '
-          'spec page.'}),
-      e(12, {
-        'g': 3, 'kind': 'tool', 'call_id': 'c-l1', 'tool': 'apply_patch', 'text': 'app/lib/theme.dart',
-        'input': '*** Begin Patch\n*** Add File: app/lib/theme.dart\n+class Palette {', 'status': 'ok',
-        'ended_at_ms': at(12), 'output': 'A app/lib/theme.dart (+182)',
-      }),
-      e(20, {
-        'g': 3, 'kind': 'tool', 'call_id': 'c-l2', 'tool': 'Bash', 'text': 'flutter analyze',
-        'input': 'flutter analyze', 'status': 'ok', 'ended_at_ms': at(21),
-        'output': 'Analyzing app...\nNo issues found! (ran in 4.1s)',
-      }),
-      e(40, {'g': 3, 'kind': 'user', 'from': 'envoy', 'text': 'arm64 tests passed (j-4f2a). '
-          'Push when ready.'}),
-      e(43, {'g': 3, 'kind': 'assistant', 'text': 'Pushing la/app.'}),
-      e(44, {
-        'g': 3, 'kind': 'tool', 'call_id': 'c-l3', 'tool': 'Bash', 'text': 'git push origin la/app',
-        'input': 'git push origin la/app', 'status': 'running',
-      }),
-      e(44, {'g': 3, 'kind': 'approval', 'approval_id': 'a-31'}),
+      e(10, user('envoy', 'Build the Flutter shell in the new look, Envoy chat first. Push la/app '
+          'when the tests pass.'), g: 3, turn: 13),
+      e(11, say('Starting from the palette tokens on the spec page.'), g: 3, turn: 13),
+      ...tool(12, 12, 'c-l1', 'apply_patch', 'app/lib/theme.dart',
+          '*** Begin Patch\n*** Add File: app/lib/theme.dart\n+class Palette {', g: 3, turn: 13,
+          output: 'A app/lib/theme.dart (+182)'),
+      ...tool(20, 21, 'c-l2', 'Bash', 'flutter analyze', 'flutter analyze', g: 3, turn: 13,
+          output: 'Analyzing app...\nNo issues found! (ran in 4.1s)'),
+      e(21, settled(96000, 272000), g: 3, turn: 13),
+      e(40, user('envoy', 'arm64 tests passed (j-4f2a). Push when ready.'), g: 3, turn: 14),
+      e(43, say('Pushing la/app.'), g: 3, turn: 14),
+      ...tool(44, 44, 'c-l3', 'Bash', 'git push origin la/app', 'git push origin la/app', g: 3,
+          turn: 14, status: null),
+      e(44, {'type': 'approval_request', 'approval_id': 'a-31', 'title': 'Bash',
+          'summary': 'git push origin la/app'}, g: 3, turn: 14),
     ];
     _onDecide['a-31'] = (ok) {
       const id = 's-laapp';
@@ -833,7 +929,7 @@ class FakeHub implements HubClient {
             then: () => _setActivity(id, 'idle', seen: false));
         _event('mail', 'la/app', 'pushed la/app, 6 commits', target: 'envoy');
       } else {
-        _finishTool(id, 'c-l3', 'denied by owner', ok: false);
+        _finishTool(id, 'c-l3', 'denied by owner', status: 'declined');
         _say(id, 'Not pushing. The branch stays local until you say otherwise.',
             then: () => _setActivity(id, 'idle', seen: false));
       }
@@ -849,30 +945,35 @@ class FakeHub implements HubClient {
     };
 
     _tx['s-fuzz'] = [
-      e(0, {'g': 1, 'kind': 'user', 'from': 'envoy', 'text': 'Fuzz pt-frame in rounds and mail '
-          'protectorate after each one.'}),
-      e(6, {'g': 1, 'kind': 'notice', 'level': 'warn', 'text': 'G1 quota_exhausted: claude 5h '
-          'window at 100%'}),
-      e(6, {'g': 2, 'kind': 'notice', 'level': 'info', 'text': 'resleeved g1 -> g2: claude -> '
-          'pi_local (guardrail); brief written to .protectorate/BRIEF.md'}),
-      e(7, {'g': 2, 'kind': 'assistant', 'text': 'Picked up from the brief: round 4 of '
-          'frame_codec, corpus at 597 inputs.'}),
+      e(0, user('envoy', 'Fuzz pt-frame in rounds and mail protectorate after each one.'), g: 1),
+      e(6, {'type': 'error', 'kind': 'quota', 'text': 'usage limit reached for the 5h window'},
+          g: 1),
+      e(6, note('G1 quota_exhausted: claude 5h window at 100%', 'warn'), g: 1),
+      e(6, {'type': 'exited', 'code': 0, 'requested': true}, g: 1),
+      e(6, note('resleeved g1 -> g2: claude -> pi_local (guardrail); brief written to '
+          '.protectorate/BRIEF.md'), g: 2),
+      e(6, {'type': 'session_info', 'harness': 'pi_local', 'mode': 'headless',
+          'native_id': '9b2e-fuzz', 'model': 'qwen3-coder-30b-a3b', 'provider': 'llama.cpp'}, g: 2),
+      e(7, say('Picked up from the brief: round 4 of frame_codec, corpus at 597 inputs.'), g: 2),
     ];
 
     _tx['s-herdr'] = [
-      e(0, {'g': 1, 'kind': 'user', 'from': 'owner', 'text': 'Port the pane layout code and '
-          'its tests, keep commits small.'}),
-      e(1, {'g': 1, 'kind': 'assistant', 'text': 'Port done: 14 commits on main, all tests '
-          'pass. The push to main needs your approval since main is protected; it was denied '
-          '(a-30), so the commits are local.'}),
+      e(0, user('owner', 'Port the pane layout code and its tests, keep commits small.'), g: 1),
+      e(1, say('Port done: 14 commits on main, all tests pass. The push to main needs your '
+          'approval since main is protected; it was denied (a-30), so the commits are local.'),
+          g: 1),
+      e(1, settled(152000, 200000), g: 1),
     ];
 
     _tx['s-notes'] = [
-      e(0, {'g': 2, 'kind': 'notice', 'level': 'alarm', 'text': 'G3 crash: exit 139 (SIGSEGV)'}),
-      e(1, {'g': 3, 'kind': 'notice', 'level': 'info', 'text': 'resleeved g2 -> g3: codex -> pi_local'}),
-      e(2, {'g': 3, 'kind': 'notice', 'level': 'alarm', 'text': 'G3 crash: exit 139 (SIGSEGV)'}),
-      e(3, {'g': 4, 'kind': 'notice', 'level': 'alarm', 'text': 'parked: third resleeve within '
-          'an hour. Resleeve by hand to run it again.'}),
+      e(0, {'type': 'exited', 'signal': 11, 'requested': false,
+          'stderr_tail': 'Segmentation fault (core dumped)'}, g: 2),
+      e(0, note('G3 crash: exit 139 (SIGSEGV)', 'alarm'), g: 2),
+      e(1, note('resleeved g2 -> g3: codex -> pi_local'), g: 3),
+      e(2, {'type': 'exited', 'signal': 11, 'requested': false}, g: 3),
+      e(2, note('G3 crash: exit 139 (SIGSEGV)', 'alarm'), g: 3),
+      e(3, note('parked: third resleeve within an hour. Resleeve by hand to run it again.',
+          'alarm'), g: 4),
     ];
 
     Json node(String id, String name, Json inv, Json? sample, Json presence,
@@ -936,24 +1037,28 @@ class FakeHub implements HubClient {
 
     _jobs.addAll([
       {
-        'id': 'j-4f2a', 'node_id': 'n-msr1', 'state': 'succeeded', 'command': 'make test',
+        'id': 'j-4f2a', 'node_id': 'n-msr1', 'target': {'type': 'arch', 'arch': 'arm64'},
+        'argv': ['make', 'test'], 'state': 'succeeded',
         'requested_by': 'envoy', 'attempt': 1, 'queued_at_ms': at(30), 'started_at_ms': at(30),
         'ended_at_ms': at(34) - 48000, 'exit_code': 0,
       },
       {
         'id': 'j-4e91', 'node_id': 'n-officepc', 'state': 'succeeded',
-        'command': 'cargo build --release --workspace', 'requested_by': 'protectorate',
+        'target': {'type': 'arch', 'arch': 'amd64'},
+        'argv': ['cargo', 'build', '--release', '--workspace'], 'requested_by': 'protectorate',
         'attempt': 1, 'queued_at_ms': at(8), 'started_at_ms': at(8), 'ended_at_ms': at(12),
         'exit_code': 0,
       },
       {
         'id': 'j-4d10', 'node_id': 'n-officewin', 'state': 'lost',
-        'command': 'winget upgrade --all --silent', 'requested_by': 'envoy', 'attempt': 1,
+        'target': {'type': 'node', 'node_id': 'n-officewin'}, 'maintenance': true,
+        'argv': ['winget', 'upgrade', '--all', '--silent'], 'requested_by': 'envoy', 'attempt': 1,
         'queued_at_ms': _ago(const Duration(hours: 3, minutes: 5)),
         'started_at_ms': _ago(const Duration(hours: 3, minutes: 4)),
       },
       {
-        'id': 'j-4c77', 'node_id': 'n-msr1', 'state': 'failed', 'command': 'make test',
+        'id': 'j-4c77', 'node_id': 'n-msr1', 'state': 'failed',
+        'target': {'type': 'arch', 'arch': 'arm64'}, 'argv': ['make', 'test'],
         'requested_by': 'la/app', 'attempt': 1,
         'queued_at_ms': _ago(const Duration(hours: 6)),
         'started_at_ms': _ago(const Duration(hours: 6)),
