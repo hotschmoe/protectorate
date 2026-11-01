@@ -35,6 +35,7 @@ pub struct TypeDef {
     pub shape: Shape,
 }
 
+#[derive(Clone, Copy)]
 pub enum Shape {
     Record(&'static [FieldDef]),
     Enum(&'static [EnumValue]),
@@ -65,7 +66,7 @@ pub struct VariantDef {
 }
 
 /// An API type with a schema description.
-pub trait Described: ToJson + FromJson {
+pub trait Described: ToJson + FromJson + Clone + PartialEq + std::fmt::Debug {
     fn def() -> &'static TypeDef;
 }
 

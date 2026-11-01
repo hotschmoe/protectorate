@@ -1,0 +1,1 @@
+{"type":"entry","seq":9,"sleeve_id":"s-proto","entry":{"seq":18,"g":2,"turn":8,"at_ms":1793489688464,"entry":{"type":"tool_call","id":"c-p1","tool":"read","name":"Read","summary":"SPEC.md","input":{"file_path":"SPEC.md","offset":432,"limit":40},"truncated":false}}}
