@@ -473,3 +473,242 @@ fn envoy_on_claude_paid() {
         reply.stdout
     );
 }
+
+fn write_script(path: &std::path::Path, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::write(path, format!("#!/bin/sh\n{body}\n")).expect("write script");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod script");
+}
+
+/// A sleeve controls its repo's config and `.gitattributes` (a child, the shared git dir): the
+/// hub's checkpoint, worktree add and brief facts must run none of its filters, hooks,
+/// fsmonitor or textconv. A child path through a symlink never reaches another worktree.
+#[test]
+fn workspace_git_config_runs_nothing() {
+    if !have_runtime() {
+        return;
+    }
+    let port = free_port();
+    let listen = format!("127.0.0.1:{port}");
+    let hub = Hub::start_with("gitcfg", "pi_local", &["--listen", &listen], &[]);
+    let repo = temp_repo("gitcfg");
+    let traps = unique("gitcfg-traps");
+    std::fs::create_dir_all(traps.join("hooks")).unwrap();
+    let marker = |what: &str| traps.join(format!("ran-{what}"));
+    for (name, what) in [
+        ("clean", "clean"),
+        ("smudge", "smudge"),
+        ("fsmonitor", "fsmonitor"),
+        ("textconv", "textconv"),
+        ("hooks/post-checkout", "post-checkout"),
+        ("hooks/reference-transaction", "reference-transaction"),
+    ] {
+        let tail = if matches!(what, "clean" | "smudge") {
+            "cat"
+        } else {
+            "exit 0"
+        };
+        write_script(
+            &traps.join(name),
+            &format!("touch '{}'\n{tail}", marker(what).display()),
+        );
+    }
+    std::fs::write(repo.join(".gitattributes"), "* filter=evil diff=evil\n").unwrap();
+    assert!(git(&repo, &["add", ".gitattributes"]).status.success());
+    assert!(
+        git(&repo, &["commit", "-qm", "attributes"])
+            .status
+            .success()
+    );
+    let t = |n: &str| traps.join(n).to_string_lossy().into_owned();
+    for (k, v) in [
+        ("filter.evil.clean", t("clean")),
+        ("filter.evil.smudge", t("smudge")),
+        ("filter.evil.required", "true".into()),
+        ("diff.evil.textconv", t("textconv")),
+        ("core.fsmonitor", t("fsmonitor")),
+        ("core.hooksPath", t("hooks")),
+    ] {
+        assert!(
+            git(&repo, &["config", k, &v]).status.success(),
+            "config {k}"
+        );
+    }
+    std::fs::write(repo.join("notes.txt"), "changed by the sleeve\n").unwrap();
+
+    let root = hub.spawn_pi("gitroot", &repo);
+    let id = root["id"].as_str().unwrap().to_string();
+    hub.send("gitroot", READY);
+    hub.wait("gitroot", "idle", 180);
+    let checkpoints = hub.home.join(format!("sleeves/{id}/checkpoints.jsonl"));
+    let line = eventually(
+        "a checkpoint after the turn",
+        Duration::from_secs(30),
+        || {
+            std::fs::read_to_string(&checkpoints)
+                .ok()
+                .filter(|t| t.contains("\"g\":1"))
+        },
+    );
+    let commit = pt_json::parse(line.lines().last().unwrap()).unwrap()["commit"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let objects = hub.home.join(format!("sleeves/{id}/objects"));
+    let show = std::process::Command::new("git")
+        .args([
+            "-C",
+            repo.to_str().unwrap(),
+            "show",
+            &format!("{commit}:notes.txt"),
+        ])
+        .env("GIT_OBJECT_DIRECTORY", &objects)
+        .env(
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            repo.join(".git/objects"),
+        )
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&show.stdout),
+        "changed by the sleeve\n",
+        "the checkpoint holds the work tree's bytes"
+    );
+
+    let kid = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "gitkid",
+            "--parent",
+            "gitroot",
+            "--harness",
+            "pi_local",
+        ])
+        .json();
+    hub.wait("gitkid", "idle", 120);
+    let kid_path = std::path::PathBuf::from(kid["path"].as_str().unwrap());
+    assert_eq!(
+        std::fs::read_to_string(kid_path.join("notes.txt")).unwrap(),
+        "The secret word is PELICAN.\n",
+        "the child's worktree is checked out"
+    );
+    assert_eq!(
+        git_out(&kid_path, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "pt/gitkid"
+    );
+
+    // A second child whose path is a symlink to the first one's worktree.
+    let links = unique("gitcfg-links");
+    std::fs::create_dir_all(&links).unwrap();
+    let link = links.join("kid2");
+    std::os::unix::fs::symlink(&kid_path, &link).unwrap();
+    // Over the API: the CLI would resolve the link itself.
+    let owner = hub.printed("owner token (shown once): ");
+    let body = pt_json::obj! {
+        "name" => "gitkid2",
+        "harness" => "pi_local",
+        "parent_id" => "gitroot",
+        "path" => link.to_str().unwrap(),
+    };
+    let (status, v) = post(port, "SpawnSleeve", Some(&owner), &body.to_string());
+    assert_eq!(status, 400, "a symlinked child path is refused: {v}");
+    assert_eq!(hub.sleeve("gitkid2"), pt_json::Value::Null);
+
+    for what in [
+        "clean",
+        "smudge",
+        "fsmonitor",
+        "textconv",
+        "post-checkout",
+        "reference-transaction",
+    ] {
+        assert!(
+            !marker(what).exists(),
+            "the hub ran the workspace's {what} with its own authority"
+        );
+    }
+}
+
+/// A child's `git worktree add` cut short by a hub crash: the worktree is registered but has no
+/// files. Recovery must not take the directory for a finished provision; it completes it.
+#[test]
+fn cut_short_worktree_is_finished() {
+    if !have_runtime() {
+        return;
+    }
+    let real_git = std::process::Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
+    let real_git = String::from_utf8_lossy(&real_git.stdout).trim().to_string();
+    let wrap = unique("cutshort-bin");
+    std::fs::create_dir_all(&wrap).unwrap();
+    let once = wrap.join("hung");
+    // The first `worktree add` registers the worktree without its files, then hangs as if the
+    // hub died mid-checkout.
+    write_script(
+        &wrap.join("git"),
+        &format!(
+            r#"case " $* " in
+  *" worktree add "*)
+    if [ ! -e '{once}' ]; then
+      touch '{once}'
+      for a in "$@"; do
+        shift
+        set -- "$@" "$a"
+        [ "$a" = add ] && set -- "$@" --no-checkout
+      done
+      '{real_git}' "$@"
+      exec sleep 600
+    fi;;
+esac
+exec '{real_git}' "$@""#,
+            once = once.display()
+        ),
+    );
+    let path = format!(
+        "{}:{}",
+        wrap.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let mut hub = Hub::start_with("cutshort", "pi_local", &[], &[("PATH", path.as_str())]);
+    let repo = temp_repo("cutshort");
+    hub.spawn_pi("cutroot", &repo);
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "cutkid",
+        "--parent",
+        "cutroot",
+        "--harness",
+        "pi_local",
+    ])
+    .ok();
+    let kid_path = eventually(
+        "the worktree to be registered",
+        Duration::from_secs(30),
+        || {
+            let p = hub.sleeve("cutkid")["path"].as_str()?.to_string();
+            git_out(&repo, &["worktree", "list"])
+                .contains(&p)
+                .then_some(p)
+        },
+    );
+    let kid_path = std::path::PathBuf::from(kid_path);
+    assert!(once.exists(), "the add was cut short");
+    assert!(!kid_path.join("notes.txt").exists());
+    hub.restart();
+    hub.wait("cutkid", "idle", 120);
+    assert_eq!(
+        std::fs::read_to_string(kid_path.join("notes.txt")).unwrap_or_default(),
+        "The secret word is PELICAN.\n",
+        "recovery finished the checkout"
+    );
+    assert_eq!(
+        git_out(&kid_path, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "pt/cutkid"
+    );
+    assert_eq!(git_out(&kid_path, &["status", "--porcelain"]), "");
+}

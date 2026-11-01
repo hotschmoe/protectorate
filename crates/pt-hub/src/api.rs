@@ -413,12 +413,22 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
             ));
             dir.to_string_lossy().into_owned()
         }
-        (Layout::Worktree, p) => {
-            let p = Path::new(p);
-            let dir = p.parent().and_then(|d| d.to_str()).unwrap_or("/");
-            let file = p.file_name().and_then(|f| f.to_str()).unwrap_or("");
-            format!("{}/{file}", canonical(dir)?)
-        }
+        // A new worktree's path need not exist yet; when it does, it is claimed by its real
+        // path, and a symlink there is refused (it could name another sleeve's worktree).
+        (Layout::Worktree, p) => match std::fs::symlink_metadata(p) {
+            Ok(m) if m.file_type().is_symlink() => {
+                return Err(err(ErrorCode::Invalid, format!("path {p} is a symlink")));
+            }
+            Ok(_) => canonical(p)?,
+            Err(_) => {
+                let p = Path::new(p);
+                let dir = p.parent().and_then(|d| d.to_str()).unwrap_or("/");
+                match p.file_name().and_then(|f| f.to_str()) {
+                    Some(file) if file != ".." => format!("{}/{file}", canonical(dir)?),
+                    _ => return Err(err(ErrorCode::Invalid, "path names no directory")),
+                }
+            }
+        },
         (Layout::View, "") => parent_path.unwrap_or_default(),
         (Layout::View, p) => canonical(p)?,
     };

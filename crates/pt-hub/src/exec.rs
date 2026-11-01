@@ -177,6 +177,15 @@ fn seed_credentials(owner_home: &Path, home: &Path, h: Harness) -> io::Result<()
     Ok(())
 }
 
+fn provision_barrier(hub: &Hub, id: SleeveId) -> PathBuf {
+    hub.home.sleeve_dir(id).join("provisioned")
+}
+
+/// The completion barrier of a sleeve's Provision: written only after the layout is whole.
+fn provisioned(hub: &Hub, id: SleeveId) -> bool {
+    provision_barrier(hub, id).is_file()
+}
+
 /// Whether the record is still exactly what this intent was released for.
 pub(crate) fn fresh(view: &View, effect: EffectId, attempt: u32, kind: &EffectKind) -> bool {
     let st = &view.state;
@@ -503,9 +512,7 @@ impl SleeveExec {
             }
         };
         match kind {
-            EffectKind::Provision { .. } => {
-                applied(workdir(&self.hub, s).is_dir() && self.hub.home.sleeve_home(s.id).is_dir())
-            }
+            EffectKind::Provision { .. } => applied(provisioned(&self.hub, s.id)),
             EffectKind::StopIncarnation { g, .. } | EffectKind::KillScope { g, .. } => {
                 applied(!self.scope_live(*g))
             }
@@ -528,14 +535,14 @@ impl SleeveExec {
         }
     }
 
+    /// Lays out the workspace, then writes the completion barrier: a cut-short provision is
+    /// done again (finishing a half-made worktree), and only the barrier makes it applied.
     fn provision(&self, view: &View, s: &Sleeve, layout: Layout) -> Result<(), String> {
+        if provisioned(&self.hub, s.id) {
+            return Ok(());
+        }
         let home = self.hub.home.sleeve_home(s.id);
         fs::create_dir_all(&home).map_err(|e| format!("{}: {e}", home.display()))?;
-        let mut harnesses = vec![s.target.harness];
-        harnesses.extend(s.resleeve_to.iter().map(|t| t.harness));
-        for h in harnesses {
-            seed_credentials(&self.hub.owner_home, &home, h).map_err(|e| e.to_string())?;
-        }
         let path = Path::new(&s.claim.path);
         match layout {
             Layout::Root => {
@@ -555,6 +562,7 @@ impl SleeveExec {
                     Path::new(&parent.claim.path),
                     path,
                     &format!("pt/{}", s.name),
+                    &self.hub.home.sleeve_dir(s.id),
                 )?;
             }
             Layout::View => {
@@ -562,7 +570,10 @@ impl SleeveExec {
                 fs::create_dir_all(&scratch).map_err(|e| format!("{}: {e}", scratch.display()))?;
             }
         }
-        Ok(())
+        let barrier = provision_barrier(&self.hub, s.id);
+        crate::home::write_private(&barrier, s.claim.path.as_bytes())
+            .and_then(|()| fs::File::open(self.hub.home.sleeve_dir(s.id))?.sync_all())
+            .map_err(|e| e.to_string())
     }
 
     fn launch(

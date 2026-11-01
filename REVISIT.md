@@ -306,8 +306,20 @@ Each entry: where, what was done, what right looks like.
   repo's objects as an alternate), listed in `sleeves/<id>/checkpoints.jsonl`. No branch moves,
   because a commit on a root's branch would land on the owner's branch. Right: decide with the
   owner; likely a hidden ref namespace in a hub-owned bare mirror, plus a pruning rule.
-- **Hub git has no timeout and no sandbox** (worktree add, checkpoint, brief facts). Right: the
-  2 s read-only-sandbox runner the old hub had.
+- **Hub git has no timeout and no sandbox** (worktree add, checkpoint, brief facts). It runs
+  nothing from the workspace: the real repo is read only through `rev-parse` and `worktree add
+  --no-checkout` with hooks off and no system or global config, and every command that reads a
+  work tree or an index runs against a shadow git dir of the hub's own (`sleeves/<id>/
+  shadow.git`: our config, HEAD as a commit id, the repo's objects as an alternate), so filters,
+  hooks, fsmonitor and textconv a sleeve configured are never defined there. A child's checkout
+  is therefore raw blobs (an LFS file stays a pointer). Right: a timeout, and the read-only
+  sandbox runner the old hub had if git itself ever needs containing.
+- **Provision has a completion barrier file** (`pt-hub`, exec.rs): `sleeves/<id>/provisioned`
+  is written (fsynced) after the layout is whole; the probe answers Applied only on it, and a
+  retried provision finishes a registered but cut-short worktree (`read-tree --reset -u`). A
+  directory left by an add cut short before git registered it is not removed; git refuses a
+  non-empty one and the provision fails. Right: fine; record the barrier in the journal if the
+  home is ever split from it.
 - **Approval answers are reported Lost** (`pt-hub`, exec.rs): `RespondApproval` is written, then
   left Uncertain, because only Codex confirms an answer; the harness's `approval_decision` entry
   becomes `ApprovalResolved` for activity. Right: Acked on a confirmed decision (Codex) or the
