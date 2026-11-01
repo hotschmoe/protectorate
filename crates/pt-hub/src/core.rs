@@ -6,14 +6,17 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
-use pt_core::{Event, Intent, Notice, Party, SleeveId, State, codec};
+use pt_api::EventKind as Kind;
+use pt_api::{ActivityState, ApprovalState, DecidedBy, Decision, HubStreamMessage, Level};
+use pt_core::{Activity, Event, Intent, Life, Notice, Party, SleeveId, State, codec};
 use pt_journal::Journal;
-use pt_json::obj;
 
+use crate::approvals::tool_id;
 use crate::exec::Executors;
 use crate::home::now_ms;
 use crate::hub::{Hub, Input, View};
 use crate::log::{debug, error, info};
+use crate::transcript::Note;
 use crate::wire;
 
 const MAX_BATCH: usize = 512;
@@ -21,7 +24,7 @@ const MAX_BATCH: usize = 512;
 pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<Input>) {
     let mut exec = Executors::new(hub.clone());
     let mut batch_n = hub.view().batch;
-    let mut since: BTreeMap<SleeveId, (&'static str, u64)> = BTreeMap::new();
+    let mut since: BTreeMap<SleeveId, (ActivityState, u64)> = BTreeMap::new();
     while let Ok(first) = rx.recv() {
         let mut inputs = vec![first];
         while inputs.len() < MAX_BATCH {
@@ -54,7 +57,7 @@ pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<I
         batch_n += 1;
         let now = now_ms();
         for s in state.sleeves.values() {
-            let kind = wire::activity_wire(&s.activity);
+            let kind = wire::activity(&s.activity);
             match since.get(&s.id) {
                 Some((k, _)) if *k == kind => {}
                 _ => {
@@ -88,20 +91,38 @@ pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<I
     info!("core stopped");
 }
 
-/// Pushes one `sleeve` message per sleeve that changed in this batch.
+/// Pushes the stream messages for every sleeve that changed in this batch: `workspace` for a new
+/// root, `sleeve`, or `sleeve_removed`. Tool approvals of ended incarnations are cancelled.
 fn announce_changes(hub: &Hub, before: &View, after: &View) {
     for s in after.state.sleeves.values() {
-        if before.state.sleeves.get(&s.id) != Some(s) {
-            hub.bus.push(obj! {
-                "kind" => "sleeve",
-                "at_ms" => now_ms(),
-                "sleeve" => wire::sleeve(hub, after, s),
-            });
+        let old = before.state.sleeves.get(&s.id);
+        if old == Some(s) {
+            continue;
         }
+        if s.life == Life::Removed {
+            if old.is_some_and(|o| o.life != Life::Removed) {
+                let id = s.id.0.to_string();
+                hub.bus
+                    .push(|seq| HubStreamMessage::SleeveRemoved { seq, id });
+            }
+            continue;
+        }
+        if s.parent.is_none() && old.is_none() {
+            let workspace = wire::workspace(s);
+            hub.bus
+                .push(|seq| HubStreamMessage::Workspace { seq, workspace });
+        }
+        let sleeve = wire::sleeve(hub, after, s);
+        hub.bus.push(|seq| HubStreamMessage::Sleeve { seq, sleeve });
     }
+    let st = &after.state;
+    hub.approvals.cancel_gone(&hub.bus, &|id, g| {
+        st.sleeve(id)
+            .is_some_and(|s| s.g.0 == g && s.activity != Activity::Ended && s.life.live())
+    });
 }
 
-fn notice_text(view: &View, n: &Notice) -> (&'static str, &'static str, String) {
+fn notice_text(view: &View, n: &Notice) -> (Kind, Level, String) {
     let name = |id: SleeveId| {
         view.state
             .sleeve(id)
@@ -109,56 +130,70 @@ fn notice_text(view: &View, n: &Notice) -> (&'static str, &'static str, String) 
     };
     match n {
         Notice::MessageRejected { request_id } => (
-            "mail",
-            "warn",
+            Kind::Mail,
+            Level::Warn,
             format!("message {request_id} was rejected by the harness"),
         ),
         Notice::MessageMayHaveApplied { request_id } => (
-            "mail",
-            "warn",
+            Kind::Mail,
+            Level::Warn,
             format!("message {request_id} may or may not have reached the harness"),
         ),
         Notice::EffectUnknowable { effect } => (
-            "hub",
-            "alarm",
+            Kind::Hub,
+            Level::Alarm,
             format!("effect {} cannot be confirmed", effect.0),
         ),
-        Notice::ApprovalRequested { approval } => {
-            ("approval", "warn", format!("approval {approval} requested"))
-        }
+        Notice::ApprovalRequested { approval } => (
+            Kind::Approval,
+            Level::Warn,
+            format!("approval {approval} requested"),
+        ),
         Notice::ApprovalTimedOut { approval } => (
-            "approval",
-            "warn",
+            Kind::Approval,
+            Level::Warn,
             format!("approval {approval} timed out and was denied"),
         ),
         Notice::Tripped { guardrail } => (
-            "guardrail",
-            "alarm",
+            Kind::Guardrail,
+            Level::Alarm,
             format!("guardrail G{} tripped ({guardrail:?})", guardrail.number()),
         ),
-        Notice::Resumed { g } => ("sleeve", "info", format!("resumed natively as g{}", g.0)),
-        Notice::Resleeved { g } => ("sleeve", "warn", format!("resleeved as g{}", g.0)),
+        Notice::Resumed { g } => (
+            Kind::Sleeve,
+            Level::Info,
+            format!("resumed natively as g{}", g.0),
+        ),
+        Notice::Resleeved { g } => (Kind::Sleeve, Level::Warn, format!("resleeved as g{}", g.0)),
         Notice::Parked { reason } => (
-            "sleeve",
-            "alarm",
+            Kind::Sleeve,
+            Level::Alarm,
             format!("parked ({})", wire::park_wire(*reason)),
         ),
-        Notice::Stopped => ("sleeve", "info", "stopped".into()),
-        Notice::Removed => ("sleeve", "info", "removed".into()),
-        Notice::ChildCrashed { child } => {
-            ("sleeve", "warn", format!("child {} crashed", name(*child)))
+        Notice::Stopped => (Kind::Sleeve, Level::Info, "stopped".into()),
+        Notice::Removed => (Kind::Sleeve, Level::Info, "removed".into()),
+        Notice::ChildCrashed { child } => (
+            Kind::Sleeve,
+            Level::Warn,
+            format!("child {} crashed", name(*child)),
+        ),
+        Notice::ChildParked { child } => (
+            Kind::Sleeve,
+            Level::Warn,
+            format!("child {} parked", name(*child)),
+        ),
+        Notice::ChildStopped { child } => (
+            Kind::Sleeve,
+            Level::Info,
+            format!("child {} stopped", name(*child)),
+        ),
+        Notice::JobInterrupted { job } => {
+            (Kind::Job, Level::Warn, format!("job {} interrupted", job.0))
         }
-        Notice::ChildParked { child } => {
-            ("sleeve", "warn", format!("child {} parked", name(*child)))
-        }
-        Notice::ChildStopped { child } => {
-            ("sleeve", "info", format!("child {} stopped", name(*child)))
-        }
-        Notice::JobInterrupted { job } => ("job", "warn", format!("job {} interrupted", job.0)),
-        Notice::JobLost { job } => ("job", "alarm", format!("job {} lost", job.0)),
+        Notice::JobLost { job } => (Kind::Job, Level::Alarm, format!("job {} lost", job.0)),
         Notice::JobFinished { job, ok } => (
-            "job",
-            if *ok { "info" } else { "warn" },
+            Kind::Job,
+            if *ok { Level::Info } else { Level::Warn },
             format!("job {} {}", job.0, if *ok { "succeeded" } else { "failed" }),
         ),
     }
@@ -167,6 +202,15 @@ fn notice_text(view: &View, n: &Notice) -> (&'static str, &'static str, String) 
 /// A notice becomes a hub event on the stream and, for a sleeve, a line in its transcript.
 fn notify(hub: &Hub, view: &View, to: Party, sleeve: Option<SleeveId>, n: &Notice) {
     let (kind, level, text) = notice_text(view, n);
+    if let (Notice::ApprovalTimedOut { approval }, Some(id)) = (n, sleeve) {
+        hub.approvals.resolve(
+            &hub.bus,
+            &tool_id(id, approval),
+            ApprovalState::Expired,
+            Some(Decision::Deny),
+            DecidedBy::Rule,
+        );
+    }
     let target = match to {
         Party::Owner => "owner".to_string(),
         Party::Envoy => "envoy".to_string(),
@@ -180,21 +224,8 @@ fn notify(hub: &Hub, view: &View, to: Party, sleeve: Option<SleeveId>, n: &Notic
         .and_then(|id| view.state.sleeve(id))
         .map_or_else(|| "hub".to_string(), |s| s.name.clone());
     info!("notice for {target} from {source}: {text}");
+    hub.event(kind, level, &source, &target, &text);
     let at = now_ms();
-    hub.bus.push(obj! {
-        "kind" => "event",
-        "at_ms" => at,
-        "event" => obj! {
-            "seq" => hub.bus.seq() + 1,
-            "at_ms" => at,
-            "kind" => kind,
-            "source" => source,
-            "target" => target,
-            "text" => text.as_str(),
-            "read" => false,
-            "level" => level,
-        },
-    });
     // Notices addressed to a parent about its child stay on the stream only.
     if let Some(id) = sleeve
         && !matches!(to, Party::Sleeve(_))
@@ -207,6 +238,10 @@ fn notify(hub: &Hub, view: &View, to: Party, sleeve: Option<SleeveId>, n: &Notic
             pt_drivers::Entry::Notice {
                 code: Some(format!("hub:{kind}")),
                 text,
+            },
+            Note {
+                harness: None,
+                level: Some(level),
             },
         );
     }

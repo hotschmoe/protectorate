@@ -20,6 +20,7 @@ class AppScope extends InheritedWidget {
     required this.hubUrl,
     required this.hubToken,
     required this.connect,
+    required this.pair,
     required super.child,
   });
 
@@ -36,6 +37,9 @@ class AppScope extends InheritedWidget {
   final String hubUrl;
   final String hubToken;
   final void Function(String url, String token) connect;
+
+  /// Trades a code from `protectorate device add` for this device's token; the device's name.
+  final Future<String> Function(String code) pair;
 
   static AppScope of(BuildContext context) {
     final s = context.dependOnInheritedWidgetOfExactType<AppScope>();

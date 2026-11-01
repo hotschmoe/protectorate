@@ -1,5 +1,6 @@
-//! Per-sleeve transcript: an append-only JSONL file of normalized entries with a monotonic seq,
-//! plus an in-memory tail. Streaming text deltas never reach the file; the final block does.
+//! Per-sleeve transcript: an append-only JSONL file of the drivers' normalized entries with a
+//! monotonic seq and the hub's turn number, plus an in-memory tail. Streaming text deltas never
+//! reach the file; the final block does. `wire::chat_entry` turns a line into the API's entry.
 
 use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
@@ -7,13 +8,36 @@ use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use pt_api::{Harness, Level};
 use pt_core::SleeveId;
-use pt_drivers::{Entry, Event};
+use pt_drivers::Entry;
 use pt_json::ToJson;
 
 use crate::home::Home;
 
 const TAIL: usize = 4096;
+
+pt_json::record! {
+    /// One stored entry. `harness` is set on `session_info` (the drivers say only `pi`), `level`
+    /// on the hub's own notices.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct Line {
+        pub seq: u64,
+        pub g: u64,
+        pub time_ms: u64,
+        pub turn: u64 = 0,
+        pub harness: Option<Harness>,
+        pub level: Option<Level>,
+        pub entry: Entry,
+    }
+}
+
+/// What `Store::append` takes besides the entry.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Note {
+    pub harness: Option<Harness>,
+    pub level: Option<Level>,
+}
 
 /// Facts the sleeve listing shows, folded from the entries as they arrive.
 #[derive(Clone, Debug, Default)]
@@ -28,7 +52,7 @@ pub struct Stats {
 }
 
 impl Stats {
-    fn fold(&mut self, e: &Event) {
+    fn fold(&mut self, e: &Line) {
         match &e.entry {
             Entry::SessionInfo {
                 model, provider, ..
@@ -56,7 +80,8 @@ pub struct Store {
     path: PathBuf,
     file: File,
     next_seq: u64,
-    tail: VecDeque<Event>,
+    turn: u64,
+    tail: VecDeque<Line>,
     pub stats: Stats,
 }
 
@@ -65,7 +90,7 @@ fn ctx(path: &std::path::Path) -> impl Fn(io::Error) -> io::Error + '_ {
 }
 
 /// Every entry in the file, skipping a torn or corrupt line (a crash mid-write).
-fn read_all(path: &std::path::Path) -> io::Result<Vec<Event>> {
+fn read_all(path: &std::path::Path) -> io::Result<Vec<Line>> {
     let f = match File::open(path) {
         Ok(f) => f,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
@@ -74,7 +99,7 @@ fn read_all(path: &std::path::Path) -> io::Result<Vec<Event>> {
     let mut out = Vec::new();
     for line in BufReader::new(f).split(b'\n') {
         let line = line.map_err(ctx(path))?;
-        if let Ok(e) = pt_json::from_bytes::<Event>(&line) {
+        if let Ok(e) = pt_json::from_bytes::<Line>(&line) {
             out.push(e);
         }
     }
@@ -92,7 +117,8 @@ impl Store {
             stats.fold(e);
         }
         let next_seq = all.last().map_or(1, |e| e.seq + 1);
-        let tail: VecDeque<Event> = all.into_iter().rev().take(TAIL).rev().collect();
+        let turn = all.last().map_or(0, |e| e.turn);
+        let tail: VecDeque<Line> = all.into_iter().rev().take(TAIL).rev().collect();
         let mut file = OpenOptions::new()
             .create(true)
             .read(true)
@@ -113,6 +139,7 @@ impl Store {
             path,
             file,
             next_seq,
+            turn,
             tail,
             stats,
         })
@@ -123,11 +150,22 @@ impl Store {
         self.next_seq
     }
 
-    pub fn append(&mut self, g: u64, time_ms: u64, entry: Entry) -> io::Result<Event> {
-        let e = Event {
+    /// The turn number the next entry gets (a `turn_started` opens the next one).
+    pub fn peek_turn(&self, entry: &Entry) -> u64 {
+        match entry {
+            Entry::TurnStarted { .. } => self.turn + 1,
+            _ => self.turn,
+        }
+    }
+
+    pub fn append(&mut self, g: u64, time_ms: u64, entry: Entry, note: Note) -> io::Result<Line> {
+        let e = Line {
             seq: self.next_seq,
             g,
             time_ms,
+            turn: self.peek_turn(&entry),
+            harness: note.harness,
+            level: note.level,
             entry,
         };
         let mut line = e.to_json().to_string();
@@ -136,6 +174,7 @@ impl Store {
             .write_all(line.as_bytes())
             .map_err(ctx(&self.path))?;
         self.next_seq += 1;
+        self.turn = e.turn;
         self.stats.fold(&e);
         if self.tail.len() == TAIL {
             self.tail.pop_front();
@@ -145,7 +184,7 @@ impl Store {
     }
 
     /// Entries with seq greater than `after`, at most `limit`.
-    pub fn after(&self, after: u64, limit: usize) -> io::Result<Vec<Event>> {
+    pub fn after(&self, after: u64, limit: usize) -> io::Result<Vec<Line>> {
         let in_tail = self.tail.front().is_none_or(|f| f.seq <= after + 1);
         if in_tail {
             return Ok(self
@@ -163,8 +202,14 @@ impl Store {
             .collect())
     }
 
+    /// The last `n` entries.
+    pub fn last(&self, n: usize) -> io::Result<Vec<Line>> {
+        let after = self.next_seq.saturating_sub(n as u64 + 1);
+        self.after(after, n)
+    }
+
     /// The whole transcript, for the continuation brief.
-    pub fn all(&self) -> io::Result<Vec<Event>> {
+    pub fn all(&self) -> io::Result<Vec<Line>> {
         if self.tail.front().is_none_or(|f| f.seq == 1) {
             return Ok(self.tail.iter().cloned().collect());
         }

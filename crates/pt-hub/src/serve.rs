@@ -15,8 +15,9 @@ use pt_core::{Claim, EventKind, Layout, SpawnSpec, codec};
 use pt_http::{Config as HttpConfig, Server, ShutdownHandle};
 use pt_journal::Journal;
 
+use crate::devices::Devices;
 use crate::home::{Config, Home, Tokens, random_hex, write_private};
-use crate::http::{Listener, handler};
+use crate::http::{Listener, Web, handler};
 use crate::hub::{ENVOY, Hub, Input, View};
 use crate::log::{info, warning};
 use crate::wire;
@@ -27,7 +28,7 @@ pub struct ServeOptions {
     pub listen: Option<SocketAddr>,
     pub proxy_listen: Option<SocketAddr>,
     pub trusted_proxy: Option<IpAddr>,
-    pub web_dir: Option<PathBuf>,
+    pub web: Web,
 }
 
 const ENVOY_MD: &str = include_str!("envoy.md");
@@ -89,6 +90,7 @@ pub fn serve(o: ServeOptions) -> Result<(), String> {
     let home = Home::prepare(&o.home).map_err(|e| e.to_string())?;
     let config = Config::load(&home).map_err(|e| e.to_string())?;
     let (tokens, new_owner) = Tokens::load_or_create(&home).map_err(|e| e.to_string())?;
+    let devices = Devices::load(&home).map_err(|e| e.to_string())?;
     let (journal, rec) = Journal::open(&home.journal())
         .map_err(|e| format!("open journal {}: {e}", home.journal().display()))?;
     if let Some(cut) = &rec.cut {
@@ -139,6 +141,7 @@ pub fn serve(o: ServeOptions) -> Result<(), String> {
         home.clone(),
         config,
         tokens,
+        devices,
         uid,
         owner_home,
         tx,
@@ -200,13 +203,19 @@ pub fn serve(o: ServeOptions) -> Result<(), String> {
         })
         .map_err(ctx("spawn tick"))?;
 
+    let web = Arc::new(o.web);
+    match &*web {
+        Web::None => info!("web app: not embedded in this binary"),
+        Web::Dir(d) => info!("web app: from {}", d.display()),
+        Web::Embedded(files) => info!("web app: embedded, {} files", files.len()),
+    }
     let mut servers = Vec::new();
     let sock = home.socket();
     clear_stale_socket(&sock)?;
     let unix = Server::bind_unix(
         &sock,
         http_config(),
-        handler(hub.clone(), Listener::Unix, o.web_dir.clone()),
+        handler(hub.clone(), Listener::Unix, web.clone()),
     )
     .map_err(|e| e.to_string())?;
     servers.push(start_server("unix", unix));
@@ -214,7 +223,7 @@ pub fn serve(o: ServeOptions) -> Result<(), String> {
         let s = Server::bind_tcp(
             addr,
             http_config(),
-            handler(hub.clone(), Listener::Loopback, o.web_dir.clone()),
+            handler(hub.clone(), Listener::Loopback, web.clone()),
         )
         .map_err(|e| e.to_string())?;
         info!("listening on {}", s.local_addr().unwrap_or(addr));
@@ -227,7 +236,7 @@ pub fn serve(o: ServeOptions) -> Result<(), String> {
         let s = Server::bind_tcp(
             addr,
             http_config(),
-            handler(hub.clone(), Listener::Proxy { trusted }, o.web_dir.clone()),
+            handler(hub.clone(), Listener::Proxy { trusted }, web.clone()),
         )
         .map_err(|e| e.to_string())?;
         info!("listening for {trusted} on {addr}");

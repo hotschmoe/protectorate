@@ -9,20 +9,24 @@
 #![forbid(unsafe_code)]
 
 mod api;
+mod approvals;
 mod brief;
 mod bus;
 mod core;
+mod devices;
 mod exec;
 mod git;
 mod home;
 mod http;
 mod hub;
 mod log;
+mod rule;
 mod select;
 mod serve;
 mod transcript;
 mod wire;
 
+pub use http::{Web, WebFile};
 pub use log::set_level as set_log_level;
 pub use serve::{ServeOptions, serve};
 

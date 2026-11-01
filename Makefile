@@ -1,8 +1,11 @@
 VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build release test test-paid check check-deps check-gen gen fmt
+.PHONY: build release web test test-paid check check-deps check-gen gen fmt app-check
 
 DART ?= dart
+FLUTTER ?= flutter
+# The release binary embeds this Flutter web build when it exists (make web first).
+WEB_DIR ?= $(CURDIR)/app/build/web
 API_DART := app/lib/api/api.g.dart
 # Inside app/ so dart format sees the app's language version and settings; .dart_tool is ignored.
 API_TMP := app/.dart_tool/apigen/api.g.dart
@@ -11,7 +14,14 @@ build:
 	PROTECTORATE_BUILD_VERSION='$(VERSION)' cargo build --locked --workspace
 
 release:
-	PROTECTORATE_BUILD_VERSION='$(VERSION)' cargo build --locked --release --workspace --bins
+	PROTECTORATE_BUILD_VERSION='$(VERSION)' PROTECTORATE_WEB_DIR='$(WEB_DIR)' cargo build --locked --release --workspace --bins
+
+# Same-origin web app: the hub serves it, so no CDN (canvaskit and fonts are local).
+web:
+	cd app && $(FLUTTER) build web --release --no-web-resources-cdn
+
+app-check:
+	cd app && $(FLUTTER) analyze
 
 test:
 	cargo test --locked --workspace
@@ -26,7 +36,7 @@ fmt:
 check:
 	cargo fmt --all -- --check
 	cargo clippy --locked --workspace --all-targets -- -D warnings
-	$(MAKE) test check-deps check-gen
+	$(MAKE) test check-deps check-gen app-check
 
 check-deps:
 	sh scripts/check-deps.sh

@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../api/api.g.dart';
+import '../local.dart';
 import '../scope.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -14,6 +18,9 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final _url = TextEditingController();
   final _token = TextEditingController();
+  final _code = TextEditingController();
+  List<Device>? _devices;
+  String? _devicesFor;
 
   @override
   void didChangeDependencies() {
@@ -27,7 +34,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void dispose() {
     _url.dispose();
     _token.dispose();
+    _code.dispose();
     super.dispose();
+  }
+
+  HubApi _api(AppScope app) => HubApi(Uri.parse(app.hubUrl), token: app.hubToken);
+
+  /// The paired devices, loaded once per hub and token.
+  void _loadDevices(AppScope app) {
+    final key = '${app.hubUrl} ${app.hubToken}';
+    if (app.hubUrl.isEmpty || app.hubToken.isEmpty || _devicesFor == key) return;
+    _devicesFor = key;
+    unawaited(_api(app).listDevices().then((l) {
+      if (mounted) setState(() => _devices = l.devices);
+    }, onError: (Object _) {
+      if (mounted) setState(() => _devices = null);
+    }));
   }
 
   @override
@@ -41,12 +63,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [Cells(14, child: T(k, color: p.dim)), Expanded(child: v)],
       ),
     );
+    _loadDevices(app);
+    final kept = pageOrigin() != null ? 'kept in this browser' : 'kept for this session only';
     void save() {
       app.connect(_url.text, _token.text);
       app.say(_url.text.trim().isEmpty
-          ? 'no hub URL: using the scripted FAKE HUB (settings last for this session only)'
-          : 'connecting to ${_url.text.trim()} (settings last for this session only)');
+          ? 'no hub URL: using the scripted FAKE HUB'
+          : 'connecting to ${_url.text.trim()} ($kept)');
     }
+    Future<void> pair() async {
+      if (_url.text.trim() != app.hubUrl) app.connect(_url.text, '');
+      await app.act(() async {
+        final name = await app.pair(_code.text);
+        _code.clear();
+        app.say('paired as $name ($kept)');
+      });
+    }
+    Future<void> revoke(Device d) => app.act(() async {
+      await _api(app).revokeDevice(DeviceRef(deviceId: d.id));
+      _devicesFor = null;
+      if (d.id == loadSetting('device_id')) app.connect(app.hubUrl, '');
+      if (mounted) setState(() {});
+    }, done: 'revoked ${d.name}');
+    final me = loadSetting('device_id');
     return ListView(children: [
       const HRule(label: 'HUB'),
       kv('CONNECTED', T(app.hub.label, color: p.warn)),
@@ -56,14 +95,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
         hint: 'https://protectorate.hotschmoe.com (empty: scripted fake hub)',
         onSubmit: (_) => save(),
       )),
+      kv('PAIRING CODE', Field(
+        controller: _code,
+        prompt: '',
+        hint: 'XXXX-XXXX-XXXX (on the hub: protectorate device add <name>)',
+        onSubmit: (_) => unawaited(pair()),
+      )),
+      kv('', Actions3270([Btn('PAIR', onTap: () => unawaited(pair()))])),
       kv('DEVICE TOKEN', Field(
         controller: _token,
         prompt: '',
-        hint: 'pd1.xxxxxxxx (from protectorate device add)',
+        hint: 'pd1.xxxxxxxx (set by PAIR)',
         obscure: true,
         onSubmit: (_) => save(),
       )),
       kv('', Actions3270([Btn('SAVE', onTap: save)])),
+      if (_devices != null) ...[
+        const HRule(label: 'DEVICES'),
+        for (final d in _devices!)
+          kv(d.id, Row(children: [
+            Expanded(child: T(d.id == me ? '${d.name} (this device)' : d.name)),
+            Btn('REVOKE', onTap: () => unawaited(revoke(d))),
+          ])),
+      ],
       const HRule(label: 'DISPLAY'),
       kv('THEME', Actions3270([
         Btn('AMBER', active: app.dark, onTap: () => app.setDark(true)),

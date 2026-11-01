@@ -1,6 +1,10 @@
 //! Executors: one serial thread per sleeve, plus one for node jobs. Each re-checks its intent
 //! against the latest published view right before acting, reports `Dispatched` before the
 //! write, and feeds the outcome back to the core as an event.
+//!
+//! A live incarnation's pump is the one ordered stream for its sleeve: the executor hands it
+//! its reports, and the pump submits each only after every harness event it has received, so
+//! output read before a write never reaches the core after the write's `Dispatched`.
 
 use std::collections::HashMap;
 use std::fs;
@@ -19,14 +23,22 @@ use pt_core::{
 use pt_drivers::{Ack, Decision, Entry, ErrorClass, Session, Stop};
 use pt_json::obj;
 
+use crate::approvals::{ToolAsk, tool_id};
 use crate::brief;
 use crate::git;
 use crate::home::now_ms;
 use crate::hub::{Hub, View};
 use crate::log::{debug, info, warning};
+use crate::transcript::Note;
+use crate::wire;
 
 const ACK_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_GRACE: Duration = Duration::from_secs(10);
+/// How long a pump waits on harness output before it looks for an executor report.
+const ORDER_POLL: Duration = Duration::from_millis(10);
+
+/// A report the pump submits in its stream, then acknowledges.
+type Ordered = (EventKind, Sender<()>);
 
 pub struct Executors {
     hub: Arc<Hub>,
@@ -88,6 +100,7 @@ impl Executors {
 struct Live {
     g: Gen,
     session: Arc<Session>,
+    order: Sender<Ordered>,
 }
 
 struct SleeveExec {
@@ -149,7 +162,7 @@ fn doctor_ineligible(hub: &Hub, h: Harness) -> bool {
     let Ok(v) = pt_json::parse_bytes(&bytes) else {
         return false;
     };
-    let name = crate::wire::harness_wire(h);
+    let name = wire::harness_wire(h);
     v["ineligible"]
         .as_array()
         .is_some_and(|a| a.iter().any(|x| x.as_str() == Some(name)))
@@ -248,7 +261,15 @@ impl SleeveExec {
         }
     }
 
+    /// Submits through the live pump when there is one, and returns once it is in: the core
+    /// sees the sleeve's reports and observations in the order they happened.
     fn submit(&self, kind: EventKind) {
+        if let Some(live) = &self.live {
+            let (tx, rx) = mpsc::channel();
+            if live.order.send((kind.clone(), tx)).is_ok() && rx.recv().is_ok() {
+                return;
+            }
+        }
         self.hub.submit(kind);
     }
 
@@ -559,12 +580,8 @@ impl SleeveExec {
         let hub = self.hub.clone();
         let harness =
             driver_harness(target.harness).ok_or("that harness has no headless driver")?;
-        let program = program(&hub, target.harness).ok_or_else(|| {
-            format!(
-                "{} is not installed",
-                crate::wire::harness_wire(target.harness)
-            )
-        })?;
+        let program = program(&hub, target.harness)
+            .ok_or_else(|| format!("{} is not installed", wire::harness_wire(target.harness)))?;
         let home = hub.home.sleeve_home(s.id);
         fs::create_dir_all(&home).map_err(|e| format!("{}: {e}", home.display()))?;
         seed_credentials(&hub.owner_home, &home, target.harness).map_err(|e| e.to_string())?;
@@ -604,7 +621,7 @@ impl SleeveExec {
             "sleeve {}: launched g{} ({}) in {scope}, pid {}",
             s.name,
             g.0,
-            crate::wire::harness_wire(target.harness),
+            wire::harness_wire(target.harness),
             session.pid()
         );
         self.submit(EventKind::Launched {
@@ -614,16 +631,23 @@ impl SleeveExec {
             pid: session.pid(),
         });
         let session = Arc::new(session);
+        let (order, ordered) = mpsc::channel();
         self.live = Some(Live {
             g,
             session: session.clone(),
+            order,
         });
-        let id = s.id;
-        let name = s.name.clone();
-        let scoped = hub.config.scopes;
+        let run = Run {
+            id: s.id,
+            name: s.name.clone(),
+            g,
+            harness: wire::api_harness(target.harness),
+            scope,
+            scoped: hub.config.scopes,
+        };
         thread::Builder::new()
-            .name(format!("pt-pump-{}-g{}", id.0, g.0))
-            .spawn(move || pump(&hub, id, &name, g, &scope, scoped, events))
+            .name(format!("pt-pump-{}-g{}", s.id.0, g.0))
+            .spawn(move || pump(&hub, &run, events, ordered))
             .map_err(|e| format!("spawn pump: {e}"))?;
         Ok(())
     }
@@ -655,6 +679,9 @@ impl SleeveExec {
             return Outcome::Nacked("no live session for that generation".into());
         };
         let from = Hub::from_label(&view.state, self.id, request_id);
+        if Hub::envoy_id(&view.state) == Some(self.id) {
+            self.note_envoy_origin(&from, steer);
+        }
         let sent = if steer {
             session.steer(request_id, &from, text)
         } else {
@@ -670,6 +697,20 @@ impl SleeveExec {
             }
             Ack::Pending => Outcome::Lost,
         }
+    }
+
+    /// D9: records who started Envoy's next turn before its prompt is written. A prompt starts
+    /// a new turn; a steer from an agent taints the running one.
+    fn note_envoy_origin(&self, from: &str, steer: bool) {
+        let agent = from.starts_with("agent:").then(|| from.to_string());
+        let mut t = crate::transcript::lock(&self.hub.envoy_turn);
+        if !steer {
+            t.origin = agent;
+            t.spawns = 0;
+        } else if agent.is_some() {
+            t.origin = agent;
+        }
+        debug!("envoy turn origin: {:?}", t.origin);
     }
 
     fn inbox(&self, view: &View, request_id: &str, text: &str) -> io::Result<()> {
@@ -724,26 +765,101 @@ fn tool_hash(name: &str, input: &Option<pt_json::Value>) -> u64 {
     u64::from_le_bytes(d[..8].try_into().expect("8 bytes"))
 }
 
+/// One incarnation, as its pump sees it.
+struct Run {
+    id: SleeveId,
+    name: String,
+    g: Gen,
+    harness: pt_api::Harness,
+    scope: String,
+    scoped: bool,
+}
+
+fn input_text(input: &Option<pt_json::Value>) -> String {
+    let t = input.as_ref().map(|v| v.to_string()).unwrap_or_default();
+    match t.char_indices().nth(2000) {
+        Some((at, _)) => format!("{}...", &t[..at]),
+        None => t,
+    }
+}
+
 /// Reads one incarnation's driver events: stores them in the transcript, turns them into
 /// observations for the core, and reports `Exited` once the scope is confirmed empty.
-fn pump(
-    hub: &Hub,
-    id: SleeveId,
-    name: &str,
-    g: Gen,
-    scope: &str,
-    scoped: bool,
-    events: Receiver<pt_drivers::Event>,
-) {
-    let mut last_error: Option<ErrorClass> = None;
-    let mut cause = ExitCause::Killed;
-    for ev in events {
+/// Records each harness event and submits its observations; between events (and every
+/// `ORDER_POLL`) it submits the executor's reports after draining what it has received.
+fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Receiver<Ordered>) {
+    let mut p = Pump {
+        last_error: None,
+        cause: ExitCause::Killed,
+    };
+    'run: loop {
+        match events.recv_timeout(ORDER_POLL) {
+            Ok(ev) => {
+                if p.event(hub, run, ev) {
+                    break;
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+        while let Ok((kind, done)) = ordered.try_recv() {
+            while let Ok(ev) = events.try_recv() {
+                if p.event(hub, run, ev) {
+                    hub.submit(kind);
+                    let _ = done.send(());
+                    break 'run;
+                }
+            }
+            hub.submit(kind);
+            let _ = done.send(());
+        }
+    }
+    // Reports still queued come after all of this incarnation's output; later ones go direct.
+    while let Ok((kind, done)) = ordered.try_recv() {
+        hub.submit(kind);
+        let _ = done.send(());
+    }
+    drop(ordered);
+    let Run {
+        ref name,
+        id,
+        g,
+        ref scope,
+        scoped,
+        ..
+    } = *run;
+    if scoped {
+        wait_scope_empty(scope);
+    }
+    info!("sleeve {name}: g{} exited ({:?})", g.0, p.cause);
+    hub.submit(EventKind::Exited {
+        sleeve: id,
+        g,
+        cause: p.cause,
+    });
+}
+
+struct Pump {
+    last_error: Option<ErrorClass>,
+    cause: ExitCause,
+}
+
+impl Pump {
+    /// Records one harness event and submits its observations; true once the harness exited.
+    fn event(&mut self, hub: &Hub, run: &Run, ev: pt_drivers::Event) -> bool {
+        let Run {
+            id,
+            ref name,
+            g,
+            harness,
+            ..
+        } = *run;
         let entry = ev.entry;
         if let Entry::AssistantText { r#final: false, .. }
         | Entry::Reasoning { r#final: false, .. } = entry
         {
             hub.delta(id, g.0, ev.time_ms, entry);
-            continue;
+            return false;
         }
         let mut obs = Vec::new();
         match &entry {
@@ -758,14 +874,51 @@ fn pump(
             | Entry::Reasoning { .. }
             | Entry::FileChange { .. } => obs.push(Obs::Progress { tool: None }),
             Entry::TurnStarted { .. } => {
-                last_error = None;
+                self.last_error = None;
                 obs.push(Obs::Progress { tool: None });
             }
-            Entry::ApprovalRequest { id, .. } => {
-                obs.push(Obs::ApprovalRequested { id: id.clone() })
+            Entry::ApprovalRequest {
+                id: native,
+                name: tool,
+                summary,
+                input,
+                options,
+                ..
+            } => {
+                hub.approvals.open_tool(
+                    &hub.bus,
+                    ToolAsk {
+                        sleeve: id,
+                        g: g.0,
+                        native: native.clone(),
+                        title: tool.clone(),
+                        summary: summary.clone(),
+                        detail: input_text(input),
+                        options: options.iter().map(|d| wire::decision(*d)).collect(),
+                    },
+                );
+                obs.push(Obs::ApprovalRequested { id: native.clone() })
             }
-            Entry::ApprovalDecision { id, .. } => {
-                obs.push(Obs::ApprovalResolved { id: id.clone() })
+            Entry::ApprovalDecision {
+                id: native,
+                decision,
+                by,
+                ..
+            } => {
+                let d = wire::decision(*decision);
+                let state = if d == pt_api::Decision::Deny {
+                    pt_api::ApprovalState::Denied
+                } else {
+                    pt_api::ApprovalState::Approved
+                };
+                hub.approvals.resolve(
+                    &hub.bus,
+                    &tool_id(id, native),
+                    state,
+                    Some(d),
+                    wire::decided_by(by.as_deref()),
+                );
+                obs.push(Obs::ApprovalResolved { id: native.clone() })
             }
             Entry::TurnSettled { stop, usage, .. } => {
                 let tokens = usage.input + usage.output;
@@ -774,7 +927,7 @@ fn pump(
                 }
                 let mut end = match stop {
                     Stop::Cancelled => TurnEnd::Interrupted,
-                    Stop::Error => match last_error {
+                    Stop::Error => match self.last_error {
                         Some(ErrorClass::Quota | ErrorClass::RateLimit) => TurnEnd::UsageLimit,
                         Some(ErrorClass::Auth) => TurnEnd::AuthFailed,
                         _ => TurnEnd::Error,
@@ -785,11 +938,11 @@ fn pump(
                     warning!("sleeve {name}: PT_TEST_FAULT reports this turn as a usage limit");
                     end = TurnEnd::UsageLimit;
                 }
-                last_error = None;
+                self.last_error = None;
                 obs.push(Obs::TurnSettled { end });
             }
             Entry::Error { class, text } => {
-                last_error = Some(*class);
+                self.last_error = Some(*class);
                 if *class == ErrorClass::Protocol {
                     obs.push(Obs::Desync {
                         detail: text.clone(),
@@ -798,7 +951,7 @@ fn pump(
             }
             Entry::Compaction { .. } => obs.push(Obs::CompactDone),
             Entry::Exited { code, signal, .. } => {
-                cause = match (code, signal) {
+                self.cause = match (code, signal) {
                     (Some(c), _) => ExitCause::Exit(*c as i32),
                     _ => ExitCause::Killed,
                 };
@@ -806,8 +959,16 @@ fn pump(
             Entry::UserMessage { .. } | Entry::PromptAck { .. } | Entry::Notice { .. } => {}
         }
         let exited = matches!(entry, Entry::Exited { .. });
+        let settles = exited || matches!(entry, Entry::TurnSettled { .. });
+        if settles && Hub::envoy_id(&hub.view().state) == Some(id) {
+            *crate::transcript::lock(&hub.envoy_turn) = Default::default();
+        }
+        let note = Note {
+            harness: matches!(entry, Entry::SessionInfo { .. }).then_some(harness),
+            level: None,
+        };
         // Stored before the core hears of it, so a settled view always has its text on disk.
-        hub.record(id, g.0, ev.time_ms, entry);
+        hub.record(id, g.0, ev.time_ms, entry, note);
         for o in obs {
             hub.submit(EventKind::Observed {
                 sleeve: id,
@@ -815,17 +976,6 @@ fn pump(
                 obs: o,
             });
         }
-        if exited {
-            break;
-        }
+        exited
     }
-    if scoped {
-        wait_scope_empty(scope);
-    }
-    info!("sleeve {name}: g{} exited ({cause:?})", g.0);
-    hub.submit(EventKind::Exited {
-        sleeve: id,
-        g,
-        cause,
-    });
 }

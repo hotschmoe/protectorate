@@ -45,6 +45,7 @@ class Shell extends StatefulWidget {
     required this.hubUrl,
     required this.hubToken,
     required this.connect,
+    required this.pair,
     this.initial = Screen.envoy,
     this.initialSleeve,
     this.initialNode,
@@ -56,6 +57,7 @@ class Shell extends StatefulWidget {
   final String hubUrl;
   final String hubToken;
   final void Function(String url, String token) connect;
+  final Future<String> Function(String code) pair;
   final Screen initial;
   final String? initialSleeve;
   final String? initialNode;
@@ -263,6 +265,7 @@ class _ShellState extends State<Shell> {
             hubUrl: widget.hubUrl,
             hubToken: widget.hubToken,
             connect: widget.connect,
+            pair: widget.pair,
             child: Builder(builder: (context) => _frame(context, phone, box)),
           );
           return PopScope(

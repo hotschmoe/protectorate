@@ -38,6 +38,8 @@ pt_json::string_enum! {
         Sleeve = "sleeve",
         /// Also the envoy-only capability of vendor general agents (D9).
         EnvoyOnly = "envoy_only",
+        /// No credential: the request carries its own proof (a one-time pairing code).
+        Public = "public",
     }
 }
 
@@ -47,7 +49,8 @@ impl Scope {
         match self {
             Scope::Owner => true,
             Scope::Sleeve => method != Scope::Owner,
-            Scope::EnvoyOnly => method == Scope::EnvoyOnly,
+            Scope::EnvoyOnly => matches!(method, Scope::EnvoyOnly | Scope::Public),
+            Scope::Public => method == Scope::Public,
         }
     }
 }

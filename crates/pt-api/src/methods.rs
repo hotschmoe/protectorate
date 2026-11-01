@@ -28,11 +28,15 @@ api_enums! {
     }
 
     pub enum ErrorCode {
+        /// No credential, or one the hub does not know.
+        Unauthenticated = "unauthenticated",
         NotFound = "not_found",
         Invalid = "invalid",
         Forbidden = "forbidden",
         Conflict = "conflict",
         Unavailable = "unavailable",
+        /// The hub gave up waiting: on its core, or on an owner approval a code rule asked for.
+        Timeout = "timeout",
         Internal = "internal",
     }
 }
@@ -40,11 +44,13 @@ api_enums! {
 impl ErrorCode {
     pub fn http_status(self) -> u16 {
         match self {
+            ErrorCode::Unauthenticated => 401,
             ErrorCode::NotFound => 404,
             ErrorCode::Invalid => 400,
             ErrorCode::Forbidden => 403,
             ErrorCode::Conflict => 409,
             ErrorCode::Unavailable => 503,
+            ErrorCode::Timeout => 504,
             ErrorCode::Internal => 500,
         }
     }
@@ -94,6 +100,8 @@ api_records! {
         pub resleeve_to: Vec<Harness> = Vec::new(),
         /// The first message, delivered once the incarnation is up.
         pub message: Option<String>,
+        /// Tokens; a root's count includes its children's (G10).
+        pub budget: Option<u64>,
     }
 
     pub struct SendMessageRequest {
@@ -115,6 +123,14 @@ api_records! {
     /// owner first.
     pub struct Accepted {
         pub approval_id: Option<String>,
+    }
+
+    /// Starts a stopped or parked sleeve again, on its own target unless one is named.
+    pub struct StartSleeveRequest {
+        pub sleeve_id: String,
+        pub target: Option<Harness>,
+        pub model: Option<String>,
+        pub provider: Option<String>,
     }
 
     pub struct ResleeveRequest {
@@ -198,10 +214,13 @@ api_records! {
 
     pub struct EnvoySendRequest {
         pub text: String,
+        /// The vendor agent's name for the `agent:<name>` tag, `[A-Za-z0-9_-]`; default `agent`.
+        pub agent: Option<String>,
     }
 
     pub struct EnvoyWaitRequest {
-        pub request_id: String,
+        /// Absent: the caller's latest message to Envoy.
+        pub request_id: Option<String>,
         /// The hub caps it.
         pub timeout_ms: u64 = 60_000,
     }
@@ -235,12 +254,29 @@ api_records! {
         pub sleeve: Sleeve,
     }
 
+    /// The envoy-only capability for vendor general agents (D9).
+    pub struct EnvoyToken {
+        pub token: String,
+    }
+
     pub struct DeviceList {
         pub devices: Vec<Device> = Vec::new(),
     }
 
-    pub struct PairDeviceRequest {
+    pub struct AddDeviceRequest {
         pub name: String,
+    }
+
+    /// A one-time code the device trades for its token with `PairDevice` before
+    /// `expires_at_ms`.
+    pub struct PairingCode {
+        pub name: String,
+        pub code: String,
+        pub expires_at_ms: EpochMs,
+    }
+
+    pub struct PairDeviceRequest {
+        pub code: String,
     }
 
     /// `token` is the `pd1.` device token, shown once.
@@ -289,8 +325,9 @@ api_methods! {
     Interrupt(SleeveRef) -> Empty: Sleeve,
     /// Stops the sleeve and, for a root, every child in the same step.
     StopSleeve(SleeveRef) -> Accepted: Sleeve,
-    /// Needs the owner's approval unless the owner asks.
+    /// Needs the owner's approval when Envoy asks during a turn an agent message started (D9).
     RemoveSleeve(SleeveRef) -> Accepted: Sleeve,
+    StartSleeve(StartSleeveRequest) -> Accepted: Sleeve,
     Resleeve(ResleeveRequest) -> Accepted: Sleeve,
     /// Not built yet: answers `unavailable`.
     TakeoverTerminal(SleeveRef) -> Empty: Owner,
@@ -299,7 +336,7 @@ api_methods! {
     ListApprovals(ListApprovalsRequest) -> ApprovalList: Owner,
     Decide(DecideRequest) -> Approval: Owner,
 
-    // Nodes and jobs
+    // Nodes and jobs: no node transport yet, so the job methods answer `unavailable`.
     ListNodes(Empty) -> NodeList: Sleeve,
     GetNode(NodeRef) -> Node: Sleeve,
     RunJob(RunJobRequest) -> Job: Sleeve,
@@ -319,6 +356,7 @@ api_methods! {
     EnvoyWait(EnvoyWaitRequest) -> EnvoyReply: EnvoyOnly,
     /// Envoy's transcript from `from_seq`.
     EnvoyRead(EnvoyReadRequest) -> Transcript: EnvoyOnly,
+    GetEnvoyToken(Empty) -> EnvoyToken: Owner,
 
     // Wait (SPEC 3.3)
     /// Blocks until the sleeve reaches `until` or the timeout passes.
@@ -327,8 +365,11 @@ api_methods! {
     // Hub
     GetHubInfo(Empty) -> HubInfo: Sleeve,
 
-    // Devices: placeholders, they answer `unavailable` (REVISIT)
+    // Devices: `pd1.` tokens for the apps
     ListDevices(Empty) -> DeviceList: Owner,
-    PairDevice(PairDeviceRequest) -> PairedDevice: Owner,
+    /// A one-time pairing code for a new device named `name`.
+    AddDevice(AddDeviceRequest) -> PairingCode: Owner,
+    /// Trades a pairing code for the device's token; the code is the credential.
+    PairDevice(PairDeviceRequest) -> PairedDevice: Public,
     RevokeDevice(DeviceRef) -> Empty: Owner,
 }
