@@ -1,0 +1,17 @@
+[package]
+name = "pt-quota"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pt-api = { path = "../pt-api" }
+pt-json = { path = "../pt-json" }
+
+[[bin]]
+name = "pt-quota-probe"
+path = "src/bin/pt-quota-probe.rs"
