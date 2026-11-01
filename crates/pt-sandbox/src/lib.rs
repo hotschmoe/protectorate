@@ -45,12 +45,17 @@ pub struct SandboxSpec {
     /// Private home, writable. Becomes `$HOME` inside. The hub fills it; we never do.
     pub home: PathBuf,
     pub ro_paths: Vec<PathBuf>,
+    /// Never `/`. A writable path may hold masked paths; the masks still apply inside it.
     pub rw_paths: Vec<PathBuf>,
     /// Git dirs of a child worktree (see `resolve_git_dirs`): bound writable, with `hooks/` over
-    /// them read-only so a sleeve cannot plant a hook that runs outside the sandbox.
+    /// them read-only so a sleeve cannot plant a hook that runs outside the sandbox. They may not
+    /// overlap a mask.
     pub git_dirs: Vec<PathBuf>,
     pub tmp_size_bytes: u64,
-    /// Directories are covered with a tmpfs, files with /dev/null. Missing paths are skipped.
+    /// Directories are covered with a tmpfs, files with /dev/null. Missing paths are skipped. A
+    /// mask holds over every bind that contains it; a bind inside a mask (a home inside the
+    /// masked state dir) is still reachable. The host's runtime dir is always replaced by a
+    /// private empty one, and the docker socket is always masked.
     pub masks: Vec<PathBuf>,
     /// Host variables copied in when set (the allowlist).
     pub env_allow: Vec<String>,
@@ -147,31 +152,18 @@ impl SandboxSpec {
         a.extend(["--size".into(), self.tmp_size_bytes.to_string()]);
         a.extend(["--tmpfs".into(), "/tmp".into()]);
 
-        for m in &self.masks {
-            match fs::metadata(m) {
-                Ok(md) if md.is_dir() => a.extend(["--tmpfs".into(), path_arg(m)?]),
-                Ok(_) => bind(a, "--ro-bind", Path::new("/dev/null"), m),
-                Err(_) => {}
-            }
-        }
-        // Binds come after the masks: the home and workspace may live under a masked directory
-        // such as the hub state dir.
-        for p in &self.ro_paths {
-            require_exists(p, "read-only path")?;
-            bind(a, "--ro-bind", p, p);
-        }
-        require_exists(&self.workspace, "workspace")?;
-        bind(a, "--bind", &self.workspace, &self.workspace);
-        require_exists(&self.home, "private home")?;
-        bind(a, "--bind", &self.home, &self.home);
-        for p in self.rw_paths.iter().chain(&self.git_dirs) {
-            require_exists(p, "writable path")?;
-            bind(a, "--bind", p, p);
-        }
-        for g in &self.git_dirs {
-            let hooks = g.join("hooks");
-            if hooks.is_dir() {
-                bind(a, "--ro-bind", &hooks, &hooks);
+        let runtime = existing(&runtime_dir());
+        let mounts = self.mounts(runtime.as_deref())?;
+        for m in &mounts {
+            let p = path_arg(&m.path)?;
+            match m.kind {
+                Kind::Ro => a.extend(["--ro-bind".into(), p.clone(), p]),
+                Kind::Rw => a.extend(["--bind".into(), p.clone(), p]),
+                Kind::MaskDir => a.extend(["--tmpfs".into(), p]),
+                Kind::MaskFile => a.extend(["--ro-bind".into(), "/dev/null".into(), p]),
+                Kind::Runtime => {
+                    a.extend(["--perms".into(), "0700".into(), "--tmpfs".into(), p]);
+                }
             }
         }
 
@@ -185,12 +177,118 @@ impl SandboxSpec {
         }
         env.push(("HOME".into(), path_arg(&self.home)?));
         env.push(("TMPDIR".into(), "/tmp".into()));
+        if let Some(rt) = &runtime {
+            env.push(("XDG_RUNTIME_DIR".into(), path_arg(rt)?));
+        }
         env.extend(self.env.iter().cloned());
         for (k, v) in env {
             a.extend(["--setenv".into(), k, v]);
         }
         Ok(())
     }
+
+    /// Every mount over the read-only root, by canonical path, ordered so that a mount on a path
+    /// always comes after the mounts on its ancestors. A mask inside a writable bind therefore
+    /// still holds, and a home inside a masked state dir is still reachable.
+    fn mounts(&self, runtime: Option<&Path>) -> Result<Vec<Mount>> {
+        let mut masks = Vec::new();
+        let fixed = CONTROL_SOCKETS.iter().map(PathBuf::from);
+        for m in self.masks.iter().cloned().chain(fixed) {
+            if let Some(path) = existing(&m) {
+                let kind = if path.is_dir() {
+                    Kind::MaskDir
+                } else {
+                    Kind::MaskFile
+                };
+                masks.push(Mount { path, kind });
+            }
+        }
+        if let Some(rt) = runtime {
+            masks.push(Mount {
+                path: rt.to_path_buf(),
+                kind: Kind::Runtime,
+            });
+        }
+
+        let mut binds = Vec::new();
+        let mut add = |p: &Path, kind: Kind, what: &str| -> Result<()> {
+            path_arg(p)?;
+            let Some(path) = existing(p) else {
+                return err(format!("sandbox {what} {} does not exist", p.display()));
+            };
+            if kind == Kind::Rw && path.parent().is_none() {
+                return err(format!(
+                    "sandbox {what} {} would make / writable",
+                    p.display()
+                ));
+            }
+            if let Some(m) = masks.iter().find(|m| m.path == path) {
+                return err(format!(
+                    "sandbox {what} {} is masked ({})",
+                    p.display(),
+                    m.path.display()
+                ));
+            }
+            binds.push(Mount { path, kind });
+            Ok(())
+        };
+        for p in &self.ro_paths {
+            add(p, Kind::Ro, "read-only path")?;
+        }
+        add(&self.workspace, Kind::Rw, "workspace")?;
+        add(&self.home, Kind::Rw, "private home")?;
+        for p in &self.rw_paths {
+            add(p, Kind::Rw, "writable path")?;
+        }
+        for g in &self.git_dirs {
+            add(g, Kind::Rw, "git dir")?;
+            let hooks = g.join("hooks");
+            if hooks.is_dir() {
+                add(&hooks, Kind::Ro, "git hooks dir")?;
+            }
+        }
+        // Git dirs come from files a sleeve can rewrite, so they may not overlap a mask at all.
+        for g in self.git_dirs.iter().filter_map(|g| existing(g)) {
+            if let Some(m) = masks
+                .iter()
+                .find(|m| m.path.starts_with(&g) || g.starts_with(&m.path))
+            {
+                return err(format!(
+                    "sandbox git dir {} overlaps the mask {}",
+                    g.display(),
+                    m.path.display()
+                ));
+            }
+        }
+
+        let mut all = binds;
+        all.extend(masks);
+        all.sort_by_key(|m| m.path.components().count());
+        Ok(all)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Ro,
+    Rw,
+    MaskDir,
+    MaskFile,
+    /// The private runtime dir: an empty tmpfs over the host's, so the user bus, the systemd
+    /// user manager and every other per-user control socket stay out of reach.
+    Runtime,
+}
+
+struct Mount {
+    path: PathBuf,
+    kind: Kind,
+}
+
+/// Host sockets outside the runtime dir that start processes outside the sandbox.
+const CONTROL_SOCKETS: &[&str] = &["/run/docker.sock"];
+
+fn existing(p: &Path) -> Option<PathBuf> {
+    fs::canonicalize(p).ok()
 }
 
 fn bind(a: &mut Vec<String>, flag: &str, src: &Path, dst: &Path) {
@@ -206,15 +304,6 @@ fn path_arg(p: &Path) -> Result<String> {
             "sandbox path {} is not absolute UTF-8",
             p.display()
         )),
-    }
-}
-
-fn require_exists(p: &Path, what: &str) -> Result<()> {
-    path_arg(p)?;
-    if p.exists() {
-        Ok(())
-    } else {
-        err(format!("sandbox {what} {} does not exist", p.display()))
     }
 }
 
@@ -276,28 +365,80 @@ pub fn scope_name(sleeve: &str, generation: u64) -> String {
     format!("pt-{clean}-g{generation}.scope")
 }
 
-/// The git dirs a worktree workspace needs: its private gitdir and the common dir. A plain
-/// repository yields its `.git` directory alone.
-pub fn resolve_git_dirs(workspace: &Path) -> Result<Vec<PathBuf>> {
-    let dot = workspace.join(".git");
-    let ctx = |e: std::io::Error| Error(format!("resolve git dir of {}: {e}", workspace.display()));
-    if dot.is_dir() {
-        return Ok(vec![dot]);
-    }
-    let text = fs::read_to_string(&dot).map_err(ctx)?;
-    let Some(rest) = text.lines().find_map(|l| l.strip_prefix("gitdir:")) else {
-        return err(format!("{} has no gitdir line", dot.display()));
+/// The git dirs a worktree `workspace` of the repository at `repo` needs: its private gitdir and
+/// the common dir. The files naming them are writable inside sandboxes, so both are checked
+/// against `repo`: the private gitdir must be `<common>/worktrees/<name>`, point back at this
+/// workspace and name `<common>` as its common dir, where `<common>` is `repo`'s git dir.
+pub fn resolve_git_dirs(workspace: &Path, repo: &Path) -> Result<Vec<PathBuf>> {
+    let ctx = |what: &Path, e: std::io::Error| {
+        Error(format!(
+            "resolve git dirs of {}: {}: {e}",
+            workspace.display(),
+            what.display()
+        ))
     };
-    let gitdir = workspace.join(rest.trim());
-    let gitdir = fs::canonicalize(&gitdir).map_err(ctx)?;
-    let mut out = vec![gitdir.clone()];
-    if let Ok(c) = fs::read_to_string(gitdir.join("commondir")) {
-        let common = fs::canonicalize(gitdir.join(c.trim())).map_err(ctx)?;
-        if common != gitdir {
-            out.push(common);
-        }
+    let canon = |p: PathBuf| fs::canonicalize(&p).map_err(|e| ctx(&p, e));
+    let read = |p: PathBuf| fs::read_to_string(&p).map_err(|e| ctx(&p, e));
+    let common = common_dir(repo)?;
+    let dot = workspace.join(".git");
+    let gitdir = canon(workspace.join(gitdir_line(&read(dot.clone())?, &dot)?))?;
+    if gitdir.parent() != Some(common.join("worktrees").as_path()) {
+        return err(format!(
+            "{} names {}, which is not a worktree of {}",
+            dot.display(),
+            gitdir.display(),
+            common.display()
+        ));
     }
-    Ok(out)
+    let back = canon(gitdir.join(read(gitdir.join("gitdir"))?.trim()))?;
+    let named = canon(gitdir.join(read(gitdir.join("commondir"))?.trim()))?;
+    if back != canon(dot.clone())? || named != common {
+        return err(format!(
+            "{} does not belong to {}",
+            gitdir.display(),
+            dot.display()
+        ));
+    }
+    Ok(vec![gitdir, common])
+}
+
+/// The real git dir of the repository at `repo`, which may itself be a worktree.
+fn common_dir(repo: &Path) -> Result<PathBuf> {
+    let ctx = |what: &Path, e: std::io::Error| {
+        Error(format!(
+            "git dir of {}: {}: {e}",
+            repo.display(),
+            what.display()
+        ))
+    };
+    let canon = |p: PathBuf| fs::canonicalize(&p).map_err(|e| ctx(&p, e));
+    let dot = repo.join(".git");
+    let dir = if dot.is_dir() {
+        canon(dot)?
+    } else {
+        let text = fs::read_to_string(&dot).map_err(|e| ctx(&dot, e))?;
+        let own = canon(repo.join(gitdir_line(&text, &dot)?))?;
+        match fs::read_to_string(own.join("commondir")) {
+            Ok(c) => canon(own.join(c.trim()))?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => own,
+            Err(e) => return Err(ctx(&own.join("commondir"), e)),
+        }
+    };
+    if dir.parent().is_none() || !dir.join("HEAD").is_file() || !dir.join("objects").is_dir() {
+        return err(format!(
+            "git dir {} of {} is not a repository",
+            dir.display(),
+            repo.display()
+        ));
+    }
+    Ok(dir)
+}
+
+fn gitdir_line<'a>(text: &'a str, dot: &Path) -> Result<&'a str> {
+    match text.lines().find_map(|l| l.strip_prefix("gitdir:")) {
+        Some(rest) if !rest.trim().is_empty() => Ok(rest.trim()),
+        _ => err(format!("{} has no gitdir line", dot.display())),
+    }
 }
 
 fn runtime_dir() -> PathBuf {

@@ -390,7 +390,7 @@ impl SleeveExec {
             },
             EffectKind::StartIncarnation {
                 g, target, resume, ..
-            } => match self.launch(s, g, &target, resume) {
+            } => match self.launch(view, s, g, &target, resume) {
                 Ok(()) => Outcome::Reported,
                 Err(e) => {
                     warning!("sleeve {}: launch g{} failed: {e}", s.name, g.0);
@@ -567,6 +567,7 @@ impl SleeveExec {
 
     fn launch(
         &mut self,
+        view: &View,
         s: &Sleeve,
         g: Gen,
         target: &Target,
@@ -588,7 +589,12 @@ impl SleeveExec {
         sb.masks.push(hub.home.root.clone());
         sb.rw_paths.push(hub.home.run());
         if s.layout == Layout::Worktree {
-            sb.git_dirs = pt_sandbox::resolve_git_dirs(&work).map_err(|e| e.to_string())?;
+            let parent = s
+                .parent
+                .and_then(|p| view.state.sleeve(p))
+                .ok_or("the parent is gone")?;
+            sb.git_dirs = pt_sandbox::resolve_git_dirs(&work, Path::new(&parent.claim.path))
+                .map_err(|e| e.to_string())?;
         }
         let token = hub.tokens.sleeve(s.id);
         let path = std::env::var("PATH").unwrap_or_default();
