@@ -185,7 +185,7 @@ pub fn intents(sim: &mut Sim, idx: usize, out: &[Intent]) {
 }
 
 /// Checks after a Tick or HubRecovered: every waiting state has re-issued its I/O (12a item 7).
-pub fn timers(st: &State) {
+pub fn timers(st: &State, tick: bool) {
     for j in st.jobs.values() {
         if matches!(j.state, JobState::Submitting | JobState::SubmitUncertain) {
             let submit = j.submit.map(|e| st.effects[&e].state);
@@ -196,18 +196,48 @@ pub fn timers(st: &State) {
                 j.state
             );
         }
-        if j.state != JobState::Cancelling {
-            continue;
-        }
+        // No state waits on a node past its lease (12a item 6), counting time the hub was down.
+        let expired = match j.state {
+            JobState::Cancelling => st.now.saturating_sub(j.state_at) >= LEASE,
+            JobState::Collecting => tick && st.now.saturating_sub(j.seen_at) >= LEASE,
+            _ => false,
+        };
+        assert!(!expired, "job {:?} is {:?} past its lease", j.id, j.state);
+        let cancel_wanted = matches!(
+            j.state,
+            JobState::Cancelling | JobState::Lost | JobState::Abandoned
+        );
         let stuck = st.effects.values().find(|e| {
-            matches!(e.kind, EffectKind::NodeCancel { job, attempt, .. } if job == j.id && attempt == j.attempt)
-                && matches!(e.state, EffectState::Uncertain | EffectState::Probing)
+            let ours = match e.kind {
+                EffectKind::NodeCancel { job, attempt, .. } => {
+                    cancel_wanted && job == j.id && attempt == j.attempt
+                }
+                EffectKind::NodeAckCollected { job, attempt, .. } => {
+                    job == j.id && attempt == j.attempt
+                }
+                _ => false,
+            };
+            ours && matches!(e.state, EffectState::Uncertain | EffectState::Probing)
         });
         if let Some(e) = stuck {
             panic!(
-                "job {:?} is Cancelling and its cancel {} is {:?}, not re-sent",
-                j.id, e.key, e.state
+                "job {:?} is {:?} and its node write {} is {:?}, not re-sent",
+                j.id, j.state, e.key, e.state
             );
+        }
+    }
+    // A sleeve write a probe could not settle is sent again or probed again until the owner
+    // has been told.
+    if tick {
+        for e in st.effects.values() {
+            if e.state == EffectState::Uncertain && e.kind.sleeve().is_some() {
+                assert!(
+                    e.unknowable >= UNKNOWABLE_NOTIFY,
+                    "effect {} left Uncertain by a Tick after {} unknowable probes",
+                    e.key,
+                    e.unknowable
+                );
+            }
         }
     }
 }

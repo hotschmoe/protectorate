@@ -1,0 +1,17 @@
+#scenario 9759b64cd64c6cbb
+# An artifact check that never answers does not hold Collecting forever: after the lease the job
+# is Lost, and the node's next Exited report collects again.
+job j1
+policy poll=1
+run
+expect-job 0 state=Running
+tick 10s
+step
+expect-job 0 state=Collecting
+tick 6m
+expect-job 0 state=Lost
+run
+expect-job 0 state=Lost
+tick 10s
+run
+expect-job 0 state=Succeeded

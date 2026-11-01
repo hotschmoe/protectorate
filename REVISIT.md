@@ -278,3 +278,6 @@ Each entry: where, what was done, what right looks like.
   a torn append only when no intact frame follows it; otherwise open fails. A group-commit batch
   whose blocks reached disk out of order after a power loss also fails open, though none of it
   was acknowledged. Right: a batch-end marker, so a torn batch is told apart from corruption.
+- **Collecting lease** (pt-core jobs): an artifact check that does not answer within the lease
+  makes the job Lost, and its next Exited report collects again, so a slow fetch can run twice.
+  Right: fetch progress reported to the core, and the lease measured from it.

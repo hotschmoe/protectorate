@@ -54,6 +54,11 @@ reads no clock, so `replay(journal) == live state`. The hub's core thread is its
 - `Exited` means the scope `pt-<sleeve>-g<g>` has no tasks, not merely that a pipe closed.
 - Effects never assumed: until an `Acked`, `Launched` or other evidence arrives, the core treats a
   write as possibly applied (Uncertain) and never as done.
+- Nothing waits forever. Each `Tick` sends an Uncertain Keyed or Idempotent record again while
+  its owner wants it (3 attempts), and probes the rest again until the owner has been told. Node
+  cancels and collected-acks are re-sent rather than probed, since a status cannot tell whether
+  they landed. `Abandon` takes an Uncertain or Probing sleeve write; node writes belong to the
+  job (`AbandonJob`, `RequeueJob`).
 
 Thresholds are in `limits`. The fuzz targets under `fuzz/` check I1 to I10 after every step, and
 `fuzz/seeds/sleeve_core/` holds the scenario scripts (format in `fuzz/src/script.rs`).

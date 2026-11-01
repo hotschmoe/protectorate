@@ -19,7 +19,8 @@
 //! tick DURATION                     e.g. 30s 16m 2h
 //! clock MILLIS                      the hub clock jumps to MILLIS (it never runs backwards)
 //! policy KEY=VALUE...               see `Policy`
-//! run | step [N] | commit | crash [empty]   step N executes the Nth released intent (from 0)
+//! run | step [N] | commit         step N executes the Nth released intent (from 0)
+//! crash [empty] [down=DURATION]     the hub dies at the last commit and restarts DURATION later
 //! job ID | cancel-job N | requeue-job N | abandon-job N
 //! expect NAME life=.. g=N activity=.. guard=.. harness=.. queue=N msg:ID=..
 //! expect-effect KEY state=.. attempt=N count=N
@@ -346,7 +347,11 @@ impl Runner {
                 }
             }
             "commit" => self.sim.commit(),
-            "crash" => self.sim.crash(flag("empty")),
+            "crash" => {
+                let down = kv("down").map(duration).transpose()?.unwrap_or(0);
+                self.sim.now = self.sim.now.saturating_add(down);
+                self.sim.crash(flag("empty"));
+            }
             "job" => {
                 self.sim.apply(E::CreateJob {
                     request_id: arg(1)?.into(),

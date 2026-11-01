@@ -156,14 +156,26 @@ impl Core<'_> {
         self.on_effect(id, None);
     }
 
-    /// Sends an Idempotent record again, as its next attempt, if it may not have landed.
-    pub(crate) fn resend(&mut self, id: EffectId) {
-        let e = self.st.effects.get_mut(&id).expect("effect exists");
-        if e.class != Class::Idempotent
+    /// Sends a record that may not have landed again, as its next attempt, up to `limit`
+    /// attempts; then it fails and the owner is told. Never for an Unsafe kind.
+    pub(crate) fn resend_or_give_up(&mut self, id: EffectId, limit: u32) {
+        let e = &self.st.effects[&id];
+        if e.class == Class::Unsafe
             || !matches!(e.state, EffectState::Uncertain | EffectState::Probing)
         {
             return;
         }
+        if e.attempt >= limit {
+            let sleeve = e.kind.sleeve();
+            self.set_effect(id, EffectState::Failed);
+            self.notify(
+                Party::Owner,
+                sleeve,
+                Notice::EffectUnknowable { effect: id },
+            );
+            return self.on_effect(id, None);
+        }
+        let e = self.st.effects.get_mut(&id).expect("effect exists");
         e.attempt += 1;
         e.state = EffectState::Intent;
         let intent = Intent::Execute {
@@ -172,6 +184,29 @@ impl Core<'_> {
             kind: e.kind.clone(),
         };
         self.out.push(intent);
+        self.on_effect(id, None);
+    }
+
+    /// Tick: a record a probe could not settle (Uncertain) is sent again when that is safe and
+    /// still wanted, else probed again until the owner has been told (12a item 7, 12b item 1).
+    /// Node writes are the job machine's.
+    pub(crate) fn tick_effects(&mut self) {
+        let ids: Vec<EffectId> = self
+            .st
+            .effects
+            .values()
+            .filter(|e| e.state == EffectState::Uncertain && e.kind.sleeve().is_some())
+            .map(|e| e.id)
+            .collect();
+        for id in ids {
+            let e = &self.st.effects[&id];
+            if e.class != Class::Unsafe && e.attempt < MAX_ATTEMPTS && self.wanted(id) {
+                self.resend_or_give_up(id, MAX_ATTEMPTS);
+            } else if e.unknowable < UNKNOWABLE_NOTIFY {
+                self.probe(id);
+                self.on_effect(id, None);
+            }
+        }
     }
 
     /// Records a non-terminal Idempotent record as applied: its goal is reached another way.
@@ -245,7 +280,23 @@ impl Core<'_> {
     }
 
     pub(crate) fn abandon_cmd(&mut self, id: EffectId) {
-        if self.effect_state(id) != Some(EffectState::Uncertain) {
+        if self
+            .st
+            .effects
+            .get(&id)
+            .is_some_and(|e| e.kind.sleeve().is_none())
+        {
+            return self.refuse(
+                crate::Code::FailedPrecondition,
+                "a node write is the job's: abandon or requeue the job",
+            );
+        }
+        // Probing too: a Tick re-probes Uncertain records, and a late answer to an abandoned
+        // record is dropped.
+        if !matches!(
+            self.effect_state(id),
+            Some(EffectState::Uncertain | EffectState::Probing)
+        ) {
             return self.refuse(
                 crate::Code::FailedPrecondition,
                 "only an Uncertain effect can be abandoned",

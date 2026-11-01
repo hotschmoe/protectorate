@@ -1,0 +1,16 @@
+#scenario ac03bafc51e2ae63
+# A lost collected-ack (12a item 5) is re-sent by the next Tick until the node takes it: a
+# node's status cannot tell whether it landed.
+job j1
+policy poll=1
+run
+expect-job 0 state=Running
+policy other=lost
+tick 10s
+run
+expect-job 0 state=Succeeded
+expect-effect collected:0:1 state=Probing attempt=1
+policy other=ack
+tick 10s
+run
+expect-effect collected:0:1 state=Confirmed attempt=2

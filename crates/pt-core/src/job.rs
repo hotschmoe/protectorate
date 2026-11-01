@@ -16,6 +16,9 @@ pub const LOST_ABANDON: Millis = 24 * HOUR;
 /// A node that refused a submit as busy or unfit is skipped this long.
 pub const EXCLUDE_FOR: Millis = 10 * MINUTE;
 pub const MAX_VERIFY: u32 = 3;
+/// Attempts of a cancel or collected ack before the record fails and the owner is told: about
+/// one lease of Ticks.
+pub const NODE_RESENDS: u32 = 30;
 
 impl Core<'_> {
     fn job(&mut self, id: JobId) -> &mut Job {
@@ -66,21 +69,39 @@ impl Core<'_> {
         self.new_effect(kind, key);
     }
 
-    /// The cancel records of the job's current attempt.
-    fn cancels(&self, id: JobId) -> Vec<EffectId> {
+    /// The cancel (`ack` false) or collected-ack records of the job's current attempt.
+    fn node_writes(&self, id: JobId, ack: bool) -> Vec<EffectId> {
         let attempt = self.st.jobs[&id].attempt;
         self.st
             .effects
             .values()
-            .filter(|e| matches!(e.kind, EffectKind::NodeCancel { job, attempt: a, .. } if job == id && a == attempt))
+            .filter(|e| match e.kind {
+                EffectKind::NodeCancel {
+                    job, attempt: a, ..
+                } => !ack && job == id && a == attempt,
+                EffectKind::NodeAckCollected {
+                    job, attempt: a, ..
+                } => ack && job == id && a == attempt,
+                _ => false,
+            })
             .map(|e| e.id)
             .collect()
     }
 
-    /// Cancelling re-sends a cancel that may not have landed (12a item 7).
-    fn resend_cancel(&mut self, id: JobId) {
-        for eff in self.cancels(id) {
-            self.resend(eff);
+    /// On Tick and recovery, re-sends a cancel while the job may still run and the collected
+    /// ack until the node takes it (12a items 5 and 7). A node's status cannot tell whether
+    /// either landed, so they are re-sent rather than probed, up to `NODE_RESENDS` attempts.
+    fn resend_node_writes(&mut self, id: JobId) {
+        let cancel_wanted = matches!(
+            self.st.jobs[&id].state,
+            JobState::Cancelling | JobState::Lost | JobState::Abandoned
+        );
+        let mut writes = self.node_writes(id, true);
+        if cancel_wanted {
+            writes.extend(self.node_writes(id, false));
+        }
+        for eff in writes {
+            self.resend_or_give_up(eff, NODE_RESENDS);
         }
     }
 
@@ -269,7 +290,11 @@ impl Core<'_> {
                 JobReport::Running { offset },
             ) => {
                 self.job(id).offset = *offset;
-                if state != J::Running {
+                // A lost job the owner cancelled is still being cancelled once it answers.
+                let cancelled = state == J::Lost && !self.node_writes(id, false).is_empty();
+                if cancelled {
+                    self.set_job(id, J::Cancelling);
+                } else if state != J::Running {
                     self.set_job(id, J::Running);
                 }
                 let j = &self.st.jobs[&id];
@@ -305,7 +330,7 @@ impl Core<'_> {
                 JobReport::Cancelled | JobReport::Exited { .. } | JobReport::Interrupted,
             ) => {
                 self.set_job(id, J::Cancelled);
-                for eff in self.cancels(id) {
+                for eff in self.node_writes(id, false) {
                     self.goal_reached(eff);
                 }
                 self.node_effect(id, true);
@@ -330,6 +355,9 @@ impl Core<'_> {
         if j.attempt != attempt || j.state != JobState::Collecting {
             return;
         }
+        let now = self.now;
+        self.job(id).seen_at = now;
+        let j = &self.st.jobs[&id];
         let code = j.exit.unwrap_or(-1);
         let done = if ok {
             Some(if code == 0 {
@@ -428,39 +456,48 @@ impl Core<'_> {
                     self.set_job(id, JobState::Lost);
                     self.notify(Party::Owner, None, Notice::JobLost { job: id });
                 }
+                // No artifact check answered within the lease: Lost, and a later Exited
+                // report collects again.
+                JobState::Collecting if since(now, j.seen_at) >= LEASE => {
+                    self.set_job(id, JobState::Lost);
+                    self.notify(Party::Owner, None, Notice::JobLost { job: id });
+                }
                 JobState::Lost if since(now, j.state_at) >= LOST_ABANDON => {
                     self.set_job(id, JobState::Abandoned);
                     self.node_effect(id, false);
                 }
-                JobState::Cancelling => {
-                    self.resend_cancel(id);
-                    self.poll(id);
-                }
-                JobState::SubmitUncertain | JobState::Running | JobState::Lost => self.poll(id),
+                JobState::SubmitUncertain
+                | JobState::Running
+                | JobState::Cancelling
+                | JobState::Lost => self.poll(id),
                 _ => {}
             }
+            self.resend_node_writes(id);
         }
     }
 
-    /// HubRecovered: timers re-arm, and every non-terminal job re-issues its I/O.
+    /// HubRecovered: every non-terminal job re-issues its I/O. Leases keep their journaled
+    /// stamps, so time spent down counts (12b item 9); the polls issued here answer before the
+    /// next Tick for a node that is up.
     pub(crate) fn recover_jobs(&mut self) {
-        let now = self.now;
         let ids: Vec<JobId> = self.st.jobs.keys().copied().collect();
         for id in ids {
-            let j = self.job(id);
-            j.seen_at = now;
-            match j.state {
+            match self.st.jobs[&id].state {
                 JobState::Queued => self.schedule(id),
                 JobState::Submitting => self.set_job(id, JobState::SubmitUncertain),
-                JobState::SubmitUncertain | JobState::Running | JobState::Lost => self.poll(id),
-                JobState::Cancelling => {
-                    self.set_job(id, JobState::Cancelling);
-                    self.resend_cancel(id);
+                JobState::Cancelling if since(self.now, self.st.jobs[&id].state_at) >= LEASE => {
+                    self.set_job(id, JobState::Lost);
+                    self.notify(Party::Owner, None, Notice::JobLost { job: id });
                     self.poll(id);
                 }
+                JobState::SubmitUncertain
+                | JobState::Running
+                | JobState::Cancelling
+                | JobState::Lost => self.poll(id),
                 JobState::Collecting => self.fetch(id),
                 _ => {}
             }
+            self.resend_node_writes(id);
         }
     }
 }

@@ -110,7 +110,7 @@ impl Sim {
         check::intents(self, idx, &out);
         check::step(&prev, &self.st, self);
         if matches!(e.kind, EventKind::Tick | EventKind::HubRecovered) {
-            check::timers(&self.st);
+            check::timers(&self.st, e.kind == EventKind::Tick);
         }
         self.held.extend(out.iter().cloned());
         self.last = out.clone();

@@ -10,6 +10,9 @@ use crate::state::*;
 pub mod limits {
     use crate::model::*;
 
+    pub use crate::effect::{MAX_ATTEMPTS, UNKNOWABLE_NOTIFY};
+    pub use crate::job::{LEASE, NODE_RESENDS};
+
     pub const MAX_CHILDREN: usize = 8;
     /// G5: not Ready within this long.
     pub const START_TIMEOUT: Millis = 60 * SECOND;
