@@ -1,6 +1,6 @@
 VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build release test test-paid check check-deps check-gen gen fmt
+.PHONY: build release release-assets release-publish test test-paid check check-deps check-gen gen fmt
 
 DART ?= dart
 API_DART := app/lib/api/api.g.dart
@@ -12,6 +12,14 @@ build:
 
 release:
 	PROTECTORATE_BUILD_VERSION='$(VERSION)' cargo build --locked --release --workspace --bins
+
+# Every release asset into dist/<version>/ with SHA256SUMS, built here and on officewin (SPEC 6).
+release-assets:
+	bash scripts/release.sh assets
+
+# gh release create with dist/<version>/; a dry run unless PUBLISH=1.
+release-publish:
+	bash scripts/release.sh publish
 
 test:
 	cargo test --locked --workspace
