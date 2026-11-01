@@ -195,7 +195,7 @@ pub fn run_program(program: &Path, args: &[&str], timeout: Duration) -> Result<O
 /// What to check. [`Config::from_env`] fills it from this process.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// The owner's home, where harness logins live.
+    /// Where harness logins live, laid out like a home: the hub passes its own login store.
     pub home: PathBuf,
     pub path: Option<OsString>,
     /// Harness checks are for the hub; a node sets this false.
@@ -387,7 +387,10 @@ fn harnesses(cfg: &Config, sandbox_ok: &[String], node: &Binary) -> Vec<Harness>
                 reasons.push(format!("{} --version: {}", s.program, binary.error));
             }
             if credentials.checked && !credentials.present {
-                reasons.push("no login found".into());
+                reasons.push(format!(
+                    "no login found; run `protectorate harness login {}`",
+                    s.program
+                ));
             }
             if s.name == "pi_durable" && !node.works() {
                 reasons.push("node (D14) not on PATH".into());

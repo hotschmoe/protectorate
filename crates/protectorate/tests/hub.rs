@@ -820,7 +820,8 @@ exec '{real_git}' "$@""#,
 /// What a sleeve process can reach, probed from inside a real sandbox by a stand-in `pi` that
 /// then runs the real one: not the owner's socket, nothing on the sleeves' socket without its
 /// capability (even with scopes off, where no cgroup names it), no write to the hub's `run/`,
-/// and no login file of a harness it is not running, now or from an earlier incarnation.
+/// its own harness's shared hub login and no other, and never the owner's own logins. A token
+/// a sleeve refreshes lands in the shared login.
 #[test]
 fn sandbox_reaches_only_its_own() {
     if !have_runtime() {
@@ -847,6 +848,23 @@ fn sandbox_reaches_only_its_own() {
     std::fs::create_dir_all(owner.join(".claude")).unwrap();
     std::fs::write(owner.join(".claude/.credentials.json"), "OWNER-CLAUDE").unwrap();
     let (repo, other) = (temp_repo("sbx"), temp_repo("sbx-other"));
+    // Stands in for a Claude Code that reads its login, refreshes it and fails.
+    let fake_claude = dir.join("claude");
+    write_script(
+        &fake_claude,
+        &format!(
+            r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi
+logins="${{PROTECTORATE_SOCKET%%/run/*}}/logins"
+[ -e "$HOME/claude-probe.txt" ] || {{
+  cat "$CLAUDE_SECURESTORAGE_CONFIG_DIR/.credentials.json" 2>/dev/null; echo
+  [ -e '{owner}/.claude/.credentials.json' ] && echo owner_login=visible || echo owner_login=hidden
+  [ -r "$logins/.pi/agent/models.json" ] && echo pi_login=visible || echo pi_login=hidden
+}} > "$HOME/claude-probe.txt"
+printf REFRESHED > "$CLAUDE_SECURESTORAGE_CONFIG_DIR/.credentials.json"
+exit 1"#,
+            owner = owner.display()
+        ),
+    );
     let fake = dir.join("pi");
     write_script(
         &fake,
@@ -860,6 +878,8 @@ fn sandbox_reaches_only_its_own() {
     touch "$run/bin/probe" 2>/dev/null && echo bin=writable || echo bin=readonly
     touch "$run/sleeves/probe" 2>/dev/null && echo sleeves=writable || echo sleeves=readonly
     [ -e "$HOME/.claude/.credentials.json" ] && echo claude_login=visible || echo claude_login=hidden
+    [ -e "${{run%/run}}/logins/.claude/.credentials.json" ] && echo hub_claude=visible || echo hub_claude=hidden
+    [ -L "$HOME/.pi/agent/models.json" ] && [ -r "$HOME/.pi/agent/models.json" ] && echo pi_login=shared || echo pi_login=missing
     [ -r '{other}/notes.txt' ] && echo other_root=visible || echo other_root=hidden
     git -c user.name=probe -c user.email=probe@localhost commit -q --allow-empty \
       -m "probe $PROTECTORATE_SLEEVE" >/dev/null 2>&1 && echo commit=ok || echo commit=failed
@@ -875,10 +895,18 @@ exec '{real_pi}' "$@""#,
         &[
             ("scopes", pt_json::Value::from(false)),
             ("pi_program", fake.to_str().unwrap().into()),
+            ("claude_program", fake_claude.to_str().unwrap().into()),
         ],
         &[],
         &[("HOME", owner.to_str().unwrap())],
     );
+    std::fs::create_dir_all(hub.home.join("logins/.claude")).unwrap();
+    std::fs::write(
+        hub.home.join("logins/.claude/.credentials.json"),
+        "HUB-CLAUDE",
+    )
+    .unwrap();
+    hub.cli(&["doctor", "--refresh"]).ok();
     hub.spawn_pi("other", &other);
     let s = hub
         .cli(&[
@@ -905,6 +933,8 @@ exec '{real_pi}' "$@""#,
         "bin=readonly",
         "sleeves=readonly",
         "claude_login=hidden",
+        "hub_claude=hidden",
+        "pi_login=shared",
         "other_root=hidden",
         "commit=ok",
     ] {
@@ -941,28 +971,63 @@ exec '{real_pi}' "$@""#,
     );
     assert!(
         !home.join(".claude/.credentials.json").exists(),
-        "a resleeve target's login is not copied in ahead of time"
+        "no Claude login is placed in a Pi sleeve's home"
     );
 
-    // A login an earlier incarnation left behind is moved out before the next launch (after a
-    // turn, so the native session exists to resume).
+    // A file an earlier hub left where a shared login belongs is replaced by the link at the
+    // next launch (after a turn, so the native session exists to resume).
     hub.send("sbx", READY);
     hub.wait("sbx", "idle", 180);
     hub.cli(&["sleeve", "stop", "sbx"]).ok();
     hub.wait("sbx", "ended", 60);
-    std::fs::create_dir_all(home.join(".claude")).unwrap();
-    std::fs::write(home.join(".claude/.credentials.json"), "OLD-CLAUDE").unwrap();
+    let models = home.join(".pi/agent/models.json");
+    std::fs::remove_file(&models).unwrap();
+    std::fs::write(&models, "OLD-COPY").unwrap();
     hub.cli(&["sleeve", "start", "sbx"]).ok();
     hub.wait("sbx", "idle", 120);
-    let probe = std::fs::read_to_string(home.join("probe.txt")).unwrap();
-    assert!(probe.contains("claude_login=hidden"), "{probe}");
     assert_eq!(
-        std::fs::read_to_string(hub.home.join(format!(
-            "sleeves/{id}/credentials/.claude/.credentials.json"
-        )))
-        .unwrap_or_default(),
-        "OLD-CLAUDE",
-        "kept outside every sandbox"
+        std::fs::read_link(&models).ok(),
+        Some(hub.home.join("logins/.pi/agent/models.json")),
+        "the copy became the shared login again"
+    );
+
+    // A Claude sleeve reads the hub's login, not the owner's, cannot see Pi's, and its refresh
+    // lands in the one shared login.
+    let c = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "sbxclaude",
+            "--path",
+            temp_repo("sbx-claude").to_str().unwrap(),
+            "--harness",
+            "claude",
+        ])
+        .json();
+    let c_id = c["id"]
+        .as_str()
+        .expect("the claude sleeve spawned")
+        .to_string();
+    let c_probe = hub
+        .home
+        .join(format!("sleeves/{c_id}/home/claude-probe.txt"));
+    let c_probe = eventually("the claude probe", Duration::from_secs(60), || {
+        std::fs::read_to_string(&c_probe).ok()
+    });
+    for want in ["HUB-CLAUDE", "owner_login=hidden", "pi_login=hidden"] {
+        assert!(
+            c_probe.lines().any(|l| l == want),
+            "want {want}:\n{c_probe}"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(hub.home.join("logins/.claude/.credentials.json")).unwrap(),
+        "REFRESHED"
+    );
+    assert_eq!(
+        std::fs::read_to_string(owner.join(".claude/.credentials.json")).unwrap(),
+        "OWNER-CLAUDE"
     );
 }
 

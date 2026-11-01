@@ -56,6 +56,8 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   hub probation                     run by the unit before each start, without the API
   doctor [--refresh]
   harness update [PROGRAM...]       claude, codex, grok, pi; none means every installed one
+  harness login <claude|codex|grok|pi> [-- ARGS...]
+                                    the sleeves' shared login, on this terminal, without the API
   sleeve list | sleeve show <sleeve>
   sleeve spawn <name> (--path DIR | --parent SLEEVE [--readonly]) [--harness H]
         [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
@@ -326,6 +328,13 @@ fn run(a: &Args) -> Result<(), Fail> {
         "hub" if a.words.get(1).map(String::as_str) == Some("probation") => {
             let line = pt_hub::probation_prestart(&home(a)).map_err(Fail::Other)?;
             println!("protectorate hub probation: {line}");
+            return Ok(());
+        }
+        "harness" if a.words.get(1).map(String::as_str) == Some("login") => {
+            let harness = a.word(2, "a harness (claude, codex, grok or pi)")?;
+            let args = a.words.get(3..).unwrap_or(&[]);
+            let line = pt_hub::harness_login(&home(a), harness, args).map_err(Fail::Other)?;
+            println!("{line}");
             return Ok(());
         }
         _ => {}

@@ -67,10 +67,10 @@ impl Quotas {
 }
 
 /// A reader per harness whose program is installed; the local model also when `local_url` is
-/// set. The readers look at the owner's login files, never the sleeves' seeded copies; the local
-/// one sends the key of Pi's `pi_local_provider` and falls back to its `baseUrl`.
+/// set. The readers look at the hub's own logins, the ones its sleeves use; the local one sends
+/// the key of Pi's `pi_local_provider` and falls back to its `baseUrl`.
 fn readers(hub: &Hub) -> Vec<Box<dyn Reader>> {
-    let home = Some(hub.owner_home.clone());
+    let home = Some(hub.home.logins());
     let installed = |h| program(hub, h).is_some();
     let mut out: Vec<Box<dyn Reader>> = Vec::new();
     if installed(Harness::Claude) {

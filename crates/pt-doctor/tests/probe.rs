@@ -153,7 +153,12 @@ fn report_gates_harnesses() {
     let codex = harness(&r, "codex");
     assert_eq!(codex.binary.install, Install::Npm);
     assert_eq!(codex.binary.version, "codex-cli 9.9.9");
-    assert!(!codex.eligible && codex.reasons == ["no login found"]);
+    assert!(
+        !codex.eligible
+            && codex.reasons == ["no login found; run `protectorate harness login codex`"],
+        "{:?}",
+        codex.reasons
+    );
 
     let grok = harness(&r, "grok");
     assert_eq!(grok.binary.install, Install::Script);

@@ -439,10 +439,13 @@ fn hub_runs_the_fleet_and_node_jobs() {
                     .then_some(())
             },
         );
+        // The tailnet takes 4 to 8 s here to reconverge on the restarted member (registration,
+        // the hub member's netmap, a fresh handshake); a poller stuck on the dead connection
+        // (the 20 s call timeout) would not make it.
         let ready = Instant::now();
         let fresh = eventually(
             "restarted node's fresh Hello",
-            Duration::from_secs(8),
+            Duration::from_secs(15),
             || {
                 let v = hub.cli(&["--json", "node", "show", &node_id]).json();
                 (v["node_version"].as_str() == Some("restart-test")
@@ -451,7 +454,7 @@ fn hub_runs_the_fleet_and_node_jobs() {
                     .then_some(v)
             },
         );
-        assert!(ready.elapsed() < Duration::from_secs(8), "{fresh}");
+        assert!(ready.elapsed() < Duration::from_secs(15), "{fresh}");
         let effect_log = hub.log_text().len();
         let restarted = run_job(&hub, &[], &["echo", "after-restart"]);
         let done = wait_job(&hub, &restarted, &["succeeded", "failed", "lost"], 90);

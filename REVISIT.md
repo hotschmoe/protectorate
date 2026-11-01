@@ -331,14 +331,19 @@ Each entry: where, what was done, what right looks like.
   already running until they relaunch, and a workspace outside every claim (the owner's other
   repos) is readable. Right: a deny-by-default view of the filesystem (only the claim, its git
   dirs and the toolchains bound in).
-- **Sleeve credentials are seeded by copy** (`pt-hub`, exec.rs `credential_files`): before each
-  launch the hub copies the owner's login files for the launching harness only
-  (`~/.claude/.credentials.json` and `~/.claude.json`, `~/.codex/auth.json`, `~/.grok/auth.json`,
-  `~/.pi/agent/{auth,models,settings}.json`) into the sleeve's private home, once, and moves every
-  other harness's files out to `sleeves/<id>/credentials/` (no sandbox sees it), back when that
-  harness runs again; a token the harness refreshes in one home does not reach the others, and
-  `~/.claude.json` carries the owner's project list. Right: a doctor-guided login per sleeve
-  home, or a shared read-only credential mount per harness.
+- **One shared login per harness** (`pt-hub`, logins.rs): every sleeve of a harness uses the
+  hub's one login in `<home>/logins/`, bound read-write, so concurrent sleeves may refresh the
+  same token at once. That has not been seen to conflict, and the old Rust hub ran this way; it
+  is not tested against the real CLIs. Codex and Grok follow a symlink from the sleeve's home to the store when they rewrite
+  their login; a harness that replaced the file by rename would fork it again (not seen yet).
+  Quota reads that same login and never refreshes it, so after a quiet spell with no sleeve on a
+  harness (Claude's access token lasts about 8 hours) its row shows `login expired` until a
+  sleeve runs. The copies an earlier hub seeded into sleeve homes stay where they are, except the
+  files a link now replaces at that harness's next launch.
+- **Grok's binary sits under the masked `~/.grok`** (`pt-hub`, exec.rs): the vendor installs
+  `grok` into `~/.grok/downloads/`, which every sandbox masks, so a Grok sleeve cannot start its
+  program. Right: bind the resolved harness program read-only (with what it needs beside it), or
+  mask only `~/.grok`'s login files.
 - **Same-uid callers on the owner's socket are the owner** (`pt-hub`, http.rs): sleeves never
   see that socket (`run/api.sock`); they get `run/sleeves/api.sock`, which takes only a sleeve
   capability (checked against the caller's scope cgroup when it has one), so with `scopes` off a
@@ -828,7 +833,7 @@ Each entry: where, what was done, what right looks like.
   the owner's endpoints.
 - **One account per native harness** (future feature, owner 2026-11-01; not a top priority):
   `pt_api::Subscription` is a fixed enum (claude, codex, grok, local, api), and each quota reader
-  reads the single login in the owner's home (`~/.claude`, `~/.codex`, `~/.grok`). Two Grok
+  reads the hub's single login per harness (`<home>/logins/`). Two Grok
   accounts, for example, can't be told apart. Right: accounts as data. Each one is a named login
   (harness, a label, and the login home or config dir it lives in, such as `CLAUDE_CONFIG_DIR` or
   `CODEX_HOME` where the harness supports one). The label is probably the account's email, read

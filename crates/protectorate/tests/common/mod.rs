@@ -175,6 +175,10 @@ impl Hub {
         }
         let config = config_obj;
         fs::write(home.join("config.json"), config.to_string()).expect("write config");
+        // The sleeves' Pi login, copied from this machine's own Pi config where it has one.
+        let _ = Command::new(bin())
+            .args(["--home", home.to_str().unwrap(), "harness", "login", "pi"])
+            .output();
         let mut hub = Hub {
             log: home.with_file_name("serve-0.log"),
             home,

@@ -1130,7 +1130,7 @@ fn doctor_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
 }
 
 fn harness_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
-    match a.word(1, "a harness command (update)")? {
+    match a.word(1, "a harness command (update or login)")? {
         "update" => {
             let req = api::UpdateHarnessesRequest {
                 programs: a.words.get(2..).unwrap_or(&[]).to_vec(),

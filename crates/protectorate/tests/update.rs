@@ -1425,7 +1425,7 @@ fn doctor_refuses_an_ineligible_harness_and_envoy_waits_for_it() {
     let fakes = dir("doctor");
     fs::write(fakes.join("health"), "broken\n").unwrap();
     let claude = fake_claude(&fakes);
-    // An owner home with a claude login file, so only the program decides.
+    // The owner's own claude login does not count: only the hub's, which comes later.
     let owner = fakes.join("owner");
     fs::create_dir_all(owner.join(".claude")).unwrap();
     fs::write(owner.join(".claude/.credentials.json"), "{}").unwrap();
@@ -1461,6 +1461,13 @@ fn doctor_refuses_an_ineligible_harness_and_envoy_waits_for_it() {
         h["reasons"][0].as_str().unwrap_or("").contains("--version"),
         "{d}"
     );
+    assert!(
+        h["reasons"][1]
+            .as_str()
+            .unwrap_or("")
+            .contains("run `protectorate harness login claude`"),
+        "{d}"
+    );
     assert!(fs::metadata(hub.home.join("doctor.json")).is_ok());
     let human = hub.cli(&["doctor"]);
     assert!(human.ok().contains("claude"), "{}", human.stdout);
@@ -1485,8 +1492,11 @@ fn doctor_refuses_an_ineligible_harness_and_envoy_waits_for_it() {
     assert_ne!(start.status, 0);
     assert!(start.stderr.contains("ineligible"), "{}", start.stderr);
 
-    // Fixed: the next doctor run finds claude eligible and starts Envoy again.
+    // Fixed, and logged in for the hub: the next doctor run finds claude eligible and starts
+    // Envoy again.
     fs::write(fakes.join("health"), "fixed\n").unwrap();
+    fs::create_dir_all(hub.home.join("logins/.claude")).unwrap();
+    fs::write(hub.home.join("logins/.claude/.credentials.json"), "{}").unwrap();
     let d = hub.cli(&["--json", "doctor", "--refresh"]).json();
     assert!(
         d["harnesses"]

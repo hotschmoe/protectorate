@@ -75,11 +75,11 @@ impl Doctor {
     }
 }
 
-/// The checks as the hub runs them: the owner's home and PATH, the harness programs the config
-/// launches, and the headscale and member this binary embeds.
+/// The checks as the hub runs them: its own harness logins, the owner's PATH, the harness
+/// programs the config launches, and the headscale and member this binary embeds.
 fn config(hub: &Hub, net: &Net) -> pt_doctor::Config {
     let mut cfg = pt_doctor::Config::from_env();
-    cfg.home = hub.owner_home.clone();
+    cfg.home = hub.home.logins();
     cfg.disk_paths = vec![hub.home.root.clone(), hub.owner_home.clone()];
     let c = &hub.config;
     for (name, p) in [

@@ -145,8 +145,9 @@ quota list
 ```
 
 One row per subscription (Claude, Codex, Grok, the local endpoint): the reading, its windows with
-percent used, and a note. The readers are read-only: they use your existing logins and never
-refresh or print a token. They run every `quota_poll_secs` (60; 0 turns them off); a reading is
+percent used, and a note. The readers are read-only: they use the hub's harness logins (below)
+and never refresh or print a token, so a harness no sleeve has run for a while can read `login
+expired` until one does. They run every `quota_poll_secs` (60; 0 turns them off); a reading is
 refreshed after 5 minutes and becomes stale after 10. A response with a malformed usage window,
 or with no window at all, is reported as an error.
 Resleeve targets are weighted by fresh readings; known-exhausted candidates are skipped, and the
@@ -190,8 +191,30 @@ Checks this machine: each harness CLI (path, version, install method, login pres
 login, the sandbox prerequisites (`bwrap`, `systemd-run --user`, linger), disk, clock, `curl` and
 the embedded headscale and member. The result is cached in `<home>/doctor.json` and gates which
 harnesses dispatch and resleeve may use; a harness marked `NO` under ELIGIBLE is skipped. It runs
-at start, every 6 hours, and on `--refresh`. It checks that login files exist, not that they are
-valid. Nodes have no doctor yet.
+at start, every 6 hours, and on `--refresh`. It checks that the hub's login files exist (below),
+not that they are valid. Nodes have no doctor yet.
+
+## Harness logins
+
+```
+harness login <claude|codex|grok|pi> [-- ARGS...]
+```
+
+Sleeves never use your own logins. The hub keeps one login per harness in `<home>/logins/`, and
+every sleeve of that harness shares it: its directory is bound read-write into the sandbox, so a
+token one sleeve refreshes reaches the others (a copy per sleeve would fork the refresh token, and
+the first refresh would log the other copies out). `harness login` runs on the hub machine, on
+your terminal, without the API:
+
+- `claude`, `codex`, `grok`: the vendor's own login command (`claude auth login`, `codex login`,
+  `grok login`) pointed at the store; words after `--` go to it, for example
+  `harness login codex -- --device-auth` on a machine without a browser.
+- `pi`: copies `auth.json`, `models.json` and `settings.json` from your `~/.pi/agent` (API keys
+  and your local endpoint's provider). An OAuth entry there is refused, since a copy would fork
+  it; log that one in with `PI_CODING_AGENT_DIR=<home>/logins/.pi/agent pi` and `/login`.
+  Run it again after you change your Pi models.
+
+Then `doctor --refresh`. Doctor names the command for a harness with no login.
 
 ## Updates and rollback
 
@@ -268,7 +291,8 @@ The hub owns one root, `<home>` (default `~/.local/share/protectorate`, mode 070
 | `doctor.json` | the cached doctor report |
 | `harness-updates.json` | the last run of each harness's update command |
 | `envoy/` | Envoy's working directory |
-| `sleeves/<id>/` | a sleeve's private `home/` (harness logins and native session logs), `transcript.jsonl`, checkpoints |
+| `logins/` | the harness logins every sleeve shares (`harness login`) |
+| `sleeves/<id>/` | a sleeve's private `home/` (native session logs, links to `logins/`), `transcript.jsonl`, checkpoints |
 | `worktrees/` | child sleeves' git worktrees |
 | `jobs/<job>/<attempt>/` | node job logs and fetched artifacts |
 | `history/` | the history index (derived; keep it private and out of backups) |

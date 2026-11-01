@@ -75,9 +75,10 @@ sha256sum install.sh
 
 - Linux with a systemd user manager, `bwrap`, `systemd-run`, `git`, `curl`, `gzip` and
   `sha256sum`. `gh`, logged in, is checked by `doctor`.
-- The harness CLIs you want, installed by their vendors' own methods and logged in as your user
-  (Claude Code, Codex, Grok Build, Pi). The hub copies their login files into each sleeve's
-  private home.
+- The harness CLIs you want, installed by their vendors' own methods (Claude Code, Codex, Grok
+  Build, Pi). After the install, log each one in for the hub with `protectorate harness login
+  <claude|codex|grok|pi>` (see [operate.md](operate.md#harness-logins)); your own logins are
+  never used by sleeves.
 - For `pi_local`: Pi configured with a provider for your OpenAI-compatible endpoint, named in the
   hub's `config.json` as `pi_local_provider`, with `pi_local_model`. Both default to empty, and
   until they are set doctor reports `pi_local` as not configured and nothing spawns or resleeves

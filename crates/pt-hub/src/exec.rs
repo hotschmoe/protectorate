@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -226,40 +226,6 @@ pub fn program(hub: &Hub, h: Harness) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// Login files copied from the owner's home into a sleeve's private home (REVISIT: a
-/// doctor-guided login per sleeve home is right). Existing files are left alone, since the
-/// harness may have refreshed them.
-fn credential_files(h: Harness) -> &'static [&'static str] {
-    match h {
-        Harness::Claude => &[".claude/.credentials.json", ".claude.json"],
-        Harness::Codex => &[".codex/auth.json", ".codex/config.toml"],
-        Harness::Grok => &[".grok/auth.json"],
-        Harness::PiVendor | Harness::PiLocal | Harness::PiDurable => &[
-            ".pi/agent/auth.json",
-            ".pi/agent/models.json",
-            ".pi/agent/settings.json",
-        ],
-        Harness::Antigravity => &[],
-    }
-}
-
-fn seed_credentials(owner_home: &Path, home: &Path, h: Harness) -> io::Result<()> {
-    for rel in credential_files(h) {
-        let (src, dst) = (owner_home.join(rel), home.join(rel));
-        if dst.exists() || !src.is_file() {
-            continue;
-        }
-        let ctx = |e: io::Error| io::Error::new(e.kind(), format!("seed {}: {e}", dst.display()));
-        if let Some(dir) = dst.parent() {
-            fs::create_dir_all(dir).map_err(ctx)?;
-            fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(ctx)?;
-        }
-        fs::copy(&src, &dst).map_err(ctx)?;
-        fs::set_permissions(&dst, fs::Permissions::from_mode(0o600)).map_err(ctx)?;
-    }
-    Ok(())
-}
-
 fn provision_barrier(hub: &Hub, id: SleeveId) -> PathBuf {
     hub.home.sleeve_dir(id).join("provisioned")
 }
@@ -267,46 +233,6 @@ fn provision_barrier(hub: &Hub, id: SleeveId) -> PathBuf {
 /// The completion barrier of a sleeve's Provision: written only after the layout is whole.
 fn provisioned(hub: &Hub, id: SleeveId) -> bool {
     provision_barrier(hub, id).is_file()
-}
-
-/// Leaves only harness `h`'s login files in a sleeve's home: every other harness's move to
-/// `sleeves/<id>/credentials/`, which no sandbox sees, and move back when that harness runs
-/// again. Runs before a launch, once the previous incarnation's scope is empty.
-fn stage_credentials(
-    owner_home: &Path,
-    sleeve_dir: &Path,
-    home: &Path,
-    h: Harness,
-) -> io::Result<()> {
-    let keep = credential_files(h);
-    let stash = sleeve_dir.join("credentials");
-    let every = [
-        Harness::Claude,
-        Harness::Codex,
-        Harness::Grok,
-        Harness::PiVendor,
-    ];
-    for rel in every.into_iter().flat_map(credential_files) {
-        let (live, kept) = (home.join(rel), stash.join(rel));
-        let (from, to) = if keep.contains(rel) {
-            if live.symlink_metadata().is_ok() || kept.symlink_metadata().is_err() {
-                continue;
-            }
-            (kept, live)
-        } else {
-            if live.symlink_metadata().is_err() {
-                continue;
-            }
-            (live, kept)
-        };
-        let ctx = |e: io::Error| io::Error::new(e.kind(), format!("move {}: {e}", from.display()));
-        if let Some(dir) = to.parent() {
-            fs::create_dir_all(dir).map_err(ctx)?;
-            fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(ctx)?;
-        }
-        fs::rename(&from, &to).map_err(ctx)?;
-    }
-    seed_credentials(owner_home, home, h)
 }
 
 /// The workspaces a sleeve's sandbox hides: every other live claim except its parent's (a
@@ -826,25 +752,35 @@ impl SleeveExec {
             .ok_or_else(|| format!("{} is not installed", wire::harness_wire(target.harness)))?;
         let home = hub.home.sleeve_home(s.id);
         fs::create_dir_all(&home).map_err(|e| format!("{}: {e}", home.display()))?;
-        stage_credentials(
-            &hub.owner_home,
-            &hub.home.sleeve_dir(s.id),
-            &home,
-            target.harness,
-        )
-        .map_err(|e| e.to_string())?;
+        let login =
+            crate::logins::prepare(&hub.home.logins(), &home, target.harness).map_err(|e| {
+                format!(
+                    "prepare the {} login: {e}",
+                    wire::harness_wire(target.harness)
+                )
+            })?;
         let work = workdir(&hub, s);
         let mut sb = pt_sandbox::SandboxSpec::new(&hub.scope_sleeve(s.id), g.0, work.clone(), home);
         sb.scope = hub.config.scopes;
         sb.masks = pt_sandbox::default_masks(&hub.owner_home);
         sb.masks.push(hub.home.root.clone());
         sb.masks.extend(other_claims(&view.state, s));
-        // Of the hub's state only the sleeves' socket and the CLI, read-only: a sleeve cannot
-        // reach the owner's socket, or replace or unlink what other sleeves use.
+        // Of the hub's state only the sleeves' socket and the CLI, read-only, and this harness's
+        // shared login: a sleeve cannot reach the owner's socket, or replace or unlink what other
+        // sleeves use. The CLI link goes through `releases/current` when the hub runs from its
+        // release store, so the store is bound whole and a hub update reaches running sleeves.
         sb.ro_paths.push(hub.home.sleeve_run());
         sb.ro_paths.push(hub.home.bin());
-        if let Ok(cli) = fs::canonicalize(hub.home.bin().join("protectorate")) {
+        let releases = hub.home.root.join("releases");
+        if releases.is_dir() {
+            sb.ro_paths.push(releases);
+        } else if let Ok(cli) = fs::canonicalize(hub.home.bin().join("protectorate")) {
             sb.ro_paths.push(cli);
+        }
+        let mut login_env = Vec::new();
+        if let Some(shared) = login {
+            sb.rw_paths.push(shared.dir);
+            login_env = shared.env;
         }
         if s.layout == Layout::Worktree {
             let parent = s
@@ -868,6 +804,7 @@ impl SleeveExec {
                 format!("{}:{path}", hub.home.bin().display()),
             ),
         ];
+        sb.env.extend(login_env);
         let prefix = sb.command().map_err(|e| e.to_string())?;
         let mut spec = pt_drivers::SpawnSpec::new(harness, program, work);
         spec.g = g.0;

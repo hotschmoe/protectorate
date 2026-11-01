@@ -86,6 +86,10 @@ impl Home {
     pub fn history(&self) -> PathBuf {
         self.root.join("history")
     }
+    /// The hub's own harness logins, shared by every sleeve (`logins.rs`).
+    pub fn logins(&self) -> PathBuf {
+        self.root.join("logins")
+    }
     /// The last run of each harness's own update command.
     pub fn harness_updates(&self) -> PathBuf {
         self.root.join("harness-updates.json")
