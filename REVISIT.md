@@ -183,9 +183,8 @@ Each entry: where, what was done, what right looks like.
   `dart:io` side forgets them on restart, so a phone pairs again each launch. Theme is not kept
   anywhere. Right: a small file in the app support directory through `dart:io`, without
   path_provider or shared_preferences.
-- **Linux desktop build unverified on the dev host**: it has no cmake, ninja or GTK 3 headers, so
-  `flutter build linux` fails there. Right: install the toolchain on the build host and add the
-  Linux bundle to the release.
+- **Linux desktop bundle is built but not released**: `flutter build linux --release` succeeds on
+  the dev host (arm64) and was not run beyond that. Right: add the Linux bundle to the release.
 - **Chat text is plain monospace** (`app/lib/chat.dart`): no Markdown, code fences show as typed.
   Right: our own small renderer for fences and lists if plain text reads badly.
 - **App tables don't sort** (nodes report 7, rule 8: sort by clicking the header rule). Right: a
