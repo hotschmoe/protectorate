@@ -8,15 +8,16 @@ Each entry: where, what was done, what right looks like.
 - **Outbound HTTPS through curl** (hub, nodes): no Rust TLS stack. Right: decide between
   curl forever, or a forked and trimmed rustls when curl's absence or output parsing bites.
 - **Sandbox through bwrap**: right is our own small namespaces helper (SPEC 3.4).
-- **Windows presence has no idle time from a plain caller** (`pt-node`, `sys/windows_presence.rs`):
-  `WTSINFOEXW.LastInputTime` is 0 for the console session when queried by an ordinary admin
-  (`quser` shows "none"), so `presence` reports UNKNOWN unless the screen is locked (lock flag
-  works; AWAY once locked 60 s). Not yet verified from LocalSystem, which is the design's
-  assumption (SPEC 3.5). Right: run as the service on officewin and compare; if still 0, have the
-  service launch a console-subsystem `idle-probe` into the active session (WTSQueryUserToken +
-  CreateProcessAsUser) that calls `GetLastInputInfo`. `alt_idle_secs` already reports
-  `GetLastInputInfo` when the binary itself runs inside the console session. The lock flag
-  (`SessionFlags` 0 = locked) was only seen unlocked; verify locked.
+- **Windows idle time through a probe process** (`pt-node`, `sys/windows_presence.rs`):
+  `WTSINFOEXW.LastInputTime` is 0 for the console session even from LocalSystem (checked on
+  officewin through a SYSTEM scheduled task), so the service starts `protectorate-node
+  idle-probe` in the console session (WTSQueryUserToken + CreateProcessAsUserW on
+  `winsta0\default`, windowless, kill-on-close job, 5 s timeout) and reads its
+  GetLastInputInfo as one JSON line; lock state stays WTS's. One process per detection (every
+  `--presence-interval` while jobs run, and per hub Presence call). From an ordinary admin (ssh)
+  WTSQueryUserToken is refused (1314), so `presence` there stays UNKNOWN unless locked. The lock
+  flag (`SessionFlags` 0 = locked) was only seen unlocked. Right: verify locked, and cache the
+  probe's answer for a few seconds if its cost shows.
 - **Linux evdev path untested with real input** (`pt-node`, `sys/linux_presence.rs`): hub has no
   keyboard or mouse, agent-world's AT keyboard needs root. Opening and watching works as root
   ("evdev watching 1 devices"); reading an actual keystroke was not exercised, and logind's
@@ -41,12 +42,13 @@ Each entry: where, what was done, what right looks like.
   only. On Linux lowering walks the process tree (plus the scope's `cgroup.procs`) once, so
   processes forked afterwards keep normal priority, and nothing raises a job back when the person
   leaves. Right: a cgroup with `cpu.weight`/`io.weight` set to idle, which covers later children.
+  (Windows checked on officewin: a running cmd and ping and a ping started later all read Idle.)
 - **Windows build path**: no Windows SDK libs on the dev hub, so there is no cross-build; both
   Windows targets build natively on officewin (VS Build Tools 14.44 incl. ARM64 libs). x64:
   `cargo build --release -p protectorate-node`; arm64: `cargo +stable build --release --target
   aarch64-pc-windows-msvc -p protectorate-node` with `%USERPROFILE%\.cargo\bin` first on PATH
   (the default toolchain lacks the arm64 std). Source goes over as a tar pushed by scp; the
-  arm64 `.exe` has never been run (no ARM Windows machine). Right: a `make release` step that runs
+  arm64 build passes clippy, but its `.exe` has never been run (the ARM laptop was off). Right: a `make release` step that runs
   these over ssh, and cargo-xwin or a vendored SDK sysroot if officewin should not be required.
 - **No macOS or Android code paths** in `pt-node` yet; the crate does not compile there.
 - **pt-json record! keys** (crates/pt-json): JSON keys are the Rust field names (`r#type` is
@@ -219,16 +221,22 @@ Each entry: where, what was done, what right looks like.
   (design report 1.3), one cgroup per job with `cgroup.kill`.
 - **Job isolation is limits only** (`pt-node`): a job gets its timeout, a capped log and a scope,
   process group or Job Object, and runs as the agent's user with the agent's environment plus its
-  `env`. There is no `cpu.max`/`memory.max`/`pids.max`, no namespaces, no Windows runner account
-  and no `mode` (sandboxed, plain, admin). Right: design report 1.3.
+  `env`. There is no `cpu.max`/`memory.max`/`pids.max`, no namespaces and no `mode` (sandboxed,
+  plain, admin). Right: design report 1.3.
+- **Runner account deferred: owner decision pending** (`pt-node`, `sys/windows_job.rs`; D11):
+  Windows jobs run as the agent's account, so as LocalSystem under the service, inside a Job
+  Object with kill-on-close, all JOB_OBJECT_UILIMIT_* restrictions and the idle priority class
+  once a person is present. No `protectorate-runner` account is created and no logon rights are
+  granted. Right: the owner decides; then a low-privilege local account that jobs run as.
 - **Node Update RPC is a stub** (`protectorate-node serve`): `Update{version, url, sha256}` answers
   `unsupported`. Right: SPEC 6a: download from GitHub through curl, check SHA256SUMS, stage, keep
   the previous binary, restart through the service manager, roll back after 10 min without hub
   contact; or take verified bytes streamed over the hub's connection.
 - **Who may speak on the agent's listener** (`protectorate-node serve`): the unix socket is mode
   0600, so `member` must run as the agent's user; `--listen-tcp` (Windows, tests) trusts any
-  local process to write an honest `tag:hub` header. Right: on Linux an installer-made group for
-  the socket; on Windows a named pipe whose ACL admits only member's account.
+  local process to write an honest `tag:hub` header; on Windows that includes every job, which
+  runs as SYSTEM (runner account deferred). Right: on Linux an installer-made group for the
+  socket; on Windows a named pipe whose ACL admits only member's account.
 - **Windows jobs** (`pt-node`, `sys/windows_job.rs`): cancel and timeout call
   `TerminateJobObject` at once (no grace period). After an agent restart every running job is
   Lost: kill-on-close ended it, or it ended unobserved, and the two cannot be told apart. The serve
@@ -404,17 +412,28 @@ Each entry: where, what was done, what right looks like.
 - **QR codes never decoded by a scanner**: zbarimg is not on the dev host and the app has no
   scanner yet; the `encode` fuzz target only proves pt-qr matches qrcodegen module for module.
   Right: decode `join`'s terminal output with a real scanner (zbar or the app) in an e2e.
-- **`uninstall` never ran** (`protectorate-node`, service.rs): it removes only manifest paths, but
-  no test or machine has exercised it, since that deletes files. Right: run it on a throwaway VM
+- **Linux `uninstall` never ran** (`protectorate-node`, service.rs): it removes only manifest
+  paths, but no test or machine has exercised it on Linux, since that deletes files. (Windows ran
+  it on officewin, after a partial install and after a full one.) Right: run it on a throwaway VM
   (or a container with systemd) in an e2e, then reinstall.
-- **No Windows service, and member can outlive serve** (`protectorate-node`): Windows runs
-  `serve` in the foreground; if serve dies, member keeps running because it is not in a Job
-  Object with kill-on-close. Right: a Windows service (runner account, D10) and member in a
-  kill-on-close Job Object.
-- **Windows jobs are refused while presence is unknown**: officewin's console session reports no
-  LastInputTime to a non-interactive caller, so presence is `unknown`, treated as present, and
-  the gate refused `uname`-style jobs (correct, but no Windows job ran through the fleet). Right:
-  the presence fix above, then a fleet job e2e on Windows.
+- **Windows service through sc.exe** (`protectorate-node`, winservice.rs, serve.rs): our own
+  dispatcher and control handler (pt-node `sys/win32_service.rs`), but create, start, stop,
+  delete and failure actions go through `sc.exe`, and the state dir is limited to SYSTEM and
+  Administrators through `icacls.exe` (not recorded: the state dir is not ours to undo). Stop
+  reports STOPPED and ends the process, so member and running jobs die by kill-on-close and the
+  jobs read Lost after the next start. `uninstall` must run from a copy outside
+  `%ProgramFiles%\protectorate-node` (Windows cannot delete the running exe). Tested on officewin
+  with a sleeping stand-in for member (officewin must not join a fleet for this): install, member
+  in the job, killing serve kills member and the SCM restarts serve, a job ran as SYSTEM, stop,
+  uninstall left no service, files or process. A reboot was not tried there. Right: our own SCM
+  calls if sc.exe output parsing bites, a reboot test on a spare box, and stop that lets jobs
+  finish or records them as interrupted.
+- **`join` leaves the Windows state dir open until install-service** (`protectorate-node`):
+  under `%ProgramData%` it inherits read access for every user (member keys), until
+  install-service runs icacls. Right: join sets the private DACL itself.
+- **No fleet job e2e on Windows yet**: presence now works from the service (AWAY through the
+  idle-probe on officewin), and a job ran through the installed service's listener, but not
+  through a hub and member. Right: a fleet job e2e on a Windows node.
 - **The poller runs the headscale CLI every 15 s and a thread per node** (`pt-fleet`,
   poller.rs): fine for a home fleet. Right: headscale's gRPC over its unix socket, and one
   scheduler thread if the fleet ever reaches hundreds.
