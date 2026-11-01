@@ -213,3 +213,75 @@ Each entry: where, what was done, what right looks like.
   edges through the lifecycle and effect tables, and the guardrail machine only through I10 and
   the scenario seeds. Right: one reference arm per table row for each machine, compared state by
   state.
+- **Sleeve credentials are seeded by copy** (`pt-hub`, exec.rs `credential_files`): at
+  provisioning and before each launch the hub copies the owner's login files for the harness
+  (`~/.claude/.credentials.json` and `~/.claude.json`, `~/.codex/auth.json`, `~/.grok/auth.json`,
+  `~/.pi/agent/{auth,models,settings}.json`) into the sleeve's private home, once; a token the
+  harness refreshes in one home does not reach the others, and `~/.claude.json` carries the
+  owner's project list. Right: a doctor-guided login per sleeve home, or a shared read-only
+  credential mount.
+- **Same-uid callers on the unix socket are the owner** (`pt-hub`, http.rs): a process inside a
+  sleeve scope is identified by its cgroup and gets that sleeve's capability whatever it sends,
+  but a vendor general agent runs as the owner's user, so envoy-only holds only while it presents
+  its `PROTECTORATE_TOKEN`. Right: vendor agents under their own uid, or an owner token required
+  on the socket for anything that is not the owner's own shell.
+- **The capability is in bwrap's argv** (`--setenv PROTECTORATE_TOKEN`), so `/proc/<pid>/cmdline`
+  of the outer bwrap shows it to same-uid processes. Right: hand the environment over a file
+  descriptor once the sandbox helper subcommand exists.
+- **The hub socket is reached through a bind of `run/`** (the whole directory, at its host path),
+  not a fixed path like `/run/protectorate.sock`: bwrap cannot create a mount point on the
+  read-only root, and a directory bind keeps a socket re-created by a restarted hub reachable.
+  Sleeves get `PROTECTORATE_SOCKET` and `run/bin/protectorate` (a link to the hub binary) on PATH.
+  Right: the sandbox helper makes the fixed mount point, or pt-sandbox gains src-to-dst binds.
+- **A View child runs in a scratch dir** (`pt-hub`, exec.rs `workdir`): `SandboxSpec` binds the
+  workspace writable, so a read-only view's cwd is `sleeves/<id>/view` and the root is visible
+  read-only at its own path through `/` (not when the root sits under a masked directory). Right:
+  a read-only workspace mode in pt-sandbox.
+- **Checkpoints are commit objects nobody points at** (`pt-hub`, git.rs): `commit-tree` over the
+  working tree with HEAD as parent, through a private index into `sleeves/<id>/objects` (the
+  repo's objects as an alternate), listed in `sleeves/<id>/checkpoints.jsonl`. No branch moves,
+  because a commit on a root's branch would land on the owner's branch. Right: decide with the
+  owner; likely a hidden ref namespace in a hub-owned bare mirror, plus a pruning rule.
+- **Hub git has no timeout and no sandbox** (worktree add, checkpoint, brief facts). Right: the
+  2 s read-only-sandbox runner the old hub had.
+- **Approval answers are reported Lost** (`pt-hub`, exec.rs): `RespondApproval` is written, then
+  left Uncertain, because only Codex confirms an answer; the harness's `approval_decision` entry
+  becomes `ApprovalResolved` for activity. Right: Acked on a confirmed decision (Codex) or the
+  matching `tool_result`.
+- **No OOM exit cause**: `Exited` carries the exit code or Killed, so G4 never fires. Right: read
+  the scope's `memory.events` `oom_kill` before reporting the exit.
+- **A message sent during the post-restart probe is rejected** (pt-core `deliverable` ignores
+  `Sleeve::probing`): a recovered Idle sleeve takes a `SendPrompt` before `ScopeProbed` answers,
+  the executor holds no session for that g, and the Nack rejects the message (the sender is
+  told). Right: `deliverable` is false while `probing`, so the message waits in the queue.
+- **select_target is first-eligible** (`pt-hub`, select.rs): it walks `resleeve_to` in order,
+  skipping a harness whose binary is missing or that `doctor.json` lists under `ineligible`. No
+  quota weighting, no task-size class (SPEC 8, D27).
+- **Node jobs are held, not run** (`pt-hub`, exec.rs jobs executor): the transport (SSH or the
+  tailnet) is undecided, so `ScheduleJob` and the node effects are logged and never answered;
+  no API method creates a job yet.
+- **The D9 code rule is not in code**: removing sleeves, node maintenance and protected pushes
+  asked for by a vendor agent rest on Envoy's CLAUDE.md. Right: the hub refuses those methods
+  for a request whose chain starts at an `agent:` message unless an owner approval names it.
+- **Who sent a message is a text prefix** (`pt-hub`, api.rs): mail reaches the harness as
+  `[from sleeve <name>] ...` and agent requests as `[from agent:<name>] ...`, since a prompt has no
+  other sender field; owner and Envoy messages are unprefixed. Right: revisit if a harness grows
+  a sender field.
+- **The brief is facts only** (`pt-hub`, brief.rs): no history search hits (no index yet), no
+  planned-resleeve summary, no checkpoint id, and the 6 KiB small-target variant is missing.
+- **Ticks are journaled and every batch clones the State** (`pt-hub`, core.rs): 8640 Tick frames
+  a day, and the published view is a full copy that grows with the never-pruned records. Right:
+  the State codec and snapshots (above), then a cheaper view (shared sub-trees or per-sleeve
+  snapshots).
+- **Transcripts never rotate** (`pt-hub`, transcript.rs): one JSONL per sleeve, a 4096-entry
+  tail in memory, and a full read for older ranges and for `EnvoyWait`. Fast: an offset index.
+- **Activity `since_ms` restarts with the hub**: it is tracked in the core thread, not journaled.
+- **The stale unix socket is unlinked at start** (`pt-hub`, serve.rs): only when the path is a
+  socket and the journal lock is held (no other hub can own it). This is the one file product
+  code deletes; the owner may prefer a fresh socket name per start.
+- **Wait and EnvoyWait hold a connection thread** for up to an hour, out of 256. Fine for a few
+  clients; right if Envoy fans out: wait on the event stream instead.
+- **`PT_TEST_FAULT=usage_limit:<sleeve name>`** (`pt-hub`, hub.rs `Fault`): the one test-only
+  knob. The named sleeve's first settled turn in this hub process is reported to the core as
+  `TurnEnd::UsageLimit`, which trips G1 and forces a resleeve; the e2e `forced_resleeve_with_brief`
+  uses it. The hub warns at start when it is set. Never set it in production.
