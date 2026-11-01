@@ -565,3 +565,25 @@ Each entry: where, what was done, what right looks like.
   not the release stamp the hub prints (`PROTECTORATE_BUILD_VERSION`), so the node installers can
   only check that the staged binary runs, not that it is the release they verified. Right: the
   node reads `PROTECTORATE_BUILD_VERSION` like the hub, and the installers compare it with the tag.
+- **Own keyword index instead of SQLite FTS5** (`pt-history`, SPEC 3.7): segments, BM25 and
+  merges are ours, to avoid `rusqlite` plus bundled C SQLite. Right if it proves insufficient
+  (recall, query features, corruption we cannot explain, or size well past the measured 1 GiB of
+  logs to 11 MB): `rusqlite` with FTS5, pinned and listed in DEPENDENCIES.md.
+- **Grok docs carry the session start time** (`pt-history`, extract/grok.rs): `chat_history.jsonl`
+  records have no timestamp, so every doc gets `summary.json` `created_at`, and time filters are
+  per session for Grok. Grok context usage is not read at all. Right: per-record times and usage
+  from the session's `updates.jsonl` or `usage.json`.
+- **Tool errors by text for Codex, none for Grok** (`pt-history`): a Codex output counts as
+  failed on "Process exited with code N" (N not 0) or "Script failed"; Grok tool results carry no
+  error flag and are never indexed. Right: a structured exit code if either log gains one.
+- **Claude subagent logs are skipped** (`pt-history`, discover.rs and claude.rs): sidechain records
+  and `subagents/` files are not indexed. Right: index them with a parent link once a brief or
+  search needs a subagent's work.
+- **Merges re-tokenize stored text** (`pt-history`, index.rs): merging two segments decodes their
+  texts and builds a new one from scratch. Fast: a k-way merge of postings, if merge time shows up.
+- **Leftover segments after a crash mid-merge** (`pt-history`, index.rs): a crash after the
+  manifest rename but before the merged segments are removed leaves unreferenced `seg-*` files.
+  Right: sweep unreferenced segment files at open.
+- **Hub transcript and native log overlap** (`pt-history`): a headless session appears in both;
+  the caller's allowlist must name one of them per session. Right: the hub picks the native log
+  for search and its transcript only where no native log exists, once both are wired.

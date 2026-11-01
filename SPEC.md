@@ -253,8 +253,18 @@ the same dispatch code. There are no external sources such as email, calendar or
      forced resleeve are one flow. The file is `.protectorate/BRIEF.md`.
   3. **Search:** `protectorate history search|read` over a keyword index. The brief already carries
      the top hits, because the forced-resleeve target (pi_local) is the weakest reader.
-- **Storage:** one SQLite file via `rusqlite` (bundled, FTS5). It is a derived, rebuildable index;
+- **Storage:** our own keyword index, crate `pt-history`, in a directory of checksummed,
+  append-only segments plus a manifest of source cursors. It is a derived, rebuildable index;
   native logs stay authoritative and are only read.
+  - Reason: SQLite FTS5 through `rusqlite` would bring a third-party crate plus bundled C SQLite
+    for one feature, against the minimal-dependency rule (D37). Owner decision 2026-11-01; this
+    overrides `docs/design/history-continuation.md` 1.4, 4.2 and 4.7.
+  - What it does: a tokenizer for paths and identifiers (camelCase and snake_case parts),
+    positional postings, BM25, all-terms and phrase queries, and filters by sleeve, harness,
+    session, time and role. Ingest tails each log by byte offset; small segments are merged.
+  - Measured on this hub (2026-11-01, release build): 1 GiB of the newest real logs ingested
+    in 1.9 s (540 MB/s, 48 MB peak RSS) into an 11 MB index; queries take 0.05 to 0.7 ms.
+  - Fallback: `rusqlite` with FTS5, if our index proves insufficient (REVISIT.md).
 - **Vectors:** off until keyword search proves insufficient. When turned on, they come from an
   external llama.cpp server over HTTP, stored as f32 blobs with brute-force cosine in Rust (bge-small
   first). No new Rust dependency.
@@ -677,12 +687,13 @@ shortcut is also in `REVISIT.md`.
   | `pt-core` | the pure state machines and `apply`, with no I/O |
   | `pt-api` | API types and the method table, declared once in a macro; `pt-apigen` writes the Dart models from it |
   | `pt-drivers` | headless harness adapters (Claude stream-json, Codex app-server, Grok ACP, Pi rpc) into one event stream |
+  | `pt-history` | the history index (3.7): native session logs and hub transcripts into checksummed segments with BM25, in place of SQLite FTS5 |
   | `pt-sandbox` | the bwrap argument builder and systemd scopes |
   | `pt-frame` | the hub-node frame codec (Verus phase 1) |
   | `pt-node` | inventory, samples, presence and jobs (the node side) |
 
   Each is fuzzed against a reference where one exists: `serde_json`, `sha2` and `crc32c` are
-  dev-only fuzz dependencies.
+  dev-only fuzz dependencies. There is no SQLite: `pt-history` replaces `rusqlite` (3.7).
 - **The API** is JSON over HTTP:
   - `POST /api/<Method>` carries the request and response bodies;
   - `GET /api/events` is a WebSocket of state changes;

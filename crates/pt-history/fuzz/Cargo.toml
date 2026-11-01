@@ -1,0 +1,42 @@
+[package]
+name = "pt-history-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+pt-history = { path = ".." }
+
+[workspace]
+
+[[bin]]
+name = "extract_lines"
+path = "fuzz_targets/extract_lines.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tokenize"
+path = "fuzz_targets/tokenize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tail"
+path = "fuzz_targets/tail.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "segment"
+path = "fuzz_targets/segment.rs"
+test = false
+doc = false
+bench = false
