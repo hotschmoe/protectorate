@@ -309,6 +309,24 @@ fn stage_credentials(
     seed_credentials(owner_home, home, h)
 }
 
+/// The workspaces a sleeve's sandbox hides: every other live claim except its parent's (a
+/// worktree child's git dirs and a view's files are there) and its own children's, and none
+/// that holds its own workspace or its parent's.
+fn other_claims(st: &pt_core::State, s: &Sleeve) -> Vec<PathBuf> {
+    let parent = s
+        .parent
+        .and_then(|p| st.sleeve(p))
+        .map(|p| PathBuf::from(&p.claim.path));
+    let own = PathBuf::from(&s.claim.path);
+    st.sleeves
+        .values()
+        .filter(|o| o.id != s.id && o.life != Life::Removed)
+        .filter(|o| Some(o.id) != s.parent && o.parent != Some(s.id))
+        .map(|o| PathBuf::from(&o.claim.path))
+        .filter(|p| !own.starts_with(p) && parent.as_ref().is_none_or(|q| !q.starts_with(p)))
+        .collect()
+}
+
 /// Whether the record is still exactly what this intent was released for.
 pub(crate) fn fresh(view: &View, effect: EffectId, attempt: u32, kind: &EffectKind) -> bool {
     let st = &view.state;
@@ -820,6 +838,7 @@ impl SleeveExec {
         sb.scope = hub.config.scopes;
         sb.masks = pt_sandbox::default_masks(&hub.owner_home);
         sb.masks.push(hub.home.root.clone());
+        sb.masks.extend(other_claims(&view.state, s));
         // Of the hub's state only the sleeves' socket and the CLI, read-only: a sleeve cannot
         // reach the owner's socket, or replace or unlink what other sleeves use.
         sb.ro_paths.push(hub.home.sleeve_run());

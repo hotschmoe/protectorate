@@ -841,6 +841,7 @@ fn sandbox_reaches_only_its_own() {
     }
     std::fs::create_dir_all(owner.join(".claude")).unwrap();
     std::fs::write(owner.join(".claude/.credentials.json"), "OWNER-CLAUDE").unwrap();
+    let (repo, other) = (temp_repo("sbx"), temp_repo("sbx-other"));
     let fake = dir.join("pi");
     write_script(
         &fake,
@@ -854,9 +855,13 @@ fn sandbox_reaches_only_its_own() {
     touch "$run/bin/probe" 2>/dev/null && echo bin=writable || echo bin=readonly
     touch "$run/sleeves/probe" 2>/dev/null && echo sleeves=writable || echo sleeves=readonly
     [ -e "$HOME/.claude/.credentials.json" ] && echo claude_login=visible || echo claude_login=hidden
+    [ -r '{other}/notes.txt' ] && echo other_root=visible || echo other_root=hidden
+    git -c user.name=probe -c user.email=probe@localhost commit -q --allow-empty \
+      -m "probe $PROTECTORATE_SLEEVE" >/dev/null 2>&1 && echo commit=ok || echo commit=failed
   }} < /dev/null > "$HOME/probe.txt"
 fi
-exec '{real_pi}' "$@""#
+exec '{real_pi}' "$@""#,
+            other = other.display()
         ),
     );
     let hub = Hub::start_config(
@@ -869,7 +874,7 @@ exec '{real_pi}' "$@""#
         &[],
         &[("HOME", owner.to_str().unwrap())],
     );
-    let repo = temp_repo("sbx");
+    hub.spawn_pi("other", &other);
     let s = hub
         .cli(&[
             "--json",
@@ -895,9 +900,40 @@ exec '{real_pi}' "$@""#
         "bin=readonly",
         "sleeves=readonly",
         "claude_login=hidden",
+        "other_root=hidden",
+        "commit=ok",
     ] {
         assert!(probe.lines().any(|l| l == want), "want {want}:\n{probe}");
     }
+    // A worktree child sees its parent's git dirs, not the other root, and commits.
+    let kid = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "sbxkid",
+            "--parent",
+            "sbx",
+            "--harness",
+            "pi_local",
+        ])
+        .json();
+    hub.wait("sbxkid", "idle", 120);
+    let kid_id = kid["id"].as_str().unwrap();
+    let kid_probe =
+        std::fs::read_to_string(hub.home.join(format!("sleeves/{kid_id}/home/probe.txt")))
+            .expect("the child's probe ran");
+    for want in ["other_root=hidden", "commit=ok"] {
+        assert!(
+            kid_probe.lines().any(|l| l == want),
+            "want {want}:\n{kid_probe}"
+        );
+    }
+    assert_eq!(
+        git_out(&repo, &["log", "-1", "--format=%s", "pt/sbxkid"]),
+        "probe sbxkid",
+        "the child's commit is on its branch"
+    );
     assert!(
         !home.join(".claude/.credentials.json").exists(),
         "a resleeve target's login is not copied in ahead of time"

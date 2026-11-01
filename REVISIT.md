@@ -307,6 +307,12 @@ Each entry: where, what was done, what right looks like.
   so jobs outlive the session). What SSH loses is NAT traversal, roaming and stable addresses (DHCP
   churn; the snapdragon laptop moved .176 to .172). The combined form is SSH as the protocol, with
   the official tailscale client on any machine the hub cannot route to.
+- **Other sleeves' workspaces are masked as of the launch** (`pt-hub`, exec.rs
+  `other_claims`): a sandbox masks every live claim but its parent's and its children's, read
+  from the view when the incarnation starts. A root spawned later stays visible to sandboxes
+  already running until they relaunch, and a workspace outside every claim (the owner's other
+  repos) is readable. Right: a deny-by-default view of the filesystem (only the claim, its git
+  dirs and the toolchains bound in).
 - **Sleeve credentials are seeded by copy** (`pt-hub`, exec.rs `credential_files`): before each
   launch the hub copies the owner's login files for the launching harness only
   (`~/.claude/.credentials.json` and `~/.claude.json`, `~/.codex/auth.json`, `~/.grok/auth.json`,
