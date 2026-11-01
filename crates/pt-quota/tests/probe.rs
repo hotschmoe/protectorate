@@ -168,7 +168,7 @@ fn fixture_readers_over_real_curl() {
         ),
         (
             "/v1/models",
-            r#"{"data":[{"id":"qwen-b70"},{"id":"llama"}]}"#,
+            r#"{"data":[{"id":"model-a"},{"id":"llama"}]}"#,
         ),
     ]);
     let base = format!("http://127.0.0.1:{port}");
@@ -202,7 +202,7 @@ fn fixture_readers_over_real_curl() {
     assert_eq!(state_of(grok), "unknown", "{grok}");
     let local = line_of(&out, "local");
     assert_eq!(state_of(local), "fresh");
-    assert!(local.contains("qwen-b70, llama"), "{local}");
+    assert!(local.contains("model-a, llama"), "{local}");
     assert!(out.lines().any(|l| l.starts_with("target ")));
 
     assert!(

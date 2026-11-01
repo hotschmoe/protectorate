@@ -1,7 +1,7 @@
 //! `serve` and `rpc` against each other: the real binary on real sockets and processes. Presence
 //! is forced with PROTECTORATE_NODE_TEST_PRESENCE (a file holding PRESENT, AWAY or UNKNOWN), so
 //! the job gate and the mid-job watcher run the same on a desk or a headless box. Linux only:
-//! the Windows path is checked by hand on officewin (REVISIT).
+//! the Windows path is checked by hand on a Windows machine (REVISIT).
 #![cfg(target_os = "linux")]
 
 mod common;

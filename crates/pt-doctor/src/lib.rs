@@ -203,6 +203,9 @@ pub struct Config {
     /// A harness program's path by its name (`claude`, `pi`, ...), in place of PATH lookup:
     /// the hub passes the programs it launches.
     pub programs: Vec<(String, PathBuf)>,
+    /// Reasons a harness is not usable that only the caller knows, by harness name: the hub
+    /// passes `pi_local` without a provider or model in its config.
+    pub unconfigured: Vec<(String, String)>,
     pub disk_paths: Vec<PathBuf>,
     /// headscale and member; when None, looked for beside this executable, then on PATH.
     pub headscale: Option<PathBuf>,
@@ -219,6 +222,7 @@ impl Config {
             path: std::env::var_os("PATH"),
             harnesses: true,
             programs: Vec::new(),
+            unconfigured: Vec::new(),
             headscale: None,
             member: None,
             timeout: Duration::from_secs(20),
@@ -388,6 +392,12 @@ fn harnesses(cfg: &Config, sandbox_ok: &[String], node: &Binary) -> Vec<Harness>
             if s.name == "pi_durable" && !node.works() {
                 reasons.push("node (D14) not on PATH".into());
             }
+            reasons.extend(
+                cfg.unconfigured
+                    .iter()
+                    .filter(|(n, _)| n == s.name)
+                    .map(|(_, why)| why.clone()),
+            );
             reasons.extend(sandbox_ok.iter().cloned());
             let mut update: Vec<String> = s.update.iter().map(|a| a.to_string()).collect();
             if let Some(first) = update.first_mut()

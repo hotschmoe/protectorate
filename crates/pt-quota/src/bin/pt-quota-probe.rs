@@ -4,7 +4,8 @@
 //! [--codex-url URL] [--grok-url URL]`
 //! One line per subscription: `<name> <fresh|stale|unknown|error> plan=<plan> [<window> <used>%
 //! resets <time>]... note=<note>`. `PT_LOCAL_URL` also configures the local endpoint; without
-//! one, the local reader uses the `baseUrl` of Pi provider `--pi-provider` (default `hotschmoe`).
+//! one, the local reader uses the `baseUrl` of Pi provider `--pi-provider` (default
+//! `PT_E2E_PI_PROVIDER`, the variable the e2e tests read; no provider and no URL reads nothing).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -17,7 +18,7 @@ use pt_quota::{
 fn main() -> ExitCode {
     let mut home: Option<PathBuf> = None;
     let mut local = std::env::var("PT_LOCAL_URL").unwrap_or_default();
-    let mut pi_provider = "hotschmoe".to_string();
+    let mut pi_provider = std::env::var("PT_E2E_PI_PROVIDER").unwrap_or_default();
     let (mut claude_url, mut codex_url, mut grok_url) = (None, None, None);
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {

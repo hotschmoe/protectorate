@@ -1,7 +1,10 @@
 #![allow(dead_code)]
 //! Runs the real `protectorate` binary as a hub on a temp `--home`, and drives it through the
-//! real CLI. Sleeves run Pi against the owner's local model (free); harnesses that spend
-//! subscription quota run only under `PT_E2E_PAID=1`.
+//! real CLI. Sleeves run Pi against a local OpenAI-compatible model (free), named by
+//! `PT_E2E_PI_PROVIDER` (a provider in Pi's own `~/.pi/agent/models.json`) and `PT_E2E_PI_MODEL`;
+//! tests that need a turn skip while either is unset. The Makefile reads them from a gitignored
+//! `.env.e2e` when it exists. Harnesses that spend subscription quota run only under
+//! `PT_E2E_PAID=1`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -36,7 +39,7 @@ pub fn on_path(name: &str) -> bool {
         .is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()))
 }
 
-/// Pi, bwrap and a systemd user manager, or a SKIP line and false.
+/// Pi with a local model, bwrap and a systemd user manager, or a SKIP line and false.
 pub fn have_runtime() -> bool {
     for tool in ["pi", "bwrap", "systemd-run", "git"] {
         if !on_path(tool) {
@@ -44,17 +47,23 @@ pub fn have_runtime() -> bool {
             return false;
         }
     }
+    if pi_provider().is_empty() || pi_model().is_empty() {
+        eprintln!(
+            "SKIP: set PT_E2E_PI_PROVIDER and PT_E2E_PI_MODEL (a Pi provider for a local \
+             OpenAI-compatible endpoint and its model), or put them in .env.e2e"
+        );
+        return false;
+    }
     true
 }
 
+/// `PT_E2E_PI_PROVIDER`, empty when unset (the hub then finds pi_local unconfigured).
 pub fn pi_provider() -> String {
-    std::env::var("PT_E2E_PI_PROVIDER").unwrap_or_else(|_| "hotschmoe".into())
+    std::env::var("PT_E2E_PI_PROVIDER").unwrap_or_default()
 }
 
 pub fn pi_model() -> String {
-    std::env::var("PT_E2E_PI_MODEL").unwrap_or_else(|_| {
-        "qwen3.8-27b-FP8-official-W8A16-mtp3-r187-xpugraph-cacheon-ctx200000-daily".into()
-    })
+    std::env::var("PT_E2E_PI_MODEL").unwrap_or_default()
 }
 
 /// A fresh git repo with one commit (left in place under the target tmp dir).
