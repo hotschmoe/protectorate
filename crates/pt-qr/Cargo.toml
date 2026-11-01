@@ -1,0 +1,12 @@
+[package]
+name = "pt-qr"
+description = "QR codes for terminal display: a trimmed port of Project Nayuki's qrcodegen"
+version.workspace = true
+edition.workspace = true
+license = "MIT"
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
