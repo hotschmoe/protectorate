@@ -9,6 +9,13 @@ pub mod priority;
 pub mod sample;
 mod sys;
 
+/// The Windows service: run under the SCM, log stdio to a file, keep children in a
+/// kill-on-close Job Object.
+#[cfg(windows)]
+pub mod windows {
+    pub use crate::sys::{Job, redirect_stdio, run_service, spawn_in_job};
+}
+
 pub use jobs::Runner;
 pub use presence::{Detector, Gate, job_gate};
 pub use priority::lower_to_idle;
