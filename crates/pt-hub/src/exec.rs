@@ -1,6 +1,10 @@
 //! Executors: one serial thread per sleeve, plus one for node jobs. Each re-checks its intent
 //! against the latest published view right before acting, reports `Dispatched` before the
 //! write, and feeds the outcome back to the core as an event.
+//!
+//! A live incarnation's pump is the one ordered stream for its sleeve: the executor hands it
+//! its reports, and the pump submits each only after every harness event it has received, so
+//! output read before a write never reaches the core after the write's `Dispatched`.
 
 use std::collections::HashMap;
 use std::fs;
@@ -30,6 +34,11 @@ use crate::wire;
 
 const ACK_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_GRACE: Duration = Duration::from_secs(10);
+/// How long a pump waits on harness output before it looks for an executor report.
+const ORDER_POLL: Duration = Duration::from_millis(10);
+
+/// A report the pump submits in its stream, then acknowledges.
+type Ordered = (EventKind, Sender<()>);
 
 pub struct Executors {
     hub: Arc<Hub>,
@@ -91,6 +100,7 @@ impl Executors {
 struct Live {
     g: Gen,
     session: Arc<Session>,
+    order: Sender<Ordered>,
 }
 
 struct SleeveExec {
@@ -251,7 +261,15 @@ impl SleeveExec {
         }
     }
 
+    /// Submits through the live pump when there is one, and returns once it is in: the core
+    /// sees the sleeve's reports and observations in the order they happened.
     fn submit(&self, kind: EventKind) {
+        if let Some(live) = &self.live {
+            let (tx, rx) = mpsc::channel();
+            if live.order.send((kind.clone(), tx)).is_ok() && rx.recv().is_ok() {
+                return;
+            }
+        }
         self.hub.submit(kind);
     }
 
@@ -613,9 +631,11 @@ impl SleeveExec {
             pid: session.pid(),
         });
         let session = Arc::new(session);
+        let (order, ordered) = mpsc::channel();
         self.live = Some(Live {
             g,
             session: session.clone(),
+            order,
         });
         let run = Run {
             id: s.id,
@@ -627,7 +647,7 @@ impl SleeveExec {
         };
         thread::Builder::new()
             .name(format!("pt-pump-{}-g{}", s.id.0, g.0))
-            .spawn(move || pump(&hub, &run, events))
+            .spawn(move || pump(&hub, &run, events, ordered))
             .map_err(|e| format!("spawn pump: {e}"))?;
         Ok(())
     }
@@ -765,24 +785,81 @@ fn input_text(input: &Option<pt_json::Value>) -> String {
 
 /// Reads one incarnation's driver events: stores them in the transcript, turns them into
 /// observations for the core, and reports `Exited` once the scope is confirmed empty.
-fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>) {
+/// Records each harness event and submits its observations; between events (and every
+/// `ORDER_POLL`) it submits the executor's reports after draining what it has received.
+fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Receiver<Ordered>) {
+    let mut p = Pump {
+        last_error: None,
+        cause: ExitCause::Killed,
+    };
+    'run: loop {
+        match events.recv_timeout(ORDER_POLL) {
+            Ok(ev) => {
+                if p.event(hub, run, ev) {
+                    break;
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+        while let Ok((kind, done)) = ordered.try_recv() {
+            while let Ok(ev) = events.try_recv() {
+                if p.event(hub, run, ev) {
+                    hub.submit(kind);
+                    let _ = done.send(());
+                    break 'run;
+                }
+            }
+            hub.submit(kind);
+            let _ = done.send(());
+        }
+    }
+    // Reports still queued come after all of this incarnation's output; later ones go direct.
+    while let Ok((kind, done)) = ordered.try_recv() {
+        hub.submit(kind);
+        let _ = done.send(());
+    }
+    drop(ordered);
     let Run {
-        id,
         ref name,
+        id,
         g,
-        harness,
         ref scope,
         scoped,
+        ..
     } = *run;
-    let mut last_error: Option<ErrorClass> = None;
-    let mut cause = ExitCause::Killed;
-    for ev in events {
+    if scoped {
+        wait_scope_empty(scope);
+    }
+    info!("sleeve {name}: g{} exited ({:?})", g.0, p.cause);
+    hub.submit(EventKind::Exited {
+        sleeve: id,
+        g,
+        cause: p.cause,
+    });
+}
+
+struct Pump {
+    last_error: Option<ErrorClass>,
+    cause: ExitCause,
+}
+
+impl Pump {
+    /// Records one harness event and submits its observations; true once the harness exited.
+    fn event(&mut self, hub: &Hub, run: &Run, ev: pt_drivers::Event) -> bool {
+        let Run {
+            id,
+            ref name,
+            g,
+            harness,
+            ..
+        } = *run;
         let entry = ev.entry;
         if let Entry::AssistantText { r#final: false, .. }
         | Entry::Reasoning { r#final: false, .. } = entry
         {
             hub.delta(id, g.0, ev.time_ms, entry);
-            continue;
+            return false;
         }
         let mut obs = Vec::new();
         match &entry {
@@ -797,7 +874,7 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>) {
             | Entry::Reasoning { .. }
             | Entry::FileChange { .. } => obs.push(Obs::Progress { tool: None }),
             Entry::TurnStarted { .. } => {
-                last_error = None;
+                self.last_error = None;
                 obs.push(Obs::Progress { tool: None });
             }
             Entry::ApprovalRequest {
@@ -850,7 +927,7 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>) {
                 }
                 let mut end = match stop {
                     Stop::Cancelled => TurnEnd::Interrupted,
-                    Stop::Error => match last_error {
+                    Stop::Error => match self.last_error {
                         Some(ErrorClass::Quota | ErrorClass::RateLimit) => TurnEnd::UsageLimit,
                         Some(ErrorClass::Auth) => TurnEnd::AuthFailed,
                         _ => TurnEnd::Error,
@@ -861,11 +938,11 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>) {
                     warning!("sleeve {name}: PT_TEST_FAULT reports this turn as a usage limit");
                     end = TurnEnd::UsageLimit;
                 }
-                last_error = None;
+                self.last_error = None;
                 obs.push(Obs::TurnSettled { end });
             }
             Entry::Error { class, text } => {
-                last_error = Some(*class);
+                self.last_error = Some(*class);
                 if *class == ErrorClass::Protocol {
                     obs.push(Obs::Desync {
                         detail: text.clone(),
@@ -874,7 +951,7 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>) {
             }
             Entry::Compaction { .. } => obs.push(Obs::CompactDone),
             Entry::Exited { code, signal, .. } => {
-                cause = match (code, signal) {
+                self.cause = match (code, signal) {
                     (Some(c), _) => ExitCause::Exit(*c as i32),
                     _ => ExitCause::Killed,
                 };
@@ -899,17 +976,6 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>) {
                 obs: o,
             });
         }
-        if exited {
-            break;
-        }
+        exited
     }
-    if scoped {
-        wait_scope_empty(scope);
-    }
-    info!("sleeve {name}: g{} exited ({cause:?})", g.0);
-    hub.submit(EventKind::Exited {
-        sleeve: id,
-        g,
-        cause,
-    });
 }

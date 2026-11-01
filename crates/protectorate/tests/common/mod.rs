@@ -27,7 +27,8 @@ fn unique(name: &str) -> PathBuf {
     let t = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs() % 100_000);
-    Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}-{t}-{n}"))
+    let pid = std::process::id();
+    Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("{name}-{t}-{pid}-{n}"))
 }
 
 pub fn on_path(name: &str) -> bool {

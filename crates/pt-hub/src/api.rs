@@ -776,22 +776,29 @@ fn answer(hub: &Hub, id: SleeveId, request_id: &str, idle: bool) -> Option<(Stri
     idle.then(|| (text.join("\n"), seq))
 }
 
-/// The latest message from `party` to Envoy, by its place in the transcript or the queue.
+/// The latest message from `party` to Envoy: queued, then being sent, then in the transcript.
 fn latest_from(hub: &Hub, view: &View, id: SleeveId, party: Party) -> Result<String> {
     let s = view
         .state
         .sleeve(id)
         .ok_or_else(|| err(ErrorCode::NotFound, "no Envoy"))?;
     let mine = |r: &str| s.messages.get(r).is_some_and(|m| m.from == party);
+    if let Some(r) = s.queue.iter().rfind(|r| mine(r)) {
+        return Ok(r.clone());
+    }
+    let sending = s.messages.iter().find(|(_, m)| {
+        m.from == party && matches!(m.state, MsgState::InFlight(_) | MsgState::SteerHeld)
+    });
+    if let Some((r, _)) = sending {
+        return Ok(r.clone());
+    }
     let store = hub.transcripts.get(id).map_err(internal)?;
     let lines = lock(&store).all().map_err(internal)?;
     let from_log = lines.iter().rev().find_map(|e| match &e.entry {
         Entry::UserMessage { request_id, .. } if mine(request_id) => Some(request_id.clone()),
         _ => None,
     });
-    from_log
-        .or_else(|| s.queue.iter().rfind(|r| mine(r)).cloned())
-        .ok_or_else(|| err(ErrorCode::NotFound, "no message from you to wait for"))
+    from_log.ok_or_else(|| err(ErrorCode::NotFound, "no message from you to wait for"))
 }
 
 fn envoy_wait(c: &Ctx<'_>, r: api::EnvoyWaitRequest) -> Result<api::EnvoyReply> {
