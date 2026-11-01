@@ -146,8 +146,8 @@ api_enums! {
     pub enum ApprovalKind {
         /// A harness permission request.
         Tool = "tool",
-        /// One a code rule requires: removing sleeves, node maintenance jobs, pushes to
-        /// protected branches.
+        /// One a code rule requires (D9): Envoy removing sleeves, running node jobs, pushing or
+        /// spawning a burst of sleeves during a turn an agent message started.
         Action = "action",
     }
 
@@ -191,6 +191,8 @@ api_enums! {
     }
 
     pub enum QuotaReading {
+        /// No reader for this subscription yet.
+        Unknown = "unknown",
         Ok = "ok",
         /// The reader failed; the windows are the last good value.
         Stale = "stale",
@@ -275,6 +277,10 @@ api_records! {
         pub parent_id: Option<String>,
         pub role: SleeveRole,
         pub lifecycle: Lifecycle,
+        /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed or `g<N>`.
+        pub park_reason: Option<String>,
+        /// The directory the incarnation works in (a child's worktree, a root's claim).
+        pub path: String = String::new(),
         /// The ordered automatic resleeve targets (default `[pi_local]`).
         pub resleeve_to: Vec<Harness> = Vec::new(),
         pub branch: Option<String>,
@@ -477,7 +483,7 @@ api_unions! {
         /// Written to the harness; the verdict follows as `prompt_ack`.
         UserMessage = "user_message" {
             request_id: String,
-            /// `owner`, `envoy`, `hub`, `mail:<sleeve>` or `ga:<vendor>`.
+            /// `owner`, `envoy`, `mail:<sleeve>`, or `agent:<name>` for a vendor general agent.
             from: String,
             text: String,
             steer: bool = false,

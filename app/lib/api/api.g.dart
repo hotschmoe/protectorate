@@ -145,6 +145,19 @@ enum ActivityState {
   String toJson() => wire;
 }
 
+final class AddDeviceRequest {
+  const AddDeviceRequest({required this.name});
+
+  factory AddDeviceRequest.fromJson(Object? json) {
+    final j = _object(json, 'AddDeviceRequest');
+    return AddDeviceRequest(name: _string(j['name'], 'AddDeviceRequest.name'));
+  }
+
+  final String name;
+
+  Map<String, Object?> toJson() => {'name': name};
+}
+
 final class ApiError {
   const ApiError({required this.code, required this.message});
 
@@ -257,8 +270,8 @@ enum ApprovalKind {
   /// A harness permission request.
   tool('tool'),
 
-  /// One a code rule requires: removing sleeves, node maintenance jobs, pushes to
-  /// protected branches.
+  /// One a code rule requires (D9): Envoy removing sleeves, running node jobs, pushing or
+  /// spawning a burst of sleeves during a turn an agent message started.
   action('action'),
 
   /// A value this client does not know.
@@ -674,7 +687,7 @@ final class EntryUserMessage extends Entry {
 
   final String requestId;
 
-  /// `owner`, `envoy`, `hub`, `mail:<sleeve>` or `ga:<vendor>`.
+  /// `owner`, `envoy`, `mail:<sleeve>`, or `agent:<name>` for a vendor general agent.
   final String from;
 
   final String text;
@@ -1225,25 +1238,51 @@ final class EnvoyReply {
 }
 
 final class EnvoySendRequest {
-  const EnvoySendRequest({required this.text});
+  const EnvoySendRequest({required this.text, this.agent});
 
   factory EnvoySendRequest.fromJson(Object? json) {
     final j = _object(json, 'EnvoySendRequest');
-    return EnvoySendRequest(text: _string(j['text'], 'EnvoySendRequest.text'));
+    return EnvoySendRequest(
+      text: _string(j['text'], 'EnvoySendRequest.text'),
+      agent: _opt(j['agent'], (e0) => _string(e0, 'EnvoySendRequest.agent')),
+    );
   }
 
   final String text;
 
-  Map<String, Object?> toJson() => {'text': text};
+  /// The vendor agent's name for the `agent:<name>` tag, `[A-Za-z0-9_-]`; default `agent`.
+  final String? agent;
+
+  Map<String, Object?> toJson() => {
+    'text': text,
+    if (agent case final v?) 'agent': v,
+  };
+}
+
+/// The envoy-only capability for vendor general agents (D9).
+final class EnvoyToken {
+  const EnvoyToken({required this.token});
+
+  factory EnvoyToken.fromJson(Object? json) {
+    final j = _object(json, 'EnvoyToken');
+    return EnvoyToken(token: _string(j['token'], 'EnvoyToken.token'));
+  }
+
+  final String token;
+
+  Map<String, Object?> toJson() => {'token': token};
 }
 
 final class EnvoyWaitRequest {
-  const EnvoyWaitRequest({required this.requestId, this.timeoutMs = 60000});
+  const EnvoyWaitRequest({this.requestId, this.timeoutMs = 60000});
 
   factory EnvoyWaitRequest.fromJson(Object? json) {
     final j = _object(json, 'EnvoyWaitRequest');
     return EnvoyWaitRequest(
-      requestId: _string(j['request_id'], 'EnvoyWaitRequest.request_id'),
+      requestId: _opt(
+        j['request_id'],
+        (e0) => _string(e0, 'EnvoyWaitRequest.request_id'),
+      ),
       timeoutMs: _or(
         j['timeout_ms'],
         60000,
@@ -1252,13 +1291,14 @@ final class EnvoyWaitRequest {
     );
   }
 
-  final String requestId;
+  /// Absent: the caller's latest message to Envoy.
+  final String? requestId;
 
   /// The hub caps it.
   final int timeoutMs;
 
   Map<String, Object?> toJson() => {
-    'request_id': requestId,
+    if (requestId case final v?) 'request_id': v,
     'timeout_ms': timeoutMs,
   };
 }
@@ -1304,11 +1344,16 @@ enum ErrorClass {
 }
 
 enum ErrorCode {
+  /// No credential, or one the hub does not know.
+  unauthenticated('unauthenticated'),
   notFound('not_found'),
   invalid('invalid'),
   forbidden('forbidden'),
   conflict('conflict'),
   unavailable('unavailable'),
+
+  /// The hub gave up waiting: on its core, or on an owner approval a code rule asked for.
+  timeout('timeout'),
   internal('internal'),
 
   /// A value this client does not know.
@@ -2639,18 +2684,18 @@ enum OnPresent {
 }
 
 final class PairDeviceRequest {
-  const PairDeviceRequest({required this.name});
+  const PairDeviceRequest({required this.code});
 
   factory PairDeviceRequest.fromJson(Object? json) {
     final j = _object(json, 'PairDeviceRequest');
     return PairDeviceRequest(
-      name: _string(j['name'], 'PairDeviceRequest.name'),
+      code: _string(j['code'], 'PairDeviceRequest.code'),
     );
   }
 
-  final String name;
+  final String code;
 
-  Map<String, Object?> toJson() => {'name': name};
+  Map<String, Object?> toJson() => {'code': code};
 }
 
 /// `token` is the `pd1.` device token, shown once.
@@ -2683,6 +2728,37 @@ final class PairedDevice {
     'device': device.toJson(),
     'token': token,
     if (expiresAt case final v?) 'expires_at_ms': v.millisecondsSinceEpoch,
+  };
+}
+
+/// A one-time code the device trades for its token with `PairDevice` before
+/// `expires_at_ms`.
+final class PairingCode {
+  const PairingCode({
+    required this.name,
+    required this.code,
+    required this.expiresAt,
+  });
+
+  factory PairingCode.fromJson(Object? json) {
+    final j = _object(json, 'PairingCode');
+    return PairingCode(
+      name: _string(j['name'], 'PairingCode.name'),
+      code: _string(j['code'], 'PairingCode.code'),
+      expiresAt: _time(j['expires_at_ms'], 'PairingCode.expires_at_ms'),
+    );
+  }
+
+  final String name;
+
+  final String code;
+
+  final DateTime expiresAt;
+
+  Map<String, Object?> toJson() => {
+    'name': name,
+    'code': code,
+    'expires_at_ms': expiresAt.millisecondsSinceEpoch,
   };
 }
 
@@ -2819,14 +2895,13 @@ final class QuotaList {
 }
 
 enum QuotaReading {
+  /// No reader for this subscription yet.
+  unknown('unknown'),
   ok('ok'),
 
   /// The reader failed; the windows are the last good value.
   stale('stale'),
-  error('error'),
-
-  /// A value this client does not know.
-  unknown('unknown');
+  error('error');
 
   const QuotaReading(this.wire);
 
@@ -3069,6 +3144,8 @@ final class Sleeve {
     this.parentId,
     required this.role,
     required this.lifecycle,
+    this.parkReason,
+    this.path = '',
     this.resleeveTo = const <Harness>[],
     this.branch,
     this.view,
@@ -3087,6 +3164,11 @@ final class Sleeve {
       parentId: _opt(j['parent_id'], (e0) => _string(e0, 'Sleeve.parent_id')),
       role: SleeveRole.fromJson(j['role']),
       lifecycle: Lifecycle.fromJson(j['lifecycle']),
+      parkReason: _opt(
+        j['park_reason'],
+        (e0) => _string(e0, 'Sleeve.park_reason'),
+      ),
+      path: _or(j['path'], '', (e0) => _string(e0, 'Sleeve.path')),
       resleeveTo: _or(
         j['resleeve_to'],
         const <Harness>[],
@@ -3119,6 +3201,12 @@ final class Sleeve {
 
   final Lifecycle lifecycle;
 
+  /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed or `g<N>`.
+  final String? parkReason;
+
+  /// The directory the incarnation works in (a child's worktree, a root's claim).
+  final String path;
+
   /// The ordered automatic resleeve targets (default `[pi_local]`).
   final List<Harness> resleeveTo;
 
@@ -3144,6 +3232,8 @@ final class Sleeve {
     if (parentId case final v?) 'parent_id': v,
     'role': role.toJson(),
     'lifecycle': lifecycle.toJson(),
+    if (parkReason case final v?) 'park_reason': v,
+    'path': path,
     'resleeve_to': [for (final e0 in resleeveTo) e0.toJson()],
     if (branch case final v?) 'branch': v,
     if (view case final v?) 'view': v.toJson(),
@@ -3224,6 +3314,7 @@ final class SpawnSleeveRequest {
     this.effort,
     this.resleeveTo = const <Harness>[],
     this.message,
+    this.budget,
   });
 
   factory SpawnSleeveRequest.fromJson(Object? json) {
@@ -3256,6 +3347,7 @@ final class SpawnSleeveRequest {
         j['message'],
         (e0) => _string(e0, 'SpawnSleeveRequest.message'),
       ),
+      budget: _opt(j['budget'], (e0) => _int(e0, 'SpawnSleeveRequest.budget')),
     );
   }
 
@@ -3287,6 +3379,9 @@ final class SpawnSleeveRequest {
   /// The first message, delivered once the incarnation is up.
   final String? message;
 
+  /// Tokens; a root's count includes its children's (G10).
+  final int? budget;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'harness': harness.toJson(),
@@ -3299,6 +3394,45 @@ final class SpawnSleeveRequest {
     if (effort case final v?) 'effort': v,
     'resleeve_to': [for (final e0 in resleeveTo) e0.toJson()],
     if (message case final v?) 'message': v,
+    if (budget case final v?) 'budget': v,
+  };
+}
+
+/// Starts a stopped or parked sleeve again, on its own target unless one is named.
+final class StartSleeveRequest {
+  const StartSleeveRequest({
+    required this.sleeveId,
+    this.target,
+    this.model,
+    this.provider,
+  });
+
+  factory StartSleeveRequest.fromJson(Object? json) {
+    final j = _object(json, 'StartSleeveRequest');
+    return StartSleeveRequest(
+      sleeveId: _string(j['sleeve_id'], 'StartSleeveRequest.sleeve_id'),
+      target: _opt(j['target'], Harness.fromJson),
+      model: _opt(j['model'], (e0) => _string(e0, 'StartSleeveRequest.model')),
+      provider: _opt(
+        j['provider'],
+        (e0) => _string(e0, 'StartSleeveRequest.provider'),
+      ),
+    );
+  }
+
+  final String sleeveId;
+
+  final Harness? target;
+
+  final String? model;
+
+  final String? provider;
+
+  Map<String, Object?> toJson() => {
+    'sleeve_id': sleeveId,
+    if (target case final v?) 'target': v.toJson(),
+    if (model case final v?) 'model': v,
+    if (provider case final v?) 'provider': v,
   };
 }
 
@@ -3743,11 +3877,15 @@ final class HubApi {
   Future<Accepted> stopSleeve(SleeveRef request) =>
       _call('StopSleeve', request.toJson(), Accepted.fromJson);
 
-  /// Needs the owner's approval unless the owner asks.
+  /// Needs the owner's approval when Envoy asks during a turn an agent message started (D9).
   ///
   /// `POST /api/RemoveSleeve`, scope `sleeve`.
   Future<Accepted> removeSleeve(SleeveRef request) =>
       _call('RemoveSleeve', request.toJson(), Accepted.fromJson);
+
+  /// `POST /api/StartSleeve`, scope `sleeve`.
+  Future<Accepted> startSleeve(StartSleeveRequest request) =>
+      _call('StartSleeve', request.toJson(), Accepted.fromJson);
 
   /// `POST /api/Resleeve`, scope `sleeve`.
   Future<Accepted> resleeve(ResleeveRequest request) =>
@@ -3821,6 +3959,10 @@ final class HubApi {
   Future<Transcript> envoyRead(EnvoyReadRequest request) =>
       _call('EnvoyRead', request.toJson(), Transcript.fromJson);
 
+  /// `POST /api/GetEnvoyToken`, scope `owner`.
+  Future<EnvoyToken> getEnvoyToken([Empty request = const Empty()]) =>
+      _call('GetEnvoyToken', request.toJson(), EnvoyToken.fromJson);
+
   /// Blocks until the sleeve reaches `until` or the timeout passes.
   ///
   /// `POST /api/Wait`, scope `sleeve`.
@@ -3835,7 +3977,15 @@ final class HubApi {
   Future<DeviceList> listDevices([Empty request = const Empty()]) =>
       _call('ListDevices', request.toJson(), DeviceList.fromJson);
 
-  /// `POST /api/PairDevice`, scope `owner`.
+  /// A one-time pairing code for a new device named `name`.
+  ///
+  /// `POST /api/AddDevice`, scope `owner`.
+  Future<PairingCode> addDevice(AddDeviceRequest request) =>
+      _call('AddDevice', request.toJson(), PairingCode.fromJson);
+
+  /// Trades a pairing code for the device's token; the code is the credential.
+  ///
+  /// `POST /api/PairDevice`, scope `public`.
   Future<PairedDevice> pairDevice(PairDeviceRequest request) =>
       _call('PairDevice', request.toJson(), PairedDevice.fromJson);
 
