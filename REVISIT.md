@@ -479,8 +479,8 @@ Each entry: where, what was done, what right looks like.
   stream re-runs the caller's authentication once per bus wait (at most 1 s) and sends close
   1008 once it no longer yields the same principal. Right: a revocation notice on the bus that
   wakes every stream of that token at once.
-- **`PT_TEST_FAULT=usage_limit:<sleeve name>`** (`pt-hub`, hub.rs `Fault`): one of two
-  test-only knobs (the other is pt-update's `PT_TEST_CRASH_AT`). The named sleeve's first settled
+- **`PT_TEST_FAULT=usage_limit:<sleeve name>`** (`pt-hub`, hub.rs `Fault`): a test-only knob.
+  The named sleeve's first settled
   turn in this hub process is reported to the core as `TurnEnd::UsageLimit`, which trips G1 and
   forces a resleeve; the e2e `forced_resleeve_with_brief` uses it. The hub warns at start when it is set. Never set it in production.
 - **RealHub is exercised only by `scripts/app-e2e.sh`** (`app/lib/real_hub.dart`): the web build
@@ -708,14 +708,10 @@ Each entry: where, what was done, what right looks like.
   does not check the fleet or launch a sleeve. The headscale snapshot is taken only while the
   fleet is up. Old `releases/<version>` directories are never pruned. Right: re-exec with the
   listeners and sandboxes handed over, and a health check that includes a fleet round trip.
-- **Release switches order their writes for crashes** (`pt-update` store.rs): a switch on
-  probation writes `probation.json` first, then `previous`, then `current`, under one lock; a
-  rollback sets `current` before `previous`. A crash at any step leaves `current` on a release
-  that worked, or the new one with its trial open; a crash inside a rollback can leave both
-  pointers on the old release, losing the way forward, never the way back. `PT_TEST_CRASH_AT`
-  (`probation-written`, `switch-previous`, `rollback-current`) ends the process after that step,
-  for the e2e. `confirm` takes the version whose check passed, so a late check never keeps a
-  release switched in since. Right: fine.
+- **Release switches order their writes for crashes** (`pt-update` store.rs): probation and
+  `previous` are each synced before `current` changes. Trial rollback restores the snapshot,
+  syncs `current` back to the confirmed release, then records the outcome; `previous` stays
+  confirmed. Debug-only `PT_TEST_CRASH_AT` exercises selected crash points. Right: fine.
 - **Probation counts on wall-clock time and on the new binary's own watch** (`pt-update`): the
   units run `releases/previous/<bin> probation` before each start, which rolls back after
   `MAX_TRIAL_STARTS` (3) failed starts or a passed window, and the release on trial watches its
@@ -867,3 +863,6 @@ Each entry: where, what was done, what right looks like.
   the blocked thread or prove a cause. Poll RPCs and member replies now have whole-call deadlines,
   and a finished node poll thread is restarted. Right: capture hub thread stacks and member logs
   if a stall recurs.
+- **Release verification is not bound to an inode** (`pt-update`, store.rs): verified staged
+  files can be replaced before the binary check or switch; agents on the owner's machines are
+  trusted. Right: bind execution and switching to the verified inode if that threat model changes.

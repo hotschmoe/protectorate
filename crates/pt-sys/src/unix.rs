@@ -19,6 +19,16 @@ fn cvt(rc: libc::c_int) -> io::Result<libc::c_int> {
     }
 }
 
+/// Sends a signal to a child process group.
+pub fn kill_group(pgid: u32, signal: i32) -> io::Result<()> {
+    let pgid = libc::pid_t::try_from(pgid)
+        .ok()
+        .filter(|&p| p > 1)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid process group"))?;
+    // SAFETY: a negative, validated process group ID addresses that group only.
+    cvt(unsafe { libc::kill(-pgid, signal) }).map(|_| ())
+}
+
 #[cfg(target_os = "linux")]
 /// Connects even when the listener's accept queue is full, up to the deadline.
 pub fn connect_unix_timeout(path: &Path, timeout: Duration) -> io::Result<UnixStream> {

@@ -49,13 +49,34 @@ fn fetch_err(msg: impl Into<String>) -> Error {
     Error::new(ErrorKind::Fetch, msg)
 }
 
+fn authority(url: &str) -> Option<&str> {
+    let (_, rest) = url.split_once("://")?;
+    let a = rest.split(['/', '?', '#']).next()?;
+    (!a.is_empty()
+        && !a.contains('@')
+        && !a.contains('\\')
+        && !a
+            .bytes()
+            .any(|b| b.is_ascii_control() || b.is_ascii_whitespace()))
+    .then_some(a)
+}
+
 fn loopback_host(authority: &str) -> bool {
-    let host = if let Some(rest) = authority.strip_prefix('[') {
-        rest.split_once(']').map_or("", |(h, _)| h)
+    let (host, suffix) = if let Some(rest) = authority.strip_prefix('[') {
+        let Some((host, suffix)) = rest.split_once(']') else {
+            return false;
+        };
+        (host, suffix)
+    } else if let Some((host, _)) = authority.split_once(':') {
+        (host, &authority[host.len()..])
     } else {
-        authority.split(':').next().unwrap_or("")
+        (authority, "")
     };
-    matches!(host, "127.0.0.1" | "::1" | "localhost")
+    let port_ok = suffix.is_empty()
+        || suffix.strip_prefix(':').is_some_and(|p| {
+            !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) && p.parse::<u16>().is_ok()
+        });
+    port_ok && matches!(host, "127.0.0.1" | "::1" | "localhost")
 }
 
 fn repo_ok(repo: &str) -> bool {
@@ -124,10 +145,11 @@ impl Source {
             return Err(rel(format!("release repo {repo:?} is not OWNER/NAME")));
         }
         let api = api.trim_end_matches('/');
+        let auth = authority(api).ok_or_else(|| rel(format!("{api}: invalid URL authority")))?;
         let allow_http = if api.starts_with("https://") {
             false
-        } else if let Some(rest) = api.strip_prefix("http://") {
-            if !loopback_host(rest.split('/').next().unwrap_or("")) {
+        } else if api.starts_with("http://") {
+            if !loopback_host(auth) {
                 return Err(rel(format!("{api}: plain http only to a loopback host")));
             }
             true
@@ -193,16 +215,15 @@ impl Source {
     }
 
     fn curl(&self, url: &str, timeout: Duration, max: u64) -> Result<Command> {
-        let ok = url.starts_with("https://")
-            || (self.allow_http
-                && url
-                    .strip_prefix("http://")
-                    .is_some_and(|r| loopback_host(r.split('/').next().unwrap_or(""))));
+        let ok = authority(url).is_some_and(|a| {
+            url.starts_with("https://")
+                || (self.allow_http && url.starts_with("http://") && loopback_host(a))
+        });
         if !ok {
             return Err(rel(format!("refusing to fetch {url}")));
         }
         let mut c = Command::new(&self.curl);
-        c.args(["--fail", "--silent", "--show-error", "--location"])
+        c.args(["-q", "--fail", "--silent", "--show-error", "--location"])
             .args(["--max-redirs", "10", "--proto-redir", "=https"])
             .args([
                 "--proto",

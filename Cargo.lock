@@ -52,6 +52,7 @@ dependencies = [
  "pt-api",
  "pt-core",
  "pt-embed",
+ "pt-frame",
  "pt-hash",
  "pt-http",
  "pt-hub",
@@ -233,6 +234,7 @@ dependencies = [
  "pt-hash",
  "pt-http",
  "pt-json",
+ "pt-sys",
 ]
 
 [[package]]

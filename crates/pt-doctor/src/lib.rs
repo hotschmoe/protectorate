@@ -592,7 +592,7 @@ pub fn run(cfg: &Config) -> Report {
                 (
                     sandbox(cfg),
                     gh(cfg),
-                    probe::binary("curl", cfg.which("curl"), Some(&["--version"]), t),
+                    probe::binary("curl", cfg.which("curl"), Some(&["-q", "--version"]), t),
                 )
             });
             let b = s.spawn(|| {

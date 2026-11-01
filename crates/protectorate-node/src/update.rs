@@ -1,8 +1,8 @@
 //! Updates (SPEC 6a). The hub sends `Update`; the node fetches the release from GitHub itself,
 //! stages `<state>/releases/<tag>/protectorate-node` (checked against SHA256SUMS, then run once),
 //! switches `releases/current` on probation and exits with [`RESTART_CODE`] for systemd to start
-//! the new binary. The new process keeps the release once the hub makes contact (a `Hello` on a
-//! `tag:hub` connection) within the window; otherwise it switches back and exits again. A binary
+//! the new binary. The new process keeps the release once it has fully answered a non-Hello
+//! request on a `tag:hub` connection; otherwise it switches back and exits again. A binary
 //! that cannot even start is switched back by `probation`, which the unit runs from
 //! `releases/previous` before each start.
 
@@ -12,7 +12,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use pt_frame::msg::{ErrorCode, Update, UpdateReply};
+use pt_frame::msg::{ErrorCode, JobInfo, SubmitJob, Update, UpdateReply};
+use pt_node::{Runner, jobs::JobError};
 use pt_update::{MAX_TRIAL_STARTS, Source, Store, Verdict};
 
 /// The exit status that asks the service manager for a restart on `releases/current`.
@@ -29,7 +30,20 @@ pub struct Releases {
     started: Option<String>,
     /// This process is the release on trial and the hub has not made contact yet.
     trial: AtomicBool,
-    updating: Mutex<()>,
+    updating: Mutex<bool>,
+}
+
+struct Admission<'a> {
+    updating: &'a Mutex<bool>,
+    switched: bool,
+}
+
+impl Drop for Admission<'_> {
+    fn drop(&mut self) {
+        if !self.switched {
+            *self.updating.lock().unwrap_or_else(|p| p.into_inner()) = false;
+        }
+    }
 }
 
 fn restart(why: &str) -> ! {
@@ -49,7 +63,7 @@ impl Releases {
             store,
             started,
             trial: AtomicBool::new(false),
-            updating: Mutex::new(()),
+            updating: Mutex::new(false),
         };
         let Some(store) = &r.store else { return r };
         let on_trial = store
@@ -88,48 +102,75 @@ impl Releases {
 
     /// The hub made contact: the release on trial stays.
     pub fn contact(&self) {
-        if !self.trial.swap(false, Ordering::SeqCst) {
+        if !self.trial.load(Ordering::SeqCst) {
             return;
         }
         let (Some(store), Some(started)) = (&self.store, &self.started) else {
             return;
         };
         match store.confirm(started) {
-            Ok(true) => eprintln!(
-                "protectorate-node: the hub made contact; release {} stays",
-                self.started.as_deref().unwrap_or("-")
-            ),
+            Ok(true) => {
+                self.trial.store(false, Ordering::SeqCst);
+                eprintln!(
+                    "protectorate-node: the hub made contact; release {} stays",
+                    self.started.as_deref().unwrap_or("-")
+                );
+            }
             Ok(false) => {}
             Err(e) => eprintln!("protectorate-node: confirming the update: {e}"),
         }
     }
 
-    /// `Update`: stage, check and switch. The caller sends the reply, then calls
-    /// [`restart_soon`] when `restart` is true.
-    pub fn update(
-        &self,
-        u: &Update,
-        running_jobs: usize,
-    ) -> Result<(UpdateReply, bool), (ErrorCode, String)> {
+    pub fn submit(&self, runner: &Runner, spec: SubmitJob) -> Result<JobInfo, JobError> {
+        let updating = self.updating.lock().unwrap_or_else(|p| p.into_inner());
+        if *updating {
+            return Err(JobError {
+                code: ErrorCode::Busy,
+                message: "an update is in progress".into(),
+            });
+        }
+        runner.submit(spec)
+    }
+
+    /// `Update`: stage, check, switch and schedule the restart before sending the reply.
+    pub fn update(&self, u: &Update, runner: &Runner) -> Result<UpdateReply, (ErrorCode, String)> {
         let unsupported = |m: String| (ErrorCode::Unsupported, m);
         if cfg!(windows) {
             return Err(unsupported(
                 "updating a Windows node is not supported yet; reinstall it".into(),
             ));
         }
-        let Ok(_one) = self.updating.try_lock() else {
+        let mut gate = self.updating.lock().unwrap_or_else(|p| p.into_inner());
+        if *gate {
             return Err((ErrorCode::Busy, "an update is already running".into()));
-        };
+        }
         let store = self
             .store
             .as_ref()
             .ok_or_else(|| (ErrorCode::Internal, "no release store".to_string()))?;
         store.started_from_current(PROGRAM).map_err(unsupported)?;
+        let running_jobs = runner.running();
         if running_jobs > 0 {
             return Err((
                 ErrorCode::Busy,
                 format!("{running_jobs} jobs are running; update once they finish"),
             ));
+        }
+        *gate = true;
+        drop(gate);
+        let mut admission = Admission {
+            updating: &self.updating,
+            switched: false,
+        };
+        #[cfg(debug_assertions)]
+        if let Some(path) = std::env::var_os("PROTECTORATE_NODE_TEST_UPDATE_PAUSE") {
+            eprintln!("protectorate-node: update admitted for testing");
+            let until = std::time::Instant::now() + Duration::from_secs(20);
+            while std::fs::read_to_string(&path).is_ok_and(|s| s.trim() == "1")
+                && std::time::Instant::now() < until
+            {
+                thread::sleep(Duration::from_millis(20));
+            }
         }
         let fail = |e: pt_update::Error| {
             let code = match e.kind {
@@ -155,18 +196,17 @@ impl Releases {
             .check_binary(&rel.tag, PROGRAM, "--version")
             .map_err(fail)?;
         if self.started.as_deref() == Some(rel.tag.as_str()) {
-            return Ok((
-                UpdateReply {
-                    from: self.started(),
-                    to: rel.tag,
-                    reused: true,
-                },
-                false,
-            ));
+            return Ok(UpdateReply {
+                from: self.started(),
+                to: rel.tag,
+                reused: true,
+            });
         }
         let sw = store
             .switch_on_probation(&rel.tag, Duration::from_secs(u.probation_secs.max(1)))
             .map_err(fail)?;
+        admission.switched = true;
+        restart_soon(sw.to.clone());
         eprintln!(
             "protectorate-node: switched from {} to {}{}",
             sw.from.as_deref().unwrap_or("-"),
@@ -177,14 +217,11 @@ impl Releases {
                 ""
             }
         );
-        Ok((
-            UpdateReply {
-                from: self.started().or(sw.from),
-                to: sw.to,
-                reused: staged.reused,
-            },
-            true,
-        ))
+        Ok(UpdateReply {
+            from: self.started().or(sw.from),
+            to: sw.to,
+            reused: staged.reused,
+        })
     }
 }
 
@@ -199,6 +236,10 @@ pub fn restart_soon(to: String) {
 fn watch(store: Store) {
     loop {
         thread::sleep(Duration::from_secs(1));
+        #[cfg(debug_assertions)]
+        if std::env::var_os("PROTECTORATE_NODE_TEST_PAUSE_WATCH").is_some() {
+            continue;
+        }
         match store.check_probation() {
             Ok(Verdict::Waiting { .. }) => {}
             Ok(Verdict::RolledBack(sw)) => restart(&format!(

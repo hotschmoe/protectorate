@@ -10,9 +10,12 @@
 //!   the unit runs from `releases/previous` before each start.
 //! - Nodes: `UpdateNodes` sends `Update` over the hub's own connection. The node fetches the
 //!   release from GitHub itself (outbound, never to the hub), checks it, switches on probation
-//!   and restarts; the hub then dials it until it answers `Hello` from the new release, which is
-//!   the contact that confirms it.
+//!   and restarts; the hub then dials it until it answers a compatible `Hello` and a `Presence`
+//!   request from the new release.
 
+use std::cmp::Ordering;
+use std::fs::{self, File};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -20,7 +23,9 @@ use std::time::{Duration, Instant};
 
 use pt_api::{self as api, ApiError, ErrorCode, EventKind as Kind, Level};
 use pt_frame::msg;
-use pt_update::{Channel, HUB_HEALTH_WINDOW, NODE_CONTACT_WINDOW, Release, Source, Store, Verdict};
+use pt_update::{
+    Channel, HUB_HEALTH_WINDOW, NODE_CONTACT_WINDOW, Probation, Release, Source, Store, Version,
+};
 
 use crate::home::Home;
 use crate::hub::Hub;
@@ -146,7 +151,22 @@ pub fn update_hub(hub: &Hub, r: api::UpdateHubRequest) -> Result<api::HubUpdate,
     let src = source(hub)?;
     let rel = release(hub, &src, r.version.as_deref(), r.channel)?;
     let target = rel.tag.clone();
-    let available = current.as_deref() != Some(target.as_str());
+    let running = current.as_deref().unwrap_or(pt_version::VERSION);
+    let ordering = Version::parse(&target)
+        .zip(Version::parse(running))
+        .map(|(to, from)| to.cmp(&from));
+    if r.version.is_none() && ordering.is_none() {
+        return Err(err(
+            ErrorCode::Invalid,
+            format!("cannot compare {target} with running release {running}; specify --version"),
+        ));
+    }
+    let downgrade = ordering == Some(Ordering::Less);
+    let available = if r.version.is_some() {
+        running != target
+    } else {
+        ordering == Some(Ordering::Greater)
+    };
     let mut answer = api::HubUpdate {
         current: current.clone(),
         target: target.clone(),
@@ -155,11 +175,14 @@ pub fn update_hub(hub: &Hub, r: api::UpdateHubRequest) -> Result<api::HubUpdate,
         note: String::new(),
     };
     if !available {
-        answer.note = format!("already on {target}");
+        answer.note = format!("no newer release than {running} on this channel (latest {target})");
         return Ok(answer);
     }
     if r.check {
-        answer.note = format!("{target} is available");
+        answer.note = format!(
+            "{target} is available{}",
+            if downgrade { " (downgrade)" } else { "" }
+        );
         return Ok(answer);
     }
     store
@@ -173,19 +196,39 @@ pub fn update_hub(hub: &Hub, r: api::UpdateHubRequest) -> Result<api::HubUpdate,
     store
         .check_binary(&target, "protectorate", "version")
         .map_err(|e| err(ErrorCode::Invalid, e.message))?;
-    if let crate::fleet::Status::Up(up) = hub.fleet.status() {
-        let dir = up
-            .fleet
-            .snapshot_headscale(&format!("before-{target}"))
-            .map_err(|e| err(ErrorCode::Internal, e.to_string()))?;
-        info!("update: headscale snapshot in {}", dir.display());
-    }
+    let snapshot = match hub.fleet.status() {
+        crate::fleet::Status::Up(up) => {
+            let dir = up
+                .fleet
+                .snapshot_headscale(&format!("before-{target}"))
+                .map_err(|e| err(ErrorCode::Internal, e.to_string()))?;
+            info!("update: headscale snapshot in {}", dir.display());
+            Some(
+                dir.to_str()
+                    .ok_or_else(|| {
+                        err(
+                            ErrorCode::Internal,
+                            format!("headscale snapshot path is not UTF-8: {}", dir.display()),
+                        )
+                    })?
+                    .to_owned(),
+            )
+        }
+        crate::fleet::Status::Off => None,
+        crate::fleet::Status::Down(why) => {
+            return Err(err(
+                ErrorCode::Unavailable,
+                format!("cannot snapshot headscale while the fleet is down: {why}"),
+            ));
+        }
+    };
     let sw = store
-        .switch_on_probation(&target, HUB_HEALTH_WINDOW)
+        .switch_on_probation_with_snapshot(&target, HUB_HEALTH_WINDOW, snapshot)
         .map_err(update_err)?;
     let note = format!(
-        "switched from {} to {target}{}; restarting on probation",
+        "switched from {} to {target}{}{}; restarting on probation",
         sw.from.as_deref().unwrap_or("-"),
+        if downgrade { " (downgrade)" } else { "" },
         if staged.reused {
             " (already staged)"
         } else {
@@ -211,38 +254,86 @@ pub fn update_hub(hub: &Hub, r: api::UpdateHubRequest) -> Result<api::HubUpdate,
 pub fn probation_at_start(home: &Home) -> Result<Option<String>, String> {
     let store = Store::open(&home.root).map_err(|e| e.to_string())?;
     let started = store.running_release();
-    let on_trial = store
-        .probation()
-        .map_err(|e| e.to_string())?
-        .is_some_and(|p| Some(&p.version) == started.as_ref());
-    if !on_trial {
-        return Ok(None);
+    let trial = store.probation().map_err(|e| e.to_string())?.filter(|p| {
+        Some(&p.version) == started.as_ref()
+            && p.contacted_ms.is_none()
+            && p.rolled_back_ms.is_none()
+    });
+    let Some(p) = trial else { return Ok(None) };
+    if p.reason.is_some() || crate::home::now_ms() >= p.deadline_ms {
+        return Err(format!(
+            "release {} needs rollback by hub probation before startup",
+            p.version
+        ));
     }
-    match store.check_probation().map_err(|e| e.to_string())? {
-        Verdict::RolledBack(sw) => Err(format!(
-            "release {} was not confirmed in time; rolled back to {}",
-            sw.from.as_deref().unwrap_or("-"),
-            sw.to
-        )),
-        Verdict::Waiting { .. } => Ok(started),
-        Verdict::Idle | Verdict::Confirmed => Ok(None),
-    }
+    Ok(started)
 }
 
-/// A start that failed while on trial switches back, so the restart runs the previous release.
+/// A start that failed while on trial requests an offline rollback at the next prestart.
 pub fn failed_start(home: &Home, why: &str) -> String {
     let Ok(store) = Store::open(&home.root) else {
         return why.to_string();
     };
-    match store.fail_probation(&format!("failed to start: {why}")) {
-        Ok(Some(sw)) => format!(
-            "{why}; release {} rolled back to {}",
-            sw.from.as_deref().unwrap_or("-"),
-            sw.to
-        ),
-        Ok(None) => why.to_string(),
-        Err(e) => format!("{why}; rolling back failed: {e}"),
+    match store.request_rollback(&format!("failed to start: {why}")) {
+        Ok(true) => format!("{why}; rollback requested for the next prestart"),
+        Ok(false) => why.to_string(),
+        Err(e) => format!("{why}; requesting rollback failed: {e}"),
     }
+}
+
+pub fn restore_headscale(p: &Probation) -> Result<(), String> {
+    let Some(snapshot) = p.headscale_snapshot.as_deref() else {
+        return Ok(());
+    };
+    let snapshot = Path::new(snapshot);
+    let fleet = snapshot
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| format!("invalid headscale snapshot {}", snapshot.display()))?;
+    let dest = fleet.join("headscale");
+    let db = snapshot.join("db.sqlite");
+    if !db.is_file() {
+        return Err(format!(
+            "headscale snapshot {} has no database",
+            snapshot.display()
+        ));
+    }
+    let mut staged = Vec::new();
+    for name in ["db.sqlite", "db.sqlite-wal", "db.sqlite-shm"] {
+        let source = snapshot.join(name);
+        if source.exists() {
+            let tmp = dest.join(format!(".restore-{name}-{}", std::process::id()));
+            fs::copy(&source, &tmp)
+                .map_err(|e| format!("copying {} to {}: {e}", source.display(), tmp.display()))?;
+            File::open(&tmp)
+                .and_then(|f| f.sync_all())
+                .map_err(|e| format!("syncing {}: {e}", tmp.display()))?;
+            staged.push((tmp, dest.join(name)));
+        }
+    }
+    for name in ["db.sqlite-wal", "db.sqlite-shm"] {
+        let path = dest.join(name);
+        if let Err(e) = fs::remove_file(&path)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            return Err(format!("removing stale {}: {e}", path.display()));
+        }
+    }
+    File::open(&dest)
+        .and_then(|f| f.sync_all())
+        .map_err(|e| format!("syncing {}: {e}", dest.display()))?;
+    for (tmp, target) in staged {
+        fs::rename(&tmp, &target)
+            .map_err(|e| format!("restoring {} to {}: {e}", tmp.display(), target.display()))?;
+    }
+    File::open(&dest)
+        .and_then(|f| f.sync_all())
+        .map_err(|e| format!("syncing {}: {e}", dest.display()))?;
+    eprintln!(
+        "update: restored headscale database from {}; nodes enrolled after this snapshot are lost",
+        snapshot.display()
+    );
+    Ok(())
 }
 
 fn healthy(hub: &Hub) -> Result<(), String> {
@@ -284,26 +375,24 @@ pub fn watch_probation(hub: &Arc<Hub>, version: String) {
             let last = match healthy(&hub) {
                 Ok(()) => {
                     let kept = Store::open(&hub.home.root).and_then(|s| s.confirm(&version));
-                    let text = match kept {
+                    match kept {
                         Ok(true) => {
-                            format!("hub {version} passed its health check; the update stays")
+                            let text =
+                                format!("hub {version} passed its health check; the update stays");
+                            info!("update: {text}");
+                            hub.event(Kind::Hub, Level::Info, "update", "owner", &text);
+                            return;
                         }
-                        Ok(false) => format!("hub {version} passed its health check; not on trial"),
-                        Err(e) => format!("hub {version} is healthy, but confirming failed: {e}"),
-                    };
-                    info!("update: {text}");
-                    hub.event(Kind::Hub, Level::Info, "update", "owner", &text);
-                    return;
+                        Ok(false) => "confirmation refused".to_string(),
+                        Err(e) => format!("confirming a healthy hub failed: {e}"),
+                    }
                 }
                 Err(e) => e,
             };
             if crate::home::now_ms() >= deadline {
                 let why = format!("health check failed: {last}");
-                let text = match Store::open(&hub.home.root).and_then(|s| s.fail_probation(&why)) {
-                    Ok(Some(sw)) => format!("hub {version} {why}; rolled back to {}", sw.to),
-                    Ok(None) => format!("hub {version} {why}; nothing on trial"),
-                    Err(e) => format!("hub {version} {why}; rolling back failed: {e}"),
-                };
+                let text =
+                    format!("hub {version} {why}; restarting for offline probation rollback");
                 warning!("update: {text}");
                 hub.event(Kind::Hub, Level::Alarm, "update", "owner", &text);
                 request_restart(&hub, text);
@@ -392,16 +481,28 @@ pub fn update_nodes(hub: &Hub, r: api::UpdateNodesRequest) -> Result<api::NodeUp
                 None => results.push(failed(&v.node.id, &v.node.name, "", &tag, "no hello yet")),
             }
         }
-        // One canary per OS and arch first, then the rest in their groups.
-        let mut first: Vec<(String, String)> = Vec::new();
-        todo.sort_by_key(|t| {
-            let key = (t.os.clone(), t.arch.clone());
-            let canary = !first.contains(&key);
-            if canary {
-                first.push(key.clone());
-            }
-            (!canary, key)
+        let mut first = std::collections::BTreeMap::<(String, String), String>::new();
+        for t in &todo {
+            first
+                .entry((t.os.clone(), t.arch.clone()))
+                .and_modify(|id| {
+                    if t.id < *id {
+                        *id = t.id.clone();
+                    }
+                })
+                .or_insert_with(|| t.id.clone());
+        }
+        let mut ordered: Vec<_> = todo
+            .into_iter()
+            .map(|t| {
+                let canary = first.get(&(t.os.clone(), t.arch.clone())) == Some(&t.id);
+                (!canary, t)
+            })
+            .collect();
+        ordered.sort_by(|a, b| {
+            (a.0, &a.1.os, &a.1.arch, &a.1.id).cmp(&(b.0, &b.1.os, &b.1.arch, &b.1.id))
         });
+        todo = ordered.into_iter().map(|(_, t)| t).collect();
     } else {
         for n in &r.nodes {
             let v = views
@@ -429,7 +530,28 @@ pub fn update_nodes(hub: &Hub, r: api::UpdateNodesRequest) -> Result<api::NodeUp
             ));
             continue;
         }
-        let res = update_one(hub, &up, &rel, &t, probation, r.no_wait);
+        let cmp = Version::parse(&tag)
+            .zip(Version::parse(&t.release))
+            .map(|(to, from)| to.cmp(&from));
+        let res = if r.version.is_none() && cmp.is_none() {
+            Err(format!(
+                "cannot compare {tag} with {}; specify --version",
+                t.release
+            ))
+        } else if r.version.is_none() && cmp != Some(Ordering::Greater) {
+            Ok(format!(
+                "no newer release than {} on this channel (latest {tag})",
+                t.release
+            ))
+        } else {
+            update_one(hub, &up, &rel, &t, probation, r.no_wait).map(|s| {
+                if cmp == Some(Ordering::Less) {
+                    format!("{s} (downgrade)")
+                } else {
+                    s
+                }
+            })
+        };
         let line = match &res {
             Ok(d) => format!("node {}: {} -> {tag}: {d}", t.name, t.release),
             Err(e) => format!("node {}: update to {tag} failed: {e}", t.name),
@@ -527,11 +649,21 @@ fn update_one(
         let hello = up
             .fleet
             .connect(&t.ip)
-            .and_then(|mut c| c.hello())
+            .and_then(|mut c| {
+                let h = c.hello()?;
+                if h.release.as_deref() == Some(rel.tag.as_str()) {
+                    c.require_compatible()?;
+                    c.presence()?;
+                }
+                Ok(h)
+            })
             .map_err(|e| e.to_string());
         match hello {
             Ok(h) if h.release.as_deref() == Some(rel.tag.as_str()) => {
-                return Ok(format!("{switched}; back on {} and confirmed", rel.tag));
+                return Ok(format!(
+                    "{switched}; back on {} and answered Presence",
+                    rel.tag
+                ));
             }
             Ok(h) if gone && reply.from.is_some() && h.release == reply.from => {
                 return Err(format!(

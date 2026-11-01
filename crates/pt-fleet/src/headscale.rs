@@ -435,5 +435,10 @@ pub(crate) fn copy_state(p: &Paths, dest_root: &Path, label: &str) -> Result<Pat
         &dest.join("snapshot.json"),
         Value::Object(copied).to_string().as_bytes(),
     )?;
+    for dir in [&dest, dest_root] {
+        fs::File::open(dir)
+            .and_then(|f| f.sync_all())
+            .map_err(|e| Error::new(format!("syncing {}: {e}", dir.display())))?;
+    }
     Ok(dest)
 }

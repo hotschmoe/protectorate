@@ -8,7 +8,7 @@
 #
 # Fetch this script at a commit, never a tag (SPEC 12a item 9), and compare its sha256 with the
 # one in the release notes before running it:
-#   curl -fsSLO https://raw.githubusercontent.com/hotschmoe/protectorate/<commit>/scripts/install.sh
+#   curl -q -fsSLO https://raw.githubusercontent.com/hotschmoe/protectorate/<commit>/scripts/install.sh
 #   sha256sum install.sh
 #   bash install.sh --dry-run
 set -euo pipefail
@@ -33,7 +33,7 @@ usage() {
 die() { printf 'install: %s\n' "$*" >&2; exit 1; }
 say() { printf '%s\n' "$*"; }
 
-curl_https() { curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 3 "$@"; }
+curl_https() { curl -q --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 3 "$@"; }
 
 # The newest tag on a channel: stable is vX.Y.Z, dev also takes vX.Y.Z-PRE. Ordered by semver
 # precedence (sort -V with the pre-release dash as a tilde, which sorts before the release).
@@ -164,7 +164,7 @@ main() {
 	if [ -n "$old" ] && [ "$old" != "$TAG" ]; then say "  point    $rel/current -> $TAG (previous -> $old)"
 	else say "  point    $rel/current -> $TAG"; fi
 	say "  write    $unit"
-	say "           ExecStartPre=-$rel/previous/protectorate --home $home hub probation"
+	say "           ExecStartPre=$rel/previous/protectorate --home $home hub probation"
 	say "           ExecStart=$exec_path --home $home serve"
 	[ "$linger" = yes ] || say "  run      loginctl enable-linger $USER (linger is $linger; a headless hub needs it)"
 	if [ "$start" = 1 ]; then say "  run      systemctl --user daemon-reload; systemctl --user enable $UNIT; (re)start it"
@@ -203,6 +203,9 @@ main() {
 		ln -s -- "$old" "$rel/.previous-$$" && mv -Tf -- "$rel/.previous-$$" "$rel/previous"
 	fi
 	ln -s -- "$TAG" "$rel/.current-$$" && mv -Tf -- "$rel/.current-$$" "$rel/current"
+	if [ ! -L "$rel/previous" ]; then
+		ln -s -- "$TAG" "$rel/previous"
+	fi
 	say "releases/current -> $TAG"
 
 	local path_line=${PATH//%/%%}
@@ -218,7 +221,7 @@ main() {
 	Environment="PROTECTORATE_HOME=$home"
 	Environment="PATH=$path_line"
 	# A release on trial that keeps failing to start is switched back from the previous one.
-	ExecStartPre=-$rel/previous/protectorate --home $home hub probation
+	ExecStartPre=$rel/previous/protectorate --home $home hub probation
 	ExecStart=$exec_path --home $home serve
 	Restart=on-failure
 	RestartSec=5

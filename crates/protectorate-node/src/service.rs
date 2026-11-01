@@ -157,7 +157,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStartPre=-{prev} probation --state-dir {state}
+ExecStartPre={prev} probation --state-dir {state}
 ExecStart={bin} serve --state-dir {state} --forward-socket {state}/agent.sock
 Restart=always
 RestartSec=5
@@ -226,6 +226,7 @@ fn into_releases(state: &Path) -> Result<String, String> {
         .check_binary(&version, "protectorate-node", "--version")
         .map_err(|e| e.to_string())?;
     store.switch(&version).map_err(|e| e.to_string())?;
+    store.ensure_previous().map_err(|e| e.to_string())?;
     Ok(version)
 }
 

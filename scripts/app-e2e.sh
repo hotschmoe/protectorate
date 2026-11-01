@@ -113,7 +113,7 @@ port=$(free_port)
 hub_pid=$!
 url=http://127.0.0.1:$port
 for _ in $(seq 50); do pt hub info >/dev/null 2>&1 && break; sleep 0.2; done
-curl -fsS "$url/" | grep -q flutter_bootstrap ||
+curl -q -fsS "$url/" | grep -q flutter_bootstrap ||
     { echo "app-e2e: $bin does not serve the web app (make web release)"; exit 1; }
 step "hub on $url; waiting for Envoy"
 pt sleeve wait envoy --until idle --timeout 180
@@ -125,7 +125,7 @@ cdp_port=$(free_port)
     --window-size=1280,860 --use-angle=swiftshader --enable-unsafe-swiftshader \
     about:blank 2>"$work/chrome.log" &
 chrome_pid=$!
-for _ in $(seq 50); do curl -fsS "http://127.0.0.1:$cdp_port/json/version" >/dev/null 2>&1 && break; sleep 0.2; done
+for _ in $(seq 50); do curl -q -fsS "http://127.0.0.1:$cdp_port/json/version" >/dev/null 2>&1 && break; sleep 0.2; done
 
 step "pairing the browser with $code"
 cdp open "$url/?pair=$code"

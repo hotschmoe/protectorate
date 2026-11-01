@@ -426,9 +426,15 @@ fn serve_conn<S: Conn>(node: &Node, stream: &mut S) -> Result<(), String> {
             }
             continue;
         }
-        answer(node, frame.id, &frame.payload, &mut w)
-            .and_then(|()| w.flush())
+        let non_hello =
+            matches!(parse_request(&frame.payload), Ok(r) if !matches!(r, Request::Hello(_)));
+        let success = answer(node, frame.id, &frame.payload, &mut w)
             .map_err(|e| format!("answering request {}: {e}", frame.id))?;
+        w.flush()
+            .map_err(|e| format!("flushing request {}: {e}", frame.id))?;
+        if non_hello && success {
+            node.releases.contact();
+        }
     }
 }
 
@@ -475,7 +481,35 @@ fn reported_version() -> String {
     pt_version::VERSION.into()
 }
 
-fn answer(node: &Node, id: u64, payload: &[u8], w: &mut impl Write) -> io::Result<()> {
+struct ReplyWriter<'a, W> {
+    inner: &'a mut W,
+    success: bool,
+}
+
+impl<W: Write> Write for ReplyWriter<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.inner.write(buf)
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+fn answer(node: &Node, id: u64, payload: &[u8], w: &mut impl Write) -> io::Result<bool> {
+    let mut reply = ReplyWriter {
+        inner: w,
+        success: true,
+    };
+    answer_inner(node, id, payload, &mut reply)?;
+    Ok(reply.success)
+}
+
+fn answer_inner(
+    node: &Node,
+    id: u64,
+    payload: &[u8],
+    w: &mut ReplyWriter<'_, impl Write>,
+) -> io::Result<()> {
     let req = match parse_request(payload) {
         Ok(r) => r,
         Err((code, message)) => return error(w, id, code, message, None),
@@ -494,23 +528,20 @@ fn answer(node: &Node, id: u64, payload: &[u8], w: &mut impl Write) -> io::Resul
         Err(e) => error(w, id, e.code, e.message, Some(epoch.clone())),
     };
     match req {
-        Request::Hello(_) => {
-            node.releases.contact();
-            respond(
-                w,
-                id,
-                &HelloReply {
-                    protocol: reported_protocol(),
-                    node_version: reported_version(),
-                    node_id: node.node_id.clone(),
-                    journal_epoch: epoch.clone(),
-                    hostname: pt_node::hostname(),
-                    os: std::env::consts::OS.into(),
-                    arch: std::env::consts::ARCH.into(),
-                    release: node.releases.started(),
-                },
-            )
-        }
+        Request::Hello(_) => respond(
+            w,
+            id,
+            &HelloReply {
+                protocol: reported_protocol(),
+                node_version: reported_version(),
+                node_id: node.node_id.clone(),
+                journal_epoch: epoch.clone(),
+                hostname: pt_node::hostname(),
+                os: std::env::consts::OS.into(),
+                arch: std::env::consts::ARCH.into(),
+                release: node.releases.started(),
+            },
+        ),
         Request::Inventory => respond(w, id, &inventory::collect()),
         Request::Sample => {
             let s = node
@@ -523,7 +554,7 @@ fn answer(node: &Node, id: u64, payload: &[u8], w: &mut impl Write) -> io::Resul
         Request::Presence => respond(w, id, &r.detect()),
         Request::SubmitJob(spec) => {
             let (job_id, attempt) = (spec.job_id.clone(), spec.attempt);
-            let res = r.submit(spec);
+            let res = node.releases.submit(r, spec);
             match &res {
                 Ok(info) => eprintln!(
                     "protectorate-node: job {job_id} attempt {attempt}: {}",
@@ -572,15 +603,8 @@ fn answer(node: &Node, id: u64, payload: &[u8], w: &mut impl Write) -> io::Resul
                 jobs: r.list(),
             },
         ),
-        Request::Update(u) => match node.releases.update(&u, r.running()) {
-            Ok((reply, restart)) => {
-                respond(w, id, &reply)?;
-                w.flush()?;
-                if restart {
-                    crate::update::restart_soon(reply.to);
-                }
-                Ok(())
-            }
+        Request::Update(u) => match node.releases.update(&u, r) {
+            Ok(reply) => respond(w, id, &reply),
             Err((code, message)) => {
                 eprintln!(
                     "protectorate-node: update to {} refused: {message}",
@@ -611,12 +635,13 @@ fn respond(w: &mut impl Write, id: u64, v: &impl ToJson) -> io::Result<()> {
 }
 
 fn error(
-    w: &mut impl Write,
+    w: &mut ReplyWriter<'_, impl Write>,
     id: u64,
     code: ErrorCode,
     message: String,
     journal_epoch: Option<String>,
 ) -> io::Result<()> {
+    w.success = false;
     let e = ErrorReply {
         code,
         message,

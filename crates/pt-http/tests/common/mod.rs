@@ -174,7 +174,7 @@ pub struct Curl {
 
 pub fn curl(args: &[&str]) -> Curl {
     let out = Command::new("curl")
-        .args(["-sS", "--max-time", "10"])
+        .args(["-q", "-sS", "--max-time", "10"])
         .args(args)
         .output()
         .expect("run curl");

@@ -10,7 +10,7 @@
 #
 # Fetch this script at a commit, never a tag (SPEC 12a item 9), and compare its sha256 with the
 # one in the release notes before running it, from an elevated PowerShell:
-#   curl.exe -fsSLO https://raw.githubusercontent.com/hotschmoe/protectorate/<commit>/scripts/install-node.ps1
+#   curl.exe -q -fsSLO https://raw.githubusercontent.com/hotschmoe/protectorate/<commit>/scripts/install-node.ps1
 #   Get-FileHash -Algorithm SHA256 .\install-node.ps1
 #   powershell -ExecutionPolicy Bypass -File .\install-node.ps1 -ServerUrl https://hub.example.lan -DryRun
 [CmdletBinding()]
@@ -152,7 +152,7 @@ if (Test-Path -LiteralPath $vdir) {
         $dest = Join-Path $staging 'protectorate-node.exe'
         if ($From) { Copy-Item -LiteralPath (Join-Path $From $asset) -Destination $dest }
         else {
-            & curl.exe --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 3 `
+            & curl.exe -q --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 3 `
                 -o $dest "$($script:Base)/$asset"
             if ($LASTEXITCODE -ne 0) { Die "downloading $asset failed" }
         }

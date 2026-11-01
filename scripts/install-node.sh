@@ -9,7 +9,7 @@
 #
 # Fetch this script at a commit, never a tag (SPEC 12a item 9), and compare its sha256 with the
 # one in the release notes before running it:
-#   curl -fsSLO https://raw.githubusercontent.com/hotschmoe/protectorate/<commit>/scripts/install-node.sh
+#   curl -q -fsSLO https://raw.githubusercontent.com/hotschmoe/protectorate/<commit>/scripts/install-node.sh
 #   sha256sum install-node.sh
 #   sudo bash install-node.sh https://hub.example.lan --dry-run
 set -euo pipefail
@@ -33,7 +33,7 @@ usage() {
 die() { printf 'install-node: %s\n' "$*" >&2; exit 1; }
 say() { printf '%s\n' "$*"; }
 
-curl_https() { curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 3 "$@"; }
+curl_https() { curl -q --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 3 "$@"; }
 
 # The newest tag on a channel: stable is vX.Y.Z, dev also takes vX.Y.Z-PRE. Ordered by semver
 # precedence (sort -V with the pre-release dash as a tilde, which sorts before the release).

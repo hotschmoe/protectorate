@@ -426,7 +426,16 @@ fn capabilities_are_scoped() {
     let owner = hub.printed("owner token (shown once): ");
     let curl = |auth: Option<&str>| {
         let mut c = std::process::Command::new("curl");
-        c.args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "-X", "POST"]);
+        c.args([
+            "-q",
+            "-s",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "-X",
+            "POST",
+        ]);
         if let Some(t) = auth {
             c.args(["-H", &format!("Authorization: Bearer {t}")]);
         }

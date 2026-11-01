@@ -98,7 +98,10 @@ pub fn probation_prestart(home: &Path) -> Result<String, String> {
     let store = pt_update::Store::open(home).map_err(|e| e.to_string())?;
     Ok(
         match store
-            .start_attempt(pt_update::MAX_TRIAL_STARTS)
+            .start_attempt_with_restore(
+                pt_update::MAX_TRIAL_STARTS,
+                crate::update::restore_headscale,
+            )
             .map_err(|e| e.to_string())?
         {
             pt_update::Verdict::Idle => "no release on trial".into(),

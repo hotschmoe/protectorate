@@ -10,6 +10,7 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -55,6 +56,8 @@ record! {
         pub deadline_ms: u64,
         pub contacted_ms: Option<u64>,
         pub rolled_back_ms: Option<u64>,
+        /// Headscale snapshot to restore before rolling back a hub release.
+        pub headscale_snapshot: Option<String>,
         /// Starts counted by [`Store::start_attempt`].
         pub starts: u64 = 0,
         /// Why it was rolled back.
@@ -125,11 +128,15 @@ fn write_synced(path: &Path, bytes: &[u8]) -> Result<()> {
 
 /// Test knob: `PT_TEST_CRASH_AT=<step>` ends the process right after that step of a switch or
 /// rollback, as a power loss would.
+#[cfg(debug_assertions)]
 fn crash_point(step: &str) {
     if std::env::var("PT_TEST_CRASH_AT").is_ok_and(|s| s == step) {
         std::process::exit(86);
     }
 }
+
+#[cfg(not(debug_assertions))]
+fn crash_point(_step: &str) {}
 
 /// argv[0] as an absolute path.
 fn argv0() -> PathBuf {
@@ -214,36 +221,75 @@ impl Store {
     /// never becomes `current`.
     pub fn check_binary(&self, version: &str, program: &str, arg: &str) -> Result<()> {
         const TIMEOUT: Duration = Duration::from_secs(30);
+        #[cfg(debug_assertions)]
+        let timeout = std::env::var("PT_TEST_CHECK_TIMEOUT_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .map(Duration::from_millis)
+            .unwrap_or(TIMEOUT);
+        #[cfg(not(debug_assertions))]
+        let timeout = TIMEOUT;
         let bin = self.version_dir(version).join(program);
         let health = |m: String| Error::new(ErrorKind::Health, m);
-        let mut child = Command::new(&bin)
+        let mut command = Command::new(&bin);
+        command
             .arg(arg)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        let mut child = command
             .spawn()
             .map_err(|e| health(format!("running {}: {e}", bin.display())))?;
         let mut stdout = child.stdout.take();
-        let reader = thread::spawn(move || {
+        let (tx, rx) = mpsc::sync_channel(1);
+        thread::spawn(move || {
             let mut out = Vec::new();
             if let Some(s) = stdout.as_mut() {
                 let _ = s.take(64 * 1024).read_to_end(&mut out);
             }
-            out
+            let _ = tx.send(out);
         });
-        let deadline = Instant::now() + TIMEOUT;
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(st)) => break Some(st),
-                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
-                Ok(None) | Err(_) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break None;
+        let deadline = Instant::now() + timeout;
+        let mut status = None;
+        let mut out = None;
+        while Instant::now() < deadline {
+            if status.is_none() {
+                match child.try_wait() {
+                    Ok(s) => status = s,
+                    Err(e) => {
+                        #[cfg(unix)]
+                        let _ = pt_sys::kill_group(child.id(), pt_sys::SIGKILL);
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return Err(health(format!("waiting for {}: {e}", bin.display())));
+                    }
                 }
             }
-        };
-        let out = reader.join().unwrap_or_default();
+            if out.is_none() {
+                out = rx.try_recv().ok();
+            }
+            if status.is_some() && out.is_some() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        if status.is_none() || out.is_none() {
+            #[cfg(unix)]
+            let _ = pt_sys::kill_group(child.id(), pt_sys::SIGKILL);
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(health(format!(
+                "{} {arg} did not finish in {} s",
+                bin.display(),
+                timeout.as_secs()
+            )));
+        }
+        let out = out.unwrap_or_default();
         let line = String::from_utf8_lossy(&out)
             .lines()
             .next()
@@ -307,6 +353,18 @@ impl Store {
 
     pub fn previous(&self) -> Result<Option<String>> {
         self.pointer(PREVIOUS)
+    }
+
+    pub fn ensure_previous(&self) -> Result<()> {
+        let _l = self.lock()?;
+        if self.previous()?.is_none() {
+            let current = self
+                .current()?
+                .ok_or_else(|| store_err("no current release"))?;
+            self.set_pointer(PREVIOUS, &current)?;
+            sync_dir(&self.dir)?;
+        }
+        Ok(())
     }
 
     /// Every staged version directory, sorted by name.
@@ -492,6 +550,7 @@ impl Store {
     pub fn switch(&self, version: &str) -> Result<Switch> {
         self.require_version_dir(version)?;
         let _l = self.lock()?;
+        self.refuse_open_trial()?;
         self.switch_locked(version)
     }
 
@@ -501,6 +560,7 @@ impl Store {
         if from.as_deref() != Some(version) {
             if let Some(f) = &from {
                 self.set_pointer(PREVIOUS, f)?;
+                sync_dir(&self.dir)?;
                 crash_point("switch-previous");
             }
             self.set_pointer(CURRENT, version)?;
@@ -515,6 +575,7 @@ impl Store {
     /// Swaps `current` and `previous`, so a second rollback undoes the first.
     pub fn rollback(&self) -> Result<Switch> {
         let _l = self.lock()?;
+        self.refuse_open_trial()?;
         self.rollback_locked()
     }
 
@@ -527,6 +588,7 @@ impl Store {
         // `current` first: a crash between the renames leaves both on the release that worked,
         // never both on the one being left.
         self.set_pointer(CURRENT, &prev)?;
+        sync_dir(&self.dir)?;
         crash_point("rollback-current");
         if let Some(c) = &cur {
             self.set_pointer(PREVIOUS, c)?;
@@ -543,8 +605,18 @@ impl Store {
     /// the switch, under the same lock, so no crash leaves the new release current untried;
     /// one that names a release `current` does not is not open.
     pub fn switch_on_probation(&self, version: &str, window: Duration) -> Result<Switch> {
+        self.switch_on_probation_with_snapshot(version, window, None)
+    }
+
+    pub fn switch_on_probation_with_snapshot(
+        &self,
+        version: &str,
+        window: Duration,
+        headscale_snapshot: Option<String>,
+    ) -> Result<Switch> {
         self.require_version_dir(version)?;
         let _l = self.lock()?;
+        self.refuse_open_trial()?;
         let from = self.current()?.ok_or_else(|| {
             store_err("no current release to fall back to; use switch for a first install")
         })?;
@@ -563,6 +635,7 @@ impl Store {
             deadline_ms: now.saturating_add(window),
             contacted_ms: None,
             rolled_back_ms: None,
+            headscale_snapshot,
             starts: 0,
             reason: None,
         };
@@ -606,6 +679,16 @@ impl Store {
         Ok(open.then_some(p))
     }
 
+    fn refuse_open_trial(&self) -> Result<()> {
+        if let Some(p) = self.open_probation()? {
+            return Err(store_err(format!(
+                "release {} is still on probation; wait for confirmation or rollback",
+                p.version
+            )));
+        }
+        Ok(())
+    }
+
     /// Keeps `version` when it is the release on trial; true when this confirmed it. A check
     /// that passed for one release never confirms another switched in since.
     pub fn confirm(&self, version: &str) -> Result<bool> {
@@ -613,7 +696,11 @@ impl Store {
         let Some(mut p) = self.open_probation()?.filter(|p| p.version == version) else {
             return Ok(false);
         };
-        p.contacted_ms = Some(now_ms());
+        let now = now_ms();
+        if now >= p.deadline_ms || p.reason.is_some() {
+            return Ok(false);
+        }
+        p.contacted_ms = Some(now);
         self.write_probation(&p)?;
         Ok(true)
     }
@@ -621,7 +708,7 @@ impl Store {
     /// Run at start and then periodically by the release on trial.
     pub fn check_probation(&self) -> Result<Verdict> {
         let _l = self.lock()?;
-        self.judge(false, 0)
+        self.judge(false, 0, &mut no_snapshot)
     }
 
     /// Run by the service manager before each start, from the previous release (known to work):
@@ -629,7 +716,26 @@ impl Store {
     /// `max_starts` times without being confirmed, or its window has passed.
     pub fn start_attempt(&self, max_starts: u64) -> Result<Verdict> {
         let _l = self.lock()?;
-        self.judge(true, max_starts)
+        self.judge(true, max_starts, &mut no_snapshot)
+    }
+
+    pub fn start_attempt_with_restore(
+        &self,
+        max_starts: u64,
+        mut restore: impl FnMut(&Probation) -> std::result::Result<(), String>,
+    ) -> Result<Verdict> {
+        let _l = self.lock()?;
+        self.judge(true, max_starts, &mut restore)
+    }
+
+    pub fn request_rollback(&self, reason: &str) -> Result<bool> {
+        let _l = self.lock()?;
+        let Some(mut p) = self.open_probation()? else {
+            return Ok(false);
+        };
+        p.reason = Some(reason.to_string());
+        self.write_probation(&p)?;
+        Ok(true)
     }
 
     /// Rolls a release on trial back now, for `reason` (it failed its own health check).
@@ -638,10 +744,16 @@ impl Store {
         let Some(mut p) = self.open_probation()? else {
             return Ok(None);
         };
-        self.roll_back_trial(&mut p, reason).map(Some)
+        self.roll_back_trial(&mut p, reason, &mut no_snapshot)
+            .map(Some)
     }
 
-    fn judge(&self, count: bool, max_starts: u64) -> Result<Verdict> {
+    fn judge(
+        &self,
+        count: bool,
+        max_starts: u64,
+        restore: &mut impl FnMut(&Probation) -> std::result::Result<(), String>,
+    ) -> Result<Verdict> {
         let Some(mut p) = self.probation()? else {
             return Ok(Verdict::Idle);
         };
@@ -651,12 +763,19 @@ impl Store {
         if self.open_probation()?.is_none() {
             return Ok(Verdict::Idle);
         }
+        if let Some(reason) = p.reason.clone() {
+            return self
+                .roll_back_trial(&mut p, &reason, restore)
+                .map(Verdict::RolledBack);
+        }
         let now = now_ms();
         if count {
             p.starts += 1;
             if p.starts > max_starts {
                 let why = format!("{} starts without passing its check", p.starts - 1);
-                return self.roll_back_trial(&mut p, &why).map(Verdict::RolledBack);
+                return self
+                    .roll_back_trial(&mut p, &why, restore)
+                    .map(Verdict::RolledBack);
             }
             self.write_probation(&p)?;
         }
@@ -669,10 +788,16 @@ impl Store {
             "not confirmed within {} s",
             p.deadline_ms.saturating_sub(p.switched_ms) / 1000
         );
-        self.roll_back_trial(&mut p, &why).map(Verdict::RolledBack)
+        self.roll_back_trial(&mut p, &why, restore)
+            .map(Verdict::RolledBack)
     }
 
-    fn roll_back_trial(&self, p: &mut Probation, reason: &str) -> Result<Switch> {
+    fn roll_back_trial(
+        &self,
+        p: &mut Probation,
+        reason: &str,
+        restore: &mut impl FnMut(&Probation) -> std::result::Result<(), String>,
+    ) -> Result<Switch> {
         if self.previous()?.as_deref() != Some(p.previous.as_str()) {
             return Err(store_err(format!(
                 "probation of {} expects previous {}, found {:?}",
@@ -681,10 +806,29 @@ impl Store {
                 self.previous()?
             )));
         }
-        let sw = self.rollback_locked()?;
+        self.require_version_dir(&p.previous)?;
+        if p.reason.as_deref() != Some(reason) {
+            p.reason = Some(reason.to_string());
+            self.write_probation(p)?;
+        }
+        restore(p).map_err(|e| store_err(format!("restoring before rollback: {e}")))?;
+        self.set_pointer(CURRENT, &p.previous)?;
+        sync_dir(&self.dir)?;
+        crash_point("rollback-current");
+        let sw = Switch {
+            from: Some(p.version.clone()),
+            to: p.previous.clone(),
+        };
         p.rolled_back_ms = Some(now_ms());
         p.reason = Some(reason.to_string());
         self.write_probation(p)?;
         Ok(sw)
     }
+}
+
+fn no_snapshot(p: &Probation) -> std::result::Result<(), String> {
+    if p.headscale_snapshot.is_some() {
+        return Err("headscale restore requires hub probation before start".into());
+    }
+    Ok(())
 }

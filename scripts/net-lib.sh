@@ -102,18 +102,18 @@ start_control() {
 	say "headscale on $HS_URL, proxy on $PX_URL"
 	"$HEADSCALE" -c "$CFG" serve >"$RUN/headscale.log" 2>&1 &
 	PIDS+=($!)
-	wait_for 30 "headscale /health" curl -fsS "$HS_URL/health"
+	wait_for 30 "headscale /health" curl -q -fsS "$HS_URL/health"
 	wait_for 10 "headscale socket" test -S "$RUN/hs/headscale.sock"
 	hs policy check -f "$ROOT/go/policy.hujson" || fail "policy check"
 	"$NETTEST" proxy --listen "$BIND:$PX_PORT" --upstream "$HS_URL" \
 		--cert "$RUN/cert.pem" --key "$RUN/key.pem" >"$RUN/proxy.log" 2>&1 &
 	PIDS+=($!)
-	wait_for 10 "proxy" curl -fsS --cacert "$RUN/cert.pem" "$PX_URL/health"
-	[ "$(curl -s -o /dev/null -w '%{http_code}' --cacert "$RUN/cert.pem" "$PX_URL/register/x")" = 404 ] ||
+	wait_for 10 "proxy" curl -q -fsS --cacert "$RUN/cert.pem" "$PX_URL/health"
+	[ "$(curl -q -s -o /dev/null -w '%{http_code}' --cacert "$RUN/cert.pem" "$PX_URL/register/x")" = 404 ] ||
 		fail "proxy routes /register"
 	USER_ID=$(hs users create e2e -o json | jq -r .id)
 	# The hub's own view of the control key, computed as member computes it.
-	CONTROL_KEY=sha256:$(curl -fsS "$HS_URL/key?v=148" | jq -r .publicKey |
+	CONTROL_KEY=sha256:$(curl -q -fsS "$HS_URL/key?v=148" | jq -r .publicKey |
 		sed 's/^mkey://' | tr a-f A-F | basenc --base16 -d | sha256sum | cut -d' ' -f1)
 }
 

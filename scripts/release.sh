@@ -236,9 +236,9 @@ write_notes() {
 			echo "    sha256 $sum"
 		done
 		echo
-		echo "Hub:            curl -fsSLO <install.sh URL> && sha256sum install.sh && bash install.sh --version $VERSION"
-		echo "Linux node:     curl -fsSLO <install-node.sh URL> && sha256sum install-node.sh && sudo bash install-node.sh SERVER_URL --version $VERSION"
-		echo "Windows node:   curl.exe -fsSLO <install-node.ps1 URL>; Get-FileHash .\\install-node.ps1; .\\install-node.ps1 -ServerUrl SERVER_URL -Version $VERSION"
+		echo "Hub:            curl -q -fsSLO <install.sh URL> && sha256sum install.sh && bash install.sh --version $VERSION"
+		echo "Linux node:     curl -q -fsSLO <install-node.sh URL> && sha256sum install-node.sh && sudo bash install-node.sh SERVER_URL --version $VERSION"
+		echo "Windows node:   curl.exe -q -fsSLO <install-node.ps1 URL>; Get-FileHash .\\install-node.ps1; .\\install-node.ps1 -ServerUrl SERVER_URL -Version $VERSION"
 	} >"$NOTES"
 }
 

@@ -208,17 +208,30 @@ hub update --rollback
 `<home>/releases/<version>/`, snapshots headscale's database, switches `releases/current` on
 probation and restarts. The new hub keeps the release once its health check passes within 2
 minutes; a release that keeps failing to start is switched back by `hub probation`, which the
-unit runs before each start. `--check` only reports what it would do; `--rollback` goes back to
-`releases/previous`. The channel defaults to `release_channel` in `config.json` (`stable`).
+unit runs before each start. Before the rollback it restores the headscale database snapshot;
+nodes enrolled after the snapshot, including during the failed trial, are lost and must be
+enrolled again. A configured fleet must be running so the database can be snapshotted. The service
+must run the snapshot-aware `hub probation` before each start and stop if it fails; regenerate an
+older unit with the current installer before relying on this rollback. `--check` only reports what
+it would do; `--rollback` goes back to `releases/previous`. The channel defaults to
+`release_channel` in `config.json` (`stable`).
 Sleeves do not survive the restart: they resume as after a crash.
 
 **Nodes:**
 
 `node update` asks each node to fetch the release from GitHub itself, verify it, stage it and
-restart through its service manager. A node that is not contacted by the hub within the
+restart through its service manager. A node confirms its release after it has fully answered a
+hub request other than Hello. A node that has not done so within the
 probation window (`--probation`, default 600 s) reverts to its previous binary. The command waits
 for every node unless `--no-wait`. Update the hub first, then one node per OS and arch, then the
-rest. A node with running jobs answers `busy`; a Windows node answers `unsupported`.
+rest. A node with running jobs answers `busy`; once an update is admitted, new jobs answer `busy`
+until the restart. A Windows node answers `unsupported`.
+
+Neither hub nor node switches releases while a release is on trial; wait for confirmation or
+automatic rollback. Without `--version`, an update is available only when the newest release on
+the selected channel has higher semver precedence than the running release. `--version` can select
+an older release, and the result identifies a downgrade. If the running version cannot be compared,
+specify `--version` explicitly.
 
 The hub talks only to nodes at its own node protocol (`node ls` shows "reinstall the node"
 otherwise). When a release bumps the protocol, update the nodes first, from the old hub, and the
