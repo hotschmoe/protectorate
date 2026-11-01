@@ -299,7 +299,8 @@ Each entry: where, what was done, what right looks like.
   and jobs fall back to process groups. Not on Windows. Right: once SSH or member is chosen, the
   system service owns the agent and always listens on `agent.sock`; `--stdio` stays a splice.
 - **SSH instead of headscale for hub-to-node** (owner, 2026-11-01: keep headscale for now and
-  revisit). Plain OpenSSH would carry the same frames: the hub runs `ssh node`, and the node's
+  revisit; 2026-11-02, after reading network-without-go.md: hole punching and relay are required,
+  so SSH comes back only with an answer for both). Plain OpenSSH would carry the same frames: the hub runs `ssh node`, and the node's
   authorized_keys pins the hub's key to `restrict,command="protectorate-node serve --stdio"`.
   Nothing on the hub would listen for nodes, so headscale's control and DERP, the one surface nodes
   reach today, would disappear, as would the whole `go/` tree, headscale's 49 MB and member's 18 MB.
