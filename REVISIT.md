@@ -307,26 +307,40 @@ Each entry: where, what was done, what right looks like.
   so jobs outlive the session). What SSH loses is NAT traversal, roaming and stable addresses (DHCP
   churn; the snapdragon laptop moved .176 to .172). The combined form is SSH as the protocol, with
   the official tailscale client on any machine the hub cannot route to.
-- **Sleeve credentials are seeded by copy** (`pt-hub`, exec.rs `credential_files`): at
-  provisioning and before each launch the hub copies the owner's login files for the harness
+- **Other sleeves' workspaces are masked as of the launch** (`pt-hub`, exec.rs
+  `other_claims`): a sandbox masks every live claim but its parent's and its children's, read
+  from the view when the incarnation starts. A root spawned later stays visible to sandboxes
+  already running until they relaunch, and a workspace outside every claim (the owner's other
+  repos) is readable. Right: a deny-by-default view of the filesystem (only the claim, its git
+  dirs and the toolchains bound in).
+- **Sleeve credentials are seeded by copy** (`pt-hub`, exec.rs `credential_files`): before each
+  launch the hub copies the owner's login files for the launching harness only
   (`~/.claude/.credentials.json` and `~/.claude.json`, `~/.codex/auth.json`, `~/.grok/auth.json`,
-  `~/.pi/agent/{auth,models,settings}.json`) into the sleeve's private home, once; a token the
-  harness refreshes in one home does not reach the others, and `~/.claude.json` carries the
-  owner's project list. Right: a doctor-guided login per sleeve home, or a shared read-only
-  credential mount.
-- **Same-uid callers on the unix socket are the owner** (`pt-hub`, http.rs): a process inside a
-  sleeve scope is identified by its cgroup and gets that sleeve's capability whatever it sends,
-  but a vendor general agent runs as the owner's user, so envoy-only holds only while it presents
-  its `PROTECTORATE_TOKEN`. Right: vendor agents under their own uid, or an owner token required
-  on the socket for anything that is not the owner's own shell.
+  `~/.pi/agent/{auth,models,settings}.json`) into the sleeve's private home, once, and moves every
+  other harness's files out to `sleeves/<id>/credentials/` (no sandbox sees it), back when that
+  harness runs again; a token the harness refreshes in one home does not reach the others, and
+  `~/.claude.json` carries the owner's project list. Right: a doctor-guided login per sleeve
+  home, or a shared read-only credential mount per harness.
+- **Same-uid callers on the owner's socket are the owner** (`pt-hub`, http.rs): sleeves never
+  see that socket (`run/api.sock`); they get `run/sleeves/api.sock`, which takes only a sleeve
+  capability (checked against the caller's scope cgroup when it has one), so with `scopes` off a
+  sleeve still cannot act as the owner. On the owner's socket a caller without a token is the
+  owner only when `/proc/<pid>/cgroup` of its SO_PEERCRED pid was read at the request and names
+  no sleeve of this hub; an exited peer is refused. The pid is read per request, not at accept,
+  so a peer that exits and whose pid is reused by an owner process in between would pass.
+  A vendor general agent runs as the owner's user, so envoy-only holds only while it presents
+  its `PROTECTORATE_TOKEN`. Right: identity captured at accept in pt-http (SO_PEERPIDFD or the
+  cgroup read then), and vendor agents under their own uid.
 - **The capability is in bwrap's argv** (`--setenv PROTECTORATE_TOKEN`), so `/proc/<pid>/cmdline`
   of the outer bwrap shows it to same-uid processes. Right: hand the environment over a file
   descriptor once the sandbox helper subcommand exists.
-- **The hub socket is reached through a bind of `run/`** (the whole directory, at its host path),
-  not a fixed path like `/run/protectorate.sock`: bwrap cannot create a mount point on the
-  read-only root, and a directory bind keeps a socket re-created by a restarted hub reachable.
-  Sleeves get `PROTECTORATE_SOCKET` and `run/bin/protectorate` (a link to the hub binary) on PATH.
-  Right: the sandbox helper makes the fixed mount point, or pt-sandbox gains src-to-dst binds.
+- **The sleeves' socket is reached through a read-only bind of `run/sleeves/`** (the
+  directory, at its host path), not a fixed path like `/run/protectorate.sock`: bwrap cannot
+  create a mount point on the read-only root, and a directory bind keeps a socket re-created by a
+  restarted hub reachable. `run/bin/` (the CLI link, first on PATH) and the binary it names are
+  bound read-only too, so a sleeve cannot replace or unlink what other sleeves use. Sleeves get
+  `PROTECTORATE_SOCKET`. Right: the sandbox helper makes the fixed mount point, or pt-sandbox
+  gains src-to-dst binds.
 - **A View child runs in a scratch dir** (`pt-hub`, exec.rs `workdir`): `SandboxSpec` binds the
   workspace writable, so a read-only view's cwd is `sleeves/<id>/view` and the root is visible
   read-only at its own path through `/` (not when the root sits under a masked directory). Right:
@@ -336,8 +350,20 @@ Each entry: where, what was done, what right looks like.
   repo's objects as an alternate), listed in `sleeves/<id>/checkpoints.jsonl`. No branch moves,
   because a commit on a root's branch would land on the owner's branch. Right: decide with the
   owner; likely a hidden ref namespace in a hub-owned bare mirror, plus a pruning rule.
-- **Hub git has no timeout and no sandbox** (worktree add, checkpoint, brief facts). Right: the
-  2 s read-only-sandbox runner the old hub had.
+- **Hub git has no timeout and no sandbox** (worktree add, checkpoint, brief facts). It runs
+  nothing from the workspace: the real repo is read only through `rev-parse` and `worktree add
+  --no-checkout` with hooks off and no system or global config, and every command that reads a
+  work tree or an index runs against a shadow git dir of the hub's own (`sleeves/<id>/
+  shadow.git`: our config, HEAD as a commit id, the repo's objects as an alternate), so filters,
+  hooks, fsmonitor and textconv a sleeve configured are never defined there. A child's checkout
+  is therefore raw blobs (an LFS file stays a pointer). Right: a timeout, and the read-only
+  sandbox runner the old hub had if git itself ever needs containing.
+- **Provision has a completion barrier file** (`pt-hub`, exec.rs): `sleeves/<id>/provisioned`
+  is written (fsynced) after the layout is whole; the probe answers Applied only on it, and a
+  retried provision finishes a registered but cut-short worktree (`read-tree --reset -u`). A
+  directory left by an add cut short before git registered it is not removed; git refuses a
+  non-empty one and the provision fails. Right: fine; record the barrier in the journal if the
+  home is ever split from it.
 - **Approval answers are reported Lost** (`pt-hub`, exec.rs): `RespondApproval` is written, then
   left Uncertain, because only Codex confirms an answer; the harness's `approval_decision` entry
   becomes `ApprovalResolved` for activity. Right: Acked on a confirmed decision (Codex) or the
@@ -397,15 +423,24 @@ Each entry: where, what was done, what right looks like.
   the system `gzip -9`; officewin, which has none, gets member gzipped by release.sh. Right:
   prune old unpacked versions once the owner agrees to that rule; table-driven decoding if
   unpack time ever shows.
-- **D9 covers three calls and the turn, not the request chain** (`pt-hub`, rule.rs): while
-  Envoy's current turn was started (or steered) by an `agent:` message, Envoy's own `sleeve rm`,
-  `job run` and spawns past `d9_spawn_limit` (default 3 per turn) wait for an owner approval
+- **D9 covers two calls and the turn, not the request chain** (`pt-hub`, rule.rs): while
+  Envoy's current turn was started (or steered) by an `agent:` message, Envoy's own `sleeve rm`
+  and spawns past `d9_spawn_limit` (default 3 per turn) wait for an owner approval
   (`d9_approval_timeout_secs`, default 900, then `timeout`). The origin is cleared when the turn
   settles, so a background process Envoy started in that turn acts as the owner's afterwards;
   a sleeve Envoy prompted on the agent's behalf is not gated at all; no push method exists yet
-  to gate. A `maintenance` node job from any sleeve, Envoy included, always waits for the owner,
-  whatever started the turn. Right: carry the origin through messages Envoy sends (a request
-  chain), and add pushes to the list when the API grows them.
+  to gate. Every node job from any sleeve, Envoy included, waits for the owner whatever started
+  the turn: a node runs every job with its own account and ignores `maintenance`, so the flag
+  marks nothing it enforces. Right: carry the origin through messages Envoy sends (a request
+  chain), add pushes to the list when the API grows them, and let non-maintenance jobs through
+  ungated once the runner account exists.
+- **Vendor agents read a filtered Envoy transcript** (`pt-hub`, api.rs `agent_transcript`):
+  `EnvoyRead` with the envoy-only token shows each `ga:` message and the assistant text and
+  settle of the turn it started, up to another sender's message; owner and sleeve messages,
+  tools and reasoning are left out. All agents share the one token, so they see each other's
+  exchanges, and an answer can still quote what Envoy learned elsewhere. It reads the whole
+  transcript per call. Sleeves get none of `EnvoyRead` or `EnvoyWait`. Right: a token per
+  agent, and an index of agent turns if transcripts grow large.
 - **Who sent a message is a text prefix** (`pt-hub`, api.rs): mail reaches the harness as
   `[from sleeve <name>] ...` and agent requests as `[from agent:<name>] ...`, since a prompt has no
   other sender field; owner and Envoy messages are unprefixed. Right: revisit if a harness grows
@@ -426,11 +461,18 @@ Each entry: where, what was done, what right looks like.
   socket and the journal lock is held (no other hub can own it). This is the one file product
   code deletes; the owner may prefer a fresh socket name per start.
 - **Wait and EnvoyWait hold a connection thread** for up to an hour, out of 256. Fine for a few
-  clients; right if Envoy fans out: wait on the event stream instead.
-- **`PT_TEST_FAULT=usage_limit:<sleeve name>`** (`pt-hub`, hub.rs `Fault`): the one test-only
-  knob. The named sleeve's first settled turn in this hub process is reported to the core as
-  `TurnEnd::UsageLimit`, which trips G1 and forces a resleeve; the e2e `forced_resleeve_with_brief`
-  uses it. The hub warns at start when it is set. Never set it in production.
+  clients; right if Envoy fans out: wait on the event stream instead. The idle keep-alive is
+  pt-http's 60 s (a request being answered is not idle), so up to 256 idle clients can still hold
+  every slot for a minute. Right: a pt-http option that closes the oldest idle connection when
+  the slots run out, and a shorter idle limit for unauthenticated connections.
+- **A revoked caller's event stream ends within a second** (`pt-hub`, http.rs `events`): the
+  stream re-runs the caller's authentication once per bus wait (at most 1 s) and sends close
+  1008 once it no longer yields the same principal. Right: a revocation notice on the bus that
+  wakes every stream of that token at once.
+- **`PT_TEST_FAULT=usage_limit:<sleeve name>`** (`pt-hub`, hub.rs `Fault`): one of two
+  test-only knobs (the other is pt-update's `PT_TEST_CRASH_AT`). The named sleeve's first settled
+  turn in this hub process is reported to the core as `TurnEnd::UsageLimit`, which trips G1 and
+  forces a resleeve; the e2e `forced_resleeve_with_brief` uses it. The hub warns at start when it is set. Never set it in production.
 - **RealHub is exercised only by `scripts/app-e2e.sh`** (`app/lib/real_hub.dart`): the web build
   against a real hub (pairing, Envoy chat, sleeves, a D9 approval denied from the app), outside
   `make test` because it needs Chromium and the local model. Reconnect backoff is 1 to 30 s; a
@@ -468,12 +510,29 @@ Each entry: where, what was done, what right looks like.
   flight. Right: a per-submit token in `NodeSubmit` that the node echoes in every status.
 - **Prompt evidence by ordering** (pt-core, `prompt_evidence`): harness output confirms an
   in-flight prompt or compaction only once its `Dispatched` is in, which relies on a sleeve's
-  observations and executor reports sharing one ordered stream. The hub meets it by handing a
-  sleeve's executor reports to its pump (`pt-hub`, exec.rs), which submits them after the
-  harness events it has received; the pump wakes every 10 ms to look for them, since std
-  channels have no select. Right: drivers tag output with the native turn id where the protocol
-  has one, and evidence must match the prompt's turn; a driver hook that puts the report into
-  its own event channel would drop the poll.
+  observations and executor reports sharing one ordered stream. The hub meets it in the pump
+  (`pt-hub`, exec.rs): a prompt's `Dispatched` is submitted when the driver's `user_message`
+  for it comes through the event stream, so output read before the write is the previous
+  turn's, and its `Acked` (with the native turn id from the ack or, failing that, from the
+  `turn_started` that follows within 2 s) or `Nacked` when the ack does. Other executor reports
+  are handed to the pump, which submits them after the harness events it has received; it wakes
+  every 10 ms to look for them, since std channels have no select. A confirmed prompt whose turn
+  id arrives later than 2 s stays unbound, so its turn cannot be steered. Right: drivers tag
+  output with the native turn id where the protocol has one, and evidence must match the
+  prompt's turn.
+- **A prompt that never left waits for the next incarnation** (pt-core `return_unsent`,
+  `deliverable`; `pt-hub` exec.rs `prompt`): after a restart nothing is delivered until the old
+  scope is probed, and a prompt or steer still `Intent` when its incarnation is fenced goes back
+  to the head of the queue. The executor leaves a prompt for an incarnation it has no live
+  session for (or whose driver says it ended) unreported, so the fence finds it `Intent`. A
+  prompt written to a harness that died before reading it is still "may have applied". Right:
+  fine.
+- **An unregistered systemd-run is found by its command line** (`pt-hub`, exec.rs
+  `kill_unregistered`): before probing a scope it has no session for, the hub SIGKILLs any
+  process of its uid whose argv is `systemd-run ... --unit <that scope>`, one a crashed hub
+  started that has not yet become the sandbox, and waits for it to go; otherwise it could
+  register the scope after the probe found none. Right: pt-sandbox registers the scope through
+  the user manager's D-Bus API before forking the sandbox, so no unregistered launcher exists.
 - **Cancel re-sent every Tick** (pt-core jobs): Cancelling re-sends an uncertain cancel at each
   10 s Tick until the lease ends. Right: the per-job backoff of node polling.
 - **Torn batch versus corruption** (pt-journal, `open_segment`): a frame failing its CRC is cut as
@@ -639,6 +698,14 @@ Each entry: where, what was done, what right looks like.
   does not check the fleet or launch a sleeve. The headscale snapshot is taken only while the
   fleet is up. Old `releases/<version>` directories are never pruned. Right: re-exec with the
   listeners and sandboxes handed over, and a health check that includes a fleet round trip.
+- **Release switches order their writes for crashes** (`pt-update` store.rs): a switch on
+  probation writes `probation.json` first, then `previous`, then `current`, under one lock; a
+  rollback sets `current` before `previous`. A crash at any step leaves `current` on a release
+  that worked, or the new one with its trial open; a crash inside a rollback can leave both
+  pointers on the old release, losing the way forward, never the way back. `PT_TEST_CRASH_AT`
+  (`probation-written`, `switch-previous`, `rollback-current`) ends the process after that step,
+  for the e2e. `confirm` takes the version whose check passed, so a late check never keeps a
+  release switched in since. Right: fine.
 - **Probation counts on wall-clock time and on the new binary's own watch** (`pt-update`): the
   units run `releases/previous/<bin> probation` before each start, which rolls back after
   `MAX_TRIAL_STARTS` (3) failed starts or a passed window, and the release on trial watches its

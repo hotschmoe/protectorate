@@ -123,6 +123,14 @@ fn write_synced(path: &Path, bytes: &[u8]) -> Result<()> {
         .map_err(|e| Error::io(format!("writing {}", path.display()), e))
 }
 
+/// Test knob: `PT_TEST_CRASH_AT=<step>` ends the process right after that step of a switch or
+/// rollback, as a power loss would.
+fn crash_point(step: &str) {
+    if std::env::var("PT_TEST_CRASH_AT").is_ok_and(|s| s == step) {
+        std::process::exit(86);
+    }
+}
+
 /// argv[0] as an absolute path.
 fn argv0() -> PathBuf {
     let a = std::env::args_os()
@@ -484,10 +492,16 @@ impl Store {
     pub fn switch(&self, version: &str) -> Result<Switch> {
         self.require_version_dir(version)?;
         let _l = self.lock()?;
+        self.switch_locked(version)
+    }
+
+    /// `previous` first, so a crash between the two renames leaves both on the old release.
+    fn switch_locked(&self, version: &str) -> Result<Switch> {
         let from = self.current()?;
         if from.as_deref() != Some(version) {
             if let Some(f) = &from {
                 self.set_pointer(PREVIOUS, f)?;
+                crash_point("switch-previous");
             }
             self.set_pointer(CURRENT, version)?;
             sync_dir(&self.dir)?;
@@ -510,10 +524,13 @@ impl Store {
             .ok_or_else(|| store_err(format!("{}: no previous release", self.dir.display())))?;
         self.require_version_dir(&prev)?;
         let cur = self.current()?;
+        // `current` first: a crash between the renames leaves both on the release that worked,
+        // never both on the one being left.
+        self.set_pointer(CURRENT, &prev)?;
+        crash_point("rollback-current");
         if let Some(c) = &cur {
             self.set_pointer(PREVIOUS, c)?;
         }
-        self.set_pointer(CURRENT, &prev)?;
         sync_dir(&self.dir)?;
         Ok(Switch {
             from: cur,
@@ -522,29 +539,36 @@ impl Store {
     }
 
     /// Switches and records a probation that [`Store::check_probation`] turns into a rollback
-    /// unless [`Store::confirm`] is called within `window`.
+    /// unless [`Store::confirm`] is called within `window`. The probation is written before
+    /// the switch, under the same lock, so no crash leaves the new release current untried;
+    /// one that names a release `current` does not is not open.
     pub fn switch_on_probation(&self, version: &str, window: Duration) -> Result<Switch> {
+        self.require_version_dir(version)?;
+        let _l = self.lock()?;
         let from = self.current()?.ok_or_else(|| {
             store_err("no current release to fall back to; use switch for a first install")
         })?;
-        let sw = self.switch(version)?;
-        if sw.from.as_deref() == Some(version) {
-            return Ok(sw);
+        if from == version {
+            return Ok(Switch {
+                from: Some(from),
+                to: version.to_string(),
+            });
         }
         let now = now_ms();
+        let window = u64::try_from(window.as_millis()).unwrap_or(u64::MAX);
         let p = Probation {
             version: version.to_string(),
             previous: from,
             switched_ms: now,
-            deadline_ms: now.saturating_add(window.as_millis() as u64),
+            deadline_ms: now.saturating_add(window),
             contacted_ms: None,
             rolled_back_ms: None,
             starts: 0,
             reason: None,
         };
-        let _l = self.lock()?;
         self.write_probation(&p)?;
-        Ok(sw)
+        crash_point("probation-written");
+        self.switch_locked(version)
     }
 
     pub fn probation(&self) -> Result<Option<Probation>> {
@@ -582,10 +606,11 @@ impl Store {
         Ok(open.then_some(p))
     }
 
-    /// Keeps the release on trial. True when this confirmed one.
-    pub fn confirm(&self) -> Result<bool> {
+    /// Keeps `version` when it is the release on trial; true when this confirmed it. A check
+    /// that passed for one release never confirms another switched in since.
+    pub fn confirm(&self, version: &str) -> Result<bool> {
         let _l = self.lock()?;
-        let Some(mut p) = self.open_probation()? else {
+        let Some(mut p) = self.open_probation()?.filter(|p| p.version == version) else {
             return Ok(false);
         };
         p.contacted_ms = Some(now_ms());

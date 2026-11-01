@@ -54,8 +54,8 @@ pub struct Sim {
     pub dispatched: BTreeSet<EffectId>,
     /// Journal index of the event whose apply first emitted each effect (I7).
     pub emitted: BTreeMap<EffectId, usize>,
-    /// Automatic resleeve briefs: (journal index, sleeve, time) (I10).
-    pub briefs: Vec<(usize, SleeveId, Millis)>,
+    /// Automatic resleeves: (journal index, sleeve, time) (I10).
+    pub resleeves: Vec<(usize, SleeveId, Millis)>,
     /// Approval responses that left the hub, with the sleeve's generation at that moment.
     pub responses: BTreeMap<EffectId, Gen>,
     /// Intents of the most recent apply.
@@ -84,7 +84,7 @@ impl Sim {
             submitted: BTreeSet::new(),
             dispatched: BTreeSet::new(),
             emitted: BTreeMap::new(),
-            briefs: Vec::new(),
+            resleeves: Vec::new(),
             responses: BTreeMap::new(),
             last: Vec::new(),
             steps: 0,
@@ -111,6 +111,7 @@ impl Sim {
         self.log.push(bytes);
         self.steps += 1;
         check::intents(self, idx, &out);
+        check::resleeves(&prev, self, idx);
         check::step(&prev, &self.st, self);
         if matches!(e.kind, EventKind::Tick | EventKind::HubRecovered) {
             check::timers(&self.st, e.kind == EventKind::Tick);
@@ -149,7 +150,7 @@ impl Sim {
         self.pending.clear();
         let committed = self.committed;
         self.emitted.retain(|_, &mut i| i < committed);
-        self.briefs.retain(|&(i, _, _)| i < committed);
+        self.resleeves.retain(|&(i, _, _)| i < committed);
         if scopes_emptied {
             self.alive.clear();
         }
@@ -197,7 +198,9 @@ impl Sim {
                 let Some(e) = self.st.effects.get(&effect) else {
                     return;
                 };
-                if e.attempt != attempt || e.state != EffectState::Intent {
+                // A node executor asks: its check may have read a view from before a cancel.
+                let asks = kind.sleeve().is_none();
+                if !asks && (e.attempt != attempt || e.state != EffectState::Intent) {
                     return;
                 }
                 if let Some((s, g)) = kind.incarnation()
@@ -205,7 +208,14 @@ impl Sim {
                 {
                     return;
                 }
-                self.apply(EventKind::Dispatched { effect, attempt });
+                let out = self.apply(EventKind::Dispatched { effect, attempt });
+                // The answer goes back to the executor, not into the released intents.
+                if matches!(self.held.last(), Some(Intent::Reply(_))) {
+                    self.held.pop();
+                }
+                if asks && !out.contains(&Intent::Reply(Reply::Accepted)) {
+                    return;
+                }
                 self.dispatched.insert(effect);
                 if let EffectKind::RespondApproval { sleeve, .. } = kind {
                     self.responses.insert(effect, self.st.sleeves[&sleeve].g);

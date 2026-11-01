@@ -330,7 +330,7 @@ fn health_check_and_probation() {
     }
     assert_eq!(current_node(&store), "node v1.0.0");
     assert_eq!(store.check_probation().unwrap(), Verdict::Idle);
-    assert!(!store.confirm().unwrap());
+    assert!(!store.confirm("v1.1.0").unwrap());
     let p = store.probation().unwrap().unwrap();
     assert!(p.rolled_back_ms.is_some() && p.contacted_ms.is_none());
     assert!(
@@ -375,8 +375,10 @@ fn health_check_and_probation() {
     store
         .switch_on_probation("v1.1.0", Duration::from_millis(400))
         .unwrap();
-    assert!(store.confirm().unwrap());
-    assert!(!store.confirm().unwrap());
+    // A check that passed for another release confirms nothing.
+    assert!(!store.confirm("v1.0.0").unwrap());
+    assert!(store.confirm("v1.1.0").unwrap());
+    assert!(!store.confirm("v1.1.0").unwrap());
     thread::sleep(Duration::from_millis(500));
     assert_eq!(store.check_probation().unwrap(), Verdict::Confirmed);
     assert_eq!(current_node(&store), "node v1.1.0");

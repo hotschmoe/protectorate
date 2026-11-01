@@ -269,12 +269,25 @@ impl Core<'_> {
             .map(|e| e.id)
             .collect();
         for id in ids {
-            let to = if self.st.effects[&id].class == Class::Idempotent {
+            // A message whose prompt never left goes back to the head of the queue.
+            let unsent = self.st.effects[&id].state == EffectState::Intent;
+            let to = if unsent && self.return_unsent(id) {
+                EffectState::Abandoned
+            } else if self.st.effects[&id].class == Class::Idempotent {
                 EffectState::Confirmed
             } else {
                 EffectState::Fenced
             };
             self.set_effect(id, to);
+            self.on_effect(id, None);
+        }
+    }
+
+    /// Takes back a released record before any executor dispatched it: a later `Dispatched`
+    /// is refused, so it is never written.
+    pub(crate) fn withdraw(&mut self, id: EffectId) {
+        if self.effect_state(id) == Some(EffectState::Intent) {
+            self.set_effect(id, EffectState::Abandoned);
             self.on_effect(id, None);
         }
     }

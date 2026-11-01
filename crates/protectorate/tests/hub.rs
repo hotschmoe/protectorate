@@ -4,6 +4,7 @@
 mod common;
 
 use std::collections::HashSet;
+use std::os::unix::process::CommandExt;
 use std::time::Duration;
 
 use common::*;
@@ -60,6 +61,36 @@ fn sleeve_lifecycle() {
     hub.cli(&["sleeve", "stop", "one"]).ok();
     hub.wait("one", "ended", 60);
     assert!(scope_pids(&scope).is_empty(), "{scope} is gone after stop");
+    // Removed, the sleeve keeps nothing open in the hub: its executor ends, its transcript
+    // closes.
+    hub.cli(&["sleeve", "rm", "one"]).ok();
+    let log = hub.home.join(format!("sleeves/{id}/transcript.jsonl"));
+    let pid = serve_pid(&hub.home);
+    let open = || {
+        std::fs::read_dir(format!("/proc/{pid}/fd"))
+            .map(|d| {
+                d.flatten()
+                    .any(|f| std::fs::read_link(f.path()).ok() == Some(log.clone()))
+            })
+            .unwrap_or(false)
+    };
+    let threads = || {
+        std::fs::read_dir(format!("/proc/{pid}/task"))
+            .map(|d| {
+                d.flatten()
+                    .filter(|t| {
+                        std::fs::read_to_string(t.path().join("comm"))
+                            .is_ok_and(|c| c.trim() == format!("pt-exec-{id}"))
+                    })
+                    .count()
+            })
+            .unwrap_or(0)
+    };
+    eventually(
+        "the removed sleeve's files and thread to go",
+        Duration::from_secs(10),
+        || (!open() && threads() == 0).then_some(()),
+    );
 
     assert_eq!(
         git_out(&repo, &["status", "--porcelain"]),
@@ -97,8 +128,23 @@ fn crash_mid_turn_recovers() {
         Duration::from_secs(20),
         || scope_pids(&hub.scope(&id, 1)).is_empty().then_some(()),
     );
+    // A systemd-run the dead hub started that never registered its scope: recovery kills it
+    // before probing, or it would register g1 after the probe found g1 empty.
+    let mut stale = Reaped(
+        std::process::Command::new("sh")
+            .arg0("systemd-run")
+            .args(["-c", "while :; do sleep 1; done", "--unit"])
+            .arg(hub.scope(&id, 1))
+            .spawn()
+            .unwrap(),
+    );
 
     hub.restart();
+    eventually(
+        "recovery to kill the unregistered systemd-run",
+        Duration::from_secs(30),
+        || stale.0.try_wait().unwrap().map(drop),
+    );
     let log = hub.log_text();
     assert!(
         log.contains("apply HubRecovered"),
@@ -168,6 +214,16 @@ fn crash_mid_turn_recovers() {
     );
 }
 
+/// A child killed and reaped when the test ends, passing or not.
+struct Reaped(std::process::Child);
+
+impl Drop for Reaped {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// The Envoy round trip a vendor general agent uses: send, wait for the settled reply, read.
 #[test]
 fn envoy_round_trip() {
@@ -201,6 +257,30 @@ fn envoy_round_trip() {
     assert!(
         read.ok()
             .contains("owner: Reply with exactly the word PONG")
+    );
+    // A vendor agent reads its own exchanges with Envoy, never the owner's.
+    let agent_token = hub.printed("envoy-only token: ");
+    let as_agent = [("PROTECTORATE_TOKEN", agent_token.as_str())];
+    hub.cli_env(
+        &as_agent,
+        &[
+            "envoy",
+            "send",
+            "Reply with exactly the word BETA and nothing else.",
+        ],
+    )
+    .ok();
+    let beta = hub.cli_env(&as_agent, &["envoy", "wait", "--timeout", "180"]);
+    assert!(
+        beta.ok().contains("BETA"),
+        "Envoy answered: {}",
+        beta.stdout
+    );
+    let theirs = hub.cli_env(&as_agent, &["envoy", "read"]);
+    let theirs = theirs.ok();
+    assert!(
+        theirs.contains("BETA") && !theirs.contains("PONG"),
+        "an agent's read: {theirs}"
     );
     assert!(
         std::fs::read_to_string(hub.home.join("envoy/CLAUDE.md"))
@@ -302,6 +382,8 @@ fn capabilities_are_scoped() {
         &["sleeve", "transcript", "b5"],
         &["sleeve", "wait", "b5", "--timeout", "1"],
         &["envoy", "send", "hello"],
+        &["envoy", "read"],
+        &["envoy", "wait", "--timeout", "1"],
     ] {
         let r = hub.cli_env(&as_a, args);
         assert_eq!(
@@ -312,6 +394,23 @@ fn capabilities_are_scoped() {
     }
     hub.cli_env(&as_a, &["sleeve", "transcript", "a5"]).ok();
     assert_eq!(hub.sleeve("b5")["lifecycle"].as_str(), Some("running"));
+
+    // Any node job from a sleeve waits for the owner, `--maintenance` or not: a node runs
+    // every job with its own account. Denied, it fails before it reaches the fleet.
+    std::thread::scope(|t| {
+        let run = t.spawn(|| hub.cli_env(&as_a, &["job", "run", "--arch", "amd64", "--", "true"]));
+        let ask = eventually("the job's approval", Duration::from_secs(30), || {
+            let v = hub.cli(&["--json", "approval", "list"]).json();
+            v["approvals"].as_array()?.iter().find_map(|a| {
+                let open = a["state"].as_str() == Some("pending")
+                    && a.to_string().contains("run node job true");
+                open.then(|| a["id"].as_str().unwrap().to_string())
+            })
+        });
+        hub.cli(&["approval", "decide", &ask, "deny"]).ok();
+        let r = run.join().unwrap();
+        assert_eq!(r.status, 4, "a denied job: {} {}", r.stdout, r.stderr);
+    });
 
     let envoy_only = hub.printed("envoy-only token: ");
     let as_agent = [("PROTECTORATE_TOKEN", envoy_only.as_str())];
@@ -472,4 +571,406 @@ fn envoy_on_claude_paid() {
         "Envoy on Claude answered: {}",
         reply.stdout
     );
+}
+
+fn write_script(path: &std::path::Path, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::write(path, format!("#!/bin/sh\n{body}\n")).expect("write script");
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod script");
+}
+
+/// A sleeve controls its repo's config and `.gitattributes` (a child, the shared git dir): the
+/// hub's checkpoint, worktree add and brief facts must run none of its filters, hooks,
+/// fsmonitor or textconv. A child path through a symlink never reaches another worktree.
+#[test]
+fn workspace_git_config_runs_nothing() {
+    if !have_runtime() {
+        return;
+    }
+    let port = free_port();
+    let listen = format!("127.0.0.1:{port}");
+    let hub = Hub::start_with("gitcfg", "pi_local", &["--listen", &listen], &[]);
+    let repo = temp_repo("gitcfg");
+    let traps = unique("gitcfg-traps");
+    std::fs::create_dir_all(traps.join("hooks")).unwrap();
+    let marker = |what: &str| traps.join(format!("ran-{what}"));
+    for (name, what) in [
+        ("clean", "clean"),
+        ("smudge", "smudge"),
+        ("fsmonitor", "fsmonitor"),
+        ("textconv", "textconv"),
+        ("hooks/post-checkout", "post-checkout"),
+        ("hooks/reference-transaction", "reference-transaction"),
+    ] {
+        let tail = if matches!(what, "clean" | "smudge") {
+            "cat"
+        } else {
+            "exit 0"
+        };
+        write_script(
+            &traps.join(name),
+            &format!("touch '{}'\n{tail}", marker(what).display()),
+        );
+    }
+    std::fs::write(repo.join(".gitattributes"), "* filter=evil diff=evil\n").unwrap();
+    assert!(git(&repo, &["add", ".gitattributes"]).status.success());
+    assert!(
+        git(&repo, &["commit", "-qm", "attributes"])
+            .status
+            .success()
+    );
+    let t = |n: &str| traps.join(n).to_string_lossy().into_owned();
+    for (k, v) in [
+        ("filter.evil.clean", t("clean")),
+        ("filter.evil.smudge", t("smudge")),
+        ("filter.evil.required", "true".into()),
+        ("diff.evil.textconv", t("textconv")),
+        ("core.fsmonitor", t("fsmonitor")),
+        ("core.hooksPath", t("hooks")),
+    ] {
+        assert!(
+            git(&repo, &["config", k, &v]).status.success(),
+            "config {k}"
+        );
+    }
+    std::fs::write(repo.join("notes.txt"), "changed by the sleeve\n").unwrap();
+
+    let root = hub.spawn_pi("gitroot", &repo);
+    let id = root["id"].as_str().unwrap().to_string();
+    hub.send("gitroot", READY);
+    hub.wait("gitroot", "idle", 180);
+    let checkpoints = hub.home.join(format!("sleeves/{id}/checkpoints.jsonl"));
+    let line = eventually(
+        "a checkpoint after the turn",
+        Duration::from_secs(30),
+        || {
+            std::fs::read_to_string(&checkpoints)
+                .ok()
+                .filter(|t| t.contains("\"g\":1"))
+        },
+    );
+    let commit = pt_json::parse(line.lines().last().unwrap()).unwrap()["commit"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let objects = hub.home.join(format!("sleeves/{id}/objects"));
+    let show = std::process::Command::new("git")
+        .args([
+            "-C",
+            repo.to_str().unwrap(),
+            "show",
+            &format!("{commit}:notes.txt"),
+        ])
+        .env("GIT_OBJECT_DIRECTORY", &objects)
+        .env(
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            repo.join(".git/objects"),
+        )
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&show.stdout),
+        "changed by the sleeve\n",
+        "the checkpoint holds the work tree's bytes"
+    );
+
+    let kid = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "gitkid",
+            "--parent",
+            "gitroot",
+            "--harness",
+            "pi_local",
+        ])
+        .json();
+    hub.wait("gitkid", "idle", 120);
+    let kid_path = std::path::PathBuf::from(kid["path"].as_str().unwrap());
+    assert_eq!(
+        std::fs::read_to_string(kid_path.join("notes.txt")).unwrap(),
+        "The secret word is PELICAN.\n",
+        "the child's worktree is checked out"
+    );
+    assert_eq!(
+        git_out(&kid_path, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "pt/gitkid"
+    );
+
+    // A second child whose path is a symlink to the first one's worktree.
+    let links = unique("gitcfg-links");
+    std::fs::create_dir_all(&links).unwrap();
+    let link = links.join("kid2");
+    std::os::unix::fs::symlink(&kid_path, &link).unwrap();
+    // Over the API: the CLI would resolve the link itself.
+    let owner = hub.printed("owner token (shown once): ");
+    let body = pt_json::obj! {
+        "name" => "gitkid2",
+        "harness" => "pi_local",
+        "parent_id" => "gitroot",
+        "path" => link.to_str().unwrap(),
+    };
+    let (status, v) = post(port, "SpawnSleeve", Some(&owner), &body.to_string());
+    assert_eq!(status, 400, "a symlinked child path is refused: {v}");
+    assert_eq!(hub.sleeve("gitkid2"), pt_json::Value::Null);
+
+    for what in [
+        "clean",
+        "smudge",
+        "fsmonitor",
+        "textconv",
+        "post-checkout",
+        "reference-transaction",
+    ] {
+        assert!(
+            !marker(what).exists(),
+            "the hub ran the workspace's {what} with its own authority"
+        );
+    }
+}
+
+/// A child's `git worktree add` cut short by a hub crash: the worktree is registered but has no
+/// files. Recovery must not take the directory for a finished provision; it completes it.
+#[test]
+fn cut_short_worktree_is_finished() {
+    if !have_runtime() {
+        return;
+    }
+    let real_git = std::process::Command::new("sh")
+        .args(["-c", "command -v git"])
+        .output()
+        .unwrap();
+    let real_git = String::from_utf8_lossy(&real_git.stdout).trim().to_string();
+    let wrap = unique("cutshort-bin");
+    std::fs::create_dir_all(&wrap).unwrap();
+    let once = wrap.join("hung");
+    // The first `worktree add` registers the worktree without its files, then hangs as if the
+    // hub died mid-checkout.
+    write_script(
+        &wrap.join("git"),
+        &format!(
+            r#"case " $* " in
+  *" worktree add "*)
+    if [ ! -e '{once}' ]; then
+      touch '{once}'
+      for a in "$@"; do
+        shift
+        set -- "$@" "$a"
+        [ "$a" = add ] && set -- "$@" --no-checkout
+      done
+      '{real_git}' "$@"
+      exec sleep 600
+    fi;;
+esac
+exec '{real_git}' "$@""#,
+            once = once.display()
+        ),
+    );
+    let path = format!(
+        "{}:{}",
+        wrap.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let mut hub = Hub::start_with("cutshort", "pi_local", &[], &[("PATH", path.as_str())]);
+    let repo = temp_repo("cutshort");
+    hub.spawn_pi("cutroot", &repo);
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "cutkid",
+        "--parent",
+        "cutroot",
+        "--harness",
+        "pi_local",
+    ])
+    .ok();
+    let kid_path = eventually(
+        "the worktree to be registered",
+        Duration::from_secs(30),
+        || {
+            let p = hub.sleeve("cutkid")["path"].as_str()?.to_string();
+            git_out(&repo, &["worktree", "list"])
+                .contains(&p)
+                .then_some(p)
+        },
+    );
+    let kid_path = std::path::PathBuf::from(kid_path);
+    assert!(once.exists(), "the add was cut short");
+    assert!(!kid_path.join("notes.txt").exists());
+    hub.restart();
+    hub.wait("cutkid", "idle", 120);
+    assert_eq!(
+        std::fs::read_to_string(kid_path.join("notes.txt")).unwrap_or_default(),
+        "The secret word is PELICAN.\n",
+        "recovery finished the checkout"
+    );
+    assert_eq!(
+        git_out(&kid_path, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "pt/cutkid"
+    );
+    assert_eq!(git_out(&kid_path, &["status", "--porcelain"]), "");
+}
+
+/// What a sleeve process can reach, probed from inside a real sandbox by a stand-in `pi` that
+/// then runs the real one: not the owner's socket, nothing on the sleeves' socket without its
+/// capability (even with scopes off, where no cgroup names it), no write to the hub's `run/`,
+/// and no login file of a harness it is not running, now or from an earlier incarnation.
+#[test]
+fn sandbox_reaches_only_its_own() {
+    if !have_runtime() {
+        return;
+    }
+    let real_pi = std::process::Command::new("sh")
+        .args(["-c", "command -v pi"])
+        .output()
+        .unwrap();
+    let real_pi = String::from_utf8_lossy(&real_pi.stdout).trim().to_string();
+    let dir = unique("sbx");
+    let owner = dir.join("owner");
+    let real_home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+    for rel in [
+        ".pi/agent/models.json",
+        ".pi/agent/settings.json",
+        ".pi/agent/auth.json",
+    ] {
+        if real_home.join(rel).is_file() {
+            std::fs::create_dir_all(owner.join(rel).parent().unwrap()).unwrap();
+            std::fs::copy(real_home.join(rel), owner.join(rel)).unwrap();
+        }
+    }
+    std::fs::create_dir_all(owner.join(".claude")).unwrap();
+    std::fs::write(owner.join(".claude/.credentials.json"), "OWNER-CLAUDE").unwrap();
+    let (repo, other) = (temp_repo("sbx"), temp_repo("sbx-other"));
+    let fake = dir.join("pi");
+    write_script(
+        &fake,
+        &format!(
+            r#"if [ "$1" != --version ]; then
+  run="${{PROTECTORATE_SOCKET%%/run/*}}/run"
+  {{
+    [ -S "$run/api.sock" ] && echo owner_socket=visible || echo owner_socket=hidden
+    env -u PROTECTORATE_TOKEN protectorate --json sleeve list >/dev/null 2>&1 && echo tokenless=ok || echo tokenless=refused
+    protectorate --json sleeve list >/dev/null 2>&1 && echo token=ok || echo token=refused
+    touch "$run/bin/probe" 2>/dev/null && echo bin=writable || echo bin=readonly
+    touch "$run/sleeves/probe" 2>/dev/null && echo sleeves=writable || echo sleeves=readonly
+    [ -e "$HOME/.claude/.credentials.json" ] && echo claude_login=visible || echo claude_login=hidden
+    [ -r '{other}/notes.txt' ] && echo other_root=visible || echo other_root=hidden
+    git -c user.name=probe -c user.email=probe@localhost commit -q --allow-empty \
+      -m "probe $PROTECTORATE_SLEEVE" >/dev/null 2>&1 && echo commit=ok || echo commit=failed
+  }} < /dev/null > "$HOME/probe.txt"
+fi
+exec '{real_pi}' "$@""#,
+            other = other.display()
+        ),
+    );
+    let hub = Hub::start_config(
+        "sbx",
+        "pi_local",
+        &[
+            ("scopes", pt_json::Value::from(false)),
+            ("pi_program", fake.to_str().unwrap().into()),
+        ],
+        &[],
+        &[("HOME", owner.to_str().unwrap())],
+    );
+    hub.spawn_pi("other", &other);
+    let s = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "sbx",
+            "--path",
+            repo.to_str().unwrap(),
+            "--harness",
+            "pi_local",
+            "--resleeve-to",
+            "claude",
+        ])
+        .json();
+    hub.wait("sbx", "idle", 120);
+    let id = s["id"].as_str().unwrap().to_string();
+    let home = hub.home.join(format!("sleeves/{id}/home"));
+    let probe = std::fs::read_to_string(home.join("probe.txt")).expect("the probe ran");
+    for want in [
+        "owner_socket=hidden",
+        "tokenless=refused",
+        "token=ok",
+        "bin=readonly",
+        "sleeves=readonly",
+        "claude_login=hidden",
+        "other_root=hidden",
+        "commit=ok",
+    ] {
+        assert!(probe.lines().any(|l| l == want), "want {want}:\n{probe}");
+    }
+    // A worktree child sees its parent's git dirs, not the other root, and commits.
+    let kid = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "sbxkid",
+            "--parent",
+            "sbx",
+            "--harness",
+            "pi_local",
+        ])
+        .json();
+    hub.wait("sbxkid", "idle", 120);
+    let kid_id = kid["id"].as_str().unwrap();
+    let kid_probe =
+        std::fs::read_to_string(hub.home.join(format!("sleeves/{kid_id}/home/probe.txt")))
+            .expect("the child's probe ran");
+    for want in ["other_root=hidden", "commit=ok"] {
+        assert!(
+            kid_probe.lines().any(|l| l == want),
+            "want {want}:\n{kid_probe}"
+        );
+    }
+    assert_eq!(
+        git_out(&repo, &["log", "-1", "--format=%s", "pt/sbxkid"]),
+        "probe sbxkid",
+        "the child's commit is on its branch"
+    );
+    assert!(
+        !home.join(".claude/.credentials.json").exists(),
+        "a resleeve target's login is not copied in ahead of time"
+    );
+
+    // A login an earlier incarnation left behind is moved out before the next launch (after a
+    // turn, so the native session exists to resume).
+    hub.send("sbx", READY);
+    hub.wait("sbx", "idle", 180);
+    hub.cli(&["sleeve", "stop", "sbx"]).ok();
+    hub.wait("sbx", "ended", 60);
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::write(home.join(".claude/.credentials.json"), "OLD-CLAUDE").unwrap();
+    hub.cli(&["sleeve", "start", "sbx"]).ok();
+    hub.wait("sbx", "idle", 120);
+    let probe = std::fs::read_to_string(home.join("probe.txt")).unwrap();
+    assert!(probe.contains("claude_login=hidden"), "{probe}");
+    assert_eq!(
+        std::fs::read_to_string(hub.home.join(format!(
+            "sleeves/{id}/credentials/.claude/.credentials.json"
+        )))
+        .unwrap_or_default(),
+        "OLD-CLAUDE",
+        "kept outside every sandbox"
+    );
+}
+
+/// The pid of the `serve` running on `home`.
+fn serve_pid(home: &std::path::Path) -> u32 {
+    let want = format!("--home\0{}\0serve\0", home.display());
+    std::fs::read_dir("/proc")
+        .unwrap()
+        .flatten()
+        .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
+        .find(|pid| {
+            std::fs::read(format!("/proc/{pid}/cmdline"))
+                .is_ok_and(|c| String::from_utf8_lossy(&c).contains(&want))
+        })
+        .expect("the hub's serve process")
 }

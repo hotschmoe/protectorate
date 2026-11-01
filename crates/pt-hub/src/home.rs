@@ -34,16 +34,25 @@ impl Home {
     pub fn worktrees(&self) -> PathBuf {
         self.root.join("worktrees")
     }
-    /// Bound read-write into every sandbox, so a socket re-created by a restarted hub stays
-    /// reachable from sleeves that outlived it.
     pub fn run(&self) -> PathBuf {
         self.root.join("run")
     }
+    /// The owner's socket: never visible inside a sandbox.
     pub fn socket(&self) -> PathBuf {
         self.run().join("api.sock")
     }
+    /// Bound read-only into every sandbox: the CLI link.
     pub fn bin(&self) -> PathBuf {
         self.run().join("bin")
+    }
+    /// Bound read-only into every sandbox (a directory, so a socket re-created by a restarted
+    /// hub stays reachable from sleeves that outlived it).
+    pub fn sleeve_run(&self) -> PathBuf {
+        self.run().join("sleeves")
+    }
+    /// The sleeves' socket: a sleeve capability is required on it.
+    pub fn sleeve_socket(&self) -> PathBuf {
+        self.sleeve_run().join("api.sock")
     }
     /// The event stream's kept messages (`stream.rs`).
     pub fn stream(&self) -> PathBuf {
@@ -98,6 +107,7 @@ impl Home {
             home.worktrees(),
             home.run(),
             home.bin(),
+            home.sleeve_run(),
             home.jobs(),
         ] {
             fs::create_dir_all(&d).map_err(|e| ctx(&d, e))?;

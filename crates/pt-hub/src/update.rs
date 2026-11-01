@@ -32,6 +32,8 @@ pub const RESTART_CODE: u8 = 75;
 const NODE_CALL_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 /// How long past its probation the hub waits for an updated node to answer.
 const NODE_BACK_SLACK: Duration = Duration::from_secs(120);
+/// The longest node probation an `UpdateNodes` may ask for: a day.
+const MAX_NODE_PROBATION: u64 = 86_400;
 
 /// Why `serve` returns.
 pub enum Stop {
@@ -281,9 +283,12 @@ pub fn watch_probation(hub: &Arc<Hub>, version: String) {
             let Some(hub) = weak.upgrade() else { return };
             let last = match healthy(&hub) {
                 Ok(()) => {
-                    let kept = Store::open(&hub.home.root).and_then(|s| s.confirm());
+                    let kept = Store::open(&hub.home.root).and_then(|s| s.confirm(&version));
                     let text = match kept {
-                        Ok(_) => format!("hub {version} passed its health check; the update stays"),
+                        Ok(true) => {
+                            format!("hub {version} passed its health check; the update stays")
+                        }
+                        Ok(false) => format!("hub {version} passed its health check; not on trial"),
                         Err(e) => format!("hub {version} is healthy, but confirming failed: {e}"),
                     };
                     info!("update: {text}");
@@ -339,10 +344,13 @@ pub fn update_nodes(hub: &Hub, r: api::UpdateNodesRequest) -> Result<api::NodeUp
     let src = source(hub)?;
     let rel = release(hub, &src, r.version.as_deref(), r.channel)?;
     let tag = rel.tag.clone();
-    let probation = r
-        .probation_secs
-        .unwrap_or(NODE_CONTACT_WINDOW.as_secs())
-        .max(1);
+    let probation = r.probation_secs.unwrap_or(NODE_CONTACT_WINDOW.as_secs());
+    if !(1..=MAX_NODE_PROBATION).contains(&probation) {
+        return Err(err(
+            ErrorCode::Invalid,
+            format!("probation must be 1 to {MAX_NODE_PROBATION} s"),
+        ));
+    }
     let views = up.poller.nodes();
     let target = |v: &pt_fleet::NodeView| -> Option<Target> {
         let h = v.hello.as_ref()?;
@@ -486,7 +494,9 @@ fn update_one(
     if no_wait {
         return Ok(format!("{switched}; restarting on {probation} s probation"));
     }
-    let deadline = Instant::now() + Duration::from_secs(probation) + NODE_BACK_SLACK;
+    let deadline = Instant::now()
+        .checked_add(Duration::from_secs(probation) + NODE_BACK_SLACK)
+        .ok_or("the probation window is too long")?;
     let mut last = String::from("no answer yet");
     // The old process answers until it exits; once it is gone, an answer from the old
     // release means the new one rolled back.

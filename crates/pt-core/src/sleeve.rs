@@ -822,8 +822,10 @@ impl Core<'_> {
     /// A Send can go out as the next prompt now.
     pub(crate) fn deliverable(&self, sid: SleeveId) -> bool {
         let s = &self.st.sleeves[&sid];
+        // After a restart, nothing goes to an incarnation whose scope is not yet probed.
         s.life == Life::Running
             && s.proc == Proc::Up
+            && !s.probing
             && matches!(s.activity, Activity::Idle { .. })
             && s.target.mode == Mode::Headless
             && matches!(
@@ -881,6 +883,34 @@ impl Core<'_> {
             self.stop_incarnation(sid);
         }
         self.deliver_next(sid);
+    }
+
+    /// The message of a prompt or steer record that was never dispatched goes back to the head
+    /// of its queue, for the next incarnation; true when there was one.
+    pub(crate) fn return_unsent(&mut self, id: EffectId) -> bool {
+        let (EffectKind::SendPrompt {
+            sleeve, request_id, ..
+        }
+        | EffectKind::Steer {
+            sleeve, request_id, ..
+        }) = self.st.effects[&id].kind.clone()
+        else {
+            return false;
+        };
+        if self.st.sleeves[&sleeve]
+            .messages
+            .get(&request_id)
+            .map(|m| m.state)
+            != Some(MsgState::InFlight(id))
+        {
+            return false;
+        }
+        // A steer held for this prompt's turn keeps its place behind it.
+        self.return_steer(sleeve);
+        let s = self.sl(sleeve);
+        s.messages.get_mut(&request_id).expect("message").state = MsgState::Queued;
+        s.queue.push_front(request_id);
+        true
     }
 
     /// The held steer goes to the head of the queue when its turn ends first.

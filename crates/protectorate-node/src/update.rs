@@ -91,8 +91,10 @@ impl Releases {
         if !self.trial.swap(false, Ordering::SeqCst) {
             return;
         }
-        let Some(store) = &self.store else { return };
-        match store.confirm() {
+        let (Some(store), Some(started)) = (&self.store, &self.started) else {
+            return;
+        };
+        match store.confirm(started) {
             Ok(true) => eprintln!(
                 "protectorate-node: the hub made contact; release {} stays",
                 self.started.as_deref().unwrap_or("-")

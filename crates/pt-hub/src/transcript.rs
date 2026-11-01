@@ -244,6 +244,11 @@ impl Transcripts {
         Ok(s)
     }
 
+    /// Drops a removed sleeve's open transcript; a later read opens it again.
+    pub fn close(&self, id: SleeveId) {
+        lock(&self.map).remove(&id);
+    }
+
     pub fn stats(&self, id: SleeveId) -> Stats {
         self.get(id)
             .map(|s| lock(&s).stats.clone())

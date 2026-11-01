@@ -1,0 +1,26 @@
+#scenario 70d64cb2c27a1aa8
+# A job cancelled while its submit is released but not yet dispatched is Cancelled at once and
+# its submit taken back: the executor's late Dispatched is refused, so nothing reaches a node
+# and no cancel is sent.
+job j1
+step
+expect-job 0 state=Submitting
+expect-effect job:0:1 state=Intent
+cancel-job 0
+expect-job 0 state=Cancelled
+expect-effect job:0:1 state=Abandoned
+policy poll=0
+run
+expect-job 0 state=Cancelled
+expect-effect job:0:1 state=Abandoned
+expect-effect cancel:0:1:* count=0
+tick 10s
+run
+expect-job 0 state=Cancelled
+# Once dispatched, a cancel goes to the node as before.
+job j2
+run
+expect-job 1 state=Running
+cancel-job 1
+expect-job 1 state=Cancelling
+expect-effect cancel:1:1:* count=1

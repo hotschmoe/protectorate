@@ -203,8 +203,19 @@ fn api_surface() {
         .find(|d| d["name"].as_str() == Some("phone"))
         .and_then(|d| d["id"].as_str())
         .unwrap();
+    let mut on_phone = ws(port, &format!("?access_token={phone}"), &[]).unwrap();
+    assert_eq!(next(&mut on_phone)["type"].as_str(), Some("snapshot"));
     hub.cli(&["device", "revoke", id]).ok();
     assert_eq!(post(port, "GetState", Some(&phone), "{}").0, 401, "revoked");
+    // A stream the device opened before is closed too, within a second or so.
+    let closed = loop {
+        match on_phone.recv() {
+            Ok(pt_http::Message::Close(code, _)) => break Some(code),
+            Ok(_) => {}
+            Err(_) => break None,
+        }
+    };
+    assert_eq!(closed, Some(1008), "the revoked device's stream ends");
 
     // The web build: files with ETags, the SPA fallback, 404 for a missing asset.
     let index = get(port, "/", &[]);
@@ -622,4 +633,53 @@ fn quota_readers_run() {
         Some("ok"),
         "{state}"
     );
+}
+
+/// The owner's socket takes a caller without a token as the owner only when it can tell that
+/// caller is not in a sleeve: a connection whose process has exited (its descriptor kept by
+/// another) is refused, not taken for the owner. The sleeves' socket never takes one.
+#[test]
+fn unidentified_peer_is_refused() {
+    if !on_path("python3") {
+        eprintln!("SKIP: python3 is not installed");
+        return;
+    }
+    let hub = Hub::start_with("peer", "pi_local", &[], &[]);
+    // The connecting process exits; its child sends the request on the inherited socket.
+    let script = r#"
+import os, socket, sys, time
+s = socket.socket(socket.AF_UNIX)
+s.connect(sys.argv[1])
+parent = os.getpid()
+if os.fork():
+    os._exit(0)
+while os.path.exists("/proc/%d" % parent):
+    time.sleep(0.01)
+time.sleep(0.2)
+s.sendall(b"POST /api/ListSleeves HTTP/1.1\r\nHost: x\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+print(s.recv(4096).split(b"\r\n")[0].decode())
+"#;
+    let n = std::cell::Cell::new(0);
+    let status = |sock: &std::path::Path| {
+        n.set(n.get() + 1);
+        let out = hub.home.with_file_name(format!("orphan-{}.txt", n.get()));
+        let mut p = Command::new("python3")
+            .args(["-I", "-c", script])
+            .arg(sock)
+            .stdout(std::fs::File::create(&out).unwrap())
+            .spawn()
+            .expect("python3");
+        // Reaped, so its pid is gone before the child sends.
+        p.wait().unwrap();
+        eventually("the orphan's answer", Duration::from_secs(10), || {
+            let t = std::fs::read_to_string(&out).unwrap_or_default();
+            (!t.trim().is_empty()).then(|| t.trim().to_string())
+        })
+    };
+    let owner = status(&hub.home.join("run/api.sock"));
+    assert!(owner.contains(" 403 "), "owner socket: {owner}");
+    let sleeves = status(&hub.home.join("run/sleeves/api.sock"));
+    assert!(sleeves.contains(" 401 "), "sleeves socket: {sleeves}");
+    // The owner's own shell is still the owner.
+    hub.cli(&["sleeve", "list"]).ok();
 }

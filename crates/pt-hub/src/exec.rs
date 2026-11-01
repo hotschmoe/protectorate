@@ -4,13 +4,16 @@
 //!
 //! A live incarnation's pump is the one ordered stream for its sleeve: the executor hands it
 //! its reports, and the pump submits each only after every harness event it has received, so
-//! output read before a write never reaches the core after the write's `Dispatched`.
+//! output read before a write never reaches the core after the write's `Dispatched`. A prompt
+//! is reported by the pump itself: `Dispatched` when the driver's entry for the write comes
+//! through (output read before it is the previous turn's) and the verdict when its ack does.
 
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -18,16 +21,16 @@ use std::time::{Duration, Instant};
 
 use pt_core::{
     Ask, Choice, EffectId, EffectKind, EffectState, EventKind, ExitCause, Gen, Harness, Intent,
-    Layout, Obs, ProbeResult, Proc, Sleeve, SleeveId, Target, TurnEnd,
+    Layout, Life, Obs, ProbeResult, Proc, Sleeve, SleeveId, Target, TurnEnd,
 };
-use pt_drivers::{Ack, Decision, Entry, ErrorClass, Session, Stop};
+use pt_drivers::{Ack, AckKind, Decision, Entry, ErrorClass, Session, Stop};
 use pt_json::obj;
 
 use crate::brief;
 use crate::git;
 use crate::home::now_ms;
 use crate::hub::{Hub, View};
-use crate::log::{debug, info, warning};
+use crate::log::{debug, error, info, warning};
 use crate::transcript::Note;
 use crate::wire;
 
@@ -36,8 +39,22 @@ const STOP_GRACE: Duration = Duration::from_secs(10);
 /// How long a pump waits on harness output before it looks for an executor report.
 const ORDER_POLL: Duration = Duration::from_millis(10);
 
-/// A report the pump submits in its stream, then acknowledges.
-type Ordered = (EventKind, Sender<()>);
+/// How long a confirmed prompt with no native turn id waits for the harness's turn start.
+const NATIVE_WAIT: Duration = Duration::from_secs(2);
+
+/// What the executor hands the pump, which acknowledges each once it is in.
+enum Ordered {
+    /// A report the pump submits in its stream.
+    Report(EventKind),
+    /// A prompt about to be written, which the pump reports from the driver's entries.
+    Expect {
+        request_id: String,
+        effect: EffectId,
+        attempt: u32,
+    },
+}
+
+type Order = (Ordered, Sender<()>);
 
 pub struct Executors {
     hub: Arc<Hub>,
@@ -69,33 +86,99 @@ impl Executors {
         let Some(id) = intent_sleeve(&intent) else {
             return self.jobs.route(intent);
         };
-        let tx = self.sleeves.entry(id).or_insert_with(|| {
-            let (tx, rx) = mpsc::channel();
-            let exec = SleeveExec {
-                hub: self.hub.clone(),
-                id,
-                live: None,
-            };
-            thread::Builder::new()
-                .name(format!("pt-exec-{}", id.0))
-                .spawn(move || exec.run(rx))
-                .expect("spawn sleeve executor");
-            tx
-        });
-        let _ = tx.send(intent);
+        if let Some(tx) = self.sleeves.get(&id) {
+            let _ = tx.send(intent);
+            return;
+        }
+        let view = self.hub.view();
+        if view
+            .state
+            .sleeve(id)
+            .is_none_or(|s| s.life == Life::Removed)
+        {
+            return refuse(&self.hub, intent, "the sleeve is removed");
+        }
+        let (tx, rx) = mpsc::channel();
+        let exec = SleeveExec {
+            hub: self.hub.clone(),
+            id,
+            live: None,
+        };
+        match thread::Builder::new()
+            .name(format!("pt-exec-{}", id.0))
+            .spawn(move || exec.run(rx))
+        {
+            Ok(_) => {
+                let _ = tx.send(intent);
+                self.sleeves.insert(id, tx);
+            }
+            Err(e) => {
+                error!("sleeve {}: spawn executor: {e}", id.0);
+                refuse(&self.hub, intent, &format!("spawn executor: {e}"));
+            }
+        }
     }
+
+    /// Lets a removed sleeve's executor finish what it was handed and end; later intents for it
+    /// are answered here.
+    pub fn release(&mut self, id: SleeveId) {
+        self.sleeves.remove(&id);
+    }
+}
+
+/// Answers an intent no executor will run: an effect is refused, a probe cannot tell.
+pub(crate) fn refuse(hub: &Hub, intent: Intent, why: &str) {
+    match intent {
+        Intent::Execute {
+            effect, attempt, ..
+        } => {
+            hub.submit(EventKind::Dispatched { effect, attempt });
+            hub.submit(EventKind::Nacked {
+                effect,
+                attempt,
+                reason: why.to_string(),
+            });
+        }
+        Intent::Probe {
+            effect, attempt, ..
+        } => hub.submit(EventKind::Probed {
+            effect,
+            attempt,
+            result: ProbeResult::Unknowable,
+        }),
+        other => debug!("dropped {other:?}: {why}"),
+    }
+}
+
+/// Runs `f` on a new named thread; the error says what could not start.
+fn spawn(name: String, f: impl FnOnce() + Send + 'static) -> Result<(), String> {
+    thread::Builder::new()
+        .name(name.clone())
+        .spawn(f)
+        .map(drop)
+        .map_err(|e| format!("spawn {name}: {e}"))
 }
 
 struct Live {
     g: Gen,
     session: Arc<Session>,
-    order: Sender<Ordered>,
+    order: Sender<Order>,
 }
 
 struct SleeveExec {
     hub: Arc<Hub>,
     id: SleeveId,
     live: Option<Live>,
+}
+
+struct Prompt<'a> {
+    g: Gen,
+    effect: EffectId,
+    attempt: u32,
+    request_id: &'a str,
+    text: &'a str,
+    /// The turn a steer is for; none for a prompt.
+    steer: Option<&'a str>,
 }
 
 enum Outcome {
@@ -177,6 +260,73 @@ fn seed_credentials(owner_home: &Path, home: &Path, h: Harness) -> io::Result<()
     Ok(())
 }
 
+fn provision_barrier(hub: &Hub, id: SleeveId) -> PathBuf {
+    hub.home.sleeve_dir(id).join("provisioned")
+}
+
+/// The completion barrier of a sleeve's Provision: written only after the layout is whole.
+fn provisioned(hub: &Hub, id: SleeveId) -> bool {
+    provision_barrier(hub, id).is_file()
+}
+
+/// Leaves only harness `h`'s login files in a sleeve's home: every other harness's move to
+/// `sleeves/<id>/credentials/`, which no sandbox sees, and move back when that harness runs
+/// again. Runs before a launch, once the previous incarnation's scope is empty.
+fn stage_credentials(
+    owner_home: &Path,
+    sleeve_dir: &Path,
+    home: &Path,
+    h: Harness,
+) -> io::Result<()> {
+    let keep = credential_files(h);
+    let stash = sleeve_dir.join("credentials");
+    let every = [
+        Harness::Claude,
+        Harness::Codex,
+        Harness::Grok,
+        Harness::PiVendor,
+    ];
+    for rel in every.into_iter().flat_map(credential_files) {
+        let (live, kept) = (home.join(rel), stash.join(rel));
+        let (from, to) = if keep.contains(rel) {
+            if live.symlink_metadata().is_ok() || kept.symlink_metadata().is_err() {
+                continue;
+            }
+            (kept, live)
+        } else {
+            if live.symlink_metadata().is_err() {
+                continue;
+            }
+            (live, kept)
+        };
+        let ctx = |e: io::Error| io::Error::new(e.kind(), format!("move {}: {e}", from.display()));
+        if let Some(dir) = to.parent() {
+            fs::create_dir_all(dir).map_err(ctx)?;
+            fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(ctx)?;
+        }
+        fs::rename(&from, &to).map_err(ctx)?;
+    }
+    seed_credentials(owner_home, home, h)
+}
+
+/// The workspaces a sleeve's sandbox hides: every other live claim except its parent's (a
+/// worktree child's git dirs and a view's files are there) and its own children's, and none
+/// that holds its own workspace or its parent's.
+fn other_claims(st: &pt_core::State, s: &Sleeve) -> Vec<PathBuf> {
+    let parent = s
+        .parent
+        .and_then(|p| st.sleeve(p))
+        .map(|p| PathBuf::from(&p.claim.path));
+    let own = PathBuf::from(&s.claim.path);
+    st.sleeves
+        .values()
+        .filter(|o| o.id != s.id && o.life != Life::Removed)
+        .filter(|o| Some(o.id) != s.parent && o.parent != Some(s.id))
+        .map(|o| PathBuf::from(&o.claim.path))
+        .filter(|p| !own.starts_with(p) && parent.as_ref().is_none_or(|q| !q.starts_with(p)))
+        .collect()
+}
+
 /// Whether the record is still exactly what this intent was released for.
 pub(crate) fn fresh(view: &View, effect: EffectId, attempt: u32, kind: &EffectKind) -> bool {
     let st = &view.state;
@@ -229,6 +379,51 @@ fn wait_scope_empty(scope: &str) {
     }
 }
 
+/// Kills any `systemd-run` of ours still about to register `scope`, and returns once it is
+/// gone: one that an earlier hub started would register the scope after a probe found none.
+fn kill_unregistered(scope: &str) {
+    let uid = fs::metadata("/proc/self").map(|m| m.uid()).ok();
+    let Ok(dir) = fs::read_dir("/proc") else {
+        return;
+    };
+    let pids: Vec<u32> = dir
+        .filter_map(|e| e.ok()?.file_name().to_str()?.parse().ok())
+        .filter(|pid| registering(*pid, scope, uid))
+        .collect();
+    for pid in &pids {
+        warning!("{scope}: killing systemd-run {pid}, which never registered it");
+        if let Err(e) = Command::new("kill")
+            .args(["-KILL", &pid.to_string()])
+            .status()
+        {
+            warning!("kill {pid}: {e}");
+        }
+    }
+    let start = Instant::now();
+    while pids.iter().any(|p| registering(*p, scope, uid)) {
+        if start.elapsed() > Duration::from_secs(10) {
+            return warning!("{scope}: systemd-run {pids:?} outlived SIGKILL");
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Whether `pid` is a `systemd-run --unit <scope>` of `uid` that has not yet become the command.
+fn registering(pid: u32, scope: &str, uid: Option<u32>) -> bool {
+    let dir = PathBuf::from(format!("/proc/{pid}"));
+    if fs::metadata(&dir).map(|m| m.uid()).ok() != uid {
+        return false;
+    }
+    let Ok(cmdline) = fs::read(dir.join("cmdline")) else {
+        return false;
+    };
+    let args: Vec<&[u8]> = cmdline.split(|b| *b == 0).collect();
+    args.first().is_some_and(|a| a.ends_with(b"systemd-run"))
+        && args
+            .windows(2)
+            .any(|w| w[0] == b"--unit" && w[1] == scope.as_bytes())
+}
+
 impl SleeveExec {
     fn run(mut self, rx: Receiver<Intent>) {
         for intent in rx {
@@ -241,11 +436,25 @@ impl SleeveExec {
     fn submit(&self, kind: EventKind) {
         if let Some(live) = &self.live {
             let (tx, rx) = mpsc::channel();
-            if live.order.send((kind.clone(), tx)).is_ok() && rx.recv().is_ok() {
+            if live.order.send((Ordered::Report(kind.clone()), tx)).is_ok() && rx.recv().is_ok() {
                 return;
             }
         }
         self.hub.submit(kind);
+    }
+
+    /// Tells incarnation `g`'s pump of a prompt about to be written; false when it has ended.
+    fn expect(&self, g: Gen, request_id: &str, effect: EffectId, attempt: u32) -> bool {
+        let Some(live) = self.live.as_ref().filter(|l| l.g == g) else {
+            return false;
+        };
+        let (tx, rx) = mpsc::channel();
+        let expect = Ordered::Expect {
+            request_id: request_id.to_string(),
+            effect,
+            attempt,
+        };
+        live.order.send((expect, tx)).is_ok() && rx.recv().is_ok()
     }
 
     fn handle(&mut self, intent: Intent) {
@@ -259,8 +468,13 @@ impl SleeveExec {
                 if !fresh(&view, effect, attempt, &kind) {
                     return debug!("sleeve {}: dropped stale effect {}", self.id.0, effect.0);
                 }
-                self.submit(EventKind::Dispatched { effect, attempt });
-                let outcome = self.execute(&view, kind);
+                if !matches!(
+                    kind,
+                    EffectKind::SendPrompt { .. } | EffectKind::Steer { .. }
+                ) {
+                    self.submit(EventKind::Dispatched { effect, attempt });
+                }
+                let outcome = self.execute(&view, effect, attempt, kind);
                 self.submit(match outcome {
                     Outcome::Acked(native) => EventKind::Acked {
                         effect,
@@ -366,6 +580,9 @@ impl SleeveExec {
             return self.live_for(g).is_some_and(|s| !s.is_exited());
         }
         let scope = self.hub.scope_name(self.id, g);
+        if self.live_for(g).is_none() {
+            kill_unregistered(&scope);
+        }
         for _ in 0..3 {
             match pt_sandbox::scope_alive(&scope) {
                 Ok(pids) => return pids.is_some(),
@@ -379,7 +596,13 @@ impl SleeveExec {
         true
     }
 
-    fn execute(&mut self, view: &View, kind: EffectKind) -> Outcome {
+    fn execute(
+        &mut self,
+        view: &View,
+        effect: EffectId,
+        attempt: u32,
+        kind: EffectKind,
+    ) -> Outcome {
         let Some(s) = view.state.sleeve(self.id) else {
             return Outcome::Nacked("no such sleeve".into());
         };
@@ -398,17 +621,16 @@ impl SleeveExec {
                 }
             },
             EffectKind::StopIncarnation { g, .. } => {
-                match self.live_for(g) {
-                    Some(session) => {
-                        thread::spawn(move || session.shutdown(STOP_GRACE));
-                    }
-                    None => {
-                        if let Err(e) = self.kill_and_watch(g) {
-                            return Outcome::Nacked(e);
-                        }
-                    }
+                let stopped = match self.live_for(g) {
+                    Some(session) => spawn(format!("pt-stop-{}-g{}", self.id.0, g.0), move || {
+                        session.shutdown(STOP_GRACE)
+                    }),
+                    None => self.kill_and_watch(g),
+                };
+                match stopped {
+                    Ok(()) => Outcome::Acked(None),
+                    Err(e) => Outcome::Nacked(e),
                 }
-                Outcome::Acked(None)
             }
             EffectKind::KillScope { g, .. } => match self.kill_and_watch(g) {
                 Ok(()) => Outcome::Acked(None),
@@ -423,17 +645,37 @@ impl SleeveExec {
             },
             EffectKind::SendPrompt {
                 g,
-                request_id,
-                text,
+                ref request_id,
+                ref text,
                 ..
-            } => self.prompt(view, g, &request_id, &text, None),
+            } => {
+                let p = Prompt {
+                    g,
+                    effect,
+                    attempt,
+                    request_id,
+                    text,
+                    steer: None,
+                };
+                self.prompt(view, p)
+            }
             EffectKind::Steer {
                 g,
-                request_id,
-                text,
-                expected_turn,
+                ref request_id,
+                ref text,
+                ref expected_turn,
                 ..
-            } => self.prompt(view, g, &request_id, &text, Some(&expected_turn)),
+            } => {
+                let p = Prompt {
+                    g,
+                    effect,
+                    attempt,
+                    request_id,
+                    text,
+                    steer: Some(expected_turn),
+                };
+                self.prompt(view, p)
+            }
             EffectKind::RespondApproval {
                 g, approval, allow, ..
             } => match self.live_for(g) {
@@ -504,9 +746,7 @@ impl SleeveExec {
             }
         };
         match kind {
-            EffectKind::Provision { .. } => {
-                applied(workdir(&self.hub, s).is_dir() && self.hub.home.sleeve_home(s.id).is_dir())
-            }
+            EffectKind::Provision { .. } => applied(provisioned(&self.hub, s.id)),
             EffectKind::StopIncarnation { g, .. } | EffectKind::KillScope { g, .. } => {
                 applied(!self.scope_live(*g))
             }
@@ -529,14 +769,14 @@ impl SleeveExec {
         }
     }
 
+    /// Lays out the workspace, then writes the completion barrier: a cut-short provision is
+    /// done again (finishing a half-made worktree), and only the barrier makes it applied.
     fn provision(&self, view: &View, s: &Sleeve, layout: Layout) -> Result<(), String> {
+        if provisioned(&self.hub, s.id) {
+            return Ok(());
+        }
         let home = self.hub.home.sleeve_home(s.id);
         fs::create_dir_all(&home).map_err(|e| format!("{}: {e}", home.display()))?;
-        let mut harnesses = vec![s.target.harness];
-        harnesses.extend(s.resleeve_to.iter().map(|t| t.harness));
-        for h in harnesses {
-            seed_credentials(&self.hub.owner_home, &home, h).map_err(|e| e.to_string())?;
-        }
         let path = Path::new(&s.claim.path);
         match layout {
             Layout::Root => {
@@ -556,6 +796,7 @@ impl SleeveExec {
                     Path::new(&parent.claim.path),
                     path,
                     &format!("pt/{}", s.name),
+                    &self.hub.home.sleeve_dir(s.id),
                 )?;
             }
             Layout::View => {
@@ -563,7 +804,10 @@ impl SleeveExec {
                 fs::create_dir_all(&scratch).map_err(|e| format!("{}: {e}", scratch.display()))?;
             }
         }
-        Ok(())
+        let barrier = provision_barrier(&self.hub, s.id);
+        crate::home::write_private(&barrier, s.claim.path.as_bytes())
+            .and_then(|()| fs::File::open(self.hub.home.sleeve_dir(s.id))?.sync_all())
+            .map_err(|e| e.to_string())
     }
 
     fn launch(
@@ -582,13 +826,26 @@ impl SleeveExec {
             .ok_or_else(|| format!("{} is not installed", wire::harness_wire(target.harness)))?;
         let home = hub.home.sleeve_home(s.id);
         fs::create_dir_all(&home).map_err(|e| format!("{}: {e}", home.display()))?;
-        seed_credentials(&hub.owner_home, &home, target.harness).map_err(|e| e.to_string())?;
+        stage_credentials(
+            &hub.owner_home,
+            &hub.home.sleeve_dir(s.id),
+            &home,
+            target.harness,
+        )
+        .map_err(|e| e.to_string())?;
         let work = workdir(&hub, s);
         let mut sb = pt_sandbox::SandboxSpec::new(&hub.scope_sleeve(s.id), g.0, work.clone(), home);
         sb.scope = hub.config.scopes;
         sb.masks = pt_sandbox::default_masks(&hub.owner_home);
         sb.masks.push(hub.home.root.clone());
-        sb.rw_paths.push(hub.home.run());
+        sb.masks.extend(other_claims(&view.state, s));
+        // Of the hub's state only the sleeves' socket and the CLI, read-only: a sleeve cannot
+        // reach the owner's socket, or replace or unlink what other sleeves use.
+        sb.ro_paths.push(hub.home.sleeve_run());
+        sb.ro_paths.push(hub.home.bin());
+        if let Ok(cli) = fs::canonicalize(hub.home.bin().join("protectorate")) {
+            sb.ro_paths.push(cli);
+        }
         if s.layout == Layout::Worktree {
             let parent = s
                 .parent
@@ -603,7 +860,7 @@ impl SleeveExec {
             ("PROTECTORATE_TOKEN".into(), token),
             (
                 "PROTECTORATE_SOCKET".into(),
-                hub.home.socket().to_string_lossy().into_owned(),
+                hub.home.sleeve_socket().to_string_lossy().into_owned(),
             ),
             ("PROTECTORATE_SLEEVE".into(), s.name.clone()),
             (
@@ -659,55 +916,74 @@ impl SleeveExec {
         Ok(())
     }
 
+    /// Kills incarnation `g`. Its pump, when this hub runs one, reports `Exited` once the scope
+    /// is empty, after the output it read; otherwise a watcher does.
     fn kill_and_watch(&self, g: Gen) -> Result<(), String> {
-        if let Some(session) = self.live_for(g) {
-            thread::spawn(move || session.shutdown(Duration::ZERO));
+        let live = self.live_for(g);
+        if let Some(session) = live.clone() {
+            spawn(format!("pt-kill-{}-g{}", self.id.0, g.0), move || {
+                session.shutdown(Duration::ZERO)
+            })?;
         }
         if !self.hub.config.scopes {
             return Ok(());
         }
         let scope = self.hub.scope_name(self.id, g);
         pt_sandbox::kill_scope(&scope).map_err(|e| e.to_string())?;
+        if live.is_some() {
+            return Ok(());
+        }
         let hub = self.hub.clone();
         let id = self.id;
-        thread::spawn(move || {
+        spawn(format!("pt-watch-{}-g{}", id.0, g.0), move || {
             wait_scope_empty(&scope);
             hub.submit(EventKind::Exited {
                 sleeve: id,
                 g,
                 cause: ExitCause::Killed,
             });
-        });
-        Ok(())
+        })
     }
 
-    fn prompt(
-        &self,
-        view: &View,
-        g: Gen,
-        request_id: &str,
-        text: &str,
-        steer: Option<&str>,
-    ) -> Outcome {
-        let Some(session) = self.live_for(g) else {
-            return Outcome::Nacked("no live session for that generation".into());
+    /// Writes a prompt. Its `Dispatched` and verdict come from the pump, which sees the write's
+    /// entry and the ack in order with the output; only a refused write, or an ack that never
+    /// came, is reported here. To an incarnation that has ended nothing is reported: the record
+    /// stays `Intent`, and the core returns its message to the queue once `Exited` fences it.
+    fn prompt(&self, view: &View, p: Prompt) -> Outcome {
+        let ended = || {
+            debug!(
+                "sleeve {}: g{} has ended; prompt {} waits for the next",
+                self.id.0, p.g.0, p.request_id
+            );
+            Outcome::Reported
         };
-        let from = Hub::from_label(&view.state, self.id, request_id);
+        let Some(session) = self.live_for(p.g) else {
+            return ended();
+        };
+        if !self.expect(p.g, p.request_id, p.effect, p.attempt) {
+            return ended();
+        }
+        let from = Hub::from_label(&view.state, self.id, p.request_id);
         if Hub::envoy_id(&view.state) == Some(self.id) {
-            self.note_envoy_origin(&from, steer.is_some());
+            self.note_envoy_origin(&from, p.steer.is_some());
         }
-        let sent = match steer {
-            Some(turn) => session.steer(request_id, &from, text, turn),
-            None => session.send_user(request_id, &from, text),
+        let sent = match p.steer {
+            Some(turn) => session.steer(p.request_id, &from, p.text, turn),
+            None => session.send_user(p.request_id, &from, p.text),
         };
-        if let Err(e) = sent {
-            return Outcome::Nacked(e.to_string());
-        }
-        match session.wait_ack(request_id, ACK_TIMEOUT) {
-            Ack::Confirmed { native_turn_id } => Outcome::Acked(native_turn_id),
-            Ack::Rejected { detail } => {
-                Outcome::Nacked(detail.unwrap_or_else(|| "rejected".into()))
+        match sent {
+            Ok(()) => {}
+            Err(pt_drivers::DriverError::Ended) => return ended(),
+            Err(e) => {
+                self.submit(EventKind::Dispatched {
+                    effect: p.effect,
+                    attempt: p.attempt,
+                });
+                return Outcome::Nacked(e.to_string());
             }
+        }
+        match session.wait_ack(p.request_id, ACK_TIMEOUT) {
+            Ack::Confirmed { .. } | Ack::Rejected { .. } => Outcome::Reported,
             Ack::Pending => Outcome::Lost,
         }
     }
@@ -810,10 +1086,12 @@ fn input_text(input: &Option<pt_json::Value>) -> String {
 /// observations for the core, and reports `Exited` once the scope is confirmed empty.
 /// Records each harness event and submits its observations; between events (and every
 /// `ORDER_POLL`) it submits the executor's reports after draining what it has received.
-fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Receiver<Ordered>) {
+fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Receiver<Order>) {
     let mut p = Pump {
         last_error: None,
         cause: ExitCause::Killed,
+        expects: HashMap::new(),
+        held: None,
     };
     'run: loop {
         match events.recv_timeout(ORDER_POLL) {
@@ -825,21 +1103,28 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Rece
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
-        while let Ok((kind, done)) = ordered.try_recv() {
+        if p.held
+            .as_ref()
+            .is_some_and(|h| h.at.elapsed() >= NATIVE_WAIT)
+        {
+            p.flush_held(hub, None);
+        }
+        while let Ok((o, done)) = ordered.try_recv() {
             while let Ok(ev) = events.try_recv() {
                 if p.event(hub, run, ev) {
-                    hub.submit(kind);
+                    p.order(hub, o);
                     let _ = done.send(());
                     break 'run;
                 }
             }
-            hub.submit(kind);
+            p.order(hub, o);
             let _ = done.send(());
         }
     }
+    p.flush_held(hub, None);
     // Reports still queued come after all of this incarnation's output; later ones go direct.
-    while let Ok((kind, done)) = ordered.try_recv() {
-        hub.submit(kind);
+    while let Ok((o, done)) = ordered.try_recv() {
+        p.order(hub, o);
         let _ = done.send(());
     }
     drop(ordered);
@@ -865,9 +1150,135 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Rece
 struct Pump {
     last_error: Option<ErrorClass>,
     cause: ExitCause,
+    /// Prompts being written, by request id.
+    expects: HashMap<String, Expect>,
+    /// A confirmed prompt whose ack had no native turn id: the harness's turn start may.
+    held: Option<Held>,
+}
+
+struct Expect {
+    effect: EffectId,
+    attempt: u32,
+    dispatched: bool,
+}
+
+struct Held {
+    request_id: String,
+    effect: EffectId,
+    attempt: u32,
+    at: Instant,
 }
 
 impl Pump {
+    fn order(&mut self, hub: &Hub, o: Ordered) {
+        match o {
+            Ordered::Report(kind) => {
+                if let EventKind::Nacked { effect, .. } = &kind {
+                    self.expects.retain(|_, e| e.effect != *effect);
+                }
+                hub.submit(kind);
+            }
+            Ordered::Expect {
+                request_id,
+                effect,
+                attempt,
+            } => {
+                let e = Expect {
+                    effect,
+                    attempt,
+                    dispatched: false,
+                };
+                self.expects.insert(request_id, e);
+            }
+        }
+    }
+
+    fn flush_held(&mut self, hub: &Hub, native: Option<String>) {
+        if let Some(h) = self.held.take() {
+            hub.submit(EventKind::Acked {
+                effect: h.effect,
+                attempt: h.attempt,
+                native,
+            });
+        }
+    }
+
+    /// Reports a prompt from the driver's entries, before the observations of the same entry:
+    /// `Dispatched` at its write, the verdict at its ack, and a native turn id that only the
+    /// turn's start carries with the confirmation.
+    fn prompt_reports(&mut self, hub: &Hub, entry: &Entry) {
+        if let Some(h) = &self.held {
+            let native = match entry {
+                Entry::TurnStarted {
+                    request_id: Some(r),
+                    native_turn_id,
+                } if *r == h.request_id => native_turn_id.clone(),
+                _ => None,
+            };
+            self.flush_held(hub, native);
+        }
+        // A turn start ahead of its ack confirms the prompt and binds the turn.
+        if let Entry::TurnStarted {
+            request_id: Some(r),
+            native_turn_id: Some(native),
+        } = entry
+            && self.expects.get(r).is_some_and(|e| e.dispatched)
+            && let Some(e) = self.expects.remove(r)
+        {
+            return hub.submit(EventKind::Acked {
+                effect: e.effect,
+                attempt: e.attempt,
+                native: Some(native.clone()),
+            });
+        }
+        let (Entry::UserMessage { request_id, .. } | Entry::PromptAck { request_id, .. }) = entry
+        else {
+            return;
+        };
+        let Some(e) = self.expects.get_mut(request_id) else {
+            return;
+        };
+        let (effect, attempt) = (e.effect, e.attempt);
+        if !e.dispatched {
+            e.dispatched = true;
+            hub.submit(EventKind::Dispatched { effect, attempt });
+        }
+        let Entry::PromptAck {
+            ack,
+            native_turn_id,
+            detail,
+            ..
+        } = entry
+        else {
+            return;
+        };
+        self.expects.remove(request_id);
+        match (ack, native_turn_id) {
+            (AckKind::Confirmed, None) => {
+                self.held = Some(Held {
+                    request_id: request_id.clone(),
+                    effect,
+                    attempt,
+                    at: Instant::now(),
+                })
+            }
+            (AckKind::Confirmed, native) => hub.submit(EventKind::Acked {
+                effect,
+                attempt,
+                native: native.clone(),
+            }),
+            (AckKind::Rejected, _) => {
+                let reason = detail.clone().unwrap_or_else(|| "rejected".into());
+                info!("prompt {request_id} refused: {reason}");
+                hub.submit(EventKind::Nacked {
+                    effect,
+                    attempt,
+                    reason,
+                });
+            }
+        }
+    }
+
     /// Records one harness event and submits its observations; true once the harness exited.
     fn event(&mut self, hub: &Hub, run: &Run, ev: pt_drivers::Event) -> bool {
         let Run {
@@ -884,6 +1295,7 @@ impl Pump {
             hub.delta(id, g.0, ev.time_ms, entry);
             return false;
         }
+        self.prompt_reports(hub, &entry);
         let mut obs = Vec::new();
         match &entry {
             Entry::SessionInfo { native_id, .. } => obs.push(Obs::Ready {

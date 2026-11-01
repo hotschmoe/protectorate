@@ -385,8 +385,17 @@ impl Core<'_> {
         let Some(j) = self.st.jobs.get(&id) else {
             return self.refuse(Code::NotFound, "no such job");
         };
+        let unsent = j
+            .submit
+            .is_some_and(|e| self.effect_state(e) == Some(EffectState::Intent));
         match j.state {
             JobState::Queued => self.set_job(id, JobState::Cancelled),
+            // Its submit has not been dispatched, and now never is: nothing reached the node.
+            JobState::Submitting if unsent => {
+                let eff = j.submit.expect("submit");
+                self.set_job(id, JobState::Cancelled);
+                self.withdraw(eff);
+            }
             JobState::Submitting
             | JobState::SubmitUncertain
             | JobState::Running

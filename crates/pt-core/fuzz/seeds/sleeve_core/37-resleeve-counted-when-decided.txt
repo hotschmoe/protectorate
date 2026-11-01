@@ -1,0 +1,38 @@
+#scenario 53f73958f3023ce8
+# I10 counts a resleeve when the core decides it, not when its brief goes out: a quiesce that
+# lingers past the hour leaves two later resleeves within the limit.
+spawn root /w/a to=pi_local,codex
+run
+obs root ready
+send root m1
+run
+policy stop=linger
+obs root settled=usage
+expect root life=Resleeving guard=Quiescing
+run
+tick 61m
+expect root guard=Quiescing
+expect-effect brief:0:2 count=0
+policy stop=exit
+run
+obs root ready
+run
+expect root life=Running g=2 guard=Cooldown
+tick 11m
+send root m2
+run
+obs root settled=usage
+expect root life=Resleeving guard=Quiescing
+run
+obs root ready
+run
+expect root life=Running g=3 guard=Cooldown
+tick 11m
+send root m3
+run
+obs root settled=usage
+expect root life=Resleeving guard=Quiescing
+run
+obs root ready
+run
+expect root life=Running g=4 guard=Cooldown

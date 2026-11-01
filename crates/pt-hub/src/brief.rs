@@ -282,7 +282,7 @@ fn build(hub: &Hub, view: &View, workdir: &Path, spec: &Spec<'_>, entries: &[Lin
 
     b.push_str("## Workspace\n");
     let facts = if git::is_repo(workdir) {
-        Some(git::facts(workdir))
+        Some(git::facts(workdir, &hub.home.sleeve_dir(s.id)))
     } else {
         None
     };
