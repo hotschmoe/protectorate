@@ -1,6 +1,7 @@
 //! The continuation brief (history report 4.5, SPEC 12b item 8), built by code from the
-//! transcript, git and the core's effect records. No model is consulted.
+//! transcript, git, the core's effect records and the history index. No model is consulted.
 
+use std::collections::HashSet;
 use std::fmt::Write as _;
 use std::fs;
 use std::path::Path;
@@ -15,6 +16,11 @@ use crate::wire;
 
 pub const FILE: &str = ".protectorate/BRIEF.md";
 const BUDGET: usize = 16 << 10;
+/// The pre-run search hits' share of the budget.
+const HITS_BUDGET: usize = 4 << 10;
+const HITS_PER_QUERY: usize = 3;
+/// The brief prompt's request id prefix (pt-core); it is not part of the task.
+const BRIEF_REQUEST: &str = "resleeve:";
 const TEST_RUNNERS: &[&str] = &[
     "cargo test",
     "make test",
@@ -91,7 +97,8 @@ pub fn write(hub: &Hub, view: &View, workdir: &Path, spec: &Spec<'_>) -> Result<
         .get(s.id)
         .and_then(|t| crate::transcript::lock(&t).all())
         .map_err(|e| format!("read transcript: {e}"))?;
-    let text = build(view, workdir, spec, &entries);
+    hub.history.catch_up(hub, Some(s.id));
+    let text = build(hub, view, workdir, spec, &entries);
     let path = workdir.join(FILE);
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -102,19 +109,97 @@ pub fn write(hub: &Hub, view: &View, workdir: &Path, spec: &Spec<'_>) -> Result<
     fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-fn build(view: &View, workdir: &Path, spec: &Spec<'_>, entries: &[Line]) -> String {
+/// A quoted shell word.
+fn shell_word(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// The pre-run search (history report 4.5): queries from the task and the last tool error, run
+/// against this sleeve's history, the top hits of each with their doc ids, within
+/// `HITS_BUDGET`. A hit that is the query's own text is left out.
+fn earlier(hub: &Hub, s: &Sleeve, queries: &[&str], b: &mut String) {
+    b.push_str("## From earlier in this session and others\n");
+    let filters = pt_history::Filters {
+        sleeves: vec![s.id.0.to_string()],
+        ..Default::default()
+    };
+    let start = b.len();
+    let mut seen = HashSet::new();
+    let mut again = Vec::new();
+    let mut cut = false;
+    for task in queries {
+        let q = pt_history::brief_query(task);
+        if q.text.is_empty() || again.contains(&q.text) {
+            continue;
+        }
+        let hits = match hub.history.search(&q, &filters, HITS_PER_QUERY + 1) {
+            Ok(h) => h,
+            Err(e) => {
+                let _ = writeln!(b, "No pre-run search: {e}.");
+                return;
+            }
+        };
+        for h in hits
+            .iter()
+            .filter(|h| h.doc.text.trim() != task.trim())
+            .take(HITS_PER_QUERY)
+        {
+            if seen.contains(&h.doc.id) {
+                continue;
+            }
+            let session = h.doc.session.get(..8).unwrap_or(&h.doc.session);
+            let line = format!(
+                "- [doc {}] {}, turn {}, session {session}: {}\n",
+                h.doc.id.0,
+                h.doc.role,
+                h.doc.turn,
+                h.snippet.marked("**", "**")
+            );
+            if b.len() - start + line.len() > HITS_BUDGET {
+                cut = true;
+                break;
+            }
+            seen.insert(h.doc.id);
+            b.push_str(&line);
+        }
+        again.push(q.text);
+    }
+    if seen.is_empty() {
+        b.push_str("No earlier hits for the task.\n");
+    }
+    if cut {
+        b.push_str("[more hits cut to fit the brief]\n");
+    }
+    b.push_str(
+        "Read a doc whole with `protectorate history read --doc <id>`; search again with:\n",
+    );
+    for q in &again {
+        let _ = writeln!(
+            b,
+            "`protectorate history search --sleeve {} --mode any {}`",
+            shell_word(&s.name),
+            shell_word(q)
+        );
+    }
+}
+
+fn build(hub: &Hub, view: &View, workdir: &Path, spec: &Spec<'_>, entries: &[Line]) -> String {
     let s = spec.sleeve;
     let mut b = String::new();
+    let mut native = None;
     let session = entries.iter().rev().find_map(|e| match &e.entry {
         Entry::SessionInfo {
             harness,
             native_id,
             model,
             ..
-        } if e.g == spec.from_gen.0 => Some(format!(
-            "{harness} session {native_id} ({})",
-            model.as_deref().unwrap_or("default model")
-        )),
+        } if e.g == spec.from_gen.0 => {
+            native = Some(native_id.clone());
+            Some(format!(
+                "{harness} session {native_id} ({})",
+                model.as_deref().unwrap_or("default model")
+            ))
+        }
         _ => None,
     });
     let _ = writeln!(b, "# Continuation brief\n{}", marker(s.id, spec.to_gen));
@@ -133,11 +218,21 @@ fn build(view: &View, workdir: &Path, spec: &Spec<'_>, entries: &[Line]) -> Stri
         spec.from_gen.0,
         spec.to_gen.0
     );
+    if let Some(u) = native.as_deref().and_then(|n| hub.history.context_usage(n)) {
+        let window = u.window.map_or(String::new(), |w| format!(" of {w}"));
+        let _ = writeln!(
+            b,
+            "From its log: {} turns, context {}{window} tokens, {} compactions.\n",
+            u.turns, u.tokens, u.compactions
+        );
+    }
 
     let users: Vec<&str> = entries
         .iter()
         .filter_map(|e| match &e.entry {
-            Entry::UserMessage { text, .. } => Some(text.as_str()),
+            Entry::UserMessage {
+                text, request_id, ..
+            } if !request_id.starts_with(BRIEF_REQUEST) => Some(text.as_str()),
             _ => None,
         })
         .collect();
@@ -305,13 +400,20 @@ fn build(view: &View, workdir: &Path, spec: &Spec<'_>, entries: &[Line]) -> Stri
     }
     b.push('\n');
 
-    b.push_str("## From earlier in this session and others\n");
-    b.push_str("The history index is not built yet; the full transcript is in the hub.\n");
-
-    if b.len() > BUDGET {
-        let cut = clip(&b, BUDGET).len();
-        b.truncate(cut);
-        b.push_str("\n[brief clipped to 16 KiB]\n");
+    let mut queries: Vec<&str> = users.last().into_iter().copied().collect();
+    if users.len() > 1 {
+        queries.extend(users.first());
     }
+    queries.extend(last_err);
+    // The hits keep their share: the sections above are clipped to make room for them.
+    let mut hits = String::new();
+    earlier(hub, s, &queries, &mut hits);
+    let room = BUDGET.saturating_sub(hits.len());
+    if b.len() > room {
+        let cut = clip(&b, room).len();
+        b.truncate(cut);
+        b.push_str("\n[brief clipped to 16 KiB]\n\n");
+    }
+    b.push_str(&hits);
     b
 }

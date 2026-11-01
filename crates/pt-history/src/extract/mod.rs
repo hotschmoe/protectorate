@@ -59,6 +59,15 @@ pub enum Item {
     },
 }
 
+impl Item {
+    pub fn session(&self) -> &str {
+        match self {
+            Item::Doc(d) => &d.session,
+            Item::Usage { session, .. } | Item::Compacted { session } => session,
+        }
+    }
+}
+
 /// Extracts one line. Returns false when the line is not a typed JSON record.
 pub fn line(kind: SourceKind, bytes: &[u8], st: &mut State, out: &mut Vec<Item>) -> bool {
     if kind == SourceKind::Hub {

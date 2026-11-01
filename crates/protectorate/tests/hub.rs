@@ -347,7 +347,8 @@ fn capabilities_are_scoped() {
 
 /// Forced resleeve end to end, through the test-only `PT_TEST_FAULT` knob: the first turn's
 /// settle is reported as a usage limit (G1), the sleeve quiesces, its scope empties, the hub
-/// writes the brief, picks pi_local from `resleeve_to`, launches g2 and lands the brief prompt.
+/// writes the brief (with pre-run history hits from g1's log), picks pi_local from `resleeve_to`,
+/// launches g2 and lands the brief prompt.
 #[test]
 fn forced_resleeve_with_brief() {
     if !have_runtime() {
@@ -407,6 +408,12 @@ fn forced_resleeve_with_brief() {
         "## Workspace",
         "## Effects that may have been applied",
         "## Child roster",
+        // The pre-run search over g1's session, which the index tailed from Pi's own log.
+        "## From earlier in this session and others",
+        "] assistant, turn 1, session ",
+        "**READY**",
+        "protectorate history search --sleeve 'six' --mode any ",
+        "From its log: 1 turns, context ",
     ] {
         assert!(
             brief.contains(section),

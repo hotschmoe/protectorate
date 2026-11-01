@@ -85,6 +85,7 @@ pub struct Hub {
     pub fleet: FleetSlot,
     pub jobs: JobStore,
     pub quotas: crate::quota::Quotas,
+    pub history: crate::history::History,
     input: Sender<Input>,
     view: Mutex<Arc<View>>,
 }
@@ -111,6 +112,11 @@ impl Hub {
     ) -> Hub {
         let transcripts = Transcripts::new(home.clone());
         let jobs = JobStore::new(home.jobs());
+        let history = crate::history::History::open(&if config.history_dir.is_empty() {
+            home.history()
+        } else {
+            PathBuf::from(&config.history_dir)
+        });
         Hub {
             home,
             config,
@@ -127,6 +133,7 @@ impl Hub {
             fleet: FleetSlot::default(),
             jobs,
             quotas: Default::default(),
+            history,
             input,
             view: Mutex::new(Arc::new(view)),
         }

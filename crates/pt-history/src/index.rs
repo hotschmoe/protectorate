@@ -333,6 +333,9 @@ impl Index {
                 got.unknown += 1;
             }
             for it in items.drain(..) {
+                if source.skip.iter().any(|s| s == it.session()) {
+                    continue;
+                }
                 match it {
                     Item::Doc(d) => queued.push((off, d)),
                     u => usage.push(u),
@@ -601,6 +604,11 @@ impl Index {
     /// The latest context fill seen for `session`, including uncommitted ingests.
     pub fn context_usage(&self, session: &str) -> Option<ContextUsage> {
         self.usage.get(session).cloned()
+    }
+
+    /// Committed live docs; cheaper than [`Index::stats`].
+    pub fn docs(&self) -> u64 {
+        self.live_docs
     }
 
     pub fn stats(&self) -> Stats {

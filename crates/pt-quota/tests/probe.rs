@@ -10,7 +10,16 @@ const PROBE: &str = env!("CARGO_BIN_EXE_pt-quota-probe");
 const STATES: [&str; 4] = ["fresh", "stale", "unknown", "error"];
 
 fn probe(args: &[&str]) -> String {
-    let out = Command::new(PROBE).args(args).output().expect("run probe");
+    probe_env(args, &[])
+}
+
+fn probe_env(args: &[&str], env: &[(&str, &str)]) -> String {
+    let mut cmd = Command::new(PROBE);
+    cmd.args(args).env_remove("PT_LOCAL_URL");
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    let out = cmd.output().expect("run probe");
     assert!(
         out.status.success(),
         "probe failed: {}",
@@ -70,8 +79,16 @@ fn write(path: &Path, text: &str) {
     std::fs::write(path, text).unwrap();
 }
 
-/// Serves canned bodies by path and records each request's Authorization header.
+/// Serves canned bodies by path and records each request's Authorization header. A path under
+/// a `guarded` prefix answers 401 unless the request carries that bearer token.
 fn serve(routes: Vec<(&'static str, &'static str)>) -> (u16, Arc<Mutex<Vec<String>>>) {
+    serve_guarded(routes, &[])
+}
+
+fn serve_guarded(
+    routes: Vec<(&'static str, &'static str)>,
+    guarded: &'static [(&'static str, &'static str)],
+) -> (u16, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -89,17 +106,26 @@ fn serve(routes: Vec<(&'static str, &'static str)>) -> (u16, Arc<Mutex<Vec<Strin
             }
             let text = String::from_utf8_lossy(&req).into_owned();
             let path = text.split(' ').nth(1).unwrap_or("").to_string();
+            let mut auth = None;
             for l in text
                 .lines()
                 .filter(|l| l.to_lowercase().starts_with("authorization:"))
             {
                 log.lock().unwrap().push(format!("{path} {l}"));
+                auth = l.split_once(':').map(|(_, v)| v.trim().to_string());
             }
+            let denied = guarded.iter().any(|(p, token)| {
+                path.starts_with(p) && auth.as_deref() != Some(format!("Bearer {token}").as_str())
+            });
             let body = routes
                 .iter()
                 .find(|(p, _)| path.starts_with(p))
                 .map(|(_, b)| *b);
             let reply = match body {
+                _ if denied => {
+                    "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        .to_string()
+                }
                 Some(b) => format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}",
                     b.len()
@@ -215,4 +241,65 @@ fn fixture_readers_over_real_curl() {
     assert!(claude.contains("expired"), "{claude}");
     assert_eq!(state_of(line_of(&out, "local")), "error");
     assert!(!out.contains("secret-token"));
+}
+
+/// The local endpoint behind a bearer token, as the owner's is: the reader finds the key and the
+/// base URL in a fixture `~/.pi/agent/models.json` (provider named by `--pi-provider`), sends the
+/// key over curl, and gets a fresh reading; a wrong key is a 401 error; an `apiKey` naming a set
+/// environment variable sends that variable's value; a `!command` key is never run. No key is
+/// ever printed.
+#[test]
+fn local_reader_sends_the_pi_provider_key() {
+    let (port, seen) = serve_guarded(
+        vec![("/v1/models", r#"{"data":[{"id":"qwen-local"}]}"#)],
+        &[("/v1/models", "local-secret-key")],
+    );
+    let base = format!("http://127.0.0.1:{port}/v1");
+    let models = |home: &Path, key: &str| {
+        write(
+            &home.join(".pi/agent/models.json"),
+            &format!(
+                r#"{{"providers":{{"other":{{"baseUrl":"http://127.0.0.1:1/v1","apiKey":"other-secret-key"}},"lab":{{"api":"openai-completions","baseUrl":"{base}","apiKey":"{key}","models":[{{"id":"qwen-local"}}]}}}}}}"#
+            ),
+        );
+    };
+    let run = |home: &Path, env: &[(&str, &str)]| {
+        let out = probe_env(
+            &["--home", home.to_str().unwrap(), "--pi-provider", "lab"],
+            env,
+        );
+        println!("{out}");
+        assert!(!out.contains("secret-key"), "a key leaked: {out}");
+        line_of(&out, "local").to_string()
+    };
+
+    let home = scratch("local-key-home");
+    models(&home, "local-secret-key");
+    let local = run(&home, &[]);
+    assert_eq!(state_of(&local), "fresh", "{local}");
+    assert!(local.contains("qwen-local"), "{local}");
+
+    models(&home, "wrong-secret-key");
+    let local = run(&home, &[]);
+    assert_eq!(state_of(&local), "error", "{local}");
+    assert!(local.contains("401"), "{local}");
+
+    models(&home, "PT_E2E_LOCAL_KEY");
+    let local = run(&home, &[("PT_E2E_LOCAL_KEY", "local-secret-key")]);
+    assert_eq!(state_of(&local), "fresh", "{local}");
+
+    models(&home, "!cat /nonexistent");
+    let local = run(&home, &[]);
+    assert_eq!(state_of(&local), "unknown", "{local}");
+    assert!(local.contains("command"), "{local}");
+
+    let seen = seen.lock().unwrap().join("\n");
+    assert!(
+        seen.contains("Bearer local-secret-key") && seen.contains("Bearer wrong-secret-key"),
+        "{seen}"
+    );
+    assert!(
+        !seen.contains("other-secret-key"),
+        "only the named provider's key is sent"
+    );
 }

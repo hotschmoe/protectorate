@@ -784,6 +784,124 @@ fn event_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
     Ok(())
 }
 
+/// `7d`, `3h`, `30m` or `90s` ago, or epoch milliseconds.
+fn when(s: &str) -> Result<EpochMs, String> {
+    let bad = || format!("bad time {s:?} (7d, 3h, 30m, 90s or epoch milliseconds)");
+    let (n, unit) = s.split_at(s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len()));
+    let n: u64 = n.parse().map_err(|_| bad())?;
+    let secs = match unit {
+        "" => return Ok(EpochMs(n)),
+        "s" => 1,
+        "m" => 60,
+        "h" => 3600,
+        "d" => 86400,
+        _ => return Err(bad()),
+    };
+    Ok(EpochMs(
+        EpochMs::now()
+            .0
+            .saturating_sub(n.saturating_mul(secs * 1000)),
+    ))
+}
+
+fn history_head(d: &api::HistoryDoc) -> String {
+    format!(
+        "[doc {}] {} {} turn {} {}, {}, session {}",
+        d.doc_id,
+        if d.sleeve.is_empty() {
+            &d.sleeve_id
+        } else {
+            &d.sleeve
+        },
+        opt(&d.harness),
+        d.turn,
+        d.role,
+        ago(d.time_ms),
+        d.session
+    )
+}
+
+/// The snippet with each match in `**`.
+fn marked(h: &api::HistoryHit) -> String {
+    let (t, mut out, mut at) = (&h.snippet, String::new(), 0);
+    for s in &h.highlights {
+        let (start, end) = (s.start as usize, s.end as usize);
+        let (Some(before), Some(word)) = (t.get(at..start), t.get(start..end)) else {
+            continue;
+        };
+        out.push_str(before);
+        out.push_str("**");
+        out.push_str(word);
+        out.push_str("**");
+        at = end;
+    }
+    out.push_str(t.get(at..).unwrap_or(""));
+    out
+}
+
+fn history_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
+    match a.word(1, "a history command (search, read)")? {
+        "search" => {
+            let req = api::SearchHistoryRequest {
+                query: a.rest(2, "a query")?,
+                mode: word_enum(a.flag("--mode").unwrap_or("all"), "--mode")?,
+                sleeves: a.all("--sleeve"),
+                harness: a.flag("--harness").map(harness).transpose()?,
+                session: a.flag("--session").map(str::to_string),
+                since_ms: a.flag("--since").map(when).transpose()?,
+                until_ms: a.flag("--until").map(when).transpose()?,
+                roles: a
+                    .all("--role")
+                    .iter()
+                    .map(|r| word_enum(r, "--role"))
+                    .collect::<Result<_, _>>()?,
+                limit: a.num("--limit")?,
+            };
+            let v = c.call::<m::SearchHistory>(&req)?;
+            o.show(&v, |v| {
+                if v.hits.is_empty() {
+                    println!("no hits ({} docs indexed)", v.indexed_docs);
+                }
+                for h in &v.hits {
+                    println!("{}", history_head(&h.doc));
+                    println!("    {}", marked(h));
+                }
+            });
+        }
+        "read" => {
+            let req = match a.num("--doc")? {
+                Some(id) => api::ReadHistoryRequest {
+                    doc_id: Some(id),
+                    session: None,
+                    from_turn: 0,
+                    to_turn: None,
+                },
+                None => api::ReadHistoryRequest {
+                    doc_id: None,
+                    session: Some(a.word(2, "a session id, or --doc ID")?.to_string()),
+                    from_turn: a.num("--from")?.unwrap_or(0),
+                    to_turn: a.num("--to")?,
+                },
+            };
+            let v = c.call::<m::ReadHistory>(&req)?;
+            o.show(&v, |v| {
+                for d in &v.docs {
+                    println!("{} ({}:{})", history_head(&d.doc), d.doc.path, d.doc.offset);
+                    if !d.doc.files.is_empty() {
+                        println!("files: {}", d.doc.files.join(", "));
+                    }
+                    println!("{}\n", d.text);
+                }
+                if v.more {
+                    println!("[more: read on with --from <the last turn>]");
+                }
+            });
+        }
+        other => return Err(Fail::Usage(format!("unknown history command {other:?}"))),
+    }
+    Ok(())
+}
+
 fn envoy_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
     match a.word(1, "an envoy command (send, wait, read, token)")? {
         "send" => {
@@ -902,6 +1020,7 @@ pub fn run(c: &Client, a: &Args, json: bool) -> Result<(), Fail> {
         "quota" => quota_cmd(c, a, &o),
         "event" => event_cmd(c, a, &o),
         "envoy" => envoy_cmd(c, a, &o),
+        "history" => history_cmd(c, a, &o),
         "device" => device_cmd(c, a, &o),
         other => Err(Fail::Usage(format!("unknown command {other:?}"))),
     }

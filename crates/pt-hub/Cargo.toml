@@ -16,6 +16,7 @@ pt-drivers = { path = "../pt-drivers" }
 pt-fleet = { path = "../pt-fleet" }
 pt-frame = { path = "../pt-frame" }
 pt-hash = { path = "../pt-hash" }
+pt-history = { path = "../pt-history" }
 pt-http = { path = "../pt-http" }
 pt-journal = { path = "../pt-journal" }
 pt-json = { path = "../pt-json" }

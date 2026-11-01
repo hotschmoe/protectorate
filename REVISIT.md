@@ -358,8 +358,11 @@ Each entry: where, what was done, what right looks like.
   `[from sleeve <name>] ...` and agent requests as `[from agent:<name>] ...`, since a prompt has no
   other sender field; owner and Envoy messages are unprefixed. Right: revisit if a harness grows
   a sender field.
-- **The brief is facts only** (`pt-hub`, brief.rs): no history search hits (no index yet), no
-  planned-resleeve summary, no checkpoint id, and the 6 KiB small-target variant is missing.
+- **The brief has no summary** (`pt-hub`, brief.rs): facts plus pre-run history hits (the
+  latest and first task prompts and the last tool error, through `pt_history::brief_query`, top
+  3 each within 4 KiB, this sleeve only), but no planned-resleeve summary, no checkpoint id, and
+  no 6 KiB small-target variant. Context usage is shown from the outgoing session's log; no
+  guardrail reads it yet.
 - **Ticks are journaled and every batch clones the State** (`pt-hub`, core.rs): 8640 Tick frames
   a day, and the published view is a full copy that grows with the never-pruned records. Right:
   the State codec and snapshots (above), then a cheaper view (shared sub-trees or per-sleeve
@@ -535,10 +538,10 @@ Each entry: where, what was done, what right looks like.
   no Antigravity reader (no `Subscription` for it, the `agy` CLI is not installed here, and
   Antigravity is pane-only, D13). Right: add a resets field to `Quota` when dispatch uses
   credits; revisit Codex `app-server` if wham breaks; Antigravity when it has a subscription.
-- **Local endpoint address is configuration** (`pt-quota`): the b70 URL comes from the probe flag
-  or `PT_LOCAL_URL`, and the hub's `config.json` key `local_url`, separate from Pi's own
-  models.json where `pi_local_provider` points. Right: read the base URL from Pi's provider entry
-  so the two cannot disagree.
+- **Local endpoint address can still be configuration** (`pt-quota`): `local_url` (or the probe's
+  `--local` and `PT_LOCAL_URL`) overrides the `baseUrl` of Pi's `pi_local_provider`, which is used
+  when it is empty, so the two can still disagree when both are set. Right: drop `local_url` once
+  every hub leaves it empty.
 - **Quota selection constants are untuned** (`pt-quota`): usable-now minimums per task size
   (5, 15, 30 percent), the 48 h half-life and the 168 h stand-in for an unknown reset are the old
   dev-hotschmoe values; `TaskSize` thresholds and N are caller inputs with no defaults. Right: tune
@@ -624,6 +627,26 @@ Each entry: where, what was done, what right looks like.
 - **Leftover segments after a crash mid-merge** (`pt-history`, index.rs): a crash after the
   manifest rename but before the merged segments are removed leaves unreferenced `seg-*` files.
   Right: sweep unreferenced segment files at open.
-- **Hub transcript and native log overlap** (`pt-history`): a headless session appears in both;
-  the caller's allowlist must name one of them per session. Right: the hub picks the native log
-  for search and its transcript only where no native log exists, once both are wired.
+- **One source per session, decided per hub run** (`pt-hub`, history.rs): a headless session
+  is in both its native log and the transcript; the native log wins once found, the transcript
+  covers a session that ended without one, and the transcript waits at a live session's
+  `session_info` until its log appears. Decisions are not persisted, so a session indexed from
+  the transcript whose log appears in a later run (a native resume of a session that had none) is
+  indexed twice. Right: keep the choice per session in the index manifest.
+- **Native logs are found by session id under the sleeve's home** (`pt-hub`, history.rs): the
+  drivers report the session id, not the log path, so the hub walks the harness's log root in the
+  sleeve's private home (`pt_history::discover`), each second while a live session has no log
+  yet. Right: the path from the driver where the protocol states it (Pi's `get_state`
+  `sessionFile`, Codex's thread path).
+- **A corrupt history index is moved aside, never pruned** (`pt-hub`, history.rs): at start an
+  index that fails to open is renamed `<dir>.corrupt-<ms>` and rebuilt in the background; the
+  copies accumulate. Right: drop them once the owner agrees to a rule for derived files. A
+  rebuild reads every source again, so search answers partially until it catches up.
+- **No history tools on `mcp --envoy`** (`protectorate`, mcp.rs): the bridge holds the
+  envoy-only capability of vendor general agents (D9), and D26 gives history to Envoy and to
+  sleeves for their own runs only, so `history_search`/`history_read` there would always be
+  refused. Right: add them if the owner widens D26 to vendor agents.
+- **Local quota key from Pi's models.json** (`pt-quota`, local.rs): the `pi_local_provider`
+  entry's `apiKey`, as a set environment variable's name or a literal; a `!command` key is never
+  run (the local row stays `unknown`). The key goes to `local_url` even when that is not the
+  provider's own `baseUrl`. Right: fine while both are the owner's endpoints.

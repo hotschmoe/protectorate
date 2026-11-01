@@ -17,6 +17,7 @@ mod devices;
 mod exec;
 mod fleet;
 mod git;
+mod history;
 mod home;
 mod http;
 mod hub;

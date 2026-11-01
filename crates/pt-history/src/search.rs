@@ -60,16 +60,19 @@ pub(crate) fn parse(q: &Query) -> Vec<QTerm> {
 }
 
 struct Resolved {
-    sleeve: Option<u32>,
+    /// Empty means any sleeve.
+    sleeves: Vec<u32>,
     session: Option<u32>,
 }
 
+/// The filters' strings as symbols; `None` when no doc can match.
 fn resolve(ix: &Index, f: &Filters) -> Option<Resolved> {
+    let sleeves: Vec<u32> = f.sleeves.iter().filter_map(|s| ix.syms.get(s)).collect();
+    if !f.sleeves.is_empty() && sleeves.is_empty() {
+        return None;
+    }
     Some(Resolved {
-        sleeve: match &f.sleeve {
-            Some(s) => Some(ix.syms.get(s)?),
-            None => None,
-        },
+        sleeves,
         session: match &f.session {
             Some(s) => Some(ix.syms.get(s)?),
             None => None,
@@ -78,7 +81,7 @@ fn resolve(ix: &Index, f: &Filters) -> Option<Resolved> {
 }
 
 fn pass(m: &Meta, f: &Filters, r: &Resolved) -> bool {
-    r.sleeve.is_none_or(|s| m.sleeve == s)
+    (r.sleeves.is_empty() || r.sleeves.contains(&m.sleeve))
         && r.session.is_none_or(|s| m.session == s)
         && f.harness.is_none_or(|h| m.harness == Some(h))
         && f.since_ms.is_none_or(|t| m.time_ms >= t)
@@ -230,45 +233,36 @@ impl Index {
         }
         Ok(hits)
     }
+}
 
-    /// The pre-run hits a continuation brief embeds: the task's identifiers, paths, quoted
-    /// strings and longer words, any of which may match, within `sleeve` when given.
-    pub fn brief_hits(
-        &self,
-        task_text: &str,
-        sleeve: Option<&str>,
-        limit: usize,
-    ) -> io::Result<Vec<Hit>> {
-        let terms = parse(&Query::any(task_text));
-        let mut scored: Vec<(u8, usize, String)> = terms
-            .into_iter()
-            .filter_map(|t| {
-                let joined = t.join(" ");
-                let ident = t.len() > 1 || joined.bytes().any(|b| b.is_ascii_digit());
-                let rank = if ident {
-                    0
-                } else if joined.len() >= 4 {
-                    1
-                } else {
-                    return None;
-                };
-                let text = if t.len() > 1 {
-                    format!("\"{joined}\"")
-                } else {
-                    joined
-                };
-                Some((rank, usize::MAX - text.len(), text))
-            })
-            .collect();
-        scored.sort();
-        scored.truncate(BRIEF_TERMS);
-        let text: Vec<String> = scored.into_iter().map(|(_, _, t)| t).collect();
-        let filters = Filters {
-            sleeve: sleeve.map(str::to_owned),
-            ..Filters::default()
-        };
-        self.search(&Query::any(text.join(" ")), &filters, limit)
-    }
+/// The query a continuation brief runs before the new session starts: the task's identifiers,
+/// paths, quoted strings and longer words, any of which may match.
+pub fn brief_query(task_text: &str) -> Query {
+    let terms = parse(&Query::any(task_text));
+    let mut scored: Vec<(u8, usize, String)> = terms
+        .into_iter()
+        .filter_map(|t| {
+            let joined = t.join(" ");
+            let ident = t.len() > 1 || joined.bytes().any(|b| b.is_ascii_digit());
+            let rank = if ident {
+                0
+            } else if joined.len() >= 4 {
+                1
+            } else {
+                return None;
+            };
+            let text = if t.len() > 1 {
+                format!("\"{joined}\"")
+            } else {
+                joined
+            };
+            Some((rank, usize::MAX - text.len(), text))
+        })
+        .collect();
+    scored.sort();
+    scored.truncate(BRIEF_TERMS);
+    let text: Vec<String> = scored.into_iter().map(|(_, _, t)| t).collect();
+    Query::any(text.join(" "))
 }
 
 /// The window of `text` with the most matched words, whitespace flattened to spaces.

@@ -10,6 +10,7 @@
 //! ix.ingest(&Source::new(SourceKind::Claude, path, session_id).sleeve("api"))?;
 //! ix.commit()?;                                  // ingested docs become searchable
 //! let hits = ix.search(&Query::all("journal torn tail"), &Filters::default(), 8)?;
+//! let pre = ix.search(&pt_history::brief_query(task), &filters, 3)?; // a brief's pre-run hits
 //! let turns = ix.read(&Selector::Turns { session, from: 3, to: 5 })?;
 //! ```
 //!
@@ -76,6 +77,9 @@ pub struct Source {
     pub sleeve: Option<String>,
     /// Read no further than this byte offset (a frozen view of a live file).
     pub limit: Option<u64>,
+    /// Sessions whose docs and usage this source does not emit, because another source
+    /// indexes them (a hub transcript repeats every headless session's native log).
+    pub skip: Vec<String>,
 }
 
 impl Source {
@@ -86,6 +90,7 @@ impl Source {
             session: session.into(),
             sleeve: None,
             limit: None,
+            skip: Vec::new(),
         }
     }
 
@@ -159,10 +164,11 @@ impl Query {
     }
 }
 
-/// Every set field must match. `roles` empty means any role; times are inclusive.
+/// Every set field must match. `sleeves` and `roles` empty mean any; times are inclusive.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Filters {
-    pub sleeve: Option<String>,
+    /// Any of these sleeves.
+    pub sleeves: Vec<String>,
     pub harness: Option<Harness>,
     pub session: Option<String>,
     pub since_ms: Option<u64>,
@@ -229,7 +235,7 @@ pt_json::record! {
     }
 }
 
-pub use search::SNIPPET;
+pub use search::{SNIPPET, brief_query};
 
 /// Drives one extractor over arbitrary lines for the fuzz targets: the first byte picks the
 /// source kind, the rest is split on newlines. Returns the number of docs. Not a stable API.

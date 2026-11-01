@@ -1720,6 +1720,282 @@ enum Harness {
   String toJson() => wire;
 }
 
+/// One indexed unit of a session the hub launched, with its provenance.
+final class HistoryDoc {
+  const HistoryDoc({
+    required this.docId,
+    required this.sleeveId,
+    required this.sleeve,
+    this.harness,
+    required this.session,
+    required this.turn,
+    required this.role,
+    required this.time,
+    this.tool,
+    this.files = const <String>[],
+    required this.path,
+    required this.offset,
+  });
+
+  factory HistoryDoc.fromJson(Object? json) {
+    final j = _object(json, 'HistoryDoc');
+    return HistoryDoc(
+      docId: _int(j['doc_id'], 'HistoryDoc.doc_id'),
+      sleeveId: _string(j['sleeve_id'], 'HistoryDoc.sleeve_id'),
+      sleeve: _string(j['sleeve'], 'HistoryDoc.sleeve'),
+      harness: _opt(j['harness'], Harness.fromJson),
+      session: _string(j['session'], 'HistoryDoc.session'),
+      turn: _int(j['turn'], 'HistoryDoc.turn'),
+      role: HistoryRole.fromJson(j['role']),
+      time: _time(j['time_ms'], 'HistoryDoc.time_ms'),
+      tool: _opt(j['tool'], (e0) => _string(e0, 'HistoryDoc.tool')),
+      files: _or(
+        j['files'],
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'HistoryDoc.files',
+          (e1) => _string(e1, 'HistoryDoc.files[]'),
+        ),
+      ),
+      path: _string(j['path'], 'HistoryDoc.path'),
+      offset: _int(j['offset'], 'HistoryDoc.offset'),
+    );
+  }
+
+  final int docId;
+
+  final String sleeveId;
+
+  final String sleeve;
+
+  final Harness? harness;
+
+  /// The native session id.
+  final String session;
+
+  /// User prompts in the session up to and including this doc.
+  final int turn;
+
+  final HistoryRole role;
+
+  final DateTime time;
+
+  final String? tool;
+
+  final List<String> files;
+
+  /// The log the doc came from, and the byte offset of its line there.
+  final String path;
+
+  final int offset;
+
+  Map<String, Object?> toJson() => {
+    'doc_id': docId,
+    'sleeve_id': sleeveId,
+    'sleeve': sleeve,
+    if (harness case final v?) 'harness': v.toJson(),
+    'session': session,
+    'turn': turn,
+    'role': role.toJson(),
+    'time_ms': time.millisecondsSinceEpoch,
+    if (tool case final v?) 'tool': v,
+    'files': files,
+    'path': path,
+    'offset': offset,
+  };
+}
+
+final class HistoryHit {
+  const HistoryHit({
+    required this.doc,
+    required this.score,
+    required this.snippet,
+    this.highlights = const <HistorySpan>[],
+  });
+
+  factory HistoryHit.fromJson(Object? json) {
+    final j = _object(json, 'HistoryHit');
+    return HistoryHit(
+      doc: HistoryDoc.fromJson(j['doc']),
+      score: _double(j['score'], 'HistoryHit.score'),
+      snippet: _string(j['snippet'], 'HistoryHit.snippet'),
+      highlights: _or(
+        j['highlights'],
+        const <HistorySpan>[],
+        (e0) => _list(e0, 'HistoryHit.highlights', HistorySpan.fromJson),
+      ),
+    );
+  }
+
+  final HistoryDoc doc;
+
+  final double score;
+
+  /// About 240 bytes around the best cluster of matches, whitespace flattened.
+  final String snippet;
+
+  final List<HistorySpan> highlights;
+
+  Map<String, Object?> toJson() => {
+    'doc': doc.toJson(),
+    'score': score,
+    'snippet': snippet,
+    'highlights': [for (final e0 in highlights) e0.toJson()],
+  };
+}
+
+final class HistoryHits {
+  const HistoryHits({
+    this.hits = const <HistoryHit>[],
+    required this.indexedDocs,
+  });
+
+  factory HistoryHits.fromJson(Object? json) {
+    final j = _object(json, 'HistoryHits');
+    return HistoryHits(
+      hits: _or(
+        j['hits'],
+        const <HistoryHit>[],
+        (e0) => _list(e0, 'HistoryHits.hits', HistoryHit.fromJson),
+      ),
+      indexedDocs: _int(j['indexed_docs'], 'HistoryHits.indexed_docs'),
+    );
+  }
+
+  final List<HistoryHit> hits;
+
+  /// Docs in the index, all sleeves.
+  final int indexedDocs;
+
+  Map<String, Object?> toJson() => {
+    'hits': [for (final e0 in hits) e0.toJson()],
+    'indexed_docs': indexedDocs,
+  };
+}
+
+/// How `SearchHistory` combines the query's words.
+enum HistoryMode {
+  /// Every word (or quoted phrase) must match.
+  all('all'),
+
+  /// Any word may match; BM25 ranks.
+  any('any'),
+
+  /// The whole query is one phrase.
+  phrase('phrase'),
+
+  /// A value this client does not know.
+  unknown('unknown');
+
+  const HistoryMode(this.wire);
+
+  final String wire;
+
+  static HistoryMode fromJson(Object? json) {
+    for (final v in values) {
+      if (v.wire == json) return v;
+    }
+    return unknown;
+  }
+
+  String toJson() => wire;
+}
+
+final class HistoryRead {
+  const HistoryRead({this.docs = const <HistoryText>[], this.more = false});
+
+  factory HistoryRead.fromJson(Object? json) {
+    final j = _object(json, 'HistoryRead');
+    return HistoryRead(
+      docs: _or(
+        j['docs'],
+        const <HistoryText>[],
+        (e0) => _list(e0, 'HistoryRead.docs', HistoryText.fromJson),
+      ),
+      more: _or(j['more'], false, (e0) => _bool(e0, 'HistoryRead.more')),
+    );
+  }
+
+  final List<HistoryText> docs;
+
+  /// The hub cut the range short; read on from the last doc's turn.
+  final bool more;
+
+  Map<String, Object?> toJson() => {
+    'docs': [for (final e0 in docs) e0.toJson()],
+    'more': more,
+  };
+}
+
+/// What an indexed history doc is.
+enum HistoryRole {
+  user('user'),
+  assistant('assistant'),
+
+  /// Tool name, paths and command line.
+  toolCall('tool_call'),
+
+  /// A failed tool result.
+  toolError('tool_error'),
+
+  /// A compaction summary.
+  compaction('compaction'),
+
+  /// A value this client does not know.
+  unknown('unknown');
+
+  const HistoryRole(this.wire);
+
+  final String wire;
+
+  static HistoryRole fromJson(Object? json) {
+    for (final v in values) {
+      if (v.wire == json) return v;
+    }
+    return unknown;
+  }
+
+  String toJson() => wire;
+}
+
+/// A byte range of a snippet.
+final class HistorySpan {
+  const HistorySpan({required this.start, required this.end});
+
+  factory HistorySpan.fromJson(Object? json) {
+    final j = _object(json, 'HistorySpan');
+    return HistorySpan(
+      start: _int(j['start'], 'HistorySpan.start'),
+      end: _int(j['end'], 'HistorySpan.end'),
+    );
+  }
+
+  final int start;
+
+  final int end;
+
+  Map<String, Object?> toJson() => {'start': start, 'end': end};
+}
+
+final class HistoryText {
+  const HistoryText({required this.doc, required this.text});
+
+  factory HistoryText.fromJson(Object? json) {
+    final j = _object(json, 'HistoryText');
+    return HistoryText(
+      doc: HistoryDoc.fromJson(j['doc']),
+      text: _string(j['text'], 'HistoryText.text'),
+    );
+  }
+
+  final HistoryDoc doc;
+
+  final String text;
+
+  Map<String, Object?> toJson() => {'doc': doc.toJson(), 'text': text};
+}
+
 /// A line of the mail and events log.
 final class HubEvent {
   const HubEvent({
@@ -3310,6 +3586,52 @@ final class QuotaWindow {
   };
 }
 
+/// One doc by id, or a session's docs whose turn is in `from_turn..=to_turn`.
+final class ReadHistoryRequest {
+  const ReadHistoryRequest({
+    this.docId,
+    this.session,
+    this.fromTurn = 0,
+    this.toTurn,
+  });
+
+  factory ReadHistoryRequest.fromJson(Object? json) {
+    final j = _object(json, 'ReadHistoryRequest');
+    return ReadHistoryRequest(
+      docId: _opt(j['doc_id'], (e0) => _int(e0, 'ReadHistoryRequest.doc_id')),
+      session: _opt(
+        j['session'],
+        (e0) => _string(e0, 'ReadHistoryRequest.session'),
+      ),
+      fromTurn: _or(
+        j['from_turn'],
+        0,
+        (e0) => _int(e0, 'ReadHistoryRequest.from_turn'),
+      ),
+      toTurn: _opt(
+        j['to_turn'],
+        (e0) => _int(e0, 'ReadHistoryRequest.to_turn'),
+      ),
+    );
+  }
+
+  final int? docId;
+
+  final String? session;
+
+  final int fromTurn;
+
+  /// Absent: the session's last turn.
+  final int? toTurn;
+
+  Map<String, Object?> toJson() => {
+    if (docId case final v?) 'doc_id': v,
+    if (session case final v?) 'session': v,
+    'from_turn': fromTurn,
+    if (toTurn case final v?) 'to_turn': v,
+  };
+}
+
 final class ResleeveRequest {
   const ResleeveRequest({
     required this.sleeveId,
@@ -3472,6 +3794,91 @@ final class Sample {
     if (load1 case final v?) 'load1': v,
     if (memAvailBytes case final v?) 'mem_avail_bytes': v,
     if (swapUsedBytes case final v?) 'swap_used_bytes': v,
+  };
+}
+
+final class SearchHistoryRequest {
+  const SearchHistoryRequest({
+    required this.query,
+    this.mode = HistoryMode.all,
+    this.sleeves = const <String>[],
+    this.harness,
+    this.session,
+    this.since,
+    this.until,
+    this.roles = const <HistoryRole>[],
+    this.limit,
+  });
+
+  factory SearchHistoryRequest.fromJson(Object? json) {
+    final j = _object(json, 'SearchHistoryRequest');
+    return SearchHistoryRequest(
+      query: _string(j['query'], 'SearchHistoryRequest.query'),
+      mode: _or(j['mode'], HistoryMode.all, HistoryMode.fromJson),
+      sleeves: _or(
+        j['sleeves'],
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'SearchHistoryRequest.sleeves',
+          (e1) => _string(e1, 'SearchHistoryRequest.sleeves[]'),
+        ),
+      ),
+      harness: _opt(j['harness'], Harness.fromJson),
+      session: _opt(
+        j['session'],
+        (e0) => _string(e0, 'SearchHistoryRequest.session'),
+      ),
+      since: _opt(
+        j['since_ms'],
+        (e0) => _time(e0, 'SearchHistoryRequest.since_ms'),
+      ),
+      until: _opt(
+        j['until_ms'],
+        (e0) => _time(e0, 'SearchHistoryRequest.until_ms'),
+      ),
+      roles: _or(
+        j['roles'],
+        const <HistoryRole>[],
+        (e0) => _list(e0, 'SearchHistoryRequest.roles', HistoryRole.fromJson),
+      ),
+      limit: _opt(j['limit'], (e0) => _int(e0, 'SearchHistoryRequest.limit')),
+    );
+  }
+
+  final String query;
+
+  final HistoryMode mode;
+
+  /// Sleeves by id or name, removed ones too. Empty means every sleeve the caller reaches.
+  final List<String> sleeves;
+
+  /// `pi_local` and `pi_vendor` both match every Pi session.
+  final Harness? harness;
+
+  /// A native session id.
+  final String? session;
+
+  final DateTime? since;
+
+  final DateTime? until;
+
+  /// Empty means any role.
+  final List<HistoryRole> roles;
+
+  /// Default 10; the hub caps it.
+  final int? limit;
+
+  Map<String, Object?> toJson() => {
+    'query': query,
+    'mode': mode.toJson(),
+    'sleeves': sleeves,
+    if (harness case final v?) 'harness': v.toJson(),
+    if (session case final v?) 'session': v,
+    if (since case final v?) 'since_ms': v.millisecondsSinceEpoch,
+    if (until case final v?) 'until_ms': v.millisecondsSinceEpoch,
+    'roles': [for (final e0 in roles) e0.toJson()],
+    if (limit case final v?) 'limit': v,
   };
 }
 
@@ -4381,6 +4788,18 @@ final class HubApi {
   /// `POST /api/Wait`, scope `sleeve`.
   Future<WaitResult> wait(WaitRequest request) =>
       _call('Wait', request.toJson(), WaitResult.fromJson);
+
+  /// Keyword search with BM25 ranking, newest first on ties.
+  ///
+  /// `POST /api/SearchHistory`, scope `sleeve`.
+  Future<HistoryHits> searchHistory(SearchHistoryRequest request) =>
+      _call('SearchHistory', request.toJson(), HistoryHits.fromJson);
+
+  /// Whole docs, by id or by session and turn range.
+  ///
+  /// `POST /api/ReadHistory`, scope `sleeve`.
+  Future<HistoryRead> readHistory(ReadHistoryRequest request) =>
+      _call('ReadHistory', request.toJson(), HistoryRead.fromJson);
 
   /// `POST /api/GetHubInfo`, scope `sleeve`.
   Future<HubInfo> getHubInfo([Empty request = const Empty()]) =>

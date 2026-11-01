@@ -114,6 +114,7 @@ dependencies = [
  "pt-fleet",
  "pt-frame",
  "pt-hash",
+ "pt-history",
  "pt-http",
  "pt-journal",
  "pt-json",

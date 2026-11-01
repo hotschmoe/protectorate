@@ -69,6 +69,10 @@ impl Home {
     pub fn jobs(&self) -> PathBuf {
         self.root.join("jobs")
     }
+    /// The default history index directory.
+    pub fn history(&self) -> PathBuf {
+        self.root.join("history")
+    }
 
     /// Creates the layout (mode 0700 at the root) and canonicalizes the root.
     pub fn prepare(root: &Path) -> io::Result<Home> {
@@ -178,10 +182,13 @@ pt_json::record! {
         pub pi_local_model: String =
             "qwen3.8-27b-FP8-official-W8A16-mtp3-r187-xpugraph-cacheon-ctx200000-daily".to_string(),
         /// The same endpoint's base URL (with or without `/v1`), read for its health as the
-        /// local quota. Empty: the local row stays `unknown`.
+        /// local quota with that provider's API key. Empty: the provider's own `baseUrl`.
         pub local_url: String = String::new(),
         /// How often the quota readers run (each reading is kept 5 min); 0 never reads.
         pub quota_poll_secs: u64 = 60,
+        /// The history index (SPEC 3.7). It is derived and holds log text, so keep it private
+        /// and out of backups. Empty means `<home>/history`.
+        pub history_dir: String = String::new(),
         pub envoy: TargetConf = TargetConf {
             harness: "claude".to_string(),
             provider: String::new(),

@@ -27,6 +27,28 @@ api_enums! {
         Parked = "parked",
     }
 
+    /// How `SearchHistory` combines the query's words.
+    pub enum HistoryMode {
+        /// Every word (or quoted phrase) must match.
+        All = "all",
+        /// Any word may match; BM25 ranks.
+        Any = "any",
+        /// The whole query is one phrase.
+        Phrase = "phrase",
+    }
+
+    /// What an indexed history doc is.
+    pub enum HistoryRole {
+        User = "user",
+        Assistant = "assistant",
+        /// Tool name, paths and command line.
+        ToolCall = "tool_call",
+        /// A failed tool result.
+        ToolError = "tool_error",
+        /// A compaction summary.
+        Compaction = "compaction",
+    }
+
     pub enum ErrorCode {
         /// No credential, or one the hub does not know.
         Unauthenticated = "unauthenticated",
@@ -364,6 +386,82 @@ api_records! {
     pub struct DeviceRef {
         pub device_id: String,
     }
+
+    pub struct SearchHistoryRequest {
+        pub query: String,
+        pub mode: HistoryMode = HistoryMode::All,
+        /// Sleeves by id or name, removed ones too. Empty means every sleeve the caller reaches.
+        pub sleeves: Vec<String> = Vec::new(),
+        /// `pi_local` and `pi_vendor` both match every Pi session.
+        pub harness: Option<Harness>,
+        /// A native session id.
+        pub session: Option<String>,
+        pub since_ms: Option<EpochMs>,
+        pub until_ms: Option<EpochMs>,
+        /// Empty means any role.
+        pub roles: Vec<HistoryRole> = Vec::new(),
+        /// Default 10; the hub caps it.
+        pub limit: Option<u64>,
+    }
+
+    /// One indexed unit of a session the hub launched, with its provenance.
+    pub struct HistoryDoc {
+        pub doc_id: u64,
+        pub sleeve_id: String,
+        pub sleeve: String,
+        pub harness: Option<Harness>,
+        /// The native session id.
+        pub session: String,
+        /// User prompts in the session up to and including this doc.
+        pub turn: u64,
+        pub role: HistoryRole,
+        pub time_ms: EpochMs,
+        pub tool: Option<String>,
+        pub files: Vec<String> = Vec::new(),
+        /// The log the doc came from, and the byte offset of its line there.
+        pub path: String,
+        pub offset: u64,
+    }
+
+    /// A byte range of a snippet.
+    pub struct HistorySpan {
+        pub start: u64,
+        pub end: u64,
+    }
+
+    pub struct HistoryHit {
+        pub doc: HistoryDoc,
+        pub score: f64,
+        /// About 240 bytes around the best cluster of matches, whitespace flattened.
+        pub snippet: String,
+        pub highlights: Vec<HistorySpan> = Vec::new(),
+    }
+
+    pub struct HistoryHits {
+        pub hits: Vec<HistoryHit> = Vec::new(),
+        /// Docs in the index, all sleeves.
+        pub indexed_docs: u64,
+    }
+
+    /// One doc by id, or a session's docs whose turn is in `from_turn..=to_turn`.
+    pub struct ReadHistoryRequest {
+        pub doc_id: Option<u64>,
+        pub session: Option<String>,
+        pub from_turn: u64 = 0,
+        /// Absent: the session's last turn.
+        pub to_turn: Option<u64>,
+    }
+
+    pub struct HistoryText {
+        pub doc: HistoryDoc,
+        pub text: String,
+    }
+
+    pub struct HistoryRead {
+        pub docs: Vec<HistoryText> = Vec::new(),
+        /// The hub cut the range short; read on from the last doc's turn.
+        pub more: bool = false,
+    }
 }
 
 impl ApiError {
@@ -447,6 +545,13 @@ api_methods! {
     // Wait (SPEC 3.3)
     /// Blocks until the sleeve reaches `until` or the timeout passes.
     Wait(WaitRequest) -> WaitResult: Sleeve,
+
+    // History (SPEC 3.7): the sessions this hub launched. A sleeve reaches its own and its
+    // children's; Envoy and the owner reach every sleeve's.
+    /// Keyword search with BM25 ranking, newest first on ties.
+    SearchHistory(SearchHistoryRequest) -> HistoryHits: Sleeve,
+    /// Whole docs, by id or by session and turn range.
+    ReadHistory(ReadHistoryRequest) -> HistoryRead: Sleeve,
 
     // Hub
     GetHubInfo(Empty) -> HubInfo: Sleeve,

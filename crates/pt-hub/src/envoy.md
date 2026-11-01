@@ -27,6 +27,8 @@ capability). `--json` prints the API's answer; `protectorate --help` lists every
 | `job list`, `job show <j>`, `job log <j> [--offset N]`, `job cancel <j>` | its state and exit, its output, cancel it |
 | `job artifact <j> <path> --out FILE` | a file the job left, checked against its SHA-256 |
 | `quota list`, `event list` | quota, the event log |
+| `history search <words> [--sleeve S] [--mode any\|phrase]` | keyword search over every sleeve's past sessions; each hit names its doc |
+| `history read --doc N` / `history read <session> --from T --to T` | a hit's whole text, or a session's turns |
 
 Harnesses: `claude`, `codex`, `grok`, `pi_vendor`, `pi_local` (the free local model).
 

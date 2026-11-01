@@ -204,6 +204,8 @@ pub fn call(hub: &Hub, who: &Principal, name: &str, body: &Value) -> Result<Valu
         EnvoyRead => envoy_read,
         GetEnvoyToken => get_envoy_token,
         Wait => wait,
+        SearchHistory => search_history,
+        ReadHistory => read_history,
         GetHubInfo => get_hub_info,
         ListDevices => list_devices,
         AddDevice => add_device,
@@ -1220,6 +1222,214 @@ fn wait(c: &Ctx<'_>, r: api::WaitRequest) -> Result<api::WaitResult> {
     Ok(api::WaitResult {
         reached: got == Some(true),
         sleeve: sleeve_view(c.hub, id)?,
+    })
+}
+
+// ---- history -------------------------------------------------------------------------------
+
+const HISTORY_DEFAULT: u64 = 10;
+const HISTORY_MAX: u64 = 100;
+const HISTORY_READ_MAX: usize = 200;
+
+fn history_err(e: crate::history::Failure) -> ApiError {
+    match e {
+        crate::history::Failure::Off(_) => err(ErrorCode::Unavailable, e.to_string()),
+        crate::history::Failure::Io(_) => internal(e),
+    }
+}
+
+/// The index's sleeve keys a history call covers; `None` is every sleeve. Names match removed
+/// sleeves too, since their history stays.
+fn history_sleeves(c: &Ctx<'_>, st: &State, asked: &[String]) -> Result<Option<Vec<String>>> {
+    let mut ids: Vec<SleeveId> = Vec::new();
+    for a in asked {
+        let named: Vec<SleeveId> = st
+            .sleeves
+            .values()
+            .filter(|s| s.id.0.to_string() == *a || s.name == *a)
+            .map(|s| s.id)
+            .collect();
+        if named.is_empty() {
+            return Err(err(ErrorCode::NotFound, format!("no sleeve {a:?}")));
+        }
+        let reached: Vec<SleeveId> = named
+            .into_iter()
+            .filter(|id| reaches(st, c.who, *id))
+            .collect();
+        if reached.is_empty() {
+            return Err(err(
+                ErrorCode::Forbidden,
+                "that sleeve is outside this capability",
+            ));
+        }
+        ids.extend(reached);
+    }
+    if ids.is_empty() {
+        if c.who.full() {
+            return Ok(None);
+        }
+        ids = st
+            .sleeves
+            .values()
+            .filter(|s| reaches(st, c.who, s.id))
+            .map(|s| s.id)
+            .collect();
+    }
+    Ok(Some(ids.iter().map(|i| i.0.to_string()).collect()))
+}
+
+fn doc_sleeve(d: &pt_history::Doc) -> Option<SleeveId> {
+    d.sleeve.as_deref()?.parse().ok().map(SleeveId)
+}
+
+fn history_role(r: pt_history::Role) -> api::HistoryRole {
+    match r {
+        pt_history::Role::User => api::HistoryRole::User,
+        pt_history::Role::Assistant => api::HistoryRole::Assistant,
+        pt_history::Role::ToolCall => api::HistoryRole::ToolCall,
+        pt_history::Role::ToolError => api::HistoryRole::ToolError,
+        pt_history::Role::Compaction => api::HistoryRole::Compaction,
+    }
+}
+
+fn history_doc(hub: &Hub, st: &State, d: &pt_history::Doc) -> api::HistoryDoc {
+    let id = doc_sleeve(d);
+    api::HistoryDoc {
+        doc_id: d.id.0,
+        sleeve_id: id.map(|i| i.0.to_string()).unwrap_or_default(),
+        sleeve: id
+            .and_then(|i| st.sleeve(i))
+            .map(|s| s.name.clone())
+            .unwrap_or_default(),
+        harness: hub.history.harness(&d.session).or(match d.harness {
+            Some(pt_drivers::Harness::Claude) => Some(api::Harness::Claude),
+            Some(pt_drivers::Harness::Codex) => Some(api::Harness::Codex),
+            Some(pt_drivers::Harness::Grok) => Some(api::Harness::Grok),
+            Some(pt_drivers::Harness::Pi) | None => None,
+        }),
+        session: d.session.clone(),
+        turn: u64::from(d.turn),
+        role: history_role(d.role),
+        time_ms: api::EpochMs(d.time_ms),
+        tool: d.tool.clone(),
+        files: d.files.clone(),
+        path: d.path.to_string_lossy().into_owned(),
+        offset: d.offset,
+    }
+}
+
+fn search_history(c: &Ctx<'_>, r: api::SearchHistoryRequest) -> Result<api::HistoryHits> {
+    if r.query.trim().is_empty() {
+        return Err(err(ErrorCode::Invalid, "query is required"));
+    }
+    let view = c.hub.view();
+    let st = &view.state;
+    let harness = match r.harness {
+        Some(h) => Some(
+            crate::exec::driver_harness(wire::core_harness(h))
+                .ok_or_else(|| err(ErrorCode::Invalid, format!("{h} has no history")))?,
+        ),
+        None => None,
+    };
+    let filters = pt_history::Filters {
+        sleeves: history_sleeves(c, st, &r.sleeves)?.unwrap_or_default(),
+        harness,
+        session: r.session,
+        since_ms: r.since_ms.map(|t| t.0),
+        until_ms: r.until_ms.map(|t| t.0),
+        roles: r
+            .roles
+            .iter()
+            .map(|x| match x {
+                api::HistoryRole::User => pt_history::Role::User,
+                api::HistoryRole::Assistant => pt_history::Role::Assistant,
+                api::HistoryRole::ToolCall => pt_history::Role::ToolCall,
+                api::HistoryRole::ToolError => pt_history::Role::ToolError,
+                api::HistoryRole::Compaction => pt_history::Role::Compaction,
+            })
+            .collect(),
+    };
+    let query = pt_history::Query {
+        text: r.query,
+        mode: match r.mode {
+            api::HistoryMode::All => pt_history::Mode::All,
+            api::HistoryMode::Any => pt_history::Mode::Any,
+            api::HistoryMode::Phrase => pt_history::Mode::Phrase,
+        },
+    };
+    let limit = r.limit.unwrap_or(HISTORY_DEFAULT).clamp(1, HISTORY_MAX) as usize;
+    let hits = c
+        .hub
+        .history
+        .search(&query, &filters, limit)
+        .map_err(history_err)?;
+    Ok(api::HistoryHits {
+        hits: hits
+            .iter()
+            .map(|h| api::HistoryHit {
+                doc: history_doc(c.hub, st, &h.doc),
+                score: h.score,
+                snippet: h.snippet.text.clone(),
+                highlights: h
+                    .snippet
+                    .highlights
+                    .iter()
+                    .map(|&(s, e)| api::HistorySpan {
+                        start: s as u64,
+                        end: e as u64,
+                    })
+                    .collect(),
+            })
+            .collect(),
+        indexed_docs: c.hub.history.docs(),
+    })
+}
+
+fn read_history(c: &Ctx<'_>, r: api::ReadHistoryRequest) -> Result<api::HistoryRead> {
+    let turn = |t: u64| u32::try_from(t).unwrap_or(u32::MAX);
+    let (sel, what) = match (r.doc_id, r.session) {
+        (Some(id), None) => (
+            pt_history::Selector::Doc(pt_history::DocId(id)),
+            format!("no history doc {id}"),
+        ),
+        (None, Some(session)) => (
+            pt_history::Selector::Turns {
+                from: turn(r.from_turn),
+                to: r.to_turn.map_or(u32::MAX, turn),
+                session: session.clone(),
+            },
+            format!("no history of session {session} in that turn range"),
+        ),
+        _ => return Err(err(ErrorCode::Invalid, "give doc_id or session, not both")),
+    };
+    let view = c.hub.view();
+    let st = &view.state;
+    let mut docs: Vec<pt_history::Doc> = c
+        .hub
+        .history
+        .read(&sel)
+        .map_err(history_err)?
+        .into_iter()
+        .filter(|d| match doc_sleeve(d) {
+            Some(id) => reaches(st, c.who, id),
+            None => c.who.full(),
+        })
+        .collect();
+    // Out of reach reads the same as absent.
+    if docs.is_empty() {
+        return Err(err(ErrorCode::NotFound, what));
+    }
+    let more = docs.len() > HISTORY_READ_MAX;
+    docs.truncate(HISTORY_READ_MAX);
+    Ok(api::HistoryRead {
+        docs: docs
+            .into_iter()
+            .map(|d| api::HistoryText {
+                doc: history_doc(c.hub, st, &d),
+                text: d.text,
+            })
+            .collect(),
+        more,
     })
 }
 

@@ -72,6 +72,10 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   event list [--from SEQ] [--limit N] | event read <seq>
   envoy send <text...> [--as NAME] | envoy wait [REQUEST_ID] [--timeout SECS]
   envoy read [--from SEQ] | envoy token
+  history search <query...> [--mode all|any|phrase] [--sleeve S]... [--harness H]
+        [--session ID] [--role user|assistant|tool-call|tool-error|compaction]...
+        [--since 7d|MS] [--until 7d|MS] [--limit N]
+  history read --doc ID | history read <session> [--from TURN] [--to TURN]
   device list | device add <name> | device pair <code> | device revoke <id>
   mcp --envoy [--token-file PATH] [--as NAME]
 

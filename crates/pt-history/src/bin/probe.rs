@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use pt_history::{DocId, Filters, Hit, Index, Query, Selector, Source, SourceKind, discover};
+use pt_history::{
+    DocId, Filters, Hit, Index, Query, Selector, Source, SourceKind, brief_query, discover,
+};
 
 const QUERIES: &[&str] = &[
     "journal codec torn tail",
@@ -323,10 +325,10 @@ fn run() -> Result<bool, String> {
 
     let t0 = Instant::now();
     let brief = ix
-        .brief_hits(BRIEF_TASK, None, 3)
+        .search(&brief_query(BRIEF_TASK), &Filters::default(), 3)
         .map_err(|e| e.to_string())?;
     println!(
-        "brief_hits {BRIEF_TASK:?}: {} hits in {:.2} ms",
+        "brief_query {BRIEF_TASK:?}: {} hits in {:.2} ms",
         brief.len(),
         ms(t0.elapsed())
     );
@@ -357,7 +359,7 @@ fn run() -> Result<bool, String> {
         same &= fingerprint(&got) == *want;
     }
     let brief_again = rb
-        .brief_hits(BRIEF_TASK, None, 3)
+        .search(&brief_query(BRIEF_TASK), &Filters::default(), 3)
         .map_err(|e| e.to_string())?;
     same &= fingerprint(&brief_again) == fingerprint(&brief);
     println!(

@@ -1,8 +1,10 @@
 //! Prints the live quota reading of every subscription on this machine, never a secret.
 //!
-//! `pt-quota-probe [--home DIR] [--local URL] [--claude-url URL] [--codex-url URL] [--grok-url URL]`
+//! `pt-quota-probe [--home DIR] [--local URL] [--pi-provider NAME] [--claude-url URL]
+//! [--codex-url URL] [--grok-url URL]`
 //! One line per subscription: `<name> <fresh|stale|unknown|error> plan=<plan> [<window> <used>%
-//! resets <time>]... note=<note>`. `PT_LOCAL_URL` also configures the local endpoint.
+//! resets <time>]... note=<note>`. `PT_LOCAL_URL` also configures the local endpoint; without
+//! one, the local reader uses the `baseUrl` of Pi provider `--pi-provider` (default `hotschmoe`).
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -15,6 +17,7 @@ use pt_quota::{
 fn main() -> ExitCode {
     let mut home: Option<PathBuf> = None;
     let mut local = std::env::var("PT_LOCAL_URL").unwrap_or_default();
+    let mut pi_provider = "hotschmoe".to_string();
     let (mut claude_url, mut codex_url, mut grok_url) = (None, None, None);
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {
@@ -25,6 +28,7 @@ fn main() -> ExitCode {
         match flag.as_str() {
             "--home" => home = Some(PathBuf::from(value)),
             "--local" => local = value,
+            "--pi-provider" => pi_provider = value,
             "--claude-url" => claude_url = Some(value),
             "--codex-url" => codex_url = Some(value),
             "--grok-url" => grok_url = Some(value),
@@ -44,10 +48,14 @@ fn main() -> ExitCode {
             base_url: codex_url,
         }),
         Box::new(Grok {
-            home,
+            home: home.clone(),
             base_url: grok_url,
         }),
-        Box::new(Local { base_url: local }),
+        Box::new(Local {
+            base_url: local,
+            home,
+            provider: pi_provider,
+        }),
     ];
     let mut cache = Cache::new(readers, Options::default());
     let now = pt_quota::now_ms();
