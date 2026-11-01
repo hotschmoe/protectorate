@@ -73,7 +73,7 @@ impl Journal {
     /// Opens or creates the journal in `dir`, truncating a torn or corrupt tail of the live
     /// segment to its last good frame.
     pub fn open(dir: &Path) -> io::Result<(Journal, Recovered)> {
-        fs::create_dir_all(dir).map_err(|e| ctx(e, "create journal dir", dir))?;
+        create_dir_durable(dir)?;
         let lock_path = dir.join("lock");
         let lock = OpenOptions::new()
             .create(true)
@@ -373,6 +373,32 @@ fn create_segment(dir: &Path, path: &Path) -> io::Result<File> {
     file.sync_all().map_err(|e| ctx(e, "fsync", path))?;
     sync_dir(dir)?;
     Ok(file)
+}
+
+/// Creates `dir` and any missing ancestors, then fsyncs the parent of every directory created
+/// and of `dir` itself, so the journal's own entry survives a power loss. The parent is synced
+/// even when `dir` exists: an earlier open may have created it and crashed before its sync.
+fn create_dir_durable(dir: &Path) -> io::Result<()> {
+    let parent = |d: &Path| {
+        d.parent()
+            .filter(|up| !up.as_os_str().is_empty())
+            .unwrap_or(Path::new("."))
+            .to_path_buf()
+    };
+    let mut dirs = vec![dir];
+    while let Some(up) = dirs
+        .last()
+        .copied()
+        .and_then(Path::parent)
+        .filter(|up| !up.as_os_str().is_empty() && !up.exists())
+    {
+        dirs.push(up);
+    }
+    fs::create_dir_all(dir).map_err(|e| ctx(e, "create journal dir", dir))?;
+    for d in dirs {
+        sync_dir(&parent(d))?;
+    }
+    Ok(())
 }
 
 fn sync_dir(dir: &Path) -> io::Result<()> {
