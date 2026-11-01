@@ -21,7 +21,7 @@ const STATUS_TIMEOUT: Duration = Duration::from_secs(10);
 const DIAL_TIMEOUT: Duration = Duration::from_secs(35);
 
 pub(crate) fn state_dir(cfg: &Config) -> PathBuf {
-    cfg.tailnet_dir().join("member")
+    cfg.dir.join("member")
 }
 
 pub(crate) fn enrolled(cfg: &Config) -> bool {
@@ -67,7 +67,7 @@ pub(crate) fn enroll(cfg: &Config, admin: &Admin, fingerprint: &str) -> Result<H
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::from(crate::append_log(
-            &cfg.tailnet_dir().join("member-enroll.log"),
+            &cfg.dir.join("member-enroll.log"),
         )?));
     let mut child = cmd.spawn().map_err(|e| {
         Error::new(format!(
@@ -141,7 +141,7 @@ fn next_event(rx: &mpsc::Receiver<String>, event: &str) -> Result<Value> {
 /// The first `member.sock`, `member-2.sock`, ... that does not exist. member refuses a path that
 /// exists, and one left by a killed member is never removed (REVISIT.md).
 pub(crate) fn fresh_socket(cfg: &Config) -> Result<PathBuf> {
-    let dir = cfg.tailnet_dir();
+    let dir = &cfg.dir;
     for n in 1..1000u32 {
         let name = if n == 1 {
             "member.sock".to_string()

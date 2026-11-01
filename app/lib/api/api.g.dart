@@ -158,6 +158,22 @@ final class AddDeviceRequest {
   Map<String, Object?> toJson() => {'name': name};
 }
 
+final class AddNodeRequest {
+  const AddNodeRequest({required this.registration});
+
+  factory AddNodeRequest.fromJson(Object? json) {
+    final j = _object(json, 'AddNodeRequest');
+    return AddNodeRequest(
+      registration: _string(j['registration'], 'AddNodeRequest.registration'),
+    );
+  }
+
+  /// The QR payload `protectorate-node join` shows, or its pasted text.
+  final String registration;
+
+  Map<String, Object?> toJson() => {'registration': registration};
+}
+
 final class ApiError {
   const ApiError({required this.code, required this.message});
 
@@ -336,6 +352,53 @@ enum ApprovalState {
   }
 
   String toJson() => wire;
+}
+
+/// `name` and `fingerprint` default to the pending registration's.
+final class ApproveNodeRequest {
+  const ApproveNodeRequest({required this.authId, this.name, this.fingerprint});
+
+  factory ApproveNodeRequest.fromJson(Object? json) {
+    final j = _object(json, 'ApproveNodeRequest');
+    return ApproveNodeRequest(
+      authId: _string(j['auth_id'], 'ApproveNodeRequest.auth_id'),
+      name: _opt(j['name'], (e0) => _string(e0, 'ApproveNodeRequest.name')),
+      fingerprint: _opt(
+        j['fingerprint'],
+        (e0) => _string(e0, 'ApproveNodeRequest.fingerprint'),
+      ),
+    );
+  }
+
+  final String authId;
+
+  final String? name;
+
+  final String? fingerprint;
+
+  Map<String, Object?> toJson() => {
+    'auth_id': authId,
+    if (name case final v?) 'name': v,
+    if (fingerprint case final v?) 'fingerprint': v,
+  };
+}
+
+final class ApprovedNode {
+  const ApprovedNode({required this.nodeId, required this.name});
+
+  factory ApprovedNode.fromJson(Object? json) {
+    final j = _object(json, 'ApprovedNode');
+    return ApprovedNode(
+      nodeId: _string(j['node_id'], 'ApprovedNode.node_id'),
+      name: _string(j['name'], 'ApprovedNode.name'),
+    );
+  }
+
+  final String nodeId;
+
+  final String name;
+
+  Map<String, Object?> toJson() => {'node_id': nodeId, 'name': name};
 }
 
 /// One entry of a sleeve's append-only transcript. A status change is a new entry naming
@@ -590,6 +653,47 @@ final class Empty {
   }
 
   Map<String, Object?> toJson() => const {};
+}
+
+/// How a machine joins this hub's tailnet: run `join_command` on it, then hand its QR text
+/// to `AddNode` or approve it with the line it prints.
+final class Enrollment {
+  const Enrollment({
+    required this.serverUrl,
+    required this.controlKey,
+    required this.joinCommand,
+    this.pending = const <PendingNode>[],
+  });
+
+  factory Enrollment.fromJson(Object? json) {
+    final j = _object(json, 'Enrollment');
+    return Enrollment(
+      serverUrl: _string(j['server_url'], 'Enrollment.server_url'),
+      controlKey: _string(j['control_key'], 'Enrollment.control_key'),
+      joinCommand: _string(j['join_command'], 'Enrollment.join_command'),
+      pending: _or(
+        j['pending'],
+        const <PendingNode>[],
+        (e0) => _list(e0, 'Enrollment.pending', PendingNode.fromJson),
+      ),
+    );
+  }
+
+  final String serverUrl;
+
+  /// `sha256:<hex>` of headscale's control key; the node shows the one it saw.
+  final String controlKey;
+
+  final String joinCommand;
+
+  final List<PendingNode> pending;
+
+  Map<String, Object?> toJson() => {
+    'server_url': serverUrl,
+    'control_key': controlKey,
+    'join_command': joinCommand,
+    'pending': [for (final e0 in pending) e0.toJson()],
+  };
 }
 
 /// The normalized transcript entry (docs/design/sessions-chat-first.md section 3).
@@ -1449,6 +1553,46 @@ final class FileDelta {
   };
 }
 
+final class GetJobArtifactRequest {
+  const GetJobArtifactRequest({
+    required this.jobId,
+    required this.path,
+    this.offset = 0,
+    this.limit,
+  });
+
+  factory GetJobArtifactRequest.fromJson(Object? json) {
+    final j = _object(json, 'GetJobArtifactRequest');
+    return GetJobArtifactRequest(
+      jobId: _string(j['job_id'], 'GetJobArtifactRequest.job_id'),
+      path: _string(j['path'], 'GetJobArtifactRequest.path'),
+      offset: _or(
+        j['offset'],
+        0,
+        (e0) => _int(e0, 'GetJobArtifactRequest.offset'),
+      ),
+      limit: _opt(j['limit'], (e0) => _int(e0, 'GetJobArtifactRequest.limit')),
+    );
+  }
+
+  final String jobId;
+
+  /// As the job's `artifacts` list names it.
+  final String path;
+
+  final int offset;
+
+  /// Bytes; the hub caps it.
+  final int? limit;
+
+  Map<String, Object?> toJson() => {
+    'job_id': jobId,
+    'path': path,
+    'offset': offset,
+    if (limit case final v?) 'limit': v,
+  };
+}
+
 final class GetJobLogRequest {
   const GetJobLogRequest({required this.jobId, this.offset = 0, this.limit});
 
@@ -1766,6 +1910,7 @@ sealed class HubStreamMessage {
       'entry' => HubStreamMessageEntry._fromMap(j),
       'approval' => HubStreamMessageApproval._fromMap(j),
       'node' => HubStreamMessageNode._fromMap(j),
+      'node_removed' => HubStreamMessageNodeRemoved._fromMap(j),
       'job' => HubStreamMessageJob._fromMap(j),
       'quota' => HubStreamMessageQuota._fromMap(j),
       'event' => HubStreamMessageEvent._fromMap(j),
@@ -1937,6 +2082,29 @@ final class HubStreamMessageNode extends HubStreamMessage {
     'type': 'node',
     'seq': seq,
     'node': node.toJson(),
+  };
+}
+
+/// The node left the tailnet (deleted, or no longer tagged as a node).
+final class HubStreamMessageNodeRemoved extends HubStreamMessage {
+  const HubStreamMessageNodeRemoved({required this.seq, required this.id});
+
+  factory HubStreamMessageNodeRemoved._fromMap(Map<String, Object?> j) =>
+      HubStreamMessageNodeRemoved(
+        seq: _int(j['seq'], 'HubStreamMessageNodeRemoved.seq'),
+        id: _string(j['id'], 'HubStreamMessageNodeRemoved.id'),
+      );
+
+  @override
+  final int seq;
+
+  final String id;
+
+  @override
+  Map<String, Object?> toJson() => {
+    'type': 'node_removed',
+    'seq': seq,
+    'id': id,
   };
 }
 
@@ -2219,6 +2387,8 @@ final class Job {
     this.endedAt,
     this.exitCode,
     this.logBytes = 0,
+    this.cwd,
+    this.artifacts = const <JobArtifact>[],
   });
 
   factory Job.fromJson(Object? json) {
@@ -2249,6 +2419,12 @@ final class Job {
       endedAt: _opt(j['ended_at_ms'], (e0) => _time(e0, 'Job.ended_at_ms')),
       exitCode: _opt(j['exit_code'], (e0) => _int(e0, 'Job.exit_code')),
       logBytes: _or(j['log_bytes'], 0, (e0) => _int(e0, 'Job.log_bytes')),
+      cwd: _opt(j['cwd'], (e0) => _string(e0, 'Job.cwd')),
+      artifacts: _or(
+        j['artifacts'],
+        const <JobArtifact>[],
+        (e0) => _list(e0, 'Job.artifacts', JobArtifact.fromJson),
+      ),
     );
   }
 
@@ -2283,7 +2459,14 @@ final class Job {
 
   final int? exitCode;
 
+  /// Bytes of log the hub holds.
   final int logBytes;
+
+  /// The node's directory the job ran in; absent means the node's own work dir.
+  final String? cwd;
+
+  /// The files the job was asked to leave, fetched once it exits.
+  final List<JobArtifact> artifacts;
 
   Map<String, Object?> toJson() => {
     'id': id,
@@ -2301,6 +2484,114 @@ final class Job {
     if (endedAt case final v?) 'ended_at_ms': v.millisecondsSinceEpoch,
     if (exitCode case final v?) 'exit_code': v,
     'log_bytes': logBytes,
+    if (cwd case final v?) 'cwd': v,
+    'artifacts': [for (final e0 in artifacts) e0.toJson()],
+  };
+}
+
+/// A file a job leaves on its node. `sha256` and `size_bytes` are set once the hub has
+/// fetched it.
+final class JobArtifact {
+  const JobArtifact({required this.path, this.sizeBytes, this.sha256});
+
+  factory JobArtifact.fromJson(Object? json) {
+    final j = _object(json, 'JobArtifact');
+    return JobArtifact(
+      path: _string(j['path'], 'JobArtifact.path'),
+      sizeBytes: _opt(
+        j['size_bytes'],
+        (e0) => _int(e0, 'JobArtifact.size_bytes'),
+      ),
+      sha256: _opt(j['sha256'], (e0) => _string(e0, 'JobArtifact.sha256')),
+    );
+  }
+
+  final String path;
+
+  final int? sizeBytes;
+
+  final String? sha256;
+
+  Map<String, Object?> toJson() => {
+    'path': path,
+    if (sizeBytes case final v?) 'size_bytes': v,
+    if (sha256 case final v?) 'sha256': v,
+  };
+}
+
+/// A slice of a fetched artifact, as lowercase hex.
+final class JobArtifactData {
+  const JobArtifactData({
+    required this.jobId,
+    required this.path,
+    required this.offset,
+    required this.nextOffset,
+    required this.sizeBytes,
+    required this.sha256,
+    required this.hex,
+    required this.eof,
+  });
+
+  factory JobArtifactData.fromJson(Object? json) {
+    final j = _object(json, 'JobArtifactData');
+    return JobArtifactData(
+      jobId: _string(j['job_id'], 'JobArtifactData.job_id'),
+      path: _string(j['path'], 'JobArtifactData.path'),
+      offset: _int(j['offset'], 'JobArtifactData.offset'),
+      nextOffset: _int(j['next_offset'], 'JobArtifactData.next_offset'),
+      sizeBytes: _int(j['size_bytes'], 'JobArtifactData.size_bytes'),
+      sha256: _string(j['sha256'], 'JobArtifactData.sha256'),
+      hex: _string(j['hex'], 'JobArtifactData.hex'),
+      eof: _bool(j['eof'], 'JobArtifactData.eof'),
+    );
+  }
+
+  final String jobId;
+
+  final String path;
+
+  final int offset;
+
+  final int nextOffset;
+
+  final int sizeBytes;
+
+  final String sha256;
+
+  final String hex;
+
+  final bool eof;
+
+  Map<String, Object?> toJson() => {
+    'job_id': jobId,
+    'path': path,
+    'offset': offset,
+    'next_offset': nextOffset,
+    'size_bytes': sizeBytes,
+    'sha256': sha256,
+    'hex': hex,
+    'eof': eof,
+  };
+}
+
+final class JobList {
+  const JobList({this.jobs = const <Job>[]});
+
+  factory JobList.fromJson(Object? json) {
+    final j = _object(json, 'JobList');
+    return JobList(
+      jobs: _or(
+        j['jobs'],
+        const <Job>[],
+        (e0) => _list(e0, 'JobList.jobs', Job.fromJson),
+      ),
+    );
+  }
+
+  final List<Job> jobs;
+
+  Map<String, Object?> toJson() => {
+    'jobs': [for (final e0 in jobs) e0.toJson()],
   };
 }
 
@@ -2535,6 +2826,32 @@ final class ListEventsRequest {
   };
 }
 
+final class ListJobsRequest {
+  const ListJobsRequest({this.nodeId, this.limit});
+
+  factory ListJobsRequest.fromJson(Object? json) {
+    final j = _object(json, 'ListJobsRequest');
+    return ListJobsRequest(
+      nodeId: _opt(
+        j['node_id'],
+        (e0) => _string(e0, 'ListJobsRequest.node_id'),
+      ),
+      limit: _opt(j['limit'], (e0) => _int(e0, 'ListJobsRequest.limit')),
+    );
+  }
+
+  /// Only the jobs on this node (id or name).
+  final String? nodeId;
+
+  /// The newest `limit` jobs; the hub caps it.
+  final int? limit;
+
+  Map<String, Object?> toJson() => {
+    if (nodeId case final v?) 'node_id': v,
+    if (limit case final v?) 'limit': v,
+  };
+}
+
 final class MarkEventsReadRequest {
   const MarkEventsReadRequest({required this.upToSeq});
 
@@ -2759,6 +3076,53 @@ final class PairingCode {
     'name': name,
     'code': code,
     'expires_at_ms': expiresAt.millisecondsSinceEpoch,
+  };
+}
+
+/// A registration the owner scanned or pasted but has not approved.
+final class PendingNode {
+  const PendingNode({
+    required this.authId,
+    required this.name,
+    required this.controlKey,
+    required this.seenAt,
+    required this.expiresAt,
+    required this.keyMatches,
+  });
+
+  factory PendingNode.fromJson(Object? json) {
+    final j = _object(json, 'PendingNode');
+    return PendingNode(
+      authId: _string(j['auth_id'], 'PendingNode.auth_id'),
+      name: _string(j['name'], 'PendingNode.name'),
+      controlKey: _string(j['control_key'], 'PendingNode.control_key'),
+      seenAt: _time(j['seen_at_ms'], 'PendingNode.seen_at_ms'),
+      expiresAt: _time(j['expires_at_ms'], 'PendingNode.expires_at_ms'),
+      keyMatches: _bool(j['key_matches'], 'PendingNode.key_matches'),
+    );
+  }
+
+  final String authId;
+
+  final String name;
+
+  final String controlKey;
+
+  final DateTime seenAt;
+
+  /// headscale forgets the registration then; the node must run `join` again.
+  final DateTime expiresAt;
+
+  /// True when the node saw this hub's control key.
+  final bool keyMatches;
+
+  Map<String, Object?> toJson() => {
+    'auth_id': authId,
+    'name': name,
+    'control_key': controlKey,
+    'seen_at_ms': seenAt.millisecondsSinceEpoch,
+    'expires_at_ms': expiresAt.millisecondsSinceEpoch,
+    'key_matches': keyMatches,
   };
 }
 
@@ -2987,6 +3351,8 @@ final class RunJobRequest {
   const RunJobRequest({
     required this.target,
     required this.argv,
+    this.cwd,
+    this.artifacts = const <String>[],
     this.evenIfPresent = false,
     this.onPresent = OnPresent.idle,
     this.maintenance = false,
@@ -3001,6 +3367,16 @@ final class RunJobRequest {
         j['argv'],
         'RunJobRequest.argv',
         (e0) => _string(e0, 'RunJobRequest.argv[]'),
+      ),
+      cwd: _opt(j['cwd'], (e0) => _string(e0, 'RunJobRequest.cwd')),
+      artifacts: _or(
+        j['artifacts'],
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'RunJobRequest.artifacts',
+          (e1) => _string(e1, 'RunJobRequest.artifacts[]'),
+        ),
       ),
       evenIfPresent: _or(
         j['even_if_present'],
@@ -3024,6 +3400,12 @@ final class RunJobRequest {
 
   final List<String> argv;
 
+  /// An absolute directory on the node; default the node's own work dir.
+  final String? cwd;
+
+  /// Files (relative to the job's directory, or absolute) the hub fetches once it exits.
+  final List<String> artifacts;
+
   /// Run although someone is at the node (PROBLEMS P2).
   final bool evenIfPresent;
 
@@ -3038,6 +3420,8 @@ final class RunJobRequest {
   Map<String, Object?> toJson() => {
     'target': target.toJson(),
     'argv': argv,
+    if (cwd case final v?) 'cwd': v,
+    'artifacts': artifacts,
     'even_if_present': evenIfPresent,
     'on_present': onPresent.toJson(),
     'maintenance': maintenance,
@@ -3909,13 +4293,38 @@ final class HubApi {
   Future<NodeList> listNodes([Empty request = const Empty()]) =>
       _call('ListNodes', request.toJson(), NodeList.fromJson);
 
+  /// By headscale id or name.
+  ///
   /// `POST /api/GetNode`, scope `sleeve`.
   Future<Node> getNode(NodeRef request) =>
       _call('GetNode', request.toJson(), Node.fromJson);
 
+  /// `POST /api/GetEnrollment`, scope `owner`.
+  Future<Enrollment> getEnrollment([Empty request = const Empty()]) =>
+      _call('GetEnrollment', request.toJson(), Enrollment.fromJson);
+
+  /// Records a registration the owner scanned or pasted, for `ApproveNode`.
+  ///
+  /// `POST /api/AddNode`, scope `owner`.
+  Future<PendingNode> addNode(AddNodeRequest request) =>
+      _call('AddNode', request.toJson(), PendingNode.fromJson);
+
+  /// Checks the control-key fingerprint, then registers, tags and names the node.
+  ///
+  /// `POST /api/ApproveNode`, scope `owner`.
+  Future<ApprovedNode> approveNode(ApproveNodeRequest request) =>
+      _call('ApproveNode', request.toJson(), ApprovedNode.fromJson);
+
+  /// A maintenance job from a sleeve, or a job Envoy asks for in an agent's turn (D9), waits
+  /// for the owner's approval.
+  ///
   /// `POST /api/RunJob`, scope `sleeve`.
   Future<Job> runJob(RunJobRequest request) =>
       _call('RunJob', request.toJson(), Job.fromJson);
+
+  /// `POST /api/ListJobs`, scope `sleeve`.
+  Future<JobList> listJobs(ListJobsRequest request) =>
+      _call('ListJobs', request.toJson(), JobList.fromJson);
 
   /// `POST /api/GetJob`, scope `sleeve`.
   Future<Job> getJob(JobRef request) =>
@@ -3924,6 +4333,10 @@ final class HubApi {
   /// `POST /api/GetJobLog`, scope `sleeve`.
   Future<JobLog> getJobLog(GetJobLogRequest request) =>
       _call('GetJobLog', request.toJson(), JobLog.fromJson);
+
+  /// `POST /api/GetJobArtifact`, scope `sleeve`.
+  Future<JobArtifactData> getJobArtifact(GetJobArtifactRequest request) =>
+      _call('GetJobArtifact', request.toJson(), JobArtifactData.fromJson);
 
   /// `POST /api/CancelJob`, scope `sleeve`.
   Future<Job> cancelJob(JobRef request) =>

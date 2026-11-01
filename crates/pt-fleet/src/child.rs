@@ -46,6 +46,8 @@ struct Flags {
     state: ChildState,
     paused: bool,
     stopping: bool,
+    /// The supervisor thread has returned: no child runs and none will start.
+    done: bool,
 }
 
 struct Shared {
@@ -76,7 +78,10 @@ impl Supervisor {
         let s = shared.clone();
         let thread = thread::Builder::new()
             .name(format!("sup-{name}"))
-            .spawn(move || run(&s))
+            .spawn(move || {
+                let _done = Done(&s);
+                run(&s);
+            })
             .map_err(|e| Error::new(format!("starting the {name} supervisor: {e}")))?;
         Ok(Supervisor {
             shared,
@@ -130,6 +135,16 @@ impl Supervisor {
         self.shared.cv.notify_all();
     }
 
+    /// Stops the child for good and returns once the supervisor thread is done.
+    pub fn stop(&self) {
+        let mut f = self.shared.lock();
+        f.stopping = true;
+        self.shared.cv.notify_all();
+        while !f.done {
+            f = self.shared.cv.wait(f).unwrap_or_else(|p| p.into_inner());
+        }
+    }
+
     /// Kills the current child so the supervisor starts a new one (tests, and a stuck child).
     pub fn kill_child(&self) -> Result<()> {
         let pid = self.shared.lock().state.pid;
@@ -150,6 +165,16 @@ impl Drop for Supervisor {
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
+    }
+}
+
+/// Marks the supervisor done when its thread returns, panics included.
+struct Done<'a>(&'a Shared);
+
+impl Drop for Done<'_> {
+    fn drop(&mut self) {
+        self.0.lock().done = true;
+        self.0.cv.notify_all();
     }
 }
 

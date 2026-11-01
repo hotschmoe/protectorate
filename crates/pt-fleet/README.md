@@ -4,16 +4,18 @@ The hub's side of the fleet (SPEC 3.2, 3.5): headscale and the hub `member` as s
 children, enrollment, the node RPC client and the poller. std threads only; Linux.
 
 ```rust
-let fleet = Fleet::start(Config::lan_direct(home, headscale_bin, member_bin, listen))?;
+let fleet = Fleet::start(Config::lan_direct(dir, headscale_bin, member_bin, listen))?;
 ```
 
-`Fleet::start` writes `<home>/tailnet/headscale/` (config as JSON, IP-pinned DERP map with STUN
+`Fleet::start` writes `<dir>/headscale/` (`dir` is the tailnet dir: the hub passes
+`<hub home>/tailnet` or `--fleet-dir`) (config as JSON, IP-pinned DERP map with STUN
 off, `go/policy.hujson`, sqlite, Noise key, a relative unix socket), runs headscale inside bwrap
-(only that dir writable, nothing else of the home visible), waits for `/health`, makes the
+(only that dir writable, nothing else of `dir` visible), waits for `/health`, makes the
 `fleet` user, enrolls the hub member once (`tag:hub`), then runs `member --mode hub`. Both
 children restart with backoff (1 s doubling to 30 s) and are health-checked every 5 s.
 `Config` fields set production values: `server_url` (Traefik's https URL), `derp` (host, IPv4,
-port, `tls`), `trusted_proxies`. Drop the last `Fleet` clone to stop everything.
+port, `tls`), `trusted_proxies`. `shutdown()` stops member then headscale and returns once
+both exited; dropping the last `Fleet` clone also stops them.
 
 | Call | What |
 |---|---|
@@ -25,7 +27,7 @@ port, `tls`), `trusted_proxies`. Drop the last `Fleet` clone to stop everything.
 | `connect(node)` | `NodeClient` to `<tailnet ip or name>:7475` through member's DIAL |
 | `status()` | member STATUS: backend state, control key, peers (online, direct `cur_addr` or DERP `relay`) |
 | `poll(PollConfig, publish)` | `Poller`; `publish(FleetEvent::Node(Box<pt_api::Node>) / Removed(id))` |
-| `snapshot_headscale(label)` | stop headscale, copy db and keys to `tailnet/snapshots/<ms>-<label>/`, restart |
+| `snapshot_headscale(label)` | stop headscale, copy db and keys to `<dir>/snapshots/<ms>-<label>/`, restart |
 | `control_fingerprint()` | `sha256:<hex>` of headscale's Noise key, as members pin it |
 | `headscale_state()`, `member_state()`, `kill_child(which)` | supervisor state; kill for tests and doctor |
 
@@ -40,9 +42,13 @@ every 15 s, one thread and one connection per node. `pt_api::Node.id` is headsca
 good round. `nodes()` and `node(id)` also give `NodeView.hello` (the agent's own node id,
 version and journal epoch) and the last error.
 
-Files under `<home>/tailnet/`: `headscale/`, `member/` (tsnet state and control-key pin),
+Files under `<dir>/`: `headscale/`, `member/` (tsnet state and control-key pin),
 `member.sock` (a fresh `member-N.sock` when a killed member left one), `member.log`,
 `pending.json`, `enrolled.json`, `snapshots/`.
+
+`Embedded { name, sha256, gz }` is a binary the hub carries gzipped; `unpack(dir)` writes it once
+to `<dir>/<name>-<sha256>` (mode 0755) through the system `gzip -dc` and checks the SHA-256 on
+every start, so a corrupted or replaced copy is unpacked again, never run.
 
 Test: `cargo test --workspace --test local` (needs bwrap and `go/bin`, built by
 `scripts/net-build.sh host` when Go is on PATH). Real machines: `examples/fleet.rs`.

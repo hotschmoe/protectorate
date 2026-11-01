@@ -92,7 +92,8 @@ pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<I
 }
 
 /// Pushes the stream messages for every sleeve that changed in this batch: `workspace` for a new
-/// root, `sleeve`, or `sleeve_removed`. Tool approvals of ended incarnations are cancelled.
+/// root, `sleeve`, or `sleeve_removed`; and `job` for every job that changed. Tool approvals of
+/// ended incarnations are cancelled.
 fn announce_changes(hub: &Hub, before: &View, after: &View) {
     for s in after.state.sleeves.values() {
         let old = before.state.sleeves.get(&s.id);
@@ -114,6 +115,12 @@ fn announce_changes(hub: &Hub, before: &View, after: &View) {
         }
         let sleeve = wire::sleeve(hub, after, s);
         hub.bus.push(|seq| HubStreamMessage::Sleeve { seq, sleeve });
+    }
+    for j in after.state.jobs.values() {
+        if before.state.jobs.get(&j.id) != Some(j) {
+            let job = crate::jobs::view(hub, j);
+            hub.bus.push(|seq| HubStreamMessage::Job { seq, job });
+        }
     }
     let st = &after.state;
     hub.approvals.cancel_gone(&hub.bus, &|id, g| {

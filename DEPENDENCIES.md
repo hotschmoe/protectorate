@@ -92,6 +92,7 @@ Bundled asset, not a package: JetBrains Mono 2.304 Regular and Bold (`app/assets
 | systemctl | Linux nodes | signal, query and stop per-job scopes |
 | curl | hub, nodes | outbound HTTPS (releases, quota readers) instead of a Rust TLS stack (REVISIT); pt-quota passes URL and tokens on a stdin config, not argv |
 | git | hub | workspaces, worktrees, pushes |
+| gzip | hub | unpacks the embedded headscale and member (`gzip -dc`) and packs them at build (`gzip -n`) (REVISIT) |
 | gh | hub | the push token's holder (SPEC 7); `doctor` runs `gh auth status` |
 | df, timedatectl | hub, Linux nodes | `doctor`: free disk (`df -P`) and NTP sync |
 | loginctl | hub install | `install.sh` enables linger so the user service starts at boot |

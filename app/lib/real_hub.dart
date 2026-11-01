@@ -127,6 +127,8 @@ class RealHub implements HubClient {
         _state = _copy(s, approvals: _upsert(s.approvals, approval, (x) => x.id == approval.id));
       case HubStreamMessageNode(:final node):
         _state = _copy(s, nodes: _upsert(s.nodes, node, (x) => x.id == node.id));
+      case HubStreamMessageNodeRemoved(:final id):
+        _state = _copy(s, nodes: [for (final x in s.nodes) if (x.id != id) x]);
       case HubStreamMessageJob(:final job):
         _state = _copy(s, jobs: _upsert(s.jobs, job, (x) => x.id == job.id));
       case HubStreamMessageQuota(:final quota):

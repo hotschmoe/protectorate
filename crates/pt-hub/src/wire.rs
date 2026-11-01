@@ -237,26 +237,12 @@ pub fn hub_info(hub: &Hub) -> api::HubInfo {
     }
 }
 
-/// One "unknown" reading per subscription whose harness is installed: no reader exists yet.
-pub fn quotas(hub: &Hub) -> Vec<api::Quota> {
-    let installed = |h| crate::exec::program(hub, h).is_some();
-    let subs = [
-        (Harness::Claude, api::Subscription::Claude),
-        (Harness::Codex, api::Subscription::Codex),
-        (Harness::Grok, api::Subscription::Grok),
-        (Harness::PiLocal, api::Subscription::Local),
-    ];
-    subs.into_iter()
-        .filter(|(h, _)| installed(*h))
-        .map(|(_, subscription)| api::Quota {
-            subscription,
-            plan: String::new(),
-            reading: api::QuotaReading::Unknown,
-            fetched_at_ms: EpochMs(hub.started_ms),
-            windows: Vec::new(),
-            note: "no quota reader yet".into(),
-        })
-        .collect()
+/// What the poller last learned of every node; none while the fleet is off or down.
+pub fn nodes(hub: &Hub) -> Vec<api::Node> {
+    match hub.fleet.status() {
+        crate::fleet::Status::Up(up) => up.poller.nodes().into_iter().map(|v| v.node).collect(),
+        _ => Vec::new(),
+    }
 }
 
 /// The full snapshot at stream seq `seq`, limited to the sleeves `visible` admits.
@@ -288,9 +274,13 @@ pub fn state(
             .collect(),
         sleeves: shown.iter().map(|s| sleeve(hub, view, s)).collect(),
         approvals,
-        nodes: Vec::new(),
-        jobs: Vec::new(),
-        quotas: quotas(hub),
+        nodes: nodes(hub),
+        jobs: st
+            .jobs
+            .values()
+            .map(|j| crate::jobs::view(hub, j))
+            .collect(),
+        quotas: hub.quotas.list(),
         events: hub.bus.events(),
     }
 }

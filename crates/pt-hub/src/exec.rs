@@ -1,4 +1,4 @@
-//! Executors: one serial thread per sleeve, plus one for node jobs. Each re-checks its intent
+//! Executors: one serial thread per sleeve, plus node jobs' (`jobs.rs`). Each re-checks its intent
 //! against the latest published view right before acting, reports `Dispatched` before the
 //! write, and feeds the outcome back to the core as an event.
 //!
@@ -43,7 +43,7 @@ type Ordered = (EventKind, Sender<()>);
 pub struct Executors {
     hub: Arc<Hub>,
     sleeves: HashMap<SleeveId, Sender<Intent>>,
-    jobs: Sender<Intent>,
+    jobs: crate::jobs::JobExec,
 }
 
 fn intent_sleeve(i: &Intent) -> Option<SleeveId> {
@@ -58,27 +58,17 @@ fn intent_sleeve(i: &Intent) -> Option<SleeveId> {
 
 impl Executors {
     pub fn new(hub: Arc<Hub>) -> Executors {
-        let (jobs, rx) = mpsc::channel::<Intent>();
-        thread::Builder::new()
-            .name("pt-exec-jobs".into())
-            .spawn(move || {
-                for i in rx {
-                    debug!("jobs: node execution is unavailable; holding {i:?}");
-                }
-            })
-            .expect("spawn jobs executor");
         Executors {
+            jobs: crate::jobs::JobExec::new(hub.clone()),
             hub,
             sleeves: HashMap::new(),
-            jobs,
         }
     }
 
     /// Hands an intent to its executor. Replies and notices never come here.
     pub fn route(&mut self, intent: Intent) {
         let Some(id) = intent_sleeve(&intent) else {
-            let _ = self.jobs.send(intent);
-            return;
+            return self.jobs.route(intent);
         };
         let tx = self.sleeves.entry(id).or_insert_with(|| {
             let (tx, rx) = mpsc::channel();
@@ -203,7 +193,7 @@ fn seed_credentials(owner_home: &Path, home: &Path, h: Harness) -> io::Result<()
 }
 
 /// Whether the record is still exactly what this intent was released for.
-fn fresh(view: &View, effect: EffectId, attempt: u32, kind: &EffectKind) -> bool {
+pub(crate) fn fresh(view: &View, effect: EffectId, attempt: u32, kind: &EffectKind) -> bool {
     let st = &view.state;
     let Some(e) = st.effects.get(&effect) else {
         return false;
@@ -342,12 +332,24 @@ impl SleeveExec {
                 let eligible = |t: &Target| {
                     program(hub, t.harness).is_some() && !doctor_ineligible(hub, t.harness)
                 };
-                let target = crate::select::select_target(&candidates, &exclude, &eligible);
-                info!(
-                    "sleeve {}: resleeve target {:?}",
-                    sleeve.0,
-                    target.as_ref().map(|t| t.harness)
+                let quotas = hub.quotas.list();
+                let chosen = crate::select::select_target(
+                    now_ms(),
+                    &candidates,
+                    &exclude,
+                    &eligible,
+                    &quotas,
                 );
+                match &chosen {
+                    Some((t, why)) => {
+                        info!(
+                            "sleeve {}: resleeve target {:?}: {why}",
+                            sleeve.0, t.harness
+                        )
+                    }
+                    None => info!("sleeve {}: no eligible resleeve target", sleeve.0),
+                }
+                let target = chosen.map(|(t, _)| t);
                 self.submit(EventKind::TargetChosen { sleeve, g, target });
             }
             Intent::Checkpoint { sleeve, g } => {

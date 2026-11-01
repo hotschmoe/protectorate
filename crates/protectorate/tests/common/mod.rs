@@ -152,6 +152,8 @@ impl Hub {
             "envoy" => pt_json::obj! { "harness" => envoy },
             "pi_local_provider" => pi_provider(),
             "pi_local_model" => pi_model(),
+            // No suite hub reads the owner's vendor quotas unless a test turns it on.
+            "quota_poll_secs" => 0u64,
         };
         if let Some(m) = config_obj.as_object_mut() {
             for (k, v) in config {
@@ -213,6 +215,25 @@ impl Hub {
         if let Some(mut c) = self.child.take() {
             let _ = c.kill();
             let _ = c.wait();
+        }
+    }
+
+    /// SIGTERM, as a planned stop, and the exit status once the hub has exited.
+    pub fn stop(&mut self) -> Option<std::process::ExitStatus> {
+        let mut c = self.child.take()?;
+        let _ = Command::new("kill")
+            .args(["-TERM", &c.id().to_string()])
+            .status();
+        let end = Instant::now() + Duration::from_secs(60);
+        loop {
+            if let Ok(Some(s)) = c.try_wait() {
+                return Some(s);
+            }
+            if Instant::now() > end {
+                let _ = c.kill();
+                return c.wait().ok();
+            }
+            std::thread::sleep(Duration::from_millis(100));
         }
     }
 

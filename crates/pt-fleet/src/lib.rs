@@ -7,6 +7,7 @@
 
 mod child;
 mod client;
+mod embed;
 mod enroll;
 mod headscale;
 mod member;
@@ -22,6 +23,7 @@ use std::time::Duration;
 
 pub use child::ChildState;
 pub use client::NodeClient;
+pub use embed::Embedded;
 pub use enroll::{Enrolled, PENDING_TTL_MS, Pending, Registration, valid_name};
 pub use headscale::{Admin, HsNode, TAG_HUB, TAG_NODE, USER};
 pub use member::{Peer, Status};
@@ -43,8 +45,9 @@ pub struct Derp {
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    /// The hub's home; pt-fleet keeps everything under `<home>/tailnet/`.
-    pub home: PathBuf,
+    /// The tailnet directory: headscale's state and keys, the hub member's keys and the
+    /// enrollment records. A hub adopts an existing one by pointing here.
+    pub dir: PathBuf,
     pub headscale: PathBuf,
     pub member: PathBuf,
     pub bwrap: PathBuf,
@@ -67,7 +70,7 @@ pub struct Config {
 impl Config {
     /// Nodes reach headscale's control and DERP directly at `listen` over plain HTTP.
     pub fn lan_direct(
-        home: PathBuf,
+        dir: PathBuf,
         headscale: PathBuf,
         member: PathBuf,
         listen: SocketAddr,
@@ -77,7 +80,7 @@ impl Config {
             std::net::IpAddr::V6(_) => Ipv4Addr::LOCALHOST,
         };
         Config {
-            home,
+            dir,
             headscale,
             member,
             bwrap: PathBuf::from("bwrap"),
@@ -94,10 +97,6 @@ impl Config {
             hub_name: "hub".into(),
             hub_udp_port: 0,
         }
-    }
-
-    pub fn tailnet_dir(&self) -> PathBuf {
-        self.home.join("tailnet")
     }
 }
 
@@ -161,8 +160,7 @@ impl Fleet {
     /// fleet user, enrolls the hub's own member on first start, then starts that member.
     pub fn start(cfg: Config) -> Result<Fleet> {
         let ctx = |e: Error| e.context("starting the fleet");
-        private_dir(&cfg.home).map_err(ctx)?;
-        private_dir(&cfg.tailnet_dir()).map_err(ctx)?;
+        private_dir(&cfg.dir).map_err(ctx)?;
         let paths = headscale::Paths::new(&cfg);
         headscale::write_config(&cfg, &paths).map_err(ctx)?;
 
@@ -193,7 +191,7 @@ impl Fleet {
                 *lock(&s3) = path.clone();
                 Ok(member::run_command(&c3, &path))
             }),
-            log: cfg.tailnet_dir().join("member.log"),
+            log: cfg.dir.join("member.log"),
             health: Box::new(move || {
                 let path = lock(&s4).clone();
                 member::status(&path).is_ok_and(|st| st.backend_state == "Running")
@@ -282,18 +280,25 @@ impl Fleet {
             .map_err(|e| Error::new(format!("starting the poller: {e}")))
     }
 
-    /// Stops headscale, copies its database and keys into `<home>/tailnet/snapshots/<ms>-<label>/`
+    /// Stops headscale, copies its database and keys into `<dir>/snapshots/<ms>-<label>/`
     /// and starts it again. Called before a headscale upgrade, since its migrations are one-way.
     pub fn snapshot_headscale(&self, label: &str) -> Result<PathBuf> {
         let i = &self.inner;
         i.headscale.pause();
-        let copied = headscale::copy_state(&i.paths, &i.cfg.tailnet_dir().join("snapshots"), label);
+        let copied = headscale::copy_state(&i.paths, &i.cfg.dir.join("snapshots"), label);
         i.headscale.resume();
         let healthy = i.headscale.wait_healthy(READY);
         let dir = copied.map_err(|e| e.context("snapshotting headscale"))?;
         healthy
             .map_err(|e| e.context(format!("headscale after the snapshot to {}", dir.display())))?;
         Ok(dir)
+    }
+
+    /// Stops member, then headscale, and returns once both have exited. They stay stopped even
+    /// while other clones of this `Fleet` are alive; dropping the last clone also stops them.
+    pub fn shutdown(&self) {
+        self.inner.member.stop();
+        self.inner.headscale.stop();
     }
 
     pub fn headscale_state(&self) -> ChildState {

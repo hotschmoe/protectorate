@@ -445,37 +445,139 @@ fn approval_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
     Ok(())
 }
 
+fn node_rows(nodes: &[api::Node]) {
+    let rows: Vec<Vec<String>> = nodes
+        .iter()
+        .map(|n| {
+            let inv = n.inventory.as_ref();
+            vec![
+                n.id.clone(),
+                n.name.clone(),
+                inv.map_or("-".into(), |i| format!("{}/{}", i.os, i.arch)),
+                if n.online { "up" } else { "down" }.into(),
+                n.presence.state.to_string(),
+                ago(n.last_seen_ms),
+                if n.node_version.is_empty() {
+                    "-".into()
+                } else {
+                    n.node_version.clone()
+                },
+            ]
+        })
+        .collect();
+    table(
+        &[
+            "ID", "NAME", "OS/ARCH", "LINK", "PRESENCE", "SEEN", "VERSION",
+        ],
+        &rows,
+    );
+}
+
+fn pending_line(p: &api::PendingNode) -> String {
+    format!(
+        "{} wants to join as {} (control key {}{}); approve with: protectorate node approve {}",
+        p.auth_id,
+        p.name,
+        p.control_key,
+        if p.key_matches {
+            ", matches"
+        } else {
+            ", DOES NOT MATCH this hub"
+        },
+        p.auth_id
+    )
+}
+
 fn node_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
-    match a.word(1, "a node command (list, show)")? {
-        "list" => {
+    match a.word(1, "a node command (ls, show, add, approve)")? {
+        "ls" | "list" => {
             let v = c.call::<m::ListNodes>(&api::Empty {})?;
-            o.show(&v, |v| {
-                let rows: Vec<Vec<String>> = v
-                    .nodes
-                    .iter()
-                    .map(|n| {
-                        vec![
-                            n.id.clone(),
-                            n.name.clone(),
-                            if n.online { "online" } else { "offline" }.into(),
-                            n.presence.state.to_string(),
-                            ago(n.last_seen_ms),
-                        ]
-                    })
-                    .collect();
-                table(&["ID", "NAME", "LINK", "PRESENCE", "SEEN"], &rows);
-            });
+            o.show(&v, |v| node_rows(&v.nodes));
         }
         "show" => {
             let req = api::NodeRef {
                 node_id: a.word(2, "a node")?.to_string(),
             };
             let v = c.call::<m::GetNode>(&req)?;
-            o.show(&v, |n| println!("{} {} {}", n.id, n.name, n.presence.state));
+            o.show(&v, |n| {
+                node_rows(std::slice::from_ref(n));
+                if let Some(i) = &n.inventory {
+                    println!(
+                        "host {} {} {}, {} {} threads, {} MiB RAM",
+                        i.hostname,
+                        i.os,
+                        i.os_version,
+                        i.cpu_model,
+                        i.cpu_count,
+                        i.ram_bytes >> 20
+                    );
+                }
+                let p = &n.presence;
+                println!(
+                    "presence {} idle {} locked {} via {}",
+                    p.state,
+                    opt(&p.idle_secs),
+                    opt(&p.locked),
+                    if p.source.is_empty() { "-" } else { &p.source }
+                );
+            });
+        }
+        "add" => {
+            if a.words.len() <= 2 {
+                let v = c.call::<m::GetEnrollment>(&api::Empty {})?;
+                o.show(&v, |e| {
+                    println!("on the new machine, run:\n  {}", e.join_command);
+                    println!("it shows the control key it saw; this hub's is {}", e.control_key);
+                    println!(
+                        "then paste its registration: protectorate node add '<text>', or run the approve line it prints"
+                    );
+                    for p in &e.pending {
+                        println!("{}", pending_line(p));
+                    }
+                });
+            } else {
+                let req = api::AddNodeRequest {
+                    registration: a.rest(2, "the registration text")?,
+                };
+                let v = c.call::<m::AddNode>(&req)?;
+                o.show(&v, |p| println!("{}", pending_line(p)));
+            }
+        }
+        "approve" => {
+            let req = api::ApproveNodeRequest {
+                auth_id: a.word(2, "an auth id")?.to_string(),
+                name: a.flag("--name").map(String::from),
+                fingerprint: a.flag("--fingerprint").map(String::from),
+            };
+            let v = c.call::<m::ApproveNode>(&req)?;
+            o.show(&v, |n| {
+                println!("approved {} as node {}", n.name, n.node_id)
+            });
         }
         other => return Err(Fail::Usage(format!("unknown node command {other:?}"))),
     }
     Ok(())
+}
+
+fn job_rows(jobs: &[api::Job]) {
+    let rows: Vec<Vec<String>> = jobs
+        .iter()
+        .map(|j| {
+            vec![
+                j.id.clone(),
+                j.state.to_string(),
+                opt(&j.node_id),
+                opt(&j.exit_code),
+                j.requested_by.clone(),
+                ago(j.queued_at_ms),
+                j.argv.join(" "),
+            ]
+        })
+        .collect();
+    table(
+        &["ID", "STATE", "NODE", "EXIT", "BY", "QUEUED", "COMMAND"],
+        &rows,
+    );
 }
 
 fn job_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
@@ -484,7 +586,7 @@ fn job_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
             job_id: a.word(2, "a job")?.to_string(),
         })
     };
-    match a.word(1, "a job command (run, show, log, cancel)")? {
+    match a.word(1, "a job command (run, ls, show, log, artifact, cancel)")? {
         "run" => {
             let target = match (a.flag("--node"), a.flag("--arch")) {
                 (Some(n), None) => api::JobTarget::Node {
@@ -498,6 +600,8 @@ fn job_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
             let req = api::RunJobRequest {
                 target,
                 argv: a.words.get(2..).unwrap_or(&[]).to_vec(),
+                cwd: a.flag("--cwd").map(String::from),
+                artifacts: a.all("--artifact"),
                 even_if_present: a.has("--even-if-present"),
                 on_present: word_enum(a.flag("--on-present").unwrap_or("idle"), "--on-present")?,
                 maintenance: a.has("--maintenance"),
@@ -506,9 +610,33 @@ fn job_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
             let v = c.call_for::<m::RunJob>(&req, APPROVAL_WAIT)?;
             o.show(&v, |j| println!("{}", job_line(j)));
         }
+        "ls" | "list" => {
+            let req = api::ListJobsRequest {
+                node_id: a.flag("--node").map(String::from),
+                limit: a.num("--limit")?,
+            };
+            let v = c.call::<m::ListJobs>(&req)?;
+            o.show(&v, |v| job_rows(&v.jobs));
+        }
         "show" => {
             let v = c.call::<m::GetJob>(&job(a)?)?;
-            o.show(&v, |j| println!("{}", job_line(j)));
+            o.show(&v, |j| {
+                println!("{}", job_line(j));
+                println!(
+                    "attempt {}, exit {}, log {} bytes",
+                    j.attempt,
+                    opt(&j.exit_code),
+                    j.log_bytes
+                );
+                for f in &j.artifacts {
+                    println!(
+                        "artifact {}: {} bytes, sha256 {}",
+                        f.path,
+                        opt(&f.size_bytes),
+                        opt(&f.sha256)
+                    );
+                }
+            });
         }
         "cancel" => {
             let v = c.call::<m::CancelJob>(&job(a)?)?;
@@ -523,7 +651,58 @@ fn job_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
             let v = c.call::<m::GetJobLog>(&req)?;
             o.show(&v, |l| print!("{}", l.text));
         }
+        "artifact" => artifact(c, a, o)?,
         other => return Err(Fail::Usage(format!("unknown job command {other:?}"))),
+    }
+    Ok(())
+}
+
+/// Every slice of the artifact, checked against its SHA-256, to `--out` or stdout.
+fn artifact(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
+    let job_id = a.word(2, "a job")?.to_string();
+    let path = a.word(3, "an artifact path")?.to_string();
+    let mut bytes = Vec::new();
+    let mut last;
+    loop {
+        let req = api::GetJobArtifactRequest {
+            job_id: job_id.clone(),
+            path: path.clone(),
+            offset: bytes.len() as u64,
+            limit: None,
+        };
+        last = c.call::<m::GetJobArtifact>(&req)?;
+        let chunk = pt_hash::from_hex(&last.hex)
+            .map_err(|e| Fail::Other(format!("artifact bytes: {e:?}")))?;
+        let empty = chunk.is_empty();
+        bytes.extend(chunk);
+        if last.eof || empty {
+            break;
+        }
+    }
+    let sha = pt_hash::to_hex(&pt_hash::sha256(&bytes));
+    if sha != last.sha256 {
+        return Err(Fail::Other(format!(
+            "artifact {path}: got sha256 {sha}, the hub recorded {}",
+            last.sha256
+        )));
+    }
+    match a.flag("--out") {
+        Some(f) => {
+            std::fs::write(f, &bytes).map_err(|e| Fail::Other(format!("{f}: {e}")))?;
+            last.hex = String::new();
+            o.show(&last, |l| {
+                println!(
+                    "{} bytes, sha256 {}, written to {f}",
+                    l.size_bytes, l.sha256
+                )
+            });
+        }
+        None => {
+            use std::io::Write;
+            std::io::stdout()
+                .write_all(&bytes)
+                .map_err(|e| Fail::Other(format!("stdout: {e}")))?;
+        }
     }
     Ok(())
 }

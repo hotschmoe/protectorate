@@ -313,19 +313,43 @@ Each entry: where, what was done, what right looks like.
   `Sleeve::probing`): a recovered Idle sleeve takes a `SendPrompt` before `ScopeProbed` answers,
   the executor holds no session for that g, and the Nack rejects the message (the sender is
   told). Right: `deliverable` is false while `probing`, so the message waits in the queue.
-- **select_target is first-eligible** (`pt-hub`, select.rs): it walks `resleeve_to` in order,
-  skipping a harness whose binary is missing or that `doctor.json` lists under `ineligible`. No
-  quota weighting, no task-size class (SPEC 8, D27).
-- **Node jobs are held, not run** (`pt-hub`, exec.rs jobs executor): the transport (SSH or the
-  tailnet) is undecided, so `ScheduleJob` and the node effects are logged and never answered;
-  no API method creates a job yet.
+- **Resleeve selection is quota-weighted only among `resleeve_to`** (`pt-hub`, select.rs): the
+  candidates that are headless, not excluded, installed and not `ineligible` in `doctor.json` go
+  to `pt_quota::select_target` with task size Medium and no health list; with no fresh quota the
+  first in the owner's order wins. A new sleeve always names its harness (`SpawnSleeve.harness` is
+  required), so nothing else is chosen by quota, and G1 does not read quota yet. Right: the task
+  size from the sleeve's history (D27), node and probe health, and an optional harness on spawn.
+- **Artifacts come back through `cat` jobs** (`pt-hub`, jobs.rs): after a job exits, each named
+  artifact is fetched by a collection job `cat -- <path>` on the same node (even if present,
+  300 s, 64 MiB log cap), whose log is the file; a file over the cap fails the check, and the
+  node's log carries stderr too, so the bytes are exact only because a successful `cat` is
+  silent. Right: a node `FetchArtifact` RPC streaming a bounded archive with
+  its SHA-256, so the hub reads bytes, not a job log.
+- **The scheduler picks the least-loaded eligible node** (`pt-hub`, jobs.rs `choose`): online,
+  hello seen, presence AWAY (unless `even_if_present`), not excluded, then lowest load1; retried
+  every 2 s. No per-node concurrency limit beyond one hub call at a time per node, no fairness
+  between requesters. Right: node slots from the inventory and a queue per requester.
+- **Hub job logs are refreshed only on the core's Tick** (`pt-hub`, jobs.rs): a running job's log
+  is pulled when pt-core polls it (every 10 s Tick), so `job log` lags by up to a Tick. Right: a
+  log follow RPC on the node that pushes appended bytes.
+- **Hub job metadata outside the journal** (`pt-hub`, jobs.rs `JobStore`): the request record
+  rides in the core's `JobSpec.command` (its digest is the spec's), but artifact results live in
+  `<home>/jobs/<job>/<attempt>/artifacts.json` and the per-job view cache in memory. Right: fine
+  while the core owns state; journal artifact results if `job show` must survive a lost home.
+- **Fleet poll interval is one knob** (`pt-hub`, `fleet.poll_secs`, default 15): presence and the
+  node list share it. Right: split them if presence must react faster than listings.
+- **Embedded headscale and member unpack through the system `gzip -dc`** (`pt-fleet`, embed.rs):
+  no inflate in std, and no crate. Old `<home>/net/<name>-<sha256>` files from earlier versions
+  stay, since nothing deletes. Right: a small inflate in Rust, and pruning old unpacked versions
+  once the owner agrees to that rule.
 - **D9 covers three calls and the turn, not the request chain** (`pt-hub`, rule.rs): while
   Envoy's current turn was started (or steered) by an `agent:` message, Envoy's own `sleeve rm`,
   `job run` and spawns past `d9_spawn_limit` (default 3 per turn) wait for an owner approval
   (`d9_approval_timeout_secs`, default 900, then `timeout`). The origin is cleared when the turn
   settles, so a background process Envoy started in that turn acts as the owner's afterwards;
-  a sleeve Envoy prompted on the agent's behalf is not gated at all; no push or node maintenance
-  method exists yet to gate. Right: carry the origin through messages Envoy sends (a request
+  a sleeve Envoy prompted on the agent's behalf is not gated at all; no push method exists yet
+  to gate. A `maintenance` node job from any sleeve, Envoy included, always waits for the owner,
+  whatever started the turn. Right: carry the origin through messages Envoy sends (a request
   chain), and add pushes to the list when the API grows them.
 - **Who sent a message is a text prefix** (`pt-hub`, api.rs): mail reaches the harness as
   `[from sleeve <name>] ...` and agent requests as `[from agent:<name>] ...`, since a prompt has no
@@ -401,9 +425,11 @@ Each entry: where, what was done, what right looks like.
 - **Collecting lease** (pt-core jobs): an artifact check that does not answer within the lease
   makes the job Lost, and its next Exited report collects again, so a slow fetch can run twice.
   Right: fetch progress reported to the core, and the lease measured from it.
-- **headscale and member are not embedded** (`pt-fleet`, `protectorate-node`): `Config` takes
-  both binary paths, and the node finds `member` next to itself (or `--member`). Right: the hub
-  and node binaries carry them and unpack to a content-addressed path, so an install is one file.
+- **The node does not embed member** (`protectorate-node`): the hub carries headscale and member
+  (gzip, unpacked to `<home>/net/<name>-<sha256>`, checked every start), but the node finds
+  `member` next to itself (or `--member`). Right: the node binary carries member the same way,
+  so a node install is one file. A protectorate built without Go and no `go/bin` has no fleet
+  (`version` says so; the e2e skips).
 - **LAN-direct DERP is plain HTTP** (`pt-fleet` `Config::lan_direct`, node `member::command`):
   with an `http://` server URL both sides set `TS_DEBUG_USE_DERP_HTTP=1`, tailscale's debug knob,
   and the DERP map pins the IPv4 with STUN off. Right: production goes through Traefik with TLS
@@ -449,16 +475,19 @@ Each entry: where, what was done, what right looks like.
 - **The poller runs the headscale CLI every 15 s and a thread per node** (`pt-fleet`,
   poller.rs): fine for a home fleet. Right: headscale's gRPC over its unix socket, and one
   scheduler thread if the fleet ever reaches hundreds.
-- **`Node.id` is headscale's node id** (`pt-fleet` view.rs): the agent's own id and journal epoch
-  are only in `NodeView.hello`. Right: decide which id the API exposes once the hub wires the
-  poller; a reinstalled node keeps neither.
+- **`Node.id` is headscale's node id** (`pt-fleet` view.rs): the API, `job run --node` (which also
+  takes the name) and the core's job records use it; the agent's own id and journal epoch are
+  only in `NodeView.hello`, and the hub derives its node-side job ids (`<hub tag>-j<n>`) and
+  epoch from the hub's own journal. A reinstalled node keeps neither id. Right: fine until nodes
+  are re-enrolled under the same name; then key nodes by the agent id.
 - **headscale listens on the whole LAN** (stand-in hub at `192.168.10.44:7480`): no host firewall
   admits only the reverse proxy. Right: production binds where Traefik reaches it and a firewall
   rule admits only stronghold.
 - **Stand-in hub** (`pt-fleet` examples/fleet.rs): agent-world, msr1-kids and officewin joined a
-  fleet run by the example, home `~/.local/share/protectorate-fleet`, until the hub embeds
-  pt-fleet. Right: the hub takes over that `tailnet/` dir (the nodes pin its Noise key), or the
-  nodes rejoin.
+  fleet run by the example, home `~/.local/share/protectorate-fleet`. The hub now runs the fleet
+  itself and can adopt that dir (`serve --fleet-dir ~/.local/share/protectorate-fleet/tailnet
+  --fleet-listen 192.168.10.44:7480 --fleet-udp-port 7483`, after stopping the example), keeping
+  the Noise key the nodes pin. Right: adopt it, then retire the example's `serve`.
 - **Node installers ran in dry-run mode only** (`scripts/install-node.sh`, `install-node.ps1`):
   they fetch from the GitHub release (12b item 13 supersedes a hub-served installer), check
   SHA256SUMS, stage, then run `join` and `install-service`. install-node.sh was dry-run on
@@ -474,12 +503,17 @@ Each entry: where, what was done, what right looks like.
   list and the event log (500 entries). The stream's seq starts at the start time in ms so a
   client resuming across a restart gets a fresh snapshot rather than a wrong delta. Right:
   journal approvals and events, or rebuild tool approvals from transcripts at start.
-- **Quota readings are `unknown`** (`pt-hub`, wire.rs): one row per installed harness program,
-  no reader yet. Right: the per-vendor quota readers of the design (and G1 from them).
+- **Quota readers run on one thread** (`pt-hub`, quota.rs): a `pt_quota::Cache` (5 min TTL,
+  stale after 10 min, backoff from 30 s) over the readers of installed harnesses, refreshed every
+  `quota_poll_secs` (default 60; 0 never reads, which the e2e suite uses so no test hub reads
+  the owner's vendor quotas); a changed row goes out as a `quota` message. Readings are not
+  journaled, so a restart starts at `unknown`. Right: fine; persist the last good reading if a
+  restart must keep dispatch weighting.
 - **pi_durable shows as pi_local in the API** (`pt-hub`, wire.rs): the experiment has no API
   harness. Right: add one if it outlives the experiment.
 - **The web app embedded is about 17.7 MB** (`crates/protectorate/build.rs`): the release binary
-  is 19.4 MB with it and 1.7 MB without. Debug symbols, the experimental CanvasKit and the skwasm
+  is 19.4 MB with it and 1.7 MB without; with gzipped headscale and member too (25 MB) the
+  release hub assets are 44.9 MB (arm64) and 47.8 MB (amd64). Debug symbols, the experimental CanvasKit and the skwasm
   renderers are left out; both CanvasKit variants stay (Chromium and the full one for other
   browsers, only Chromium tested). Files go out uncompressed with an ETag. Right: precompressed
   gzip copies with `Content-Encoding` and a check in Firefox and Safari.
@@ -499,7 +533,9 @@ Each entry: where, what was done, what right looks like.
   Antigravity is pane-only, D13). Right: add a resets field to `Quota` when dispatch uses
   credits; revisit Codex `app-server` if wham breaks; Antigravity when it has a subscription.
 - **Local endpoint address is configuration** (`pt-quota`): the b70 URL comes from the probe flag
-  or `PT_LOCAL_URL`; the hub must pass it to `Local { base_url }`. Right: hub config key.
+  or `PT_LOCAL_URL`, and the hub's `config.json` key `local_url`, separate from Pi's own
+  models.json where `pi_local_provider` points. Right: read the base URL from Pi's provider entry
+  so the two cannot disagree.
 - **Quota selection constants are untuned** (`pt-quota`): usable-now minimums per task size
   (5, 15, 30 percent), the 48 h half-life and the 168 h stand-in for an unknown reset are the old
   dev-hotschmoe values; `TaskSize` thresholds and N are caller inputs with no defaults. Right: tune
@@ -539,9 +575,10 @@ Each entry: where, what was done, what right looks like.
 - **APK, desktop and Android-node assets are hooks only** (`scripts/release.sh` step `app`):
   `protectorate-android.apk`, `protectorate-desktop-{linux,windows}-{amd64,arm64}` and
   `protectorate-node-android-arm64` (SPEC 6) are not built; the step says so, and `APP=1` fails.
-  The hub embeds no Flutter web build yet either. Right: `flutter build apk` with the existing
-  signing recipe, the desktop bundles (the Linux one needs cmake, ninja and GTK 3 on the build
-  host), and the node once `pt-node` has Android code paths.
+  The hub assets do embed the web build (step `web`) and their arch's headscale and member.
+  Right: `flutter build apk` with the existing signing recipe, the desktop bundles (the Linux one
+  needs cmake, ninja and GTK 3 on the build host), and the node once `pt-node` has Android code
+  paths.
 - **Release publishing is untried** (`make release-publish`): it stops at a dry run unless
   `PUBLISH=1`, refuses a dirty tree, an untagged HEAD and a tag missing on origin, and uses
   `gh release create --verify-tag`; no release has been created from `next`. GitHub immutable

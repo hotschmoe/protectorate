@@ -14,8 +14,11 @@ use pt_drivers::Entry;
 use pt_json::{FromJson, ToJson, Value};
 
 use crate::approvals::ACTION_PREFIX;
+use crate::fleet::{Status as FleetStatus, Up};
 use crate::home::{now_ms, random_hex};
 use crate::hub::{CommandError, Hub, View};
+use crate::jobs::JobRequest;
+use crate::log::info;
 use crate::rule::{self, Guarded};
 use crate::transcript::{Note, lock};
 use crate::wire;
@@ -184,9 +187,14 @@ pub fn call(hub: &Hub, who: &Principal, name: &str, body: &Value) -> Result<Valu
         Decide => decide,
         ListNodes => list_nodes,
         GetNode => get_node,
+        GetEnrollment => get_enrollment,
+        AddNode => add_node,
+        ApproveNode => approve_node,
         RunJob => run_job,
+        ListJobs => list_jobs,
         GetJob => get_job,
         GetJobLog => get_job_log,
+        GetJobArtifact => get_job_artifact,
         CancelJob => cancel_job,
         ListQuotas => list_quotas,
         ListEvents => list_events,
@@ -629,50 +637,344 @@ fn decide(c: &Ctx<'_>, r: api::DecideRequest) -> Result<api::Approval> {
 
 // ---- nodes and jobs ------------------------------------------------------------------------
 
-fn list_nodes(_: &Ctx<'_>, _: api::Empty) -> Result<api::NodeList> {
-    Ok(api::NodeList { nodes: Vec::new() })
+const LOG_DEFAULT: u64 = 64 << 10;
+const LOG_MAX: u64 = 1 << 20;
+const ARTIFACT_MAX: u64 = 512 << 10;
+const JOBS_DEFAULT: u64 = 200;
+
+fn fleet(hub: &Hub) -> Result<Up> {
+    match hub.fleet.status() {
+        FleetStatus::Up(u) => Ok(u),
+        FleetStatus::Off => Err(err(
+            ErrorCode::Unavailable,
+            "no fleet is configured (config.json fleet.listen or serve --fleet-listen)",
+        )),
+        FleetStatus::Down(why) => Err(err(ErrorCode::Unavailable, why)),
+    }
 }
 
-fn get_node(_: &Ctx<'_>, r: api::NodeRef) -> Result<api::Node> {
-    Err(err(
-        ErrorCode::NotFound,
-        format!("no node {} (no node transport yet)", r.node_id),
-    ))
+fn fleet_err(e: pt_fleet::Error) -> ApiError {
+    let m = e.to_string();
+    let code = if m.contains("already exists") {
+        ErrorCode::Conflict
+    } else if m.contains("control key mismatch") {
+        ErrorCode::Forbidden
+    } else {
+        ErrorCode::Invalid
+    };
+    err(code, m)
+}
+
+fn list_nodes(c: &Ctx<'_>, _: api::Empty) -> Result<api::NodeList> {
+    if matches!(c.hub.fleet.status(), FleetStatus::Off) {
+        return Ok(api::NodeList { nodes: Vec::new() });
+    }
+    let up = fleet(c.hub)?;
+    Ok(api::NodeList {
+        nodes: up.poller.nodes().into_iter().map(|v| v.node).collect(),
+    })
+}
+
+fn find_node(up: &Up, s: &str) -> Result<pt_fleet::NodeView> {
+    up.poller
+        .nodes()
+        .into_iter()
+        .find(|v| v.node.id == s || v.node.name == s)
+        .ok_or_else(|| err(ErrorCode::NotFound, format!("no node {s:?}")))
+}
+
+fn get_node(c: &Ctx<'_>, r: api::NodeRef) -> Result<api::Node> {
+    Ok(find_node(&fleet(c.hub)?, &r.node_id)?.node)
+}
+
+fn pending_node(p: &pt_fleet::Pending, fp: &str) -> api::PendingNode {
+    let r = &p.registration;
+    api::PendingNode {
+        auth_id: r.auth_id.clone(),
+        name: r.name.clone(),
+        control_key: r.control_key.clone(),
+        seen_at_ms: api::EpochMs(p.seen_at_ms),
+        expires_at_ms: api::EpochMs(p.seen_at_ms + pt_fleet::PENDING_TTL_MS),
+        key_matches: r.control_key.eq_ignore_ascii_case(fp),
+    }
+}
+
+fn get_enrollment(c: &Ctx<'_>, _: api::Empty) -> Result<api::Enrollment> {
+    let up = fleet(c.hub)?;
+    let fp = up.fleet.control_fingerprint().map_err(internal)?;
+    let url = up.fleet.config().server_url.clone();
+    let pending = up.fleet.pending().map_err(internal)?;
+    Ok(api::Enrollment {
+        join_command: format!("protectorate-node join {url} --name <name>"),
+        server_url: url,
+        pending: pending.iter().map(|p| pending_node(p, &fp)).collect(),
+        control_key: fp,
+    })
+}
+
+fn add_node(c: &Ctx<'_>, r: api::AddNodeRequest) -> Result<api::PendingNode> {
+    let up = fleet(c.hub)?;
+    let reg = pt_fleet::Registration::parse(&r.registration)
+        .map_err(|e| err(ErrorCode::Invalid, e.to_string()))?;
+    let fp = up.fleet.control_fingerprint().map_err(internal)?;
+    up.fleet.record_pending(reg.clone()).map_err(fleet_err)?;
+    let p = up
+        .fleet
+        .pending()
+        .map_err(internal)?
+        .into_iter()
+        .find(|p| p.registration.auth_id == reg.auth_id)
+        .ok_or_else(|| err(ErrorCode::Internal, "the registration was not recorded"))?;
+    let shown = pending_node(&p, &fp);
+    c.hub.event(
+        api::EventKind::Node,
+        api::Level::Info,
+        &reg.name,
+        "owner",
+        &format!(
+            "node {} asks to join{}",
+            reg.name,
+            if shown.key_matches {
+                ""
+            } else {
+                " (it saw another control key)"
+            }
+        ),
+    );
+    Ok(shown)
+}
+
+fn approve_node(c: &Ctx<'_>, r: api::ApproveNodeRequest) -> Result<api::ApprovedNode> {
+    let up = fleet(c.hub)?;
+    let pending = up
+        .fleet
+        .pending()
+        .map_err(internal)?
+        .into_iter()
+        .find(|p| p.registration.auth_id == r.auth_id);
+    let from_pending = |f: fn(&pt_fleet::Registration) -> &String, what: &str| {
+        pending
+            .as_ref()
+            .map(|p| f(&p.registration).clone())
+            .ok_or_else(|| {
+                err(
+                    ErrorCode::Invalid,
+                    format!("{what} is required: no pending registration {}", r.auth_id),
+                )
+            })
+    };
+    let name = match r.name {
+        Some(n) => n,
+        None => from_pending(|g| &g.name, "name")?,
+    };
+    let fingerprint = match r.fingerprint {
+        Some(f) => f,
+        None => from_pending(|g| &g.control_key, "fingerprint")?,
+    };
+    let n = up
+        .fleet
+        .approve(&r.auth_id, &name, &fingerprint)
+        .map_err(fleet_err)?;
+    info!("node {} approved as headscale node {}", n.name, n.id);
+    c.hub.event(
+        api::EventKind::Node,
+        api::Level::Info,
+        &n.name,
+        "owner",
+        &format!("node {} approved", n.name),
+    );
+    Ok(api::ApprovedNode {
+        node_id: n.id.to_string(),
+        name: n.name,
+    })
+}
+
+/// The job's requester as the caller may see it: the owner sees every job, a sleeve its own
+/// and its children's.
+fn job_visible(state: &State, who: &Principal, req: Option<&JobRequest>) -> bool {
+    match req.and_then(|r| r.sleeve) {
+        _ if who.full() => true,
+        Some(id) => reaches(state, who, SleeveId(id)),
+        None => false,
+    }
+}
+
+fn find_job(c: &Ctx<'_>, view: &View, id: &str) -> Result<pt_core::JobId> {
+    let id = id
+        .parse::<u64>()
+        .map(pt_core::JobId)
+        .map_err(|_| err(ErrorCode::NotFound, format!("no job {id:?}")))?;
+    let j = view
+        .state
+        .jobs
+        .get(&id)
+        .ok_or_else(|| err(ErrorCode::NotFound, format!("no job {}", id.0)))?;
+    if !job_visible(&view.state, c.who, JobRequest::of(&j.spec).as_ref()) {
+        return Err(err(
+            ErrorCode::Forbidden,
+            "that job is outside this capability",
+        ));
+    }
+    Ok(id)
+}
+
+fn job_view(hub: &Hub, id: pt_core::JobId) -> Result<api::Job> {
+    let view = hub.view();
+    view.state
+        .jobs
+        .get(&id)
+        .map(|j| crate::jobs::view(hub, j))
+        .ok_or_else(|| err(ErrorCode::NotFound, format!("job {} is gone", id.0)))
 }
 
 fn run_job(c: &Ctx<'_>, r: api::RunJobRequest) -> Result<api::Job> {
     if r.argv.is_empty() {
         return Err(err(ErrorCode::Invalid, "argv is required"));
     }
+    if let Some(d) = &r.cwd
+        && !d.starts_with('/')
+    {
+        return Err(err(ErrorCode::Invalid, "cwd must be an absolute path"));
+    }
+    let timeout_secs = r
+        .timeout_secs
+        .unwrap_or(pt_frame::msg::DEFAULT_TIMEOUT_SECS);
+    if timeout_secs == 0 || timeout_secs > pt_frame::msg::MAX_TIMEOUT_SECS {
+        return Err(err(ErrorCode::Invalid, "timeout_secs is 1 s to 24 h"));
+    }
+    fleet(c.hub)?;
     let on = match &r.target {
         api::JobTarget::Node { node_id } => format!("node {node_id}"),
         api::JobTarget::Arch { arch } => format!("a node of arch {arch}"),
     };
-    rule::gate(
-        c.hub,
-        c.who,
-        Guarded::RunJob(format!("{} on {on}", r.argv.join(" "))),
-    )?;
-    Err(unavailable("node jobs (the node transport)"))
+    let what = format!("{} on {on}", r.argv.join(" "));
+    let approval_id = if r.maintenance {
+        rule::gate_maintenance(c.hub, c.who, &what)?
+    } else {
+        rule::gate(c.hub, c.who, Guarded::RunJob(what))?
+    };
+    let view = c.hub.view();
+    let sleeve = match c.who {
+        Principal::Envoy(x) | Principal::Sleeve(x) => Some(*x),
+        _ => None,
+    };
+    let requested_by = sleeve
+        .and_then(|x| view.state.sleeve(x))
+        .map_or_else(|| "owner".to_string(), |s| s.name.clone());
+    let req = JobRequest {
+        argv: r.argv,
+        target: r.target,
+        cwd: r.cwd,
+        artifacts: r.artifacts,
+        on_present: r.on_present,
+        timeout_secs,
+        maintenance: r.maintenance,
+        requested_by,
+        sleeve: sleeve.map(|x| x.0),
+        approval_id,
+        queued_at_ms: now_ms(),
+    };
+    let spec = req.spec(r.even_if_present);
+    let request_id = new_id("job:")?;
+    match command(c.hub, EventKind::CreateJob { request_id, spec })? {
+        Reply::JobCreated(id) => job_view(c.hub, id),
+        other => Err(internal(format!("CreateJob answered {other:?}"))),
+    }
 }
 
-fn get_job(_: &Ctx<'_>, _: api::JobRef) -> Result<api::Job> {
-    Err(unavailable("node jobs (the node transport)"))
+fn list_jobs(c: &Ctx<'_>, r: api::ListJobsRequest) -> Result<api::JobList> {
+    let view = c.hub.view();
+    let node = match &r.node_id {
+        Some(n) => Some(match n.parse::<u64>() {
+            Ok(id) => id,
+            Err(_) => find_node(&fleet(c.hub)?, n)?
+                .node
+                .id
+                .parse()
+                .map_err(internal)?,
+        }),
+        None => None,
+    };
+    let limit = r.limit.unwrap_or(JOBS_DEFAULT).min(10_000) as usize;
+    let mut jobs: Vec<api::Job> = view
+        .state
+        .jobs
+        .values()
+        .rev()
+        .filter(|j| node.is_none_or(|n| j.node.map(|x| x.0) == Some(n)))
+        .filter(|j| job_visible(&view.state, c.who, JobRequest::of(&j.spec).as_ref()))
+        .take(limit)
+        .map(|j| crate::jobs::view(c.hub, j))
+        .collect();
+    jobs.reverse();
+    Ok(api::JobList { jobs })
 }
 
-fn get_job_log(_: &Ctx<'_>, _: api::GetJobLogRequest) -> Result<api::JobLog> {
-    Err(unavailable("node jobs (the node transport)"))
+fn get_job(c: &Ctx<'_>, r: api::JobRef) -> Result<api::Job> {
+    let id = find_job(c, &c.hub.view(), &r.job_id)?;
+    job_view(c.hub, id)
 }
 
-fn cancel_job(_: &Ctx<'_>, _: api::JobRef) -> Result<api::Job> {
-    Err(unavailable("node jobs (the node transport)"))
+fn get_job_log(c: &Ctx<'_>, r: api::GetJobLogRequest) -> Result<api::JobLog> {
+    let view = c.hub.view();
+    let id = find_job(c, &view, &r.job_id)?;
+    let j = &view.state.jobs[&id];
+    let limit = r.limit.unwrap_or(LOG_DEFAULT).clamp(1, LOG_MAX);
+    let (bytes, len) = c
+        .hub
+        .jobs
+        .read_log(id, j.attempt, r.offset, limit)
+        .map_err(internal)?;
+    let next = r.offset.min(len) + bytes.len() as u64;
+    Ok(api::JobLog {
+        job_id: r.job_id,
+        offset: r.offset,
+        next_offset: next,
+        text: String::from_utf8_lossy(&bytes).into_owned(),
+        eof: crate::jobs::ended(j.state) && next >= len,
+    })
+}
+
+fn get_job_artifact(c: &Ctx<'_>, r: api::GetJobArtifactRequest) -> Result<api::JobArtifactData> {
+    let view = c.hub.view();
+    let id = find_job(c, &view, &r.job_id)?;
+    let j = &view.state.jobs[&id];
+    let limit = r.limit.unwrap_or(ARTIFACT_MAX).clamp(1, ARTIFACT_MAX);
+    let (f, bytes) = c
+        .hub
+        .jobs
+        .read_artifact(id, j.attempt, &r.path, r.offset, limit)
+        .map_err(internal)?
+        .ok_or_else(|| {
+            err(
+                ErrorCode::NotFound,
+                format!("job {} has no fetched artifact {:?}", id.0, r.path),
+            )
+        })?;
+    let next = r.offset.min(f.size_bytes) + bytes.len() as u64;
+    Ok(api::JobArtifactData {
+        job_id: r.job_id,
+        path: r.path,
+        offset: r.offset,
+        next_offset: next,
+        size_bytes: f.size_bytes,
+        sha256: f.sha256,
+        hex: pt_hash::to_hex(&bytes),
+        eof: next >= f.size_bytes,
+    })
+}
+
+fn cancel_job(c: &Ctx<'_>, r: api::JobRef) -> Result<api::Job> {
+    let id = find_job(c, &c.hub.view(), &r.job_id)?;
+    command(c.hub, EventKind::CancelJob { job: id })?;
+    job_view(c.hub, id)
 }
 
 // ---- quota and events ----------------------------------------------------------------------
 
 fn list_quotas(c: &Ctx<'_>, _: api::Empty) -> Result<api::QuotaList> {
     Ok(api::QuotaList {
-        quotas: wire::quotas(c.hub),
+        quotas: c.hub.quotas.list(),
     })
 }
 

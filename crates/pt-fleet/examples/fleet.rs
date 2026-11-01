@@ -57,7 +57,7 @@ fn serve(args: &[String]) -> Result<(), String> {
         .parse()
         .map_err(|e| format!("--listen: {e}"))?;
     let mut cfg = Config::lan_direct(
-        home.clone(),
+        home.join("tailnet"),
         PathBuf::from(need(args, "--headscale")?),
         PathBuf::from(need(args, "--member")?),
         listen,

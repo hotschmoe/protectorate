@@ -111,10 +111,13 @@ dependencies = [
  "pt-api",
  "pt-core",
  "pt-drivers",
+ "pt-fleet",
+ "pt-frame",
  "pt-hash",
  "pt-http",
  "pt-journal",
  "pt-json",
+ "pt-quota",
  "pt-sandbox",
  "pt-sys",
 ]

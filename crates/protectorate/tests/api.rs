@@ -1,6 +1,6 @@
 //! The API surface of the real hub binary: every method of pt-api's table served under its
 //! scope, the events WebSocket with snapshot and resume, device pairing, the web build, the D9
-//! approval rule, and the stdio MCP for vendor agents.
+//! approval rule, the stdio MCP for vendor agents, and the quota reader thread.
 
 mod common;
 
@@ -72,7 +72,8 @@ fn get(port: u16, path: &str, headers: &[(&str, &str)]) -> pt_http::ClientRespon
         .expect("GET from the hub")
 }
 
-/// Every method is routed and its scope enforced; unbuilt backings answer `unavailable`; the
+/// Every method is routed and its scope enforced; unbuilt backings and node methods without a
+/// fleet answer `unavailable`; the
 /// event stream snapshots, streams and resumes; pairing issues hashed `pd1.` tokens; the web
 /// build is served with ETags and an SPA fallback.
 #[test]
@@ -120,9 +121,8 @@ fn api_surface() {
             "RunJob",
             obj! { "target" => obj! { "type" => "node", "node_id" => "n1" }, "argv" => vec![Value::from("true")] },
         ),
-        ("GetJob", obj! { "job_id" => "j1" }),
-        ("GetJobLog", obj! { "job_id" => "j1" }),
-        ("CancelJob", obj! { "job_id" => "j1" }),
+        ("GetNode", obj! { "node_id" => "n1" }),
+        ("GetEnrollment", obj! {}),
         (
             "Wait",
             obj! { "sleeve_id" => "envoy", "until" => "report", "timeout_ms" => 10 },
@@ -133,6 +133,18 @@ fn api_surface() {
         assert_eq!(s, 503, "{method}: {v}");
         assert_eq!(v["error"]["code"].as_str(), Some("unavailable"));
     }
+    for method in ["GetJob", "GetJobLog", "CancelJob"] {
+        let (s, v) = post(
+            port,
+            method,
+            Some(&owner),
+            &obj! { "job_id" => "j1" }.to_string(),
+        );
+        assert_eq!(s, 404, "{method}: {v}");
+        assert_eq!(v["error"]["code"].as_str(), Some("not_found"));
+    }
+    let (s, jobs) = post(port, "ListJobs", Some(&owner), "{}");
+    assert_eq!((s, jobs["jobs"].as_array().map(<[_]>::len)), (200, Some(0)));
     let (s, nodes) = post(port, "ListNodes", Some(&owner), "{}");
     assert_eq!(
         (s, nodes["nodes"].as_array().map(<[_]>::len)),
@@ -599,4 +611,67 @@ fn mcp_envoy_round_trip() {
     drop(mcp.stdin);
     let status = mcp.child.wait().unwrap();
     assert!(status.success(), "mcp exits cleanly when stdin closes");
+}
+
+/// The quota reader thread: with only the local model configured (vendor programs pointed at
+/// nothing), a stand-in OpenAI-compatible endpoint makes the local row fresh, on ListQuotas and
+/// as a `quota` stream message.
+#[test]
+fn quota_readers_run() {
+    let models = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let models_port = models.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for c in models.incoming() {
+            let Ok(mut c) = c else { continue };
+            let mut req = [0u8; 4096];
+            let _ = std::io::Read::read(&mut c, &mut req);
+            let body = r#"{"object":"list","data":[{"id":"stand-in-model"}]}"#;
+            let _ = write!(
+                c,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    let port = free_port();
+    let listen = format!("127.0.0.1:{port}");
+    let none = "/nonexistent/program";
+    let hub = Hub::start_config(
+        "quota",
+        "pi_local",
+        &[
+            (
+                "local_url",
+                format!("http://127.0.0.1:{models_port}/v1").into(),
+            ),
+            ("quota_poll_secs", 1u64.into()),
+            ("claude_program", none.into()),
+            ("codex_program", none.into()),
+            ("grok_program", none.into()),
+        ],
+        &["--listen", &listen],
+        &[],
+    );
+    let owner = hub.printed("owner token (shown once): ");
+    let mut s = ws(port, &format!("?access_token={owner}"), &[]).expect("events");
+    let seen = until(&mut s, "quota", |m| {
+        m["quota"]["subscription"].as_str() == Some("local")
+            && m["quota"]["reading"].as_str() == Some("ok")
+    });
+    let q = &seen.last().unwrap()["quota"];
+    assert!(
+        q["note"].as_str().unwrap_or("").contains("stand-in-model"),
+        "{q}"
+    );
+    let (st, list) = post(port, "ListQuotas", Some(&owner), "{}");
+    assert_eq!(st, 200);
+    let rows = list["quotas"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "only the local reader: {list}");
+    assert_eq!(rows[0]["reading"].as_str(), Some("ok"), "{list}");
+    let state = hub.state();
+    assert_eq!(
+        state["quotas"][0]["reading"].as_str(),
+        Some("ok"),
+        "{state}"
+    );
 }

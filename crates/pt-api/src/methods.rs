@@ -164,6 +164,10 @@ api_records! {
     pub struct RunJobRequest {
         pub target: JobTarget,
         pub argv: Vec<String>,
+        /// An absolute directory on the node; default the node's own work dir.
+        pub cwd: Option<String>,
+        /// Files (relative to the job's directory, or absolute) the hub fetches once it exits.
+        pub artifacts: Vec<String> = Vec::new(),
         /// Run although someone is at the node (PROBLEMS P2).
         pub even_if_present: bool = false,
         pub on_present: OnPresent = OnPresent::Idle,
@@ -175,6 +179,77 @@ api_records! {
 
     pub struct JobRef {
         pub job_id: String,
+    }
+
+    pub struct ListJobsRequest {
+        /// Only the jobs on this node (id or name).
+        pub node_id: Option<String>,
+        /// The newest `limit` jobs; the hub caps it.
+        pub limit: Option<u64>,
+    }
+
+    pub struct JobList {
+        pub jobs: Vec<Job> = Vec::new(),
+    }
+
+    pub struct GetJobArtifactRequest {
+        pub job_id: String,
+        /// As the job's `artifacts` list names it.
+        pub path: String,
+        pub offset: u64 = 0,
+        /// Bytes; the hub caps it.
+        pub limit: Option<u64>,
+    }
+
+    /// A slice of a fetched artifact, as lowercase hex.
+    pub struct JobArtifactData {
+        pub job_id: String,
+        pub path: String,
+        pub offset: u64,
+        pub next_offset: u64,
+        pub size_bytes: u64,
+        pub sha256: String,
+        pub hex: String,
+        pub eof: bool,
+    }
+
+    /// How a machine joins this hub's tailnet: run `join_command` on it, then hand its QR text
+    /// to `AddNode` or approve it with the line it prints.
+    pub struct Enrollment {
+        pub server_url: String,
+        /// `sha256:<hex>` of headscale's control key; the node shows the one it saw.
+        pub control_key: String,
+        pub join_command: String,
+        pub pending: Vec<PendingNode> = Vec::new(),
+    }
+
+    /// A registration the owner scanned or pasted but has not approved.
+    pub struct PendingNode {
+        pub auth_id: String,
+        pub name: String,
+        pub control_key: String,
+        pub seen_at_ms: EpochMs,
+        /// headscale forgets the registration then; the node must run `join` again.
+        pub expires_at_ms: EpochMs,
+        /// True when the node saw this hub's control key.
+        pub key_matches: bool,
+    }
+
+    pub struct AddNodeRequest {
+        /// The QR payload `protectorate-node join` shows, or its pasted text.
+        pub registration: String,
+    }
+
+    /// `name` and `fingerprint` default to the pending registration's.
+    pub struct ApproveNodeRequest {
+        pub auth_id: String,
+        pub name: Option<String>,
+        pub fingerprint: Option<String>,
+    }
+
+    pub struct ApprovedNode {
+        pub node_id: String,
+        pub name: String,
     }
 
     pub struct GetJobLogRequest {
@@ -336,12 +411,23 @@ api_methods! {
     ListApprovals(ListApprovalsRequest) -> ApprovalList: Owner,
     Decide(DecideRequest) -> Approval: Owner,
 
-    // Nodes and jobs: no node transport yet, so the job methods answer `unavailable`.
+    // Nodes and jobs, over the tailnet the hub's fleet runs. Without a fleet they answer
+    // `unavailable` (ListNodes: no nodes).
     ListNodes(Empty) -> NodeList: Sleeve,
+    /// By headscale id or name.
     GetNode(NodeRef) -> Node: Sleeve,
+    GetEnrollment(Empty) -> Enrollment: Owner,
+    /// Records a registration the owner scanned or pasted, for `ApproveNode`.
+    AddNode(AddNodeRequest) -> PendingNode: Owner,
+    /// Checks the control-key fingerprint, then registers, tags and names the node.
+    ApproveNode(ApproveNodeRequest) -> ApprovedNode: Owner,
+    /// A maintenance job from a sleeve, or a job Envoy asks for in an agent's turn (D9), waits
+    /// for the owner's approval.
     RunJob(RunJobRequest) -> Job: Sleeve,
+    ListJobs(ListJobsRequest) -> JobList: Sleeve,
     GetJob(JobRef) -> Job: Sleeve,
     GetJobLog(GetJobLogRequest) -> JobLog: Sleeve,
+    GetJobArtifact(GetJobArtifactRequest) -> JobArtifactData: Sleeve,
     CancelJob(JobRef) -> Job: Sleeve,
 
     // Quota and events

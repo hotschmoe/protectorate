@@ -19,9 +19,36 @@ mod web {
     include!(concat!(env!("OUT_DIR"), "/web.rs"));
 }
 
+mod net {
+    include!(concat!(env!("OUT_DIR"), "/net.rs"));
+}
+
+/// What `version` and `serve` say about the embedded headscale and member.
+fn net_line() -> String {
+    let n = &net::NET;
+    let one = |e: &Option<pt_hub::Embedded>, name: &str| match e {
+        Some(e) => format!(
+            "{name} sha256:{} ({:.1} MB gzipped)",
+            &e.sha256[..16],
+            e.gz.len() as f64 / 1e6
+        ),
+        None => format!("{name} missing"),
+    };
+    let mut s = format!(
+        "net: {}, {}",
+        one(&n.headscale, "headscale"),
+        one(&n.member, "member")
+    );
+    if !n.missing.is_empty() {
+        s.push_str(&format!(" ({})", n.missing));
+    }
+    s
+}
+
 const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <noun> <verb> ...
 
   serve [--listen ADDR|off] [--proxy-listen ADDR --trusted-proxy IP] [--web-dir DIR]
+        [--fleet-listen ADDR|off] [--fleet-dir DIR] [--fleet-udp-port N] [--fleet-server-url URL]
         [--log-level error|warn|info|debug]
   version
   hub info | hub state
@@ -35,10 +62,12 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   sleeve transcript <sleeve> [--from SEQ] [--limit N]
   sleeve wait <sleeve> [--until idle|done|blocked|parked|ended] [--timeout SECS]
   approval list [--pending] | approval decide <id> allow|allow-session|deny
-  node list | node show <node>
+  node ls | node show <node> | node add [REGISTRATION] | node approve <auth_id>
+        [--name NAME] [--fingerprint FP]
   job run (--node ID | --arch ARCH) [--even-if-present] [--on-present idle|kill]
-        [--maintenance] [--timeout SECS] -- <argv...>
-  job show|cancel <job> | job log <job> [--offset N] [--limit N]
+        [--maintenance] [--timeout SECS] [--cwd DIR] [--artifact PATH]... -- <argv...>
+  job ls [--node N] [--limit N] | job show|cancel <job> | job log <job> [--offset N] [--limit N]
+  job artifact <job> <path> [--out FILE]
   quota list
   event list [--from SEQ] [--limit N] | event read <seq>
   envoy send <text...> [--as NAME] | envoy wait [REQUEST_ID] [--timeout SECS]
@@ -97,6 +126,14 @@ impl Args {
             .rev()
             .find(|(k, _)| k == name)
             .and_then(|(_, v)| v.as_deref())
+    }
+
+    pub fn all(&self, name: &str) -> Vec<String> {
+        self.flags
+            .iter()
+            .filter(|(k, _)| k == name)
+            .filter_map(|(_, v)| v.clone())
+            .collect()
     }
 
     pub fn has(&self, name: &str) -> bool {
@@ -230,12 +267,27 @@ fn serve(a: &Args) -> Result<(), Fail> {
         None if web::FILES.is_empty() => pt_hub::Web::None,
         None => pt_hub::Web::Embedded(web::FILES),
     };
+    let fleet = pt_hub::FleetFlags {
+        dir: a.flag("--fleet-dir").map(PathBuf::from),
+        listen: a.flag("--fleet-listen").map(String::from),
+        udp_port: a
+            .flag("--fleet-udp-port")
+            .map(|p| {
+                p.parse()
+                    .map_err(|_| format!("--fleet-udp-port {p:?} is not a port"))
+            })
+            .transpose()?,
+        server_url: a.flag("--fleet-server-url").map(String::from),
+    };
+    eprintln!("{}", net_line());
     pt_hub::serve(pt_hub::ServeOptions {
         home: home(a),
         listen,
         proxy_listen: addr("--proxy-listen")?,
         trusted_proxy: trusted,
         web,
+        fleet,
+        net: net::NET,
     })
     .map_err(Fail::Other)
 }
@@ -249,6 +301,7 @@ fn run(a: &Args) -> Result<(), Fail> {
                 "protectorate {}",
                 option_env!("PROTECTORATE_BUILD_VERSION").unwrap_or("dev")
             );
+            println!("{}", net_line());
             return Ok(());
         }
         _ => {}
