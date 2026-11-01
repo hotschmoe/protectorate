@@ -9,9 +9,9 @@ use crate::exec;
 use pt_frame::msg::{Isolation, SubmitJob};
 use std::fs;
 use std::io;
-use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::os::unix::process::CommandExt;
 use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
 /// The scope's own time limit sits this far past the job's, so a job outlives a dead agent by
@@ -112,14 +112,15 @@ impl Isolator {
             .stdout(out)
             .stderr(err)
             .process_group(0);
-        let mut child = cmd.spawn()?;
+        let child = cmd.spawn()?;
         let start_time = start_time(child.id());
         let scope = self.scope.then(|| format!("{unit}.scope"));
         if let Some(s) = &scope {
-            in_scope(&mut child, s);
+            in_scope(child.id(), s);
         }
         Ok(Proc {
             child,
+            exit: None,
             start_time,
             scope,
             user: self.user,
@@ -130,10 +131,9 @@ impl Isolator {
     pub fn reap_orphan(&self, receipt: Option<&Receipt>, unit: &str) -> Orphan {
         let mut killed = false;
         if let Some(r) = receipt
-            && r.start_time.is_some()
-            && start_time(r.pid) == r.start_time
+            && let Some(start) = r.start_time
         {
-            killed |= ffi::kill_group(r.pid, libc::SIGKILL).is_ok();
+            killed |= kill_orphan_group(r.pid, start);
         }
         let scope = receipt
             .and_then(|r| r.scope.clone())
@@ -148,11 +148,20 @@ impl Isolator {
     }
 }
 
+/// The leader is reaped only when the `Proc` is dropped. Until then it holds its pid and process
+/// group id even as a zombie, so signalling the group can never reach a reused id.
 pub struct Proc {
     child: Child,
+    exit: Option<i64>,
     start_time: Option<u64>,
     scope: Option<String>,
     user: bool,
+}
+
+impl Drop for Proc {
+    fn drop(&mut self) {
+        let _ = self.child.try_wait();
+    }
 }
 
 impl Proc {
@@ -166,7 +175,10 @@ impl Proc {
 
     /// The exit code once the leader has exited (128 + signal for a signal death).
     pub fn try_wait(&mut self) -> io::Result<Option<i64>> {
-        Ok(self.child.try_wait()?.map(exit_code))
+        if self.exit.is_none() {
+            self.exit = ffi::exited_unreaped(self.child.id())?;
+        }
+        Ok(self.exit)
     }
 
     /// Asks the whole tree to stop.
@@ -207,15 +219,15 @@ impl Proc {
 /// Waits until systemd-run has moved the job into its scope (or exited), so the job is never
 /// signalled mid-registration: a scope registered after its only process died stays active,
 /// empty, until its time limit.
-fn in_scope(child: &mut Child, scope: &str) {
+fn in_scope(pid: u32, scope: &str) {
     let suffix = format!("/{scope}");
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
-        let cg = fs::read_to_string(format!("/proc/{}/cgroup", child.id())).unwrap_or_default();
+        let cg = fs::read_to_string(format!("/proc/{pid}/cgroup")).unwrap_or_default();
         if cg.lines().any(|l| l.trim_end().ends_with(&suffix)) {
             return;
         }
-        if !matches!(child.try_wait(), Ok(None)) {
+        if !matches!(ffi::exited_unreaped(pid), Ok(None)) {
             return;
         }
         std::thread::sleep(Duration::from_millis(2));
@@ -241,22 +253,70 @@ fn scope_active(user: bool, scope: &str) -> bool {
     })
 }
 
-fn exit_code(s: ExitStatus) -> i64 {
-    match (s.code(), s.signal()) {
-        (Some(c), _) => i64::from(c),
-        (None, Some(sig)) => 128 + i64::from(sig),
-        (None, None) => -1,
+/// Kills process group `pid` of an orphaned job, which is no longer our child, signalling only
+/// processes proven to belong to it: the leader through a pidfd that still names a live process
+/// with the recorded start time, and each member through a pidfd taken while that leader, held
+/// stopped, kept the group id from being reused.
+fn kill_orphan_group(pid: u32, start: u64) -> bool {
+    const ROUNDS: u32 = 100;
+    let Ok(leader) = ffi::pidfd_open(pid) else {
+        return false;
+    };
+    // Alive after the read, so the read saw the pidfd's process and not a successor.
+    if stat(pid).and_then(|s| s.start) != Some(start) || ffi::pidfd_send_signal(&leader, 0).is_err()
+    {
+        return false;
     }
+    let _ = ffi::pidfd_send_signal(&leader, libc::SIGSTOP);
+    for _ in 0..ROUNDS {
+        let members = group_members(pid);
+        if members.is_empty() || ffi::pidfd_send_signal(&leader, 0).is_err() {
+            break;
+        }
+        for m in &members {
+            let _ = ffi::pidfd_send_signal(m, libc::SIGKILL);
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    ffi::pidfd_send_signal(&leader, libc::SIGKILL).is_ok()
 }
 
-/// Field 22 of `/proc/<pid>/stat`; `None` for a missing or zombie process.
-fn start_time(pid: u32) -> Option<u64> {
+/// Pidfds of the live processes other than the leader whose group is `pgid`, each checked after
+/// its pidfd was opened.
+fn group_members(pgid: u32) -> Vec<std::os::fd::OwnedFd> {
+    let Ok(dir) = fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    let in_group = |p: u32| stat(p).is_some_and(|s| s.pgid == pgid && s.start.is_some());
+    dir.flatten()
+        .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
+        .filter(|&p| p != pgid && in_group(p))
+        .filter_map(|p| ffi::pidfd_open(p).ok().filter(|_| in_group(p)))
+        .collect()
+}
+
+struct Stat {
+    pgid: u32,
+    /// Field 22 of `/proc/<pid>/stat`; `None` for a zombie.
+    start: Option<u64>,
+}
+
+fn stat(pid: u32) -> Option<Stat> {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let mut fields = stat.rsplit_once(')')?.1.split_whitespace();
-    if fields.next()? == "Z" {
-        return None;
-    }
-    fields.nth(18)?.parse().ok()
+    let f: Vec<&str> = stat.rsplit_once(')')?.1.split_whitespace().collect();
+    Some(Stat {
+        pgid: f.get(2)?.parse().ok()?,
+        start: if *f.first()? == "Z" {
+            None
+        } else {
+            f.get(19)?.parse().ok()
+        },
+    })
+}
+
+/// `None` for a missing or zombie process.
+fn start_time(pid: u32) -> Option<u64> {
+    stat(pid)?.start
 }
 
 fn cgroup_members(pid: u32) -> Vec<u32> {
