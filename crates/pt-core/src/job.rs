@@ -277,7 +277,7 @@ impl Core<'_> {
                     job: id,
                     attempt,
                     node: j.node.expect("node"),
-                    offset: *offset,
+                    upto: *offset,
                 });
             }
             (

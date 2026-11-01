@@ -289,11 +289,13 @@ pub enum Intent {
         attempt: u32,
         node: NodeId,
     },
+    /// The node's log is `upto` bytes long: append to the hub's copy from the length it already
+    /// holds, up to `upto`.
     ReadLog {
         job: JobId,
         attempt: u32,
         node: NodeId,
-        offset: u64,
+        upto: u64,
     },
     FetchArtifacts {
         job: JobId,

@@ -36,6 +36,8 @@ reads no clock, so `replay(journal) == live state`. The hub's core thread is its
 - `SelectTarget`: run the pure `select_target` (outside the core) and answer `TargetChosen`.
   `ScheduleJob`: run node scheduling and answer `NodeChosen`.
 - `PollJob`, `ReadLog`, `FetchArtifacts`, `Checkpoint`: reads and git checkpoints, no record.
+  `ReadLog { upto }` is the node's log length: the hub appends to its own copy from the length
+  it holds.
 - `Notify`, `Reply`: for people, Envoy and sleeves.
 
 ## Execution rules
