@@ -51,6 +51,9 @@ impl Home {
     pub fn config(&self) -> PathBuf {
         self.root.join("config.json")
     }
+    pub fn devices(&self) -> PathBuf {
+        self.root.join("devices.json")
+    }
     pub fn doctor(&self) -> PathBuf {
         self.root.join("doctor.json")
     }
@@ -148,6 +151,11 @@ pt_json::record! {
         pub resleeve_to: Vec<String> = vec!["pi_local".to_string()],
         /// Run each incarnation in a systemd user scope (limits and cgroup.kill).
         pub scopes: bool = true,
+        /// D9: sleeves Envoy may spawn in one turn an agent message started before each further
+        /// spawn needs the owner's approval.
+        pub d9_spawn_limit: u64 = 3,
+        /// D9: how long a guarded call waits for the owner before it fails.
+        pub d9_approval_timeout_secs: u64 = 900,
     }
 }
 
@@ -197,7 +205,7 @@ pub struct Tokens {
 pub const OWNER_PREFIX: &str = "po1.";
 pub const CAP_PREFIX: &str = "pc1.";
 
-fn sha_hex(s: &str) -> String {
+pub fn sha_hex(s: &str) -> String {
     pt_hash::to_hex(&pt_hash::sha256(s.as_bytes()))
 }
 

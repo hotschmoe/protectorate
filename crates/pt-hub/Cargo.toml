@@ -10,6 +10,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+pt-api = { path = "../pt-api" }
 pt-core = { path = "../pt-core" }
 pt-drivers = { path = "../pt-drivers" }
 pt-hash = { path = "../pt-hash" }

@@ -205,7 +205,7 @@ fn envoy_round_trip() {
     assert!(
         std::fs::read_to_string(hub.home.join("envoy/CLAUDE.md"))
             .unwrap()
-            .contains("protectorate sleeve spawn"),
+            .contains("`sleeve spawn <name> --path <dir>"),
         "Envoy's workspace describes the CLI"
     );
 }
@@ -219,7 +219,7 @@ fn root_stop_stops_child() {
     let hub = Hub::start("tree");
     let repo = temp_repo("tree");
     let root = hub.spawn_pi("root4", &repo);
-    let child = hub
+    let kid = hub
         .cli(&[
             "--json",
             "sleeve",
@@ -232,9 +232,9 @@ fn root_stop_stops_child() {
         ])
         .json();
     hub.wait("kid4", "idle", 120);
-    let kid = &child["sleeve"];
     assert_eq!(kid["role"].as_str(), Some("child"));
-    assert_eq!(kid["layout"].as_str(), Some("worktree"));
+    assert_eq!(kid["view"].as_str(), Some("worktree"));
+    assert_eq!(kid["branch"].as_str(), Some("pt/kid4"));
     let path = kid["path"].as_str().unwrap();
     assert_eq!(
         git_out(
@@ -275,31 +275,14 @@ fn capabilities_are_scoped() {
     if !have_runtime() {
         return;
     }
-    let port = std::net::TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    let port = free_port();
     let listen = format!("127.0.0.1:{port}");
     let hub = Hub::start_with("caps", "pi_local", &["--listen", &listen], &[]);
     let (ra, rb) = (temp_repo("caps-a"), temp_repo("caps-b"));
     let a = hub.spawn_pi("a5", &ra);
     hub.spawn_pi("b5", &rb);
 
-    // The token the sandboxed harness really holds.
-    let scope = hub.scope(a["id"].as_str().unwrap(), 1);
-    let token = scope_pids(&scope)
-        .iter()
-        .find_map(|pid| {
-            let env = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
-            env.split(|b| *b == 0).find_map(|kv| {
-                std::str::from_utf8(kv)
-                    .ok()?
-                    .strip_prefix("PROTECTORATE_TOKEN=")
-                    .map(str::to_string)
-            })
-        })
-        .expect("the sleeve's environment carries its token");
+    let token = hub.sleeve_token(a["id"].as_str().unwrap(), 1);
     assert!(token.starts_with("pc1."));
     let as_a = [("PROTECTORATE_TOKEN", token.as_str())];
     let list = hub.cli_env(&as_a, &["--json", "sleeve", "list"]).json();
@@ -316,8 +299,8 @@ fn capabilities_are_scoped() {
     for args in [
         &["sleeve", "stop", "b5"][..],
         &["sleeve", "send", "b5", "hello"],
-        &["transcript", "b5"],
-        &["wait", "b5", "--timeout", "1"],
+        &["sleeve", "transcript", "b5"],
+        &["sleeve", "wait", "b5", "--timeout", "1"],
         &["envoy", "send", "hello"],
     ] {
         let r = hub.cli_env(&as_a, args);
@@ -327,16 +310,16 @@ fn capabilities_are_scoped() {
             r.stdout, r.stderr
         );
     }
-    hub.cli_env(&as_a, &["transcript", "a5"]).ok();
+    hub.cli_env(&as_a, &["sleeve", "transcript", "a5"]).ok();
     assert_eq!(hub.sleeve("b5")["lifecycle"].as_str(), Some("running"));
 
     let envoy_only = hub.printed("envoy-only token: ");
     let as_agent = [("PROTECTORATE_TOKEN", envoy_only.as_str())];
     for args in [
         &["sleeve", "list"][..],
-        &["state"],
+        &["hub", "state"],
         &["sleeve", "stop", "a5"],
-        &["transcript", "envoy"],
+        &["sleeve", "transcript", "envoy"],
     ] {
         let r = hub.cli_env(&as_agent, args);
         assert_eq!(r.status, 4, "envoy-only must not {args:?}: {}", r.stderr);
@@ -398,7 +381,7 @@ fn forced_resleeve_with_brief() {
         ])
         .json();
     hub.wait("six", "idle", 120);
-    let id = s["sleeve"]["id"].as_str().unwrap().to_string();
+    let id = s["id"].as_str().unwrap().to_string();
     hub.send("six", READY);
     let s = eventually("the resleeve to land", Duration::from_secs(240), || {
         let s = hub.sleeve("six");
@@ -408,7 +391,7 @@ fn forced_resleeve_with_brief() {
             && inc["harness"].as_str() == Some("pi_local");
         done.then_some(s)
     });
-    assert_eq!(s["guard"].as_str(), Some("cooldown"));
+    assert_eq!(s["resleeve_to"].as_array().map(<[_]>::len), Some(1));
     assert!(
         scope_pids(&hub.scope(&id, 1)).is_empty(),
         "g1's scope is empty"

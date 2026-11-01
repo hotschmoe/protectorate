@@ -6,10 +6,11 @@ use std::fs;
 use std::path::Path;
 
 use pt_core::{Cause, EffectId, EffectKind, Gen, Sleeve, SleeveId};
-use pt_drivers::{Entry, Event, ToolStatus};
+use pt_drivers::{Entry, ToolStatus};
 
 use crate::git;
 use crate::hub::{Hub, View};
+use crate::transcript::Line;
 use crate::wire;
 
 pub const FILE: &str = ".protectorate/BRIEF.md";
@@ -85,7 +86,7 @@ pub struct Spec<'a> {
 /// Builds the brief and writes it into the sleeve's working directory.
 pub fn write(hub: &Hub, view: &View, workdir: &Path, spec: &Spec<'_>) -> Result<(), String> {
     let s = spec.sleeve;
-    let entries: Vec<Event> = hub
+    let entries: Vec<Line> = hub
         .transcripts
         .get(s.id)
         .and_then(|t| crate::transcript::lock(&t).all())
@@ -101,7 +102,7 @@ pub fn write(hub: &Hub, view: &View, workdir: &Path, spec: &Spec<'_>) -> Result<
     fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-fn build(view: &View, workdir: &Path, spec: &Spec<'_>, entries: &[Event]) -> String {
+fn build(view: &View, workdir: &Path, spec: &Spec<'_>, entries: &[Line]) -> String {
     let s = spec.sleeve;
     let mut b = String::new();
     let session = entries.iter().rev().find_map(|e| match &e.entry {
@@ -162,7 +163,7 @@ fn build(view: &View, workdir: &Path, spec: &Spec<'_>, entries: &[Event]) -> Str
         }
         None => b.push_str("No assistant message seen.\n\n"),
     }
-    let calls: Vec<&Event> = entries
+    let calls: Vec<&Line> = entries
         .iter()
         .filter(|e| matches!(e.entry, Entry::ToolCall { .. }))
         .collect();
@@ -297,8 +298,8 @@ fn build(view: &View, workdir: &Path, spec: &Spec<'_>, entries: &[Event]) -> Str
                 b,
                 "- {} ({}, {})",
                 c.name,
-                wire::life_wire(c.life),
-                wire::activity_wire(&c.activity)
+                wire::lifecycle(c.life),
+                wire::activity(&c.activity)
             );
         }
     }

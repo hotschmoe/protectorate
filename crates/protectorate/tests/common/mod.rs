@@ -134,13 +134,30 @@ impl Hub {
     }
 
     pub fn start_with(name: &str, envoy: &str, extra: &[&str], env: &[(&str, &str)]) -> Hub {
+        Hub::start_config(name, envoy, &[], extra, env)
+    }
+
+    /// `config` adds keys to the hub's `config.json`.
+    pub fn start_config(
+        name: &str,
+        envoy: &str,
+        config: &[(&str, Value)],
+        extra: &[&str],
+        env: &[(&str, &str)],
+    ) -> Hub {
         let home = unique(name).join("home");
         fs::create_dir_all(&home).expect("create home");
-        let config = pt_json::obj! {
+        let mut config_obj = pt_json::obj! {
             "envoy" => pt_json::obj! { "harness" => envoy },
             "pi_local_provider" => pi_provider(),
             "pi_local_model" => pi_model(),
         };
+        if let Some(m) = config_obj.as_object_mut() {
+            for (k, v) in config {
+                m.insert(*k, v.clone());
+            }
+        }
+        let config = config_obj;
         fs::write(home.join("config.json"), config.to_string()).expect("write config");
         let mut hub = Hub {
             log: home.with_file_name("serve-0.log"),
@@ -186,7 +203,7 @@ impl Hub {
         }
         self.child = Some(cmd.spawn().expect("start protectorate serve"));
         eventually("the hub to answer", Duration::from_secs(20), || {
-            (self.cli(&["--json", "state"]).status == 0).then_some(())
+            (self.cli(&["--json", "hub", "state"]).status == 0).then_some(())
         });
     }
 
@@ -229,7 +246,7 @@ impl Hub {
     }
 
     pub fn state(&self) -> Value {
-        self.cli(&["--json", "state"]).json()
+        self.cli(&["--json", "hub", "state"]).json()
     }
 
     pub fn sleeve(&self, name: &str) -> Value {
@@ -257,11 +274,12 @@ impl Hub {
             ])
             .json();
         self.wait(name, "idle", 120);
-        v["sleeve"].clone()
+        v
     }
 
     pub fn wait(&self, sleeve: &str, until: &str, secs: u64) {
         let r = self.cli(&[
+            "sleeve",
             "wait",
             sleeve,
             "--until",
@@ -284,9 +302,11 @@ impl Hub {
         v["request_id"].as_str().expect("request id").to_string()
     }
 
-    /// The stored transcript, raw normalized entries.
+    /// The stored transcript, as the API's chat entries.
     pub fn transcript(&self, sleeve: &str) -> Vec<Value> {
-        let v = self.cli(&["--json", "transcript", sleeve, "--raw"]).json();
+        let v = self
+            .cli(&["--json", "sleeve", "transcript", sleeve, "--limit", "10000"])
+            .json();
         v["entries"].as_array().unwrap_or(&[]).to_vec()
     }
 
@@ -298,6 +318,22 @@ impl Hub {
 
     pub fn scope(&self, id: &str, g: u64) -> String {
         format!("pt-{}-{id}-g{g}.scope", self.hub_tag())
+    }
+
+    /// The `PROTECTORATE_TOKEN` the sandboxed harness of incarnation `g` really holds.
+    pub fn sleeve_token(&self, id: &str, g: u64) -> String {
+        scope_pids(&self.scope(id, g))
+            .iter()
+            .find_map(|pid| {
+                let env = fs::read(format!("/proc/{pid}/environ")).ok()?;
+                env.split(|b| *b == 0).find_map(|kv| {
+                    std::str::from_utf8(kv)
+                        .ok()?
+                        .strip_prefix("PROTECTORATE_TOKEN=")
+                        .map(str::to_string)
+                })
+            })
+            .expect("the sleeve's environment carries its token")
     }
 
     /// The line `<prefix><value>` the first start printed to stderr.
@@ -317,6 +353,30 @@ impl Drop for Hub {
         // The sandboxes die with the hub (bwrap --die-with-parent).
         self.kill9();
     }
+}
+
+/// A port nothing listens on right now (never the real hub's 7470).
+pub fn free_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|l| l.local_addr())
+        .expect("bind an ephemeral port")
+        .port()
+}
+
+/// `POST /api/<method>` over TCP: the status and the JSON body.
+pub fn post(port: u16, method: &str, token: Option<&str>, body: &str) -> (u16, Value) {
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let auth = token.map(|t| format!("Bearer {t}"));
+    let mut headers = vec![("Content-Type", "application/json")];
+    if let Some(a) = &auth {
+        headers.push(("Authorization", a.as_str()));
+    }
+    let r = pt_http::Client::tcp(addr)
+        .read_timeout(Some(Duration::from_secs(60)))
+        .request("POST", &format!("/api/{method}"), &headers, body.as_bytes())
+        .expect("POST to the hub");
+    let v = pt_json::parse_bytes(&r.body).unwrap_or(Value::Null);
+    (r.status, v)
 }
 
 pub fn tail(s: &str, n: usize) -> String {

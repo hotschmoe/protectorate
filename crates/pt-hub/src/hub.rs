@@ -1,5 +1,5 @@
-//! What every thread shares: the published view, the core's input channel, the transcripts and
-//! the event bus.
+//! What every thread shares: the published view, the core's input channel, the transcripts, the
+//! event bus, approvals, devices and Envoy's current turn origin (D9).
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -8,14 +8,16 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use pt_api::{EpochMs, EventKind as ApiEventKind, HubEvent, HubStreamMessage, Level};
 use pt_core::{EventKind, Gen, Millis, Party, Reply, SleeveId, State};
 use pt_drivers::Entry;
-use pt_json::obj;
 
+use crate::approvals::Approvals;
 use crate::bus::Bus;
+use crate::devices::Devices;
 use crate::home::{Config, Home, Tokens, now_ms};
 use crate::log::{debug, warning};
-use crate::transcript::{Transcripts, lock};
+use crate::transcript::{Line, Note, Transcripts, lock};
 use crate::wire;
 
 pub const ENVOY: &str = "envoy";
@@ -56,10 +58,22 @@ impl Fault {
     }
 }
 
+/// D9: who started Envoy's current turn. `origin` is `agent:<name>` when an agent message was
+/// written into it (as its prompt or a steer), and stays so until the turn settles.
+#[derive(Debug, Default)]
+pub struct EnvoyTurn {
+    pub origin: Option<String>,
+    /// Sleeves Envoy spawned in this turn.
+    pub spawns: u64,
+}
+
 pub struct Hub {
     pub home: Home,
     pub config: Config,
     pub tokens: Tokens,
+    pub devices: Devices,
+    pub approvals: Approvals,
+    pub envoy_turn: Mutex<EnvoyTurn>,
     pub uid: u32,
     pub started_ms: u64,
     pub owner_home: PathBuf,
@@ -84,6 +98,7 @@ impl Hub {
         home: Home,
         config: Config,
         tokens: Tokens,
+        devices: Devices,
         uid: u32,
         owner_home: PathBuf,
         input: Sender<Input>,
@@ -94,6 +109,9 @@ impl Hub {
             home,
             config,
             tokens,
+            devices,
+            approvals: Approvals::default(),
+            envoy_turn: Mutex::new(EnvoyTurn::default()),
             uid,
             started_ms: now_ms(),
             owner_home,
@@ -154,19 +172,21 @@ impl Hub {
             .map(|s| s.id)
     }
 
-    /// Stores a transcript entry and streams it.
-    pub fn record(&self, id: SleeveId, g: u64, time_ms: u64, entry: Entry) {
+    /// Stores a transcript entry and streams it. The stream message is pushed while the store
+    /// is held, so stream order is transcript order.
+    pub fn record(&self, id: SleeveId, g: u64, time_ms: u64, entry: Entry, note: Note) {
         let store = match self.transcripts.get(id) {
             Ok(s) => s,
             Err(e) => return warning!("sleeve {}: {e}", id.0),
         };
-        let stored = lock(&store).append(g, time_ms, entry);
-        match stored {
-            Ok(ev) => {
-                self.bus.push(obj! {
-                    "kind" => "transcript",
-                    "sleeve_id" => id.0.to_string(),
-                    "entry" => wire::chat_entry(&ev, false),
+        let mut store = lock(&store);
+        match store.append(g, time_ms, entry, note) {
+            Ok(line) => {
+                let entry = wire::chat_entry(id, &line, false);
+                self.bus.push(|seq| HubStreamMessage::Entry {
+                    seq,
+                    sleeve_id: id.0.to_string(),
+                    entry,
                 });
             }
             Err(e) => warning!("sleeve {}: {e}", id.0),
@@ -175,25 +195,47 @@ impl Hub {
 
     /// Streams a live text delta under the seq its final entry will take; nothing is stored.
     pub fn delta(&self, id: SleeveId, g: u64, time_ms: u64, entry: Entry) {
-        let seq = match self.transcripts.get(id) {
-            Ok(s) => lock(&s).peek_seq(),
-            Err(_) => return,
+        let Ok(store) = self.transcripts.get(id) else {
+            return;
         };
-        let ev = pt_drivers::Event {
-            seq,
+        let store = lock(&store);
+        let line = Line {
+            seq: store.peek_seq(),
             g,
             time_ms,
+            turn: store.peek_turn(&entry),
+            harness: None,
+            level: None,
             entry,
         };
-        self.bus.push(obj! {
-            "kind" => "transcript",
-            "sleeve_id" => id.0.to_string(),
-            "entry" => wire::chat_entry(&ev, true),
+        let entry = wire::chat_entry(id, &line, true);
+        self.bus.push_delta(|seq| HubStreamMessage::Entry {
+            seq,
+            sleeve_id: id.0.to_string(),
+            entry,
         });
     }
 
-    /// The `from` label a harness sees on a user message: owner, envoy, agent:<name>, or the
-    /// sending sleeve's name.
+    /// Streams a line of the mail and events log.
+    pub fn event(&self, kind: ApiEventKind, level: Level, source: &str, target: &str, text: &str) {
+        let at = EpochMs(now_ms());
+        self.bus.push(|seq| HubStreamMessage::Event {
+            seq,
+            event: HubEvent {
+                seq,
+                at_ms: at,
+                kind,
+                source: source.to_string(),
+                target: Some(target.to_string()),
+                text: text.to_string(),
+                read: false,
+                level,
+            },
+        });
+    }
+
+    /// The `from` label a harness sees on a user message: owner, envoy, agent:<name>, or
+    /// mail:<name> from a sleeve.
     pub fn from_label(state: &State, to: SleeveId, request_id: &str) -> String {
         let party = state
             .sleeve(to)
@@ -208,7 +250,7 @@ impl Hub {
             },
             Some(Party::Sleeve(x)) => state
                 .sleeve(x)
-                .map_or_else(|| format!("sleeve:{}", x.0), |s| s.name.clone()),
+                .map_or_else(|| format!("mail:{}", x.0), |s| format!("mail:{}", s.name)),
         }
     }
 }
