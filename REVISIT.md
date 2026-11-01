@@ -44,12 +44,14 @@ Each entry: where, what was done, what right looks like.
   leaves. Right: a cgroup with `cpu.weight`/`io.weight` set to idle, which covers later children.
   (Windows checked on officewin: a running cmd and ping and a ping started later all read Idle.)
 - **Windows build path**: no Windows SDK libs on the dev hub, so there is no cross-build; both
-  Windows targets build natively on officewin (VS Build Tools 14.44 incl. ARM64 libs). x64:
-  `cargo build --release -p protectorate-node`; arm64: `cargo +stable build --release --target
-  aarch64-pc-windows-msvc -p protectorate-node` with `%USERPROFILE%\.cargo\bin` first on PATH
-  (the default toolchain lacks the arm64 std). Source goes over as a tar pushed by scp; the
-  arm64 build passes clippy, but its `.exe` has never been run (the ARM laptop was off). Right: a `make release` step that runs
-  these over ssh, and cargo-xwin or a vendored SDK sysroot if officewin should not be required.
+  Windows targets build natively on officewin (VS Build Tools 14.44 incl. ARM64 libs), now as the
+  `windows` step of `make release-assets`: the workspace goes over as a tar pushed by scp into
+  `%USERPROFILE%\pt-release\src`, `cargo +stable build -p protectorate-node` builds both targets
+  with `%USERPROFILE%\.cargo\bin` first on PATH (the system Rust lacks the arm64 std), and the
+  `.exe` files come back as base64 over ssh, checked against the remote sha256. That is rustup's
+  stable (1.96 there) while Linux builds with 1.99.1, and the arm64 `.exe` has never been run (the
+  snapdragon laptop was off). Right: one pinned toolchain (`rust-toolchain.toml`) on both sides, and
+  cargo-xwin or a vendored SDK sysroot if officewin, the owner's desktop, should not be required.
 - **No macOS or Android code paths** in `pt-node` yet; the crate does not compile there.
 - **pt-json record! keys** (crates/pt-json): JSON keys are the Rust field names (`r#type` is
   `type`), with no rename, so camelCase foreign JSON (Codex app-server) goes through `Value`
@@ -457,9 +459,13 @@ Each entry: where, what was done, what right looks like.
   fleet run by the example, home `~/.local/share/protectorate-fleet`, until the hub embeds
   pt-fleet. Right: the hub takes over that `tailnet/` dir (the nodes pin its Noise key), or the
   nodes rejoin.
-- **No node install script**: an owner copies `protectorate-node` and `member` to the machine and
-  runs `join`, then `install-service`. Right: the hub serves both binaries and a one-line
-  installer, checked by SHA256SUMS.
+- **Node installers ran in dry-run mode only** (`scripts/install-node.sh`, `install-node.ps1`):
+  they fetch from the GitHub release (12b item 13 supersedes a hub-served installer), check
+  SHA256SUMS, stage, then run `join` and `install-service`. install-node.sh was dry-run on
+  agent-world (whose node is live; not root, so its 0700 state dir reads as unknown) and the ps1
+  on officewin; install.sh's real path ran into a scratch home with stand-in `systemctl` and
+  `loginctl`. No real node install, `join` from an installer, or real hub service start has run.
+  Right: one real install each on a throwaway VM, then on a spare box.
 - **`join` waits 15 minutes then gives up**: headscale keeps a registration that long in memory,
   so an unapproved node must run `join` again. Right: fine; the app's scan path approves in
   seconds.
@@ -504,3 +510,58 @@ Each entry: where, what was done, what right looks like.
 - **Quota fuzz runs wrote corpus into `fuzz/seeds`** (`pt-quota`): `cargo fuzz run <t> seeds/<t>`
   adds new inputs to the seed dir; only the hand-written seeds (named, not hex) are committed.
   Right: run with `corpus` as first dir and seeds as the second.
+- **pt-update is not called yet** (`pt-update`): the library stages, switches, rolls back and
+  keeps probation, but `protectorate update`, the hub's supervisor wrapper (`switch_checked`
+  within `HUB_HEALTH_WINDOW`), the headscale DB snapshot before a hub update, and the node's
+  `Update` RPC (stage, `switch_on_probation`, restart through the service manager,
+  `hub_contacted` on each hub RPC, `check_probation` at start and every minute) are all still to
+  write in the binaries. The hub-streamed bytes for a node without internet are not in it either.
+- **Node self-rollback runs inside the new binary** (`pt-update` probation): a new node binary
+  that crashes before its first `check_probation` loops under the service manager and never
+  reverts. The deadline is wall-clock milliseconds, so a clock jump moves it. Right: the unit's
+  `ExecStartPre` (or the Windows service) runs the check from `releases/previous`, the binary
+  that is known to work, and the deadline counts from a monotonic boot-relative stamp.
+- **Release pointers are Unix-only** (`pt-update` `set_pointer`): switching `current` and
+  `previous` is a symlink plus rename; on Windows it returns an error. `install-node.ps1` makes
+  the first `current` with `mklink /D` and refuses to run on an installed node. Right: a tested
+  Windows swap (directory symlink replaced by `MoveFileEx`, or a pointer file read by the
+  service) before the Windows node takes the `Update` RPC.
+- **The node service does not run `releases/current`** (`protectorate-node install-service`):
+  install-node.sh stages into `<state>/releases/<version>/` and runs `join` and `install-service`
+  from there, but `install-service` copies the binary and member into
+  `/usr/local/lib/protectorate-node`, so the unit would not follow a switch. Right: the unit's
+  `ExecStart` is `<state>/releases/current/protectorate-node` and the manifest lists the releases
+  dir.
+- **arm64 Linux assets link against the build host's glibc** (`scripts/release.sh`): the task's
+  native arm64 build needs glibc 2.34 (it links on the dev hub's Debian 12); amd64 is built by cargo-zigbuild
+  for glibc 2.31. Right: `aarch64-unknown-linux-gnu.2.31` through zigbuild too, if an older arm64
+  box ever runs the hub or a node.
+- **APK, desktop and Android-node assets are hooks only** (`scripts/release.sh` step `app`):
+  `protectorate-android.apk`, `protectorate-desktop-{linux,windows}-{amd64,arm64}` and
+  `protectorate-node-android-arm64` (SPEC 6) are not built; the step says so, and `APP=1` fails.
+  The hub embeds no Flutter web build yet either. Right: `flutter build apk` with the existing
+  signing recipe, the desktop bundles (the Linux one needs cmake, ninja and GTK 3 on the build
+  host), and the node once `pt-node` has Android code paths.
+- **Release publishing is untried** (`make release-publish`): it stops at a dry run unless
+  `PUBLISH=1`, refuses a dirty tree, an untagged HEAD and a tag missing on origin, and uses
+  `gh release create --verify-tag`; no release has been created from `next`. GitHub immutable
+  releases (SPEC 6) are not checked. Right: enable immutable releases on the repo, then publish a
+  first `v*-dev.1` with the owner.
+- **Installers read GitHub's JSON with grep** (`install.sh`, `install-node.sh`): with no jq, a
+  channel's newest tag comes from `"tag_name": "..."` matches, ordered by `sort -V` with the
+  pre-release dash read as `~`; the API is unauthenticated (60 requests an hour per address),
+  as is pt-update's. `--version TAG` skips the lookup. Right: fine while GitHub's format holds;
+  an optional token through a curl config file, never argv, if rate limits bite.
+- **Doctor checks presence, not validity** (`pt-doctor`): a login counts when its file is
+  non-empty or its key variable is set; SPEC 7 wants validity through the read-only quota readers,
+  which do not exist yet. Antigravity's login location is unknown, so it is not checked; the
+  update commands are listed, never run (the 24 h `pi update self` schedule of D34 is not in);
+  `codex update` is listed even for an npm install. Disk comes from `df -P`, linger from
+  `/var/lib/systemd/linger/<user>`, and each run starts one `systemd-run --user --scope true`.
+  Neither binary has a `doctor` subcommand yet (`pt-doctor-probe` prints the report) and failures
+  mail nobody. Right: wire `doctor` into hub and node, add the quota-reader validity check, mail
+  the owner on new problems.
+- **`protectorate-node --version` prints the crate version** (`0.0.0`, from `CARGO_PKG_VERSION`),
+  not the release stamp the hub prints (`PROTECTORATE_BUILD_VERSION`), so the node installers can
+  only check that the staged binary runs, not that it is the release they verified. Right: the
+  node reads `PROTECTORATE_BUILD_VERSION` like the hub, and the installers compare it with the tag.

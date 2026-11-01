@@ -1,6 +1,6 @@
 VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build release web test test-paid check check-deps check-gen gen fmt app-check
+.PHONY: build release release-assets release-publish web test test-paid check check-deps check-gen gen fmt app-check
 
 DART ?= dart
 FLUTTER ?= flutter
@@ -22,6 +22,14 @@ web:
 
 app-check:
 	cd app && $(FLUTTER) analyze
+
+# Every release asset into dist/<version>/ with SHA256SUMS, built here and on officewin (SPEC 6).
+release-assets:
+	bash scripts/release.sh assets
+
+# gh release create with dist/<version>/; a dry run unless PUBLISH=1.
+release-publish:
+	bash scripts/release.sh publish
 
 test:
 	cargo test --locked --workspace

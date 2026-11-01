@@ -1,0 +1,16 @@
+[package]
+name = "pt-update"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pt-hash = { path = "../pt-hash" }
+pt-json = { path = "../pt-json" }
+
+[dev-dependencies]
+pt-http = { path = "../pt-http" }

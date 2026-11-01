@@ -46,7 +46,7 @@ A bump is a hand-picked change to this file and `Cargo.lock` in the same commit.
 | cpufeatures | 0.2.17 | sha1 and sha2 dependency |
 | crc32c | 0.6.8 | reference implementation for the pt-journal `crc_diff` differential target |
 | rustc_version | 0.4.1 | transitive: crc32c build script |
-| semver | 1.0.28 | transitive: rustc_version |
+| semver | 1.0.28 | transitive: rustc_version; also the reference for pt-update's `tags` differential target |
 | qrcodegen | 1.8.0 | reference encoder for pt-qr's `encode` differential target (pt-qr is a trimmed port of it) |
 
 ## Go
@@ -92,3 +92,15 @@ Bundled asset, not a package: JetBrains Mono 2.304 Regular and Bold (`app/assets
 | systemctl | Linux nodes | signal, query and stop per-job scopes |
 | curl | hub, nodes | outbound HTTPS (releases, quota readers) instead of a Rust TLS stack (REVISIT); pt-quota passes URL and tokens on a stdin config, not argv |
 | git | hub | workspaces, worktrees, pushes |
+| gh | hub | the push token's holder (SPEC 7); `doctor` runs `gh auth status` |
+| df, timedatectl | hub, Linux nodes | `doctor`: free disk (`df -P`) and NTP sync |
+| loginctl | hub install | `install.sh` enables linger so the user service starts at boot |
+| sha256sum | installers | `install.sh` and `install-node.sh` check assets against SHA256SUMS |
+
+## Build tools (release only, never shipped)
+
+| Tool | Where | Reason |
+|---|---|---|
+| cargo-zigbuild, zig 0.16.0 | dev hub | amd64 Linux assets linked for glibc 2.31 (`make release-assets`) |
+| Go (go.mod's toolchain) | dev hub | headscale and member, through `scripts/net-build.sh` |
+| VS Build Tools 14.44, rustup stable | officewin | the Windows node assets, built natively over ssh (no SDK on the dev hub) |
