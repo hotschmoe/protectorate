@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../model.dart';
+import '../api/api.g.dart';
+import '../derived.dart';
 import '../scope.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -163,7 +164,7 @@ class SleevesTable extends StatelessWidget {
                       Cells(22, child: T(inc?.model ?? '-', color: p.dim)),
                       Cells(4, right: true, child: T('${inc?.g ?? '-'}')),
                       const Cells(2, child: SizedBox()),
-                      Cells(13, child: T(x.lifecycle.name.toUpperCase(),
+                      Cells(13, child: T(x.lifecycle.wire.toUpperCase(),
                           color: x.lifecycle == Lifecycle.running ? p.dim : st.color)),
                       Cells(14, child: Line([statusSpan(c, st)])),
                       Cells(8, right: true, child: T(act == null ? '-' : span(now.difference(act.since)), color: p.dim)),

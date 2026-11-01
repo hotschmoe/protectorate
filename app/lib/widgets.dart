@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'model.dart';
+import 'api/api.g.dart';
 import 'theme.dart';
 
 // ---- text ------------------------------------------------------------------------------------
@@ -331,17 +331,14 @@ TextSpan statusSpan(BuildContext c, Status s, {int width = 0}) {
       : sp(c, w, color: s.color);
 }
 
-String harnessName(Harness h) => switch (h) {
-  Harness.piVendor => 'pi_vendor',
-  Harness.piLocal => 'pi_local',
-  _ => h.name,
-};
+String harnessName(Harness h) => h.wire;
 
 String subscriptionLetter(Subscription s) => switch (s) {
   Subscription.claude => 'C',
   Subscription.codex => 'X',
   Subscription.grok => 'G',
   Subscription.local => 'L',
+  Subscription.api => 'A',
   Subscription.unknown => '?',
 };
 

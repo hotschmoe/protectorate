@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../chat.dart';
-import '../model.dart';
+import '../api/api.g.dart';
+import '../derived.dart';
 import '../scope.dart';
 import '../theme.dart';
 import '../widgets.dart';

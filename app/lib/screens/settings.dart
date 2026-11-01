@@ -12,8 +12,16 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  final _url = TextEditingController(text: 'https://protectorate.hotschmoe.com');
+  final _url = TextEditingController();
   final _token = TextEditingController();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final app = AppScope.of(context);
+    if (_url.text.isEmpty) _url.text = app.hubUrl;
+    if (_token.text.isEmpty) _token.text = app.hubToken;
+  }
 
   @override
   void dispose() {
@@ -33,11 +41,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
         children: [Cells(14, child: T(k, color: p.dim)), Expanded(child: v)],
       ),
     );
-    void save() => app.say('saved for this session only; the client still talks to ${app.hub.label}');
+    void save() {
+      app.connect(_url.text, _token.text);
+      app.say(_url.text.trim().isEmpty
+          ? 'no hub URL: using the scripted FAKE HUB (settings last for this session only)'
+          : 'connecting to ${_url.text.trim()} (settings last for this session only)');
+    }
     return ListView(children: [
       const HRule(label: 'HUB'),
       kv('CONNECTED', T(app.hub.label, color: p.warn)),
-      kv('HUB URL', Field(controller: _url, prompt: '', onSubmit: (_) => save())),
+      kv('HUB URL', Field(
+        controller: _url,
+        prompt: '',
+        hint: 'https://protectorate.hotschmoe.com (empty: scripted fake hub)',
+        onSubmit: (_) => save(),
+      )),
       kv('DEVICE TOKEN', Field(
         controller: _token,
         prompt: '',

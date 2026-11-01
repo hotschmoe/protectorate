@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../model.dart';
+import '../api/api.g.dart';
 import '../scope.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -47,7 +47,7 @@ class _EventsScreenState extends State<EventsScreen> {
         final color = switch (e.level) {
           Level.alarm => p.alarm,
           Level.warn => p.warn,
-          Level.info => e.read ? p.fg : p.lit,
+          Level.info || Level.unknown => e.read ? p.fg : p.lit,
         };
         final who = e.target == null ? e.source : '${e.source} -> ${e.target}';
         if (phone) {
@@ -56,7 +56,7 @@ class _EventsScreenState extends State<EventsScreen> {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Line([
                 sp(context, '${hhmm(e.at)} ', color: p.rule),
-                sp(context, pad(e.kind.name.toUpperCase(), 10), color: p.dim),
+                sp(context, pad(e.kind.wire.toUpperCase(), 10), color: p.dim),
                 sp(context, who, color: e.read ? p.dim : p.lit),
               ]),
               Padding(
@@ -69,7 +69,7 @@ class _EventsScreenState extends State<EventsScreen> {
         return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Cells(6, child: T(hhmm(e.at), color: p.rule)),
           Cells(2, child: T(e.read ? '' : '*', color: p.lit)),
-          Cells(10, child: T(e.kind.name.toUpperCase(), color: p.dim)),
+          Cells(10, child: T(e.kind.wire.toUpperCase(), color: p.dim)),
           Cells(28, child: T(who, color: e.read ? p.dim : p.fg)),
           Expanded(child: T(e.text, color: color, maxLines: null)),
         ]);
@@ -82,7 +82,7 @@ class _EventsScreenState extends State<EventsScreen> {
         Actions3270([
           for (final k in const [null, EventKind.mail, EventKind.sleeve, EventKind.approval,
               EventKind.job, EventKind.node, EventKind.guardrail])
-            Btn(k == null ? 'ALL' : k.name.toUpperCase(),
+            Btn(k == null ? 'ALL' : k.wire.toUpperCase(),
                 active: _filter == k,
                 color: p.dim,
                 onTap: () => setState(() => _filter = k)),

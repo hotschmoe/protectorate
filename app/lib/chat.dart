@@ -2,7 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import 'model.dart';
+import 'api/api.g.dart';
+import 'derived.dart';
 import 'scope.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -170,7 +171,7 @@ class _StatusLine extends StatelessWidget {
     final app = AppScope.of(context);
     final inc = sleeve.incarnation;
     if (inc == null) {
-      return Line([sp(context, 'NO INCARNATION  ', color: p.dim), sp(context, sleeve.lifecycle.name.toUpperCase(), color: p.dim)]);
+      return Line([sp(context, 'NO INCARNATION  ', color: p.dim), sp(context, sleeve.lifecycle.wire.toUpperCase(), color: p.dim)]);
     }
     final q = app.state.quota(inc.subscription);
     final w = q?.tightest;
@@ -180,7 +181,7 @@ class _StatusLine extends StatelessWidget {
         sp(context, ' ${inc.model}', color: p.fg),
       ]),
       Line([sp(context, 'g', color: p.dim), sp(context, '${inc.g}', color: p.lit),
-        sp(context, ' ${inc.mode.name.toUpperCase()}', color: p.dim)]),
+        sp(context, ' ${inc.mode.wire.toUpperCase()}', color: p.dim)]),
       Line([sp(context, 'turn ', color: p.dim), sp(context, '${inc.turn}', color: p.fg)]),
       Row(mainAxisSize: MainAxisSize.min, children: [
         T('ctx ', color: p.dim),
@@ -287,23 +288,28 @@ class _TranscriptViewState extends State<TranscriptView> {
 
   @override
   Widget build(BuildContext context) {
-    final entries = _t.entries;
-    if (entries.isEmpty) return T('(none)', color: pal(context).dim);
+    final rows = foldTranscript(_t.entries);
+    if (rows.isEmpty) return T('(none)', color: pal(context).dim);
     return SelectionArea(
       child: ListView.builder(
         reverse: true,
         padding: const EdgeInsets.symmetric(vertical: 4),
-        itemCount: entries.length,
+        itemCount: rows.length,
         itemBuilder: (c, i) {
-          final e = entries[entries.length - 1 - i];
-          final prev = entries.length - 2 - i >= 0 ? entries[entries.length - 2 - i] : null;
+          final r = rows[rows.length - 1 - i];
+          final prev = rows.length - 2 - i >= 0 ? rows[rows.length - 2 - i] : null;
+          final key = switch (r) {
+            ToolRow(:final call) => 't:${call.id}',
+            TextRow(thinking: true, :final id) => 'r:$id',
+            _ => '',
+          };
           return _EntryRow(
-            entry: e,
+            row: r,
             envoy: widget.envoy,
-            showTime: prev == null || hhmm(prev.at) != hhmm(e.at) || prev.kind != e.kind,
-            open: _open.contains(e.callId),
+            showTime: prev == null || hhmm(prev.at) != hhmm(r.at) || prev.runtimeType != r.runtimeType,
+            open: _open.contains(key),
             onToggle: () => setState(() {
-              if (!_open.remove(e.callId)) _open.add(e.callId);
+              if (!_open.remove(key)) _open.add(key);
             }),
           );
         },
@@ -314,54 +320,60 @@ class _TranscriptViewState extends State<TranscriptView> {
 
 class _EntryRow extends StatelessWidget {
   const _EntryRow({
-    required this.entry,
+    required this.row,
     required this.envoy,
     required this.showTime,
     required this.open,
     required this.onToggle,
   });
 
-  final ChatEntry entry;
+  final ChatRow row;
   final bool envoy;
   final bool showTime;
   final bool open;
   final VoidCallback onToggle;
 
+  Color _level(Palette p, Level l) => switch (l) {
+    Level.info || Level.unknown => p.dim,
+    Level.warn => p.warn,
+    Level.alarm => p.alarm,
+  };
+
   @override
   Widget build(BuildContext context) {
     final p = pal(context);
     final phone = Term.of(context).phone;
-    final e = entry;
-    final (who, whoColor) = switch (e.kind) {
-      EntryKind.user => (e.from, e.from == 'owner' ? p.lit : p.dim),
-      EntryKind.assistant => (envoy ? 'envoy' : 'agent', p.dim),
-      EntryKind.tool => ('tool', p.dim),
-      EntryKind.approval => ('appr', p.warn),
-      EntryKind.notice => ('--', p.dim),
-      EntryKind.unknown => ('?', p.dim),
+    final r = row;
+    final (who, whoColor) = switch (r) {
+      UserRow(:final msg) => (msg.from, msg.from == 'owner' ? p.lit : p.dim),
+      TextRow(thinking: true) => ('think', p.dim),
+      TextRow() => (envoy ? 'envoy' : 'agent', p.dim),
+      ToolRow() => ('tool', p.dim),
+      ApprovalRow() => ('appr', p.warn),
+      LineRow(:final who, :final level) => (who, level == Level.alarm ? p.alarm : p.dim),
     };
-    final body = switch (e.kind) {
-      EntryKind.user => T(e.text, color: e.from == 'owner' ? p.lit : p.fg, maxLines: null),
-      EntryKind.assistant => Line([
-        sp(context, e.text, color: p.fg),
-        if (e.streaming) sp(context, ' ', bg: p.lit),
+    final Widget body = switch (r) {
+      UserRow(:final msg, :final ack) => Line([
+        sp(context, msg.text, color: msg.from == 'owner' ? p.lit : p.fg),
+        if (msg.steer) sp(context, '  STEER', color: p.dim),
+        if (ack == AckKind.confirmed) sp(context, '  +', color: p.dim),
       ], maxLines: null),
-      EntryKind.tool => _ToolBody(entry: e, open: open, onToggle: onToggle),
-      EntryKind.approval => ApprovalBlock(approvalId: e.approvalId),
-      EntryKind.notice => T(e.text, maxLines: null, color: switch (e.level) {
-        Level.info => p.dim,
-        Level.warn => p.warn,
-        Level.alarm => p.alarm,
-      }),
-      EntryKind.unknown => T('(unknown entry)', color: p.dim),
+      TextRow(thinking: true) => _Thinking(row: r, open: open, onToggle: onToggle),
+      TextRow(:final text, :final streaming) => Line([
+        sp(context, text, color: p.fg),
+        if (streaming) sp(context, ' ', bg: p.lit),
+      ], maxLines: null),
+      ToolRow() => _ToolBody(row: r, open: open, onToggle: onToggle),
+      ApprovalRow(:final request) => ApprovalBlock(approvalId: request.approvalId),
+      LineRow(:final text, :final level) => T(text, maxLines: null, color: _level(p, level)),
     };
-    final gap = e.kind == EntryKind.user || (e.kind == EntryKind.assistant && showTime);
+    final gap = r is UserRow || (r is TextRow && !r.thinking && showTime);
     return Padding(
       padding: EdgeInsets.only(top: gap ? 6 : 0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (!phone) Cells(6, child: T(showTime ? hhmm(e.at) : '', color: p.rule)),
+          if (!phone) Cells(6, child: T(showTime ? hhmm(r.at) : '', color: p.rule)),
           Cells(phone ? 7 : 9, child: T(who.length > 8 ? who.substring(0, 8) : who, color: whoColor)),
           Expanded(child: body),
         ],
@@ -370,21 +382,54 @@ class _EntryRow extends StatelessWidget {
   }
 }
 
-class _ToolBody extends StatelessWidget {
-  const _ToolBody({required this.entry, required this.open, required this.onToggle});
+/// Reasoning, collapsed to its first line until opened.
+class _Thinking extends StatelessWidget {
+  const _Thinking({required this.row, required this.open, required this.onToggle});
 
-  final ChatEntry entry;
+  final TextRow row;
   final bool open;
   final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
     final p = pal(context);
-    final e = entry;
-    final (word, color) = switch (e.status) {
-      ToolStatus.running => ('RUNNING', p.ok),
-      ToolStatus.ok => ('OK', p.dim),
-      ToolStatus.error => ('ERROR', p.alarm),
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onToggle,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            T(open ? 'v ' : '> ', color: p.info),
+            Expanded(
+              child: T(open ? row.text : row.text.split('\n').first, color: p.dim, maxLines: open ? null : 1),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ToolBody extends StatelessWidget {
+  const _ToolBody({required this.row, required this.open, required this.onToggle});
+
+  final ToolRow row;
+  final bool open;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context);
+    final r = row;
+    final res = r.result;
+    final (word, color) = switch (res?.status) {
+      null => ('RUNNING', p.ok),
+      ToolStatus.completed => ('OK', p.dim),
+      ToolStatus.failed => ('ERROR', p.alarm),
+      ToolStatus.declined => ('DECLINED', p.warn),
+      ToolStatus.cancelled => ('CANCELLED', p.warn),
       ToolStatus.unknown => ('?', p.dim),
     };
     final head = MouseRegion(
@@ -395,13 +440,13 @@ class _ToolBody extends StatelessWidget {
         child: Row(
           children: [
             T(open ? 'v ' : '> ', color: p.info),
-            T('${e.tool} ', color: p.fg, bold: true),
-            Expanded(child: T(e.text, color: p.fg)),
+            T('${r.call.name} ', color: p.fg, bold: true),
+            Expanded(child: T(r.call.summary, color: p.fg)),
             Tick(builder: (c, now) {
-              final d = (e.endedAt ?? now).difference(e.at);
+              final d = (r.endedAt ?? now).difference(r.at);
               return Line([
                 sp(c, ' $word', color: color),
-                if (e.status != ToolStatus.unknown) sp(c, ' ${lpad(span(d), 6)}', color: p.dim),
+                sp(c, ' ${lpad(span(d), 6)}', color: p.dim),
               ]);
             }),
           ],
@@ -423,12 +468,13 @@ class _ToolBody extends StatelessWidget {
         ),
       ),
     );
+    final out = res == null ? '(running)' : '${res.output}${res.truncated ? '\n(truncated)' : ''}';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         head,
-        block('in', e.input),
-        block('out', e.status == ToolStatus.running && e.output.isEmpty ? '(running)' : e.output),
+        block('in', '${r.input}${r.call.truncated ? '\n(truncated)' : ''}'),
+        block('out', out),
       ],
     );
   }
@@ -448,15 +494,17 @@ class ApprovalBlock extends StatelessWidget {
     if (a == null) return T('approval $approvalId (gone)', color: p.dim);
     if (a.state != ApprovalState.pending) {
       final (word, color) = switch (a.state) {
-        ApprovalState.approved => ('APPROVED', p.ok),
+        ApprovalState.approved =>
+          (a.decision == Decision.allowSession ? 'APPROVED FOR SESSION' : 'APPROVED', p.ok),
         ApprovalState.denied => ('DENIED', p.alarm),
         ApprovalState.expired => ('EXPIRED', p.dim),
+        ApprovalState.cancelled => ('CANCELLED', p.dim),
         _ => ('UNKNOWN', p.dim),
       };
       return Line([
         sp(context, '${a.id} ', color: p.dim),
         sp(context, word, color: color),
-        if (a.decidedBy != null) sp(context, ' by ${a.decidedBy}', color: p.dim),
+        if (a.decidedBy != null) sp(context, ' by ${a.decidedBy!.wire}', color: p.dim),
         if (a.decidedAt != null) sp(context, ' ${hhmm(a.decidedAt!)}', color: p.dim),
         sp(context, '  ${a.title} ${a.summary}', color: p.dim),
       ], maxLines: null);
@@ -478,9 +526,12 @@ class ApprovalBlock extends StatelessWidget {
           ),
         Tick(builder: (c, now) => Actions3270([
           Btn('APPROVE', color: p.ok,
-              onTap: () => unawaited(app.act(() => app.hub.decide(a.id, approve: true)))),
+              onTap: () => unawaited(app.act(() => app.hub.decide(a.id, Decision.allowOnce)))),
+          if (a.options.contains(Decision.allowSession))
+            Btn('FOR SESSION', color: p.ok,
+                onTap: () => unawaited(app.act(() => app.hub.decide(a.id, Decision.allowSession)))),
           Btn('DENY', color: p.alarm,
-              onTap: () => unawaited(app.act(() => app.hub.decide(a.id, approve: false)))),
+              onTap: () => unawaited(app.act(() => app.hub.decide(a.id, Decision.deny)))),
           T('asked ${span(now.difference(a.requestedAt))} ago', color: p.dim),
           if (a.timeoutAt != null)
             T('times out in ${span(a.timeoutAt!.difference(now))}', color: p.dim),
