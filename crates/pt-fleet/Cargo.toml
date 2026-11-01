@@ -1,0 +1,20 @@
+[package]
+name = "pt-fleet"
+description = "The hub's side of the fleet: headscale and member supervision, enrollment, the node client and the poller"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+libc.workspace = true
+pt-api = { path = "../pt-api" }
+pt-frame = { path = "../pt-frame" }
+pt-hash = { path = "../pt-hash" }
+pt-http = { path = "../pt-http" }
+pt-json = { path = "../pt-json" }
+pt-sys = { path = "../pt-sys" }
+

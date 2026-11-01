@@ -30,7 +30,9 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 pub const USAGE: &str =
     "  serve --state-dir DIR (--forward-socket PATH | --listen-tcp 127.0.0.1:PORT | --stdio)...
         [--presence-interval SECS] [--away-after SECS] [--no-scope] [--idle-exit SECS]
+        [--member PATH | --no-member]
                                     serve the hub link: one header line from member, then frames;
+                                    once joined (DIR/node.json), also run member and restart it;
                                     --stdio: frames on stdin/stdout for an sshd forced command,
                                     through a resident agent that keeps jobs across sessions;
                                     PROTECTORATE_NODE_TEST_PRESENCE=FILE forces presence (tests)";
@@ -52,6 +54,8 @@ pub struct Flags {
     pub allow_scope: bool,
     /// Exit once no job runs and no connection is open for this long.
     pub idle_exit: Option<u64>,
+    member: Option<PathBuf>,
+    no_member: bool,
 }
 
 fn flags(args: &[String]) -> Result<Flags, String> {
@@ -64,6 +68,8 @@ fn flags(args: &[String]) -> Result<Flags, String> {
         away_after: Config::default().away_after_secs,
         allow_scope: true,
         idle_exit: None,
+        member: None,
+        no_member: false,
     };
     let mut it = args.iter();
     while let Some(flag) = it.next() {
@@ -88,6 +94,8 @@ fn flags(args: &[String]) -> Result<Flags, String> {
             "--no-scope" => f.allow_scope = false,
             "--stdio" => f.stdio = true,
             "--idle-exit" => f.idle_exit = Some(crate::cli::number(flag, Some(value()?))?),
+            "--member" => f.member = Some(PathBuf::from(value()?)),
+            "--no-member" => f.no_member = true,
             other => return Err(format!("serve: unknown option '{other}'")),
         }
     }
@@ -97,6 +105,9 @@ fn flags(args: &[String]) -> Result<Flags, String> {
     }
     if !f.stdio && listeners == 0 {
         return Err("serve needs --forward-socket, --listen-tcp or --stdio".into());
+    }
+    if f.member.is_some() && f.no_member {
+        return Err("--member and --no-member exclude each other".into());
     }
     if f.presence_interval == 0 {
         return Err("--presence-interval must be at least 1".into());
@@ -152,10 +163,44 @@ pub fn run(args: &[String]) -> Result<(), String> {
         let node = node.clone();
         thread::spawn(move || idle_exit(&node, Duration::from_secs(secs)));
     }
+    if !f.no_member {
+        start_member(&f, &dir)?;
+    }
     for a in accepts {
         let _ = a.join();
     }
     Ok(())
+}
+
+/// Once joined, member runs as this agent's child and forwards to its first listener.
+fn start_member(f: &Flags, dir: &Path) -> Result<(), String> {
+    let Some(cfg) = crate::member::read_config(dir)? else {
+        return match &f.member {
+            Some(_) => Err(format!(
+                "--member given, but {} has no node.json: run join first",
+                dir.display()
+            )),
+            None => Ok(()),
+        };
+    };
+    let bin = crate::member::member_binary(f.member.as_deref())?;
+    let forward = match (f.sockets.first(), f.tcp.first()) {
+        (Some(p), _) => p.display().to_string(),
+        (None, Some(a)) => a.to_string(),
+        (None, None) => return Err("member needs a listener to forward to".into()),
+    };
+    eprintln!(
+        "protectorate-node: joined {} as {}; running {}",
+        cfg.server_url,
+        cfg.name,
+        bin.display()
+    );
+    let dir = dir.to_path_buf();
+    thread::Builder::new()
+        .name("member".into())
+        .spawn(move || crate::member::supervise(bin, dir, cfg, forward))
+        .map(drop)
+        .map_err(|e| format!("starting the member supervisor: {e}"))
 }
 
 /// Ends the process after `after` with no running job and no open connection. A connection

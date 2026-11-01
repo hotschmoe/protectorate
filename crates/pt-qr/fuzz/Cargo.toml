@@ -1,0 +1,23 @@
+[package]
+name = "pt-qr-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# qrcodegen is upstream, the reference the port is checked against; fuzz only.
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+pt-qr = { path = ".." }
+qrcodegen = "=1.8.0"
+
+[workspace]
+
+[[bin]]
+name = "encode"
+path = "fuzz_targets/encode.rs"
+test = false
+doc = false
+bench = false

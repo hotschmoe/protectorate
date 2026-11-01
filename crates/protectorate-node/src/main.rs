@@ -1,6 +1,9 @@
 mod cli;
+mod join;
+mod member;
 mod rpc;
 mod serve;
+mod service;
 mod stdio;
 
 fn main() {

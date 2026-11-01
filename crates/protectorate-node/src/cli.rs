@@ -9,6 +9,8 @@ fn usage() -> String {
         "usage: protectorate-node <command>
 {}
 {}
+{}
+{}
   inventory                         print the machine inventory as JSON
   sample                            print one sample as JSON
   presence [--away-after SECS]      print presence as JSON
@@ -16,7 +18,9 @@ fn usage() -> String {
                                     print a JSON line each time presence changes
   lower-idle PID                    drop a running process tree to idle priority
   --version",
+        crate::join::USAGE,
         crate::serve::USAGE,
+        crate::service::USAGE,
         crate::rpc::USAGE
     )
 }
@@ -38,7 +42,10 @@ pub fn run(args: Vec<String>) -> i32 {
         }),
         Some("watch-presence") => Opts::parse(&args[1..]).and_then(watch),
         Some("lower-idle") => lower_idle(&args[1..]),
+        Some("join") => crate::join::run(&args[1..]),
         Some("serve") => crate::serve::run(&args[1..]),
+        Some("install-service") => crate::service::install(&args[1..]),
+        Some("uninstall") => crate::service::uninstall(&args[1..]),
         Some("rpc") => return crate::rpc::run(&args[1..]),
         Some("-h") | Some("--help") | Some("help") => {
             println!("{}", usage());

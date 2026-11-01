@@ -381,3 +381,56 @@ Each entry: where, what was done, what right looks like.
 - **Collecting lease** (pt-core jobs): an artifact check that does not answer within the lease
   makes the job Lost, and its next Exited report collects again, so a slow fetch can run twice.
   Right: fetch progress reported to the core, and the lease measured from it.
+- **headscale and member are not embedded** (`pt-fleet`, `protectorate-node`): `Config` takes
+  both binary paths, and the node finds `member` next to itself (or `--member`). Right: the hub
+  and node binaries carry them and unpack to a content-addressed path, so an install is one file.
+- **LAN-direct DERP is plain HTTP** (`pt-fleet` `Config::lan_direct`, node `member::command`):
+  with an `http://` server URL both sides set `TS_DEBUG_USE_DERP_HTTP=1`, tailscale's debug knob,
+  and the DERP map pins the IPv4 with STUN off. Right: production goes through Traefik with TLS
+  (`derp.tls`); keep the knob for LAN tests only.
+- **headscale's bwrap has the host network** (`pt-fleet`, headscale.rs): user, pid, ipc, uts and
+  cgroup namespaces, caps dropped, only its own dir writable, but no seccomp filter, no memory or
+  pid limit, and it can reach anything the hub can. Right: the namespaces helper with a seccomp
+  allowlist and a cgroup when the hub has a scope.
+- **Child stop signals go through the `kill` binary** (`pt-fleet`, child.rs): SIGTERM, then
+  SIGKILL after 10 s, and bwrap's child is found through /proc. Right: `pt_sys` grows a `kill`
+  wrapper (libc is already there) and pidfds to close the pid-reuse race.
+- **Fleet logs never rotate**: `tailnet/headscale/headscale.log`, `tailnet/member.log` and the
+  node's member log grow forever. Right: size-capped rotation shared with the hub's transcripts.
+- **Stale sockets accumulate** (`pt-fleet`): a killed member leaves `member.sock`, so the next
+  start uses `member-2.sock` and so on, and the stand-in hub makes `ctl-<pid>.sock` per run,
+  because nothing here may unlink. Right: one path, unlinked at start after a failed connect (as
+  the hub's own socket is), once the owner agrees to that rule for runtime files.
+- **QR codes never decoded by a scanner**: zbarimg is not on the dev host and the app has no
+  scanner yet; the `encode` fuzz target only proves pt-qr matches qrcodegen module for module.
+  Right: decode `join`'s terminal output with a real scanner (zbar or the app) in an e2e.
+- **`uninstall` never ran** (`protectorate-node`, service.rs): it removes only manifest paths, but
+  no test or machine has exercised it, since that deletes files. Right: run it on a throwaway VM
+  (or a container with systemd) in an e2e, then reinstall.
+- **No Windows service, and member can outlive serve** (`protectorate-node`): Windows runs
+  `serve` in the foreground; if serve dies, member keeps running because it is not in a Job
+  Object with kill-on-close. Right: a Windows service (runner account, D10) and member in a
+  kill-on-close Job Object.
+- **Windows jobs are refused while presence is unknown**: officewin's console session reports no
+  LastInputTime to a non-interactive caller, so presence is `unknown`, treated as present, and
+  the gate refused `uname`-style jobs (correct, but no Windows job ran through the fleet). Right:
+  the presence fix above, then a fleet job e2e on Windows.
+- **The poller runs the headscale CLI every 15 s and a thread per node** (`pt-fleet`,
+  poller.rs): fine for a home fleet. Right: headscale's gRPC over its unix socket, and one
+  scheduler thread if the fleet ever reaches hundreds.
+- **`Node.id` is headscale's node id** (`pt-fleet` view.rs): the agent's own id and journal epoch
+  are only in `NodeView.hello`. Right: decide which id the API exposes once the hub wires the
+  poller; a reinstalled node keeps neither.
+- **headscale listens on the whole LAN** (stand-in hub at `192.168.10.44:7480`): no host firewall
+  admits only the reverse proxy. Right: production binds where Traefik reaches it and a firewall
+  rule admits only stronghold.
+- **Stand-in hub** (`pt-fleet` examples/fleet.rs): agent-world, msr1-kids and officewin joined a
+  fleet run by the example, home `~/.local/share/protectorate-fleet`, until the hub embeds
+  pt-fleet. Right: the hub takes over that `tailnet/` dir (the nodes pin its Noise key), or the
+  nodes rejoin.
+- **No node install script**: an owner copies `protectorate-node` and `member` to the machine and
+  runs `join`, then `install-service`. Right: the hub serves both binaries and a one-line
+  installer, checked by SHA256SUMS.
+- **`join` waits 15 minutes then gives up**: headscale keeps a registration that long in memory,
+  so an unapproved node must run `join` again. Right: fine; the app's scan path approves in
+  seconds.
