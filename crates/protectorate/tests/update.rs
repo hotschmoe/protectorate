@@ -541,6 +541,100 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
     drop(sup);
 }
 
+/// A hub killed at each step of a switch on probation, or of the rollback that ends one
+/// (`PT_TEST_CRASH_AT`, the store's crash knob), comes back on a release that worked with the
+/// way back intact: never on the new release with no trial, never with `previous` lost.
+#[test]
+fn release_switches_survive_a_crash_at_each_step() {
+    let real = PathBuf::from(bin());
+    let asset = format!("protectorate-linux-{}", arch());
+    let wrap = |tag: &str| wrapper("protectorate", "version", tag, &real, "", false);
+    let fake = serve_releases(vec![release("v0.0.2", vec![(asset, wrap("v0.0.2"))])]);
+    let root = dir("crash");
+    let home = root.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let config = obj! {
+        "envoy" => obj! { "harness" => "claude" },
+        "claude_program" => "/nonexistent/program",
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+        "release_api" => fake.url.as_str(),
+        "release_repo" => "o/r",
+    };
+    fs::write(home.join("config.json"), config.to_string()).unwrap();
+    install(&home, "v0.0.1", "protectorate", &wrap("v0.0.1"));
+    let home_s = home.display().to_string();
+    let words = |w: &[&str]| -> Vec<String> {
+        ["--home", home_s.as_str()]
+            .iter()
+            .chain(w)
+            .map(|s| s.to_string())
+            .collect()
+    };
+
+    // Killed right after the probation is written: still on v0.0.1, and no trial is open.
+    let sup = Supervisor::start(
+        &home,
+        "protectorate",
+        words(&["hub", "probation"]),
+        words(&["serve", "--listen", "off"]),
+        vec![("PT_TEST_CRASH_AT".into(), "probation-written".into())],
+        Duration::from_millis(300),
+    );
+    eventually("the hub on v0.0.1", Duration::from_secs(60), || {
+        hub_started_ms(&home)
+    });
+    let n = sup.starts().len();
+    cli(&home, &["--json", "hub", "update", "--version", "v0.0.2"]);
+    eventually("the hub to die mid-switch", Duration::from_secs(60), || {
+        sup.starts().get(n - 1)?.code.filter(|c| *c == 86)
+    });
+    sup.running("v0.0.1", n, 60);
+    assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
+    let p = probation(&home);
+    assert_eq!(p["version"].as_str(), Some("v0.0.2"), "{p}");
+    let idle = cli(&home, &["hub", "probation"]);
+    assert!(
+        idle.stdout.contains("no release on trial"),
+        "{}",
+        idle.stdout
+    );
+    drop(sup);
+
+    // On trial with its window passed, the prestart's rollback is killed between its two
+    // renames: both pointers name v0.0.1, the release that worked.
+    fs::create_dir_all(home.join("releases/v0.0.2")).unwrap();
+    write_exec(
+        &home.join("releases/v0.0.2/protectorate"),
+        std::str::from_utf8(&wrap("v0.0.2")).unwrap(),
+    );
+    let link = |name: &str, tag: &str| {
+        let tmp = home.join(format!("releases/.{name}-test"));
+        std::os::unix::fs::symlink(tag, &tmp).unwrap();
+        fs::rename(&tmp, home.join("releases").join(name)).unwrap();
+    };
+    link("previous", "v0.0.1");
+    link("current", "v0.0.2");
+    let trial = obj! {
+        "version" => "v0.0.2",
+        "previous" => "v0.0.1",
+        "switched_ms" => 1u64,
+        "deadline_ms" => 2u64,
+    };
+    fs::write(home.join("releases/probation.json"), trial.to_string()).unwrap();
+    let out = Command::new(home.join("releases/previous/protectorate"))
+        .args(words(&["hub", "probation"]))
+        .env("PT_TEST_CRASH_AT", "rollback-current")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(86), "{out:?}");
+    assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
+    assert_eq!(pointer(&home, "previous").as_deref(), Some("v0.0.1"));
+    let after = cli(&home, &["hub", "probation"]);
+    assert_eq!(after.status, 0, "{}", after.stderr);
+    assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
+}
+
 fn node_bin() -> Option<PathBuf> {
     let p = Path::new(bin()).with_file_name("protectorate-node");
     if p.is_file() {
