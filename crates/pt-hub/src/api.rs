@@ -13,14 +13,13 @@ use pt_core::{
 use pt_drivers::Entry;
 use pt_json::{FromJson, ToJson, Value};
 
-use crate::approvals::ACTION_PREFIX;
 use crate::fleet::{Status as FleetStatus, Up};
 use crate::home::{now_ms, random_hex};
 use crate::hub::{CommandError, Hub, View};
 use crate::jobs::JobRequest;
 use crate::log::info;
 use crate::rule::{self, Guarded};
-use crate::transcript::{Note, lock};
+use crate::transcript::lock;
 use crate::wire;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
@@ -251,7 +250,7 @@ fn target_sleeve(c: &Ctx<'_>, view: &View, s: &str) -> Result<SleeveId> {
     Ok(id)
 }
 
-fn command(hub: &Hub, kind: EventKind) -> Result<Reply> {
+pub(crate) fn command(hub: &Hub, kind: EventKind) -> Result<Reply> {
     let r = hub.command(kind, COMMAND_TIMEOUT).map_err(|e| match e {
         CommandError::Timeout => err(ErrorCode::Timeout, "the core did not answer"),
         CommandError::Down => err(ErrorCode::Unavailable, "the core is stopped"),
@@ -563,78 +562,20 @@ fn takeover(_: &Ctx<'_>, _: api::SleeveRef) -> Result<api::Empty> {
 // ---- approvals -----------------------------------------------------------------------------
 
 fn list_approvals(c: &Ctx<'_>, r: api::ListApprovalsRequest) -> Result<api::ApprovalList> {
+    let view = c.hub.view();
     Ok(api::ApprovalList {
-        approvals: c.hub.approvals.list(r.pending_only),
+        approvals: view
+            .state
+            .approvals
+            .values()
+            .filter(|a| !r.pending_only || a.state == pt_core::ApprovalState::Pending)
+            .map(crate::approvals::view)
+            .collect(),
     })
 }
 
 fn decide(c: &Ctx<'_>, r: api::DecideRequest) -> Result<api::Approval> {
-    let hub = c.hub;
-    let (a, origin) = hub.approvals.get(&r.approval_id).ok_or_else(|| {
-        err(
-            ErrorCode::NotFound,
-            format!("no approval {}", r.approval_id),
-        )
-    })?;
-    if a.state != api::ApprovalState::Pending {
-        return Err(err(
-            ErrorCode::Conflict,
-            format!("approval {} is already {}", a.id, a.state),
-        ));
-    }
-    let allow = r.decision != api::Decision::Deny;
-    if a.kind == api::ApprovalKind::Action && r.decision == api::Decision::AllowSession {
-        return Err(err(
-            ErrorCode::Invalid,
-            "an action approval is allow_once or deny",
-        ));
-    }
-    if a.kind == api::ApprovalKind::Tool {
-        command(
-            hub,
-            EventKind::RespondApproval {
-                sleeve: origin.sleeve,
-                approval: origin.native.clone(),
-                allow,
-                note: String::new(),
-            },
-        )?;
-    }
-    let state = if allow {
-        api::ApprovalState::Approved
-    } else {
-        api::ApprovalState::Denied
-    };
-    let done = hub
-        .approvals
-        .resolve(
-            &hub.bus,
-            &a.id,
-            state,
-            Some(r.decision),
-            api::DecidedBy::Owner,
-        )
-        .ok_or_else(|| err(ErrorCode::Conflict, format!("approval {} just ended", a.id)))?;
-    if a.id.starts_with(ACTION_PREFIX) {
-        let g = hub.view().state.sleeve(origin.sleeve).map_or(0, |s| s.g.0);
-        hub.record(
-            origin.sleeve,
-            g,
-            now_ms(),
-            Entry::ApprovalDecision {
-                id: a.id.clone(),
-                decision: if allow {
-                    pt_drivers::Decision::AllowOnce
-                } else {
-                    pt_drivers::Decision::Deny
-                },
-                by: Some("owner".into()),
-                confirmed: true,
-            },
-            Note::default(),
-        );
-    }
-    Ok(done)
+    crate::approvals::decide(c.hub, &r.approval_id, r.decision)
 }
 
 // ---- nodes and jobs ------------------------------------------------------------------------
@@ -984,14 +925,7 @@ fn list_events(c: &Ctx<'_>, r: api::ListEventsRequest) -> Result<api::EventList>
     let from = r.from_seq.unwrap_or(0);
     let limit = r.limit.unwrap_or(500) as usize;
     Ok(api::EventList {
-        events: c
-            .hub
-            .bus
-            .events()
-            .into_iter()
-            .filter(|e| e.seq >= from)
-            .take(limit)
-            .collect(),
+        events: c.hub.bus.events_from(from, limit),
     })
 }
 
@@ -1170,7 +1104,7 @@ fn envoy_wait(c: &Ctx<'_>, r: api::EnvoyWaitRequest) -> Result<api::EnvoyReply> 
 
 /// Re-evaluates `check` on every change until it answers or `deadline` passes. The bus position
 /// is read before the view, so a change between the two wakes the wait at once.
-fn wait_for<T>(
+pub(crate) fn wait_for<T>(
     hub: &Hub,
     deadline: Instant,
     mut check: impl FnMut(&View) -> Option<T>,

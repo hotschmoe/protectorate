@@ -22,7 +22,7 @@ pub fn bin() -> &'static str {
 }
 
 /// Short on purpose: the hub's socket path must fit in a sockaddr_un (108 bytes).
-fn unique(name: &str) -> PathBuf {
+pub fn unique(name: &str) -> PathBuf {
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
     let t = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -126,6 +126,8 @@ pub struct Hub {
     restarts: usize,
     extra: Vec<String>,
     env: Vec<(String, String)>,
+    /// A command line the hub runs under (a sandbox around it).
+    wrap: Vec<String>,
 }
 
 impl Hub {
@@ -172,6 +174,25 @@ impl Hub {
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect(),
+            wrap: Vec::new(),
+        };
+        hub.spawn();
+        hub
+    }
+
+    /// A hub on an existing `home`, run under `wrap`.
+    pub fn open(home: PathBuf, wrap: &[&str], env: &[(&str, &str)]) -> Hub {
+        let mut hub = Hub {
+            log: home.with_file_name("serve-0.log"),
+            home,
+            child: None,
+            restarts: 0,
+            extra: Vec::new(),
+            env: env
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            wrap: wrap.iter().map(|s| s.to_string()).collect(),
         };
         hub.spawn();
         hub
@@ -182,7 +203,14 @@ impl Hub {
             .home
             .with_file_name(format!("serve-{}.log", self.restarts));
         let log = fs::File::create(&self.log).expect("create serve log");
-        let mut cmd = Command::new(bin());
+        let mut cmd = match self.wrap.split_first() {
+            Some((w, rest)) => {
+                let mut c = Command::new(w);
+                c.args(rest).arg(bin());
+                c
+            }
+            None => Command::new(bin()),
+        };
         cmd.arg("--home")
             .arg(&self.home)
             .args(["serve", "--log-level", "debug"])
@@ -399,6 +427,58 @@ pub fn post(port: u16, method: &str, token: Option<&str>, body: &str) -> (u16, V
         .expect("POST to the hub");
     let v = pt_json::parse_bytes(&r.body).unwrap_or(Value::Null);
     (r.status, v)
+}
+
+/// The events WebSocket, `query` starting with `?`.
+pub fn ws(port: u16, query: &str, headers: &[(&str, &str)]) -> std::io::Result<pt_http::WebSocket> {
+    pt_http::Client::tcp(std::net::SocketAddr::from(([127, 0, 0, 1], port)))
+        .read_timeout(Some(Duration::from_secs(20)))
+        .websocket(&format!("/api/events{query}"), headers)
+}
+
+pub fn next(ws: &mut pt_http::WebSocket) -> Value {
+    loop {
+        match ws.recv().expect("a stream message") {
+            pt_http::Message::Text(t) => return pt_json::parse(&t).expect("stream JSON"),
+            pt_http::Message::Close(c, r) => panic!("stream closed: {c} {r}"),
+            _ => {}
+        }
+    }
+}
+
+/// Reads until a message of type `kind` passes `pick`; returns every message read.
+pub fn until(ws: &mut pt_http::WebSocket, kind: &str, pick: impl Fn(&Value) -> bool) -> Vec<Value> {
+    let mut seen = Vec::new();
+    loop {
+        let m = next(ws);
+        let hit = m["type"].as_str() == Some(kind) && pick(&m);
+        seen.push(m);
+        if hit {
+            return seen;
+        }
+    }
+}
+
+pub fn pair(port: u16, owner: &str, name: &str) -> String {
+    let (s, code) = post(
+        port,
+        "AddDevice",
+        Some(owner),
+        &pt_json::obj! { "name" => name }.to_string(),
+    );
+    assert_eq!(s, 200, "AddDevice: {code}");
+    let code = code["code"].as_str().expect("a pairing code").to_string();
+    let (s, paired) = post(
+        port,
+        "PairDevice",
+        None,
+        &pt_json::obj! { "code" => code }.to_string(),
+    );
+    assert_eq!(s, 200, "PairDevice without a credential: {paired}");
+    paired["token"]
+        .as_str()
+        .expect("a device token")
+        .to_string()
 }
 
 pub fn tail(s: &str, n: usize) -> String {

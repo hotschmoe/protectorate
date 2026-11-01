@@ -226,6 +226,36 @@ pub fn timers(st: &State, tick: bool) {
             );
         }
     }
+    // An approval past its journaled deadline has timed out, unless it waits on a live
+    // incarnation that G9 does not cover (a pane, or a request outside a blocked turn).
+    for a in st.approvals.values() {
+        if a.state != ApprovalState::Pending {
+            continue;
+        }
+        let s = &st.sleeves[&a.sleeve];
+        assert!(
+            s.life.live(),
+            "approval {} pending on a {:?} sleeve",
+            a.id,
+            s.life
+        );
+        if !a.due(st.now) {
+            continue;
+        }
+        let Source::Tool { g, native } = &a.source else {
+            panic!("action approval {} pending past its deadline", a.id);
+        };
+        assert!(
+            a.orphan.is_none(),
+            "orphaned approval {} pending past its deadline",
+            a.id
+        );
+        let g9 = s.g == *g
+            && s.life == Life::Running
+            && s.target.mode == Mode::Headless
+            && matches!(&s.activity, Activity::Blocked { approvals } if approvals.contains(native));
+        assert!(!(tick && g9), "approval {} pending past G9", a.id);
+    }
     // A sleeve write a probe could not settle is sent again or probed again until the owner
     // has been told.
     if tick {
@@ -301,7 +331,171 @@ pub fn step(prev: &State, st: &State, sim: &Sim) {
             assert!(e.attempt >= p.attempt, "effect attempt went down");
         }
     }
+    approval_steps(prev, st);
     invariants(st, sim);
+}
+
+/// The ledger only grows; an approval leaves Pending once, its decision is set at most once and
+/// never changes, and only a definitively refused response turns Decided into Fenced.
+fn approval_steps(prev: &State, st: &State) {
+    for (id, p) in &prev.approvals {
+        let a = st
+            .approvals
+            .get(id)
+            .unwrap_or_else(|| panic!("approval {id} vanished"));
+        assert_eq!(
+            (a.sleeve, &a.source, a.requested_at, a.deadline),
+            (p.sleeve, &p.source, p.requested_at, p.deadline),
+            "approval {id} changed what it asks"
+        );
+        if p.state == ApprovalState::Pending {
+            assert!(
+                p.orphan.is_none() || a.orphan == p.orphan,
+                "approval {id}: orphan changed"
+            );
+            continue;
+        }
+        assert_eq!(a.decision, p.decision, "approval {id}: decision changed");
+        assert!(
+            a.state == p.state
+                || (p.state == ApprovalState::Decided && a.state == ApprovalState::Fenced),
+            "approval {id}: {:?} -> {:?}",
+            p.state,
+            a.state
+        );
+    }
+    for (id, a) in &st.approvals {
+        if !prev.approvals.contains_key(id) {
+            assert_eq!(
+                a.state,
+                ApprovalState::Pending,
+                "approval {id} opened as {:?}",
+                a.state
+            );
+        }
+    }
+}
+
+/// Approvals against the rest of the state.
+fn approvals(st: &State, sim: &Sim) {
+    for (id, a) in &st.approvals {
+        assert_eq!(&a.id, id);
+        // A tool approval times out with its sleeve's blocked episode (G9), which may have
+        // begun well before this request.
+        assert!(
+            a.source != Source::Action || a.deadline >= a.requested_at,
+            "approval {id}: deadline before its request"
+        );
+        match a.state {
+            ApprovalState::Pending | ApprovalState::Cancelled => {
+                assert!(
+                    a.decision.is_none(),
+                    "approval {id}: {:?} with a decision",
+                    a.state
+                )
+            }
+            ApprovalState::Decided | ApprovalState::Fenced => {
+                assert!(
+                    a.decision.is_some(),
+                    "approval {id}: {:?} without a decision",
+                    a.state
+                )
+            }
+            ApprovalState::Expired => assert!(
+                a.decision
+                    .is_some_and(|d| !d.allow && d.by == Decider::Rule),
+                "approval {id} expired without a rule's denial"
+            ),
+            ApprovalState::Abandoned => assert!(
+                a.decision.is_none_or(|d| d.by == Decider::Owner),
+                "approval {id} abandoned by a rule"
+            ),
+        }
+        let response = a.decision.and_then(|d| d.response.map(|e| (d, e)));
+        match (&a.source, response) {
+            (Source::Action, r) => {
+                assert!(r.is_none(), "action approval {id} wrote to a harness");
+                assert!(id.starts_with(ACTION_PREFIX));
+            }
+            (Source::Tool { g, native }, Some((d, eff))) => {
+                // A tool decision goes only to the incarnation that asked.
+                let e = &st.effects[&eff];
+                assert!(
+                    matches!(&e.kind, EffectKind::RespondApproval { sleeve, g: eg, approval, allow, .. }
+                        if *sleeve == a.sleeve && eg == g && approval == native && *allow == d.allow),
+                    "approval {id}: response {} is not its answer",
+                    e.key
+                );
+                if a.state == ApprovalState::Fenced {
+                    assert_eq!(
+                        e.state,
+                        EffectState::Rejected,
+                        "approval {id} fenced with a response that may apply"
+                    );
+                }
+            }
+            (Source::Tool { g, native }, None) => {
+                assert_eq!(id, &tool_approval_id(a.sleeve, *g, native));
+                assert!(
+                    a.state != ApprovalState::Decided,
+                    "tool approval {id} decided without a response"
+                );
+            }
+        }
+        // Whoever waits on a pending approval is marked once it is gone.
+        if a.state == ApprovalState::Pending
+            && let Source::Tool { g, .. } = a.source
+        {
+            let s = &st.sleeves[&a.sleeve];
+            if s.g != g || s.proc == Proc::Down {
+                assert!(
+                    a.orphan.is_some(),
+                    "approval {id}: g{} is gone but the approval is not orphaned",
+                    g.0
+                );
+            }
+        }
+    }
+    // Every RespondApproval record is a ledger decision's response.
+    for e in st.effects.values() {
+        if let EffectKind::RespondApproval {
+            sleeve,
+            g,
+            approval,
+            ..
+        } = &e.kind
+        {
+            let id = tool_approval_id(*sleeve, *g, approval);
+            assert!(
+                st.approvals
+                    .get(&id)
+                    .and_then(|a| a.decision)
+                    .is_some_and(|d| d.response == Some(e.id)),
+                "response {} is not an approval's decision",
+                e.key
+            );
+        }
+    }
+    // The current incarnation's blocked requests are in the ledger.
+    for s in st.sleeves.values() {
+        if let Activity::Blocked { approvals } = &s.activity {
+            for native in approvals {
+                let id = tool_approval_id(s.id, s.g, native);
+                assert!(
+                    st.approvals.contains_key(&id),
+                    "blocked on {id}, not in the ledger"
+                );
+            }
+        }
+    }
+    // A response that left the hub went to the incarnation that asked, while it was current.
+    for (eff, at) in &sim.responses {
+        let e = &st.effects[eff];
+        let EffectKind::RespondApproval { g, .. } = e.kind else {
+            unreachable!()
+        };
+        assert_eq!(*at, g, "response {} reached g{}", e.key, at.0);
+    }
 }
 
 pub fn invariants(st: &State, sim: &Sim) {
@@ -468,6 +662,8 @@ pub fn invariants(st: &State, sim: &Sim) {
             );
         }
     }
+
+    approvals(st, sim);
 
     // I10: automatic resleeves per sleeve in any hour.
     let mut by_sleeve: BTreeMap<SleeveId, Vec<Millis>> = BTreeMap::new();

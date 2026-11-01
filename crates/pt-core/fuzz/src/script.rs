@@ -11,8 +11,9 @@
 //! send NAME ID [steer] [from=NAME]
 //! stop|remove|interrupt|compact|viewed NAME
 //! start|resleeve NAME [harness=H]
-//! approve NAME ID allow|deny        abandon KEY
-//! obs NAME WHAT [g=N]               WHAT: ready progress[=H] approval=ID resolved=ID
+//! approve NAME ID allow|deny [g=N]  ID: the harness's id, or action:N   abandon KEY
+//! ask NAME [timeout=DURATION]       a code rule asks the owner (D9)
+//! obs NAME WHAT [g=N] [noask]       WHAT: ready progress[=H] approval=ID resolved=ID
 //!                                         settled[=usage|auth|interrupted|error] compactdone
 //!                                         desync screen=V usage=N disk=N forbidden
 //! exit NAME [oom] [code=N]          the incarnation's process tree dies
@@ -25,6 +26,7 @@
 //! expect NAME life=.. g=N activity=.. guard=.. harness=.. queue=N msg:ID=..
 //! expect-effect KEY state=.. attempt=N count=N
 //! expect-job N state=..           expect-none NAME
+//! expect-approval ID [g=N] state=.. decision=allow|deny|none orphan=.. response=KEY
 //! ```
 //!
 //! An effect KEY ending in `*` matches the newest record whose key has that prefix.
@@ -237,11 +239,29 @@ impl Runner {
             }
             "approve" => {
                 let sleeve = self.id(arg(1)?)?;
+                let approval = self.approval(sleeve, arg(2)?, kv("g"))?;
                 self.sim.apply(E::RespondApproval {
                     sleeve,
-                    approval: arg(2)?.into(),
+                    approval,
                     allow: arg(3)? == "allow",
                     note: String::new(),
+                });
+            }
+            "ask" => {
+                let sleeve = self.id(arg(1)?)?;
+                let timeout = kv("timeout")
+                    .map(duration)
+                    .transpose()?
+                    .unwrap_or(15 * MINUTE);
+                self.sim.apply(E::RequestApproval {
+                    sleeve,
+                    ask: Ask {
+                        title: "remove sleeve victim".into(),
+                        summary: "rule asks".into(),
+                        detail: String::new(),
+                        options: vec![Choice::AllowOnce, Choice::Deny],
+                    },
+                    timeout,
                 });
             }
             "abandon" => {
@@ -263,7 +283,15 @@ impl Runner {
                     "progress" => Obs::Progress {
                         tool: if v.is_empty() { None } else { Some(num(v)?) },
                     },
-                    "approval" => Obs::ApprovalRequested { id: v.into() },
+                    "approval" => Obs::ApprovalRequested {
+                        id: v.into(),
+                        ask: (!flag("noask")).then(|| Ask {
+                            title: "Bash".into(),
+                            summary: format!("tool call {v}"),
+                            detail: String::new(),
+                            options: vec![Choice::AllowOnce, Choice::AllowSession, Choice::Deny],
+                        }),
+                    },
                     "resolved" => Obs::ApprovalResolved { id: v.into() },
                     "settled" => Obs::TurnSettled {
                         end: match v {
@@ -405,8 +433,55 @@ impl Runner {
                     return Err(format!("job state is {:?}, expected {want}", j.state));
                 }
             }
-            "expect" | "expect-effect" | "expect-job" | "expect-none" => {}
+            "expect-approval" if self.checked => self.expect_approval(&words)?,
+            "expect" | "expect-effect" | "expect-job" | "expect-none" | "expect-approval" => {}
             w => return Err(format!("unknown command {w}")),
+        }
+        Ok(())
+    }
+
+    /// A script approval ID: `action:N` as is, else sleeve's tool approval at g (default the
+    /// current generation).
+    fn approval(&self, sleeve: SleeveId, id: &str, g: Option<&str>) -> Result<String, String> {
+        if id.starts_with(ACTION_PREFIX) {
+            return Ok(id.into());
+        }
+        let g = match g {
+            Some(n) => Gen(num(n)?),
+            None => self.sim.st.sleeves[&sleeve].g,
+        };
+        Ok(tool_approval_id(sleeve, g, id))
+    }
+
+    fn expect_approval(&self, words: &[&str]) -> Result<(), String> {
+        let id = *words.get(1).ok_or("missing approval")?;
+        let a = self
+            .sim
+            .st
+            .approvals
+            .values()
+            .find(|a| a.id == id)
+            .ok_or(format!("no approval {id}"))?;
+        for w in &words[2..] {
+            let (k, v) = w.split_once('=').ok_or(format!("bad expectation {w}"))?;
+            let got = match k {
+                "state" => variant(&a.state),
+                "decision" => match a.decision {
+                    Some(d) if d.allow => "allow".into(),
+                    Some(_) => "deny".into(),
+                    None => "none".into(),
+                },
+                "by" => a.decision.map(|d| variant(&d.by)).unwrap_or_default(),
+                "orphan" => a.orphan.map(|o| variant(&o)).unwrap_or("none".into()),
+                "response" => match a.decision.and_then(|d| d.response) {
+                    Some(e) => variant(&self.sim.st.effects[&e].state),
+                    None => "none".into(),
+                },
+                _ => return Err(format!("bad key {k}")),
+            };
+            if got != v {
+                return Err(format!("approval {id}: {k} is {got}, expected {v}"));
+            }
         }
         Ok(())
     }

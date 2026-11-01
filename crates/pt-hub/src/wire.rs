@@ -5,7 +5,6 @@ use pt_api::EpochMs;
 use pt_core::{Activity, Harness, Layout, Life, Mode, ParkReason, Sleeve, SleeveId, State, Target};
 use pt_drivers as drv;
 
-use crate::approvals::{ACTION_PREFIX, tool_id};
 use crate::home::Config;
 use crate::hub::{Hub, View};
 use crate::transcript::Line;
@@ -256,11 +255,11 @@ pub fn state(
         .values()
         .filter(|s| s.life != Life::Removed && visible(s.id))
         .collect();
-    let approvals = hub
+    let approvals = st
         .approvals
-        .list(false)
-        .into_iter()
-        .filter(|a| a.sleeve_id.parse().is_ok_and(|id| visible(SleeveId(id))))
+        .values()
+        .filter(|a| visible(a.sleeve))
+        .map(crate::approvals::view)
         .collect();
     api::HubState {
         seq,
@@ -279,7 +278,7 @@ pub fn state(
             .map(|j| crate::jobs::view(hub, j))
             .collect(),
         quotas: hub.quotas.list(),
-        events: hub.bus.events(),
+        events: hub.bus.recent_events(crate::bus::SNAPSHOT_EVENTS),
     }
 }
 
@@ -335,12 +334,13 @@ fn error_class(c: drv::ErrorClass) -> api::ErrorClass {
     }
 }
 
-/// The approval id an entry names: action approvals carry theirs, tool approvals are per sleeve.
-fn approval_id(sleeve: SleeveId, id: &str) -> String {
-    if id.starts_with(ACTION_PREFIX) {
+/// The approval id an entry names: action approvals carry theirs, tool approvals are the
+/// incarnation's.
+fn approval_id(sleeve: SleeveId, g: u64, id: &str) -> String {
+    if id.starts_with(pt_core::ACTION_PREFIX) {
         id.to_string()
     } else {
-        tool_id(sleeve, id)
+        pt_core::tool_approval_id(sleeve, pt_core::Gen(g), id)
     }
 }
 
@@ -452,7 +452,7 @@ pub fn chat_entry(sleeve: SleeveId, l: &Line, delta: bool) -> api::ChatEntry {
         D::ApprovalRequest {
             id, name, summary, ..
         } => A::ApprovalRequest {
-            approval_id: approval_id(sleeve, id),
+            approval_id: approval_id(sleeve, l.g, id),
             title: name.clone(),
             summary: summary.clone(),
         },
@@ -462,7 +462,7 @@ pub fn chat_entry(sleeve: SleeveId, l: &Line, delta: bool) -> api::ChatEntry {
             by,
             ..
         } => A::ApprovalDecision {
-            approval_id: approval_id(sleeve, id),
+            approval_id: approval_id(sleeve, l.g, id),
             decision: decision(*d),
             by: decided_by(by.as_deref()),
         },

@@ -45,6 +45,10 @@ impl Home {
     pub fn bin(&self) -> PathBuf {
         self.run().join("bin")
     }
+    /// The event stream's kept messages (`stream.rs`).
+    pub fn stream(&self) -> PathBuf {
+        self.root.join("stream.log")
+    }
     pub fn tokens(&self) -> PathBuf {
         self.root.join("tokens")
     }
@@ -196,6 +200,9 @@ pt_json::record! {
         },
         pub default_harness: String = "claude".to_string(),
         pub resleeve_to: Vec<String> = vec!["pi_local".to_string()],
+        /// Harnesses (`claude`, `codex`, `grok`) whose headless sleeves run supervised: each
+        /// tool approval goes to the owner. Empty: every sleeve runs unsupervised.
+        pub supervised: Vec<String> = Vec::new(),
         /// Run each incarnation in a systemd user scope (limits and cgroup.kill).
         pub scopes: bool = true,
         /// D9: sleeves Envoy may spawn in one turn an agent message started before each further

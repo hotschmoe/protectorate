@@ -1,6 +1,6 @@
-//! `protectorate serve`: lay out the home, replay the journal, apply `HubRecovered`, start the
-//! core, the executors, the fleet, the tick and the listeners; on a signal stop the listeners
-//! and the fleet.
+//! `protectorate serve`: lay out the home, replay the journal, open the stream log, apply
+//! `HubRecovered`, start the core, the executors, the fleet, the tick and the listeners; on a
+//! signal stop the listeners and the fleet.
 
 use std::fs;
 use std::io;
@@ -128,6 +128,9 @@ pub fn serve(o: ServeOptions) -> Result<(), String> {
         .map(PathBuf::from)
         .ok_or("HOME is not set")?;
 
+    let (bus, stream_log) = crate::bus::Bus::open(home.stream())
+        .map_err(|e| format!("open stream log {}: {e}", home.stream().display()))?;
+
     let (tx, rx) = mpsc::channel::<Input>();
     // HubRecovered is the first input, before any listener or timer can add one (README step 5).
     tx.send(Input {
@@ -150,7 +153,13 @@ pub fn serve(o: ServeOptions) -> Result<(), String> {
         owner_home,
         tx,
         view,
+        bus,
     ));
+    let writer_hub = hub.clone();
+    thread::Builder::new()
+        .name("pt-stream".into())
+        .spawn(move || writer_hub.bus.write(stream_log))
+        .map_err(ctx("spawn stream writer"))?;
     if let Some(t) = new_owner {
         eprintln!("owner token (shown once): {t}");
         eprintln!("envoy-only token: {}", hub.tokens.envoy_only());

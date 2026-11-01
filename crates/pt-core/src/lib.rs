@@ -11,12 +11,14 @@ pub mod intent;
 pub mod model;
 pub mod state;
 
+mod approval;
 mod effect;
 mod guard;
 mod job;
 mod sleeve;
 
-pub use event::{Event, EventKind, JobReport, JobSpec, Obs, SpawnSpec};
+pub use approval::{ACTION_PREFIX, tool_approval_id};
+pub use event::{Ask, Event, EventKind, JobReport, JobSpec, Obs, SpawnSpec};
 pub use guard::limits;
 pub use intent::{Class, Code, EffectKind, Intent, Notice, Reply};
 pub use model::*;
@@ -71,6 +73,11 @@ impl Core<'_> {
                 allow,
                 note,
             } => self.respond_cmd(*sleeve, approval, *allow, note),
+            E::RequestApproval {
+                sleeve,
+                ask,
+                timeout,
+            } => self.request_action(*sleeve, ask, *timeout),
             E::Stop { sleeve } => self.stop_cmd(*sleeve, false),
             E::Remove { sleeve } => self.stop_cmd(*sleeve, true),
             E::Start { sleeve, target } => self.start_cmd(*sleeve, target.as_ref()),
@@ -131,11 +138,13 @@ impl Core<'_> {
                 self.tick_effects();
                 self.tick_sleeves();
                 self.tick_jobs();
+                self.tick_approvals();
             }
             E::HubRecovered => {
                 self.recover_effects();
                 self.recover_sleeves();
                 self.recover_jobs();
+                self.recover_approvals();
             }
         }
     }

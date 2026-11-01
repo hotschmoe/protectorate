@@ -16,6 +16,10 @@ pt-http = { path = "../pt-http" }
 pt-hub = { path = "../pt-hub" }
 pt-json = { path = "../pt-json" }
 
+[dev-dependencies]
+pt-core = { path = "../pt-core" }
+pt-journal = { path = "../pt-journal" }
+
 [build-dependencies]
 pt-embed = { path = "../pt-embed" }
 pt-hash = { path = "../pt-hash" }

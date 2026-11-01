@@ -1,0 +1,24 @@
+#scenario 79f78b6f07f66d60
+# A D9 approval whose waiting API call died with the hub is marked on recovery; a decision is
+# recorded as abandoned and does nothing, and it is decided only once.
+spawn root /w/a
+run
+obs root ready
+ask root timeout=15m
+expect-approval action:0 state=Pending orphan=none
+commit
+crash down=1m
+expect-approval action:0 state=Pending orphan=HubRestarted
+approve root action:0 allow
+expect-approval action:0 state=Abandoned decision=allow by=Owner
+approve root action:0 deny
+expect-approval action:0 state=Abandoned decision=allow
+commit
+# A request the hub never journaled is gone with the crash.
+ask root
+crash
+expect-approval action:0 state=Abandoned
+ask root timeout=5m
+expect-approval action:1 state=Pending orphan=none
+approve root action:1 deny
+expect-approval action:1 state=Decided decision=deny

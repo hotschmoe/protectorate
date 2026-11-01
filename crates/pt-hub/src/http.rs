@@ -14,7 +14,7 @@ use pt_http::{Message, Peer, Request, Response};
 use pt_json::ToJson;
 
 use crate::api::{self, Principal, err};
-use crate::bus::Since;
+use crate::bus::{Resume, Since};
 use crate::hub::Hub;
 use crate::log::debug;
 use crate::wire;
@@ -216,8 +216,9 @@ fn snapshot(hub: &Hub) -> (u64, String) {
     (pos, msg.to_json().to_string())
 }
 
-/// The WebSocket fan-out: replays from `from_seq` while the ring still holds every kept message
-/// from it, else starts with a snapshot; then streams every message, deltas included.
+/// The WebSocket fan-out: replays from `from_seq` while the ring or the stream log still holds
+/// every kept message from it, else starts with a snapshot; then streams every message, deltas
+/// included.
 fn events(hub: Arc<Hub>, from: Option<u64>) -> Response {
     Response::websocket(move |mut ws| {
         let writer = ws.writer();
@@ -233,8 +234,23 @@ fn events(hub: Arc<Hub>, from: Option<u64>) -> Response {
             flag.store(true, Ordering::SeqCst);
         });
         // Deltas up to here belong to messages the client already has or is about to replay.
-        let (mut cursor, replay_to) = match from.and_then(|f| hub.bus.resume(f)) {
-            Some(pos) => (pos, hub.bus.pos()),
+        let replay_to = hub.bus.pos();
+        let start = match from.and_then(|f| hub.bus.resume(f)) {
+            Some(Resume::Ring(pos)) => Some(pos),
+            Some(Resume::Log {
+                from,
+                until,
+                cursor,
+            }) => hub.bus.logged(from, until).and_then(|texts| {
+                texts
+                    .iter()
+                    .all(|t| writer.send_text(t).is_ok())
+                    .then_some(cursor)
+            }),
+            None => None,
+        };
+        let (mut cursor, replay_to) = match start {
+            Some(pos) => (pos, replay_to),
             None => {
                 let (pos, text) = snapshot(&hub);
                 if writer.send_text(&text).is_err() {

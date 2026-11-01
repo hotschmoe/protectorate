@@ -12,59 +12,7 @@ use std::time::{Duration, Instant};
 
 use common::*;
 use pt_api::{METHODS, Scope};
-use pt_http::Message;
 use pt_json::{Value, obj};
-
-fn ws(port: u16, query: &str, headers: &[(&str, &str)]) -> std::io::Result<pt_http::WebSocket> {
-    pt_http::Client::tcp(SocketAddr::from(([127, 0, 0, 1], port)))
-        .read_timeout(Some(Duration::from_secs(20)))
-        .websocket(&format!("/api/events{query}"), headers)
-}
-
-fn next(ws: &mut pt_http::WebSocket) -> Value {
-    loop {
-        match ws.recv().expect("a stream message") {
-            Message::Text(t) => return pt_json::parse(&t).expect("stream JSON"),
-            Message::Close(c, r) => panic!("stream closed: {c} {r}"),
-            _ => {}
-        }
-    }
-}
-
-/// Reads until a message of type `kind` passes `pick`; returns every message read.
-fn until(ws: &mut pt_http::WebSocket, kind: &str, pick: impl Fn(&Value) -> bool) -> Vec<Value> {
-    let mut seen = Vec::new();
-    loop {
-        let m = next(ws);
-        let hit = m["type"].as_str() == Some(kind) && pick(&m);
-        seen.push(m);
-        if hit {
-            return seen;
-        }
-    }
-}
-
-fn pair(port: u16, owner: &str, name: &str) -> String {
-    let (s, code) = post(
-        port,
-        "AddDevice",
-        Some(owner),
-        &obj! { "name" => name }.to_string(),
-    );
-    assert_eq!(s, 200, "AddDevice: {code}");
-    let code = code["code"].as_str().expect("a pairing code").to_string();
-    let (s, paired) = post(
-        port,
-        "PairDevice",
-        None,
-        &obj! { "code" => code }.to_string(),
-    );
-    assert_eq!(s, 200, "PairDevice without a credential: {paired}");
-    paired["token"]
-        .as_str()
-        .expect("a device token")
-        .to_string()
-}
 
 fn get(port: u16, path: &str, headers: &[(&str, &str)]) -> pt_http::ClientResponse {
     pt_http::Client::tcp(SocketAddr::from(([127, 0, 0, 1], port)))

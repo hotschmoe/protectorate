@@ -1,0 +1,35 @@
+#scenario c558bf8d8f748e73
+# A tool approval pending when the hub dies stays pending. The incarnation that asked is killed
+# on recovery, so a decision is recorded as fenced and never reaches g+1 (12a item 4).
+spawn root /w/a
+run
+obs root ready
+send root m1
+run
+obs root approval=a1
+expect-approval 0:1:a1 state=Pending orphan=none
+commit
+crash
+expect-approval 0:1:a1 state=Pending orphan=none
+run
+tick 1s
+run
+expect root g=2
+expect-approval 0:1:a1 state=Pending orphan=IncarnationEnded
+approve root a1 allow g=1
+run
+expect-approval 0:1:a1 state=Fenced decision=allow response=none
+expect-effect approval:* count=0
+# Decided once: a different answer is refused, the same one is a duplicate.
+approve root a1 deny g=1
+approve root a1 allow g=1
+expect-approval 0:1:a1 state=Fenced decision=allow
+# g=2 asks under the same harness id: a new approval, answered to g=2 only.
+obs root ready
+send root m2
+run
+obs root approval=a1
+approve root a1 allow
+run
+expect-approval 0:2:a1 state=Decided decision=allow response=Confirmed
+expect-effect approval:0:2:a1:* state=Confirmed count=1

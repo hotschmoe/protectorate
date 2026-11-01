@@ -35,6 +35,16 @@ fn party(b: &mut Bytes) -> Party {
     }
 }
 
+fn ask(b: &mut Bytes) -> Ask {
+    const C: [Choice; 3] = [Choice::AllowOnce, Choice::AllowSession, Choice::Deny];
+    Ask {
+        title: b.string(),
+        summary: b.string(),
+        detail: b.string(),
+        options: (0..b.below(4)).map(|_| C[b.below(3) as usize]).collect(),
+    }
+}
+
 fn obs(b: &mut Bytes) -> Obs {
     const ENDS: [TurnEnd; 5] = [
         TurnEnd::Done,
@@ -56,7 +66,10 @@ fn obs(b: &mut Bytes) -> Obs {
         1 => Obs::Progress {
             tool: opt(b, |b| b.u64()),
         },
-        2 => Obs::ApprovalRequested { id: b.string() },
+        2 => Obs::ApprovalRequested {
+            id: b.string(),
+            ask: opt(b, ask),
+        },
         3 => Obs::ApprovalResolved { id: b.string() },
         4 => Obs::TurnSettled {
             end: ENDS[b.below(5) as usize],
@@ -91,7 +104,7 @@ pub fn event(b: &mut Bytes) -> Event {
     let j = |b: &mut Bytes| JobId(b.u64());
     let a = |b: &mut Bytes| b.u64() as u32;
     use EventKind as E;
-    let kind = match b.below(30) {
+    let kind = match b.below(31) {
         0 => E::Spawn(SpawnSpec {
             request_id: b.string(),
             name: b.string(),
@@ -224,7 +237,12 @@ pub fn event(b: &mut Bytes) -> Event {
             },
         },
         28 => E::Tick,
-        _ => E::HubRecovered,
+        29 => E::HubRecovered,
+        _ => E::RequestApproval {
+            sleeve: s(b),
+            ask: ask(b),
+            timeout: b.u64(),
+        },
     };
     Event { at, kind }
 }

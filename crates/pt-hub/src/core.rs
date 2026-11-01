@@ -7,11 +7,10 @@ use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 
 use pt_api::EventKind as Kind;
-use pt_api::{ActivityState, ApprovalState, DecidedBy, Decision, HubStreamMessage, Level};
-use pt_core::{Activity, Event, Intent, Life, Notice, Party, SleeveId, State, codec};
+use pt_api::{ActivityState, HubStreamMessage, Level};
+use pt_core::{Event, Intent, Life, Notice, Party, SleeveId, State, codec};
 use pt_journal::Journal;
 
-use crate::approvals::tool_id;
 use crate::exec::Executors;
 use crate::home::now_ms;
 use crate::hub::{Hub, Input, View};
@@ -33,7 +32,13 @@ pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<I
                 Err(_) => break,
             }
         }
-        let before = hub.view();
+        // The first batch announces everything recent: a message the crash kept from the stream
+        // log would otherwise leave a resuming client behind the replayed state.
+        let before = if batch_n == 0 {
+            Arc::new(recent_baseline(&state))
+        } else {
+            hub.view()
+        };
         let mut frames = Vec::with_capacity(inputs.len());
         let mut out = Vec::with_capacity(inputs.len());
         for input in inputs {
@@ -91,9 +96,42 @@ pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<I
     info!("core stopped");
 }
 
+/// How far back the first batch after a start re-announces jobs and approvals.
+const RECENT: u64 = 10 * 60 * 1000;
+
+/// What the first batch compares against: no sleeves, and only the jobs and approvals that are
+/// settled and older than `RECENT` before the last journaled event.
+fn recent_baseline(st: &State) -> View {
+    let old = |t: u64| st.now.saturating_sub(t) >= RECENT;
+    let base = State {
+        jobs: st
+            .jobs
+            .iter()
+            .filter(|(_, j)| old(j.state_at) && old(j.seen_at))
+            .map(|(k, j)| (*k, j.clone()))
+            .collect(),
+        approvals: st
+            .approvals
+            .iter()
+            .filter(|(_, a)| {
+                a.state != pt_core::ApprovalState::Pending
+                    && old(a.requested_at)
+                    && a.decision.is_none_or(|d| old(d.at))
+            })
+            .map(|(k, a)| (k.clone(), a.clone()))
+            .collect(),
+        ..State::default()
+    };
+    View {
+        state: base,
+        batch: 0,
+        since: BTreeMap::new(),
+    }
+}
+
 /// Pushes the stream messages for every sleeve that changed in this batch: `workspace` for a new
-/// root, `sleeve`, or `sleeve_removed`; and `job` for every job that changed. Tool approvals of
-/// ended incarnations are cancelled.
+/// root, `sleeve`, or `sleeve_removed`; `job` for every job and `approval` for every approval
+/// that changed.
 fn announce_changes(hub: &Hub, before: &View, after: &View) {
     for s in after.state.sleeves.values() {
         let old = before.state.sleeves.get(&s.id);
@@ -122,11 +160,13 @@ fn announce_changes(hub: &Hub, before: &View, after: &View) {
             hub.bus.push(|seq| HubStreamMessage::Job { seq, job });
         }
     }
-    let st = &after.state;
-    hub.approvals.cancel_gone(&hub.bus, &|id, g| {
-        st.sleeve(id)
-            .is_some_and(|s| s.g.0 == g && s.activity != Activity::Ended && s.life.live())
-    });
+    for a in after.state.approvals.values() {
+        if before.state.approvals.get(&a.id) != Some(a) {
+            let approval = crate::approvals::view(a);
+            hub.bus
+                .push(|seq| HubStreamMessage::Approval { seq, approval });
+        }
+    }
 }
 
 fn notice_text(view: &View, n: &Notice) -> (Kind, Level, String) {
@@ -154,7 +194,15 @@ fn notice_text(view: &View, n: &Notice) -> (Kind, Level, String) {
         Notice::ApprovalRequested { approval } => (
             Kind::Approval,
             Level::Warn,
-            format!("approval {approval} requested"),
+            match view
+                .state
+                .approvals
+                .get(approval)
+                .and_then(|a| a.ask.as_ref())
+            {
+                Some(ask) => format!("approval {approval} requested: {}", ask.title),
+                None => format!("approval {approval} requested"),
+            },
         ),
         Notice::ApprovalTimedOut { approval } => (
             Kind::Approval,
@@ -209,15 +257,6 @@ fn notice_text(view: &View, n: &Notice) -> (Kind, Level, String) {
 /// A notice becomes a hub event on the stream and, for a sleeve, a line in its transcript.
 fn notify(hub: &Hub, view: &View, to: Party, sleeve: Option<SleeveId>, n: &Notice) {
     let (kind, level, text) = notice_text(view, n);
-    if let (Notice::ApprovalTimedOut { approval }, Some(id)) = (n, sleeve) {
-        hub.approvals.resolve(
-            &hub.bus,
-            &tool_id(id, approval),
-            ApprovalState::Expired,
-            Some(Decision::Deny),
-            DecidedBy::Rule,
-        );
-    }
     let target = match to {
         Party::Owner => "owner".to_string(),
         Party::Envoy => "envoy".to_string(),

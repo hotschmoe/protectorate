@@ -13,10 +13,12 @@ name = "protectorate"
 version = "0.0.0"
 dependencies = [
  "pt-api",
+ "pt-core",
  "pt-embed",
  "pt-hash",
  "pt-http",
  "pt-hub",
+ "pt-journal",
  "pt-json",
  "pt-version",
 ]

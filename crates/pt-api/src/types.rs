@@ -158,6 +158,11 @@ api_enums! {
         Expired = "expired",
         /// The request went away first (turn interrupted, sleeve stopped).
         Cancelled = "cancelled",
+        /// Decided, but the incarnation that asked was gone: nothing reached the harness.
+        Fenced = "fenced",
+        /// An action approval decided or timed out after the call waiting on it ended (a hub
+        /// restart): nothing was done.
+        Abandoned = "abandoned",
     }
 
     /// UNKNOWN counts as present: the node takes no jobs.
@@ -347,6 +352,8 @@ api_records! {
         pub decision: Option<Decision>,
         pub decided_by: Option<DecidedBy>,
         pub decided_at_ms: Option<EpochMs>,
+        /// Why a decision did or will do nothing (the asker is gone), when that is so.
+        pub note: String = String::new(),
     }
 
     pub struct Presence {

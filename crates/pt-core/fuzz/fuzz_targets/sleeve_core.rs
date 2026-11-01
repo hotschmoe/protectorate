@@ -31,7 +31,7 @@ fn sleeve(sim: &Sim, b: &mut Bytes) -> SleeveId {
 fn command(sim: &mut Sim, b: &mut Bytes) {
     use EventKind as E;
     let s = sleeve(sim, b);
-    let kind = match b.below(16) {
+    let kind = match b.below(17) {
         0 | 1 => {
             let parent = if b.below(3) == 0 {
                 None
@@ -79,12 +79,28 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
         }
         4 => E::Interrupt { sleeve: s },
         5 => E::Compact { sleeve: s },
-        6 => E::RespondApproval {
-            sleeve: s,
-            approval: format!("a{}", b.below(2)),
-            allow: b.bool(),
-            note: String::new(),
-        },
+        6 => {
+            // An approval the core knows (most of the time), else a made-up one.
+            let known: Vec<(String, SleeveId)> = sim
+                .st
+                .approvals
+                .values()
+                .map(|a| (a.id.clone(), a.sleeve))
+                .collect();
+            let (approval, sleeve) = match known.len() {
+                n if n > 0 && b.below(4) != 0 => known[b.below(n as u64) as usize].clone(),
+                _ => (
+                    tool_approval_id(s, Gen(b.below(4)), &format!("a{}", b.below(2))),
+                    s,
+                ),
+            };
+            E::RespondApproval {
+                sleeve,
+                approval,
+                allow: b.bool(),
+                note: String::new(),
+            }
+        }
         7 => E::Stop { sleeve: s },
         8 => E::Remove { sleeve: s },
         9 => E::Start {
@@ -113,6 +129,14 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
         14 => E::RequeueJob {
             job: JobId(b.below(sim.st.next_job + 1)),
         },
+        15 => E::RequestApproval {
+            sleeve: s,
+            ask: Ask {
+                title: "remove sleeve x".into(),
+                ..Ask::default()
+            },
+            timeout: [0, SECOND, 15 * MINUTE, 2 * HOUR, Millis::MAX][b.below(5) as usize],
+        },
         _ => E::AbandonJob {
             job: JobId(b.below(sim.st.next_job + 1)),
         },
@@ -130,6 +154,12 @@ fn obs(b: &mut Bytes) -> Obs {
         },
         4 => Obs::ApprovalRequested {
             id: format!("a{}", b.below(2)),
+            ask: b.bool().then(|| Ask {
+                title: "Bash".into(),
+                summary: "rm -rf build".into(),
+                detail: String::new(),
+                options: vec![Choice::AllowOnce, Choice::Deny],
+            }),
         },
         5 => Obs::ApprovalResolved {
             id: format!("a{}", b.below(2)),

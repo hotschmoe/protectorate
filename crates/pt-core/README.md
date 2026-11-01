@@ -17,7 +17,8 @@ reads no clock, so `replay(journal) == live state`. The hub's core thread is its
 
 - Commands: `Spawn`, `Send` (queue or steer; mail is a `Send` from `Party::Sleeve`), `Interrupt`,
   `Compact`, `RespondApproval`, `Stop`, `Remove`, `Start`, `Resleeve`, `Abandon`, `Viewed`,
-  `CreateJob`, `CancelJob`, `AbandonJob`, `RequeueJob`. Each gets exactly one `Intent::Reply`.
+  `CreateJob`, `CancelJob`, `AbandonJob`, `RequeueJob`, `RequestApproval` (a code rule asks the
+  owner, D9). Each gets exactly one `Intent::Reply`.
 - Effect reports, carrying the record's `attempt`: `Dispatched` (sent before the first byte),
   `Acked` (with the native turn id for prompts), `Nacked` (definitive: nothing applied), `Lost`
   (timeout or channel lost), `Probed`.
@@ -28,6 +29,16 @@ reads no clock, so `replay(journal) == live state`. The hub's core thread is its
 - `Observed { sleeve, g, obs }` from drivers and pane screen rules; `Exited { sleeve, g }` once
   the scope is confirmed empty. A stale `g` is dropped.
 - `Tick`, `HubRecovered`.
+
+## Approvals
+
+`State::approvals` is the ledger: a harness's tool request (id `<sleeve>:<g>:<native>`) or an
+action approval (`action:<n>`). Each is decided at most once (`RespondApproval` by the owner, or
+a rule's denial on timeout). A tool decision becomes a `RespondApproval` record only while the
+incarnation that asked is the sleeve's live headless one; otherwise it is recorded `Fenced` and
+nothing is written. A pending approval whose incarnation died, or whose waiting API call ended
+with the hub (`HubRecovered`), is marked `orphan`; an orphaned action approval decided later is
+`Abandoned`. Deadlines are journaled times, so downtime counts and nothing restarts a timer.
 
 ## Intents
 

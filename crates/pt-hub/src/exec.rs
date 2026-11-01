@@ -17,13 +17,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use pt_core::{
-    EffectId, EffectKind, EffectState, EventKind, ExitCause, Gen, Harness, Intent, Layout, Obs,
-    ProbeResult, Proc, Sleeve, SleeveId, Target, TurnEnd,
+    Ask, Choice, EffectId, EffectKind, EffectState, EventKind, ExitCause, Gen, Harness, Intent,
+    Layout, Obs, ProbeResult, Proc, Sleeve, SleeveId, Target, TurnEnd,
 };
 use pt_drivers::{Ack, Decision, Entry, ErrorClass, Session, Stop};
 use pt_json::obj;
 
-use crate::approvals::{ToolAsk, tool_id};
 use crate::brief;
 use crate::git;
 use crate::home::now_ms;
@@ -617,6 +616,10 @@ impl SleeveExec {
         spec.provider = Some(target.provider.clone()).filter(|p| !p.is_empty());
         spec.resume = resume;
         spec.prefix = Some(prefix);
+        let name = wire::harness_wire(target.harness);
+        if hub.config.supervised.iter().any(|h| h == name) {
+            spec.permission = pt_drivers::Permission::Supervised;
+        }
         let (session, events) = pt_drivers::spawn(spec).map_err(|e| e.to_string())?;
         let scope = hub.scope_name(s.id, g);
         info!(
@@ -777,6 +780,16 @@ struct Run {
     scoped: bool,
 }
 
+/// An answer the harness offers; its own "cancel" is not one the owner picks.
+fn choice(d: Decision) -> Option<Choice> {
+    match d {
+        Decision::AllowOnce => Some(Choice::AllowOnce),
+        Decision::AllowSession => Some(Choice::AllowSession),
+        Decision::Deny => Some(Choice::Deny),
+        Decision::Cancel => None,
+    }
+}
+
 fn input_text(input: &Option<pt_json::Value>) -> String {
     let t = input.as_ref().map(|v| v.to_string()).unwrap_or_default();
     match t.char_indices().nth(2000) {
@@ -886,40 +899,16 @@ impl Pump {
                 input,
                 options,
                 ..
-            } => {
-                hub.approvals.open_tool(
-                    &hub.bus,
-                    ToolAsk {
-                        sleeve: id,
-                        g: g.0,
-                        native: native.clone(),
-                        title: tool.clone(),
-                        summary: summary.clone(),
-                        detail: input_text(input),
-                        options: options.iter().map(|d| wire::decision(*d)).collect(),
-                    },
-                );
-                obs.push(Obs::ApprovalRequested { id: native.clone() })
-            }
-            Entry::ApprovalDecision {
-                id: native,
-                decision,
-                by,
-                ..
-            } => {
-                let d = wire::decision(*decision);
-                let state = if d == pt_api::Decision::Deny {
-                    pt_api::ApprovalState::Denied
-                } else {
-                    pt_api::ApprovalState::Approved
-                };
-                hub.approvals.resolve(
-                    &hub.bus,
-                    &tool_id(id, native),
-                    state,
-                    Some(d),
-                    wire::decided_by(by.as_deref()),
-                );
+            } => obs.push(Obs::ApprovalRequested {
+                id: native.clone(),
+                ask: Some(Ask {
+                    title: tool.clone(),
+                    summary: summary.clone(),
+                    detail: input_text(input),
+                    options: options.iter().filter_map(|d| choice(*d)).collect(),
+                }),
+            }),
+            Entry::ApprovalDecision { id: native, .. } => {
                 obs.push(Obs::ApprovalResolved { id: native.clone() })
             }
             Entry::TurnSettled { stop, usage, .. } => {

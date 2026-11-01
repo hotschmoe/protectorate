@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, VecDeque};
 
-use crate::event::JobSpec;
+use crate::event::{Ask, JobSpec};
 use crate::intent::{Class, EffectKind};
 use crate::model::*;
 
@@ -14,12 +14,15 @@ pub struct State {
     pub next_sleeve: u64,
     pub next_effect: u64,
     pub next_job: u64,
+    pub next_approval: u64,
     pub sleeves: BTreeMap<SleeveId, Sleeve>,
     pub effects: BTreeMap<EffectId, Effect>,
     pub jobs: BTreeMap<JobId, Job>,
     /// Spawn request ids, for idempotent retries.
     pub spawn_requests: BTreeMap<String, SleeveId>,
     pub job_requests: BTreeMap<String, JobId>,
+    /// Every approval, by id: `<sleeve>:<g>:<native id>` for a tool, `action:<n>` for D9.
+    pub approvals: BTreeMap<String, Approval>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -231,6 +234,69 @@ impl EffectState {
                 | EffectState::Abandoned
         )
     }
+}
+
+/// An approval the owner sees: a harness's tool request, or one a code rule requires (D9).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Approval {
+    pub id: String,
+    pub sleeve: SleeveId,
+    pub source: Source,
+    pub ask: Option<Ask>,
+    pub requested_at: Millis,
+    /// When code times it out (saturating).
+    pub deadline: Millis,
+    pub state: ApprovalState,
+    /// Set at most once.
+    pub decision: Option<Decision>,
+    /// Set while pending once whoever waits on it is gone.
+    pub orphan: Option<Orphan>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Source {
+    /// Incarnation `g` asked, under the harness's own id `native`.
+    Tool { g: Gen, native: String },
+    /// An API call waits on it (D9).
+    Action,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Decision {
+    pub allow: bool,
+    pub by: Decider,
+    pub at: Millis,
+    /// The RespondApproval record that carries it to the harness.
+    pub response: Option<EffectId>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Decider {
+    Owner,
+    Rule,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApprovalState {
+    Pending,
+    /// Decided; a tool decision is on its way to the incarnation that asked.
+    Decided,
+    /// Timed out: denied by rule.
+    Expired,
+    /// The request went away first (withdrawn by the harness, turn settled, sleeve stopped).
+    Cancelled,
+    /// Decided, but the incarnation that asked could not be reached: nothing was written.
+    Fenced,
+    /// An action approval decided or timed out after the call waiting on it ended: nothing done.
+    Abandoned,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Orphan {
+    /// The incarnation that asked is dead.
+    IncarnationEnded,
+    /// The hub restarted, ending the API call that waited.
+    HubRestarted,
 }
 
 /// Node job (2.e).

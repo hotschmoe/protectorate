@@ -1,0 +1,24 @@
+#scenario 8b367d9a4298c1d7
+# Near u64::MAX a saturated deadline never comes; an unsaturated one still does.
+clock 18446744073709540000
+spawn root /w/a
+run
+tick 10s
+obs root ready
+ask root timeout=1h
+ask root timeout=1s
+send root m1
+run
+obs root approval=a1
+tick 2s
+expect-approval action:0 state=Pending
+expect-approval action:1 state=Expired decision=deny
+expect-approval 0:1:a1 state=Pending
+tick 1h
+tick 1h
+run
+expect-approval action:0 state=Pending
+expect-approval 0:1:a1 state=Pending
+approve root a1 deny
+run
+expect-approval 0:1:a1 state=Decided decision=deny response=Confirmed

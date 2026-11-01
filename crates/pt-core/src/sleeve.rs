@@ -413,6 +413,7 @@ impl Core<'_> {
             _ => false,
         };
         self.fence_incarnation(sid, g);
+        self.orphan_tool_approvals(sid, g);
 
         let s = &self.st.sleeves[&sid];
         match s.life {
@@ -556,7 +557,7 @@ impl Core<'_> {
 
     // ----- commands -----
 
-    fn existing(&mut self, sid: SleeveId) -> bool {
+    pub(crate) fn existing(&mut self, sid: SleeveId) -> bool {
         let ok = self.st.sleeve(sid).is_some_and(|s| s.life != Life::Removed);
         if !ok {
             self.refuse(Code::NotFound, "no such sleeve");
@@ -672,80 +673,6 @@ impl Core<'_> {
             self.sl(sid).activity = Activity::Idle { seen: true };
             self.settled(sid);
         }
-    }
-
-    pub(crate) fn respond_cmd(&mut self, sid: SleeveId, approval: &str, allow: bool, note: &str) {
-        if !self.existing(sid) {
-            return;
-        }
-        let s = &self.st.sleeves[&sid];
-        let pending = matches!(&s.activity, Activity::Blocked { approvals } if approvals.iter().any(|a| a == approval));
-        if s.proc != Proc::Up || s.target.mode != Mode::Headless || !pending {
-            return self.refuse(Code::FailedPrecondition, "no such pending approval");
-        }
-        if let Some(sent) = self.answered(sid, approval) {
-            if sent == allow {
-                return self.reply(Reply::Duplicate);
-            }
-            return self.refuse(
-                Code::FailedPrecondition,
-                "a response to that approval is already sent or may have applied",
-            );
-        }
-        self.respond(sid, approval, allow, note);
-        self.reply(Reply::Accepted);
-    }
-
-    /// The decision of a response to `approval` that was, or may yet be, written to the current
-    /// incarnation. Another write would answer twice (12b item 1). A Rejected record wrote
-    /// nothing, and an Abandoned one is the owner's explicit release.
-    fn answered(&self, sid: SleeveId, approval: &str) -> Option<bool> {
-        let g = self.st.sleeves[&sid].g;
-        self.st.effects.values().find_map(|e| match &e.kind {
-            EffectKind::RespondApproval {
-                sleeve,
-                g: eg,
-                approval: a,
-                allow,
-                ..
-            } if *sleeve == sid
-                && *eg == g
-                && a == approval
-                && !matches!(
-                    e.state,
-                    EffectState::Rejected | EffectState::Abandoned | EffectState::Failed
-                ) =>
-            {
-                Some(*allow)
-            }
-            _ => None,
-        })
-    }
-
-    /// Writes a response unless one is already outstanding; returns whether it did.
-    pub(crate) fn respond(
-        &mut self,
-        sid: SleeveId,
-        approval: &str,
-        allow: bool,
-        note: &str,
-    ) -> bool {
-        if self.answered(sid, approval).is_some() {
-            return false;
-        }
-        let g = self.st.sleeves[&sid].g;
-        let n = self.st.next_effect;
-        self.new_effect(
-            EffectKind::RespondApproval {
-                sleeve: sid,
-                g,
-                approval: approval.to_string(),
-                allow,
-                note: note.to_string(),
-            },
-            format!("approval:{}:{}:{approval}:{n}", sid.0, g.0),
-        );
-        true
     }
 
     pub(crate) fn viewed_cmd(&mut self, sid: SleeveId) {
@@ -1127,7 +1054,7 @@ impl Core<'_> {
                     }
                 }
             }
-            Obs::ApprovalRequested { id } => {
+            Obs::ApprovalRequested { id, ask } => {
                 self.prompt_evidence(sid);
                 let s = self.sl(sid);
                 match &mut s.activity {
@@ -1142,13 +1069,7 @@ impl Core<'_> {
                     }
                     _ => return,
                 }
-                self.notify(
-                    Party::Owner,
-                    Some(sid),
-                    Notice::ApprovalRequested {
-                        approval: id.clone(),
-                    },
-                );
+                self.tool_requested(sid, g, id, ask);
             }
             Obs::ApprovalResolved { id } => {
                 let s = self.sl(sid);
@@ -1158,6 +1079,7 @@ impl Core<'_> {
                         s.activity = Activity::Working;
                     }
                 }
+                self.tool_withdrawn(sid, g, id);
             }
             Obs::TurnSettled { end } => {
                 // Not evidence for an in-flight prompt: a settle with no turn begun is the
@@ -1171,6 +1093,9 @@ impl Core<'_> {
                 }
                 s.activity = Activity::Idle { seen: false };
                 s.turn = None;
+                // Whatever the harness still asked in this turn went away with it.
+                self.withdraw_tool_approvals(sid, g);
+                let s = self.sl(sid);
                 if s.guard.state == GuardState::Interrupting {
                     s.guard.state = GuardState::Armed;
                 }

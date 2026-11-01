@@ -499,6 +499,8 @@ class ApprovalBlock extends StatelessWidget {
         ApprovalState.denied => ('DENIED', p.alarm),
         ApprovalState.expired => ('EXPIRED', p.dim),
         ApprovalState.cancelled => ('CANCELLED', p.dim),
+        ApprovalState.fenced => ('FENCED', p.warn),
+        ApprovalState.abandoned => ('ABANDONED', p.warn),
         _ => ('UNKNOWN', p.dim),
       };
       return Line([
@@ -507,6 +509,7 @@ class ApprovalBlock extends StatelessWidget {
         if (a.decidedBy != null) sp(context, ' by ${a.decidedBy!.wire}', color: p.dim),
         if (a.decidedAt != null) sp(context, ' ${hhmm(a.decidedAt!)}', color: p.dim),
         sp(context, '  ${a.title} ${a.summary}', color: p.dim),
+        if (a.note.isNotEmpty) sp(context, '  (${a.note})', color: p.dim),
       ], maxLines: null);
     }
     return Column(
@@ -519,6 +522,11 @@ class ApprovalBlock extends StatelessWidget {
           sp(context, '${a.title} ', color: p.lit, bold: true),
           sp(context, a.summary, color: p.lit),
         ], maxLines: null),
+        if (a.note.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(left: kCell),
+            child: T(a.note, color: p.warn, maxLines: null),
+          ),
         if (a.detail.isNotEmpty && a.detail != a.summary)
           Padding(
             padding: const EdgeInsets.only(left: kCell),

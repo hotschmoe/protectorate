@@ -177,16 +177,7 @@ impl Core<'_> {
                 }
                 let approvals = approvals.clone();
                 self.sl(sid).blocked_at = self.now;
-                for a in approvals {
-                    if !self.respond(sid, &a, false, "approval timed out after 30 minutes") {
-                        continue;
-                    }
-                    self.notify(
-                        Party::Owner,
-                        Some(sid),
-                        Notice::ApprovalTimedOut { approval: a },
-                    );
-                }
+                self.deny_timed_out(sid, &approvals);
             }
             Action::Resume => self.after_death(sid, Cause::Guard(g)),
         }
