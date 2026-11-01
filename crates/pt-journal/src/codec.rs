@@ -57,6 +57,16 @@ pub fn encode_frame(payload: &[u8], out: &mut Vec<u8>) -> Result<(), EncodeError
     Ok(())
 }
 
+/// The total length of the frame at the start of `buf` when its declared length is valid and
+/// its payload is all present, whatever its CRC.
+pub fn complete_len(buf: &[u8]) -> Option<usize> {
+    if buf.len() < FRAME_HEADER {
+        return None;
+    }
+    let len = u32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]) as usize;
+    (len != 0 && len <= MAX_FRAME && buf.len() - FRAME_HEADER >= len).then_some(FRAME_HEADER + len)
+}
+
 /// Decodes frames from the start of `buf` up to the first invalid one. Nothing after the first
 /// invalid frame is examined: a damaged frame in the middle ends the valid prefix.
 pub fn decode_frames(buf: &[u8]) -> Decoded<'_> {

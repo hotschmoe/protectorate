@@ -70,8 +70,9 @@ pub struct Journal {
 }
 
 impl Journal {
-    /// Opens or creates the journal in `dir`, truncating a torn or corrupt tail of the live
-    /// segment to its last good frame.
+    /// Opens or creates the journal in `dir`, truncating a torn tail of the live segment to its
+    /// last good frame. A frame that fails its CRC with an intact frame after it is corruption,
+    /// not a torn append: open fails with `InvalidData` and leaves the file as it is.
     pub fn open(dir: &Path) -> io::Result<(Journal, Recovered)> {
         create_dir_durable(dir)?;
         let lock_path = dir.join("lock");
@@ -344,8 +345,23 @@ fn open_segment(path: &Path) -> io::Result<Segment> {
     }
     check_header(path, &data[..HEADER_LEN], &SEGMENT_MAGIC)?;
     let decoded = codec::decode_frames(&data[HEADER_LEN..]);
-    let frames = decoded.frames.iter().map(|f| f.to_vec()).collect();
     let good = (HEADER_LEN + decoded.valid_len) as u64;
+    if decoded.stop == Some(Stop::CrcMismatch) {
+        // A torn append damages only the last complete frame. A damaged frame with an intact
+        // one after it is corruption of committed data: cutting would lose that frame.
+        let bad = &data[HEADER_LEN + decoded.valid_len..];
+        let end = codec::complete_len(bad).expect("a CRC mismatch is a complete frame");
+        if !codec::decode_frames(&bad[end..]).frames.is_empty() {
+            return Err(invalid(
+                path,
+                format!(
+                    "frame at offset {good} fails its CRC and intact frames follow it; \
+                     the segment is left as it is"
+                ),
+            ));
+        }
+    }
+    let frames = decoded.frames.iter().map(|f| f.to_vec()).collect();
     let cut = match decoded.stop {
         None => None,
         Some(stop) => {
