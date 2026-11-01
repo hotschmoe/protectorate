@@ -175,11 +175,17 @@ pub fn intents(sim: &mut Sim, idx: usize, out: &[Intent]) {
                 "message {request_id} sent to {sleeve:?}, a child of a parked root"
             );
         }
-        if let EffectKind::ContinuationBrief { sleeve, cause, .. } = kind
-            && *cause != Cause::Manual
-            && *attempt == 1
-        {
-            sim.briefs.push((idx, *sleeve, sim.now));
+    }
+}
+
+/// Records each automatic resleeve as the core decides it: the step that puts a sleeve into
+/// Resleeving (I10). Its brief can come much later, after a long quiesce.
+pub fn resleeves(prev: &State, sim: &mut Sim, idx: usize) {
+    for (&sid, s) in &sim.st.sleeves {
+        let entered = s.life == Life::Resleeving
+            && prev.sleeves.get(&sid).map(|p| p.life) != Some(Life::Resleeving);
+        if entered && s.guard.cause.is_some_and(|c| c != Cause::Manual) {
+            sim.resleeves.push((idx, sid, sim.now));
         }
     }
 }
@@ -699,7 +705,7 @@ pub fn invariants(st: &State, sim: &Sim) {
 
     // I10: automatic resleeves per sleeve in any hour.
     let mut by_sleeve: BTreeMap<SleeveId, Vec<Millis>> = BTreeMap::new();
-    for &(_, s, t) in &sim.briefs {
+    for &(_, s, t) in &sim.resleeves {
         by_sleeve.entry(s).or_default().push(t);
     }
     for times in by_sleeve.values() {
