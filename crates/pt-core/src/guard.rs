@@ -10,6 +10,9 @@ use crate::state::*;
 pub mod limits {
     use crate::model::*;
 
+    pub use crate::effect::{MAX_ATTEMPTS, UNKNOWABLE_NOTIFY};
+    pub use crate::job::{LEASE, NODE_RESENDS};
+
     pub const MAX_CHILDREN: usize = 8;
     /// G5: not Ready within this long.
     pub const START_TIMEOUT: Millis = 60 * SECOND;
@@ -69,36 +72,42 @@ pub fn action(g: Guardrail) -> Action {
     }
 }
 
+/// Time since `t`, which is never after `now`. Event times may come close to `Millis::MAX`, so
+/// every timeout compares elapsed time rather than adding to a stamp.
+pub(crate) fn since(now: Millis, t: Millis) -> Millis {
+    now.saturating_sub(t)
+}
+
 fn recent(v: &mut Vec<Millis>, now: Millis, window: Millis) -> usize {
-    v.retain(|&t| t + window > now);
+    v.retain(|&t| since(now, t) < window);
     v.len()
 }
 
 /// G5: not Ready within 60 s.
 pub fn start_failed(s: &Sleeve, now: Millis) -> bool {
-    s.activity == Activity::Booting && now >= s.boot_at + START_TIMEOUT
+    s.activity == Activity::Booting && since(now, s.boot_at) >= START_TIMEOUT
 }
 
 /// G6: Working with no progress for 15 min.
 pub fn silent(s: &Sleeve, now: Millis) -> bool {
-    s.activity == Activity::Working && now >= s.progress_at + SILENT
+    s.activity == Activity::Working && since(now, s.progress_at) >= SILENT
 }
 
 /// G8: one turn Working (or Blocked) for more than 90 min.
 pub fn turn_wallclock(s: &Sleeve, now: Millis) -> bool {
     matches!(s.activity, Activity::Working | Activity::Blocked { .. })
-        && now >= s.turn_at + TURN_WALLCLOCK
+        && since(now, s.turn_at) >= TURN_WALLCLOCK
 }
 
 /// G9: Blocked on an approval for more than 30 min.
 pub fn approval_timeout(s: &Sleeve, now: Millis) -> bool {
     matches!(&s.activity, Activity::Blocked { approvals } if !approvals.is_empty())
-        && now >= s.blocked_at + APPROVAL_TIMEOUT
+        && since(now, s.blocked_at) >= APPROVAL_TIMEOUT
 }
 
 /// G13: Interrupting for more than 30 s.
 pub fn interrupt_unresponsive(s: &Sleeve, now: Millis) -> bool {
-    s.activity == Activity::Interrupting && now >= s.interrupt_at + INTERRUPT_TIMEOUT
+    s.activity == Activity::Interrupting && since(now, s.interrupt_at) >= INTERRUPT_TIMEOUT
 }
 
 impl Core<'_> {
@@ -169,7 +178,9 @@ impl Core<'_> {
                 let approvals = approvals.clone();
                 self.sl(sid).blocked_at = self.now;
                 for a in approvals {
-                    self.respond(sid, &a, false, "approval timed out after 30 minutes");
+                    if !self.respond(sid, &a, false, "approval timed out after 30 minutes") {
+                        continue;
+                    }
                     self.notify(
                         Party::Owner,
                         Some(sid),
@@ -230,7 +241,7 @@ impl Core<'_> {
             return self.capture(sid, true);
         }
         s.guard.state = GuardState::Quiescing {
-            deadline: now + QUIESCE_WAIT,
+            deadline: now.saturating_add(QUIESCE_WAIT),
             nudged: false,
         };
         if matches!(
@@ -400,8 +411,9 @@ impl Core<'_> {
             if s.proc == Proc::Down {
                 continue;
             }
-            let stop_due = s.stop_at.is_some_and(|t| now >= t + STOP_GRACE) && s.kill_at.is_none();
-            let kill_due = s.kill_at.is_some_and(|t| now >= t + STOP_GRACE);
+            let stop_due =
+                s.stop_at.is_some_and(|t| since(now, t) >= STOP_GRACE) && s.kill_at.is_none();
+            let kill_due = s.kill_at.is_some_and(|t| since(now, t) >= STOP_GRACE);
             if stop_due || kill_due {
                 self.kill(sid, None);
                 continue;
@@ -414,7 +426,7 @@ impl Core<'_> {
                     );
                     if busy && !nudged && s.proc == Proc::Up && s.target.mode == Mode::Headless {
                         self.sl(sid).guard.state = GuardState::Quiescing {
-                            deadline: now + QUIESCE_GRACE,
+                            deadline: now.saturating_add(QUIESCE_GRACE),
                             nudged: true,
                         };
                         self.interrupt(sid);

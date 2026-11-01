@@ -200,9 +200,12 @@ pub enum EventKind {
         node: NodeId,
         epoch: u64,
     },
+    /// `node` is the node that answered: a report from any node but the job's current one is
+    /// stale and dropped.
     JobStatus {
         job: JobId,
         attempt: u32,
+        node: NodeId,
         report: JobReport,
     },
     ArtifactsChecked {

@@ -48,6 +48,24 @@ fuzz_target!(|data: &[u8]| {
     let mut file = b"PTJOURNL\x01\0\0\0".to_vec();
     file.extend_from_slice(data);
     fs::write(&seg, &file).expect("write segment");
+    // A CRC mismatch with an intact frame after it is corruption: open refuses it untouched.
+    let corrupt = d.stop == Some(Stop::CrcMismatch) && {
+        let bad = &data[d.valid_len..];
+        let end = 8 + u32::from_le_bytes(bad[..4].try_into().expect("4 bytes")) as usize;
+        !decode_frames(&bad[end..]).frames.is_empty()
+    };
+    if corrupt {
+        let err = Journal::open(dir())
+            .err()
+            .expect("open refuses mid-segment corruption");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(
+            fs::read(&seg).expect("read"),
+            file,
+            "the segment is untouched"
+        );
+        return;
+    }
     let (journal, rec) = Journal::open(dir()).expect("open");
     drop(journal);
     assert_eq!(rec.frames.len(), d.frames.len());

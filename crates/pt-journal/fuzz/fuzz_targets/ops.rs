@@ -55,7 +55,7 @@ fuzz_target!(|data: &[u8]| {
     };
     while let Some(op) = next() {
         let full = fs::metadata(seg_path(&j)).expect("stat").len() > MAX_SEGMENT_BYTES;
-        match op % 6 {
+        match op % 7 {
             0 if !full => {
                 let p = payload(&mut next);
                 j.append(&p).expect("append");
@@ -127,6 +127,38 @@ fuzz_target!(|data: &[u8]| {
                 let (j2, rec) = Journal::open(dir()).expect("reopen damaged");
                 let cut = rec.cut.expect("damage reported");
                 assert_eq!(cut.offset, frames_len(&m.frames));
+                check(&rec, &m);
+                j = j2;
+            }
+            6 if m.frames.len() >= 2 => {
+                // A flipped payload bit in an earlier frame: open refuses the segment and leaves
+                // it untouched; with the bit restored it opens cleanly.
+                let path = seg_path(&j);
+                drop(j);
+                let i = next().unwrap_or(0) as usize % (m.frames.len() - 1);
+                let at = frames_len(&m.frames[..i])
+                    + 8
+                    + next().unwrap_or(0) as u64 % m.frames[i].len() as u64;
+                let bit = 1u8 << (next().unwrap_or(0) % 8);
+                let flip = || {
+                    let f = OpenOptions::new()
+                        .read(true)
+                        .write(true)
+                        .open(&path)
+                        .expect("open");
+                    let mut byte = [0u8];
+                    f.read_exact_at(&mut byte, at).expect("read");
+                    byte[0] ^= bit;
+                    f.write_all_at(&byte, at).expect("write");
+                };
+                flip();
+                let before = fs::read(&path).expect("read");
+                let err = Journal::open(dir()).err().expect("open refuses corruption");
+                assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+                assert_eq!(fs::read(&path).expect("read"), before, "segment untouched");
+                flip();
+                let (j2, rec) = Journal::open(dir()).expect("reopen restored");
+                assert_eq!(rec.cut, None);
                 check(&rec, &m);
                 j = j2;
             }

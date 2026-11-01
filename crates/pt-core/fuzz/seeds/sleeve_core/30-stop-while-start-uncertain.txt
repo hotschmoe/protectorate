@@ -1,0 +1,31 @@
+#scenario 6146a6b56b108f55
+# Stopping a root while its child's start is unconfirmed: the start's probe (a scope probe,
+# which always answers live or empty) settles it, and both sleeves reach Stopped. A start that
+# spawned but lost its receipt is stopped once the probe finds it.
+spawn root /w/a
+run
+obs root ready
+policy start=lost
+spawn kid /wt/kid parent=root
+step
+step
+step
+expect kid life=Launching
+expect-effect start:1:1 state=Probing
+stop root
+expect kid life=Stopping
+run
+expect kid life=Stopped
+expect root life=Stopped
+start root
+run
+obs root ready
+policy start=lostreceipt
+start kid
+step
+step
+expect-effect start:1:2 state=Probing
+stop root
+run
+expect kid life=Stopped
+expect root life=Stopped

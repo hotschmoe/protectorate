@@ -70,10 +70,11 @@ pub struct Journal {
 }
 
 impl Journal {
-    /// Opens or creates the journal in `dir`, truncating a torn or corrupt tail of the live
-    /// segment to its last good frame.
+    /// Opens or creates the journal in `dir`, truncating a torn tail of the live segment to its
+    /// last good frame. A frame that fails its CRC with an intact frame after it is corruption,
+    /// not a torn append: open fails with `InvalidData` and leaves the file as it is.
     pub fn open(dir: &Path) -> io::Result<(Journal, Recovered)> {
-        fs::create_dir_all(dir).map_err(|e| ctx(e, "create journal dir", dir))?;
+        create_dir_durable(dir)?;
         let lock_path = dir.join("lock");
         let lock = OpenOptions::new()
             .create(true)
@@ -344,8 +345,23 @@ fn open_segment(path: &Path) -> io::Result<Segment> {
     }
     check_header(path, &data[..HEADER_LEN], &SEGMENT_MAGIC)?;
     let decoded = codec::decode_frames(&data[HEADER_LEN..]);
-    let frames = decoded.frames.iter().map(|f| f.to_vec()).collect();
     let good = (HEADER_LEN + decoded.valid_len) as u64;
+    if decoded.stop == Some(Stop::CrcMismatch) {
+        // A torn append damages only the last complete frame. A damaged frame with an intact
+        // one after it is corruption of committed data: cutting would lose that frame.
+        let bad = &data[HEADER_LEN + decoded.valid_len..];
+        let end = codec::complete_len(bad).expect("a CRC mismatch is a complete frame");
+        if !codec::decode_frames(&bad[end..]).frames.is_empty() {
+            return Err(invalid(
+                path,
+                format!(
+                    "frame at offset {good} fails its CRC and intact frames follow it; \
+                     the segment is left as it is"
+                ),
+            ));
+        }
+    }
+    let frames = decoded.frames.iter().map(|f| f.to_vec()).collect();
     let cut = match decoded.stop {
         None => None,
         Some(stop) => {
@@ -373,6 +389,32 @@ fn create_segment(dir: &Path, path: &Path) -> io::Result<File> {
     file.sync_all().map_err(|e| ctx(e, "fsync", path))?;
     sync_dir(dir)?;
     Ok(file)
+}
+
+/// Creates `dir` and any missing ancestors, then fsyncs the parent of every directory created
+/// and of `dir` itself, so the journal's own entry survives a power loss. The parent is synced
+/// even when `dir` exists: an earlier open may have created it and crashed before its sync.
+fn create_dir_durable(dir: &Path) -> io::Result<()> {
+    let parent = |d: &Path| {
+        d.parent()
+            .filter(|up| !up.as_os_str().is_empty())
+            .unwrap_or(Path::new("."))
+            .to_path_buf()
+    };
+    let mut dirs = vec![dir];
+    while let Some(up) = dirs
+        .last()
+        .copied()
+        .and_then(Path::parent)
+        .filter(|up| !up.as_os_str().is_empty() && !up.exists())
+    {
+        dirs.push(up);
+    }
+    fs::create_dir_all(dir).map_err(|e| ctx(e, "create journal dir", dir))?;
+    for d in dirs {
+        sync_dir(&parent(d))?;
+    }
+    Ok(())
 }
 
 fn sync_dir(dir: &Path) -> io::Result<()> {

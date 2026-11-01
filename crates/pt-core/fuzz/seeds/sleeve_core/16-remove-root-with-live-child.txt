@@ -1,0 +1,38 @@
+#scenario e277cfaaaeddf01b
+# Remove on a root with a live child: whichever finishes stopping last, the child goes Stopped
+# then Removed, and a Removed child does not hold the root in Stopping.
+spawn root /w/a
+run
+obs root ready
+spawn kid /wt/kid parent=root
+run
+obs kid ready
+# The child's scope lingers after its stop, so the root is down first.
+policy stop=linger
+remove root
+step
+step
+expect root life=Stopping
+expect kid life=Stopping
+policy stop=exit
+tick 31s
+run
+expect root life=Removed
+expect kid life=Removed
+# Again, with the root's scope lingering past the child's.
+spawn root2 /w/b
+run
+obs root2 ready
+spawn kid2 /wt/kid2 parent=root2
+run
+obs kid2 ready
+policy stop=linger
+remove root2
+step
+policy stop=exit
+run
+expect kid2 life=Removed
+expect root2 life=Stopping
+tick 31s
+run
+expect root2 life=Removed

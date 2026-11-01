@@ -120,13 +120,15 @@ impl Core<'_> {
             E::JobStatus {
                 job,
                 attempt,
+                node,
                 report,
-            } => self.job_status(*job, *attempt, report),
+            } => self.job_status(*job, *attempt, *node, report),
             E::ArtifactsChecked { job, attempt, ok } => self.artifacts_checked(*job, *attempt, *ok),
 
             E::Observed { sleeve, g, obs } => self.observed(*sleeve, *g, obs),
             E::Exited { sleeve, g, cause } => self.exited(*sleeve, *g, *cause),
             E::Tick => {
+                self.tick_effects();
                 self.tick_sleeves();
                 self.tick_jobs();
             }

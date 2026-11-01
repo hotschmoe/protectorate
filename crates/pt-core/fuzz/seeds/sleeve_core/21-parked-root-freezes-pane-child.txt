@@ -1,0 +1,21 @@
+#scenario f47c964d7380d95e
+# A pane child of a root parked by G10 gets no inbox mail until the root starts again (12b
+# item 10).
+spawn root /w/a budget=100
+run
+obs root ready
+spawn kid /wt/kid parent=root pane
+run
+obs kid ready
+obs root usage=150
+expect root life=Parked
+expect kid life=Running
+send kid m1
+expect kid msg:m1=Queued queue=1
+run
+expect kid msg:m1=Queued queue=1
+expect-effect m1 count=0
+start root
+expect kid msg:m1=InFlight queue=0
+run
+expect kid msg:m1=Delivered

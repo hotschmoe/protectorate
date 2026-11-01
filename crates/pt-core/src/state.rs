@@ -247,6 +247,7 @@ pub struct Job {
     pub state: JobState,
     pub excluded: Vec<(NodeId, Millis)>,
     pub submit: Option<EffectId>,
+    /// The node's log length at its last Running report (not the hub's read position).
     pub offset: u64,
     pub exit: Option<i32>,
     pub verify_failures: u32,

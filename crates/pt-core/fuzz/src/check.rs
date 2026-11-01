@@ -154,11 +154,90 @@ pub fn intents(sim: &mut Sim, idx: usize, out: &[Intent]) {
             // I6: no effect for a generation that is no longer current.
             assert_eq!(sim.st.sleeves[&s].g, g, "I6: effect for a stale generation");
         }
+        // Parking a root freezes its children (12b item 10): no new message goes to them.
+        if *attempt == 1
+            && let EffectKind::SendPrompt {
+                sleeve, request_id, ..
+            }
+            | EffectKind::Steer {
+                sleeve, request_id, ..
+            }
+            | EffectKind::MailDeliver {
+                sleeve, request_id, ..
+            } = kind
+        {
+            let s = &sim.st.sleeves[sleeve];
+            let frozen = s
+                .parent
+                .is_some_and(|p| matches!(sim.st.sleeves[&p].life, Life::Parked(_)));
+            assert!(
+                !(frozen && s.messages.contains_key(request_id)),
+                "message {request_id} sent to {sleeve:?}, a child of a parked root"
+            );
+        }
         if let EffectKind::ContinuationBrief { sleeve, cause, .. } = kind
             && *cause != Cause::Manual
             && *attempt == 1
         {
             sim.briefs.push((idx, *sleeve, sim.now));
+        }
+    }
+}
+
+/// Checks after a Tick or HubRecovered: every waiting state has re-issued its I/O (12a item 7).
+pub fn timers(st: &State, tick: bool) {
+    for j in st.jobs.values() {
+        if matches!(j.state, JobState::Submitting | JobState::SubmitUncertain) {
+            let submit = j.submit.map(|e| st.effects[&e].state);
+            assert!(
+                submit.is_some_and(|s| !s.terminal()),
+                "job {:?} is {:?} with its submit {submit:?}",
+                j.id,
+                j.state
+            );
+        }
+        // No state waits on a node past its lease (12a item 6), counting time the hub was down.
+        let expired = match j.state {
+            JobState::Cancelling => st.now.saturating_sub(j.state_at) >= LEASE,
+            JobState::Collecting => tick && st.now.saturating_sub(j.seen_at) >= LEASE,
+            _ => false,
+        };
+        assert!(!expired, "job {:?} is {:?} past its lease", j.id, j.state);
+        let cancel_wanted = matches!(
+            j.state,
+            JobState::Cancelling | JobState::Lost | JobState::Abandoned
+        );
+        let stuck = st.effects.values().find(|e| {
+            let ours = match e.kind {
+                EffectKind::NodeCancel { job, attempt, .. } => {
+                    cancel_wanted && job == j.id && attempt == j.attempt
+                }
+                EffectKind::NodeAckCollected { job, attempt, .. } => {
+                    job == j.id && attempt == j.attempt
+                }
+                _ => false,
+            };
+            ours && matches!(e.state, EffectState::Uncertain | EffectState::Probing)
+        });
+        if let Some(e) = stuck {
+            panic!(
+                "job {:?} is {:?} and its node write {} is {:?}, not re-sent",
+                j.id, j.state, e.key, e.state
+            );
+        }
+    }
+    // A sleeve write a probe could not settle is sent again or probed again until the owner
+    // has been told.
+    if tick {
+        for e in st.effects.values() {
+            if e.state == EffectState::Uncertain && e.kind.sleeve().is_some() {
+                assert!(
+                    e.unknowable >= UNKNOWABLE_NOTIFY,
+                    "effect {} left Uncertain by a Tick after {} unknowable probes",
+                    e.key,
+                    e.unknowable
+                );
+            }
         }
     }
 }
@@ -333,6 +412,63 @@ pub fn invariants(st: &State, sim: &Sim) {
         i9(st, s);
     }
 
+    // A write the harness or a node acted on reached it: a record confirmed by evidence (harness
+    // output, a node's report) was dispatched. Idempotent records count as applied once their
+    // target is gone, and a start is confirmed by its scope, so neither is checked here.
+    for e in st.effects.values() {
+        let checked = !matches!(
+            e.kind,
+            EffectKind::StartIncarnation { .. } | EffectKind::NodeSubmit { .. }
+        ) && e.class != Class::Idempotent;
+        if checked && e.state == EffectState::Confirmed {
+            assert!(
+                sim.dispatched.contains(&e.id),
+                "effect {:?} ({}) confirmed but never dispatched",
+                e.id,
+                e.key
+            );
+        }
+    }
+    // A job runs on the node that was sent its submit.
+    for j in st.jobs.values() {
+        if matches!(j.state, JobState::Running | JobState::Collecting) {
+            let node = j.node.expect("a running job has a node");
+            assert!(
+                sim.submitted.contains(&(j.id, j.attempt, node)),
+                "job {:?} attempt {} is {:?} on {node:?}, which was never sent it",
+                j.id,
+                j.attempt,
+                j.state
+            );
+        }
+    }
+    // An Unsafe write is issued once: no second approval response while one may apply (12b
+    // item 1). An abandoned record is the owner's explicit release.
+    let mut answers = BTreeSet::new();
+    for e in st.effects.values() {
+        if let EffectKind::RespondApproval {
+            sleeve,
+            g,
+            approval,
+            ..
+        } = &e.kind
+            && matches!(
+                e.state,
+                EffectState::Intent
+                    | EffectState::Sent
+                    | EffectState::Uncertain
+                    | EffectState::Probing
+                    | EffectState::Confirmed
+            )
+        {
+            assert!(
+                answers.insert((*sleeve, *g, approval.clone())),
+                "two live responses to approval {approval} of {sleeve:?} g{}",
+                g.0
+            );
+        }
+    }
+
     // I10: automatic resleeves per sleeve in any hour.
     let mut by_sleeve: BTreeMap<SleeveId, Vec<Millis>> = BTreeMap::new();
     for &(_, s, t) in &sim.briefs {
@@ -342,7 +478,7 @@ pub fn invariants(st: &State, sim: &Sim) {
         for (i, &t) in times.iter().enumerate() {
             let n = times[i..]
                 .iter()
-                .take_while(|&&u| u < t + RESLEEVE_WINDOW)
+                .take_while(|&&u| u.saturating_sub(t) < RESLEEVE_WINDOW)
                 .count();
             assert!(
                 n <= RESLEEVE_LIMIT,

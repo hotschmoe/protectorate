@@ -641,11 +641,13 @@ impl Wire for EventKind {
             E::JobStatus {
                 job,
                 attempt,
+                node,
                 report,
             } => {
                 w.push(24);
                 job.put(w);
                 attempt.put(w);
+                node.put(w);
                 report.put(w);
             }
             E::ArtifactsChecked { job, attempt, ok } => {
@@ -769,6 +771,7 @@ impl Wire for EventKind {
             24 => E::JobStatus {
                 job: Wire::get(r)?,
                 attempt: Wire::get(r)?,
+                node: Wire::get(r)?,
                 report: Wire::get(r)?,
             },
             25 => E::ArtifactsChecked {

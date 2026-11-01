@@ -1,0 +1,38 @@
+#scenario 607ac9b473fb3199
+# A probe that cannot tell leaves the record Uncertain. A Keyed record the sleeve still wants
+# is sent again by the next Tick; an Unsafe one is only probed again, until the owner is told.
+spawn root /w/a pane
+run
+obs root ready
+policy other=lost probe=unknowable
+send root m1
+run
+expect-effect m1 state=Uncertain attempt=1
+tick 10s
+run
+expect-effect m1 state=Uncertain attempt=2
+policy other=ack
+tick 10s
+run
+expect-effect m1 state=Confirmed attempt=3
+expect root msg:m1=Delivered
+spawn head /w/b
+run
+obs head ready
+policy prompt=lost
+send head m2
+run
+expect-effect m2 state=Uncertain attempt=1
+tick 10s
+run
+tick 10s
+run
+expect-effect m2 state=Uncertain attempt=1
+tick 10s
+run
+tick 10s
+run
+expect-effect m2 state=Uncertain attempt=1
+expect head activity=Delivering msg:m2=InFlight
+abandon m2
+expect head activity=Idle msg:m2=MayHaveApplied

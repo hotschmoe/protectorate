@@ -404,6 +404,14 @@ impl Core<'_> {
         if let Proc::Starting(eff) = old {
             self.evidence(eff);
         }
+        // A brief prompt whose first byte left may have landed: once fenced it cannot be
+        // confirmed, so the sleeve parks instead of trying another target (12b item 7).
+        let brief_sent = match self.st.sleeves[&sid].guard.state {
+            GuardState::Briefing { effect } => {
+                self.effect_state(effect) != Some(EffectState::Intent)
+            }
+            _ => false,
+        };
         self.fence_incarnation(sid, g);
 
         let s = &self.st.sleeves[&sid];
@@ -411,6 +419,9 @@ impl Core<'_> {
             Life::Stopping { .. } => self.try_finalize(sid),
             Life::Resleeving => match s.guard.state {
                 GuardState::Quiescing { .. } => self.capture(sid, !stop_requested),
+                GuardState::Briefing { .. } if brief_sent => {
+                    self.park(sid, ParkReason::BriefUnconfirmed)
+                }
                 GuardState::Launching | GuardState::Briefing { .. } => self.launch_failed(sid),
                 _ => {}
             },
@@ -672,11 +683,56 @@ impl Core<'_> {
         if s.proc != Proc::Up || s.target.mode != Mode::Headless || !pending {
             return self.refuse(Code::FailedPrecondition, "no such pending approval");
         }
+        if let Some(sent) = self.answered(sid, approval) {
+            if sent == allow {
+                return self.reply(Reply::Duplicate);
+            }
+            return self.refuse(
+                Code::FailedPrecondition,
+                "a response to that approval is already sent or may have applied",
+            );
+        }
         self.respond(sid, approval, allow, note);
         self.reply(Reply::Accepted);
     }
 
-    pub(crate) fn respond(&mut self, sid: SleeveId, approval: &str, allow: bool, note: &str) {
+    /// The decision of a response to `approval` that was, or may yet be, written to the current
+    /// incarnation. Another write would answer twice (12b item 1). A Rejected record wrote
+    /// nothing, and an Abandoned one is the owner's explicit release.
+    fn answered(&self, sid: SleeveId, approval: &str) -> Option<bool> {
+        let g = self.st.sleeves[&sid].g;
+        self.st.effects.values().find_map(|e| match &e.kind {
+            EffectKind::RespondApproval {
+                sleeve,
+                g: eg,
+                approval: a,
+                allow,
+                ..
+            } if *sleeve == sid
+                && *eg == g
+                && a == approval
+                && !matches!(
+                    e.state,
+                    EffectState::Rejected | EffectState::Abandoned | EffectState::Failed
+                ) =>
+            {
+                Some(*allow)
+            }
+            _ => None,
+        })
+    }
+
+    /// Writes a response unless one is already outstanding; returns whether it did.
+    pub(crate) fn respond(
+        &mut self,
+        sid: SleeveId,
+        approval: &str,
+        allow: bool,
+        note: &str,
+    ) -> bool {
+        if self.answered(sid, approval).is_some() {
+            return false;
+        }
         let g = self.st.sleeves[&sid].g;
         let n = self.st.next_effect;
         self.new_effect(
@@ -689,6 +745,7 @@ impl Core<'_> {
             },
             format!("approval:{}:{}:{approval}:{n}", sid.0, g.0),
         );
+        true
     }
 
     pub(crate) fn viewed_cmd(&mut self, sid: SleeveId) {
@@ -739,7 +796,10 @@ impl Core<'_> {
         }
         let pane = s.target.mode == Mode::Pane;
         let steers = s.target.harness.steers() && s.life == Life::Running;
-        let working = s.proc == Proc::Up && s.activity == Activity::Working && s.turn.is_some();
+        let working = s.proc == Proc::Up
+            && s.activity == Activity::Working
+            && s.turn.is_some()
+            && !self.frozen(to);
         let delivering =
             matches!(s.activity, Activity::Delivering { .. }) && s.steer_slot.is_none();
         let queue_empty = s.queue.is_empty();
@@ -760,6 +820,10 @@ impl Core<'_> {
                 return self.refuse(Code::FailedPrecondition, "a pane cannot be steered");
             }
             insert(self, MsgState::Queued);
+            if self.frozen(to) {
+                self.sl(to).queue.push_back(request_id.to_string());
+                return self.reply(Reply::Queued);
+            }
             self.inbox(to, request_id);
             return self.reply(Reply::Inboxed);
         }
@@ -831,9 +895,6 @@ impl Core<'_> {
     /// A Send can go out as the next prompt now.
     pub(crate) fn deliverable(&self, sid: SleeveId) -> bool {
         let s = &self.st.sleeves[&sid];
-        let frozen = s
-            .parent
-            .is_some_and(|p| matches!(self.st.sleeves[&p].life, Life::Parked(_)));
         s.life == Life::Running
             && s.proc == Proc::Up
             && matches!(s.activity, Activity::Idle { .. })
@@ -842,7 +903,14 @@ impl Core<'_> {
                 s.guard.state,
                 GuardState::Armed | GuardState::Cooldown { .. }
             )
-            && !frozen
+            && !self.frozen(sid)
+    }
+
+    /// The sleeve's root is parked, which stops every send to its children (12b item 10).
+    fn frozen(&self, sid: SleeveId) -> bool {
+        self.st.sleeves[&sid]
+            .parent
+            .is_some_and(|p| matches!(self.st.sleeves[&p].life, Life::Parked(_)))
     }
 
     /// Dequeues the head message as the one prompt in flight (Delivering, 12b item 3). A pane
@@ -850,6 +918,9 @@ impl Core<'_> {
     pub(crate) fn deliver_next(&mut self, sid: SleeveId) {
         let s = &self.st.sleeves[&sid];
         if s.target.mode == Mode::Pane && s.life.live() {
+            if self.frozen(sid) {
+                return;
+            }
             while let Some(r) = self.sl(sid).queue.pop_front() {
                 self.inbox(sid, &r);
             }
@@ -946,7 +1017,13 @@ impl Core<'_> {
         s.turn_at = now;
         s.progress_at = now;
         let ready = s.turn.is_some() && s.proc == Proc::Up;
-        if ready && let Some(r) = s.steer_slot.take() {
+        if !ready {
+            return;
+        }
+        if self.frozen(sid) {
+            return self.return_steer(sid);
+        }
+        if let Some(r) = self.sl(sid).steer_slot.take() {
             self.steer(sid, &r);
         }
     }
@@ -959,7 +1036,7 @@ impl Core<'_> {
                 let s = self.sl(sid);
                 s.life = Life::Running;
                 s.guard.state = GuardState::Cooldown {
-                    until: now + COOLDOWN,
+                    until: now.saturating_add(COOLDOWN),
                 };
                 s.guard.since_gen = s.g;
                 s.guard.tried.clear();
@@ -1083,7 +1160,8 @@ impl Core<'_> {
                 }
             }
             Obs::TurnSettled { end } => {
-                self.prompt_evidence(sid);
+                // Not evidence for an in-flight prompt: a settle with no turn begun is the
+                // previous turn's, and is dropped below.
                 let s = self.sl(sid);
                 if !matches!(
                     s.activity,
@@ -1109,7 +1187,6 @@ impl Core<'_> {
                 if self.st.sleeves[&sid].activity != Activity::Compacting {
                     return;
                 }
-                self.sl(sid).activity = Activity::Idle { seen: true };
                 let pending: Vec<EffectId> = self
                     .st
                     .effects
@@ -1119,6 +1196,14 @@ impl Core<'_> {
                     })
                     .map(|e| e.id)
                     .collect();
+                // Not this compaction's: its first byte has not left yet.
+                if pending
+                    .iter()
+                    .any(|&e| self.effect_state(e) == Some(EffectState::Intent))
+                {
+                    return;
+                }
+                self.sl(sid).activity = Activity::Idle { seen: true };
                 for e in pending {
                     self.evidence(e);
                 }
@@ -1142,9 +1227,12 @@ impl Core<'_> {
         }
     }
 
-    /// Harness output while a prompt is in flight shows the prompt landed.
+    /// Harness output while a prompt is in flight shows the prompt landed, but only once its
+    /// first byte has left: output before that is the previous turn's (README, ordering).
     fn prompt_evidence(&mut self, sid: SleeveId) {
-        if let Activity::Delivering { effect } = self.st.sleeves[&sid].activity {
+        if let Activity::Delivering { effect } = self.st.sleeves[&sid].activity
+            && self.effect_state(effect) != Some(EffectState::Intent)
+        {
             self.evidence(effect);
         }
     }
