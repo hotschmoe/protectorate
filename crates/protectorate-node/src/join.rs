@@ -127,9 +127,10 @@ pub fn run(args: &[String]) -> Result<(), String> {
         format!("{}\n", cfg.to_json()).as_bytes(),
     )?;
     println!(
-        "Joined. Wrote {}.\nNext: protectorate-node install-service (as root or an elevated administrator), or\n  protectorate-node serve --state-dir {} --listen-tcp 127.0.0.1:7476",
+        "Joined. Wrote {}.\nNext: protectorate-node install-service (as root or an elevated administrator), or\n  protectorate-node serve --state-dir {} --listen-tcp {}",
         member::config_path(&state).display(),
-        state.display()
+        state.display(),
+        crate::service::LISTEN
     );
     Ok(())
 }
