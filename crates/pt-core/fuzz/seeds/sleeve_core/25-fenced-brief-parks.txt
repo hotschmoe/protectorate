@@ -1,0 +1,29 @@
+#scenario 3ad1b3044b093e62
+# The resleeved incarnation dies after its brief prompt was sent but before it was confirmed:
+# the brief may have landed, so the sleeve parks (12b item 7) rather than launching g+2.
+spawn root /w/a to=pi_local,codex
+run
+obs root ready
+resleeve root
+run
+expect root life=Resleeving guard=Launching g=2 harness=pilocal
+obs root ready
+expect root guard=Briefing activity=Delivering
+policy prompt=none
+run
+expect-effect resleeve:root:2 state=Sent
+exit root
+expect root life=Parked guard=Parked g=2
+expect-effect resleeve:root:2 state=Fenced
+# A brief that never left is a plain launch failure: the next target is tried.
+start root
+run
+obs root ready
+resleeve root
+run
+expect root guard=Launching g=4
+obs root ready
+expect root guard=Briefing
+exit root
+run
+expect root life=Resleeving g=5 harness=codex

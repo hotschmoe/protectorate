@@ -404,6 +404,14 @@ impl Core<'_> {
         if let Proc::Starting(eff) = old {
             self.evidence(eff);
         }
+        // A brief prompt whose first byte left may have landed: once fenced it cannot be
+        // confirmed, so the sleeve parks instead of trying another target (12b item 7).
+        let brief_sent = match self.st.sleeves[&sid].guard.state {
+            GuardState::Briefing { effect } => {
+                self.effect_state(effect) != Some(EffectState::Intent)
+            }
+            _ => false,
+        };
         self.fence_incarnation(sid, g);
 
         let s = &self.st.sleeves[&sid];
@@ -411,6 +419,9 @@ impl Core<'_> {
             Life::Stopping { .. } => self.try_finalize(sid),
             Life::Resleeving => match s.guard.state {
                 GuardState::Quiescing { .. } => self.capture(sid, !stop_requested),
+                GuardState::Briefing { .. } if brief_sent => {
+                    self.park(sid, ParkReason::BriefUnconfirmed)
+                }
                 GuardState::Launching | GuardState::Briefing { .. } => self.launch_failed(sid),
                 _ => {}
             },
