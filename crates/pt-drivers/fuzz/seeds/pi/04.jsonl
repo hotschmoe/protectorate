@@ -1,0 +1,20 @@
+#
+{"id":"pt-1","type":"response","command":"get_state","success":true,"data":{"sessionId":"S","model":{"id":"m","provider":"p","contextWindow":99999999999999999999}}}
+!send /handled
+{"id":"pt-2","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}
+!send A
+{"type":"agent_settled","aborted":false}
+{"id":"pt-3","type":"response","command":"prompt","success":true,"data":{"disposition":"started"}}
+{"type":"agent_start"}
+{"type":"message_end","message":{"role":"assistant","usage":{"input":18446744073709551615,"output":18446744073709551615,"cacheRead":18446744073709551615,"cacheWrite":1,"cost":{"total":1e300}}}}
+{"type":"message_end","message":{"role":"assistant","usage":{"input":1099511627776,"output":1099511627776,"cost":{"total":999999}}}}
+{"type":"message_end","message":{"role":"assistant","usage":{"input":1099511627776,"output":1099511627776,"cost":{"total":-5}}}}
+!steer pi-turn-2
+{"id":"pt-4","type":"response","command":"prompt","success":true,"data":{"disposition":"queued"}}
+!steer pi-turn-1
+!wrote
+{"type":"agent_settled","aborted":false}
+!steer pi-turn-2
+!send C
+{"id":"pt-5","type":"response","command":"prompt","success":true}
+{"id":"pt-5","type":"response","command":"prompt","success":"yes","data":{"disposition":"started"}}

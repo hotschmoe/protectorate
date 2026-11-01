@@ -2,9 +2,9 @@
 //!
 //! The prompt ack is Grok's own `_x.ai/queue/changed` naming the running prompt, or the
 //! first session update after the prompt. Updates replayed by `session/load` arrive before its
-//! reply and are dropped.
+//! reply and are dropped, and so are notices naming a prompt that already ended.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use pt_json::{Value, obj};
 
@@ -24,6 +24,8 @@ pub(crate) struct Grok {
     pending: HashMap<u64, Rpc>,
     session_id: Option<String>,
     turn: Option<Turn>,
+    /// Grok's ids of recently ended prompts.
+    finished: VecDeque<String>,
     turns: u64,
     segment: u64,
     changed_tools: HashSet<String>,
@@ -40,6 +42,8 @@ enum Rpc {
 struct Turn {
     request_id: String,
     acked: bool,
+    /// Grok's prompt id, once a notice named it.
+    native: Option<String>,
 }
 
 struct Approval {
@@ -58,6 +62,7 @@ impl Grok {
             pending: HashMap::new(),
             session_id: None,
             turn: None,
+            finished: VecDeque::new(),
             turns: 0,
             segment: 0,
             changed_tools: HashSet::new(),
@@ -94,11 +99,24 @@ impl Grok {
         });
     }
 
+    /// A notice names Grok prompt `id`: true when that is not the running prompt.
+    fn stale(&self, id: &str) -> bool {
+        self.finished.iter().any(|f| f == id)
+            || self
+                .turn
+                .as_ref()
+                .and_then(|t| t.native.as_deref())
+                .is_some_and(|n| n != id)
+    }
+
     fn ack(&mut self, native: Option<String>, out: &mut Out) {
         let Some(turn) = self.turn.as_mut().filter(|t| !t.acked) else {
             return;
         };
         turn.acked = true;
+        if native.is_some() {
+            turn.native.clone_from(&native);
+        }
         let request_id = turn.request_id.clone();
         out.emit(Entry::PromptAck {
             request_id: request_id.clone(),
@@ -122,6 +140,13 @@ impl Grok {
         };
         let error = &msg["error"];
         let failed = !error.is_null();
+        if failed == msg.get("result").is_some() {
+            out.error(
+                ErrorClass::Protocol,
+                format!("grok reply to request {} is malformed", msg["id"]),
+            );
+            return;
+        }
         let message = format!(
             "{} (code {})",
             error["message"].as_str().unwrap_or("request failed"),
@@ -199,17 +224,34 @@ impl Grok {
         result: &Value,
         out: &mut Out,
     ) {
-        let acked = self.turn.as_ref().is_some_and(|t| t.acked);
-        if self
+        let turn = self
             .turn
-            .as_ref()
-            .is_some_and(|t| t.request_id == request_id)
-        {
-            self.turn = None;
-        }
+            .take_if(|t| t.request_id == request_id)
+            .map(|t| t.acked);
+        let acked = turn == Some(true);
         self.approvals.clear();
         self.finished_tools.clear();
         self.changed_tools.clear();
+        let meta = &result["_meta"];
+        let prompt_id = opt_str(&meta["promptId"]);
+        if let Some(id) = &prompt_id {
+            if self.finished.len() == 16 {
+                self.finished.pop_front();
+            }
+            self.finished.push_back(id.clone());
+        }
+        let native = opt_str(&result["stopReason"]);
+        let malformed = !failed && native.is_none();
+        if malformed {
+            out.error(
+                ErrorClass::Protocol,
+                "grok session/prompt reply has no stopReason",
+            );
+            if !acked {
+                // Nothing showed the prompt ran: its effect stays open.
+                return;
+            }
+        }
         if failed && !acked {
             out.emit(Entry::PromptAck {
                 request_id,
@@ -227,12 +269,12 @@ impl Grok {
             out.emit(Entry::PromptAck {
                 request_id: request_id.clone(),
                 ack: AckKind::Confirmed,
-                native_turn_id: None,
+                native_turn_id: prompt_id.clone(),
                 detail: None,
             });
             out.emit(Entry::TurnStarted {
                 request_id: Some(request_id),
-                native_turn_id: None,
+                native_turn_id: prompt_id,
             });
         }
         if failed {
@@ -241,9 +283,8 @@ impl Grok {
                 format!("grok session/prompt: {message}"),
             );
         }
-        let native = opt_str(&result["stopReason"]);
         let stop = match native.as_deref() {
-            _ if failed => Stop::Error,
+            _ if failed || malformed => Stop::Error,
             Some("end_turn") => Stop::EndTurn,
             Some("cancelled") => Stop::Cancelled,
             Some("max_tokens" | "max_turn_requests") => Stop::MaxTurns,
@@ -255,19 +296,21 @@ impl Grok {
         } else {
             meta
         };
-        let n = |k: &str| u[k].as_u64().unwrap_or(0);
+        let context_tokens = out.count("totalTokens", &meta["totalTokens"]);
+        let mut n = |k: &str| out.count(k, &u[k]).unwrap_or(0);
+        let usage = Usage {
+            input: n("inputTokens").saturating_sub(n("cachedReadTokens")),
+            output: n("outputTokens"),
+            cache_read: n("cachedReadTokens"),
+            cache_write: n("cacheCreationTokens"),
+            cost_usd: None,
+            context_tokens,
+            context_window: None,
+        };
         out.emit(Entry::TurnSettled {
             stop,
             native_stop: native,
-            usage: Usage {
-                input: n("inputTokens").saturating_sub(n("cachedReadTokens")),
-                output: n("outputTokens"),
-                cache_read: n("cachedReadTokens"),
-                cache_write: n("cacheCreationTokens"),
-                cost_usd: None,
-                context_tokens: meta["totalTokens"].as_u64(),
-                context_window: None,
-            },
+            usage,
             duration_ms: u["apiDurationMs"].as_u64(),
         });
     }
@@ -290,19 +333,37 @@ impl Grok {
             .iter()
             .filter_map(|o| Some((opt_str(&o["kind"])?, opt_str(&o["optionId"])?)))
             .collect();
+        // Deny picks reject_once or else cancels; reject_always would outlive the call.
         let mut offered = Vec::new();
-        for (kind, _) in &options {
-            let d = match kind.as_str() {
-                "allow_once" => Decision::AllowOnce,
-                "allow_always" => Decision::AllowSession,
-                _ => Decision::Deny,
-            };
-            if !offered.contains(&d) {
+        for (kind, d) in [
+            ("allow_once", Decision::AllowOnce),
+            ("allow_always", Decision::AllowSession),
+        ] {
+            if options.iter().any(|(k, _)| k == kind) {
                 offered.push(d);
             }
         }
-        offered.push(Decision::Cancel);
-        let id = format!("grok-{}", id_key(&msg["id"]));
+        offered.extend([Decision::Deny, Decision::Cancel]);
+        let Some(key) = id_key(&msg["id"]) else {
+            out.error(
+                ErrorClass::Protocol,
+                format!("grok request {method} has id {}", msg["id"]),
+            );
+            return;
+        };
+        let id = format!("grok-{key}");
+        if self.approvals.contains_key(&id) {
+            out.error(
+                ErrorClass::Protocol,
+                format!("grok reused pending request id {}", msg["id"]),
+            );
+            return;
+        }
+        let auto = if offered.contains(&Decision::AllowOnce) {
+            Decision::AllowOnce
+        } else {
+            Decision::Cancel
+        };
         let title = tool["title"].as_str().unwrap_or("");
         let kind = acp_kind(tool);
         let name = if title.is_empty() { kind } else { title };
@@ -323,7 +384,7 @@ impl Grok {
             },
         );
         if !self.supervised {
-            let _ = self.answer(&id, Decision::AllowOnce, Some("autonomous"), out);
+            let _ = self.answer(&id, auto, Some("autonomous"), out);
         }
     }
 
@@ -336,21 +397,30 @@ impl Grok {
     ) -> Result<(), DriverError> {
         let approval = self
             .approvals
-            .remove(id)
+            .get(id)
             .ok_or_else(|| DriverError::UnknownApproval(id.to_owned()))?;
-        let pick = |want: &str, prefix: &str| {
+        let pick = |want: &str| {
             approval
                 .options
                 .iter()
                 .find(|(k, _)| k == want)
-                .or_else(|| approval.options.iter().find(|(k, _)| k.starts_with(prefix)))
                 .map(|(_, id)| id.clone())
         };
+        // Never wider than asked: allow-once is never answered with allow_always.
         let option = match decision {
-            Decision::AllowOnce => pick("allow_once", "allow"),
-            Decision::AllowSession => pick("allow_always", "allow_once"),
-            Decision::Deny => pick("reject_once", "reject"),
+            Decision::AllowOnce => Some(pick("allow_once").ok_or(DriverError::Unsupported(
+                "grok offered no allow-once option",
+            ))?),
+            Decision::AllowSession => Some(
+                pick("allow_always")
+                    .or_else(|| pick("allow_once"))
+                    .ok_or(DriverError::Unsupported("grok offered no allow option"))?,
+            ),
+            Decision::Deny => pick("reject_once"),
             Decision::Cancel => None,
+        };
+        let Some(approval) = self.approvals.remove(id) else {
+            return Err(DriverError::UnknownApproval(id.to_owned()));
         };
         let outcome = match option {
             Some(option) => obj! { "outcome" => "selected", "optionId" => option },
@@ -378,9 +448,20 @@ impl Grok {
             return;
         }
         match method {
-            "session/update" => self.on_update(&p["update"], out),
+            "session/update" => {
+                let prompt = opt_str(&p["_meta"]["promptId"]);
+                if prompt.as_deref().is_some_and(|id| self.stale(id)) {
+                    return;
+                }
+                if let Some(t) = self.turn.as_mut().filter(|t| t.native.is_none()) {
+                    t.native.clone_from(&prompt);
+                }
+                self.on_update(&p["update"], prompt, out);
+            }
             "_x.ai/queue/changed" => {
-                if let Some(running) = opt_str(&p["runningPromptId"]) {
+                if let Some(running) = opt_str(&p["runningPromptId"])
+                    && !self.stale(&running)
+                {
                     self.ack(Some(running), out);
                 }
             }
@@ -389,13 +470,13 @@ impl Grok {
         }
     }
 
-    fn on_update(&mut self, u: &Value, out: &mut Out) {
+    fn on_update(&mut self, u: &Value, prompt: Option<String>, out: &mut Out) {
         let kind = u["sessionUpdate"].as_str().unwrap_or_default();
         if matches!(
             kind,
             "agent_message_chunk" | "agent_thought_chunk" | "tool_call" | "tool_call_update"
         ) {
-            self.ack(None, out);
+            self.ack(prompt, out);
         }
         match kind {
             "agent_message_chunk" | "agent_thought_chunk" => {
@@ -542,11 +623,11 @@ impl Protocol for Grok {
         &mut self,
         request_id: &str,
         text: &str,
-        steer: bool,
+        steer: Option<&str>,
         out: &mut Out,
     ) -> Result<(), DriverError> {
         let session = self.session_id.clone().ok_or(DriverError::NotReady)?;
-        if steer {
+        if steer.is_some() {
             return Err(DriverError::Unsupported("Grok cannot steer a running turn"));
         }
         if self.turn.is_some() {
@@ -565,6 +646,7 @@ impl Protocol for Grok {
         self.turn = Some(Turn {
             request_id: request_id.to_owned(),
             acked: false,
+            native: None,
         });
         Ok(())
     }

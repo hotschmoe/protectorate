@@ -1,0 +1,24 @@
+# supervised
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}
+{"jsonrpc":"2.0","id":2,"result":{"sessionId":"S"}}
+!send A
+{"jsonrpc":"2.0","method":"_x.ai/queue/changed","params":{"sessionId":"S","entries":[],"runningPromptId":"pA"}}
+{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{"sessionId":"S","toolCall":{"title":"rm","kind":"execute"},"options":[{"kind":"allow_always","optionId":"aa"},{"kind":"reject_always","optionId":"ra"}]}}
+!approve grok-7
+!session grok-7
+{"jsonrpc":"2.0","id":"7","method":"session/request_permission","params":{"sessionId":"S","toolCall":{"title":"ls","kind":"read"},"options":[{"kind":"allow_once","optionId":"ao"},{"kind":"allow_always","optionId":"aa"},{"kind":"reject_always","optionId":"ra"}]}}
+{"jsonrpc":"2.0","id":"7","method":"session/request_permission","params":{"sessionId":"S","toolCall":{"title":"dup","kind":"read"},"options":[]}}
+!deny grok-s:7
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"S","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"hi"}},"_meta":{"promptId":"pA"}}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"S","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"other"}},"_meta":{"promptId":"pZ"}}}
+{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn","_meta":{"promptId":"pA","totalTokens":18446744073709551615,"usage":{"inputTokens":18446744073709551615,"cachedReadTokens":1,"outputTokens":99999999999999999999}}}}
+!send B
+!wrote
+{"jsonrpc":"2.0","method":"_x.ai/queue/changed","params":{"sessionId":"S","entries":[],"runningPromptId":"pA"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"S","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"late"}},"_meta":{"promptId":"pA"}}}
+{"jsonrpc":"2.0","method":"_x.ai/queue/changed","params":{"sessionId":"S","entries":[],"runningPromptId":"pB"}}
+{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn","_meta":{"promptId":"pB"}}}
+!send C
+{"jsonrpc":"2.0","id":5}
+!send D
+{"jsonrpc":"2.0","id":5,"result":{"_meta":{}}}

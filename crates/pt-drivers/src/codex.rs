@@ -4,7 +4,7 @@
 //! A `turn/start` with no reply stays unconfirmed: the effect record turns that into
 //! Uncertain, never into "not started".
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use pt_json::{Value, obj};
 
@@ -25,6 +25,8 @@ pub(crate) struct Codex {
     pending: HashMap<u64, Rpc>,
     thread_id: Option<String>,
     turn: Option<Turn>,
+    /// Recently completed turn ids, so a late or repeated notice for one is not this turn's.
+    finished: VecDeque<String>,
     approvals: HashMap<String, Approval>,
     answered: HashMap<String, Decision>,
     last_total: Totals,
@@ -75,6 +77,7 @@ impl Codex {
             pending: HashMap::new(),
             thread_id: None,
             turn: None,
+            finished: VecDeque::new(),
             approvals: HashMap::new(),
             answered: HashMap::new(),
             last_total: Totals::default(),
@@ -140,12 +143,21 @@ impl Codex {
         );
     }
 
+    /// Gives the running turn its native id (once) and reports it started.
     fn bind_turn(&mut self, native: Option<String>, out: &mut Out) {
         let Some(turn) = self.turn.as_mut() else {
             return;
         };
-        if turn.native.is_none() {
-            turn.native = native;
+        match (&turn.native, native) {
+            (None, native) => turn.native = native,
+            (Some(have), Some(native)) if *have != native => {
+                out.error(
+                    ErrorClass::Protocol,
+                    format!("codex named turn {native} for turn {have}"),
+                );
+                return;
+            }
+            _ => {}
         }
         if !turn.started && turn.native.is_some() {
             turn.started = true;
@@ -159,6 +171,10 @@ impl Codex {
         }
     }
 
+    fn finished(&self, turn: &str) -> bool {
+        self.finished.iter().any(|t| t == turn)
+    }
+
     fn on_reply(&mut self, msg: &Value, out: &mut Out) {
         let id = msg["id"].as_u64();
         let Some(rpc) = id.and_then(|id| self.pending.remove(&id)) else {
@@ -170,6 +186,14 @@ impl Codex {
         };
         let error = &msg["error"];
         let failed = !error.is_null();
+        if failed == msg.get("result").is_some() {
+            // A reply is a result or an error, never both or neither: the effect stays open.
+            out.error(
+                ErrorClass::Protocol,
+                format!("codex reply to request {} is malformed", msg["id"]),
+            );
+            return;
+        }
         let message = error["message"]
             .as_str()
             .unwrap_or("request failed")
@@ -232,25 +256,43 @@ impl Codex {
                 });
             }
             Rpc::TurnStart(request_id) => {
-                let native = opt_str(&result["turn"]["id"]);
+                let Some(native) = opt_str(&result["turn"]["id"]) else {
+                    out.error(ErrorClass::Protocol, "codex turn/start gave no turn id");
+                    return;
+                };
+                out.emit(Entry::PromptAck {
+                    request_id: request_id.clone(),
+                    ack: AckKind::Confirmed,
+                    native_turn_id: Some(native.clone()),
+                    detail: None,
+                });
+                // A late reply binds only its own turn, never the one running now.
+                if self
+                    .turn
+                    .as_ref()
+                    .is_some_and(|t| t.request_id.as_deref() == Some(&request_id))
+                {
+                    self.bind_turn(Some(native), out);
+                }
+            }
+            Rpc::Steer(request_id) if failed => out.emit(Entry::PromptAck {
+                request_id,
+                ack: AckKind::Rejected,
+                native_turn_id: None,
+                detail: Some(message),
+            }),
+            Rpc::Steer(request_id) => {
+                let Some(native) = opt_str(&result["turnId"]) else {
+                    out.error(ErrorClass::Protocol, "codex turn/steer gave no turn id");
+                    return;
+                };
                 out.emit(Entry::PromptAck {
                     request_id,
                     ack: AckKind::Confirmed,
-                    native_turn_id: native.clone(),
+                    native_turn_id: Some(native),
                     detail: None,
                 });
-                self.bind_turn(native, out);
             }
-            Rpc::Steer(request_id) => out.emit(Entry::PromptAck {
-                request_id,
-                ack: if failed {
-                    AckKind::Rejected
-                } else {
-                    AckKind::Confirmed
-                },
-                native_turn_id: opt_str(&result["turnId"]),
-                detail: failed.then_some(message),
-            }),
             Rpc::Interrupt if failed => {
                 out.notice("interrupt", format!("codex turn/interrupt: {message}"))
             }
@@ -276,7 +318,22 @@ impl Codex {
                 return;
             }
         };
-        let id = format!("codex-{}", id_key(&msg["id"]));
+        let Some(key) = id_key(&msg["id"]) else {
+            out.error(
+                ErrorClass::Protocol,
+                format!("codex request {method} has id {}", msg["id"]),
+            );
+            return;
+        };
+        let id = format!("codex-{key}");
+        if self.approvals.contains_key(&id) {
+            out.error(
+                ErrorClass::Protocol,
+                format!("codex reused pending request id {}", msg["id"]),
+            );
+            return;
+        }
+        self.answered.remove(&id);
         let detail = p[summary_field]
             .as_str()
             .or_else(|| p["reason"].as_str())
@@ -364,6 +421,20 @@ impl Codex {
         }
         match method {
             "turn/started" => {
+                let native = opt_str(&p["turn"]["id"]);
+                if native.as_deref().is_some_and(|t| self.finished(t)) {
+                    return;
+                }
+                if let (Some(have), Some(native)) =
+                    (self.turn.as_ref().and_then(|t| t.native.as_ref()), &native)
+                    && have != native
+                {
+                    out.notice(
+                        "turn",
+                        format!("codex started turn {native} while turn {have} runs"),
+                    );
+                    return;
+                }
                 if self.turn.is_none() {
                     self.turn = Some(Turn {
                         native: None,
@@ -373,7 +444,7 @@ impl Codex {
                         errored: false,
                     });
                 }
-                self.bind_turn(opt_str(&p["turn"]["id"]), out);
+                self.bind_turn(native, out);
             }
             "turn/completed" => self.on_turn_completed(p, out),
             "item/agentMessage/delta" => {
@@ -388,16 +459,17 @@ impl Codex {
             "item/completed" => self.on_item_completed(&p["item"], out),
             "thread/tokenUsage/updated" => {
                 let usage = &p["tokenUsage"];
-                let n = |v: &Value, k: &str| v[k].as_u64().unwrap_or(0);
                 let total = &usage["total"];
+                let mut n = |k: &str| out.count(k, &total[k]).unwrap_or(0);
                 self.total = Totals {
-                    input: n(total, "inputTokens"),
-                    cached: n(total, "cachedInputTokens"),
-                    cache_write: n(total, "cacheWriteInputTokens"),
-                    output: n(total, "outputTokens"),
+                    input: n("inputTokens"),
+                    cached: n("cachedInputTokens"),
+                    cache_write: n("cacheWriteInputTokens"),
+                    output: n("outputTokens"),
                 };
-                self.context_tokens = usage["last"]["inputTokens"].as_u64();
-                if let Some(window) = usage["modelContextWindow"].as_u64() {
+                self.context_tokens = out.count("inputTokens", &usage["last"]["inputTokens"]);
+                if let Some(window) = out.count("modelContextWindow", &usage["modelContextWindow"])
+                {
                     self.context_window = Some(window);
                 }
             }
@@ -417,7 +489,10 @@ impl Codex {
                 }
             }
             "serverRequest/resolved" => {
-                let id = format!("codex-{}", id_key(&p["requestId"]));
+                let Some(key) = id_key(&p["requestId"]) else {
+                    return;
+                };
+                let id = format!("codex-{key}");
                 if let Some(decision) = self.answered.remove(&id) {
                     out.emit(Entry::ApprovalDecision {
                         id,
@@ -462,6 +537,37 @@ impl Codex {
 
     fn on_turn_completed(&mut self, p: &Value, out: &mut Out) {
         let turn = &p["turn"];
+        let native = opt_str(&turn["id"]);
+        if let Some(native) = &native {
+            if self.finished(native) {
+                return;
+            }
+            if let Some(have) = self.turn.as_ref().and_then(|t| t.native.as_ref())
+                && have != native
+            {
+                out.notice(
+                    "turn",
+                    format!("codex completed turn {native} while turn {have} runs"),
+                );
+                return;
+            }
+            if self.finished.len() == 16 {
+                self.finished.pop_front();
+            }
+            self.finished.push_back(native.clone());
+        }
+        // Completed before turn/start's reply: it did start, which the core must see first.
+        if let Some(t) = self.turn.as_mut() {
+            t.interrupt_wanted = false;
+        }
+        self.bind_turn(native, out);
+        if let Some(t) = self.turn.as_mut().filter(|t| !t.started) {
+            t.started = true;
+            out.emit(Entry::TurnStarted {
+                request_id: t.request_id.clone(),
+                native_turn_id: None,
+            });
+        }
         let errored = self.turn.take().is_some_and(|t| t.errored);
         let status = turn["status"].as_str().unwrap_or("completed");
         let stop = match status {
@@ -772,20 +878,18 @@ impl Protocol for Codex {
         &mut self,
         request_id: &str,
         text: &str,
-        steer: bool,
+        steer: Option<&str>,
         out: &mut Out,
     ) -> Result<(), DriverError> {
         let thread = self.thread_id.clone().ok_or(DriverError::NotReady)?;
         let input = Value::from(vec![obj! { "type" => "text", "text" => text }]);
-        if steer {
-            let native = self
-                .turn
-                .as_ref()
-                .and_then(|t| t.native.clone())
-                .ok_or(DriverError::NotReady)?;
+        if let Some(expected) = steer {
+            if self.turn.as_ref().and_then(|t| t.native.as_deref()) != Some(expected) {
+                return Err(DriverError::TurnEnded);
+            }
             self.call(
                 "turn/steer",
-                obj! { "threadId" => thread, "input" => input, "expectedTurnId" => native },
+                obj! { "threadId" => thread, "input" => input, "expectedTurnId" => expected },
                 Rpc::Steer(request_id.to_owned()),
                 out,
             );

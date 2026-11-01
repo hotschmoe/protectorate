@@ -426,13 +426,14 @@ impl SleeveExec {
                 request_id,
                 text,
                 ..
-            } => self.prompt(view, g, &request_id, &text, false),
+            } => self.prompt(view, g, &request_id, &text, None),
             EffectKind::Steer {
                 g,
                 request_id,
                 text,
+                expected_turn,
                 ..
-            } => self.prompt(view, g, &request_id, &text, true),
+            } => self.prompt(view, g, &request_id, &text, Some(&expected_turn)),
             EffectKind::RespondApproval {
                 g, approval, allow, ..
             } => match self.live_for(g) {
@@ -674,18 +675,24 @@ impl SleeveExec {
         Ok(())
     }
 
-    fn prompt(&self, view: &View, g: Gen, request_id: &str, text: &str, steer: bool) -> Outcome {
+    fn prompt(
+        &self,
+        view: &View,
+        g: Gen,
+        request_id: &str,
+        text: &str,
+        steer: Option<&str>,
+    ) -> Outcome {
         let Some(session) = self.live_for(g) else {
             return Outcome::Nacked("no live session for that generation".into());
         };
         let from = Hub::from_label(&view.state, self.id, request_id);
         if Hub::envoy_id(&view.state) == Some(self.id) {
-            self.note_envoy_origin(&from, steer);
+            self.note_envoy_origin(&from, steer.is_some());
         }
-        let sent = if steer {
-            session.steer(request_id, &from, text)
-        } else {
-            session.send_user(request_id, &from, text)
+        let sent = match steer {
+            Some(turn) => session.steer(request_id, &from, text, turn),
+            None => session.send_user(request_id, &from, text),
         };
         if let Err(e) = sent {
             return Outcome::Nacked(e.to_string());
