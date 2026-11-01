@@ -387,6 +387,7 @@ fn live_journal_replays() {
     );
     let wrap = [
         "/usr/bin/bwrap",
+        "--die-with-parent",
         "--dev-bind",
         "/",
         "/",
