@@ -127,7 +127,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         format!("{}\n", cfg.to_json()).as_bytes(),
     )?;
     println!(
-        "Joined. Wrote {}.\nNext: protectorate-node install-service (Linux, as root), or\n  protectorate-node serve --state-dir {} --listen-tcp 127.0.0.1:7476",
+        "Joined. Wrote {}.\nNext: protectorate-node install-service (as root or an elevated administrator), or\n  protectorate-node serve --state-dir {} --listen-tcp 127.0.0.1:7476",
         member::config_path(&state).display(),
         state.display()
     );
@@ -289,13 +289,23 @@ fn state_dir(given: Option<PathBuf>) -> Result<PathBuf, String> {
     if let Some(d) = given {
         return Ok(d);
     }
-    if cfg!(target_os = "linux") && is_root() {
-        return Ok(PathBuf::from(SYSTEM_STATE));
+    if (cfg!(target_os = "linux") && is_root()) || cfg!(windows) {
+        return system_state();
     }
     Err(
         "pass --state-dir DIR (the default, /var/lib/protectorate-node, is for root on Linux)"
             .into(),
     )
+}
+
+/// The service's state dir: /var/lib/protectorate-node, or %ProgramData%\protectorate-node.
+pub fn system_state() -> Result<PathBuf, String> {
+    if cfg!(windows) {
+        let base = std::env::var_os("ProgramData").ok_or("ProgramData is not set")?;
+        Ok(PathBuf::from(base).join("protectorate-node"))
+    } else {
+        Ok(PathBuf::from(SYSTEM_STATE))
+    }
 }
 
 #[cfg(unix)]

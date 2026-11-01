@@ -14,15 +14,23 @@ pub use linux_job::{Isolator, Proc};
 #[cfg(windows)]
 mod win32;
 #[cfg(windows)]
+mod win32_proc;
+#[cfg(windows)]
+mod win32_service;
+#[cfg(windows)]
 mod windows;
 #[cfg(windows)]
 mod windows_presence;
 #[cfg(windows)]
 pub use windows::*;
 #[cfg(windows)]
-pub use windows_presence::Platform;
+pub use windows_presence::{Platform, idle_probe};
 #[cfg(windows)]
 mod windows_job;
+#[cfg(windows)]
+pub use win32::Job;
+#[cfg(windows)]
+pub use win32_service::{redirect_stdio, run_service, spawn_in_job};
 #[cfg(windows)]
 pub use windows_job::{Isolator, Proc};
 

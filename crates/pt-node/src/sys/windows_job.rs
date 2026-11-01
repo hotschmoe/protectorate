@@ -1,5 +1,6 @@
-//! Windows job processes: each job runs in its own Job Object with kill-on-close, created
-//! suspended and assigned before its first instruction, so no child escapes the job.
+//! Windows job processes: each job runs in its own Job Object with kill-on-close and UI limits,
+//! created suspended and assigned before its first instruction, so no child escapes the job.
+//! Jobs run as the agent's account, LocalSystem under the service (REVISIT: runner account).
 
 use super::win32::{self, Job};
 use super::{Orphan, Receipt};
@@ -16,7 +17,10 @@ pub struct Isolator;
 
 impl Isolator {
     pub fn probe(_allow_scope: bool) -> (Isolator, String) {
-        (Isolator, "job objects with kill-on-close".into())
+        (
+            Isolator,
+            "job objects with kill-on-close and UI limits, as this agent's account".into(),
+        )
     }
 
     pub fn kind(&self) -> Isolation {
@@ -56,7 +60,9 @@ impl Isolator {
             .stdout(out)
             .stderr(err)
             .creation_flags(CREATE_SUSPENDED | CREATE_NO_WINDOW);
-        let job = Job::new().map_err(|e| ctx("creating the job object", e))?;
+        let job = Job::new()
+            .and_then(|j| j.restrict_ui().map(|()| j))
+            .map_err(|e| ctx("creating the job object", e))?;
         let mut child = cmd.spawn()?;
         if let Err(e) = job.assign(&child).and_then(|()| win32::resume(&child)) {
             let _ = child.kill();

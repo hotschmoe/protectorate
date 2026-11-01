@@ -511,9 +511,8 @@ unsafe extern "system" {
     fn NtResumeProcess(process: isize) -> i32;
 }
 
-fn process_handle(child: &std::process::Child) -> isize {
-    use std::os::windows::io::AsRawHandle;
-    child.as_raw_handle() as isize
+fn process_handle(p: &impl std::os::windows::io::AsRawHandle) -> isize {
+    p.as_raw_handle() as isize
 }
 
 /// A Job Object that kills every process in it when its last handle closes, including when the
@@ -559,10 +558,10 @@ impl Job {
         Ok(())
     }
 
-    pub fn assign(&self, child: &std::process::Child) -> io::Result<()> {
-        // SAFETY: both handles are valid: the job is ours, and `child` owns its process handle
-        // for the duration of the borrow.
-        let ok = unsafe { AssignProcessToJobObject(self.0, process_handle(child)) };
+    pub fn assign(&self, process: &impl std::os::windows::io::AsRawHandle) -> io::Result<()> {
+        // SAFETY: both handles are valid: the job is ours, and `process` owns its process
+        // handle for the duration of the borrow.
+        let ok = unsafe { AssignProcessToJobObject(self.0, process_handle(process)) };
         if ok == 0 {
             return Err(io::Error::last_os_error());
         }
@@ -573,6 +572,26 @@ impl Job {
     pub fn terminate(&self, code: u32) -> io::Result<()> {
         // SAFETY: `self.0` is a job handle we own.
         let ok = unsafe { TerminateJobObject(self.0, code) };
+        if ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// No access to other processes' USER handles, the clipboard, system parameters, display
+    /// settings, global atoms, desktop switching or ExitWindows.
+    pub fn restrict_ui(&self) -> io::Result<()> {
+        const BASIC_UI_RESTRICTIONS: i32 = 4;
+        const ALL_UI_LIMITS: u32 = 0xFF;
+        // SAFETY: `self.0` is a job handle we own; the u32 is JOBOBJECT_BASIC_UI_RESTRICTIONS.
+        let ok = unsafe {
+            SetInformationJobObject(
+                self.0,
+                BASIC_UI_RESTRICTIONS,
+                (&ALL_UI_LIMITS as *const u32).cast(),
+                4,
+            )
+        };
         if ok == 0 {
             return Err(io::Error::last_os_error());
         }

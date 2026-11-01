@@ -90,6 +90,15 @@ pub fn command(member: &Path, state: &Path, server_url: &str, name: &str) -> Com
 /// loopback port) for as long as this process lives, restarting it with backoff. Its log lines
 /// go to stderr with a `member:` prefix.
 pub fn supervise(member: PathBuf, state: PathBuf, cfg: NodeConfig, forward: String) {
+    // One kill-on-close job for every member run: when this process ends, so does member.
+    #[cfg(windows)]
+    let job = match pt_node::windows::Job::new() {
+        Ok(j) => j,
+        Err(e) => {
+            eprintln!("protectorate-node: creating member's job object: {e}; member not started");
+            return;
+        }
+    };
     let mut backoff = BACKOFF_MIN;
     loop {
         let mut cmd = command(&member, &state, &cfg.server_url, &cfg.name);
@@ -99,10 +108,16 @@ pub fn supervise(member: PathBuf, state: PathBuf, cfg: NodeConfig, forward: Stri
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped());
-        // member dies with the agent's supervising thread (Linux; REVISIT.md for Windows).
-        let _ = pt_sys::pdeathsig_on_spawn(&mut cmd, pt_sys::SIGTERM);
         let started = Instant::now();
-        match cmd.spawn() {
+        #[cfg(windows)]
+        let spawned = pt_node::windows::spawn_in_job(&mut cmd, &job);
+        #[cfg(not(windows))]
+        let spawned = {
+            // member dies with the agent's supervising thread.
+            let _ = pt_sys::pdeathsig_on_spawn(&mut cmd, pt_sys::SIGTERM);
+            cmd.spawn()
+        };
+        match spawned {
             Ok(mut child) => {
                 eprintln!(
                     "protectorate-node: member started (pid {}), control {}",
