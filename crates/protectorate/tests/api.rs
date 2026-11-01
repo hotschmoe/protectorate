@@ -72,7 +72,8 @@ fn get(port: u16, path: &str, headers: &[(&str, &str)]) -> pt_http::ClientRespon
         .expect("GET from the hub")
 }
 
-/// Every method is routed and its scope enforced; unbuilt backings answer `unavailable`; the
+/// Every method is routed and its scope enforced; unbuilt backings and node methods without a
+/// fleet answer `unavailable`; the
 /// event stream snapshots, streams and resumes; pairing issues hashed `pd1.` tokens; the web
 /// build is served with ETags and an SPA fallback.
 #[test]
@@ -120,9 +121,8 @@ fn api_surface() {
             "RunJob",
             obj! { "target" => obj! { "type" => "node", "node_id" => "n1" }, "argv" => vec![Value::from("true")] },
         ),
-        ("GetJob", obj! { "job_id" => "j1" }),
-        ("GetJobLog", obj! { "job_id" => "j1" }),
-        ("CancelJob", obj! { "job_id" => "j1" }),
+        ("GetNode", obj! { "node_id" => "n1" }),
+        ("GetEnrollment", obj! {}),
         (
             "Wait",
             obj! { "sleeve_id" => "envoy", "until" => "report", "timeout_ms" => 10 },
@@ -133,6 +133,18 @@ fn api_surface() {
         assert_eq!(s, 503, "{method}: {v}");
         assert_eq!(v["error"]["code"].as_str(), Some("unavailable"));
     }
+    for method in ["GetJob", "GetJobLog", "CancelJob"] {
+        let (s, v) = post(
+            port,
+            method,
+            Some(&owner),
+            &obj! { "job_id" => "j1" }.to_string(),
+        );
+        assert_eq!(s, 404, "{method}: {v}");
+        assert_eq!(v["error"]["code"].as_str(), Some("not_found"));
+    }
+    let (s, jobs) = post(port, "ListJobs", Some(&owner), "{}");
+    assert_eq!((s, jobs["jobs"].as_array().map(<[_]>::len)), (200, Some(0)));
     let (s, nodes) = post(port, "ListNodes", Some(&owner), "{}");
     assert_eq!(
         (s, nodes["nodes"].as_array().map(<[_]>::len)),

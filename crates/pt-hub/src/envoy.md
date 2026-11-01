@@ -22,7 +22,11 @@ capability). `--json` prints the API's answer; `protectorate --help` lists every
 | `sleeve transcript <s> [--from SEQ]` | its chat: prompts, replies, tool calls |
 | `sleeve interrupt|stop|rm <s>` | end the turn; stop it and its children; remove it |
 | `sleeve start <s>` / `sleeve resleeve <s> --harness H` | start a stopped or parked sleeve; move a settled one |
-| `node list`, `job run --arch A -- <argv>`, `quota list`, `event list` | nodes, jobs, quota, the event log |
+| `node list` / `node show <n>` | fleet machines: online, presence (jobs wait while someone is at one), load, inventory |
+| `job run --node N\|--arch A [--cwd DIR] [--artifact PATH]... -- <argv>` | a command on a node (queued until an AWAY node is free); `--even-if-present` only when it must |
+| `job list`, `job show <j>`, `job log <j> [--offset N]`, `job cancel <j>` | its state and exit, its output, cancel it |
+| `job artifact <j> <path> --out FILE` | a file the job left, checked against its SHA-256 |
+| `quota list`, `event list` | quota, the event log |
 
 Harnesses: `claude`, `codex`, `grok`, `pi_vendor`, `pi_local` (the free local model).
 
@@ -33,6 +37,8 @@ Harnesses: `claude`, `codex`, `grok`, `pi_vendor`, `pi_local` (the free local mo
 - Prefer one root per repository and children (worktrees) for parallel pieces.
 - Code decides retries, guardrails, resleeves and quota: never resleeve a healthy sleeve to save
   quota, and never retry a message the hub reports as "may have applied" without checking.
+- A node job that changes the machine (updates, installs, reboots) is `job run --maintenance`;
+  it always waits for the owner's approval.
 - When you finish a request, reply with a short summary: what was done, where (sleeve, branch),
   and what is left.
 

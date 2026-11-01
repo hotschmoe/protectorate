@@ -15,7 +15,9 @@ use pt_drivers::Entry;
 use crate::approvals::Approvals;
 use crate::bus::Bus;
 use crate::devices::Devices;
+use crate::fleet::FleetSlot;
 use crate::home::{Config, Home, Tokens, now_ms};
+use crate::jobs::JobStore;
 use crate::log::{debug, warning};
 use crate::transcript::{Line, Note, Transcripts, lock};
 use crate::wire;
@@ -80,6 +82,8 @@ pub struct Hub {
     pub fault: Option<Fault>,
     pub bus: Bus,
     pub transcripts: Transcripts,
+    pub fleet: FleetSlot,
+    pub jobs: JobStore,
     input: Sender<Input>,
     view: Mutex<Arc<View>>,
 }
@@ -105,6 +109,7 @@ impl Hub {
         view: View,
     ) -> Hub {
         let transcripts = Transcripts::new(home.clone());
+        let jobs = JobStore::new(home.jobs());
         Hub {
             home,
             config,
@@ -118,6 +123,8 @@ impl Hub {
             fault: Fault::from_env(),
             bus: Bus::default(),
             transcripts,
+            fleet: FleetSlot::default(),
+            jobs,
             input,
             view: Mutex::new(Arc::new(view)),
         }

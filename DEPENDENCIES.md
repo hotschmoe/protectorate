@@ -92,3 +92,4 @@ Bundled asset, not a package: JetBrains Mono 2.304 Regular and Bold (`app/assets
 | systemctl | Linux nodes | signal, query and stop per-job scopes |
 | curl | hub, nodes | outbound HTTPS (releases, quota readers) instead of a Rust TLS stack (REVISIT) |
 | git | hub | workspaces, worktrees, pushes |
+| gzip | hub | unpacks the embedded headscale and member (`gzip -dc`) and packs them at build (`gzip -n`) (REVISIT) |

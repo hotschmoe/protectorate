@@ -216,6 +216,25 @@ impl Hub {
         }
     }
 
+    /// SIGTERM, as a planned stop, and the exit status once the hub has exited.
+    pub fn stop(&mut self) -> Option<std::process::ExitStatus> {
+        let mut c = self.child.take()?;
+        let _ = Command::new("kill")
+            .args(["-TERM", &c.id().to_string()])
+            .status();
+        let end = Instant::now() + Duration::from_secs(60);
+        loop {
+            if let Ok(Some(s)) = c.try_wait() {
+                return Some(s);
+            }
+            if Instant::now() > end {
+                let _ = c.kill();
+                return c.wait().ok();
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
     pub fn restart(&mut self) {
         self.kill9();
         self.restarts += 1;

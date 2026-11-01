@@ -94,11 +94,11 @@ fn valid_fingerprint(fp: &str) -> Result<()> {
 }
 
 fn pending_path(f: &Fleet) -> PathBuf {
-    f.config().tailnet_dir().join("pending.json")
+    f.config().dir.join("pending.json")
 }
 
 fn enrolled_path(f: &Fleet) -> PathBuf {
-    f.config().tailnet_dir().join("enrolled.json")
+    f.config().dir.join("enrolled.json")
 }
 
 fn read_list<T: FromJson>(path: &Path) -> Result<Vec<T>> {

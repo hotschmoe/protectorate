@@ -1,5 +1,6 @@
 //! `protectorate serve`: lay out the home, replay the journal, apply `HubRecovered`, start the
-//! core, the executors, the tick and the listeners.
+//! core, the executors, the fleet, the tick and the listeners; on a signal stop the listeners
+//! and the fleet.
 
 use std::fs;
 use std::io;
@@ -16,6 +17,7 @@ use pt_http::{Config as HttpConfig, Server, ShutdownHandle};
 use pt_journal::Journal;
 
 use crate::devices::Devices;
+use crate::fleet::{FleetFlags, Net};
 use crate::home::{Config, Home, Tokens, random_hex, write_private};
 use crate::http::{Listener, Web, handler};
 use crate::hub::{ENVOY, Hub, Input, View};
@@ -29,6 +31,8 @@ pub struct ServeOptions {
     pub proxy_listen: Option<SocketAddr>,
     pub trusted_proxy: Option<IpAddr>,
     pub web: Web,
+    pub fleet: FleetFlags,
+    pub net: Net,
 }
 
 const ENVOY_MD: &str = include_str!("envoy.md");
@@ -192,6 +196,8 @@ pub fn serve(o: ServeOptions) -> Result<(), String> {
         }));
     }
 
+    crate::fleet::start(&hub, o.fleet, o.net);
+
     let tick_hub = hub.clone();
     thread::Builder::new()
         .name("pt-tick".into())
@@ -245,9 +251,10 @@ pub fn serve(o: ServeOptions) -> Result<(), String> {
     info!("ready: {}", sock.display());
 
     let sig = pt_sys::wait_term().map_err(|e| e.to_string())?;
-    info!("signal {sig}: stopping the listeners");
+    info!("signal {sig}: stopping the listeners and the fleet");
     for s in &servers {
         s.shutdown(Duration::from_secs(2));
     }
+    hub.fleet.shutdown();
     Ok(())
 }

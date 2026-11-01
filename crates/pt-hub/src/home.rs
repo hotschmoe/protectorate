@@ -57,6 +57,18 @@ impl Home {
     pub fn doctor(&self) -> PathBuf {
         self.root.join("doctor.json")
     }
+    /// The default tailnet dir: headscale's state, the hub member's keys, enrollment records.
+    pub fn tailnet(&self) -> PathBuf {
+        self.root.join("tailnet")
+    }
+    /// The embedded headscale and member, unpacked under their SHA-256.
+    pub fn net(&self) -> PathBuf {
+        self.root.join("net")
+    }
+    /// Each node job's log and artifacts as the hub fetched them.
+    pub fn jobs(&self) -> PathBuf {
+        self.root.join("jobs")
+    }
 
     /// Creates the layout (mode 0700 at the root) and canonicalizes the root.
     pub fn prepare(root: &Path) -> io::Result<Home> {
@@ -74,6 +86,7 @@ impl Home {
             home.worktrees(),
             home.run(),
             home.bin(),
+            home.jobs(),
         ] {
             fs::create_dir_all(&d).map_err(|e| ctx(&d, e))?;
         }
@@ -125,6 +138,28 @@ pt_json::record! {
         pub model: String = String::new(),
     }
 
+    /// The `fleet` section: the tailnet this hub runs (SPEC 3.2). `serve --fleet-*` flags
+    /// override each key.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct FleetConf {
+        /// headscale's listener, the hub's LAN address; empty turns the fleet off.
+        pub listen: String = String::new(),
+        /// The tailnet dir; empty means `<home>/tailnet`. Point it at an existing one to adopt it.
+        pub dir: String = String::new(),
+        /// The hub member's WireGuard UDP port; 0 picks one.
+        pub udp_port: u16 = 0,
+        /// The control URL nodes use; empty means `http://<listen>` (LAN-direct, plain DERP).
+        pub server_url: String = String::new(),
+        /// With an `https` server URL: the IPv4 the DERP map pins for its host (the proxy's).
+        pub derp_ipv4: String = String::new(),
+        /// Proxies whose X-Forwarded-For headscale trusts.
+        pub trusted_proxies: Vec<String> = Vec::new(),
+        /// The hub member's tailnet hostname.
+        pub hub_name: String = "hub".to_string(),
+        /// How often the poller re-reads the node list and each node's presence.
+        pub poll_secs: u64 = 15,
+    }
+
     /// `config.json`. Every key is optional; a missing one takes the default below.
     #[derive(Debug, Clone, PartialEq)]
     pub struct Config {
@@ -156,6 +191,16 @@ pt_json::record! {
         pub d9_spawn_limit: u64 = 3,
         /// D9: how long a guarded call waits for the owner before it fails.
         pub d9_approval_timeout_secs: u64 = 900,
+        pub fleet: FleetConf = FleetConf {
+            listen: String::new(),
+            dir: String::new(),
+            udp_port: 0,
+            server_url: String::new(),
+            derp_ipv4: String::new(),
+            trusted_proxies: Vec::new(),
+            hub_name: "hub".to_string(),
+            poll_secs: 15,
+        },
     }
 }
 

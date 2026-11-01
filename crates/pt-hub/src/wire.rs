@@ -259,6 +259,14 @@ pub fn quotas(hub: &Hub) -> Vec<api::Quota> {
         .collect()
 }
 
+/// What the poller last learned of every node; none while the fleet is off or down.
+pub fn nodes(hub: &Hub) -> Vec<api::Node> {
+    match hub.fleet.status() {
+        crate::fleet::Status::Up(up) => up.poller.nodes().into_iter().map(|v| v.node).collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// The full snapshot at stream seq `seq`, limited to the sleeves `visible` admits.
 pub fn state(
     hub: &Hub,
@@ -288,8 +296,12 @@ pub fn state(
             .collect(),
         sleeves: shown.iter().map(|s| sleeve(hub, view, s)).collect(),
         approvals,
-        nodes: Vec::new(),
-        jobs: Vec::new(),
+        nodes: nodes(hub),
+        jobs: st
+            .jobs
+            .values()
+            .map(|j| crate::jobs::view(hub, j))
+            .collect(),
         quotas: quotas(hub),
         events: hub.bus.events(),
     }

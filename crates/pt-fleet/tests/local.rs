@@ -205,7 +205,7 @@ fn local_fleet_end_to_end() {
 
     // Hub side.
     let listen = SocketAddr::new(ip, free_tcp(ip));
-    let mut cfg = Config::lan_direct(base.join("hub"), headscale, member.clone(), listen);
+    let mut cfg = Config::lan_direct(base.join("hub/tailnet"), headscale, member.clone(), listen);
     cfg.stun_listen = SocketAddr::from(([127, 0, 0, 1], free_udp()));
     let fleet = Fleet::start(cfg).expect("fleet starts");
     let st = fleet.status().unwrap();

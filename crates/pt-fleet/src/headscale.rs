@@ -33,7 +33,7 @@ pub(crate) struct Paths {
 
 impl Paths {
     pub fn new(cfg: &Config) -> Paths {
-        let dir = cfg.tailnet_dir().join("headscale");
+        let dir = cfg.dir.join("headscale");
         Paths {
             config: dir.join("headscale.yaml"),
             dir,

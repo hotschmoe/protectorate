@@ -306,16 +306,37 @@ Each entry: where, what was done, what right looks like.
 - **select_target is first-eligible** (`pt-hub`, select.rs): it walks `resleeve_to` in order,
   skipping a harness whose binary is missing or that `doctor.json` lists under `ineligible`. No
   quota weighting, no task-size class (SPEC 8, D27).
-- **Node jobs are held, not run** (`pt-hub`, exec.rs jobs executor): the transport (SSH or the
-  tailnet) is undecided, so `ScheduleJob` and the node effects are logged and never answered;
-  no API method creates a job yet.
+- **Artifacts come back through `cat` jobs** (`pt-hub`, jobs.rs): after a job exits, each named
+  artifact is fetched by a collection job `cat -- <path>` on the same node (even if present,
+  300 s, 64 MiB log cap), whose log is the file; a file over the cap fails the check, and the
+  node's log carries stderr too, so the bytes are exact only because a successful `cat` is
+  silent. Right: a node `FetchArtifact` RPC streaming a bounded archive with
+  its SHA-256, so the hub reads bytes, not a job log.
+- **The scheduler picks the least-loaded eligible node** (`pt-hub`, jobs.rs `choose`): online,
+  hello seen, presence AWAY (unless `even_if_present`), not excluded, then lowest load1; retried
+  every 2 s. No per-node concurrency limit beyond one hub call at a time per node, no fairness
+  between requesters. Right: node slots from the inventory and a queue per requester.
+- **Hub job logs are refreshed only on the core's Tick** (`pt-hub`, jobs.rs): a running job's log
+  is pulled when pt-core polls it (every 10 s Tick), so `job log` lags by up to a Tick. Right: a
+  log follow RPC on the node that pushes appended bytes.
+- **Hub job metadata outside the journal** (`pt-hub`, jobs.rs `JobStore`): the request record
+  rides in the core's `JobSpec.command` (its digest is the spec's), but artifact results live in
+  `<home>/jobs/<job>/<attempt>/artifacts.json` and the per-job view cache in memory. Right: fine
+  while the core owns state; journal artifact results if `job show` must survive a lost home.
+- **Fleet poll interval is one knob** (`pt-hub`, `fleet.poll_secs`, default 15): presence and the
+  node list share it. Right: split them if presence must react faster than listings.
+- **Embedded headscale and member unpack through the system `gzip -dc`** (`pt-fleet`, embed.rs):
+  no inflate in std, and no crate. Old `<home>/net/<name>-<sha256>` files from earlier versions
+  stay, since nothing deletes. Right: a small inflate in Rust, and pruning old unpacked versions
+  once the owner agrees to that rule.
 - **D9 covers three calls and the turn, not the request chain** (`pt-hub`, rule.rs): while
   Envoy's current turn was started (or steered) by an `agent:` message, Envoy's own `sleeve rm`,
   `job run` and spawns past `d9_spawn_limit` (default 3 per turn) wait for an owner approval
   (`d9_approval_timeout_secs`, default 900, then `timeout`). The origin is cleared when the turn
   settles, so a background process Envoy started in that turn acts as the owner's afterwards;
-  a sleeve Envoy prompted on the agent's behalf is not gated at all; no push or node maintenance
-  method exists yet to gate. Right: carry the origin through messages Envoy sends (a request
+  a sleeve Envoy prompted on the agent's behalf is not gated at all; no push method exists yet
+  to gate. A `maintenance` node job from any sleeve, Envoy included, always waits for the owner,
+  whatever started the turn. Right: carry the origin through messages Envoy sends (a request
   chain), and add pushes to the list when the API grows them.
 - **Who sent a message is a text prefix** (`pt-hub`, api.rs): mail reaches the harness as
   `[from sleeve <name>] ...` and agent requests as `[from agent:<name>] ...`, since a prompt has no
@@ -391,9 +412,11 @@ Each entry: where, what was done, what right looks like.
 - **Collecting lease** (pt-core jobs): an artifact check that does not answer within the lease
   makes the job Lost, and its next Exited report collects again, so a slow fetch can run twice.
   Right: fetch progress reported to the core, and the lease measured from it.
-- **headscale and member are not embedded** (`pt-fleet`, `protectorate-node`): `Config` takes
-  both binary paths, and the node finds `member` next to itself (or `--member`). Right: the hub
-  and node binaries carry them and unpack to a content-addressed path, so an install is one file.
+- **The node does not embed member** (`protectorate-node`): the hub carries headscale and member
+  (gzip, unpacked to `<home>/net/<name>-<sha256>`, checked every start), but the node finds
+  `member` next to itself (or `--member`). Right: the node binary carries member the same way,
+  so a node install is one file. A protectorate built without Go and no `go/bin` has no fleet
+  (`version` says so; the e2e skips).
 - **LAN-direct DERP is plain HTTP** (`pt-fleet` `Config::lan_direct`, node `member::command`):
   with an `http://` server URL both sides set `TS_DEBUG_USE_DERP_HTTP=1`, tailscale's debug knob,
   and the DERP map pins the IPv4 with STUN off. Right: production goes through Traefik with TLS
@@ -428,16 +451,19 @@ Each entry: where, what was done, what right looks like.
 - **The poller runs the headscale CLI every 15 s and a thread per node** (`pt-fleet`,
   poller.rs): fine for a home fleet. Right: headscale's gRPC over its unix socket, and one
   scheduler thread if the fleet ever reaches hundreds.
-- **`Node.id` is headscale's node id** (`pt-fleet` view.rs): the agent's own id and journal epoch
-  are only in `NodeView.hello`. Right: decide which id the API exposes once the hub wires the
-  poller; a reinstalled node keeps neither.
+- **`Node.id` is headscale's node id** (`pt-fleet` view.rs): the API, `job run --node` (which also
+  takes the name) and the core's job records use it; the agent's own id and journal epoch are
+  only in `NodeView.hello`, and the hub derives its node-side job ids (`<hub tag>-j<n>`) and
+  epoch from the hub's own journal. A reinstalled node keeps neither id. Right: fine until nodes
+  are re-enrolled under the same name; then key nodes by the agent id.
 - **headscale listens on the whole LAN** (stand-in hub at `192.168.10.44:7480`): no host firewall
   admits only the reverse proxy. Right: production binds where Traefik reaches it and a firewall
   rule admits only stronghold.
 - **Stand-in hub** (`pt-fleet` examples/fleet.rs): agent-world, msr1-kids and officewin joined a
-  fleet run by the example, home `~/.local/share/protectorate-fleet`, until the hub embeds
-  pt-fleet. Right: the hub takes over that `tailnet/` dir (the nodes pin its Noise key), or the
-  nodes rejoin.
+  fleet run by the example, home `~/.local/share/protectorate-fleet`. The hub now runs the fleet
+  itself and can adopt that dir (`serve --fleet-dir ~/.local/share/protectorate-fleet/tailnet
+  --fleet-listen 192.168.10.44:7480 --fleet-udp-port 7483`, after stopping the example), keeping
+  the Noise key the nodes pin. Right: adopt it, then retire the example's `serve`.
 - **No node install script**: an owner copies `protectorate-node` and `member` to the machine and
   runs `join`, then `install-service`. Right: the hub serves both binaries and a one-line
   installer, checked by SHA256SUMS.

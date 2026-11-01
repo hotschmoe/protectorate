@@ -4,11 +4,13 @@
 //!
 //! The list: removing a sleeve, running a node job, and spawning more than
 //! `config.d9_spawn_limit` sleeves in one such turn. Pushes join it with the push method
-//! (REVISIT).
+//! (REVISIT). A node maintenance job from any sleeve, Envoy included, always waits for the
+//! owner (SPEC 3.1).
 
 use std::time::{Duration, Instant};
 
 use pt_api::{ApiError, ApprovalState, DecidedBy, Decision, ErrorCode, EventKind, Level};
+use pt_core::SleeveId;
 use pt_drivers::{Entry, ToolKind};
 
 use crate::api::{Principal, err};
@@ -22,6 +24,25 @@ pub enum Guarded<'a> {
     /// The command line and where it would run.
     RunJob(String),
     Spawn(&'a str),
+}
+
+/// A node maintenance job (`what`: the command line and where it would run): from any sleeve,
+/// Envoy included, it waits for the owner whatever started the turn.
+pub fn gate_maintenance(
+    hub: &Hub,
+    who: &Principal,
+    what: &str,
+) -> Result<Option<String>, ApiError> {
+    let (Principal::Envoy(sleeve) | Principal::Sleeve(sleeve)) = *who else {
+        return Ok(None);
+    };
+    ask(
+        hub,
+        sleeve,
+        format!("run node maintenance job {what}"),
+        "A sleeve asked for a node maintenance job. Code requires the owner's approval for it."
+            .into(),
+    )
 }
 
 /// Lets the call through (`Ok(None)`), lets it through after the owner allowed it
@@ -56,18 +77,33 @@ pub fn gate(hub: &Hub, who: &Principal, action: Guarded<'_>) -> Result<Option<St
         "Envoy asked for this in a turn started by {origin}. Code requires the owner's \
          approval for it (D9)."
     );
+    ask(hub, envoy, title, summary)
+}
+
+/// Opens an action approval for `sleeve`, records it in its transcript and on the stream, and
+/// waits for the owner.
+fn ask(
+    hub: &Hub,
+    sleeve: SleeveId,
+    title: String,
+    summary: String,
+) -> Result<Option<String>, ApiError> {
     let wait = Duration::from_secs(hub.config.d9_approval_timeout_secs);
     let a = hub.approvals.open_action(
         &hub.bus,
-        envoy,
+        sleeve,
         title.clone(),
         summary.clone(),
         wait.as_millis() as u64,
     );
-    info!("D9: {} waits for the owner: {title}", a.id);
-    let g = hub.view().state.sleeve(envoy).map_or(0, |s| s.g.0);
+    info!("{} waits for the owner: {title}", a.id);
+    let (g, source) = hub
+        .view()
+        .state
+        .sleeve(sleeve)
+        .map_or((0, String::new()), |s| (s.g.0, s.name.clone()));
     hub.record(
-        envoy,
+        sleeve,
         g,
         now_ms(),
         Entry::ApprovalRequest {
@@ -83,7 +119,7 @@ pub fn gate(hub: &Hub, who: &Principal, action: Guarded<'_>) -> Result<Option<St
     hub.event(
         EventKind::Approval,
         Level::Warn,
-        "envoy",
+        &source,
         "owner",
         &format!("approval {} requested: {title}", a.id),
     );

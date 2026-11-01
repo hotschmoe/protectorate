@@ -429,7 +429,20 @@ api_records! {
         pub started_at_ms: Option<EpochMs>,
         pub ended_at_ms: Option<EpochMs>,
         pub exit_code: Option<i64>,
+        /// Bytes of log the hub holds.
         pub log_bytes: u64 = 0,
+        /// The node's directory the job ran in; absent means the node's own work dir.
+        pub cwd: Option<String>,
+        /// The files the job was asked to leave, fetched once it exits.
+        pub artifacts: Vec<JobArtifact> = Vec::new(),
+    }
+
+    /// A file a job leaves on its node. `sha256` and `size_bytes` are set once the hub has
+    /// fetched it.
+    pub struct JobArtifact {
+        pub path: String,
+        pub size_bytes: Option<u64>,
+        pub sha256: Option<String>,
     }
 
     pub struct QuotaWindow {
@@ -619,6 +632,11 @@ api_unions! {
         Node = "node" {
             seq: u64,
             node: Node,
+        },
+        /// The node left the tailnet (deleted, or no longer tagged as a node).
+        NodeRemoved = "node_removed" {
+            seq: u64,
+            id: String,
         },
         Job = "job" {
             seq: u64,
