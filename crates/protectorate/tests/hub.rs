@@ -1,0 +1,485 @@
+//! Whole scenarios against the real hub binary: sleeves in real bwrap sandboxes and systemd
+//! scopes, real Pi on the local model, the journal on disk, the CLI over the unix socket.
+
+mod common;
+
+use std::collections::HashSet;
+use std::time::Duration;
+
+use common::*;
+
+/// Spawn, prompt, transcript, checkpoint, stop: and the worked-on repo shows nothing of ours.
+#[test]
+fn sleeve_lifecycle() {
+    if !have_runtime() {
+        return;
+    }
+    let hub = Hub::start("lifecycle");
+    let st = hub.state();
+    let roles: Vec<&str> = st["sleeves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["role"].as_str())
+        .collect();
+    assert_eq!(roles, ["envoy"], "a fresh hub has Envoy and nothing else");
+
+    let repo = temp_repo("lifecycle");
+    let s = hub.spawn_pi("one", &repo);
+    let id = s["id"].as_str().unwrap().to_string();
+    let rid = hub.send("one", READY);
+    hub.wait("one", "idle", 180);
+
+    let entries = hub.transcript("one");
+    assert!(
+        assistant_text(&entries).contains("READY"),
+        "the reply is in the transcript"
+    );
+    let users = of_type(&entries, "user_message");
+    assert_eq!(users.len(), 1);
+    assert_eq!(users[0]["entry"]["request_id"].as_str(), Some(rid.as_str()));
+    let seqs: Vec<u64> = entries.iter().map(|e| e["seq"].as_u64().unwrap()).collect();
+    assert!(
+        seqs.windows(2).all(|w| w[1] == w[0] + 1),
+        "seq is gapless: {seqs:?}"
+    );
+
+    let scope = hub.scope(&id, 1);
+    assert!(!scope_pids(&scope).is_empty(), "{scope} holds the harness");
+    let checkpoints = hub.home.join(format!("sleeves/{id}/checkpoints.jsonl"));
+    eventually(
+        "a checkpoint after the turn",
+        Duration::from_secs(20),
+        || {
+            std::fs::read_to_string(&checkpoints)
+                .ok()
+                .filter(|t| t.contains("\"g\":1"))
+        },
+    );
+
+    hub.cli(&["sleeve", "stop", "one"]).ok();
+    hub.wait("one", "ended", 60);
+    assert!(scope_pids(&scope).is_empty(), "{scope} is gone after stop");
+
+    assert_eq!(
+        git_out(&repo, &["status", "--porcelain"]),
+        "",
+        "no file of ours in the repo"
+    );
+    assert_eq!(
+        git_out(&repo, &["for-each-ref", "--format=%(refname)"]),
+        "refs/heads/main",
+        "no ref of ours in the repo"
+    );
+}
+
+/// kill -9 of the hub mid-turn: on restart the journal replays, HubRecovered probes the scope,
+/// the sleeve resumes natively as g2, the transcript continues, and the prompt that was in
+/// flight is never delivered twice.
+#[test]
+fn crash_mid_turn_recovers() {
+    if !have_runtime() {
+        return;
+    }
+    let mut hub = Hub::start("crash");
+    let repo = temp_repo("crash");
+    let s = hub.spawn_pi("two", &repo);
+    let id = s["id"].as_str().unwrap().to_string();
+    let long = hub.send("two", LONG);
+    eventually("the long turn to start", Duration::from_secs(60), || {
+        let s = hub.sleeve("two");
+        (s["incarnation"]["activity"]["state"].as_str() == Some("working")).then_some(())
+    });
+    std::thread::sleep(Duration::from_secs(1));
+    hub.kill9();
+    eventually(
+        "the sandbox to die with its hub",
+        Duration::from_secs(20),
+        || scope_pids(&hub.scope(&id, 1)).is_empty().then_some(()),
+    );
+
+    hub.restart();
+    let log = hub.log_text();
+    assert!(
+        log.contains("apply HubRecovered"),
+        "HubRecovered is applied on start"
+    );
+    assert!(
+        !log.contains("replayed 0 events"),
+        "the journal is replayed"
+    );
+    hub.wait("two", "idle", 180);
+    let s = hub.sleeve("two");
+    assert_eq!(s["lifecycle"].as_str(), Some("running"));
+    let g = s["incarnation"]["g"].as_u64().unwrap();
+    assert!(g >= 2, "a new incarnation after the crash, got g{g}");
+
+    let again = hub.send("two", READY);
+    hub.wait("two", "idle", 180);
+    let entries = hub.transcript("two");
+    let seqs: Vec<u64> = entries.iter().map(|e| e["seq"].as_u64().unwrap()).collect();
+    let unique: HashSet<u64> = seqs.iter().copied().collect();
+    assert_eq!(
+        unique.len(),
+        seqs.len(),
+        "no seq repeats across the restart"
+    );
+    assert!(
+        seqs.windows(2).all(|w| w[1] > w[0]),
+        "seq is monotonic: {seqs:?}"
+    );
+    let delivered: Vec<&str> = of_type(&entries, "user_message")
+        .iter()
+        .filter_map(|e| e["entry"]["request_id"].as_str())
+        .collect();
+    assert_eq!(
+        delivered.iter().filter(|r| **r == long).count(),
+        1,
+        "the in-flight prompt went to the harness once: {delivered:?}"
+    );
+    assert!(delivered.contains(&again.as_str()));
+    let sessions: HashSet<u64> = of_type(&entries, "session_info")
+        .iter()
+        .filter_map(|e| e["g"].as_u64())
+        .collect();
+    assert!(
+        sessions.contains(&1) && sessions.contains(&g),
+        "both incarnations: {sessions:?}"
+    );
+    let notices: Vec<&str> = of_type(&entries, "notice")
+        .iter()
+        .filter_map(|e| e["entry"]["text"].as_str())
+        .collect();
+    assert!(
+        notices
+            .iter()
+            .any(|n| n.starts_with("resumed natively") || n.starts_with("resleeved")),
+        "the recovery is in the chat: {notices:?}"
+    );
+    let after_crash = entries
+        .iter()
+        .skip_while(|e| e["g"].as_u64() == Some(1))
+        .map(|e| e["entry"]["text"].as_str().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        after_crash.contains("READY"),
+        "the resumed incarnation answers"
+    );
+}
+
+/// The Envoy round trip a vendor general agent uses: send, wait for the settled reply, read.
+#[test]
+fn envoy_round_trip() {
+    if !have_runtime() {
+        return;
+    }
+    let hub = Hub::start("envoy");
+    hub.wait("envoy", "idle", 120);
+    let rid = hub
+        .cli(&[
+            "envoy",
+            "send",
+            "Reply with exactly the word PONG and nothing else.",
+        ])
+        .ok()
+        .trim()
+        .to_string();
+    assert!(rid.starts_with("owner:"), "request id {rid}");
+    let reply = hub.cli(&["envoy", "wait", &rid, "--timeout", "180"]);
+    assert!(
+        reply.ok().contains("PONG"),
+        "Envoy answered: {}",
+        reply.stdout
+    );
+    let again = hub.cli(&["envoy", "wait", "--timeout", "10"]);
+    assert!(
+        again.ok().contains("PONG"),
+        "wait without an id finds the latest message"
+    );
+    let read = hub.cli(&["envoy", "read"]);
+    assert!(
+        read.ok()
+            .contains("owner: Reply with exactly the word PONG")
+    );
+    assert!(
+        std::fs::read_to_string(hub.home.join("envoy/CLAUDE.md"))
+            .unwrap()
+            .contains("protectorate sleeve spawn"),
+        "Envoy's workspace describes the CLI"
+    );
+}
+
+/// A child gets its own worktree and branch; stopping the root stops the child in the same step.
+#[test]
+fn root_stop_stops_child() {
+    if !have_runtime() {
+        return;
+    }
+    let hub = Hub::start("tree");
+    let repo = temp_repo("tree");
+    let root = hub.spawn_pi("root4", &repo);
+    let child = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "kid4",
+            "--parent",
+            "root4",
+            "--harness",
+            "pi_local",
+        ])
+        .json();
+    hub.wait("kid4", "idle", 120);
+    let kid = &child["sleeve"];
+    assert_eq!(kid["role"].as_str(), Some("child"));
+    assert_eq!(kid["layout"].as_str(), Some("worktree"));
+    let path = kid["path"].as_str().unwrap();
+    assert_eq!(
+        git_out(
+            std::path::Path::new(path),
+            &["rev-parse", "--abbrev-ref", "HEAD"]
+        ),
+        "pt/kid4"
+    );
+    assert!(git_out(&repo, &["worktree", "list"]).contains(path));
+
+    let (rid, kid_id) = (root["id"].as_str().unwrap(), kid["id"].as_str().unwrap());
+    let (rscope, kscope) = (hub.scope(rid, 1), hub.scope(kid_id, 1));
+    assert!(!scope_pids(&kscope).is_empty());
+    hub.cli(&["sleeve", "stop", "root4"]).ok();
+    let st = hub.state();
+    for name in ["root4", "kid4"] {
+        let s = st["sleeves"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["name"].as_str() == Some(name))
+            .unwrap();
+        let life = s["lifecycle"].as_str().unwrap();
+        assert!(
+            matches!(life, "stopping" | "stopped"),
+            "{name} is {life} right after the root's stop"
+        );
+    }
+    hub.wait("kid4", "ended", 60);
+    hub.wait("root4", "ended", 60);
+    assert!(scope_pids(&rscope).is_empty() && scope_pids(&kscope).is_empty());
+}
+
+/// Capabilities: a sleeve's own token sees only its tree, an envoy-only token reaches only
+/// Envoy, and the loopback listener wants a token.
+#[test]
+fn capabilities_are_scoped() {
+    if !have_runtime() {
+        return;
+    }
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let listen = format!("127.0.0.1:{port}");
+    let hub = Hub::start_with("caps", "pi_local", &["--listen", &listen], &[]);
+    let (ra, rb) = (temp_repo("caps-a"), temp_repo("caps-b"));
+    let a = hub.spawn_pi("a5", &ra);
+    hub.spawn_pi("b5", &rb);
+
+    // The token the sandboxed harness really holds.
+    let scope = hub.scope(a["id"].as_str().unwrap(), 1);
+    let token = scope_pids(&scope)
+        .iter()
+        .find_map(|pid| {
+            let env = std::fs::read(format!("/proc/{pid}/environ")).ok()?;
+            env.split(|b| *b == 0).find_map(|kv| {
+                std::str::from_utf8(kv)
+                    .ok()?
+                    .strip_prefix("PROTECTORATE_TOKEN=")
+                    .map(str::to_string)
+            })
+        })
+        .expect("the sleeve's environment carries its token");
+    assert!(token.starts_with("pc1."));
+    let as_a = [("PROTECTORATE_TOKEN", token.as_str())];
+    let list = hub.cli_env(&as_a, &["--json", "sleeve", "list"]).json();
+    let names: Vec<&str> = list["sleeves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["name"].as_str())
+        .collect();
+    assert!(
+        names.contains(&"a5") && !names.contains(&"b5"),
+        "a5 sees {names:?}"
+    );
+    for args in [
+        &["sleeve", "stop", "b5"][..],
+        &["sleeve", "send", "b5", "hello"],
+        &["transcript", "b5"],
+        &["wait", "b5", "--timeout", "1"],
+        &["envoy", "send", "hello"],
+    ] {
+        let r = hub.cli_env(&as_a, args);
+        assert_eq!(
+            r.status, 4,
+            "a5 must not {args:?}: {} {}",
+            r.stdout, r.stderr
+        );
+    }
+    hub.cli_env(&as_a, &["transcript", "a5"]).ok();
+    assert_eq!(hub.sleeve("b5")["lifecycle"].as_str(), Some("running"));
+
+    let envoy_only = hub.printed("envoy-only token: ");
+    let as_agent = [("PROTECTORATE_TOKEN", envoy_only.as_str())];
+    for args in [
+        &["sleeve", "list"][..],
+        &["state"],
+        &["sleeve", "stop", "a5"],
+        &["transcript", "envoy"],
+    ] {
+        let r = hub.cli_env(&as_agent, args);
+        assert_eq!(r.status, 4, "envoy-only must not {args:?}: {}", r.stderr);
+    }
+    hub.cli_env(&as_agent, &["envoy", "read"]).ok();
+    let bogus = [("PROTECTORATE_TOKEN", "pc1.nope")];
+    assert_eq!(hub.cli_env(&bogus, &["envoy", "read"]).status, 4);
+
+    let owner = hub.printed("owner token (shown once): ");
+    let curl = |auth: Option<&str>| {
+        let mut c = std::process::Command::new("curl");
+        c.args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "-X", "POST"]);
+        if let Some(t) = auth {
+            c.args(["-H", &format!("Authorization: Bearer {t}")]);
+        }
+        c.arg(format!("http://{listen}/api/GetState"));
+        String::from_utf8(c.output().expect("curl").stdout).unwrap()
+    };
+    if on_path("curl") {
+        assert_eq!(curl(None), "401", "loopback needs a token");
+        assert_eq!(curl(Some(&owner)), "200");
+        assert_eq!(curl(Some(&envoy_only)), "403");
+    }
+}
+
+/// Forced resleeve end to end, through the test-only `PT_TEST_FAULT` knob: the first turn's
+/// settle is reported as a usage limit (G1), the sleeve quiesces, its scope empties, the hub
+/// writes the brief, picks pi_local from `resleeve_to`, launches g2 and lands the brief prompt.
+#[test]
+fn forced_resleeve_with_brief() {
+    if !have_runtime() {
+        return;
+    }
+    let hub = Hub::start_with(
+        "resleeve",
+        "pi_local",
+        &[],
+        &[("PT_TEST_FAULT", "usage_limit:six")],
+    );
+    let repo = temp_repo("resleeve");
+    // pi_vendor on the local provider: the same free model under a different harness, so the
+    // resleeve has somewhere to go.
+    let s = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "six",
+            "--path",
+            repo.to_str().unwrap(),
+            "--harness",
+            "pi_vendor",
+            "--provider",
+            &pi_provider(),
+            "--model",
+            &pi_model(),
+            "--resleeve-to",
+            "pi_local",
+        ])
+        .json();
+    hub.wait("six", "idle", 120);
+    let id = s["sleeve"]["id"].as_str().unwrap().to_string();
+    hub.send("six", READY);
+    let s = eventually("the resleeve to land", Duration::from_secs(240), || {
+        let s = hub.sleeve("six");
+        let inc = &s["incarnation"];
+        let done = s["lifecycle"].as_str() == Some("running")
+            && inc["g"].as_u64() == Some(2)
+            && inc["harness"].as_str() == Some("pi_local");
+        done.then_some(s)
+    });
+    assert_eq!(s["guard"].as_str(), Some("cooldown"));
+    assert!(
+        scope_pids(&hub.scope(&id, 1)).is_empty(),
+        "g1's scope is empty"
+    );
+
+    let brief = std::fs::read_to_string(repo.join(".protectorate/BRIEF.md")).expect("the brief");
+    for section in [
+        "# Continuation brief",
+        "Reason: guardrail G1",
+        "## Task",
+        READY,
+        "## Where it stopped",
+        "## Workspace",
+        "## Effects that may have been applied",
+        "## Child roster",
+    ] {
+        assert!(
+            brief.contains(section),
+            "the brief has {section:?}:\n{brief}"
+        );
+    }
+    assert_eq!(
+        git_out(&repo, &["status", "--porcelain"]),
+        "",
+        "the brief is git-excluded"
+    );
+
+    hub.wait("six", "idle", 180);
+    let entries = hub.transcript("six");
+    let users: Vec<&str> = of_type(&entries, "user_message")
+        .iter()
+        .filter_map(|e| e["entry"]["request_id"].as_str())
+        .collect();
+    assert!(
+        users.contains(&"resleeve:six:2"),
+        "the brief prompt landed: {users:?}"
+    );
+    let notices = of_type(&entries, "notice")
+        .iter()
+        .filter_map(|e| e["entry"]["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(notices.contains("guardrail G1 tripped"), "{notices}");
+    assert!(notices.contains("resleeved as g2"), "{notices}");
+}
+
+/// Envoy on its default harness, Claude Code headless. Spends a small Claude turn.
+#[test]
+fn envoy_on_claude_paid() {
+    if std::env::var_os("PT_E2E_PAID").is_none() {
+        eprintln!("SKIP claude: spends subscription quota; set PT_E2E_PAID=1");
+        return;
+    }
+    if !have_runtime() || !on_path("claude") {
+        return;
+    }
+    let hub = Hub::start_with("envoy-claude", "claude", &[], &[]);
+    hub.wait("envoy", "idle", 120);
+    let rid = hub
+        .cli(&[
+            "envoy",
+            "send",
+            "Reply with exactly the word PONG and nothing else.",
+        ])
+        .ok()
+        .trim()
+        .to_string();
+    let reply = hub.cli(&["envoy", "wait", &rid, "--timeout", "180"]);
+    assert!(
+        reply.ok().contains("PONG"),
+        "Envoy on Claude answered: {}",
+        reply.stdout
+    );
+}

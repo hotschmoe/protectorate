@@ -1,0 +1,20 @@
+[package]
+name = "pt-hub"
+description = "The hub runtime: the core thread, executors, transcripts and the API server behind `protectorate serve`"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pt-core = { path = "../pt-core" }
+pt-drivers = { path = "../pt-drivers" }
+pt-hash = { path = "../pt-hash" }
+pt-http = { path = "../pt-http" }
+pt-journal = { path = "../pt-journal" }
+pt-json = { path = "../pt-json" }
+pt-sandbox = { path = "../pt-sandbox" }
+pt-sys = { path = "../pt-sys" }
