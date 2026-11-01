@@ -104,7 +104,7 @@ impl Sim {
     }
 
     pub fn tick(&mut self, by: Millis) {
-        self.now += by;
+        self.now = self.now.saturating_add(by);
         self.apply(EventKind::Tick);
     }
 
@@ -136,7 +136,7 @@ impl Sim {
         if scopes_emptied {
             self.alive.clear();
         }
-        self.now += 2 * SECOND;
+        self.now = self.now.saturating_add(2 * SECOND);
         self.apply(EventKind::HubRecovered);
     }
 

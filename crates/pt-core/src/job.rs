@@ -4,6 +4,7 @@
 use crate::Core;
 use crate::effect::Report;
 use crate::event::{JobReport, JobSpec};
+use crate::guard::since;
 use crate::intent::{Code, EffectKind, Intent, Notice, Reply};
 use crate::model::*;
 use crate::state::*;
@@ -171,7 +172,7 @@ impl Core<'_> {
                 let now = self.now;
                 let j = self.job(id);
                 if let Some(n) = node {
-                    j.excluded.push((n, now + EXCLUDE_FOR));
+                    j.excluded.push((n, now.saturating_add(EXCLUDE_FOR)));
                 }
                 j.node = None;
                 j.submit = None;
@@ -245,7 +246,7 @@ impl Core<'_> {
             } else {
                 let node = self.st.jobs[&id].node.expect("node");
                 let j = self.job(id);
-                j.excluded.push((node, now + EXCLUDE_FOR));
+                j.excluded.push((node, now.saturating_add(EXCLUDE_FOR)));
                 j.node = None;
                 self.set_job(id, J::Queued);
             }
@@ -415,15 +416,15 @@ impl Core<'_> {
         for id in ids {
             let j = &self.st.jobs[&id];
             match j.state {
-                JobState::SubmitUncertain | JobState::Running if now >= j.seen_at + LEASE => {
+                JobState::SubmitUncertain | JobState::Running if since(now, j.seen_at) >= LEASE => {
                     self.set_job(id, JobState::Lost);
                     self.notify(Party::Owner, None, Notice::JobLost { job: id });
                 }
-                JobState::Cancelling if now >= j.state_at + LEASE => {
+                JobState::Cancelling if since(now, j.state_at) >= LEASE => {
                     self.set_job(id, JobState::Lost);
                     self.notify(Party::Owner, None, Notice::JobLost { job: id });
                 }
-                JobState::Lost if now >= j.state_at + LOST_ABANDON => {
+                JobState::Lost if since(now, j.state_at) >= LOST_ABANDON => {
                     self.set_job(id, JobState::Abandoned);
                     self.node_effect(id, false);
                 }

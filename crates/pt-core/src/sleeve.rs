@@ -1025,7 +1025,7 @@ impl Core<'_> {
                 let s = self.sl(sid);
                 s.life = Life::Running;
                 s.guard.state = GuardState::Cooldown {
-                    until: now + COOLDOWN,
+                    until: now.saturating_add(COOLDOWN),
                 };
                 s.guard.since_gen = s.g;
                 s.guard.tried.clear();

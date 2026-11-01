@@ -342,7 +342,7 @@ pub fn invariants(st: &State, sim: &Sim) {
         for (i, &t) in times.iter().enumerate() {
             let n = times[i..]
                 .iter()
-                .take_while(|&&u| u < t + RESLEEVE_WINDOW)
+                .take_while(|&&u| u.saturating_sub(t) < RESLEEVE_WINDOW)
                 .count();
             assert!(
                 n <= RESLEEVE_LIMIT,
