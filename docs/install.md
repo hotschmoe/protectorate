@@ -26,9 +26,35 @@ Releases are built locally, not in CI (SPEC 6). `make release-assets` writes `di
 `protectorate-linux-{amd64,arm64}` (the hub, with the web app, headscale and member embedded),
 `protectorate-node-linux-{amd64,arm64}`, `protectorate-node-windows-{amd64,arm64}.exe` (each with
 member embedded), the three installers, `VERSION` and `SHA256SUMS`. The Windows assets are built
-natively on a Windows machine over ssh (`WIN_HOST`). `make release-publish` uploads them with
-`gh release create`; it is a dry run unless `PUBLISH=1`, and refuses a dirty tree or an untagged
-HEAD. It has never been run.
+natively on a Windows machine over ssh (`PT_RELEASE_WIN_HOST`; unset, they are skipped), and the
+glibc 2.31 amd64 build needs `zig` on PATH or `ZIG`. `make release-publish` uploads them with
+`gh release create`; it is a dry run unless `PUBLISH=1`. It has never been run.
+
+### Versioning
+
+The git tag is the version, and the only place it is written: `vX.Y.Z` for the stable channel,
+`vX.Y.Z-PRE` (such as `v0.7.0-dev.1`) for the dev channel. `make version` prints what a build
+here carries (`git describe`: the tag itself on a tagged commit, otherwise `vX.Y.Z-N-gHASH`,
+with `-dirty` for uncommitted changes). The Makefile passes it to every build: cargo as
+`PROTECTORATE_BUILD_VERSION`, Flutter as `--build-name`, `--build-number` and
+`--dart-define=PROTECTORATE_VERSION`. The versions in `Cargo.toml` (`0.0.0`) and
+`app/pubspec.yaml` (`0.0.0+0`) are placeholders, and `make check-version` (part of `make check`)
+fails if they change or if any build path in the Makefile or `scripts/` skips the tag.
+
+To release:
+
+```
+git tag v0.7.0-dev.1          # on a clean, committed HEAD
+make release-assets           # refuses anything but a clean semver tag on HEAD
+git push origin v0.7.0-dev.1
+make release-publish          # dry run; PUBLISH=1 make release-publish uploads
+```
+
+`make release-snapshot` builds the same assets from any commit, for trying the build; never
+publish one. Machine-specific release settings (`PT_RELEASE_WIN_HOST`, `PT_RELEASE_WIN_DIR`,
+`ZIG`, `PT_RELEASE_REPO`) go in the environment or the gitignored `.env.e2e` (see the Makefile).
+The default release repo is `hotschmoe/protectorate`; installers take `--repo` (`-Repo`), the hub
+`release_repo` in `config.json`.
 
 Every installer checks each download against the release's `SHA256SUMS` before using it, and
 checks that the staged binary reports that release. There is no signing key, so this catches
@@ -52,7 +78,10 @@ sha256sum install.sh
 - The harness CLIs you want, installed by their vendors' own methods and logged in as your user
   (Claude Code, Codex, Grok Build, Pi). The hub copies their login files into each sleeve's
   private home.
-- For `pi_local`: Pi configured with a provider for your OpenAI-compatible endpoint.
+- For `pi_local`: Pi configured with a provider for your OpenAI-compatible endpoint, named in the
+  hub's `config.json` as `pi_local_provider`, with `pi_local_model`. Both default to empty, and
+  until they are set doctor reports `pi_local` as not configured and nothing spawns or resleeves
+  onto it (the default `resleeve_to` is `["pi_local"]`, so a sleeve that must resleeve parks).
 
 ### Install
 
@@ -197,16 +226,10 @@ powershell -ExecutionPolicy Bypass -File .\install-node.ps1 -ServerUrl SERVER_UR
 ```
 
 Parameters: `-Version`, `-Channel`, `-From`, `-Repo`, `-StateDir` (default
-`%ProgramData%\Protectorate\node`). It stages the binary, links `releases\current` and runs `join`,
-but does not install the service. Afterwards, from the same elevated prompt:
-
-```
-<state>\releases\current\protectorate-node.exe install-service --state-dir <state>
-```
-
-Pass the state dir explicitly: the script's default differs from the binary's
-(`%ProgramData%\protectorate-node`). Only dry runs of the script have happened. A Windows node
-cannot take updates from the hub yet; updating one is a reinstall.
+`%ProgramData%\protectorate-node`, the binary's own). It stages the binary, links
+`releases\current`, runs `join`, then `protectorate-node install-service`, which registers and
+starts the LocalSystem service `protectorate-node`. Only dry runs of the script have happened. A
+Windows node cannot take updates from the hub yet; updating one is a reinstall.
 
 ### Join and approve
 

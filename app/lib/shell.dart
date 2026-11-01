@@ -17,8 +17,6 @@ import 'screens/sleeves.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
-const kVersion = '0.1.0';
-
 const _keys = <(String, Screen, String, LogicalKeyboardKey)>[
   ('F1', Screen.envoy, 'ENVOY', LogicalKeyboardKey.f1),
   ('F2', Screen.sleeves, 'SLEEVES', LogicalKeyboardKey.f2),

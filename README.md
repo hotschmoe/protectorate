@@ -93,13 +93,16 @@ make release        # release binaries for this machine
 make web release    # the same, with the Flutter web build embedded
 make test           # e2e tests (cargo test --workspace)
 make test-paid      # also the Claude, Codex and Grok e2e tests, which spend a little quota
-make check          # fmt --check, clippy -D warnings, test, check-deps, check-gen, app-check
+make check          # fmt --check, clippy -D warnings, test, check-deps, check-gen, app-check, check-version
+make version        # the version every build here carries: the git tag (docs/install.md, Versioning)
 make release-assets # every release asset into dist/<version>/ with SHA256SUMS
 ```
 
-The hub e2e tests need `bwrap`, `systemd-run --user`, `git` and `pi` pointed at an
-OpenAI-compatible endpoint (`PT_E2E_PI_PROVIDER`, `PT_E2E_PI_MODEL`). A binary built without Go
-has no fleet; `protectorate version` says so. Fuzz targets live in `crates/<crate>/fuzz/` and run
+The hub e2e tests need `bwrap`, `systemd-run --user`, `git` and `pi` with a provider for an
+OpenAI-compatible endpoint, named by `PT_E2E_PI_PROVIDER` and `PT_E2E_PI_MODEL`; without them those
+tests print SKIP and pass. Machine-specific settings like these go in a gitignored `.env.e2e`
+(`KEY=value` lines) at the repo root, which the Makefile reads; the Makefile header lists them.
+A binary built without Go has no fleet; `protectorate version` says so. Fuzz targets live in `crates/<crate>/fuzz/` and run
 with `cargo +nightly fuzz`.
 
 To install a hub or a node, see [docs/install.md](docs/install.md). Day-to-day commands are in
