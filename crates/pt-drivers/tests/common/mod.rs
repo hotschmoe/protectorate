@@ -125,6 +125,7 @@ pub struct Run {
     last_seq: u64,
     next_req: usize,
     finals: std::collections::HashSet<(bool, String)>,
+    written: std::collections::HashSet<String>,
 }
 
 #[derive(Debug, Default)]
@@ -156,6 +157,7 @@ impl Run {
             last_seq: 0,
             next_req: 0,
             finals: std::collections::HashSet::new(),
+            written: std::collections::HashSet::new(),
         }
     }
 
@@ -198,6 +200,19 @@ impl Run {
                             "one final per reasoning block {id}"
                         )
                     }
+                    // The written user message is ahead of everything the harness says about it.
+                    Entry::UserMessage { request_id, .. } => {
+                        assert!(self.written.insert(request_id.clone()), "one user_message");
+                    }
+                    Entry::PromptAck { request_id, .. }
+                    | Entry::TurnStarted {
+                        request_id: Some(request_id),
+                        ..
+                    } => assert!(
+                        self.written.contains(request_id),
+                        "user_message {request_id} precedes {:?}",
+                        event.entry
+                    ),
                     _ => {}
                 }
                 // Every entry serializes and parses back.

@@ -7,6 +7,12 @@ use crate::event::{Entry, ErrorClass, Event, ToolKind};
 
 pub(crate) const MAX_TOOL_OUTPUT: usize = 16 << 10;
 pub(crate) const MAX_TOOL_INPUT: usize = 16 << 10;
+/// The most text one assistant or reasoning block keeps; the rest is cut with a marker.
+pub(crate) const MAX_BLOCK: usize = 1 << 20;
+const TRUNCATED: &str = "\n[protectorate: block truncated at 1 MiB]";
+/// Token counts above this are malformed (2^40, far past any context window or session).
+const MAX_COUNT: u64 = 1 << 40;
+const MAX_COST_USD: f64 = 1e6;
 const SUMMARY: usize = 300;
 
 /// Assigns seqs, coalesces text deltas into one final entry per block, and buffers what a
@@ -16,17 +22,46 @@ pub(crate) struct Out {
     next_seq: u64,
     open: Option<OpenText>,
     /// Recently finalized blocks, so a late authoritative end does not repeat one.
-    closed: VecDeque<(bool, String)>,
-    unmapped: HashSet<String>,
+    closed: VecDeque<Closed>,
+    notes: HashSet<String>,
+    /// User messages whose line is queued but not yet written, by request id.
+    unwritten: Vec<(String, Entry)>,
     pub(crate) events: Vec<Event>,
-    pub(crate) writes: Vec<Value>,
+    pub(crate) writes: Vec<Write>,
 }
 
+/// A line for the harness's stdin; `request` names the user message it carries.
+pub(crate) struct Write {
+    pub(crate) line: Value,
+    pub(crate) request: Option<String>,
+}
+
+/// A text block. Another entry in mid-stream (a steer's ack, a notice) closes it; deltas
+/// that follow for the same harness id open part 2, emitted as `<id>~2`, so no two finals
+/// share an id.
 struct OpenText {
     seq: u64,
     reasoning: bool,
-    id: String,
+    /// The harness's id for the block.
+    key: String,
+    part: u32,
     text: String,
+    truncated: bool,
+}
+
+struct Closed {
+    reasoning: bool,
+    key: String,
+    parts: u32,
+}
+
+impl OpenText {
+    fn id(&self) -> String {
+        match self.part {
+            1 => self.key.clone(),
+            n => format!("{}~{n}", self.key),
+        }
+    }
 }
 
 impl Out {
@@ -36,14 +71,38 @@ impl Out {
             next_seq: 1,
             open: None,
             closed: VecDeque::new(),
-            unmapped: HashSet::new(),
+            notes: HashSet::new(),
+            unwritten: Vec::new(),
             events: Vec::new(),
             writes: Vec::new(),
         }
     }
 
     pub(crate) fn write(&mut self, line: Value) {
-        self.writes.push(line);
+        self.writes.push(Write {
+            line,
+            request: None,
+        });
+    }
+
+    /// Holds the user message `entry` back until the line just written for `request_id` has
+    /// left ([`Out::written`]), or the harness answers it, which proves it was read.
+    pub(crate) fn after_write(&mut self, request_id: &str, entry: Entry) {
+        match self.writes.last_mut() {
+            Some(w) if w.request.is_none() => {
+                w.request = Some(request_id.to_owned());
+                self.unwritten.push((request_id.to_owned(), entry));
+            }
+            _ => self.emit(entry),
+        }
+    }
+
+    /// The line carrying `request_id` is written: its user message enters the stream.
+    pub(crate) fn written(&mut self, request_id: &str) {
+        if let Some(i) = self.unwritten.iter().position(|(r, _)| r == request_id) {
+            let (_, entry) = self.unwritten.remove(i);
+            self.emit(entry);
+        }
     }
 
     fn push(&mut self, seq: u64, entry: Entry) {
@@ -61,8 +120,19 @@ impl Out {
         seq
     }
 
-    /// Any entry other than a delta closes the open text block first.
+    /// Any entry other than a delta closes the open text block first. An answer to a user
+    /// message is never ahead of the message itself.
     pub(crate) fn emit(&mut self, entry: Entry) {
+        if let Entry::PromptAck { request_id, .. }
+        | Entry::TurnStarted {
+            request_id: Some(request_id),
+            ..
+        } = &entry
+            && self.unwritten.iter().any(|(r, _)| r == request_id)
+        {
+            let request_id = request_id.clone();
+            self.written(&request_id);
+        }
         self.flush();
         let seq = self.take_seq();
         self.push(seq, entry);
@@ -84,13 +154,44 @@ impl Out {
 
     /// One notice per unmapped message type per session (NoMatch, not Desync).
     pub(crate) fn unmapped(&mut self, what: &str) {
-        if self.unmapped.len() < 256 && self.unmapped.insert(what.to_owned()) {
-            let what = bounded(what, 120);
-            self.notice(
-                &format!("unmapped:{what}"),
-                format!("unmapped message {what}"),
-            );
+        let what = bounded(what, 120);
+        self.once(
+            &format!("unmapped:{what}"),
+            format!("unmapped message {what}"),
+        );
+    }
+
+    fn once(&mut self, code: &str, text: String) {
+        if self.notes.len() < 256 && self.notes.insert(code.to_owned()) {
+            self.notice(code, text);
         }
+    }
+
+    /// A token count the harness reported: `None` when absent, and when absurd, which is
+    /// noticed once per field as malformed.
+    pub(crate) fn count(&mut self, what: &str, v: &Value) -> Option<u64> {
+        let n = v.as_u64()?;
+        if n > MAX_COUNT {
+            self.once(
+                &format!("malformed:{what}"),
+                format!("ignored malformed {what} {n}"),
+            );
+            return None;
+        }
+        Some(n)
+    }
+
+    /// A cost in USD: finite, not negative and not absurd, else `None`.
+    pub(crate) fn cost(&mut self, what: &str, v: &Value) -> Option<f64> {
+        let c = v.as_f64()?;
+        if !(0.0..=MAX_COST_USD).contains(&c) {
+            self.once(
+                &format!("malformed:{what}"),
+                format!("ignored malformed {what} {}", bounded(&v.to_string(), 40)),
+            );
+            return None;
+        }
+        Some(c)
     }
 
     pub(crate) fn delta(&mut self, reasoning: bool, id: &str, text: &str) {
@@ -100,50 +201,80 @@ impl Out {
         if self
             .open
             .as_ref()
-            .is_some_and(|o| o.reasoning != reasoning || o.id != id)
+            .is_some_and(|o| o.reasoning != reasoning || o.key != id)
         {
             self.flush();
         }
         if self.open.is_none() {
+            let part = self
+                .closed
+                .iter()
+                .find(|c| c.reasoning == reasoning && c.key == id)
+                .map_or(1, |c| c.parts.saturating_add(1));
             let seq = self.take_seq();
             self.open = Some(OpenText {
                 seq,
                 reasoning,
-                id: id.to_owned(),
+                key: id.to_owned(),
+                part,
                 text: String::new(),
+                truncated: false,
             });
         }
         let Some(open) = self.open.as_mut() else {
             return;
         };
+        // Past the cap the block keeps its marker and live deltas stop, so the live view
+        // never shows more than the final keeps.
+        if open.truncated {
+            return;
+        }
+        let room = MAX_BLOCK - open.text.len();
+        let text = if text.len() > room {
+            open.truncated = true;
+            bounded(text, room)
+        } else {
+            text
+        };
         open.text.push_str(text);
-        let seq = open.seq;
-        self.push(seq, text_entry(reasoning, id, text, false));
+        let (seq, block) = (open.seq, open.id());
+        if !text.is_empty() {
+            self.push(seq, text_entry(reasoning, &block, text, false));
+        }
     }
 
     /// Closes the block `id` with the harness's authoritative text, or with the streamed text
-    /// when that is empty (Claude redacts thinking). A block never streamed becomes one final;
-    /// one already closed (Pi ends thinking after its text started) is not repeated.
+    /// when that is empty (Claude redacts thinking) or the block was split, since earlier
+    /// parts already hold the start. A block never streamed becomes one final; one already
+    /// closed (Pi ends thinking after its text started) is not repeated.
     pub(crate) fn finish(&mut self, reasoning: bool, id: &str, text: &str) {
         let matches = self
             .open
             .as_ref()
-            .is_some_and(|o| o.reasoning == reasoning && o.id == id);
+            .is_some_and(|o| o.reasoning == reasoning && o.key == id);
         if matches {
             if let Some(mut open) = self.open.take() {
-                if !text.is_empty() {
-                    open.text = text.to_owned();
+                if !text.is_empty() && open.part == 1 {
+                    open.text = bounded(text, MAX_BLOCK).to_owned();
+                    open.truncated = text.len() > MAX_BLOCK;
                 }
                 self.close(open);
             }
-        } else if !text.is_empty() && !self.closed.iter().any(|(r, i)| *r == reasoning && i == id) {
+        } else if !text.is_empty()
+            && !self
+                .closed
+                .iter()
+                .any(|c| c.reasoning == reasoning && c.key == id)
+        {
             self.flush();
             let seq = self.take_seq();
             self.close(OpenText {
                 seq,
                 reasoning,
-                id: id.to_owned(),
-                text: text.to_owned(),
+                key: id.to_owned(),
+                part: 1,
+                text: bounded(text, MAX_BLOCK).to_owned(),
+                truncated: text.len() > MAX_BLOCK,
             });
         }
     }
@@ -154,15 +285,30 @@ impl Out {
         }
     }
 
-    fn close(&mut self, open: OpenText) {
+    fn close(&mut self, mut open: OpenText) {
+        if open.truncated {
+            open.text.push_str(TRUNCATED);
+        }
         self.push(
             open.seq,
-            text_entry(open.reasoning, &open.id, &open.text, true),
+            text_entry(open.reasoning, &open.id(), &open.text, true),
         );
+        if let Some(c) = self
+            .closed
+            .iter_mut()
+            .find(|c| c.reasoning == open.reasoning && c.key == open.key)
+        {
+            c.parts = open.part;
+            return;
+        }
         if self.closed.len() == 64 {
             self.closed.pop_front();
         }
-        self.closed.push_back((open.reasoning, open.id));
+        self.closed.push_back(Closed {
+            reasoning: open.reasoning,
+            key: open.key,
+            parts: open.part,
+        });
     }
 
     pub(crate) fn tool_call(&mut self, id: &str, tool: ToolKind, name: &str, input: &Value) {
@@ -279,11 +425,18 @@ pub(crate) fn content_text(content: &Value) -> String {
     }
 }
 
-/// A JSON-RPC id as an approval or map key.
-pub(crate) fn id_key(id: &Value) -> String {
+/// A sum of token counts over a turn's calls, held to the same bound as one count.
+pub(crate) fn add_count(a: u64, b: u64) -> u64 {
+    a.saturating_add(b).min(MAX_COUNT)
+}
+
+/// A JSON-RPC id as a key that keeps its type: a number as its text, a string as `s:` and
+/// the string, so `1` and `"1"` stay apart. `None` for any other JSON type.
+pub(crate) fn id_key(id: &Value) -> Option<String> {
     match id {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
+        Value::Number(n) => Some(n.as_str().to_owned()),
+        Value::String(s) => Some(format!("s:{s}")),
+        _ => None,
     }
 }
 

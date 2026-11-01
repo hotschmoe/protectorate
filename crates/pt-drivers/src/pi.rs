@@ -1,12 +1,13 @@
 //! `pi --mode rpc` JSONL. Provider and model come from Pi's own `--provider`/`--model`
 //! flags (a local endpoint is just a provider in the owner's models.json). The prompt ack is
-//! the `prompt` response; a turn ends at `agent_settled`, not `agent_end`.
+//! the `prompt` response; a turn ends at `agent_settled`, not `agent_end`. Pi has no turn
+//! ids, so the driver numbers its turns (`pi-turn-<n>`) for acks and steering.
 
 use std::collections::HashMap;
 
 use pt_json::{Value, obj};
 
-use crate::emit::{Out, bounded_output, content_text, opt_str};
+use crate::emit::{Out, add_count, bounded_output, content_text, opt_str};
 use crate::event::{
     AckKind, Decision, Entry, ErrorClass, Harness, Stop, ToolKind, ToolStatus, TouchedPath, Usage,
     classify,
@@ -19,6 +20,7 @@ pub(crate) struct Pi {
     pending: HashMap<String, Rpc>,
     ready: bool,
     turn: Option<Turn>,
+    turns: u64,
     msg_n: u64,
     context_window: Option<u64>,
 }
@@ -26,13 +28,27 @@ pub(crate) struct Pi {
 enum Rpc {
     State,
     Prompt(String),
-    Steer(String),
+    /// The request and the turn it steers.
+    Steer(String, String),
     Abort,
 }
 
-#[derive(Default)]
+impl Rpc {
+    fn command(&self) -> &'static str {
+        match self {
+            Rpc::State => "get_state",
+            Rpc::Prompt(_) => "prompt",
+            Rpc::Steer(..) => "steer",
+            Rpc::Abort => "abort",
+        }
+    }
+}
+
 struct Turn {
+    native: String,
     request_id: Option<String>,
+    /// Pi answered our prompt, which it does before the run starts.
+    answered: bool,
     started: bool,
     errored: bool,
     usage: Usage,
@@ -47,6 +63,7 @@ impl Pi {
             pending: HashMap::new(),
             ready: false,
             turn: None,
+            turns: 0,
             msg_n: 0,
             context_window: None,
         }
@@ -83,9 +100,21 @@ impl Pi {
         out.write(fields);
     }
 
+    fn new_turn(&mut self, request_id: Option<String>) -> Turn {
+        self.turns += 1;
+        Turn {
+            native: format!("pi-turn-{}", self.turns),
+            request_id,
+            answered: false,
+            started: false,
+            errored: false,
+            usage: Usage::default(),
+            cost: 0.0,
+        }
+    }
+
     fn on_response(&mut self, msg: &Value, out: &mut Out) {
         let command = msg["command"].as_str().unwrap_or_default();
-        let ok = msg["success"].as_bool() == Some(true);
         let error = msg["error"].as_str().unwrap_or("failed").to_owned();
         let Some(rpc) = msg["id"].as_str().and_then(|id| self.pending.remove(id)) else {
             if command == "parse" {
@@ -101,7 +130,39 @@ impl Pi {
             }
             return;
         };
+        // Only a well-formed answer to this very command decides it; anything else leaves the
+        // effect open.
+        let Some(ok) = msg["success"]
+            .as_bool()
+            .filter(|_| command == rpc.command())
+        else {
+            out.error(
+                ErrorClass::Protocol,
+                format!(
+                    "pi answered {} {} with a malformed {command:?} response",
+                    rpc.command(),
+                    msg["id"]
+                ),
+            );
+            return;
+        };
         let data = &msg["data"];
+        let disposition = opt_str(&data["disposition"]);
+        let known = match rpc {
+            Rpc::Prompt(_) => ["started", "queued", "handled"].as_slice(),
+            Rpc::Steer(..) => &["queued", "handled"],
+            _ => &[],
+        };
+        if ok && !known.is_empty() && !disposition.as_deref().is_some_and(|d| known.contains(&d)) {
+            out.error(
+                ErrorClass::Protocol,
+                format!(
+                    "pi {command} response has disposition {}",
+                    data["disposition"]
+                ),
+            );
+            return;
+        }
         match rpc {
             Rpc::State if !ok => {
                 out.error(classify(&error, None), format!("pi get_state: {error}"))
@@ -122,7 +183,7 @@ impl Pi {
                 }
                 self.ready = true;
                 let model = &data["model"];
-                self.context_window = model["contextWindow"].as_u64();
+                self.context_window = out.count("contextWindow", &model["contextWindow"]);
                 out.emit(Entry::SessionInfo {
                     harness: Harness::Pi,
                     native_id: id,
@@ -132,8 +193,26 @@ impl Pi {
                     cwd: None,
                 });
             }
-            Rpc::Prompt(request_id) | Rpc::Steer(request_id) => {
-                let disposition = opt_str(&data["disposition"]);
+            Rpc::Steer(request_id, native) => out.emit(Entry::PromptAck {
+                request_id,
+                ack: if ok {
+                    AckKind::Confirmed
+                } else {
+                    AckKind::Rejected
+                },
+                native_turn_id: ok.then_some(native),
+                detail: if ok { disposition } else { Some(error) },
+            }),
+            Rpc::Prompt(request_id) => {
+                let turn = self
+                    .turn
+                    .as_mut()
+                    .filter(|t| t.request_id.as_deref() == Some(&request_id));
+                let native = turn.as_ref().map(|t| t.native.clone());
+                let unstarted = turn.as_ref().is_some_and(|t| !t.started);
+                if let Some(t) = turn {
+                    t.answered = true;
+                }
                 out.emit(Entry::PromptAck {
                     request_id: request_id.clone(),
                     ack: if ok {
@@ -141,17 +220,18 @@ impl Pi {
                     } else {
                         AckKind::Rejected
                     },
-                    native_turn_id: None,
+                    native_turn_id: native.clone().filter(|_| ok),
                     detail: if ok { disposition.clone() } else { Some(error) },
                 });
-                let ours = self
-                    .turn
-                    .as_ref()
-                    .is_some_and(|t| t.request_id.as_deref() == Some(&request_id) && !t.started);
-                if ours && (!ok || disposition.as_deref() == Some("handled")) {
-                    // Rejected before acceptance, or consumed without a run: no agent_settled follows.
+                if unstarted && (!ok || disposition.as_deref() == Some("handled")) {
+                    // Rejected before acceptance, or consumed without a run: no agent_settled
+                    // follows. A handled prompt still reports a turn, so it starts and ends.
                     self.turn = None;
                     if ok {
+                        out.emit(Entry::TurnStarted {
+                            request_id: Some(request_id),
+                            native_turn_id: native,
+                        });
                         out.emit(Entry::TurnSettled {
                             stop: Stop::Other,
                             native_stop: disposition,
@@ -167,7 +247,10 @@ impl Pi {
     }
 
     fn turn(&mut self) -> &mut Turn {
-        self.turn.get_or_insert_with(Turn::default)
+        if self.turn.is_none() {
+            self.turn = Some(self.new_turn(None));
+        }
+        self.turn.as_mut().expect("a turn was just set")
     }
 
     fn on_message_update(&mut self, msg: &Value, out: &mut Out) {
@@ -189,15 +272,19 @@ impl Pi {
         }
         out.flush();
         let u = &m["usage"];
-        let n = |k: &str| u[k].as_u64().unwrap_or(0);
-        let context = n("input") + n("cacheRead") + n("cacheWrite");
+        let mut n = |k: &str| out.count(k, &u[k]).unwrap_or(0);
+        let (input, output, cache_read, cache_write) =
+            (n("input"), n("output"), n("cacheRead"), n("cacheWrite"));
+        let cost = out.cost("cost", &u["cost"]["total"]).unwrap_or(0.0);
+        let context = input + cache_read + cache_write;
         let window = self.context_window;
         let turn = self.turn();
-        turn.usage.input += n("input");
-        turn.usage.output += n("output");
-        turn.usage.cache_read += n("cacheRead");
-        turn.usage.cache_write += n("cacheWrite");
-        turn.cost += u["cost"]["total"].as_f64().unwrap_or(0.0);
+        let u = &mut turn.usage;
+        u.input = add_count(u.input, input);
+        u.output = add_count(u.output, output);
+        u.cache_read = add_count(u.cache_read, cache_read);
+        u.cache_write = add_count(u.cache_write, cache_write);
+        turn.cost = (turn.cost + cost).min(1e6);
         if context > 0 {
             turn.usage.context_tokens = Some(context);
         }
@@ -210,7 +297,31 @@ impl Pi {
     }
 
     fn on_settled(&mut self, msg: &Value, out: &mut Out) {
-        let turn = self.turn.take().unwrap_or_default();
+        // Pi answers a prompt before its run starts, so a settle before that answer is not
+        // this prompt's.
+        if self
+            .turn
+            .as_ref()
+            .is_some_and(|t| t.request_id.is_some() && !t.answered)
+        {
+            out.notice("stale_settle", "pi settled before answering the prompt");
+            return;
+        }
+        let Some(turn) = self.turn.take() else {
+            out.emit(Entry::TurnSettled {
+                stop: Stop::Other,
+                native_stop: Some("settled".into()),
+                usage: Usage::default(),
+                duration_ms: None,
+            });
+            return;
+        };
+        if !turn.started {
+            out.emit(Entry::TurnStarted {
+                request_id: turn.request_id.clone(),
+                native_turn_id: Some(turn.native.clone()),
+            });
+        }
         let aborted = msg["aborted"].as_bool() == Some(true);
         let stop = if aborted {
             Stop::Cancelled
@@ -280,9 +391,10 @@ impl Protocol for Pi {
                 if !turn.started {
                     turn.started = true;
                     let request_id = turn.request_id.clone();
+                    let native = turn.native.clone();
                     out.emit(Entry::TurnStarted {
                         request_id,
-                        native_turn_id: None,
+                        native_turn_id: Some(native),
                     });
                 }
             }
@@ -328,10 +440,13 @@ impl Protocol for Pi {
             "compaction_end" => {
                 let r = &msg["result"];
                 if r.as_object().is_some() {
+                    let tokens_before = out.count("tokensBefore", &r["tokensBefore"]);
+                    let tokens_after =
+                        out.count("estimatedTokensAfter", &r["estimatedTokensAfter"]);
                     out.emit(Entry::Compaction {
                         trigger: opt_str(&msg["reason"]),
-                        tokens_before: r["tokensBefore"].as_u64(),
-                        tokens_after: r["estimatedTokensAfter"].as_u64(),
+                        tokens_before,
+                        tokens_after,
                     });
                 } else if let Some(error) = msg["errorMessage"].as_str() {
                     out.notice("compaction", format!("pi compaction failed: {error}"));
@@ -381,17 +496,21 @@ impl Protocol for Pi {
         &mut self,
         request_id: &str,
         text: &str,
-        steer: bool,
+        steer: Option<&str>,
         out: &mut Out,
     ) -> Result<(), DriverError> {
         if !self.ready {
             return Err(DriverError::NotReady);
         }
-        if steer && self.turn.is_some() {
+        if let Some(expected) = steer {
+            // A steer that lost the race with settlement must not become a new prompt.
+            if self.turn.as_ref().map(|t| t.native.as_str()) != Some(expected) {
+                return Err(DriverError::TurnEnded);
+            }
             self.command(
                 "steer",
                 obj! { "message" => text },
-                Rpc::Steer(request_id.to_owned()),
+                Rpc::Steer(request_id.to_owned(), expected.to_owned()),
                 out,
             );
             return Ok(());
@@ -405,10 +524,7 @@ impl Protocol for Pi {
             Rpc::Prompt(request_id.to_owned()),
             out,
         );
-        self.turn = Some(Turn {
-            request_id: Some(request_id.to_owned()),
-            ..Turn::default()
-        });
+        self.turn = Some(self.new_turn(Some(request_id.to_owned())));
         Ok(())
     }
 

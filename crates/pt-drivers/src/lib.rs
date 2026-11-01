@@ -12,6 +12,11 @@
 //! match session.wait_ack("req-1", timeout) { Ack::Confirmed { .. } => .., .. }
 //! for event in events { .. }                    // ends after Entry::Exited
 //! ```
+//!
+//! Ordering: `Entry::UserMessage` for a request enters the stream once its line is written
+//! to the harness's stdin, and always before that request's `PromptAck` and `TurnStarted`.
+//! Harness output that comes before it in the stream was read before the prompt was written,
+//! so it is never evidence that the prompt landed.
 
 #![forbid(unsafe_code)]
 
@@ -19,6 +24,7 @@ mod claude;
 mod codex;
 mod emit;
 mod event;
+mod fuzz;
 mod grok;
 mod pi;
 mod session;
@@ -32,6 +38,9 @@ pub use event::{
     Usage, classify,
 };
 pub use session::{Ack, Session, spawn};
+
+#[doc(hidden)]
+pub use fuzz::fuzz_feed;
 
 use emit::Out;
 use pt_json::Value;
@@ -97,6 +106,8 @@ pub enum DriverError {
     Busy,
     /// The process has exited or is shutting down; nothing was written.
     Ended,
+    /// The turn a steer was meant for is not the running one; nothing was written.
+    TurnEnded,
     Unsupported(&'static str),
     UnknownApproval(String),
     Invalid(&'static str),
@@ -112,6 +123,7 @@ impl fmt::Display for DriverError {
             DriverError::NotReady => f.write_str("harness session is not ready"),
             DriverError::Busy => f.write_str("harness is in a turn and cannot take a message"),
             DriverError::Ended => f.write_str("harness session has ended"),
+            DriverError::TurnEnded => f.write_str("the turn to steer has ended"),
             DriverError::Unsupported(what) => write!(f, "unsupported: {what}"),
             DriverError::UnknownApproval(id) => write!(f, "approval {id:?} is not pending"),
             DriverError::Invalid(what) => write!(f, "invalid: {what}"),
@@ -136,11 +148,12 @@ impl std::error::Error for DriverError {
 trait Protocol: Send {
     fn start(&mut self, out: &mut Out);
     fn on_message(&mut self, msg: Value, out: &mut Out);
+    /// A prompt, or with `steer` the native id of the turn it is meant for.
     fn send_user(
         &mut self,
         request_id: &str,
         text: &str,
-        steer: bool,
+        steer: Option<&str>,
         out: &mut Out,
     ) -> Result<(), DriverError>;
     fn respond_approval(
@@ -152,8 +165,14 @@ trait Protocol: Send {
     fn interrupt(&mut self, out: &mut Out) -> Result<(), DriverError>;
 }
 
-/// The harness argv after the program, and the protocol state for `spec`.
-fn plan(spec: &SpawnSpec) -> Result<(Vec<String>, Box<dyn Protocol>), DriverError> {
+type UuidSource<'a> = &'a mut dyn FnMut() -> std::io::Result<String>;
+
+/// The harness argv after the program, and the protocol state for `spec`; `uuid` yields
+/// fresh random UUIDs.
+fn plan(
+    spec: &SpawnSpec,
+    uuid: UuidSource<'_>,
+) -> Result<(Vec<String>, Box<dyn Protocol>), DriverError> {
     let cwd = spec
         .cwd
         .to_str()
@@ -163,12 +182,9 @@ fn plan(spec: &SpawnSpec) -> Result<(Vec<String>, Box<dyn Protocol>), DriverErro
         Harness::Claude => {
             let id = match &spec.resume {
                 Some(id) => id.clone(),
-                None => emit::new_uuid().map_err(|source| DriverError::Spawn {
-                    program: "/dev/urandom".into(),
-                    source,
-                })?,
+                None => random(uuid)?,
             };
-            let p = claude::Claude::new(id, spec, cwd);
+            let p = claude::Claude::new(id, random(uuid)?, spec, cwd);
             (p.argv(spec), Box::new(p))
         }
         Harness::Codex => {
@@ -185,10 +201,7 @@ fn plan(spec: &SpawnSpec) -> Result<(Vec<String>, Box<dyn Protocol>), DriverErro
             }
             let new_id = match &spec.resume {
                 Some(_) => None,
-                None => Some(emit::new_uuid().map_err(|source| DriverError::Spawn {
-                    program: "/dev/urandom".into(),
-                    source,
-                })?),
+                None => Some(random(uuid)?),
             };
             let p = pi::Pi::new(spec);
             (p.argv(spec, new_id.as_deref()), Box::new(p))
@@ -196,58 +209,9 @@ fn plan(spec: &SpawnSpec) -> Result<(Vec<String>, Box<dyn Protocol>), DriverErro
     })
 }
 
-/// Drives a protocol mapper with arbitrary input for the fuzz targets. An optional first
-/// line `#` with `resume=<id>` and `supervised` sets the spawn options. Lines starting with
-/// `!` are calls (`!send`, `!steer`, `!approve <id>`, `!session <id>`, `!deny <id>`,
-/// `!cancel <id>`, `!interrupt`); every other line goes through the same path as the
-/// harness's stdout. Every entry must survive a JSON round trip. Not a stable API.
-#[doc(hidden)]
-pub fn fuzz_feed(harness: Harness, input: &[u8]) -> usize {
-    let mut spec = SpawnSpec::new(harness, "harness", "/work");
-    let mut lines = input.split(|b| *b == b'\n').peekable();
-    if let Some(header) = lines.next_if(|l| l.first() == Some(&b'#')) {
-        for word in String::from_utf8_lossy(&header[1..]).split_whitespace() {
-            if let Some(id) = word.strip_prefix("resume=") {
-                spec.resume = Some(id.to_owned());
-            } else if word == "supervised" && harness != Harness::Pi {
-                spec.permission = Permission::Supervised;
-            }
-        }
-    }
-    let Ok((_, mut proto)) = plan(&spec) else {
-        return 0;
-    };
-    let mut out = Out::new(1);
-    proto.start(&mut out);
-    let mut n = 0;
-    for (i, line) in lines.enumerate() {
-        if let Some(call) = line.strip_prefix(b"!") {
-            let call = String::from_utf8_lossy(call);
-            let (verb, arg) = call.split_once(' ').unwrap_or((&call, ""));
-            let req = format!("r{i}");
-            let p = proto.as_mut();
-            let _ = match verb {
-                "send" => session::deliver(p, &mut out, &req, "fuzz", "hi", false),
-                "steer" => session::deliver(p, &mut out, &req, "fuzz", "hi", true),
-                "approve" => p.respond_approval(arg, Decision::AllowOnce, &mut out),
-                "session" => p.respond_approval(arg, Decision::AllowSession, &mut out),
-                "deny" => p.respond_approval(arg, Decision::Deny, &mut out),
-                "cancel" => p.respond_approval(arg, Decision::Cancel, &mut out),
-                "interrupt" => p.interrupt(&mut out),
-                _ => Ok(()),
-            };
-        } else {
-            session::handle_line(proto.as_mut(), &mut out, harness, line);
-        }
-        for event in out.events.drain(..) {
-            let text = pt_json::ToJson::to_json(&event).to_string();
-            let back: Event = pt_json::from_str(&text).expect("an event parses back");
-            assert_eq!(back, event, "an event survives a JSON round trip");
-            n += text.len();
-        }
-        for line in out.writes.drain(..) {
-            n += line.to_string().len();
-        }
-    }
-    n
+fn random(uuid: UuidSource<'_>) -> Result<String, DriverError> {
+    uuid().map_err(|source| DriverError::Spawn {
+        program: "/dev/urandom".into(),
+        source,
+    })
 }
