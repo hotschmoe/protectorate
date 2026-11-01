@@ -109,9 +109,9 @@ Each entry: where, what was done, what right looks like.
   the scope and sandbox) are gone, and so are the keyring, ssh-agent, gpg-agent and pipewire
   sockets. Abstract unix sockets still reach the host, since the network namespace is shared
   (X11 `@/tmp/.X11-unix`, other users' buses). Right: a network namespace or the own helper.
-- **pt-sandbox: the docker socket is always masked.** The owner's supplementary groups survive the
-  user namespace (shown as nogroup), so `/run/docker.sock` was root on the host from any sleeve.
-  A sleeve that needs docker has none. Right: an explicit per-sleeve opt-in if one is wanted.
+- **pt-sandbox: the docker socket is reachable** (SPEC 2, principle 10). The owner's supplementary
+  groups survive the user namespace, so `/run/docker.sock` is root on the host from any sleeve; the
+  threat model accepts that. Right: revisit with the threat model.
 - **Own namespaces helper instead of bwrap** stays a later option (host dependency on bwrap's
   version; 0.13.1 here).
 - **Control-key pin is checked by a separate fetch** (`go/cmd/member`): member fetches `/key` and
@@ -260,11 +260,11 @@ Each entry: where, what was done, what right looks like.
   process group or Job Object, and runs as the agent's user with the agent's environment plus its
   `env`. There is no `cpu.max`/`memory.max`/`pids.max`, no namespaces and no `mode` (sandboxed,
   plain, admin). Right: design report 1.3.
-- **Runner account deferred: owner decision pending** (`pt-node`, `sys/windows_job.rs`; D11):
-  Windows jobs run as the agent's account, so as LocalSystem under the service, inside a Job
-  Object with kill-on-close, all JOB_OBJECT_UILIMIT_* restrictions and the idle priority class
-  once a person is present. No `protectorate-runner` account is created and no logon rights are
-  granted. Right: the owner decides; then a low-privilege local account that jobs run as.
+- **No runner account** (`pt-node`, `sys/windows_job.rs`; D11): jobs run as the agent's account,
+  so as root on Linux and LocalSystem on Windows, inside a Job Object with kill-on-close, all
+  JOB_OBJECT_UILIMIT_* restrictions and the idle priority class once a person is present. SPEC 2
+  principle 10 (2026-11-01) accepts this, so no low-privilege account is planned. Right: revisit
+  with the threat model.
 - **A node fetches its update from GitHub itself** (`protectorate-node` update.rs): `Update{version,
   api, repo}` has the node call the releases API and download its asset through its own curl, so
   a node without outbound internet cannot update, and every node spends unauthenticated API
@@ -429,13 +429,10 @@ Each entry: where, what was done, what right looks like.
   (`d9_approval_timeout_secs`, default 900, then `timeout`). The origin is cleared when the turn
   settles, so a background process Envoy started in that turn acts as the owner's afterwards;
   a sleeve Envoy prompted on the agent's behalf is not gated at all; no push method exists yet
-  to gate. A `maintenance` node job from any sleeve, Envoy included, always waits for the owner;
-  other node jobs from sleeves run unasked (owner, 2026-11-01: jobs may run as root, and the
-  owner is not to be the bottleneck). A node runs every job with its own account (root, or
-  LocalSystem on Windows) and does not enforce `maintenance`, so the flag is a sleeve's own
-  declaration: a sleeve that leaves it off runs anything as the node's account. Right: carry the
-  origin through messages Envoy sends (a request chain), add pushes to the list when the API
-  grows them, and a runner account for ordinary jobs so `maintenance` means a privilege.
+  to gate. Outside such a turn no node job waits for the owner, `maintenance` or not: a node runs
+  every job with its own account (root, or LocalSystem on Windows), and SPEC 2 principle 10
+  accepts that. Right: carry the origin through messages Envoy sends (a request chain), and add
+  pushes to the list when the API grows them.
 - **Vendor agents read a filtered Envoy transcript** (`pt-hub`, api.rs `agent_transcript`):
   `EnvoyRead` with the envoy-only token shows each `ga:` message and the assistant text and
   settle of the turn it started, up to another sender's message; owner and sleeve messages,
@@ -823,11 +820,11 @@ Each entry: where, what was done, what right looks like.
   from the login itself (owner's idea; to settle later). There is one quota row and reader per
   account, and the app's QUOTA screen lists every account. `select_target` weighs accounts rather than
   harnesses, and a sleeve's incarnation records the account it draws on.
-- **Windows job identity, blocked** (`pt-node`, Windows job runner): the owner chose
+- **Windows job identity, dropped** (`pt-node`, Windows job runner): the owner first chose
   (2026-11-01) ordinary jobs as LocalService or a restricted token, and maintenance jobs as
-  SYSTEM. Two agent attempts to write the token and logon code were cut off by a safety
-  classifier and not retried, so jobs still run as LocalSystem inside a Job Object. Next step:
-  the owner decides how to proceed; the planned design is in the devlog.
+  SYSTEM. Two agent attempts at the token code were cut off by a safety classifier. The same
+  day the owner's threat model (SPEC 2, principle 10) made it unnecessary, so jobs stay
+  LocalSystem inside a Job Object. Right: revisit with the threat model.
 - **An idle Pi sleeve that never had a turn does not resume after a hub restart** (`pt-hub`,
   found by the durable agent): it fails to resume and parks. Right: resume (or freshly launch) a
   Pi sleeve with no native session yet, as one whose session exists.

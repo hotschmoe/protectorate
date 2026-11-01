@@ -395,40 +395,18 @@ fn capabilities_are_scoped() {
     hub.cli_env(&as_a, &["sleeve", "transcript", "a5"]).ok();
     assert_eq!(hub.sleeve("b5")["lifecycle"].as_str(), Some("running"));
 
-    // An ordinary node job from a sleeve is not asked about: with no fleet it fails at once.
-    let r = hub.cli_env(&as_a, &["job", "run", "--arch", "amd64", "--", "true"]);
-    assert_ne!(r.status, 0, "{} {}", r.stdout, r.stderr);
-    assert!(r.stderr.contains("no fleet is configured"), "{}", r.stderr);
+    // A sleeve's node jobs, maintenance ones included, are not asked about (SPEC 2, threat
+    // model): with no fleet they fail at once.
+    for extra in [&[][..], &["--maintenance"]] {
+        let mut args = vec!["job", "run", "--arch", "amd64"];
+        args.extend_from_slice(extra);
+        args.extend_from_slice(&["--", "true"]);
+        let r = hub.cli_env(&as_a, &args);
+        assert_ne!(r.status, 0, "{} {}", r.stdout, r.stderr);
+        assert!(r.stderr.contains("no fleet is configured"), "{}", r.stderr);
+    }
     let v = hub.cli(&["--json", "approval", "list"]).json();
-    assert!(!v.to_string().contains("run node job"), "{v}");
-    // A maintenance job waits for the owner. Denied, it fails before it reaches the fleet.
-    std::thread::scope(|t| {
-        let run = t.spawn(|| {
-            hub.cli_env(
-                &as_a,
-                &[
-                    "job",
-                    "run",
-                    "--arch",
-                    "amd64",
-                    "--maintenance",
-                    "--",
-                    "true",
-                ],
-            )
-        });
-        let ask = eventually("the job's approval", Duration::from_secs(30), || {
-            let v = hub.cli(&["--json", "approval", "list"]).json();
-            v["approvals"].as_array()?.iter().find_map(|a| {
-                let open = a["state"].as_str() == Some("pending")
-                    && a.to_string().contains("run node maintenance job true");
-                open.then(|| a["id"].as_str().unwrap().to_string())
-            })
-        });
-        hub.cli(&["approval", "decide", &ask, "deny"]).ok();
-        let r = run.join().unwrap();
-        assert_eq!(r.status, 4, "a denied job: {} {}", r.stdout, r.stderr);
-    });
+    assert!(!v.to_string().contains("node job"), "{v}");
 
     let envoy_only = hub.printed("envoy-only token: ");
     let as_agent = [("PROTECTORATE_TOKEN", envoy_only.as_str())];

@@ -4,9 +4,8 @@
 //!
 //! The list: removing a sleeve, running a node job, and spawning more than
 //! `config.d9_spawn_limit` sleeves in one such turn. Pushes join it with the push method
-//! (REVISIT). A node maintenance job from any sleeve, Envoy included, always waits for the
-//! owner whatever started the turn; other node jobs from sleeves run unasked (owner,
-//! 2026-11-01), though a node runs every job with its own account (REVISIT).
+//! (REVISIT). Outside such a turn nothing a sleeve does waits for the owner (SPEC 2, threat
+//! model).
 
 use pt_api::ApiError;
 use pt_core::SleeveId;
@@ -20,25 +19,6 @@ pub enum Guarded<'a> {
     /// The command line and where it would run.
     RunJob(String),
     Spawn(&'a str),
-}
-
-/// A node maintenance job (`what`: the command line and where it would run): from any sleeve,
-/// Envoy included, it waits for the owner whatever started the turn.
-pub fn gate_maintenance(
-    hub: &Hub,
-    who: &Principal,
-    what: &str,
-) -> Result<Option<String>, ApiError> {
-    let (Principal::Envoy(sleeve) | Principal::Sleeve(sleeve)) = *who else {
-        return Ok(None);
-    };
-    ask(
-        hub,
-        sleeve,
-        format!("run node maintenance job {what}"),
-        "A sleeve asked for a node maintenance job. Code requires the owner's approval for it."
-            .into(),
-    )
 }
 
 /// Lets the call through (`Ok(None)`), lets it through after the owner allowed it

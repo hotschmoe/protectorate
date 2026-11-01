@@ -422,8 +422,7 @@ fn a_sleeve_cannot_reach_the_user_manager() {
              && echo ESCAPED; \
          done; \
          XDG_RUNTIME_DIR={rt} systemd-run --user --quiet --unit={unit} /bin/sleep 300 \
-           >/dev/null 2>&1 && echo ESCAPED; \
-         [ -S /run/docker.sock ] && echo DOCKER; true"
+           >/dev/null 2>&1 && echo ESCAPED; true"
     );
     let out = stdout(&sh(&s, &script));
     let active = Command::new("systemctl")
@@ -436,10 +435,6 @@ fn a_sleeve_cannot_reach_the_user_manager() {
             .status();
     }
     assert!(!out.contains("ESCAPED"), "a sleeve started {unit}:\n{out}");
-    assert!(
-        !out.contains("DOCKER"),
-        "the docker socket is reachable:\n{out}"
-    );
     let listed = out.split("LISTED").next().unwrap().trim();
     assert!(listed.is_empty(), "the runtime dir shows {listed}");
     assert!(

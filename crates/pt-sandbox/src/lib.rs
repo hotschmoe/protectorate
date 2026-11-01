@@ -55,7 +55,7 @@ pub struct SandboxSpec {
     /// Directories are covered with a tmpfs, files with /dev/null. Missing paths are skipped. A
     /// mask holds over every bind that contains it; a bind inside a mask (a home inside the
     /// masked state dir) is still reachable. The host's runtime dir is always replaced by a
-    /// private empty one, and the docker socket is always masked.
+    /// private empty one.
     pub masks: Vec<PathBuf>,
     /// Host variables copied in when set (the allowlist).
     pub env_allow: Vec<String>,
@@ -192,9 +192,8 @@ impl SandboxSpec {
     /// still holds, and a home inside a masked state dir is still reachable.
     fn mounts(&self, runtime: Option<&Path>) -> Result<Vec<Mount>> {
         let mut masks = Vec::new();
-        let fixed = CONTROL_SOCKETS.iter().map(PathBuf::from);
-        for m in self.masks.iter().cloned().chain(fixed) {
-            if let Some(path) = existing(&m) {
+        for m in &self.masks {
+            if let Some(path) = existing(m) {
                 let kind = if path.is_dir() {
                     Kind::MaskDir
                 } else {
@@ -283,9 +282,6 @@ struct Mount {
     path: PathBuf,
     kind: Kind,
 }
-
-/// Host sockets outside the runtime dir that start processes outside the sandbox.
-const CONTROL_SOCKETS: &[&str] = &["/run/docker.sock"];
 
 fn existing(p: &Path) -> Option<PathBuf> {
     fs::canonicalize(p).ok()

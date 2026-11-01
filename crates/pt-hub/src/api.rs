@@ -826,11 +826,7 @@ fn run_job(c: &Ctx<'_>, r: api::RunJobRequest) -> Result<api::Job> {
         api::JobTarget::Arch { arch } => format!("a node of arch {arch}"),
     };
     let what = format!("{} on {on}", r.argv.join(" "));
-    let approval_id = if r.maintenance {
-        rule::gate_maintenance(c.hub, c.who, &what)?
-    } else {
-        rule::gate(c.hub, c.who, Guarded::RunJob(what))?
-    };
+    let approval_id = rule::gate(c.hub, c.who, Guarded::RunJob(what))?;
     fleet(c.hub)?;
     let view = c.hub.view();
     let sleeve = match c.who {

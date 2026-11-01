@@ -63,6 +63,24 @@ CLI on the hub machine (section 3.1).
 8. **Repo rules carry over** from `dev-hotschmoe` CLAUDE.md: no emojis, full migrations with no
    shims, real-binary e2e and fuzz tests only, no hand-edited generated code.
 9. **Verus in narrow scope** under the owner's eight rules (section 10).
+10. **Threat model: outsiders, not our own agents** (owner, 2026-11-01; revisit as needed). The
+    one fear is people outside the owner's network gaining access to it. Agents breaking things
+    on the owner's machines (deleted directories, broken settings, a bad node job) is accepted:
+    all of it is fixable and replaceable. Human involvement and friction are kept to a minimum.
+    - **Full permissions.** Envoy and sleeves run harnesses unsupervised and run any node job,
+      as root, unasked. No approval gate is added for what agents do to files, settings or
+      nodes.
+    - **Isolation is between agents.** The sandbox keeps sleeves out of each other's
+      workspaces, sockets and processes, so one agent cannot disturb another. It is not meant
+      to protect the machine from a sleeve.
+    - **The outsider boundary is kept, and needs no human.** The realistic path for an outsider
+      is content that steers an agent: a prompt injection, or a vendor agent's message. So:
+      - no sleeve can widen who reaches the network: pairing devices, minting tokens,
+        enrolling or approving nodes, and deciding approvals are owner-only methods;
+      - credentials and keys (`~/.ssh`, other harnesses' logins, hub tokens, headscale keys)
+        stay masked from sleeves;
+      - D9 still applies: in a turn a vendor agent started, Envoy's removals, mass spawns and
+        node jobs wait for the owner. This is the one remaining approval.
 
 ## 3. Layers
 
@@ -81,8 +99,8 @@ CLI on the hub machine (section 3.1).
 - **Envoy holds the power.** Envoy (a root sleeve) uses the full CLI over loopback for sleeves,
   nodes and jobs. When a general agent asks for something big, heavy or dangerous, Envoy raises an
   approval that reaches the owner's phone and waits for it. A code rule makes this mandatory for a
-  list of actions (removing sleeves, node maintenance jobs, pushes to protected branches), so it does
-  not rest on Envoy's judgment alone.
+  list of actions in a turn a vendor agent started (removing sleeves, node jobs, mass spawns, pushes
+  to protected branches), so it does not rest on Envoy's judgment alone (principle 10).
 - **The CLI is the API.** Every CLI command maps onto one hub API method. Envoy and shell-capable
   sleeves use the CLI.
 - The web build is embedded in the hub binary and served from the same origin.
