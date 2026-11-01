@@ -144,20 +144,6 @@ pub fn program(hub: &Hub, h: Harness) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// Harnesses `doctor.json` marks ineligible (`{"ineligible": ["claude"]}`).
-fn doctor_ineligible(hub: &Hub, h: Harness) -> bool {
-    let Ok(bytes) = fs::read(hub.home.doctor()) else {
-        return false;
-    };
-    let Ok(v) = pt_json::parse_bytes(&bytes) else {
-        return false;
-    };
-    let name = wire::harness_wire(h);
-    v["ineligible"]
-        .as_array()
-        .is_some_and(|a| a.iter().any(|x| x.as_str() == Some(name)))
-}
-
 /// Login files copied from the owner's home into a sleeve's private home (REVISIT: a
 /// doctor-guided login per sleeve home is right). Existing files are left alone, since the
 /// harness may have refreshed them.
@@ -330,16 +316,24 @@ impl SleeveExec {
             } => {
                 let hub = &self.hub;
                 let eligible = |t: &Target| {
-                    program(hub, t.harness).is_some() && !doctor_ineligible(hub, t.harness)
+                    program(hub, t.harness).is_some()
+                        && crate::doctor::check(hub, t.harness).is_ok()
                 };
                 let quotas = hub.quotas.list();
-                let chosen = crate::select::select_target(
-                    now_ms(),
-                    &candidates,
-                    &exclude,
-                    &eligible,
-                    &quotas,
-                );
+                // Envoy whose own harness doctor refused parks rather than moving elsewhere.
+                let envoy_gated = Hub::envoy_id(&view.state) == Some(sleeve)
+                    && hub.doctor.gated(sleeve).is_some();
+                let chosen = if envoy_gated {
+                    None
+                } else {
+                    crate::select::select_target(
+                        now_ms(),
+                        &candidates,
+                        &exclude,
+                        &eligible,
+                        &quotas,
+                    )
+                };
                 match &chosen {
                     Some((t, why)) => {
                         info!(
@@ -580,6 +574,7 @@ impl SleeveExec {
         resume: Option<String>,
     ) -> Result<(), String> {
         let hub = self.hub.clone();
+        crate::doctor::gate_launch(&hub, s.id, &s.name, target.harness)?;
         let harness =
             driver_harness(target.harness).ok_or("that harness has no headless driver")?;
         let program = program(&hub, target.harness)

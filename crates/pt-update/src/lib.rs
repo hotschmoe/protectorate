@@ -5,9 +5,11 @@
 //! - [`Store`] is `<root>/releases/`: [`Store::stage`] checks every asset against the release's
 //!   `SHA256SUMS` before anything lands in `releases/<version>/`, and the `current` and
 //!   `previous` symlinks switch by rename, so a crash leaves one or the other.
-//! - [`Store::switch_checked`] is the hub supervisor's health-check hook, and
-//!   [`Store::switch_on_probation`] with [`Store::check_probation`] is a node's self-rollback
-//!   when the hub has not contacted it in time.
+//! - [`Store::switch_on_probation`] puts a new release on trial: [`Store::confirm`] keeps it
+//!   (a node: the hub made contact; the hub: its own health check passed), and
+//!   [`Store::check_probation`] or [`Store::start_attempt`] (run by the service before each
+//!   start, from the previous release) rolls it back when the window passes or it keeps failing
+//!   to start.
 //!
 //! There is no signing key (D36): the sums catch corruption and truncation, not someone who can
 //! replace release assets.
@@ -27,7 +29,7 @@ pub use version::{Channel, Version};
 use std::fmt;
 use std::time::Duration;
 
-/// How long a new hub has to pass its health check before the supervisor switches back.
+/// How long a new hub has to pass its own health check before it switches back.
 pub const HUB_HEALTH_WINDOW: Duration = Duration::from_secs(120);
 /// How long a node waits for the hub's first contact after an update before it reverts.
 pub const NODE_CONTACT_WINDOW: Duration = Duration::from_secs(600);
@@ -106,23 +108,22 @@ pub fn arch() -> Option<&'static str> {
     }
 }
 
-/// The hub's assets on Linux `arch`: the hub, and headscale and member until the hub embeds them.
+/// How many starts a release on trial gets before [`Store::start_attempt`] rolls it back.
+pub const MAX_TRIAL_STARTS: u64 = 3;
+
+/// The hub's asset on Linux `arch`; it embeds headscale and member.
 pub fn hub_picks(arch: &str) -> Vec<Pick> {
-    ["protectorate", "headscale", "member"]
-        .into_iter()
-        .map(|n| exe(format!("{n}-linux-{arch}"), n.to_string()))
-        .collect()
+    vec![exe(
+        format!("protectorate-linux-{arch}"),
+        "protectorate".to_string(),
+    )]
 }
 
-/// A node's assets: the node binary and member beside it, where `join` and `serve` look for it.
-/// `os` is `linux` or `windows`.
+/// A node's asset; it embeds member. `os` is `linux` or `windows`.
 pub fn node_picks(os: &str, arch: &str) -> Vec<Pick> {
     let ext = if os == "windows" { ".exe" } else { "" };
-    vec![
-        exe(
-            format!("protectorate-node-{os}-{arch}{ext}"),
-            format!("protectorate-node{ext}"),
-        ),
-        exe(format!("member-{os}-{arch}{ext}"), format!("member{ext}")),
-    ]
+    vec![exe(
+        format!("protectorate-node-{os}-{arch}{ext}"),
+        format!("protectorate-node{ext}"),
+    )]
 }

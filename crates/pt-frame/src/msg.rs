@@ -132,6 +132,8 @@ record! {
         pub hostname: String,
         pub os: String,
         pub arch: String,
+        /// The release this agent was started from, when it runs from `<state>/releases/`.
+        pub release: Option<String>,
     }
 
     /// Exactly one of `argv` and `script` (run by `sh -c` or `cmd /c`).
@@ -189,11 +191,25 @@ record! {
         pub token: Option<String>,
     }
 
+    /// Fetch release `version` from the GitHub releases API at `api` (https, or http to a
+    /// loopback host) for `repo`, check its asset against the release's SHA256SUMS, stage it,
+    /// switch `releases/current` on probation and restart through the service manager. Unless
+    /// the hub makes contact within `probation_secs` of the restart, the node switches back.
     #[derive(Debug, Clone, PartialEq)]
     pub struct Update {
         pub version: String,
-        pub url: String,
-        pub sha256: String,
+        pub api: String,
+        pub repo: String,
+        pub probation_secs: u64 = 600,
+    }
+
+    /// The node staged and switched, and restarts once this is sent.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct UpdateReply {
+        pub from: Option<String>,
+        pub to: String,
+        /// The release was on disk already and matched SHA256SUMS.
+        pub reused: bool,
     }
 
     #[derive(Debug, Clone, PartialEq)]

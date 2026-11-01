@@ -234,10 +234,11 @@ Each entry: where, what was done, what right looks like.
   Object with kill-on-close, all JOB_OBJECT_UILIMIT_* restrictions and the idle priority class
   once a person is present. No `protectorate-runner` account is created and no logon rights are
   granted. Right: the owner decides; then a low-privilege local account that jobs run as.
-- **Node Update RPC is a stub** (`protectorate-node serve`): `Update{version, url, sha256}` answers
-  `unsupported`. Right: SPEC 6a: download from GitHub through curl, check SHA256SUMS, stage, keep
-  the previous binary, restart through the service manager, roll back after 10 min without hub
-  contact; or take verified bytes streamed over the hub's connection.
+- **A node fetches its update from GitHub itself** (`protectorate-node` update.rs): `Update{version,
+  api, repo}` has the node call the releases API and download its asset through its own curl, so
+  a node without outbound internet cannot update, and every node spends unauthenticated API
+  calls. A node with running jobs answers `busy` instead of draining. Right: the hub streams the
+  verified bytes over its connection (`FetchArtifact` in reverse) when a node has no route out.
 - **Who may speak on the agent's listener** (`protectorate-node serve`): the unix socket is mode
   0600, so `member` must run as the agent's user; `--listen-tcp` (Windows, tests) trusts any
   local process to write an honest `tag:hub` header; on Windows that includes every job, which
@@ -572,28 +573,32 @@ Each entry: where, what was done, what right looks like.
 - **Quota fuzz runs wrote corpus into `fuzz/seeds`** (`pt-quota`): `cargo fuzz run <t> seeds/<t>`
   adds new inputs to the seed dir; only the hand-written seeds (named, not hex) are committed.
   Right: run with `corpus` as first dir and seeds as the second.
-- **pt-update is not called yet** (`pt-update`): the library stages, switches, rolls back and
-  keeps probation, but `protectorate update`, the hub's supervisor wrapper (`switch_checked`
-  within `HUB_HEALTH_WINDOW`), the headscale DB snapshot before a hub update, and the node's
-  `Update` RPC (stage, `switch_on_probation`, restart through the service manager,
-  `hub_contacted` on each hub RPC, `check_probation` at start and every minute) are all still to
-  write in the binaries. The hub-streamed bytes for a node without internet are not in it either.
-- **Node self-rollback runs inside the new binary** (`pt-update` probation): a new node binary
-  that crashes before its first `check_probation` loops under the service manager and never
-  reverts. The deadline is wall-clock milliseconds, so a clock jump moves it. Right: the unit's
-  `ExecStartPre` (or the Windows service) runs the check from `releases/previous`, the binary
-  that is known to work, and the deadline counts from a monotonic boot-relative stamp.
+- **A hub update restarts the process; it does not re-exec** (`pt-hub` update.rs; D17): the hub
+  exits 75 and the service manager starts `releases/current`, so every sleeve's harness dies with
+  it (bwrap `--die-with-parent`) and resumes as after a crash; there is no fd handoff. The new
+  hub's health check is the core applying `HubRecovered` plus `GetHubInfo` on its own socket; it
+  does not check the fleet or launch a sleeve. The headscale snapshot is taken only while the
+  fleet is up. Old `releases/<version>` directories are never pruned. Right: re-exec with the
+  listeners and sandboxes handed over, and a health check that includes a fleet round trip.
+- **Probation counts on wall-clock time and on the new binary's own watch** (`pt-update`): the
+  units run `releases/previous/<bin> probation` before each start, which rolls back after
+  `MAX_TRIAL_STARTS` (3) failed starts or a passed window, and the release on trial watches its
+  own window. A new binary that starts and then hangs is never restarted, so it stays until the
+  next start. The deadline is wall-clock milliseconds, so a clock jump moves it. Right: a
+  systemd watchdog (`WatchdogSec`) the binaries ping, and a boot-relative deadline.
 - **Release pointers are Unix-only** (`pt-update` `set_pointer`): switching `current` and
   `previous` is a symlink plus rename; on Windows it returns an error. `install-node.ps1` makes
   the first `current` with `mklink /D` and refuses to run on an installed node. Right: a tested
   Windows swap (directory symlink replaced by `MoveFileEx`, or a pointer file read by the
-  service) before the Windows node takes the `Update` RPC.
-- **The node service does not run `releases/current`** (`protectorate-node install-service`):
-  install-node.sh stages into `<state>/releases/<version>/` and runs `join` and `install-service`
-  from there, but `install-service` copies the binary into
-  `/usr/local/lib/protectorate-node`, so the unit would not follow a switch. Right: the unit's
-  `ExecStart` is `<state>/releases/current/protectorate-node` and the manifest lists the releases
-  dir.
+  service) before the Windows node takes the `Update` RPC. Until then a Windows node answers
+  `Update` with `unsupported`, its service still runs the copy under %ProgramFiles%, and there is
+  no restart path (the SCM restarts on failure only if configured to); updating one is a
+  reinstall.
+- **Node releases are state** (`protectorate-node install-service`): the unit runs
+  `<state>/releases/current/protectorate-node`; install-service copies a binary that does not
+  already run from there into `releases/<its version>/`. The manifest lists only the unit, so
+  uninstall keeps every staged release with the rest of the state dir. Right: fine; a `prune`
+  that keeps `current` and `previous` once disks fill.
 - **arm64 Linux assets link against the build host's glibc** (`scripts/release.sh`): the task's
   native arm64 build needs glibc 2.34 (it links on the dev hub's Debian 12); amd64 is built by cargo-zigbuild
   for glibc 2.31. Right: `aarch64-unknown-linux-gnu.2.31` through zigbuild too, if an older arm64
@@ -618,13 +623,22 @@ Each entry: where, what was done, what right looks like.
   an optional token through a curl config file, never argv, if rate limits bite.
 - **Doctor checks presence, not validity** (`pt-doctor`): a login counts when its file is
   non-empty or its key variable is set; SPEC 7 wants validity through the read-only quota readers,
-  which do not exist yet. Antigravity's login location is unknown, so it is not checked; the
-  update commands are listed, never run (the 24 h `pi update self` schedule of D34 is not in);
-  `codex update` is listed even for an npm install. Disk comes from `df -P`, linger from
-  `/var/lib/systemd/linger/<user>`, and each run starts one `systemd-run --user --scope true`.
-  Neither binary has a `doctor` subcommand yet (`pt-doctor-probe` prints the report) and failures
-  mail nobody. Right: wire `doctor` into hub and node, add the quota-reader validity check, mail
-  the owner on new problems.
+  which do not exist yet. Antigravity's login location is unknown, so it is not checked. Disk
+  comes from `df -P`, linger from `/var/lib/systemd/linger/<user>`, and each run starts one
+  `systemd-run --user --scope true`. The hub runs it at start, every 6 h and on `doctor
+  --refresh`; a hub with no cached report holds its first launch up to 60 s for the first run.
+  New and resolved problems are hub events; nobody is mailed. A harness that fails to launch
+  right after its update is not marked ineligible (only `--version`, login and sandbox are). The
+  node has no `doctor` yet. Right: the quota-reader validity check, a node `doctor`, mail on new
+  problems, and a launch failure after an update counted against the harness.
+- **Harness updates run each program's own command, one at a time** (`pt-hub` harness_update.rs;
+  D33, D34): `claude update`, `codex update`, `grok update` and `pi update self` every
+  `harness_update_hours` (24; 0 runs only `harness update`), each only while no sleeve on a
+  harness of that program is starting or mid-turn, retried every 3 s until then, so a sleeve that
+  never idles holds it back indefinitely. `codex update` is kept for npm installs too: the npm
+  launcher sets `CODEX_MANAGED_BY_NPM`, so the command updates through npm. A failed run is tried
+  again only in the next period. Right: a ceiling on the deferral (stop accepting turns on that
+  harness), and a retry with backoff after a failure.
 - **The version stamp falls back to `git describe`** (`pt-version`): a build without
   `PROTECTORATE_BUILD_VERSION` (plain `cargo build` or `cargo test`) gets `git describe --tags
   --always --dirty`, recomputed when HEAD, its branch or the tags move, so a `-dirty` mark is the

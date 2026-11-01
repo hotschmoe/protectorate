@@ -32,6 +32,7 @@ dependencies = [
  "pt-node",
  "pt-qr",
  "pt-sys",
+ "pt-update",
  "pt-version",
 ]
 
@@ -124,6 +125,7 @@ version = "0.0.0"
 dependencies = [
  "pt-api",
  "pt-core",
+ "pt-doctor",
  "pt-drivers",
  "pt-fleet",
  "pt-frame",
@@ -135,6 +137,7 @@ dependencies = [
  "pt-quota",
  "pt-sandbox",
  "pt-sys",
+ "pt-update",
  "pt-version",
 ]
 

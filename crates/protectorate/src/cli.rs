@@ -213,8 +213,40 @@ fn job_line(j: &api::Job) -> String {
     )
 }
 
+/// Long enough for a download of every asset on a slow link.
+const UPDATE_WAIT: Duration = Duration::from_secs(45 * 60);
+
+fn channel(a: &Args) -> Result<Option<api::ReleaseChannel>, String> {
+    a.flag("--channel")
+        .map(|c| word_enum(c, "channel (stable, dev)"))
+        .transpose()
+}
+
 fn hub_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
-    match a.word(1, "a hub command (info, state)")? {
+    match a.word(1, "a hub command (info, state, update)")? {
+        "update" => {
+            let req = api::UpdateHubRequest {
+                check: a.has("--check"),
+                channel: channel(a)?,
+                version: a.flag("--version").map(String::from),
+                rollback: a.has("--rollback"),
+            };
+            let v = c.call_for::<m::UpdateHub>(&req, UPDATE_WAIT)?;
+            o.show(&v, |u| {
+                println!(
+                    "{} -> {}: {}",
+                    u.current.as_deref().unwrap_or("-"),
+                    u.target,
+                    u.note
+                );
+                if u.restarting {
+                    println!(
+                        "the hub restarts now and keeps {} once its health check passes (2 min); `protectorate hub info` shows it",
+                        u.target
+                    );
+                }
+            });
+        }
         "info" => {
             let v = c.call::<m::GetHubInfo>(&api::Empty {})?;
             o.show(&v, |h| {
@@ -489,7 +521,40 @@ fn pending_line(p: &api::PendingNode) -> String {
 }
 
 fn node_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
-    match a.word(1, "a node command (ls, show, add, approve)")? {
+    match a.word(1, "a node command (ls, show, add, approve, update)")? {
+        "update" => {
+            let req = api::UpdateNodesRequest {
+                nodes: a.words.get(2..).unwrap_or(&[]).to_vec(),
+                all: a.has("--all"),
+                version: a.flag("--version").map(String::from),
+                channel: channel(a)?,
+                probation_secs: a.num("--probation")?,
+                no_wait: a.has("--no-wait"),
+            };
+            if req.all == !req.nodes.is_empty() {
+                return Err(Fail::Usage("node update needs node names or --all".into()));
+            }
+            let v = c.call_for::<m::UpdateNodes>(&req, Duration::from_secs(4 * 3600))?;
+            o.show(&v, |u| {
+                let rows: Vec<Vec<String>> = u
+                    .nodes
+                    .iter()
+                    .map(|n| {
+                        vec![
+                            n.name.clone(),
+                            n.from.clone(),
+                            n.to.clone(),
+                            if n.ok { "ok" } else { "FAILED" }.into(),
+                            n.detail.clone(),
+                        ]
+                    })
+                    .collect();
+                table(&["NODE", "FROM", "TO", "", "DETAIL"], &rows);
+            });
+            if v.nodes.iter().any(|n| !n.ok) {
+                return Err(Fail::Other("some nodes did not update".into()));
+            }
+        }
         "ls" | "list" => {
             let v = c.call::<m::ListNodes>(&api::Empty {})?;
             o.show(&v, |v| node_rows(&v.nodes));
@@ -1009,6 +1074,79 @@ fn device_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
     Ok(())
 }
 
+fn doctor_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
+    let req = api::GetDoctorRequest {
+        refresh: a.has("--refresh"),
+    };
+    let v = c.call_for::<m::GetDoctor>(&req, Duration::from_secs(120))?;
+    o.show(&v, |d| {
+        println!(
+            "{} {}, checked {}; gh {}; sandbox {}",
+            d.os,
+            d.arch,
+            if d.checked_at_ms.0 == 0 {
+                "never".into()
+            } else {
+                ago(d.checked_at_ms)
+            },
+            if d.gh_logged_in {
+                format!("logged in as {}", d.gh_account)
+            } else {
+                "not logged in".into()
+            },
+            if d.sandbox_ok { "ok" } else { "NOT OK" }
+        );
+        let rows: Vec<Vec<String>> = d
+            .harnesses
+            .iter()
+            .map(|h| {
+                vec![
+                    h.name.clone(),
+                    if h.eligible { "yes" } else { "NO" }.into(),
+                    if h.present {
+                        format!("{} ({})", h.version, h.install)
+                    } else {
+                        "missing".into()
+                    },
+                    if h.login { "yes" } else { "no" }.into(),
+                    h.updated_at_ms.map_or("never".into(), ago),
+                    h.reasons.join("; "),
+                ]
+            })
+            .collect();
+        table(
+            &["HARNESS", "ELIGIBLE", "VERSION", "LOGIN", "UPDATED", "WHY"],
+            &rows,
+        );
+        for p in &d.problems {
+            println!("problem: {p}");
+        }
+    });
+    Ok(())
+}
+
+fn harness_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
+    match a.word(1, "a harness command (update)")? {
+        "update" => {
+            let req = api::UpdateHarnessesRequest {
+                programs: a.words.get(2..).unwrap_or(&[]).to_vec(),
+            };
+            let v = c.call::<m::UpdateHarnesses>(&req)?;
+            o.show(&v, |v| {
+                let rows: Vec<Vec<String>> = v
+                    .programs
+                    .iter()
+                    .map(|p| vec![p.program.clone(), p.state.to_string(), p.detail.clone()])
+                    .collect();
+                table(&["PROGRAM", "STATE", "DETAIL"], &rows);
+                println!("each run ends in a hub event (`protectorate event list`)");
+            });
+        }
+        other => return Err(Fail::Usage(format!("unknown harness command {other:?}"))),
+    }
+    Ok(())
+}
+
 pub fn run(c: &Client, a: &Args, json: bool) -> Result<(), Fail> {
     let o = Out { json };
     match a.word(0, "a command")? {
@@ -1022,6 +1160,8 @@ pub fn run(c: &Client, a: &Args, json: bool) -> Result<(), Fail> {
         "envoy" => envoy_cmd(c, a, &o),
         "history" => history_cmd(c, a, &o),
         "device" => device_cmd(c, a, &o),
+        "doctor" => doctor_cmd(c, a, &o),
+        "harness" => harness_cmd(c, a, &o),
         other => Err(Fail::Usage(format!("unknown command {other:?}"))),
     }
 }

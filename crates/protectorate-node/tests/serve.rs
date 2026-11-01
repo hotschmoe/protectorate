@@ -66,11 +66,13 @@ fn inventory_sample_and_presence_answer_over_tcp() {
     assert_eq!(text(&p, "source"), "test-override");
     a.set_presence("PRESENT");
     assert_eq!(text(&a.ok("Presence", "{}"), "state"), "PRESENT");
+    // An agent not started as <state>/releases/current/protectorate-node cannot switch.
     let e = a.err(
         "Update",
-        r#"{"version":"v1","url":"https://x","sha256":"00"}"#,
+        r#"{"version":"v1","api":"https://x","repo":"o/r"}"#,
     );
     assert_eq!(text(&e, "code"), "unsupported");
+    assert!(text(&e, "message").contains("releases/current"), "{e}");
 }
 
 #[test]

@@ -9,7 +9,7 @@ use std::time::Duration;
 use pt_frame::Kind;
 use pt_frame::msg::{
     self, ArtifactEnd, ErrorReply, FetchArtifact, FetchLog, Hello, HelloReply, Inventory, JobList,
-    JobRef, JobReply, JobStatus, LogEnd, Presence, Request, Sample, SubmitJob,
+    JobRef, JobReply, JobStatus, LogEnd, Presence, Request, Sample, SubmitJob, Update, UpdateReply,
 };
 use pt_frame::wire::{FrameReader, write_frame};
 use pt_json::FromJson;
@@ -119,6 +119,11 @@ impl NodeClient {
 
     pub fn list_jobs(&mut self) -> Result<JobList> {
         self.typed(&Request::ListJobs)
+    }
+
+    /// The node downloads and checks the release before it answers: give it a long timeout.
+    pub fn update(&mut self, u: Update) -> Result<UpdateReply> {
+        self.typed(&Request::Update(u))
     }
 
     fn typed<T: FromJson>(&mut self, req: &Request) -> Result<T> {

@@ -96,7 +96,7 @@ appcmd() {
 
 cat >"$home/config.json" <<EOF
 {"envoy": {"harness": "pi_local"}, "pi_local_provider": "$provider", "pi_local_model": "$model",
- "d9_approval_timeout_secs": 300}
+ "d9_approval_timeout_secs": 300, "harness_update_hours": 0}
 EOF
 port=$(free_port)
 "$bin" --home "$home" serve --listen "127.0.0.1:$port" --log-level debug 2>"$work/serve.log" &

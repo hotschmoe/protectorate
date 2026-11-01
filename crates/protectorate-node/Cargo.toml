@@ -20,6 +20,7 @@ pt-json = { path = "../pt-json" }
 pt-node = { path = "../pt-node" }
 pt-qr = { path = "../pt-qr" }
 pt-sys = { path = "../pt-sys" }
+pt-update = { path = "../pt-update" }
 pt-version = { path = "../pt-version" }
 
 [build-dependencies]

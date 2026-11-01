@@ -14,9 +14,11 @@ mod brief;
 mod bus;
 mod core;
 mod devices;
+mod doctor;
 mod exec;
 mod fleet;
 mod git;
+mod harness_update;
 mod history;
 mod home;
 mod http;
@@ -28,13 +30,15 @@ mod rule;
 mod select;
 mod serve;
 mod transcript;
+mod update;
 mod wire;
 
 pub use fleet::{FleetFlags, Net};
 pub use http::{Web, WebFile};
 pub use log::set_level as set_log_level;
 pub use pt_fleet::Embedded;
-pub use serve::{ServeOptions, serve};
+pub use serve::{Exit, ServeOptions, probation_prestart, serve};
+pub use update::RESTART_CODE;
 
 /// `$PROTECTORATE_HOME`, else `~/.local/share/protectorate`.
 pub fn default_home() -> std::path::PathBuf {

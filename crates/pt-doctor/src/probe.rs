@@ -8,9 +8,9 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-const KEEP: usize = 64 << 10;
+pub(crate) const KEEP: usize = 64 << 10;
 
-pub(crate) struct Out {
+pub struct Out {
     pub ok: bool,
     pub stdout: String,
     pub stderr: String,

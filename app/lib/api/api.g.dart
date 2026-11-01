@@ -643,6 +643,175 @@ final class Disk {
   };
 }
 
+/// A harness as `doctor` found it (SPEC 7, D33).
+final class DoctorHarness {
+  const DoctorHarness({
+    required this.name,
+    required this.present,
+    required this.path,
+    required this.version,
+    required this.install,
+    required this.login,
+    required this.eligible,
+    this.reasons = const <String>[],
+    this.update = const <String>[],
+    this.updatedAt,
+    this.updateNote = '',
+  });
+
+  factory DoctorHarness.fromJson(Object? json) {
+    final j = _object(json, 'DoctorHarness');
+    return DoctorHarness(
+      name: _string(j['name'], 'DoctorHarness.name'),
+      present: _bool(j['present'], 'DoctorHarness.present'),
+      path: _string(j['path'], 'DoctorHarness.path'),
+      version: _string(j['version'], 'DoctorHarness.version'),
+      install: _string(j['install'], 'DoctorHarness.install'),
+      login: _bool(j['login'], 'DoctorHarness.login'),
+      eligible: _bool(j['eligible'], 'DoctorHarness.eligible'),
+      reasons: _or(
+        j['reasons'],
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'DoctorHarness.reasons',
+          (e1) => _string(e1, 'DoctorHarness.reasons[]'),
+        ),
+      ),
+      update: _or(
+        j['update'],
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'DoctorHarness.update',
+          (e1) => _string(e1, 'DoctorHarness.update[]'),
+        ),
+      ),
+      updatedAt: _opt(
+        j['updated_at_ms'],
+        (e0) => _time(e0, 'DoctorHarness.updated_at_ms'),
+      ),
+      updateNote: _or(
+        j['update_note'],
+        '',
+        (e0) => _string(e0, 'DoctorHarness.update_note'),
+      ),
+    );
+  }
+
+  /// The hub's name for it, `pi_durable` included.
+  final String name;
+
+  final bool present;
+
+  final String path;
+
+  final String version;
+
+  /// `native`, `npm`, `script`, `other` or `missing`.
+  final String install;
+
+  /// A login file or key was found (never read or shown).
+  final bool login;
+
+  /// Whether the hub spawns, starts or resleeves onto it.
+  final bool eligible;
+
+  /// Why it is not eligible: each failed check.
+  final List<String> reasons;
+
+  /// Its own update command; empty when it has none.
+  final List<String> update;
+
+  /// The last run of that command by the hub, and how it went.
+  final DateTime? updatedAt;
+
+  final String updateNote;
+
+  Map<String, Object?> toJson() => {
+    'name': name,
+    'present': present,
+    'path': path,
+    'version': version,
+    'install': install,
+    'login': login,
+    'eligible': eligible,
+    'reasons': reasons,
+    'update': update,
+    if (updatedAt case final v?) 'updated_at_ms': v.millisecondsSinceEpoch,
+    'update_note': updateNote,
+  };
+}
+
+/// The hub machine's `doctor.json`, compacted.
+final class DoctorReport {
+  const DoctorReport({
+    required this.checkedAt,
+    required this.os,
+    required this.arch,
+    this.harnesses = const <DoctorHarness>[],
+    required this.ghLoggedIn,
+    required this.ghAccount,
+    required this.sandboxOk,
+    this.problems = const <String>[],
+  });
+
+  factory DoctorReport.fromJson(Object? json) {
+    final j = _object(json, 'DoctorReport');
+    return DoctorReport(
+      checkedAt: _time(j['checked_at_ms'], 'DoctorReport.checked_at_ms'),
+      os: _string(j['os'], 'DoctorReport.os'),
+      arch: _string(j['arch'], 'DoctorReport.arch'),
+      harnesses: _or(
+        j['harnesses'],
+        const <DoctorHarness>[],
+        (e0) => _list(e0, 'DoctorReport.harnesses', DoctorHarness.fromJson),
+      ),
+      ghLoggedIn: _bool(j['gh_logged_in'], 'DoctorReport.gh_logged_in'),
+      ghAccount: _string(j['gh_account'], 'DoctorReport.gh_account'),
+      sandboxOk: _bool(j['sandbox_ok'], 'DoctorReport.sandbox_ok'),
+      problems: _or(
+        j['problems'],
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'DoctorReport.problems',
+          (e1) => _string(e1, 'DoctorReport.problems[]'),
+        ),
+      ),
+    );
+  }
+
+  /// 0 until the first run finishes.
+  final DateTime checkedAt;
+
+  final String os;
+
+  final String arch;
+
+  final List<DoctorHarness> harnesses;
+
+  final bool ghLoggedIn;
+
+  final String ghAccount;
+
+  final bool sandboxOk;
+
+  /// Everything that needs the owner, one line each.
+  final List<String> problems;
+
+  Map<String, Object?> toJson() => {
+    'checked_at_ms': checkedAt.millisecondsSinceEpoch,
+    'os': os,
+    'arch': arch,
+    'harnesses': [for (final e0 in harnesses) e0.toJson()],
+    'gh_logged_in': ghLoggedIn,
+    'gh_account': ghAccount,
+    'sandbox_ok': sandboxOk,
+    'problems': problems,
+  };
+}
+
 /// No fields.
 final class Empty {
   const Empty();
@@ -1553,6 +1722,26 @@ final class FileDelta {
   };
 }
 
+final class GetDoctorRequest {
+  const GetDoctorRequest({this.refresh = false});
+
+  factory GetDoctorRequest.fromJson(Object? json) {
+    final j = _object(json, 'GetDoctorRequest');
+    return GetDoctorRequest(
+      refresh: _or(
+        j['refresh'],
+        false,
+        (e0) => _bool(e0, 'GetDoctorRequest.refresh'),
+      ),
+    );
+  }
+
+  /// Run the checks again (a few seconds) before answering.
+  final bool refresh;
+
+  Map<String, Object?> toJson() => {'refresh': refresh};
+}
+
 final class GetJobArtifactRequest {
   const GetJobArtifactRequest({
     required this.jobId,
@@ -1718,6 +1907,83 @@ enum Harness {
   }
 
   String toJson() => wire;
+}
+
+final class HarnessUpdate {
+  const HarnessUpdate({
+    required this.program,
+    required this.state,
+    this.detail = '',
+  });
+
+  factory HarnessUpdate.fromJson(Object? json) {
+    final j = _object(json, 'HarnessUpdate');
+    return HarnessUpdate(
+      program: _string(j['program'], 'HarnessUpdate.program'),
+      state: HarnessUpdateState.fromJson(j['state']),
+      detail: _or(j['detail'], '', (e0) => _string(e0, 'HarnessUpdate.detail')),
+    );
+  }
+
+  final String program;
+
+  final HarnessUpdateState state;
+
+  final String detail;
+
+  Map<String, Object?> toJson() => {
+    'program': program,
+    'state': state.toJson(),
+    'detail': detail,
+  };
+}
+
+enum HarnessUpdateState {
+  /// Running now, in the background; its outcome is a hub event.
+  started('started'),
+
+  /// A sleeve on it is mid-turn: it runs once they are all idle.
+  deferred('deferred'),
+
+  /// Not installed, without an update command, or already running.
+  skipped('skipped'),
+
+  /// A value this client does not know.
+  unknown('unknown');
+
+  const HarnessUpdateState(this.wire);
+
+  final String wire;
+
+  static HarnessUpdateState fromJson(Object? json) {
+    for (final v in values) {
+      if (v.wire == json) return v;
+    }
+    return unknown;
+  }
+
+  String toJson() => wire;
+}
+
+final class HarnessUpdates {
+  const HarnessUpdates({this.programs = const <HarnessUpdate>[]});
+
+  factory HarnessUpdates.fromJson(Object? json) {
+    final j = _object(json, 'HarnessUpdates');
+    return HarnessUpdates(
+      programs: _or(
+        j['programs'],
+        const <HarnessUpdate>[],
+        (e0) => _list(e0, 'HarnessUpdates.programs', HarnessUpdate.fromJson),
+      ),
+    );
+  }
+
+  final List<HarnessUpdate> programs;
+
+  Map<String, Object?> toJson() => {
+    'programs': [for (final e0 in programs) e0.toJson()],
+  };
 }
 
 /// One indexed unit of a session the hub launched, with its provenance.
@@ -2461,6 +2727,50 @@ final class HubStreamMessageUnknown extends HubStreamMessage {
 
   @override
   Map<String, Object?> toJson() => json;
+}
+
+final class HubUpdate {
+  const HubUpdate({
+    this.current,
+    required this.target,
+    required this.available,
+    required this.restarting,
+    this.note = '',
+  });
+
+  factory HubUpdate.fromJson(Object? json) {
+    final j = _object(json, 'HubUpdate');
+    return HubUpdate(
+      current: _opt(j['current'], (e0) => _string(e0, 'HubUpdate.current')),
+      target: _string(j['target'], 'HubUpdate.target'),
+      available: _bool(j['available'], 'HubUpdate.available'),
+      restarting: _bool(j['restarting'], 'HubUpdate.restarting'),
+      note: _or(j['note'], '', (e0) => _string(e0, 'HubUpdate.note')),
+    );
+  }
+
+  /// What `releases/current` named before.
+  final String? current;
+
+  /// The release picked, or rolled back to.
+  final String target;
+
+  /// The target differs from `current`.
+  final bool available;
+
+  /// The hub exits so its service manager starts the target, which keeps it only if its
+  /// own health check passes within 2 minutes.
+  final bool restarting;
+
+  final String note;
+
+  Map<String, Object?> toJson() => {
+    if (current case final v?) 'current': v,
+    'target': target,
+    'available': available,
+    'restarting': restarting,
+    'note': note,
+  };
 }
 
 /// One harness process tree with generation `g`.
@@ -3253,6 +3563,76 @@ final class NodeRef {
   Map<String, Object?> toJson() => {'node_id': nodeId};
 }
 
+final class NodeUpdate {
+  const NodeUpdate({
+    required this.nodeId,
+    required this.name,
+    required this.from,
+    required this.to,
+    required this.ok,
+    this.detail = '',
+  });
+
+  factory NodeUpdate.fromJson(Object? json) {
+    final j = _object(json, 'NodeUpdate');
+    return NodeUpdate(
+      nodeId: _string(j['node_id'], 'NodeUpdate.node_id'),
+      name: _string(j['name'], 'NodeUpdate.name'),
+      from: _string(j['from'], 'NodeUpdate.from'),
+      to: _string(j['to'], 'NodeUpdate.to'),
+      ok: _bool(j['ok'], 'NodeUpdate.ok'),
+      detail: _or(j['detail'], '', (e0) => _string(e0, 'NodeUpdate.detail')),
+    );
+  }
+
+  final String nodeId;
+
+  final String name;
+
+  /// The release the node ran before, as it reported it.
+  final String from;
+
+  final String to;
+
+  final bool ok;
+
+  final String detail;
+
+  Map<String, Object?> toJson() => {
+    'node_id': nodeId,
+    'name': name,
+    'from': from,
+    'to': to,
+    'ok': ok,
+    'detail': detail,
+  };
+}
+
+final class NodeUpdates {
+  const NodeUpdates({required this.version, this.nodes = const <NodeUpdate>[]});
+
+  factory NodeUpdates.fromJson(Object? json) {
+    final j = _object(json, 'NodeUpdates');
+    return NodeUpdates(
+      version: _string(j['version'], 'NodeUpdates.version'),
+      nodes: _or(
+        j['nodes'],
+        const <NodeUpdate>[],
+        (e0) => _list(e0, 'NodeUpdates.nodes', NodeUpdate.fromJson),
+      ),
+    );
+  }
+
+  final String version;
+
+  final List<NodeUpdate> nodes;
+
+  Map<String, Object?> toJson() => {
+    'version': version,
+    'nodes': [for (final e0 in nodes) e0.toJson()],
+  };
+}
+
 /// What a running job does when a person arrives at the node.
 enum OnPresent {
   /// Drop to idle CPU and I/O priority and keep running.
@@ -3630,6 +4010,28 @@ final class ReadHistoryRequest {
     'from_turn': fromTurn,
     if (toTurn case final v?) 'to_turn': v,
   };
+}
+
+/// Stable takes `vX.Y.Z` tags only; dev takes every `vX.Y.Z[-PRE]` tag.
+enum ReleaseChannel {
+  stable('stable'),
+  dev('dev'),
+
+  /// A value this client does not know.
+  unknown('unknown');
+
+  const ReleaseChannel(this.wire);
+
+  final String wire;
+
+  static ReleaseChannel fromJson(Object? json) {
+    for (final v in values) {
+      if (v.wire == json) return v;
+    }
+    return unknown;
+  }
+
+  String toJson() => wire;
 }
 
 final class ResleeveRequest {
@@ -4384,6 +4786,146 @@ final class Transcript {
   };
 }
 
+final class UpdateHarnessesRequest {
+  const UpdateHarnessesRequest({this.programs = const <String>[]});
+
+  factory UpdateHarnessesRequest.fromJson(Object? json) {
+    final j = _object(json, 'UpdateHarnessesRequest');
+    return UpdateHarnessesRequest(
+      programs: _or(
+        j['programs'],
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'UpdateHarnessesRequest.programs',
+          (e1) => _string(e1, 'UpdateHarnessesRequest.programs[]'),
+        ),
+      ),
+    );
+  }
+
+  /// Programs (`claude`, `codex`, `grok`, `pi`); empty means every installed one.
+  final List<String> programs;
+
+  Map<String, Object?> toJson() => {'programs': programs};
+}
+
+final class UpdateHubRequest {
+  const UpdateHubRequest({
+    this.check = false,
+    this.channel,
+    this.version,
+    this.rollback = false,
+  });
+
+  factory UpdateHubRequest.fromJson(Object? json) {
+    final j = _object(json, 'UpdateHubRequest');
+    return UpdateHubRequest(
+      check: _or(
+        j['check'],
+        false,
+        (e0) => _bool(e0, 'UpdateHubRequest.check'),
+      ),
+      channel: _opt(j['channel'], ReleaseChannel.fromJson),
+      version: _opt(
+        j['version'],
+        (e0) => _string(e0, 'UpdateHubRequest.version'),
+      ),
+      rollback: _or(
+        j['rollback'],
+        false,
+        (e0) => _bool(e0, 'UpdateHubRequest.rollback'),
+      ),
+    );
+  }
+
+  /// Only say what would be installed.
+  final bool check;
+
+  /// Default: the hub's `release_channel`.
+  final ReleaseChannel? channel;
+
+  /// A release tag, in place of the channel's newest.
+  final String? version;
+
+  /// Swap `releases/current` and `releases/previous`, then restart.
+  final bool rollback;
+
+  Map<String, Object?> toJson() => {
+    'check': check,
+    if (channel case final v?) 'channel': v.toJson(),
+    if (version case final v?) 'version': v,
+    'rollback': rollback,
+  };
+}
+
+final class UpdateNodesRequest {
+  const UpdateNodesRequest({
+    this.nodes = const <String>[],
+    this.all = false,
+    this.version,
+    this.channel,
+    this.probationSecs,
+    this.noWait = false,
+  });
+
+  factory UpdateNodesRequest.fromJson(Object? json) {
+    final j = _object(json, 'UpdateNodesRequest');
+    return UpdateNodesRequest(
+      nodes: _or(
+        j['nodes'],
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'UpdateNodesRequest.nodes',
+          (e1) => _string(e1, 'UpdateNodesRequest.nodes[]'),
+        ),
+      ),
+      all: _or(j['all'], false, (e0) => _bool(e0, 'UpdateNodesRequest.all')),
+      version: _opt(
+        j['version'],
+        (e0) => _string(e0, 'UpdateNodesRequest.version'),
+      ),
+      channel: _opt(j['channel'], ReleaseChannel.fromJson),
+      probationSecs: _opt(
+        j['probation_secs'],
+        (e0) => _int(e0, 'UpdateNodesRequest.probation_secs'),
+      ),
+      noWait: _or(
+        j['no_wait'],
+        false,
+        (e0) => _bool(e0, 'UpdateNodesRequest.no_wait'),
+      ),
+    );
+  }
+
+  /// By id or name; leave empty with `all`.
+  final List<String> nodes;
+
+  /// Every online node, one canary per OS and arch first.
+  final bool all;
+
+  /// A release tag, in place of the channel's newest.
+  final String? version;
+
+  final ReleaseChannel? channel;
+
+  /// How long a node waits for the hub after its restart before it rolls back (600).
+  final int? probationSecs;
+
+  /// Answer once each node has switched, without waiting for it to come back.
+  final bool noWait;
+
+  Map<String, Object?> toJson() => {
+    'nodes': nodes,
+    'all': all,
+    if (version case final v?) 'version': v,
+    if (channel case final v?) 'channel': v.toJson(),
+    if (probationSecs case final v?) 'probation_secs': v,
+    'no_wait': noWait,
+  };
+}
+
 /// Token counts the harness reported for one turn.
 final class Usage {
   const Usage({
@@ -4804,6 +5346,31 @@ final class HubApi {
   /// `POST /api/GetHubInfo`, scope `sleeve`.
   Future<HubInfo> getHubInfo([Empty request = const Empty()]) =>
       _call('GetHubInfo', request.toJson(), HubInfo.fromJson);
+
+  /// The doctor report; Envoy and the owner only.
+  ///
+  /// `POST /api/GetDoctor`, scope `sleeve`.
+  Future<DoctorReport> getDoctor(GetDoctorRequest request) =>
+      _call('GetDoctor', request.toJson(), DoctorReport.fromJson);
+
+  /// Runs each harness's own update command now; one with a sleeve mid-turn waits for it.
+  ///
+  /// `POST /api/UpdateHarnesses`, scope `owner`.
+  Future<HarnessUpdates> updateHarnesses(UpdateHarnessesRequest request) =>
+      _call('UpdateHarnesses', request.toJson(), HarnessUpdates.fromJson);
+
+  /// Stages a release from GitHub, checks it against SHA256SUMS, switches `releases/current`
+  /// and restarts the hub on probation.
+  ///
+  /// `POST /api/UpdateHub`, scope `owner`.
+  Future<HubUpdate> updateHub(UpdateHubRequest request) =>
+      _call('UpdateHub', request.toJson(), HubUpdate.fromJson);
+
+  /// Has each node fetch, check and switch to a release, then waits for it to come back.
+  ///
+  /// `POST /api/UpdateNodes`, scope `owner`.
+  Future<NodeUpdates> updateNodes(UpdateNodesRequest request) =>
+      _call('UpdateNodes', request.toJson(), NodeUpdates.fromJson);
 
   /// `POST /api/ListDevices`, scope `owner`.
   Future<DeviceList> listDevices([Empty request = const Empty()]) =>

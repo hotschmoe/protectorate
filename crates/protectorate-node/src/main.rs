@@ -5,6 +5,7 @@ mod rpc;
 mod serve;
 mod service;
 mod stdio;
+mod update;
 #[cfg(windows)]
 mod winservice;
 

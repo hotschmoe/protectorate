@@ -52,6 +52,10 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
         [--log-level error|warn|info|debug]
   version
   hub info | hub state
+  hub update [--check] [--channel stable|dev] [--version TAG] | hub update --rollback
+  hub probation                     run by the unit before each start, without the API
+  doctor [--refresh]
+  harness update [PROGRAM...]       claude, codex, grok, pi; none means every installed one
   sleeve list | sleeve show <sleeve>
   sleeve spawn <name> (--path DIR | --parent SLEEVE [--readonly]) [--harness H]
         [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
@@ -64,6 +68,8 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   approval list [--pending] | approval decide <id> allow|allow-session|deny
   node ls | node show <node> | node add [REGISTRATION] | node approve <auth_id>
         [--name NAME] [--fingerprint FP]
+  node update (<node>... | --all) [--version TAG] [--channel stable|dev] [--probation SECS]
+        [--no-wait]
   job run (--node ID | --arch ARCH) [--even-if-present] [--on-present idle|kill]
         [--maintenance] [--timeout SECS] [--cwd DIR] [--artifact PATH]... -- <argv...>
   job ls [--node N] [--limit N] | job show|cancel <job> | job log <job> [--offset N] [--limit N]
@@ -96,6 +102,11 @@ const SWITCHES: &[&str] = &[
     "--even-if-present",
     "--maintenance",
     "--envoy",
+    "--check",
+    "--rollback",
+    "--refresh",
+    "--all",
+    "--no-wait",
 ];
 
 impl Args {
@@ -284,7 +295,7 @@ fn serve(a: &Args) -> Result<(), Fail> {
         server_url: a.flag("--fleet-server-url").map(String::from),
     };
     eprintln!("{}", net_line());
-    pt_hub::serve(pt_hub::ServeOptions {
+    let exit = pt_hub::serve(pt_hub::ServeOptions {
         home: home(a),
         listen,
         proxy_listen: addr("--proxy-listen")?,
@@ -293,7 +304,11 @@ fn serve(a: &Args) -> Result<(), Fail> {
         fleet,
         net: net::NET,
     })
-    .map_err(Fail::Other)
+    .map_err(Fail::Other)?;
+    match exit {
+        pt_hub::Exit::Stopped => Ok(()),
+        pt_hub::Exit::Restart => std::process::exit(i32::from(pt_hub::RESTART_CODE)),
+    }
 }
 
 fn run(a: &Args) -> Result<(), Fail> {
@@ -306,6 +321,11 @@ fn run(a: &Args) -> Result<(), Fail> {
                 option_env!("PROTECTORATE_BUILD_VERSION").unwrap_or("dev")
             );
             println!("{}", net_line());
+            return Ok(());
+        }
+        "hub" if a.words.get(1).map(String::as_str) == Some("probation") => {
+            let line = pt_hub::probation_prestart(&home(a)).map_err(Fail::Other)?;
+            println!("protectorate hub probation: {line}");
             return Ok(());
         }
         _ => {}

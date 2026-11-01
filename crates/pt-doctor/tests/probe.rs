@@ -146,8 +146,9 @@ fn report_gates_harnesses() {
         claude.binary
     );
     assert_eq!(claude.credentials.found, [".claude/.credentials.json"]);
-    assert_eq!(claude.update.argv, ["claude", "update"]);
-    assert!(claude.update.dry_run && claude.eligible);
+    let claude_path = w.bin.join("claude").display().to_string();
+    assert_eq!(claude.update, [claude_path.as_str(), "update"]);
+    assert!(claude.eligible);
 
     let codex = harness(&r, "codex");
     assert_eq!(codex.binary.install, Install::Npm);
@@ -162,7 +163,7 @@ fn report_gates_harnesses() {
 
     let agy = harness(&r, "antigravity");
     assert!(!agy.binary.present && agy.binary.install == Install::Missing);
-    assert!(!agy.credentials.checked && agy.update.argv.is_empty());
+    assert!(!agy.credentials.checked && agy.update.is_empty());
 
     let pi = harness(&r, "pi_vendor");
     assert_eq!(
@@ -172,7 +173,10 @@ fn report_gates_harnesses() {
         pi.binary
     );
     assert!(pi.binary.real_path.ends_with("pi/node_modules/pi/cli.js"));
-    assert_eq!(pi.update.argv, ["pi", "update", "self"]);
+    let pi_path = w.bin.join("pi").display().to_string();
+    assert_eq!(pi.update, [pi_path.as_str(), "update", "self"]);
+    let codex_path = w.bin.join("codex").display().to_string();
+    assert_eq!(harness(&r, "codex").update, [codex_path.as_str(), "update"]);
     assert!(pi.eligible);
     assert!(!harness(&r, "pi_local").eligible);
     assert!(

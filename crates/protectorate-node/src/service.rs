@@ -1,5 +1,6 @@
-//! The system service. Linux (D10): `install-service` copies this binary under
-//! /usr/local/lib/protectorate-node and writes a systemd unit that runs `serve` as root.
+//! The system service. Linux (D10): `install-service` puts this binary in the release store,
+//! `<state>/releases/<version>/` with `releases/current` naming it, and writes a systemd unit
+//! that runs `serve` as root from `releases/current` (so updates switch it, see `update.rs`).
 //! Windows (D11): it copies it under %ProgramFiles%\protectorate-node, limits the state dir
 //! to SYSTEM and Administrators, and registers (through sc.exe) an auto-start LocalSystem
 //! service running `serve --service`. Either way serve supervises the member this binary
@@ -33,8 +34,6 @@ pub const SERVICE: &str = "protectorate-node";
 pub const LISTEN: &str = "127.0.0.1:7476";
 #[cfg(not(windows))]
 const UNIT_PATH: &str = "/etc/systemd/system/protectorate-node.service";
-#[cfg(not(windows))]
-const PREFIX: &str = "/usr/local/lib/protectorate-node";
 const MANIFEST: &str = "install-manifest.json";
 
 record! {
@@ -136,38 +135,19 @@ fn install_systemd(o: &Opts) -> Result<(), String> {
     }
     // The unit runs the embedded member; unpacking it now proves it is there.
     member::member_binary(None, &o.state)?;
-    let exe = std::env::current_exe().map_err(|e| format!("finding this binary: {e}"))?;
-    let prefix = Path::new(PREFIX);
-    let bin = prefix.join("protectorate-node");
-    for p in [prefix, Path::new(UNIT_PATH)] {
-        if p.exists() {
-            return Err(format!(
-                "{} exists already; not overwriting it",
-                p.display()
-            ));
-        }
+    if Path::new(UNIT_PATH).exists() {
+        return Err(format!("{UNIT_PATH} exists already; not overwriting it"));
     }
     crate::join::create_private(&o.state)?;
+    let version = into_releases(&o.state)?;
 
-    // Each path goes into the manifest as soon as it exists, so a failed install can be undone.
     let mut m = Manifest {
         unit: UNIT.into(),
         entries: Vec::new(),
     };
-    let record = |m: &mut Manifest, path: &Path, kind: &str| {
-        m.entries.push(Entry {
-            path: path.display().to_string(),
-            kind: kind.into(),
-        });
-        save(&o.state, m)
-    };
-    fs::create_dir(prefix).map_err(|e| format!("creating {PREFIX}: {e}"))?;
-    record(&mut m, prefix, "dir")?;
-    fs::copy(&exe, &bin)
-        .map_err(|e| format!("copying {} to {}: {e}", exe.display(), bin.display()))?;
-    record(&mut m, &bin, "file")?;
-    set_mode(&bin, 0o755)?;
     let state = o.state.display().to_string();
+    let releases = o.state.join("releases");
+    let bin = releases.join("current").join("protectorate-node");
     let unit = format!(
         "# Written by protectorate-node install-service; removed by uninstall.
 [Unit]
@@ -177,6 +157,7 @@ After=network-online.target
 
 [Service]
 Type=simple
+ExecStartPre=-{prev} probation --state-dir {state}
 ExecStart={bin} serve --state-dir {state} --forward-socket {state}/agent.sock
 Restart=always
 RestartSec=5
@@ -186,18 +167,66 @@ WantedBy=multi-user.target
 ",
         name = cfg.name,
         url = cfg.server_url,
+        prev = releases
+            .join("previous")
+            .join("protectorate-node")
+            .display(),
         bin = bin.display(),
     );
     fs::write(UNIT_PATH, unit).map_err(|e| format!("writing {UNIT_PATH}: {e}"))?;
-    record(&mut m, Path::new(UNIT_PATH), "file")?;
+    m.entries.push(Entry {
+        path: UNIT_PATH.into(),
+        kind: "file".into(),
+    });
+    save(&o.state, &m)?;
     systemctl(&["daemon-reload"])?;
     systemctl(&["enable", "--now", UNIT])?;
     println!(
-        "Installed and started {UNIT}.\nInstall manifest: {}\nUninstall: sudo {} uninstall --state-dir {state}",
+        "Installed and started {UNIT} on release {version} ({}).\nInstall manifest: {}\nUninstall: sudo {} uninstall --state-dir {state}",
+        releases.display(),
         manifest_path(&o.state).display(),
         bin.display()
     );
     Ok(())
+}
+
+/// The service runs `<state>/releases/current/protectorate-node`, the path updates switch. This
+/// binary is copied in as release `pt_version::VERSION` unless it runs from there already. The
+/// releases are state: uninstall keeps them.
+#[cfg(not(windows))]
+fn into_releases(state: &Path) -> Result<String, String> {
+    let store = pt_update::Store::open(state).map_err(|e| e.to_string())?;
+    let version = match store.running_release() {
+        Some(v) => v,
+        None => {
+            let v = pt_version::VERSION.to_string();
+            let exe = std::env::current_exe().map_err(|e| format!("finding this binary: {e}"))?;
+            let dir = store.version_dir(&v);
+            let bin = dir.join("protectorate-node");
+            if dir.exists() {
+                let same = fs::read(&exe)
+                    .ok()
+                    .is_some_and(|a| fs::read(&bin).ok() == Some(a));
+                if !same {
+                    return Err(format!(
+                        "{} exists and is not this binary; not overwriting it",
+                        dir.display()
+                    ));
+                }
+            } else {
+                fs::create_dir(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+                fs::copy(&exe, &bin)
+                    .map_err(|e| format!("copying {} to {}: {e}", exe.display(), bin.display()))?;
+                set_mode(&bin, 0o755)?;
+            }
+            v
+        }
+    };
+    store
+        .check_binary(&version, "protectorate-node", "--version")
+        .map_err(|e| e.to_string())?;
+    store.switch(&version).map_err(|e| e.to_string())?;
+    Ok(version)
 }
 
 pub fn uninstall(args: &[String]) -> Result<(), String> {

@@ -21,6 +21,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _code = TextEditingController();
   List<Device>? _devices;
   String? _devicesFor;
+  DoctorReport? _doctor;
 
   @override
   void didChangeDependencies() {
@@ -50,6 +51,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }, onError: (Object _) {
       if (mounted) setState(() => _devices = null);
     }));
+    unawaited(_api(app).getDoctor(const GetDoctorRequest()).then((d) {
+      if (mounted) setState(() => _doctor = d);
+    }, onError: (Object _) {
+      if (mounted) setState(() => _doctor = null);
+    }));
+  }
+
+  /// The hub machine's doctor report, read-only: one line per harness, then the problems.
+  List<Widget> _doctorRows(DoctorReport d, Palette p, Widget Function(String, Widget) kv) {
+    final checked = d.checkedAt.millisecondsSinceEpoch == 0
+        ? 'not yet'
+        : '${d.checkedAt.toLocal().toIso8601String().substring(0, 10)} ${hhmm(d.checkedAt.toLocal())}';
+    return [
+      const HRule(label: 'DOCTOR'),
+      kv('CHECKED', T('$checked  ${d.os}/${d.arch}  sandbox ${d.sandboxOk ? 'ok' : 'NOT OK'}'
+          '  gh ${d.ghLoggedIn ? d.ghAccount : 'not logged in'}',
+          color: d.sandboxOk ? p.dim : p.alarm)),
+      for (final h in d.harnesses)
+        kv(h.name.toUpperCase(), T(
+          [
+            h.eligible ? 'OK' : 'NO',
+            h.present ? '${h.version} (${h.install})' : 'missing',
+            if (!h.eligible) h.reasons.join('; '),
+            if (h.updateNote.isNotEmpty) 'last update: ${h.updateNote}',
+          ].join('  '),
+          color: h.eligible ? null : p.warn,
+          maxLines: 3,
+        )),
+      for (final x in d.problems) kv('PROBLEM', T(x, color: p.warn, maxLines: 3)),
+      kv('', T('protectorate doctor --refresh on the hub runs it again', color: p.dim)),
+    ];
   }
 
   @override
@@ -118,6 +150,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Btn('REVOKE', onTap: () => unawaited(revoke(d))),
           ])),
       ],
+      if (_doctor case final d?) ..._doctorRows(d, p, kv),
       const HRule(label: 'DISPLAY'),
       kv('THEME', Actions3270([
         Btn('AMBER', active: app.dark, onTap: () => app.setDark(true)),
