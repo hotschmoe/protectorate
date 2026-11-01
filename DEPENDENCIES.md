@@ -71,6 +71,11 @@ them; they are not ours to bump and change only with a Flutter upgrade (now 3.44
 | meta | 1.18.0 | transitive, Flutter SDK (annotations) |
 | vector_math | 2.2.0 | transitive, Flutter SDK (transforms) |
 
+The generated hub client (`app/lib/api/`) adds no package: dart:io carries HTTP and WebSocket on
+desktop and Android, and the web build calls the browser's `fetch` and `WebSocket` through the
+SDK's `dart:js_interop` instead of `package:web`. `make gen` and `make check-gen` format it with
+the SDK's `dart format`.
+
 Bundled asset, not a package: JetBrains Mono 2.304 Regular and Bold (`app/assets/fonts/`, SIL OFL
 1.1, licence file beside it), the one typeface of the UI (SPEC 9).
 
