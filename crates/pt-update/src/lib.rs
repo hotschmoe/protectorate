@@ -1,0 +1,128 @@
+//! Updates from GitHub releases (SPEC 6a), for the hub and the nodes.
+//!
+//! - [`Source`] asks the GitHub releases API for a channel's newest release through the system
+//!   curl (SPEC 15) and downloads its assets.
+//! - [`Store`] is `<root>/releases/`: [`Store::stage`] checks every asset against the release's
+//!   `SHA256SUMS` before anything lands in `releases/<version>/`, and the `current` and
+//!   `previous` symlinks switch by rename, so a crash leaves one or the other.
+//! - [`Store::switch_checked`] is the hub supervisor's health-check hook, and
+//!   [`Store::switch_on_probation`] with [`Store::check_probation`] is a node's self-rollback
+//!   when the hub has not contacted it in time.
+//!
+//! There is no signing key (D36): the sums catch corruption and truncation, not someone who can
+//! replace release assets.
+
+#![forbid(unsafe_code)]
+
+mod fetch;
+mod store;
+mod sums;
+mod version;
+
+pub use fetch::{Asset, Release, Source};
+pub use store::{Probation, Staged, Store, Switch, Verdict};
+pub use sums::Sums;
+pub use version::{Channel, Version};
+
+use std::fmt;
+use std::time::Duration;
+
+/// How long a new hub has to pass its health check before the supervisor switches back.
+pub const HUB_HEALTH_WINDOW: Duration = Duration::from_secs(120);
+/// How long a node waits for the hub's first contact after an update before it reverts.
+pub const NODE_CONTACT_WINDOW: Duration = Duration::from_secs(600);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ErrorKind {
+    /// curl failed, or a body was over its limit.
+    Fetch,
+    /// The release metadata is unusable: missing asset, bad JSON, no release on the channel.
+    Release,
+    /// A size or sha256 did not match `SHA256SUMS`, or `SHA256SUMS` itself is malformed.
+    Verify,
+    /// The local `releases/` directory: I/O, a pointer that is not a symlink, nothing to roll
+    /// back to.
+    Store,
+    /// A new release failed its health check (and was rolled back where possible).
+    Health,
+}
+
+#[derive(Debug, Clone)]
+pub struct Error {
+    pub kind: ErrorKind,
+    pub message: String,
+}
+
+impl Error {
+    pub(crate) fn new(kind: ErrorKind, message: impl Into<String>) -> Error {
+        Error {
+            kind,
+            message: message.into(),
+        }
+    }
+
+    pub(crate) fn io(what: impl fmt::Display, e: std::io::Error) -> Error {
+        Error::new(ErrorKind::Store, format!("{what}: {e}"))
+    }
+
+    pub(crate) fn context(mut self, what: impl fmt::Display) -> Error {
+        self.message = format!("{what}: {}", self.message);
+        self
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Error {}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// One release asset and the name it gets inside `releases/<version>/`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pick {
+    pub asset: String,
+    pub install_as: String,
+    pub executable: bool,
+}
+
+fn exe(asset: String, install_as: String) -> Pick {
+    Pick {
+        asset,
+        install_as,
+        executable: true,
+    }
+}
+
+/// This machine's architecture in release asset names (`amd64`, `arm64`).
+pub fn arch() -> Option<&'static str> {
+    match std::env::consts::ARCH {
+        "x86_64" => Some("amd64"),
+        "aarch64" => Some("arm64"),
+        _ => None,
+    }
+}
+
+/// The hub's assets on Linux `arch`: the hub, and headscale and member until the hub embeds them.
+pub fn hub_picks(arch: &str) -> Vec<Pick> {
+    ["protectorate", "headscale", "member"]
+        .into_iter()
+        .map(|n| exe(format!("{n}-linux-{arch}"), n.to_string()))
+        .collect()
+}
+
+/// A node's assets: the node binary and member beside it, where `join` and `serve` look for it.
+/// `os` is `linux` or `windows`.
+pub fn node_picks(os: &str, arch: &str) -> Vec<Pick> {
+    let ext = if os == "windows" { ".exe" } else { "" };
+    vec![
+        exe(
+            format!("protectorate-node-{os}-{arch}{ext}"),
+            format!("protectorate-node{ext}"),
+        ),
+        exe(format!("member-{os}-{arch}{ext}"), format!("member{ext}")),
+    ]
+}

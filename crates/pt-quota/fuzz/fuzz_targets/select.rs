@@ -1,0 +1,92 @@
+#![no_main]
+
+use libfuzzer_sys::fuzz_target;
+use pt_api::{Harness, Mode, Subscription};
+use pt_quota::{Health, State, TaskSize, Thresholds, derive, select_target, spare_trigger, state};
+use pt_quota_fuzz::{Bytes, HARNESSES, quota};
+
+fuzz_target!(|data: &[u8]| {
+    let mut b = Bytes::new(data);
+    let now = 1_800_000_000_000u64 + u64::from(b.u32());
+    let size = [TaskSize::Small, TaskSize::Medium, TaskSize::Large][b.below(3)];
+    let mode = if b.bool() { Mode::Headless } else { Mode::Pane };
+    let pick = |b: &mut Bytes| -> Vec<Harness> {
+        let mask = b.u8();
+        HARNESSES.iter().enumerate().filter(|(i, _)| mask >> i & 1 == 1).map(|(_, h)| *h).collect()
+    };
+    let allow = pick(&mut b);
+    let exclude = pick(&mut b);
+    let mut health = Vec::new();
+    for h in HARNESSES {
+        if b.bool() {
+            health.push(Health { harness: h, healthy: b.bool() });
+        }
+    }
+    let quotas: Vec<_> = (0..b.below(8)).map(|_| quota(&mut b, now)).collect();
+
+    let eligible = |h: Harness| {
+        allow.contains(&h) && !exclude.contains(&h) && health.iter().all(|e| e.harness != h || e.healthy)
+    };
+    let got = select_target(now, size, &allow, mode, &exclude, &quotas, &health);
+
+    if let Some(t) = &got {
+        assert!(eligible(t.harness), "picked an excluded, disallowed or unhealthy harness: {t:?}");
+        let first_fresh = quotas.iter().find(|q| q.subscription == t.subscription && state(q) == State::Fresh);
+        assert!(first_fresh.is_some(), "picked a target with no fresh reading: {t:?}");
+        assert!(t.score.is_finite() && t.score >= 0.0);
+        if t.harness == Harness::PiLocal {
+            assert_eq!(t.subscription, Subscription::Local);
+            let without_local: Vec<Harness> = allow.iter().copied().filter(|h| *h != Harness::PiLocal).collect();
+            assert!(
+                select_target(now, size, &without_local, mode, &exclude, &quotas, &health).is_none(),
+                "fell back to local while a subscription was eligible"
+            );
+        } else {
+            assert!(t.score >= 0.0);
+            // Excluding the winner can only lower the best score.
+            let mut ex2 = exclude.clone();
+            ex2.push(t.harness);
+            if let Some(next) = select_target(now, size, &allow, mode, &ex2, &quotas, &health)
+                && next.harness != Harness::PiLocal
+            {
+                assert!(next.score <= t.score, "winner is not the best: {t:?} vs {next:?}");
+            }
+        }
+    } else {
+        // Nothing eligible: no allowed, healthy harness has a fresh quota for its subscription.
+        let without_local: Vec<Harness> = allow.iter().copied().filter(|h| *h != Harness::PiLocal).collect();
+        assert!(select_target(now, size, &without_local, mode, &exclude, &quotas, &health).is_none());
+    }
+
+    // Stale, unknown and error readings alone never produce a pick.
+    let unfresh: Vec<_> = quotas.iter().filter(|q| state(q) != State::Fresh).cloned().collect();
+    assert!(select_target(now, size, &allow, mode, &exclude, &unfresh, &health).is_none());
+
+    // Spare trigger: nothing while high-priority work is queued; fresh only; above threshold; sorted.
+    let threshold = f64::from(b.u8()) * 100.0 / 255.0;
+    assert!(spare_trigger(now, &quotas, threshold, true).is_empty());
+    let spare = spare_trigger(now, &quotas, threshold, false);
+    for s in &spare {
+        assert!(s.unused_pct > threshold && s.unused_pct <= 100.0);
+        assert!(quotas.iter().any(|q| q.subscription == s.subscription && state(q) == State::Fresh));
+    }
+    assert!(spare.windows(2).all(|w| w[0].unused_pct >= w[1].unused_pct));
+    assert!(spare_trigger(now, &unfresh, threshold, false).is_empty());
+
+    // Task size: the owner's class is final; otherwise Envoy moves it at most one class.
+    let history: Vec<u64> = (0..b.below(12)).map(|_| u64::from(b.u32())).collect();
+    let th = Thresholds { small_max: u64::from(b.u32()), large_min: u64::from(b.u32()) };
+    let n = b.below(10);
+    let nudge = b.u8() as i8;
+    let owner = [None, Some(TaskSize::Small), Some(TaskSize::Medium), Some(TaskSize::Large)][b.below(4)];
+    let got = derive(&history, n, th, owner, nudge);
+    if let Some(o) = owner {
+        assert_eq!(got, o);
+    } else {
+        let base = derive(&history, n, th, None, 0);
+        assert!(got.max(base) as i8 - got.min(base) as i8 <= 1);
+        if nudge == 0 {
+            assert_eq!(got, base);
+        }
+    }
+});

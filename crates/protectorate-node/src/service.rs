@@ -1,52 +1,66 @@
-//! The Linux system service (D10): `install-service` copies this binary and member under
-//! /usr/local/lib/protectorate-node, writes a systemd unit that runs `serve` as root (which
-//! supervises member), and records every path it created in the install manifest. `uninstall`
-//! removes exactly what that manifest lists. The state dir (node identity, member keys, jobs) was
-//! made by `join`, so it is not in the manifest and stays.
+//! The system service. Linux (D10): `install-service` copies this binary and member under
+//! /usr/local/lib/protectorate-node and writes a systemd unit that runs `serve` as root.
+//! Windows (D11): it copies both under %ProgramFiles%\protectorate-node, limits the state dir
+//! to SYSTEM and Administrators, and registers (through sc.exe) an auto-start LocalSystem
+//! service running `serve --service`. Either way serve supervises member, and every path or
+//! service created goes into the install manifest; `uninstall` removes exactly what it lists.
+//! The state dir (node identity, member keys, jobs) was made by `join`, so it is not in the
+//! manifest and stays.
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use pt_json::{FromJson, ToJson, record};
 
-use crate::join::{SYSTEM_STATE, create_private, is_root};
+use crate::join::{is_root, system_state};
+#[cfg(not(windows))]
 use crate::member;
 
 pub const USAGE: &str = "  install-service [--state-dir DIR] [--member PATH]
-                                    Linux, as root, after join: install the systemd unit
-                                    protectorate-node.service and start it
+                                    after join, as root or an elevated administrator: install
+                                    and start the service (systemd protectorate-node.service,
+                                    or the Windows service protectorate-node)
   uninstall [--state-dir DIR]       stop the service and remove what install-service listed in
                                     DIR/install-manifest.json";
 
+#[cfg(not(windows))]
 const UNIT: &str = "protectorate-node.service";
+/// The Windows service name.
+#[cfg(windows)]
+pub const SERVICE: &str = "protectorate-node";
+/// Where the Windows service's member forwards hub connections.
+#[cfg(windows)]
+pub const LISTEN: &str = "127.0.0.1:7476";
+#[cfg(not(windows))]
 const UNIT_PATH: &str = "/etc/systemd/system/protectorate-node.service";
+#[cfg(not(windows))]
 const PREFIX: &str = "/usr/local/lib/protectorate-node";
 const MANIFEST: &str = "install-manifest.json";
 
 record! {
     #[derive(Debug, Clone, PartialEq)]
-    struct Entry {
-        path: String,
-        /// `file` or `dir` (removed only when empty).
-        kind: String,
+    pub(crate) struct Entry {
+        pub(crate) path: String,
+        /// `file`, `dir` (removed only when empty) or, on Windows, `service`.
+        pub(crate) kind: String,
     }
 
     #[derive(Debug, Clone, PartialEq)]
-    struct Manifest {
-        unit: String,
-        entries: Vec<Entry> = Vec::new(),
+    pub(crate) struct Manifest {
+        /// The systemd unit or Windows service.
+        pub(crate) unit: String,
+        pub(crate) entries: Vec<Entry> = Vec::new(),
     }
 }
 
-struct Opts {
-    state: PathBuf,
-    member: Option<PathBuf>,
+pub(crate) struct Opts {
+    pub(crate) state: PathBuf,
+    pub(crate) member: Option<PathBuf>,
 }
 
 fn opts(args: &[String], allow_member: bool) -> Result<Opts, String> {
     let mut o = Opts {
-        state: PathBuf::from(SYSTEM_STATE),
+        state: system_state()?,
         member: None,
     };
     let mut it = args.iter();
@@ -67,19 +81,24 @@ fn opts(args: &[String], allow_member: bool) -> Result<Opts, String> {
     Ok(o)
 }
 
-fn manifest_path(state: &Path) -> PathBuf {
+pub(crate) fn manifest_path(state: &Path) -> PathBuf {
     state.join(MANIFEST)
 }
 
-fn save(state: &Path, m: &Manifest) -> Result<(), String> {
+pub(crate) fn save(state: &Path, m: &Manifest) -> Result<(), String> {
     let path = manifest_path(state);
-    fs::write(&path, format!("{}\n", m.to_json()))
-        .and_then(|()| fs::File::open(&path)?.sync_all())
+    // Windows flushes only a handle opened for writing.
+    fs::File::create(&path)
+        .and_then(|mut f| {
+            std::io::Write::write_all(&mut f, format!("{}\n", m.to_json()).as_bytes())?;
+            f.sync_all()
+        })
         .map_err(|e| format!("writing {}: {e}", path.display()))
 }
 
+#[cfg(not(windows))]
 fn systemctl(args: &[&str]) -> Result<(), String> {
-    let out = Command::new("systemctl")
+    let out = std::process::Command::new("systemctl")
         .args(args)
         .output()
         .map_err(|e| format!("running systemctl {}: {e}", args.join(" ")))?;
@@ -96,10 +115,16 @@ fn systemctl(args: &[&str]) -> Result<(), String> {
 
 pub fn install(args: &[String]) -> Result<(), String> {
     let o = opts(args, true)?;
+    #[cfg(windows)]
+    return crate::winservice::install(&o);
+    #[cfg(not(windows))]
+    install_systemd(&o)
+}
+
+#[cfg(not(windows))]
+fn install_systemd(o: &Opts) -> Result<(), String> {
     if !cfg!(target_os = "linux") {
-        return Err(
-            "install-service is Linux only; on Windows run serve in the foreground for now".into(),
-        );
+        return Err("install-service supports Linux and Windows only".into());
     }
     if !is_root() {
         return Err("install-service needs root (sudo)".into());
@@ -125,7 +150,7 @@ pub fn install(args: &[String]) -> Result<(), String> {
             ));
         }
     }
-    create_private(&o.state)?;
+    crate::join::create_private(&o.state)?;
 
     // Each path goes into the manifest as soon as it exists, so a failed install can be undone.
     let mut m = Manifest {
@@ -183,22 +208,24 @@ WantedBy=multi-user.target
 
 pub fn uninstall(args: &[String]) -> Result<(), String> {
     let o = opts(args, false)?;
-    if !is_root() {
+    if cfg!(unix) && !is_root() {
         return Err("uninstall needs root (sudo)".into());
     }
     let path = manifest_path(&o.state);
-    let text = fs::read_to_string(&path).map_err(|e| format!("reading {}: {e}", path.display()))?;
-    let v = pt_json::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-    let m = Manifest::from_json(&v).map_err(|e| format!("{}: {e}", path.display()))?;
+    let m = load(&path)?;
+    #[cfg(windows)]
+    crate::winservice::check_uninstaller(&m)?;
+    #[cfg(not(windows))]
     if let Err(e) = systemctl(&["disable", "--now", &m.unit]) {
         eprintln!("protectorate-node: {e} (continuing)");
     }
     let mut failed = Vec::new();
     for e in m.entries.iter().rev() {
-        let p = Path::new(&e.path);
         let res = match e.kind.as_str() {
-            "file" => fs::remove_file(p),
-            "dir" => fs::remove_dir(p),
+            "file" => remove_retrying(|| fs::remove_file(&e.path)),
+            "dir" => remove_retrying(|| fs::remove_dir(&e.path)),
+            #[cfg(windows)]
+            "service" => crate::winservice::remove_service(&e.path),
             other => {
                 failed.push(format!("{}: unknown kind {other}", e.path));
                 continue;
@@ -212,6 +239,7 @@ pub fn uninstall(args: &[String]) -> Result<(), String> {
             Err(err) => failed.push(format!("{}: {err}", e.path)),
         }
     }
+    #[cfg(not(windows))]
     if let Err(e) = systemctl(&["daemon-reload"]) {
         eprintln!("protectorate-node: {e}");
     }
@@ -231,6 +259,33 @@ pub fn uninstall(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+pub(crate) fn load(path: &Path) -> Result<Manifest, String> {
+    let text = fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+    let v = pt_json::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+    Manifest::from_json(&v).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Windows keeps a just-stopped service's executables locked for a moment.
+fn remove_retrying(mut f: impl FnMut() -> std::io::Result<()>) -> std::io::Result<()> {
+    let mut tries = if cfg!(windows) { 20 } else { 1 };
+    loop {
+        match f() {
+            Err(e)
+                if tries > 1
+                    && matches!(
+                        e.kind(),
+                        std::io::ErrorKind::PermissionDenied
+                            | std::io::ErrorKind::DirectoryNotEmpty
+                    ) =>
+            {
+                tries -= 1;
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            r => return r,
+        }
+    }
+}
+
 #[cfg(unix)]
 fn set_mode(p: &Path, mode: u32) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
@@ -238,7 +293,7 @@ fn set_mode(p: &Path, mode: u32) -> Result<(), String> {
         .map_err(|e| format!("chmod {}: {e}", p.display()))
 }
 
-#[cfg(not(unix))]
+#[cfg(not(any(unix, windows)))]
 fn set_mode(_p: &Path, _mode: u32) -> Result<(), String> {
     Ok(())
 }

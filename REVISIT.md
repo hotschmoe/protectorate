@@ -8,15 +8,16 @@ Each entry: where, what was done, what right looks like.
 - **Outbound HTTPS through curl** (hub, nodes): no Rust TLS stack. Right: decide between
   curl forever, or a forked and trimmed rustls when curl's absence or output parsing bites.
 - **Sandbox through bwrap**: right is our own small namespaces helper (SPEC 3.4).
-- **Windows presence has no idle time from a plain caller** (`pt-node`, `sys/windows_presence.rs`):
-  `WTSINFOEXW.LastInputTime` is 0 for the console session when queried by an ordinary admin
-  (`quser` shows "none"), so `presence` reports UNKNOWN unless the screen is locked (lock flag
-  works; AWAY once locked 60 s). Not yet verified from LocalSystem, which is the design's
-  assumption (SPEC 3.5). Right: run as the service on officewin and compare; if still 0, have the
-  service launch a console-subsystem `idle-probe` into the active session (WTSQueryUserToken +
-  CreateProcessAsUser) that calls `GetLastInputInfo`. `alt_idle_secs` already reports
-  `GetLastInputInfo` when the binary itself runs inside the console session. The lock flag
-  (`SessionFlags` 0 = locked) was only seen unlocked; verify locked.
+- **Windows idle time through a probe process** (`pt-node`, `sys/windows_presence.rs`):
+  `WTSINFOEXW.LastInputTime` is 0 for the console session even from LocalSystem (checked on
+  officewin through a SYSTEM scheduled task), so the service starts `protectorate-node
+  idle-probe` in the console session (WTSQueryUserToken + CreateProcessAsUserW on
+  `winsta0\default`, windowless, kill-on-close job, 5 s timeout) and reads its
+  GetLastInputInfo as one JSON line; lock state stays WTS's. One process per detection (every
+  `--presence-interval` while jobs run, and per hub Presence call). From an ordinary admin (ssh)
+  WTSQueryUserToken is refused (1314), so `presence` there stays UNKNOWN unless locked. The lock
+  flag (`SessionFlags` 0 = locked) was only seen unlocked. Right: verify locked, and cache the
+  probe's answer for a few seconds if its cost shows.
 - **Linux evdev path untested with real input** (`pt-node`, `sys/linux_presence.rs`): hub has no
   keyboard or mouse, agent-world's AT keyboard needs root. Opening and watching works as root
   ("evdev watching 1 devices"); reading an actual keystroke was not exercised, and logind's
@@ -41,13 +42,16 @@ Each entry: where, what was done, what right looks like.
   only. On Linux lowering walks the process tree (plus the scope's `cgroup.procs`) once, so
   processes forked afterwards keep normal priority, and nothing raises a job back when the person
   leaves. Right: a cgroup with `cpu.weight`/`io.weight` set to idle, which covers later children.
+  (Windows checked on officewin: a running cmd and ping and a ping started later all read Idle.)
 - **Windows build path**: no Windows SDK libs on the dev hub, so there is no cross-build; both
-  Windows targets build natively on officewin (VS Build Tools 14.44 incl. ARM64 libs). x64:
-  `cargo build --release -p protectorate-node`; arm64: `cargo +stable build --release --target
-  aarch64-pc-windows-msvc -p protectorate-node` with `%USERPROFILE%\.cargo\bin` first on PATH
-  (the default toolchain lacks the arm64 std). Source goes over as a tar pushed by scp; the
-  arm64 `.exe` has never been run (no ARM Windows machine). Right: a `make release` step that runs
-  these over ssh, and cargo-xwin or a vendored SDK sysroot if officewin should not be required.
+  Windows targets build natively on officewin (VS Build Tools 14.44 incl. ARM64 libs), now as the
+  `windows` step of `make release-assets`: the workspace goes over as a tar pushed by scp into
+  `%USERPROFILE%\pt-release\src`, `cargo +stable build -p protectorate-node` builds both targets
+  with `%USERPROFILE%\.cargo\bin` first on PATH (the system Rust lacks the arm64 std), and the
+  `.exe` files come back as base64 over ssh, checked against the remote sha256. That is rustup's
+  stable (1.96 there) while Linux builds with 1.99.1, and the arm64 `.exe` has never been run (the
+  snapdragon laptop was off). Right: one pinned toolchain (`rust-toolchain.toml`) on both sides, and
+  cargo-xwin or a vendored SDK sysroot if officewin, the owner's desktop, should not be required.
 - **No macOS or Android code paths** in `pt-node` yet; the crate does not compile there.
 - **pt-json record! keys** (crates/pt-json): JSON keys are the Rust field names (`r#type` is
   `type`), with no rename, so camelCase foreign JSON (Codex app-server) goes through `Value`
@@ -220,16 +224,22 @@ Each entry: where, what was done, what right looks like.
   (design report 1.3), one cgroup per job with `cgroup.kill`.
 - **Job isolation is limits only** (`pt-node`): a job gets its timeout, a capped log and a scope,
   process group or Job Object, and runs as the agent's user with the agent's environment plus its
-  `env`. There is no `cpu.max`/`memory.max`/`pids.max`, no namespaces, no Windows runner account
-  and no `mode` (sandboxed, plain, admin). Right: design report 1.3.
+  `env`. There is no `cpu.max`/`memory.max`/`pids.max`, no namespaces and no `mode` (sandboxed,
+  plain, admin). Right: design report 1.3.
+- **Runner account deferred: owner decision pending** (`pt-node`, `sys/windows_job.rs`; D11):
+  Windows jobs run as the agent's account, so as LocalSystem under the service, inside a Job
+  Object with kill-on-close, all JOB_OBJECT_UILIMIT_* restrictions and the idle priority class
+  once a person is present. No `protectorate-runner` account is created and no logon rights are
+  granted. Right: the owner decides; then a low-privilege local account that jobs run as.
 - **Node Update RPC is a stub** (`protectorate-node serve`): `Update{version, url, sha256}` answers
   `unsupported`. Right: SPEC 6a: download from GitHub through curl, check SHA256SUMS, stage, keep
   the previous binary, restart through the service manager, roll back after 10 min without hub
   contact; or take verified bytes streamed over the hub's connection.
 - **Who may speak on the agent's listener** (`protectorate-node serve`): the unix socket is mode
   0600, so `member` must run as the agent's user; `--listen-tcp` (Windows, tests) trusts any
-  local process to write an honest `tag:hub` header. Right: on Linux an installer-made group for
-  the socket; on Windows a named pipe whose ACL admits only member's account.
+  local process to write an honest `tag:hub` header; on Windows that includes every job, which
+  runs as SYSTEM (runner account deferred). Right: on Linux an installer-made group for the
+  socket; on Windows a named pipe whose ACL admits only member's account.
 - **Windows jobs** (`pt-node`, `sys/windows_job.rs`): cancel and timeout call
   `TerminateJobObject` at once (no grace period). After an agent restart every running job is
   Lost: kill-on-close ended it, or it ended unobserved, and the two cannot be told apart. The serve
@@ -437,17 +447,28 @@ Each entry: where, what was done, what right looks like.
 - **QR codes never decoded by a scanner**: zbarimg is not on the dev host and the app has no
   scanner yet; the `encode` fuzz target only proves pt-qr matches qrcodegen module for module.
   Right: decode `join`'s terminal output with a real scanner (zbar or the app) in an e2e.
-- **`uninstall` never ran** (`protectorate-node`, service.rs): it removes only manifest paths, but
-  no test or machine has exercised it, since that deletes files. Right: run it on a throwaway VM
+- **Linux `uninstall` never ran** (`protectorate-node`, service.rs): it removes only manifest
+  paths, but no test or machine has exercised it on Linux, since that deletes files. (Windows ran
+  it on officewin, after a partial install and after a full one.) Right: run it on a throwaway VM
   (or a container with systemd) in an e2e, then reinstall.
-- **No Windows service, and member can outlive serve** (`protectorate-node`): Windows runs
-  `serve` in the foreground; if serve dies, member keeps running because it is not in a Job
-  Object with kill-on-close. Right: a Windows service (runner account, D10) and member in a
-  kill-on-close Job Object.
-- **Windows jobs are refused while presence is unknown**: officewin's console session reports no
-  LastInputTime to a non-interactive caller, so presence is `unknown`, treated as present, and
-  the gate refused `uname`-style jobs (correct, but no Windows job ran through the fleet). Right:
-  the presence fix above, then a fleet job e2e on Windows.
+- **Windows service through sc.exe** (`protectorate-node`, winservice.rs, serve.rs): our own
+  dispatcher and control handler (pt-node `sys/win32_service.rs`), but create, start, stop,
+  delete and failure actions go through `sc.exe`, and the state dir is limited to SYSTEM and
+  Administrators through `icacls.exe` (not recorded: the state dir is not ours to undo). Stop
+  reports STOPPED and ends the process, so member and running jobs die by kill-on-close and the
+  jobs read Lost after the next start. `uninstall` must run from a copy outside
+  `%ProgramFiles%\protectorate-node` (Windows cannot delete the running exe). Tested on officewin
+  with a sleeping stand-in for member (officewin must not join a fleet for this): install, member
+  in the job, killing serve kills member and the SCM restarts serve, a job ran as SYSTEM, stop,
+  uninstall left no service, files or process. A reboot was not tried there. Right: our own SCM
+  calls if sc.exe output parsing bites, a reboot test on a spare box, and stop that lets jobs
+  finish or records them as interrupted.
+- **`join` leaves the Windows state dir open until install-service** (`protectorate-node`):
+  under `%ProgramData%` it inherits read access for every user (member keys), until
+  install-service runs icacls. Right: join sets the private DACL itself.
+- **No fleet job e2e on Windows yet**: presence now works from the service (AWAY through the
+  idle-probe on officewin), and a job ran through the installed service's listener, but not
+  through a hub and member. Right: a fleet job e2e on a Windows node.
 - **The poller runs the headscale CLI every 15 s and a thread per node** (`pt-fleet`,
   poller.rs): fine for a home fleet. Right: headscale's gRPC over its unix socket, and one
   scheduler thread if the fleet ever reaches hundreds.
@@ -464,9 +485,13 @@ Each entry: where, what was done, what right looks like.
   itself and can adopt that dir (`serve --fleet-dir ~/.local/share/protectorate-fleet/tailnet
   --fleet-listen 192.168.10.44:7480 --fleet-udp-port 7483`, after stopping the example), keeping
   the Noise key the nodes pin. Right: adopt it, then retire the example's `serve`.
-- **No node install script**: an owner copies `protectorate-node` and `member` to the machine and
-  runs `join`, then `install-service`. Right: the hub serves both binaries and a one-line
-  installer, checked by SHA256SUMS.
+- **Node installers ran in dry-run mode only** (`scripts/install-node.sh`, `install-node.ps1`):
+  they fetch from the GitHub release (12b item 13 supersedes a hub-served installer), check
+  SHA256SUMS, stage, then run `join` and `install-service`. install-node.sh was dry-run on
+  agent-world (whose node is live; not root, so its 0700 state dir reads as unknown) and the ps1
+  on officewin; install.sh's real path ran into a scratch home with stand-in `systemctl` and
+  `loginctl`. No real node install, `join` from an installer, or real hub service start has run.
+  Right: one real install each on a throwaway VM, then on a spare box.
 - **`join` waits 15 minutes then gives up**: headscale keeps a registration that long in memory,
   so an unapproved node must run `join` again. Right: fine; the app's scan path approves in
   seconds.
@@ -492,3 +517,99 @@ Each entry: where, what was done, what right looks like.
   envoy_read over line-delimited JSON-RPC, protocol versions 2025-06-18, 2025-03-26 and
   2024-11-05; no resources, prompts or notifications, and the agent name comes from `--as` or
   `clientInfo.name`. Right: grow it with what the vendor apps actually call.
+- **Quota readers drop the old extras** (`pt-quota`): no reset credits (Claude cedar_ember, Codex
+  rate-limit-reset-credits, Grok GetRemainingResets and its protobuf walker), because
+  `pt_api::Quota` has no field for them; no Claude `extra` overage window; no Codex `app-server`
+  path (it would launch the CLI, which may refresh a token; the wham endpoint is the only source);
+  no Antigravity reader (no `Subscription` for it, the `agy` CLI is not installed here, and
+  Antigravity is pane-only, D13). Right: add a resets field to `Quota` when dispatch uses
+  credits; revisit Codex `app-server` if wham breaks; Antigravity when it has a subscription.
+- **Local endpoint address is configuration** (`pt-quota`): the b70 URL comes from the probe flag
+  or `PT_LOCAL_URL`; the hub must pass it to `Local { base_url }`. Right: hub config key.
+- **Quota selection constants are untuned** (`pt-quota`): usable-now minimums per task size
+  (5, 15, 30 percent), the 48 h half-life and the 168 h stand-in for an unknown reset are the old
+  dev-hotschmoe values; `TaskSize` thresholds and N are caller inputs with no defaults. Right: tune
+  from real dispatch history once a workspace has any.
+- **`select_target` takes `now_ms`** (`pt-quota`): the pure function needs a clock for time to
+  reset, so it is the first argument. Pi with a vendor login (`PiVendor`) and Antigravity are never
+  selected (no quota subscription behind them).
+- **Quota fuzz runs wrote corpus into `fuzz/seeds`** (`pt-quota`): `cargo fuzz run <t> seeds/<t>`
+  adds new inputs to the seed dir; only the hand-written seeds (named, not hex) are committed.
+  Right: run with `corpus` as first dir and seeds as the second.
+- **pt-update is not called yet** (`pt-update`): the library stages, switches, rolls back and
+  keeps probation, but `protectorate update`, the hub's supervisor wrapper (`switch_checked`
+  within `HUB_HEALTH_WINDOW`), the headscale DB snapshot before a hub update, and the node's
+  `Update` RPC (stage, `switch_on_probation`, restart through the service manager,
+  `hub_contacted` on each hub RPC, `check_probation` at start and every minute) are all still to
+  write in the binaries. The hub-streamed bytes for a node without internet are not in it either.
+- **Node self-rollback runs inside the new binary** (`pt-update` probation): a new node binary
+  that crashes before its first `check_probation` loops under the service manager and never
+  reverts. The deadline is wall-clock milliseconds, so a clock jump moves it. Right: the unit's
+  `ExecStartPre` (or the Windows service) runs the check from `releases/previous`, the binary
+  that is known to work, and the deadline counts from a monotonic boot-relative stamp.
+- **Release pointers are Unix-only** (`pt-update` `set_pointer`): switching `current` and
+  `previous` is a symlink plus rename; on Windows it returns an error. `install-node.ps1` makes
+  the first `current` with `mklink /D` and refuses to run on an installed node. Right: a tested
+  Windows swap (directory symlink replaced by `MoveFileEx`, or a pointer file read by the
+  service) before the Windows node takes the `Update` RPC.
+- **The node service does not run `releases/current`** (`protectorate-node install-service`):
+  install-node.sh stages into `<state>/releases/<version>/` and runs `join` and `install-service`
+  from there, but `install-service` copies the binary and member into
+  `/usr/local/lib/protectorate-node`, so the unit would not follow a switch. Right: the unit's
+  `ExecStart` is `<state>/releases/current/protectorate-node` and the manifest lists the releases
+  dir.
+- **arm64 Linux assets link against the build host's glibc** (`scripts/release.sh`): the task's
+  native arm64 build needs glibc 2.34 (it links on the dev hub's Debian 12); amd64 is built by cargo-zigbuild
+  for glibc 2.31. Right: `aarch64-unknown-linux-gnu.2.31` through zigbuild too, if an older arm64
+  box ever runs the hub or a node.
+- **APK, desktop and Android-node assets are hooks only** (`scripts/release.sh` step `app`):
+  `protectorate-android.apk`, `protectorate-desktop-{linux,windows}-{amd64,arm64}` and
+  `protectorate-node-android-arm64` (SPEC 6) are not built; the step says so, and `APP=1` fails.
+  The hub embeds no Flutter web build yet either. Right: `flutter build apk` with the existing
+  signing recipe, the desktop bundles (the Linux one needs cmake, ninja and GTK 3 on the build
+  host), and the node once `pt-node` has Android code paths.
+- **Release publishing is untried** (`make release-publish`): it stops at a dry run unless
+  `PUBLISH=1`, refuses a dirty tree, an untagged HEAD and a tag missing on origin, and uses
+  `gh release create --verify-tag`; no release has been created from `next`. GitHub immutable
+  releases (SPEC 6) are not checked. Right: enable immutable releases on the repo, then publish a
+  first `v*-dev.1` with the owner.
+- **Installers read GitHub's JSON with grep** (`install.sh`, `install-node.sh`): with no jq, a
+  channel's newest tag comes from `"tag_name": "..."` matches, ordered by `sort -V` with the
+  pre-release dash read as `~`; the API is unauthenticated (60 requests an hour per address),
+  as is pt-update's. `--version TAG` skips the lookup. Right: fine while GitHub's format holds;
+  an optional token through a curl config file, never argv, if rate limits bite.
+- **Doctor checks presence, not validity** (`pt-doctor`): a login counts when its file is
+  non-empty or its key variable is set; SPEC 7 wants validity through the read-only quota readers,
+  which do not exist yet. Antigravity's login location is unknown, so it is not checked; the
+  update commands are listed, never run (the 24 h `pi update self` schedule of D34 is not in);
+  `codex update` is listed even for an npm install. Disk comes from `df -P`, linger from
+  `/var/lib/systemd/linger/<user>`, and each run starts one `systemd-run --user --scope true`.
+  Neither binary has a `doctor` subcommand yet (`pt-doctor-probe` prints the report) and failures
+  mail nobody. Right: wire `doctor` into hub and node, add the quota-reader validity check, mail
+  the owner on new problems.
+- **`protectorate-node --version` prints the crate version** (`0.0.0`, from `CARGO_PKG_VERSION`),
+  not the release stamp the hub prints (`PROTECTORATE_BUILD_VERSION`), so the node installers can
+  only check that the staged binary runs, not that it is the release they verified. Right: the
+  node reads `PROTECTORATE_BUILD_VERSION` like the hub, and the installers compare it with the tag.
+- **Own keyword index instead of SQLite FTS5** (`pt-history`, SPEC 3.7): segments, BM25 and
+  merges are ours, to avoid `rusqlite` plus bundled C SQLite. Right if it proves insufficient
+  (recall, query features, corruption we cannot explain, or size well past the measured 1 GiB of
+  logs to 11 MB): `rusqlite` with FTS5, pinned and listed in DEPENDENCIES.md.
+- **Grok docs carry the session start time** (`pt-history`, extract/grok.rs): `chat_history.jsonl`
+  records have no timestamp, so every doc gets `summary.json` `created_at`, and time filters are
+  per session for Grok. Grok context usage is not read at all. Right: per-record times and usage
+  from the session's `updates.jsonl` or `usage.json`.
+- **Tool errors by text for Codex, none for Grok** (`pt-history`): a Codex output counts as
+  failed on "Process exited with code N" (N not 0) or "Script failed"; Grok tool results carry no
+  error flag and are never indexed. Right: a structured exit code if either log gains one.
+- **Claude subagent logs are skipped** (`pt-history`, discover.rs and claude.rs): sidechain records
+  and `subagents/` files are not indexed. Right: index them with a parent link once a brief or
+  search needs a subagent's work.
+- **Merges re-tokenize stored text** (`pt-history`, index.rs): merging two segments decodes their
+  texts and builds a new one from scratch. Fast: a k-way merge of postings, if merge time shows up.
+- **Leftover segments after a crash mid-merge** (`pt-history`, index.rs): a crash after the
+  manifest rename but before the merged segments are removed leaves unreferenced `seg-*` files.
+  Right: sweep unreferenced segment files at open.
+- **Hub transcript and native log overlap** (`pt-history`): a headless session appears in both;
+  the caller's allowlist must name one of them per session. Right: the hub picks the native log
+  for search and its transcript only where no native log exists, once both are wired.

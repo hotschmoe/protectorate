@@ -27,6 +27,19 @@ impl Default for Config {
     }
 }
 
+/// One JSON line, `{"session":N,"idle_ms":M}`, for the caller's own session: what the
+/// Windows service reads from `idle-probe`, which it starts inside the console session.
+pub fn idle_probe() -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        sys::idle_probe()
+    }
+    #[cfg(not(windows))]
+    {
+        Err("idle-probe is Windows only".into())
+    }
+}
+
 pub enum Gate {
     Allow,
     Refuse(String),

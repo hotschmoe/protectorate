@@ -50,6 +50,13 @@ name = "pt-core"
 version = "0.0.0"
 
 [[package]]
+name = "pt-doctor"
+version = "0.0.0"
+dependencies = [
+ "pt-json",
+]
+
+[[package]]
 name = "pt-drivers"
 version = "0.0.0"
 dependencies = [
@@ -79,6 +86,15 @@ dependencies = [
 [[package]]
 name = "pt-hash"
 version = "0.0.0"
+
+[[package]]
+name = "pt-history"
+version = "0.0.0"
+dependencies = [
+ "pt-drivers",
+ "pt-journal",
+ "pt-json",
+]
 
 [[package]]
 name = "pt-http"
@@ -127,6 +143,14 @@ name = "pt-qr"
 version = "0.0.0"
 
 [[package]]
+name = "pt-quota"
+version = "0.0.0"
+dependencies = [
+ "pt-api",
+ "pt-json",
+]
+
+[[package]]
 name = "pt-sandbox"
 version = "0.0.0"
 
@@ -135,4 +159,13 @@ name = "pt-sys"
 version = "0.0.0"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "pt-update"
+version = "0.0.0"
+dependencies = [
+ "pt-hash",
+ "pt-http",
+ "pt-json",
 ]
