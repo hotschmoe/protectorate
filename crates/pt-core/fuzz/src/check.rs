@@ -154,11 +154,60 @@ pub fn intents(sim: &mut Sim, idx: usize, out: &[Intent]) {
             // I6: no effect for a generation that is no longer current.
             assert_eq!(sim.st.sleeves[&s].g, g, "I6: effect for a stale generation");
         }
+        // Parking a root freezes its children (12b item 10): no new message goes to them.
+        if *attempt == 1
+            && let EffectKind::SendPrompt {
+                sleeve, request_id, ..
+            }
+            | EffectKind::Steer {
+                sleeve, request_id, ..
+            }
+            | EffectKind::MailDeliver {
+                sleeve, request_id, ..
+            } = kind
+        {
+            let s = &sim.st.sleeves[sleeve];
+            let frozen = s
+                .parent
+                .is_some_and(|p| matches!(sim.st.sleeves[&p].life, Life::Parked(_)));
+            assert!(
+                !(frozen && s.messages.contains_key(request_id)),
+                "message {request_id} sent to {sleeve:?}, a child of a parked root"
+            );
+        }
         if let EffectKind::ContinuationBrief { sleeve, cause, .. } = kind
             && *cause != Cause::Manual
             && *attempt == 1
         {
             sim.briefs.push((idx, *sleeve, sim.now));
+        }
+    }
+}
+
+/// Checks after a Tick or HubRecovered: every waiting state has re-issued its I/O (12a item 7).
+pub fn timers(st: &State) {
+    for j in st.jobs.values() {
+        if matches!(j.state, JobState::Submitting | JobState::SubmitUncertain) {
+            let submit = j.submit.map(|e| st.effects[&e].state);
+            assert!(
+                submit.is_some_and(|s| !s.terminal()),
+                "job {:?} is {:?} with its submit {submit:?}",
+                j.id,
+                j.state
+            );
+        }
+        if j.state != JobState::Cancelling {
+            continue;
+        }
+        let stuck = st.effects.values().find(|e| {
+            matches!(e.kind, EffectKind::NodeCancel { job, attempt, .. } if job == j.id && attempt == j.attempt)
+                && matches!(e.state, EffectState::Uncertain | EffectState::Probing)
+        });
+        if let Some(e) = stuck {
+            panic!(
+                "job {:?} is Cancelling and its cancel {} is {:?}, not re-sent",
+                j.id, e.key, e.state
+            );
         }
     }
 }
@@ -331,6 +380,63 @@ pub fn invariants(st: &State, sim: &Sim) {
             );
         }
         i9(st, s);
+    }
+
+    // A write the harness or a node acted on reached it: a record confirmed by evidence (harness
+    // output, a node's report) was dispatched. Idempotent records count as applied once their
+    // target is gone, and a start is confirmed by its scope, so neither is checked here.
+    for e in st.effects.values() {
+        let checked = !matches!(
+            e.kind,
+            EffectKind::StartIncarnation { .. } | EffectKind::NodeSubmit { .. }
+        ) && e.class != Class::Idempotent;
+        if checked && e.state == EffectState::Confirmed {
+            assert!(
+                sim.dispatched.contains(&e.id),
+                "effect {:?} ({}) confirmed but never dispatched",
+                e.id,
+                e.key
+            );
+        }
+    }
+    // A job runs on the node that was sent its submit.
+    for j in st.jobs.values() {
+        if matches!(j.state, JobState::Running | JobState::Collecting) {
+            let node = j.node.expect("a running job has a node");
+            assert!(
+                sim.submitted.contains(&(j.id, j.attempt, node)),
+                "job {:?} attempt {} is {:?} on {node:?}, which was never sent it",
+                j.id,
+                j.attempt,
+                j.state
+            );
+        }
+    }
+    // An Unsafe write is issued once: no second approval response while one may apply (12b
+    // item 1). An abandoned record is the owner's explicit release.
+    let mut answers = BTreeSet::new();
+    for e in st.effects.values() {
+        if let EffectKind::RespondApproval {
+            sleeve,
+            g,
+            approval,
+            ..
+        } = &e.kind
+            && matches!(
+                e.state,
+                EffectState::Intent
+                    | EffectState::Sent
+                    | EffectState::Uncertain
+                    | EffectState::Probing
+                    | EffectState::Confirmed
+            )
+        {
+            assert!(
+                answers.insert((*sleeve, *g, approval.clone())),
+                "two live responses to approval {approval} of {sleeve:?} g{}",
+                g.0
+            );
+        }
     }
 
     // I10: automatic resleeves per sleeve in any hour.

@@ -5,8 +5,10 @@
 //! uncommitted tail, checks `replay(journal) == state at the last commit`, and applies
 //! `HubRecovered`. Executors re-check attempt and generation before acting (12b item 4).
 //!
-//! World: the set of incarnations whose scope has tasks. Processes survive a hub crash unless the
-//! crash says otherwise; probes answer truthfully from this set.
+//! World: the set of incarnations whose scope has tasks, the writes whose first byte left, and
+//! which node got which submit. Processes survive a hub crash unless the crash says otherwise,
+//! but lose their pipes to the hub. Scope probes answer from this set, effect probes never call
+//! an undispatched write applied, and a node never claims a submit it never got.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -44,6 +46,12 @@ pub struct Sim {
     held: Vec<Intent>,
     pub pending: VecDeque<Intent>,
     pub alive: BTreeSet<(SleeveId, Gen)>,
+    /// Incarnations this hub process started and so holds pipes to; a crash detaches them all.
+    attached: BTreeSet<(SleeveId, Gen)>,
+    /// Submits whose first byte reached a node: (job, attempt, node).
+    pub submitted: BTreeSet<(JobId, u32, NodeId)>,
+    /// Effects whose first byte left the hub.
+    pub dispatched: BTreeSet<EffectId>,
     /// Journal index of the event whose apply first emitted each effect (I7).
     pub emitted: BTreeMap<EffectId, usize>,
     /// Automatic resleeve briefs: (journal index, sleeve, time) (I10).
@@ -70,6 +78,9 @@ impl Sim {
             held: Vec::new(),
             pending: VecDeque::new(),
             alive: BTreeSet::new(),
+            attached: BTreeSet::new(),
+            submitted: BTreeSet::new(),
+            dispatched: BTreeSet::new(),
             emitted: BTreeMap::new(),
             briefs: Vec::new(),
             last: Vec::new(),
@@ -98,6 +109,9 @@ impl Sim {
         self.steps += 1;
         check::intents(self, idx, &out);
         check::step(&prev, &self.st, self);
+        if matches!(e.kind, EventKind::Tick | EventKind::HubRecovered) {
+            check::timers(&self.st);
+        }
         self.held.extend(out.iter().cloned());
         self.last = out.clone();
         out
@@ -136,6 +150,7 @@ impl Sim {
         if scopes_emptied {
             self.alive.clear();
         }
+        self.attached.clear();
         self.now = self.now.saturating_add(2 * SECOND);
         self.apply(EventKind::HubRecovered);
     }
@@ -188,6 +203,13 @@ impl Sim {
                     return;
                 }
                 self.apply(EventKind::Dispatched { effect, attempt });
+                self.dispatched.insert(effect);
+                if let EffectKind::NodeSubmit {
+                    job, attempt, node, ..
+                } = kind
+                {
+                    self.submitted.insert((job, attempt, node));
+                }
                 self.perform(effect, attempt, &kind, p);
             }
             Intent::Probe {
@@ -207,7 +229,7 @@ impl Sim {
                     }
                     | EffectKind::NodeCancel { job, attempt, node }
                     | EffectKind::NodeAckCollected { job, attempt, node } => {
-                        let report = job_report(p.poll);
+                        let report = self.node_report(job, attempt, node, p.poll);
                         self.apply(EventKind::JobStatus {
                             job,
                             attempt,
@@ -216,9 +238,10 @@ impl Sim {
                         });
                     }
                     _ => {
+                        // Nothing applied a write whose first byte never left.
                         let result = match p.probe % 3 {
-                            0 => ProbeResult::Applied,
-                            1 => ProbeResult::NotApplied,
+                            0 if self.dispatched.contains(&effect) => ProbeResult::Applied,
+                            0 | 1 => ProbeResult::NotApplied,
                             _ => ProbeResult::Unknowable,
                         };
                         self.apply(EventKind::Probed {
@@ -265,7 +288,7 @@ impl Sim {
                 });
             }
             Intent::PollJob { job, attempt, node } => {
-                let report = job_report(p.poll);
+                let report = self.node_report(job, attempt, node, p.poll);
                 self.apply(EventKind::JobStatus {
                     job,
                     attempt,
@@ -303,6 +326,7 @@ impl Sim {
             EffectKind::StartIncarnation { sleeve, g, .. } => match p.start % 4 {
                 0 => {
                     self.alive.insert((*sleeve, *g));
+                    self.attached.insert((*sleeve, *g));
                     self.apply(EventKind::Launched {
                         sleeve: *sleeve,
                         g: *g,
@@ -315,6 +339,7 @@ impl Sim {
                 }
                 2 => {
                     self.alive.insert((*sleeve, *g));
+                    self.attached.insert((*sleeve, *g));
                     self.apply(lost);
                 }
                 _ => {
@@ -360,8 +385,30 @@ impl Sim {
         }
     }
 
-    /// A harness observation for a live incarnation, or a crash of its process.
+    /// A node's answer about `(job, attempt)`, chosen by `b`. A node never claims to run, or to
+    /// have run, a submit that never reached it.
+    fn node_report(&self, job: JobId, attempt: u32, node: NodeId, b: u8) -> JobReport {
+        let report = job_report(b);
+        let claims_run = matches!(
+            report,
+            JobReport::Running { .. }
+                | JobReport::Exited { .. }
+                | JobReport::Interrupted
+                | JobReport::Cancelled
+        );
+        if claims_run && !self.submitted.contains(&(job, attempt, node)) {
+            return JobReport::Unknown { epoch: 7 };
+        }
+        report
+    }
+
+    /// A harness observation. The current generation speaks only through pipes this hub
+    /// process holds; a stale generation's late output is delivered, to exercise fencing.
     pub fn observe(&mut self, sleeve: SleeveId, g: Gen, obs: Obs) {
+        let current = self.st.sleeves.get(&sleeve).is_some_and(|s| s.g == g);
+        if current && !self.attached.contains(&(sleeve, g)) {
+            return;
+        }
         self.apply(EventKind::Observed { sleeve, g, obs });
     }
 
