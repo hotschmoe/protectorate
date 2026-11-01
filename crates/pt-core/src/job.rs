@@ -166,8 +166,12 @@ impl Core<'_> {
             (EffectState::Intent, JobState::SubmitUncertain) => {
                 self.set_job(id, JobState::Submitting)
             }
-            (EffectState::Failed, JobState::Submitting | JobState::SubmitUncertain) => {
-                // The node provably never took it: pick a node again, same attempt.
+            (
+                EffectState::Failed | EffectState::Rejected,
+                JobState::Submitting | JobState::SubmitUncertain,
+            ) => {
+                // The node provably never took it (it refused, or every attempt was not
+                // applied): pick a node again, same attempt.
                 let node = j.node;
                 let now = self.now;
                 let j = self.job(id);
