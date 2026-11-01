@@ -6,7 +6,6 @@ use crate::ws::{self, WebSocket};
 use std::fmt;
 use std::io::{self, BufReader, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -186,7 +185,7 @@ impl Client {
                 s.set_nodelay(true)?;
                 Stream::Tcp(s)
             }
-            Target::Unix(p) => Stream::Unix(UnixStream::connect(p)?),
+            Target::Unix(p) => Stream::Unix(crate::unix_connect(p)?),
         };
         let mut timed = Timed {
             stream,

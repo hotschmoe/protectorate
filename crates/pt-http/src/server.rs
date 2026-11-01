@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::io::{self, BufReader, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -121,7 +121,7 @@ impl ShutdownHandle {
                 }
                 TcpStream::connect_timeout(&a, Duration::from_secs(1)).map(drop)
             }
-            Wake::Unix(path) => UnixStream::connect(path).map(drop),
+            Wake::Unix(path) => crate::unix_connect(path).map(drop),
         };
     }
 }
@@ -152,7 +152,7 @@ impl Server {
         handler: impl Fn(&Request, &Peer) -> Response + Send + Sync + 'static,
     ) -> io::Result<Server> {
         let ctx = |e: io::Error| io::Error::new(e.kind(), format!("bind {}: {e}", path.display()));
-        let l = UnixListener::bind(path).map_err(ctx)?;
+        let l = crate::unix_bind(path).map_err(ctx)?;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(ctx)?;
         Ok(Server::new(
             Listener::Unix(l),

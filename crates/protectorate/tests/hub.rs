@@ -961,6 +961,51 @@ exec '{real_pi}' "$@""#,
     );
 }
 
+/// A home too deep for a unix socket address (`sun_path`, 107 bytes) still serves the owner's
+/// socket and the sleeves' one.
+#[test]
+fn deep_home_serves_its_sockets() {
+    if !have_runtime() {
+        return;
+    }
+    let real_pi = std::process::Command::new("sh")
+        .args(["-c", "command -v pi"])
+        .output()
+        .unwrap();
+    let real_pi = String::from_utf8_lossy(&real_pi.stdout).trim().to_string();
+    let dir = unique("deep");
+    std::fs::create_dir_all(&dir).unwrap();
+    let fake = dir.join("pi");
+    write_script(
+        &fake,
+        &format!(
+            r#"if [ "$1" != --version ]; then
+  protectorate --json sleeve list >/dev/null 2>&1 && echo sleeve_socket=ok || echo sleeve_socket=failed
+  echo "socket_len=${{#PROTECTORATE_SOCKET}}"
+fi > "$HOME/probe.txt"
+exec '{real_pi}' "$@""#
+        ),
+    );
+    let name = format!("deep-{}", "d".repeat(80));
+    let hub = Hub::start_config(
+        &name,
+        "pi_local",
+        &[("pi_program", fake.to_str().unwrap().into())],
+        &[],
+        &[],
+    );
+    assert!(
+        hub.home.join("run/sleeves/api.sock").as_os_str().len() > 107,
+        "the test home is deep enough"
+    );
+    hub.wait("envoy", "idle", 120);
+    hub.cli(&["--json", "sleeve", "list"]).json();
+    let id = hub.sleeve("envoy")["id"].as_str().unwrap().to_string();
+    let probe =
+        std::fs::read_to_string(hub.home.join(format!("sleeves/{id}/home/probe.txt"))).unwrap();
+    assert!(probe.lines().any(|l| l == "sleeve_socket=ok"), "{probe}");
+}
+
 /// The pid of the `serve` running on `home`.
 fn serve_pid(home: &std::path::Path) -> u32 {
     let want = format!("--home\0{}\0serve\0", home.display());
