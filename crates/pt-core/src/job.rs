@@ -65,6 +65,24 @@ impl Core<'_> {
         self.new_effect(kind, key);
     }
 
+    /// The cancel records of the job's current attempt.
+    fn cancels(&self, id: JobId) -> Vec<EffectId> {
+        let attempt = self.st.jobs[&id].attempt;
+        self.st
+            .effects
+            .values()
+            .filter(|e| matches!(e.kind, EffectKind::NodeCancel { job, attempt: a, .. } if job == id && a == attempt))
+            .map(|e| e.id)
+            .collect()
+    }
+
+    /// Cancelling re-sends a cancel that may not have landed (12a item 7).
+    fn resend_cancel(&mut self, id: JobId) {
+        for eff in self.cancels(id) {
+            self.resend(eff);
+        }
+    }
+
     pub(crate) fn create_job(&mut self, request_id: &str, spec: &JobSpec) {
         if let Some(&id) = self.st.job_requests.get(request_id) {
             if self.st.jobs[&id].spec == *spec {
@@ -282,6 +300,9 @@ impl Core<'_> {
                 JobReport::Cancelled | JobReport::Exited { .. } | JobReport::Interrupted,
             ) => {
                 self.set_job(id, J::Cancelled);
+                for eff in self.cancels(id) {
+                    self.goal_reached(eff);
+                }
                 self.node_effect(id, true);
             }
             _ => {}
@@ -406,10 +427,11 @@ impl Core<'_> {
                     self.set_job(id, JobState::Abandoned);
                     self.node_effect(id, false);
                 }
-                JobState::SubmitUncertain
-                | JobState::Running
-                | JobState::Cancelling
-                | JobState::Lost => self.poll(id),
+                JobState::Cancelling => {
+                    self.resend_cancel(id);
+                    self.poll(id);
+                }
+                JobState::SubmitUncertain | JobState::Running | JobState::Lost => self.poll(id),
                 _ => {}
             }
         }
@@ -428,6 +450,7 @@ impl Core<'_> {
                 JobState::SubmitUncertain | JobState::Running | JobState::Lost => self.poll(id),
                 JobState::Cancelling => {
                     self.set_job(id, JobState::Cancelling);
+                    self.resend_cancel(id);
                     self.poll(id);
                 }
                 JobState::Collecting => self.fetch(id),

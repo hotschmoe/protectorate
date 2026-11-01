@@ -272,3 +272,5 @@ Each entry: where, what was done, what right looks like.
   in-flight prompt or compaction only once its `Dispatched` is in, which relies on a sleeve's
   observations and executor reports sharing one ordered stream. Right: drivers tag output with
   the native turn id where the protocol has one, and evidence must match the prompt's turn.
+- **Cancel re-sent every Tick** (pt-core jobs): Cancelling re-sends an uncertain cancel at each
+  10 s Tick until the lease ends. Right: the per-job backoff of node polling.

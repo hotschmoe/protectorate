@@ -156,6 +156,33 @@ impl Core<'_> {
         self.on_effect(id, None);
     }
 
+    /// Sends an Idempotent record again, as its next attempt, if it may not have landed.
+    pub(crate) fn resend(&mut self, id: EffectId) {
+        let e = self.st.effects.get_mut(&id).expect("effect exists");
+        if e.class != Class::Idempotent
+            || !matches!(e.state, EffectState::Uncertain | EffectState::Probing)
+        {
+            return;
+        }
+        e.attempt += 1;
+        e.state = EffectState::Intent;
+        let intent = Intent::Execute {
+            effect: id,
+            attempt: e.attempt,
+            kind: e.kind.clone(),
+        };
+        self.out.push(intent);
+    }
+
+    /// Records a non-terminal Idempotent record as applied: its goal is reached another way.
+    pub(crate) fn goal_reached(&mut self, id: EffectId) {
+        let e = &self.st.effects[&id];
+        if e.class == Class::Idempotent && !e.state.terminal() {
+            self.set_effect(id, EffectState::Confirmed);
+            self.on_effect(id, None);
+        }
+    }
+
     /// Whether the owner of a NotApplied record still wants it performed.
     fn wanted(&self, id: EffectId) -> bool {
         let st = &*self.st;

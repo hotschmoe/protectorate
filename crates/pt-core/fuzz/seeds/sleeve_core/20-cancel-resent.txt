@@ -1,0 +1,33 @@
+#scenario 9deb3b77013ac35a
+# A lost cancel is re-sent (12a item 7) by the next tick and after a hub restart, while the node
+# keeps reporting the job running.
+job j1
+policy poll=0
+run
+expect-job 0 state=Running
+policy other=lost
+cancel-job 0
+run
+expect-job 0 state=Cancelling
+expect-effect cancel:0:1:* state=Probing count=1
+crash
+policy other=ack
+run
+expect-effect cancel:0:1:* state=Confirmed count=1
+expect-job 0 state=Cancelling
+job j2
+run
+expect-job 1 state=Running
+policy other=lost
+cancel-job 1
+run
+expect-effect cancel:1:1:* state=Probing count=1
+policy other=ack
+tick 10s
+run
+expect-effect cancel:1:1:* state=Confirmed count=1
+policy poll=8
+tick 10s
+run
+expect-job 1 state=Cancelled
+expect-job 0 state=Cancelled
