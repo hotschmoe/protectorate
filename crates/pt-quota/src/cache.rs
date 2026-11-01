@@ -1,6 +1,7 @@
-//! The last good reading per subscription, with a TTL and error backoff.
+//! The last good reading per subscription, with a monotonic TTL and error backoff.
 
-use std::time::Duration;
+use std::sync::{Arc, mpsc};
+use std::time::{Duration, Instant};
 
 use pt_api::{EpochMs, Quota, QuotaReading};
 
@@ -8,14 +9,10 @@ use crate::{Error, Reader, Snapshot, fmt_age};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
-    /// A good reading younger than this is not re-read.
     pub ttl: Duration,
-    /// A good reading older than this is stale.
     pub stale_after: Duration,
-    /// Wait after the first failure; doubles per consecutive failure.
     pub backoff_base: Duration,
     pub backoff_max: Duration,
-    /// Bound on one read.
     pub read_timeout: Duration,
 }
 
@@ -41,11 +38,12 @@ impl Options {
 }
 
 struct Slot {
-    reader: Box<dyn Reader>,
-    good: Option<(Snapshot, u64)>,
-    last_attempt_ms: Option<u64>,
+    reader: Arc<dyn Reader>,
+    good: Option<(Snapshot, u64, Instant)>,
+    last_attempt: Option<Instant>,
     failures: u32,
     last_err: Option<Error>,
+    pending: Option<mpsc::Receiver<crate::Result<Snapshot>>>,
 }
 
 pub struct Cache {
@@ -58,39 +56,53 @@ impl Cache {
         let slots = readers
             .into_iter()
             .map(|reader| Slot {
-                reader,
+                reader: Arc::from(reader),
                 good: None,
-                last_attempt_ms: None,
+                last_attempt: None,
                 failures: 0,
                 last_err: None,
+                pending: None,
             })
             .collect();
         Cache { opts, slots }
     }
 
-    /// Reads, in parallel, every subscription that is due: never read, past its TTL, or past its
-    /// backoff after failures. `force` skips the TTL but never the backoff.
+    /// Reads due subscriptions concurrently, with a deadline for the entire reader.
     pub fn refresh(&mut self, now_ms: u64, force: bool) {
         let opts = self.opts;
         std::thread::scope(|scope| {
             for slot in &mut self.slots {
-                if !slot.due(&opts, now_ms, force) {
+                if let Some(pending) = &slot.pending {
+                    match pending.try_recv() {
+                        Err(mpsc::TryRecvError::Empty) => continue,
+                        Ok(_) | Err(mpsc::TryRecvError::Disconnected) => slot.pending = None,
+                    }
+                }
+                if !slot.due(&opts, force) {
                     continue;
                 }
                 scope.spawn(move || {
-                    let sub = slot.reader.subscription();
-                    let res = std::thread::scope(|inner| {
-                        inner
-                            .spawn(|| slot.reader.read(now_ms, opts.read_timeout))
-                            .join()
-                            .unwrap_or_else(|_| {
-                                Err(Error::other(format!("{sub:?} reader panicked")))
-                            })
+                    let reader = slot.reader.clone();
+                    let (tx, rx) = mpsc::channel();
+                    std::thread::spawn(move || {
+                        let _ = tx.send(reader.read(now_ms, opts.read_timeout));
                     });
-                    slot.last_attempt_ms = Some(now_ms);
-                    match res {
+                    let result = match rx.recv_timeout(opts.read_timeout) {
+                        Ok(result) => result,
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            slot.pending = Some(rx);
+                            Err(Error::Timeout)
+                        }
+                        Err(mpsc::RecvTimeoutError::Disconnected) => Err(Error::other(format!(
+                            "{:?} reader panicked",
+                            slot.reader.subscription()
+                        ))),
+                    };
+                    let now = Instant::now();
+                    slot.last_attempt = Some(now);
+                    match result {
                         Ok(snap) => {
-                            slot.good = Some((snap, now_ms));
+                            slot.good = Some((snap, now_ms, now));
                             slot.failures = 0;
                             slot.last_err = None;
                         }
@@ -104,69 +116,79 @@ impl Cache {
         });
     }
 
-    /// Every subscription's quota with its reading state computed at `now_ms`.
-    pub fn quotas(&self, now_ms: u64) -> Vec<Quota> {
-        self.slots
-            .iter()
-            .map(|s| s.quota(&self.opts, now_ms))
-            .collect()
+    pub fn quotas(&self) -> Vec<Quota> {
+        self.quotas_with_age().into_iter().map(|(q, _)| q).collect()
+    }
+
+    /// The reading and the monotonic age of its last successful fetch.
+    pub fn quotas_with_age(&self) -> Vec<(Quota, Option<Duration>)> {
+        self.slots.iter().map(|s| s.quota(&self.opts)).collect()
     }
 }
 
 impl Slot {
-    fn due(&self, opts: &Options, now_ms: u64, force: bool) -> bool {
-        let Some(last) = self.last_attempt_ms else {
+    fn due(&self, opts: &Options, force: bool) -> bool {
+        let Some(last) = self.last_attempt else {
             return true;
         };
-        let since = Duration::from_millis(now_ms.saturating_sub(last));
+        let since = last.elapsed();
         if self.failures > 0 {
             return since >= opts.backoff(self.failures);
         }
         force && since >= opts.backoff_base || since >= opts.ttl
     }
 
-    fn quota(&self, opts: &Options, now_ms: u64) -> Quota {
+    fn quota(&self, opts: &Options) -> (Quota, Option<Duration>) {
         let subscription = self.reader.subscription();
-        let err_note = self.last_err.as_ref().map(ToString::to_string);
-        let Some((snap, fetched)) = &self.good else {
-            let (reading, note) = match (&self.last_err, self.last_attempt_ms) {
-                (Some(Error::Unavailable(d)), _) => (QuotaReading::Unknown, d.to_string()),
-                (Some(e), _) => (QuotaReading::Error, e.to_string()),
-                (None, _) => (QuotaReading::Unknown, "not read yet".to_string()),
+        let Some((snap, fetched, instant)) = &self.good else {
+            let (reading, note) = match &self.last_err {
+                Some(Error::Unavailable(d)) => (QuotaReading::Unknown, d.to_string()),
+                Some(e) => (QuotaReading::Error, e.to_string()),
+                None => (QuotaReading::Unknown, "not read yet".to_string()),
             };
-            return Quota {
-                subscription,
-                plan: String::new(),
-                reading,
-                fetched_at_ms: EpochMs(0),
-                windows: Vec::new(),
-                note,
-            };
+            return (
+                Quota {
+                    subscription,
+                    plan: String::new(),
+                    reading,
+                    fetched_at_ms: EpochMs(0),
+                    windows: Vec::new(),
+                    note,
+                },
+                None,
+            );
         };
-        let age = now_ms.saturating_sub(*fetched);
-        let stale = Duration::from_millis(age) > opts.stale_after;
-        let mut note = snap.note.clone();
-        if stale {
-            note = format!("stale ({} old)", fmt_age(age));
-        }
-        if let Some(e) = err_note {
+        let age = instant.elapsed();
+        let stale = age > opts.stale_after;
+        let mut note = if stale {
+            format!(
+                "stale ({} old)",
+                fmt_age(age.as_millis().min(u64::MAX as u128) as u64)
+            )
+        } else {
+            snap.note.clone()
+        };
+        if let Some(e) = &self.last_err {
             note = if note.is_empty() {
                 format!("last read failed: {e}")
             } else {
                 format!("{note}; last read failed: {e}")
             };
         }
-        Quota {
-            subscription,
-            plan: snap.plan.clone(),
-            reading: if stale {
-                QuotaReading::Stale
-            } else {
-                QuotaReading::Ok
+        (
+            Quota {
+                subscription,
+                plan: snap.plan.clone(),
+                reading: if stale {
+                    QuotaReading::Stale
+                } else {
+                    QuotaReading::Ok
+                },
+                fetched_at_ms: EpochMs(*fetched),
+                windows: snap.windows.clone(),
+                note,
             },
-            fetched_at_ms: EpochMs(*fetched),
-            windows: snap.windows.clone(),
-            note,
-        }
+            Some(age),
+        )
     }
 }

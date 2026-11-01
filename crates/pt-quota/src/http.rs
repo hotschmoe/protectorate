@@ -49,6 +49,45 @@ fn send(req: &Get) -> Result<(u16, Vec<u8>)> {
     if !local && !req.url.starts_with("https://") {
         return Err(Error::other("request URL is not http or https"));
     }
+    let mut localhost_port = None;
+    if local {
+        let authority = req.url[7..].split(['/', '?', '#']).next().unwrap_or("");
+        if authority.contains(['@', '\\', '%']) || authority.chars().any(char::is_whitespace) {
+            return Err(Error::other(
+                "misconfigured endpoint: HTTP is allowed only for loopback",
+            ));
+        }
+        let (host, port) = if let Some(rest) = authority.strip_prefix('[') {
+            let (host, rest) = rest
+                .split_once(']')
+                .ok_or_else(|| Error::other("invalid HTTP authority"))?;
+            (host, rest)
+        } else {
+            authority
+                .find(':')
+                .map_or((authority, ""), |at| (&authority[..at], &authority[at..]))
+        };
+        let port = if port.is_empty() {
+            80
+        } else {
+            port.strip_prefix(':')
+                .and_then(|p| p.parse::<u16>().ok())
+                .filter(|p| *p != 0)
+                .ok_or_else(|| Error::other("invalid HTTP port"))?
+        };
+        let loopback_name = host.eq_ignore_ascii_case("localhost");
+        let loopback_ip = host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback());
+        if !loopback_name && !loopback_ip {
+            return Err(Error::other(
+                "misconfigured endpoint: HTTP is allowed only for loopback",
+            ));
+        }
+        if loopback_name {
+            localhost_port = Some(port);
+        }
+    }
     let mut config = format!("url = {}\n", config_quote(req.url)?);
     for (name, value) in req.headers {
         config += &format!("header = {}\n", config_quote(&format!("{name}: {value}"))?);
@@ -62,6 +101,9 @@ fn send(req: &Get) -> Result<(u16, Vec<u8>)> {
         .args(["-w", "\n%{http_code}"]);
     if local {
         cmd.args(["--noproxy", "*"]);
+    }
+    if let Some(port) = localhost_port {
+        cmd.args(["--resolve", &format!("localhost:{port}:127.0.0.1")]);
     }
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())

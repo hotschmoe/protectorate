@@ -459,8 +459,13 @@ pub fn next(ws: &mut pt_http::WebSocket) -> Value {
 
 /// Reads until a message of type `kind` passes `pick`; returns every message read.
 pub fn until(ws: &mut pt_http::WebSocket, kind: &str, pick: impl Fn(&Value) -> bool) -> Vec<Value> {
+    let end = Instant::now() + Duration::from_secs(120);
     let mut seen = Vec::new();
     loop {
+        assert!(
+            Instant::now() < end,
+            "timed out waiting for a {kind} message"
+        );
         let m = next(ws);
         let hit = m["type"].as_str() == Some(kind) && pick(&m);
         seen.push(m);

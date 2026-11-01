@@ -152,18 +152,42 @@ fn build(dir: &Path, sources: &[Source], commit_each: bool) -> Result<(Index, To
     let mut ix = Index::open(dir).map_err(|e| e.to_string())?;
     let mut t = Totals::default();
     for s in sources {
-        let got = ix.ingest(s).map_err(|e| e.to_string())?;
+        let got = match ix.ingest(s) {
+            Ok(got) => got,
+            Err(e) if retry_test_failure(&e) => ix.ingest(s).map_err(|e| e.to_string())?,
+            Err(e) => return Err(e.to_string()),
+        };
         t.bytes += got.bytes;
         t.lines += got.lines;
         t.unknown += got.unknown;
         t.docs += got.docs;
         t.overlong += u64::from(got.overlong);
         if commit_each {
-            ix.commit().map_err(|e| e.to_string())?;
+            commit(&mut ix)?;
         }
     }
-    ix.commit().map_err(|e| e.to_string())?;
+    commit(&mut ix)?;
     Ok((ix, t))
+}
+
+fn retry_test_failure(e: &std::io::Error) -> bool {
+    if cfg!(debug_assertions)
+        && std::env::var_os("PT_TEST_HISTORY_FAIL_COMMIT").is_some()
+        && e.to_string().starts_with("injected history ")
+    {
+        eprintln!("retrying {e}");
+        true
+    } else {
+        false
+    }
+}
+
+fn commit(ix: &mut Index) -> Result<(), String> {
+    match ix.commit() {
+        Ok(()) => Ok(()),
+        Err(e) if retry_test_failure(&e) => ix.commit().map_err(|e| e.to_string()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 fn day(ms: u64) -> String {
@@ -235,6 +259,18 @@ fn fingerprint(hits: &[Hit]) -> Vec<(u64, u64, String)> {
 fn run() -> Result<bool, String> {
     let a = args()?;
     let sources = select(&a.home, a.cap)?;
+    #[cfg(debug_assertions)]
+    if let Some(marker) = std::env::var_os("PT_TEST_HISTORY_DISCOVERY_BARRIER") {
+        let marker = PathBuf::from(marker);
+        std::fs::write(&marker, b"ready").map_err(|e| format!("write discovery barrier: {e}"))?;
+        let until = Instant::now() + Duration::from_secs(15);
+        while !marker.with_extension("continue").exists() {
+            if Instant::now() >= until {
+                return Err("discovery barrier timed out".into());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
     let selected: u64 = sources.iter().filter_map(|s| s.limit).sum();
     let mut by_kind = std::collections::BTreeMap::new();
     for s in &sources {

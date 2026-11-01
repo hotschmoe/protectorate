@@ -537,7 +537,7 @@ impl SleeveExec {
                 let envoy_gated = Hub::envoy_id(&view.state) == Some(sleeve)
                     && hub.doctor.gated(sleeve).is_some();
                 let chosen = if envoy_gated {
-                    None
+                    Err("Envoy's harness failed doctor")
                 } else {
                     crate::select::select_target(
                         now_ms(),
@@ -548,15 +548,15 @@ impl SleeveExec {
                     )
                 };
                 match &chosen {
-                    Some((t, why)) => {
+                    Ok((t, why)) => {
                         info!(
                             "sleeve {}: resleeve target {:?}: {why}",
                             sleeve.0, t.harness
                         )
                     }
-                    None => info!("sleeve {}: no eligible resleeve target", sleeve.0),
+                    Err(why) => info!("sleeve {}: {why}", sleeve.0),
                 }
-                let target = chosen.map(|(t, _)| t);
+                let target = chosen.ok().map(|(t, _)| t);
                 self.submit(EventKind::TargetChosen { sleeve, g, target });
             }
             Intent::Checkpoint { sleeve, g } => {

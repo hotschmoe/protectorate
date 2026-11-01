@@ -87,9 +87,9 @@ pub fn parse_billing(body: &[u8]) -> Result<Snapshot> {
         plan: text("/subscriptionTier").to_string(),
         ..Snapshot::default()
     };
-    let Some(cfg) = v.get("config") else {
-        return Ok(snap);
-    };
+    let cfg = v
+        .get("config")
+        .ok_or_else(|| Error::other("billing response missing config"))?;
     if snap.plan.is_empty() {
         snap.plan = text("/config/subscriptionTier").to_string();
     }
@@ -108,9 +108,10 @@ pub fn parse_billing(body: &[u8]) -> Result<Snapshot> {
             let cap = amount(cfg.get("onDemandCap"))?;
             (cap > 0.0).then(|| used / cap * 100.0)
         });
-    if let Some(pct) = pct.filter(|p| p.is_finite()) {
-        snap.windows.push(window(label(start, end), pct, end));
-    }
+    let pct = pct
+        .filter(|p| p.is_finite() && *p >= 0.0)
+        .ok_or_else(|| Error::other("billing response missing valid credit usage"))?;
+    snap.windows.push(window(label(start, end), pct, end));
     Ok(snap)
 }
 

@@ -4,7 +4,7 @@
 
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use pt_api::{self as api, HubStreamMessage};
 use pt_core::Harness;
@@ -15,14 +15,54 @@ use crate::hub::Hub;
 use crate::log::{info, warning};
 use crate::transcript::lock;
 
-#[derive(Default)]
 pub struct Quotas {
-    last: Mutex<Vec<api::Quota>>,
+    last: Mutex<Published>,
+}
+
+struct Published {
+    rows: Vec<(api::Quota, Option<Duration>)>,
+    at: Instant,
+    stale_after: Duration,
+}
+
+impl Default for Quotas {
+    fn default() -> Self {
+        Quotas {
+            last: Mutex::new(Published {
+                rows: Vec::new(),
+                at: Instant::now(),
+                stale_after: Options::default().stale_after,
+            }),
+        }
+    }
 }
 
 impl Quotas {
     pub fn list(&self) -> Vec<api::Quota> {
-        lock(&self.last).clone()
+        let last = lock(&self.last);
+        last.rows
+            .iter()
+            .map(|(q, age)| {
+                let mut q = q.clone();
+                if q.reading == api::QuotaReading::Ok
+                    && age
+                        .is_some_and(|age| age.saturating_add(last.at.elapsed()) > last.stale_after)
+                {
+                    let age = age.unwrap_or_default().saturating_add(last.at.elapsed());
+                    q.reading = api::QuotaReading::Stale;
+                    let stale = format!(
+                        "stale ({} old)",
+                        pt_quota::fmt_age(age.as_millis().min(u64::MAX as u128) as u64)
+                    );
+                    q.note = if q.note.is_empty() {
+                        stale
+                    } else {
+                        format!("{stale}; {}", q.note)
+                    };
+                }
+                q
+            })
+            .collect()
     }
 }
 
@@ -56,6 +96,7 @@ fn readers(hub: &Hub) -> Vec<Box<dyn Reader>> {
             base_url: hub.config.local_url.clone(),
             home,
             provider: hub.config.pi_local_provider.clone(),
+            model: hub.config.pi_local_model.clone(),
         }));
     }
     out
@@ -64,8 +105,16 @@ fn readers(hub: &Hub) -> Vec<Box<dyn Reader>> {
 /// Publishes the unread rows at once, then refreshes in the background until the hub is gone.
 /// `quota_poll_secs` 0 never reads: every row stays `unknown`.
 pub fn start(hub: &Arc<Hub>) {
-    let mut cache = Cache::new(readers(hub), Options::default());
-    publish(hub, cache.quotas(pt_quota::now_ms()));
+    let mut opts = Options::default();
+    #[cfg(debug_assertions)]
+    if let Some(ms) = std::env::var("PT_TEST_QUOTA_STALE_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+    {
+        opts.stale_after = Duration::from_millis(ms);
+    }
+    let mut cache = Cache::new(readers(hub), opts);
+    publish(hub, cache.quotas_with_age(), opts.stale_after);
     let every = hub.config.quota_poll_secs;
     if every == 0 {
         return info!("quota: reading is off (quota_poll_secs 0)");
@@ -78,7 +127,7 @@ pub fn start(hub: &Arc<Hub>) {
                 let Some(hub) = weak.upgrade() else { return };
                 let now = pt_quota::now_ms();
                 cache.refresh(now, false);
-                publish(&hub, cache.quotas(now));
+                publish(&hub, cache.quotas_with_age(), opts.stale_after);
                 drop(hub);
                 thread::sleep(Duration::from_secs(every));
             }
@@ -88,13 +137,17 @@ pub fn start(hub: &Arc<Hub>) {
     }
 }
 
-fn publish(hub: &Hub, now: Vec<api::Quota>) {
+fn publish(hub: &Hub, now: Vec<(api::Quota, Option<Duration>)>, stale_after: Duration) {
     let mut last = lock(&hub.quotas.last);
-    for q in &now {
-        if !last.contains(q) {
+    for (q, _) in &now {
+        if !last.rows.iter().any(|(old, _)| old == q) {
             let quota = q.clone();
             hub.bus.push(|seq| HubStreamMessage::Quota { seq, quota });
         }
     }
-    *last = now;
+    *last = Published {
+        rows: now,
+        at: Instant::now(),
+        stale_after,
+    };
 }

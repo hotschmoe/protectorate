@@ -74,8 +74,10 @@ fn assistant(v: &Value, st: &mut State, out: &mut Vec<Item>) {
     ]
     .iter()
     .filter_map(|k| u[*k].as_u64())
-    .sum();
-    st.usage(out, tokens, None);
+    .try_fold(0u64, u64::checked_add);
+    if let Some(tokens) = tokens {
+        st.usage(out, tokens, None);
+    }
     let Some(blocks) = m["content"].as_array() else {
         return;
     };

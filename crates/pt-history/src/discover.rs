@@ -5,11 +5,14 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::safe_open;
 use crate::{Source, SourceKind};
 
 pub fn discover(kind: SourceKind, root: &Path) -> io::Result<Vec<Source>> {
     let mut files = Vec::new();
-    walk(root, kind, 0, &mut files)?;
+    let dir = safe_open::directory(root)
+        .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", root.display())))?;
+    walk(root, &dir, kind, 0, &mut files)?;
     files.sort();
     Ok(files
         .into_iter()
@@ -24,8 +27,14 @@ pub fn discover(kind: SourceKind, root: &Path) -> io::Result<Vec<Source>> {
         .collect())
 }
 
-fn walk(dir: &Path, kind: SourceKind, depth: u32, out: &mut Vec<PathBuf>) -> io::Result<()> {
-    let rd = match fs::read_dir(dir) {
+fn walk(
+    dir: &Path,
+    opened: &fs::File,
+    kind: SourceKind,
+    depth: u32,
+    out: &mut Vec<PathBuf>,
+) -> io::Result<()> {
+    let rd = match fs::read_dir(safe_open::fd_path(opened)) {
         Ok(rd) => rd,
         Err(e) if depth > 0 && e.kind() == io::ErrorKind::PermissionDenied => return Ok(()),
         Err(e) => return Err(io::Error::new(e.kind(), format!("{}: {e}", dir.display()))),
@@ -34,13 +43,16 @@ fn walk(dir: &Path, kind: SourceKind, depth: u32, out: &mut Vec<PathBuf>) -> io:
         let entry =
             entry.map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", dir.display())))?;
         let ft = entry.file_type()?;
-        let path = entry.path();
+        let path = dir.join(entry.file_name());
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if ft.is_dir() {
             // Claude subagent logs are all sidechain records, which are not indexed.
-            if depth < 8 && !(kind == SourceKind::Claude && name == "subagents") {
-                walk(&path, kind, depth + 1, out)?;
+            if depth < 8
+                && !(kind == SourceKind::Claude && name == "subagents")
+                && let Ok(child) = safe_open::child(opened, &entry.file_name(), true)
+            {
+                walk(&path, &child, kind, depth + 1, out)?;
             }
         } else if ft.is_file() && wanted(kind, &name) {
             out.push(path);

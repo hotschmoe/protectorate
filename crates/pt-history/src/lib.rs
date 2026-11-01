@@ -27,6 +27,7 @@
 mod discover;
 mod extract;
 mod index;
+mod safe_open;
 mod search;
 #[doc(hidden)]
 pub mod segment;

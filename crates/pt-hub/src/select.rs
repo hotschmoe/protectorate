@@ -1,6 +1,6 @@
 //! The answer to the core's `SelectTarget` (SPEC 8): among the sleeve's ordered `resleeve_to`
 //! candidates that are headless, not excluded and eligible, `pt_quota::select_target` picks by
-//! fresh quota; when no quota reading makes one eligible, the first in the owner's order wins.
+//! fresh quota; when a reading is unavailable, the first candidate without one may be used.
 
 use pt_api as api;
 use pt_core::{Mode, Target};
@@ -15,33 +15,16 @@ pub fn select_target(
     exclude: &[Target],
     eligible: &dyn Fn(&Target) -> bool,
     quotas: &[api::Quota],
-) -> Option<(Target, String)> {
+) -> Result<(Target, String), &'static str> {
     let open: Vec<&Target> = candidates
         .iter()
         .filter(|t| t.mode == Mode::Headless && !exclude.contains(t) && eligible(t))
         .collect();
     let allow: Vec<api::Harness> = open.iter().map(|t| api_harness(t.harness)).collect();
-    let by_quota = pt_quota::select_target(
-        now_ms,
-        TaskSize::Medium,
-        &allow,
-        api::Mode::Headless,
-        &[],
-        quotas,
-        &[],
-    )
-    .and_then(|pick| {
-        let t = open
-            .iter()
-            .find(|t| api_harness(t.harness) == pick.harness)?;
-        Some(((*t).clone(), pick.reason))
-    });
-    by_quota.or_else(|| {
-        open.first().map(|t| {
-            (
-                (*t).clone(),
-                "first eligible in resleeve_to (no fresh quota)".into(),
-            )
-        })
-    })
+    let (chosen, why) = pt_quota::select_with_fallback(now_ms, TaskSize::Medium, &allow, quotas)?;
+    let target = open
+        .iter()
+        .find(|t| api_harness(t.harness) == chosen)
+        .ok_or("no eligible resleeve target")?;
+    Ok(((*target).clone(), why))
 }

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 
@@ -17,7 +17,7 @@ use crate::{ContextUsage, Doc, DocId, Selector, Source, SourceKind};
 const MANIFEST: &str = "manifest";
 const MANIFEST_MAGIC: &str = "PTHISTMF";
 const VERSION: u32 = 1;
-/// Pending text that triggers a commit at the next source boundary.
+/// Pending text that triggers a commit after a read window.
 const FLUSH: usize = 96 << 20;
 /// More live segments than this start merges.
 const MAX_SEGMENTS: usize = 8;
@@ -163,6 +163,7 @@ pub struct Index {
     usage: BTreeMap<String, ContextUsage>,
     pending: Vec<Pending>,
     pending_bytes: usize,
+    dirty: bool,
     pub(crate) live_docs: u64,
     pub(crate) live_len: u64,
 }
@@ -212,6 +213,7 @@ impl Index {
             usage: BTreeMap::new(),
             pending: Vec::new(),
             pending_bytes: 0,
+            dirty: false,
             live_docs: 0,
             live_len: 0,
         };
@@ -311,7 +313,7 @@ impl Index {
                 state: fresh_state(source),
             });
         rec.sleeve = source.sleeve.clone();
-        let opened = tail::open(&source.path, &rec.cursor)?;
+        let mut opened = tail::open(&source.path, &rec.cursor)?;
         let mut got = Ingested {
             reset: opened.reset,
             ..Ingested::default()
@@ -319,60 +321,84 @@ impl Index {
         if opened.reset {
             self.drop_source(key.clone(), self.next_doc);
             rec.state = fresh_state(source);
+            self.dirty = true;
         }
         if source.kind == SourceKind::Grok && rec.state.time_ms == 0 {
             rec.state.time_ms = grok_start(&source.path).unwrap_or(0);
         }
-        let mut items = Vec::new();
-        let mut state = rec.state.clone();
-        let mut queued: Vec<(u64, Draft)> = Vec::new();
-        let mut usage: Vec<Item> = Vec::new();
-        let tail = opened.read(source.limit, |off, line| {
-            got.lines += 1;
-            if !extract::line(source.kind, line, &mut state, &mut items) {
-                got.unknown += 1;
-            }
-            for it in items.drain(..) {
-                if source.skip.iter().any(|s| s == it.session()) {
-                    continue;
+        let end = source.limit.unwrap_or(opened.len).min(opened.len);
+        loop {
+            let start = opened.start.offset;
+            let limit = start.saturating_add(tail::WINDOW as u64).min(end);
+            let mut items = Vec::new();
+            let mut state = rec.state.clone();
+            let mut queued: Vec<(u64, Draft)> = Vec::new();
+            let mut usage: Vec<Item> = Vec::new();
+            let tail = opened.read(Some(limit), |off, line| {
+                got.lines = got.lines.saturating_add(1);
+                if !extract::line(source.kind, line, &mut state, &mut items) {
+                    got.unknown = got.unknown.saturating_add(1);
                 }
-                match it {
-                    Item::Doc(d) => queued.push((off, d)),
-                    u => usage.push(u),
+                for it in items.drain(..) {
+                    if source.skip.iter().any(|s| s == it.session()) {
+                        continue;
+                    }
+                    match it {
+                        Item::Doc(d) => queued.push((off, d)),
+                        u => usage.push(u),
+                    }
                 }
+            })?;
+            self.next_doc
+                .checked_add(queued.len() as u64)
+                .ok_or_else(|| invalid(source.path.display(), "document ids exhausted"))?;
+            got.bytes = got.bytes.saturating_add(tail.bytes);
+            got.overlong = got.overlong.saturating_add(tail.overlong);
+            got.docs = got.docs.saturating_add(queued.len() as u64);
+            for u in usage {
+                self.note_usage(u);
             }
-        })?;
-        got.bytes = tail.bytes;
-        got.overlong = tail.overlong;
-        got.docs = queued.len() as u64;
-        for u in usage {
-            self.note_usage(u);
-        }
-        for (offset, draft) in queued {
-            let u = self
-                .usage
-                .entry(draft.session.clone())
-                .or_insert_with(|| ContextUsage {
-                    session: draft.session.clone(),
-                    harness: draft.harness,
-                    ..ContextUsage::default()
+            for (offset, draft) in queued {
+                let u = self
+                    .usage
+                    .entry(draft.session.clone())
+                    .or_insert_with(|| ContextUsage {
+                        session: draft.session.clone(),
+                        harness: draft.harness,
+                        ..ContextUsage::default()
+                    });
+                u.turns = u.turns.max(draft.turn);
+                let bytes = draft.files.iter().fold(
+                    draft
+                        .text
+                        .len()
+                        .saturating_add(draft.session.len())
+                        .saturating_add(key.len())
+                        .saturating_add(source.sleeve.as_ref().map_or(0, String::len))
+                        .saturating_add(draft.tool.as_ref().map_or(0, String::len))
+                        .saturating_add(128),
+                    |n, f| n.saturating_add(f.len().saturating_add(24)),
+                );
+                self.pending_bytes = self.pending_bytes.saturating_add(bytes);
+                self.pending.push(Pending {
+                    id: self.next_doc,
+                    offset,
+                    source: key.clone(),
+                    sleeve: source.sleeve.clone(),
+                    draft,
                 });
-            u.turns = u.turns.max(draft.turn);
-            self.pending_bytes += draft.text.len() + 64;
-            self.pending.push(Pending {
-                id: self.next_doc,
-                offset,
-                source: key.clone(),
-                sleeve: source.sleeve.clone(),
-                draft,
-            });
-            self.next_doc += 1;
-        }
-        rec.cursor = tail.cursor;
-        rec.state = state;
-        self.sources.insert(key, rec);
-        if self.pending_bytes >= FLUSH {
-            self.commit()?;
+                self.next_doc += 1;
+            }
+            rec.cursor = tail.cursor;
+            rec.state = state;
+            self.dirty |= tail.bytes > 0;
+            self.sources.insert(key.clone(), rec.clone());
+            if self.pending_bytes >= flush_limit() {
+                self.commit()?;
+            }
+            if opened.start.offset >= end || opened.start.offset == start {
+                break;
+            }
         }
         Ok(got)
     }
@@ -396,7 +422,7 @@ impl Index {
             Item::Compacted { session } => {
                 let u = self.usage.entry(session.clone()).or_default();
                 u.session = session;
-                u.compactions += 1;
+                u.compactions = u.compactions.saturating_add(1);
             }
             Item::Doc(_) => {}
         }
@@ -408,7 +434,6 @@ impl Index {
     pub fn commit(&mut self) -> io::Result<()> {
         if !self.pending.is_empty() {
             let pending = std::mem::take(&mut self.pending);
-            self.pending_bytes = 0;
             let docs: Vec<DocIn<'_>> = pending
                 .iter()
                 .map(|p| DocIn {
@@ -426,19 +451,41 @@ impl Index {
                     text: &p.draft.text,
                 })
                 .collect();
-            let seg = self.write_segment(&docs)?;
+            let seg = match inject_failure("segment").and_then(|()| self.write_segment(&docs)) {
+                Ok(seg) => seg,
+                Err(e) => {
+                    self.pending = pending;
+                    return Err(e);
+                }
+            };
             self.segs.push(seg);
+            if let Err(e) = inject_failure("manifest").and_then(|()| self.write_manifest()) {
+                self.segs.pop();
+                self.pending = pending;
+                return Err(e);
+            }
+            self.pending_bytes = 0;
+        } else {
+            self.write_manifest()?;
         }
-        self.write_manifest()?;
+        self.dirty = false;
+        self.recount();
         self.merge()?;
         self.recount();
         Ok(())
     }
 
+    pub fn has_uncommitted(&self) -> bool {
+        self.dirty
+    }
+
     fn write_segment(&mut self, docs: &[DocIn<'_>]) -> io::Result<Seg> {
         let bytes = segment::encode(docs);
         let name = format!("seg-{:08}", self.next_seg);
-        self.next_seg += 1;
+        self.next_seg = self
+            .next_seg
+            .checked_add(1)
+            .ok_or_else(|| invalid(self.dir.display(), "segment ids exhausted"))?;
         let path = self.dir.join(&name);
         write_atomic(&self.dir, &path, &bytes)?;
         let file = File::open(&path).map_err(|e| ctx(e, "open", path.display()))?;
@@ -530,13 +577,19 @@ impl Index {
             let bytes = segment::encode(&docs);
             drop(docs);
             let seg_name = format!("seg-{:08}", self.next_seg);
-            self.next_seg += 1;
+            self.next_seg = self
+                .next_seg
+                .checked_add(1)
+                .ok_or_else(|| invalid(self.dir.display(), "segment ids exhausted"))?;
             let path = self.dir.join(&seg_name);
             write_atomic(&self.dir, &path, &bytes)?;
             let file = File::open(&path).map_err(|e| ctx(e, "open", path.display()))?;
             let merged = self.adopt(&seg_name, file, &bytes)?;
             let old: Vec<Seg> = self.segs.splice(i..i + 2, [merged]).collect();
-            self.write_manifest()?;
+            if let Err(e) = self.write_manifest() {
+                self.segs.splice(i..i + 1, old);
+                return Err(e);
+            }
             for s in old {
                 let p = self.dir.join(&s.name);
                 match fs::remove_file(&p) {
@@ -630,6 +683,37 @@ impl Index {
     }
 }
 
+fn flush_limit() -> usize {
+    #[cfg(debug_assertions)]
+    if let Some(bytes) = std::env::var("PT_TEST_HISTORY_FLUSH_BYTES")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+    {
+        return bytes;
+    }
+    FLUSH
+}
+
+fn inject_failure(phase: &str) -> io::Result<()> {
+    #[cfg(debug_assertions)]
+    {
+        static FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        let armed = std::env::var_os("PT_TEST_HISTORY_FAIL_ARM")
+            .is_none_or(|path| Path::new(&path).exists());
+        if std::env::var("PT_TEST_HISTORY_FAIL_COMMIT").as_deref() == Ok(phase)
+            && armed
+            && !FAILED.swap(true, std::sync::atomic::Ordering::Relaxed)
+        {
+            return Err(io::Error::other(format!(
+                "injected history {phase} commit failure"
+            )));
+        }
+    }
+    let _ = phase;
+    Ok(())
+}
+
 fn fresh_state(source: &Source) -> State {
     State {
         session: source.session.clone(),
@@ -640,7 +724,9 @@ fn fresh_state(source: &Source) -> State {
 
 /// A Grok session's start time from the `summary.json` beside its chat history.
 fn grok_start(path: &Path) -> Option<u64> {
-    let text = fs::read_to_string(path.parent()?.join("summary.json")).ok()?;
+    let file = crate::safe_open::file(&path.parent()?.join("summary.json")).ok()?;
+    let mut text = String::new();
+    file.take(1 << 20).read_to_string(&mut text).ok()?;
     let v = pt_json::parse(&text).ok()?;
     extract::parse_time(v["created_at"].as_str()?)
 }

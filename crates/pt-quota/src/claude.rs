@@ -54,16 +54,22 @@ pub fn parse_usage(body: &[u8]) -> Result<Snapshot> {
         return Err(Error::other("usage response is not an object"));
     }
     let mut snap = Snapshot::default();
+    // An absent or null window is skipped; one with a usage value that is not a percentage
+    // fails the whole reading.
+    let mut bad: Option<String> = None;
     let mut add = |label: String, w: Option<&Value>, pct_key: &str| {
-        let Some(w) = w else { return };
-        let Some(pct) = w.get(pct_key).and_then(Value::as_f64) else {
+        let Some(raw) = w.and_then(|w| w.get(pct_key)).filter(|p| !p.is_null()) else {
             return;
         };
-        if !pct.is_finite() || snap.windows.iter().any(|x| x.label == label) {
+        let Some(pct) = raw.as_f64().filter(|p| p.is_finite() && *p >= 0.0) else {
+            bad.get_or_insert(label);
+            return;
+        };
+        if snap.windows.iter().any(|x| x.label == label) {
             return;
         }
         let reset = w
-            .get("resets_at")
+            .and_then(|w| w.get("resets_at"))
             .and_then(Value::as_str)
             .and_then(parse_rfc3339);
         snap.windows.push(window(label, pct, reset));
@@ -85,6 +91,14 @@ pub fn parse_usage(body: &[u8]) -> Result<Snapshot> {
                 add(format!("wk {}", name.to_lowercase()), Some(l), "percent");
             }
         }
+    }
+    if let Some(label) = bad {
+        return Err(Error::other(format!(
+            "usage response has an invalid {label} window"
+        )));
+    }
+    if snap.windows.is_empty() {
+        return Err(Error::other("usage response has no usage windows"));
     }
     Ok(snap)
 }
