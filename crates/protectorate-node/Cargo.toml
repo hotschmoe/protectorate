@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
+build = "build.rs"
 
 [lints]
 workspace = true
@@ -13,11 +14,17 @@ name = "protectorate-node"
 path = "src/main.rs"
 
 [dependencies]
+pt-embed = { path = "../pt-embed" }
 pt-frame = { path = "../pt-frame" }
 pt-json = { path = "../pt-json" }
 pt-node = { path = "../pt-node" }
 pt-qr = { path = "../pt-qr" }
 pt-sys = { path = "../pt-sys" }
+pt-version = { path = "../pt-version" }
+
+[build-dependencies]
+pt-embed = { path = "../pt-embed" }
 
 [dev-dependencies]
+pt-hash = { path = "../pt-hash" }
 pt-json = { path = "../pt-json" }

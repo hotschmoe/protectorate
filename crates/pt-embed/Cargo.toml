@@ -1,0 +1,13 @@
+[package]
+name = "pt-embed"
+description = "Binaries carried inside ours (headscale, member): gzip with our own inflate, content-addressed unpack, and the build-script side"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+pt-hash = { path = "../pt-hash" }

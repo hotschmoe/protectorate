@@ -12,9 +12,11 @@ workspace = true
 [dependencies]
 libc.workspace = true
 pt-api = { path = "../pt-api" }
+pt-embed = { path = "../pt-embed" }
 pt-frame = { path = "../pt-frame" }
 pt-hash = { path = "../pt-hash" }
 pt-http = { path = "../pt-http" }
 pt-json = { path = "../pt-json" }
 pt-sys = { path = "../pt-sys" }
+pt-version = { path = "../pt-version" }
 

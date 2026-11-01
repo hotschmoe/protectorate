@@ -26,7 +26,10 @@ fn stdout_ok(args: &[&str]) -> String {
 #[test]
 fn version() {
     let out = stdout_ok(&["--version"]);
-    assert!(out.starts_with("protectorate-node "), "{out}");
+    let first = out.lines().next().unwrap_or("");
+    let v = first.strip_prefix("protectorate-node ").expect(&out);
+    assert!(!v.is_empty() && v != "0.0.0", "{out}");
+    assert!(out.contains("\nmember: "), "{out}");
 }
 
 #[test]

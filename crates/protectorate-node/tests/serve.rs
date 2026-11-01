@@ -38,7 +38,18 @@ fn a_peer_without_the_hub_tag_is_refused() {
         Some(0)
     );
     let hello = a.ok("Hello", "{}");
-    assert_eq!(num(&hello, "protocol"), 1);
+    assert_eq!(num(&hello, "protocol"), 2);
+    let version = std::process::Command::new(common::BIN)
+        .arg("--version")
+        .output()
+        .unwrap();
+    let version = String::from_utf8_lossy(&version.stdout);
+    let first = version.lines().next().unwrap_or("");
+    assert_eq!(
+        Some(text(&hello, "node_version")),
+        first.strip_prefix("protectorate-node "),
+        "Hello reports the build's version"
+    );
     assert_eq!(text(&hello, "node_id").len(), 32);
     assert_eq!(text(&hello, "journal_epoch").len(), 32);
 }
@@ -334,4 +345,139 @@ fn a_log_over_its_cap_is_truncated_and_the_job_still_finishes() {
     let (bytes, end) = a.fetch("big", 1, 0, 1 << 20);
     assert_eq!(bytes.len(), 1000);
     assert_eq!(end["truncated"].as_bool(), Some(true));
+}
+
+/// FetchArtifact end to end: a 3 MB binary file in slices with its SHA-256, every way out of the
+/// job's directory refused, and the submit token fencing reads, cancels and acks.
+#[test]
+fn artifacts_come_only_from_inside_the_job_dir_and_tokens_fence() {
+    let a = Agent::start("artifact", &[]);
+    let outside = a.dir.join("outside");
+    std::fs::create_dir_all(&outside).unwrap();
+    std::fs::write(outside.join("secret"), "secret").unwrap();
+    let o = outside.display();
+    let script = format!(
+        "head -c 3000000 /dev/urandom > big.bin; mkdir sub; printf small > sub/small.txt; \
+         ln -s {o}/secret esc; ln -s {o} escdir; ln -s sub/small.txt inside; mkfifo fifo; echo made"
+    );
+    let submit = pt_json::obj! {
+        "job_id" => "art", "attempt" => 1u64, "script" => script.as_str(), "token" => "tok-1",
+    };
+    let j = a.submit(&submit.to_string());
+    assert_eq!(text(&j, "token"), "tok-1");
+    let j = a.wait_state("art", 1, &["succeeded"], 20 * SECS);
+    assert_eq!(text(&j, "token"), "tok-1", "{j}");
+    let dir = a.state_dir().join("work").join("art.1");
+    let big = std::fs::read(dir.join("big.bin")).unwrap();
+    assert_eq!(big.len(), 3_000_000);
+
+    let fetch = |path: &str, offset: u64, max: u64, token: &str| {
+        let f = pt_json::obj! {
+            "job_id" => "art", "attempt" => 1u64, "path" => path, "offset" => offset,
+            "max" => max, "token" => token,
+        };
+        a.stream("FetchArtifact", &f.to_string())
+    };
+    let mut got = Vec::new();
+    let end = loop {
+        let (bytes, end) = fetch("big.bin", got.len() as u64, 1 << 20, "tok-1");
+        assert!(bytes.len() <= 1 << 20);
+        got.extend_from_slice(&bytes);
+        assert_eq!(num(&end, "offset"), got.len() as u64, "{end}");
+        assert_eq!(num(&end, "size"), 3_000_000);
+        if end["done"].as_bool() == Some(true) {
+            break end;
+        }
+        assert!(end.get("sha256").is_none(), "{end}");
+    };
+    assert!(got == big, "the slices differ from the file");
+    assert_eq!(
+        text(&end, "sha256"),
+        pt_hash::to_hex(&pt_hash::sha256(&big))
+    );
+    let (small, end) = fetch("inside", 0, 100, "tok-1");
+    assert_eq!(small, b"small");
+    assert_eq!(
+        text(&end, "sha256"),
+        pt_hash::to_hex(&pt_hash::sha256(b"small"))
+    );
+    let (past, end) = fetch("sub/small.txt", 99, 10, "tok-1");
+    assert!(past.is_empty());
+    assert_eq!(
+        (num(&end, "offset"), end["done"].as_bool()),
+        (5, Some(true))
+    );
+
+    let artifact = |path: &str, token: &str| {
+        let f = pt_json::obj! {
+            "job_id" => "art", "attempt" => 1u64, "path" => path, "token" => token,
+        };
+        a.err("FetchArtifact", &f.to_string())
+    };
+    let secret = outside.join("secret");
+    for path in [
+        "esc",
+        "escdir/secret",
+        "../../logs/art.1.log",
+        "sub/../../art.1/../../node-id",
+        secret.to_str().unwrap(),
+    ] {
+        let e = artifact(path, "tok-1");
+        assert_eq!(text(&e, "code"), "bad_request", "{path}: {e}");
+        assert!(text(&e, "message").contains("outside"), "{path}: {e}");
+    }
+    for path in ["fifo", "sub", "."] {
+        let e = artifact(path, "tok-1");
+        assert_eq!(text(&e, "code"), "bad_request", "{path}: {e}");
+        assert!(
+            text(&e, "message").contains("not a regular file"),
+            "{path}: {e}"
+        );
+    }
+    assert_eq!(text(&artifact("nope", "tok-1"), "code"), "not_found");
+    assert!(a.log().contains("refused"), "{}", a.log());
+
+    // Another submit's token gets nothing; without a token (protocol 1 hubs) it still answers.
+    assert_eq!(text(&artifact("big.bin", "tok-2"), "code"), "stale_attempt");
+    let e = a.err(
+        "FetchLog",
+        r#"{"job_id":"art","attempt":1,"token":"tok-2"}"#,
+    );
+    assert_eq!(text(&e, "code"), "stale_attempt");
+    assert_eq!(a.fetch("art", 1, 0, 100).0, b"made\n");
+    let e = a.err(
+        "AckCollected",
+        r#"{"job_id":"art","attempt":1,"token":"tok-2"}"#,
+    );
+    assert_eq!(text(&e, "code"), "stale_attempt");
+    // The same (job, attempt) resubmitted with another token answers the record it holds.
+    let again = a.submit(r#"{"job_id":"art","attempt":1,"script":"true","token":"tok-2"}"#);
+    assert_eq!(text(&again, "token"), "tok-1");
+
+    let run = a.submit(r#"{"job_id":"run","attempt":1,"script":"sleep 20","token":"r-1"}"#);
+    assert_eq!(text(&run, "token"), "r-1");
+    let e = a.err(
+        "FetchArtifact",
+        r#"{"job_id":"run","attempt":1,"path":"x","token":"r-1"}"#,
+    );
+    assert_eq!(text(&e, "code"), "not_finished");
+    let e = a.err("CancelJob", r#"{"job_id":"run","attempt":1,"token":"r-2"}"#);
+    assert_eq!(text(&e, "code"), "stale_attempt");
+    assert_eq!(text(&a.status("run", 1), "state"), "running");
+    a.ok("CancelJob", r#"{"job_id":"run","attempt":1,"token":"r-1"}"#);
+    a.wait_state("run", 1, &["cancelled"], 10 * SECS);
+
+    // The ack drops the node's own directory with the tombstone.
+    a.ok(
+        "AckCollected",
+        r#"{"job_id":"art","attempt":1,"token":"tok-1"}"#,
+    );
+    assert!(!dir.exists(), "{} survived the ack", dir.display());
+    assert_eq!(text(&artifact("big.bin", "tok-1"), "code"), "not_found");
+    assert!(secret.exists());
+    let bad = a.err_raw(
+        "SubmitJob",
+        r#"{"job_id":"t","attempt":1,"script":"true","token":"has space"}"#,
+    );
+    assert!(text(&bad, "message").contains("token"), "{bad}");
 }

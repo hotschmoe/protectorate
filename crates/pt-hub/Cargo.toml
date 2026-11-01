@@ -23,3 +23,4 @@ pt-json = { path = "../pt-json" }
 pt-quota = { path = "../pt-quota" }
 pt-sandbox = { path = "../pt-sandbox" }
 pt-sys = { path = "../pt-sys" }
+pt-version = { path = "../pt-version" }

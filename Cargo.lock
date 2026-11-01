@@ -13,21 +13,26 @@ name = "protectorate"
 version = "0.0.0"
 dependencies = [
  "pt-api",
+ "pt-embed",
  "pt-hash",
  "pt-http",
  "pt-hub",
  "pt-json",
+ "pt-version",
 ]
 
 [[package]]
 name = "protectorate-node"
 version = "0.0.0"
 dependencies = [
+ "pt-embed",
  "pt-frame",
+ "pt-hash",
  "pt-json",
  "pt-node",
  "pt-qr",
  "pt-sys",
+ "pt-version",
 ]
 
 [[package]]
@@ -64,16 +69,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-embed"
+version = "0.0.0"
+dependencies = [
+ "pt-hash",
+]
+
+[[package]]
 name = "pt-fleet"
 version = "0.0.0"
 dependencies = [
  "libc",
  "pt-api",
+ "pt-embed",
  "pt-frame",
  "pt-hash",
  "pt-http",
  "pt-json",
  "pt-sys",
+ "pt-version",
 ]
 
 [[package]]
@@ -121,6 +135,7 @@ dependencies = [
  "pt-quota",
  "pt-sandbox",
  "pt-sys",
+ "pt-version",
 ]
 
 [[package]]
@@ -137,6 +152,7 @@ version = "0.0.0"
 dependencies = [
  "libc",
  "pt-frame",
+ "pt-hash",
  "pt-json",
 ]
 
@@ -171,3 +187,7 @@ dependencies = [
  "pt-http",
  "pt-json",
 ]
+
+[[package]]
+name = "pt-version"
+version = "0.0.0"

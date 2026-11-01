@@ -1,13 +1,23 @@
 //! The hub-node RPC set, carried as pt-json payloads. A request frame holds a `Request`
 //! (`{"type": "<Method>", ...fields}`); its answer is one response frame with the method's reply,
-//! or one error frame with an `ErrorReply`. `FetchLog` answers with raw chunk frames of log bytes
-//! and then an end frame holding a `LogEnd`. All frames of one exchange carry the request's id.
+//! or one error frame with an `ErrorReply`. `FetchLog` and `FetchArtifact` answer with raw chunk
+//! frames of bytes and then an end frame holding a `LogEnd` or an `ArtifactEnd`. All frames of one
+//! exchange carry the request's id.
+//!
+//! Protocol 2 adds the submit token (SPEC 12a fencing): the hub sends one with each submit, the
+//! node keeps it with the job and echoes it in every `JobInfo`, and refuses a cancel, ack or fetch
+//! whose token names another submit. It also adds `FetchArtifact`. A protocol 1 node ignores the
+//! token fields and does not know `FetchArtifact`.
 
 use std::collections::BTreeMap;
 
 use pt_json::{Error, FromJson, Map, ToJson, Value, record, string_enum};
 
-pub const PROTOCOL: u32 = 1;
+pub const PROTOCOL: u32 = 2;
+/// Longest submit token.
+pub const MAX_TOKEN: usize = 128;
+/// Longest artifact path.
+pub const MAX_PATH: usize = 4096;
 /// The tailnet tag the member must report for the peer before anything is served.
 pub const HUB_TAG: &str = "tag:hub";
 /// Longest header line from the member, newline included.
@@ -37,6 +47,7 @@ string_enum! {
         SubmitJob = "SubmitJob",
         JobStatus = "JobStatus",
         FetchLog = "FetchLog",
+        FetchArtifact = "FetchArtifact",
         CancelJob = "CancelJob",
         AckCollected = "AckCollected",
         ListJobs = "ListJobs",
@@ -136,6 +147,8 @@ record! {
         pub log_cap: u64 = DEFAULT_LOG_CAP,
         pub even_if_present: bool = false,
         pub on_present: OnPresent = OnPresent::Lower,
+        /// Names this submit; echoed in every status of the job.
+        pub token: Option<String>,
     }
 
     /// Without `attempt`, the highest attempt the node holds.
@@ -145,10 +158,12 @@ record! {
         pub attempt: Option<u64>,
     }
 
+    /// With `token`, refused unless the job was submitted with it.
     #[derive(Debug, Clone, PartialEq)]
     pub struct JobRef {
         pub job_id: String,
         pub attempt: u64,
+        pub token: Option<String>,
     }
 
     #[derive(Debug, Clone, PartialEq)]
@@ -157,6 +172,21 @@ record! {
         pub attempt: u64,
         pub offset: u64 = 0,
         pub max: u64 = DEFAULT_FETCH,
+        pub token: Option<String>,
+    }
+
+    /// A regular file inside the finished job's directory (its `cwd`, else the node's own
+    /// directory for that attempt), from `offset`, at most `max` bytes. `path` is relative and
+    /// without `..`; one that still resolves outside the directory, through a symlink, is
+    /// refused.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct FetchArtifact {
+        pub job_id: String,
+        pub attempt: u64,
+        pub path: String,
+        pub offset: u64 = 0,
+        pub max: u64 = DEFAULT_FETCH,
+        pub token: Option<String>,
     }
 
     #[derive(Debug, Clone, PartialEq)]
@@ -184,6 +214,8 @@ record! {
         pub lowered: bool = false,
         pub on_present: OnPresent = OnPresent::Lower,
         pub timeout_secs: u64 = DEFAULT_TIMEOUT_SECS,
+        /// The submit's token, as it came.
+        pub token: Option<String>,
     }
 
     /// The answer to SubmitJob, JobStatus, CancelJob and AckCollected; `job` is absent when the
@@ -208,6 +240,16 @@ record! {
         pub size: u64,
         pub done: bool,
         pub truncated: bool,
+    }
+
+    /// The end frame of a FetchArtifact stream. `offset` is where the next fetch starts; `done`
+    /// means it reached `size`, and then `sha256` is the whole file's, read again at the end.
+    #[derive(Debug, Clone, PartialEq)]
+    pub struct ArtifactEnd {
+        pub offset: u64,
+        pub size: u64,
+        pub done: bool,
+        pub sha256: Option<String>,
     }
 
     #[derive(Debug, Clone, PartialEq)]
@@ -298,6 +340,7 @@ pub enum Request {
     SubmitJob(SubmitJob),
     JobStatus(JobStatus),
     FetchLog(FetchLog),
+    FetchArtifact(FetchArtifact),
     CancelJob(JobRef),
     AckCollected(JobRef),
     ListJobs,
@@ -314,6 +357,7 @@ impl Request {
             Request::SubmitJob(_) => Method::SubmitJob,
             Request::JobStatus(_) => Method::JobStatus,
             Request::FetchLog(_) => Method::FetchLog,
+            Request::FetchArtifact(_) => Method::FetchArtifact,
             Request::CancelJob(_) => Method::CancelJob,
             Request::AckCollected(_) => Method::AckCollected,
             Request::ListJobs => Method::ListJobs,
@@ -331,6 +375,7 @@ impl Request {
             Method::SubmitJob => Request::SubmitJob(SubmitJob::from_json(fields)?),
             Method::JobStatus => Request::JobStatus(JobStatus::from_json(fields)?),
             Method::FetchLog => Request::FetchLog(FetchLog::from_json(fields)?),
+            Method::FetchArtifact => Request::FetchArtifact(FetchArtifact::from_json(fields)?),
             Method::CancelJob => Request::CancelJob(JobRef::from_json(fields)?),
             Method::AckCollected => Request::AckCollected(JobRef::from_json(fields)?),
             Method::ListJobs => Request::ListJobs,
@@ -344,6 +389,7 @@ impl Request {
             Request::SubmitJob(r) => r.to_json(),
             Request::JobStatus(r) => r.to_json(),
             Request::FetchLog(r) => r.to_json(),
+            Request::FetchArtifact(r) => r.to_json(),
             Request::CancelJob(r) | Request::AckCollected(r) => r.to_json(),
             Request::Update(r) => r.to_json(),
             Request::Inventory | Request::Sample | Request::Presence | Request::ListJobs => {

@@ -1,7 +1,7 @@
 //! `protectorate-node rpc`: a stand-in hub client for tests and manual checks. It writes the
 //! header line member would write (a `tag:hub` peer unless `--header` says otherwise), sends one
 //! request frame and prints the answer: a response or error as JSON on stdout, or for FetchLog
-//! the raw log bytes on stdout and the end frame as JSON on stderr.
+//! and FetchArtifact the raw bytes on stdout and the end frame as JSON on stderr.
 
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};

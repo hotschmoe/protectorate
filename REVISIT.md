@@ -322,12 +322,30 @@ Each entry: where, what was done, what right looks like.
   first in the owner's order wins. A new sleeve always names its harness (`SpawnSleeve.harness` is
   required), so nothing else is chosen by quota, and G1 does not read quota yet. Right: the task
   size from the sleeve's history (D27), node and probe health, and an optional harness on spawn.
-- **Artifacts come back through `cat` jobs** (`pt-hub`, jobs.rs): after a job exits, each named
-  artifact is fetched by a collection job `cat -- <path>` on the same node (even if present,
-  300 s, 64 MiB log cap), whose log is the file; a file over the cap fails the check, and the
-  node's log carries stderr too, so the bytes are exact only because a successful `cat` is
-  silent. Right: a node `FetchArtifact` RPC streaming a bounded archive with
-  its SHA-256, so the hub reads bytes, not a job log.
+- **Protocol 1 nodes keep the old job path** (`pt-hub`, jobs.rs `TOKEN_PROTOCOL`, `cat_artifact`):
+  a node whose Hello says protocol 1 (agent-world and msr1-kids until they are upgraded) gets no
+  submit-token check, and its artifacts come back through `cat -- <path>` collection jobs whose
+  log is the file (64 MiB cap; exact only because a successful `cat` is silent). Right: once
+  both nodes run protocol 2, remove `cat_artifact` and every `protocol < TOKEN_PROTOCOL` branch,
+  and refuse a protocol 1 node.
+- **FetchArtifact reads one file at a time and hashes it twice** (`pt-node` `read_artifact`,
+  `pt-hub` `fetch_artifact`): the hub asks 4 MiB slices; at the end the node re-reads the whole
+  file for its SHA-256 and the hub compares it with the hash of what it received, so a file that
+  changed between slices fails the check and is fetched again (3 tries). Files over 64 MiB fail.
+  The opened file's own path is checked again only on Linux (`/proc/self/fd`); elsewhere the
+  canonical-path check stands alone, so a directory swapped between check and open could lead
+  outside. Right: a bounded archive when jobs return trees, and `GetFinalPathNameByHandleW` on
+  Windows.
+- **A held (job, attempt) with another token fails the new job** (`pt-hub` jobs.rs `run_job`):
+  the node answers a submit of a (job, attempt) it holds with the job it holds; when that job's
+  token is not the submit's, the hub ignores the status and reports the submit refused as
+  invalid, so the job fails and the other submit's job stays on the node, unacknowledged. That
+  happens only when node job ids repeat (a hub on an older journal with the same hub tag). Right:
+  fine; an owner command to drop such a foreign tombstone if one ever shows up.
+- **A node's own job directories can outlive a crash** (`pt-node` jobs): a job without `cwd`
+  runs in `work/<job>.<attempt>/`, removed with its tombstone on AckCollected; an agent killed
+  between the `collected` line and the removal leaves it. Right: sweep `work/` against the
+  journal at open.
 - **The scheduler picks the least-loaded eligible node** (`pt-hub`, jobs.rs `choose`): online,
   hello seen, presence AWAY (unless `even_if_present`), not excluded, then lowest load1; retried
   every 2 s. No per-node concurrency limit beyond one hub call at a time per node, no fairness
@@ -341,10 +359,12 @@ Each entry: where, what was done, what right looks like.
   while the core owns state; journal artifact results if `job show` must survive a lost home.
 - **Fleet poll interval is one knob** (`pt-hub`, `fleet.poll_secs`, default 15): presence and the
   node list share it. Right: split them if presence must react faster than listings.
-- **Embedded headscale and member unpack through the system `gzip -dc`** (`pt-fleet`, embed.rs):
-  no inflate in std, and no crate. Old `<home>/net/<name>-<sha256>` files from earlier versions
-  stay, since nothing deletes. Right: a small inflate in Rust, and pruning old unpacked versions
-  once the owner agrees to that rule.
+- **Embedded binaries are never pruned** (`pt-embed`): the hub unpacks headscale and member to
+  `<home>/net/<name>-<sha256>`, the node member to `<state>/net/`, with our own inflate (after
+  zlib's puff, a bit at a time); old versions stay, since nothing deletes. Build scripts gzip with
+  the system `gzip -9`; officewin, which has none, gets member gzipped by release.sh. Right:
+  prune old unpacked versions once the owner agrees to that rule; table-driven decoding if
+  unpack time ever shows.
 - **D9 covers three calls and the turn, not the request chain** (`pt-hub`, rule.rs): while
   Envoy's current turn was started (or steered) by an `agent:` message, Envoy's own `sleeve rm`,
   `job run` and spawns past `d9_spawn_limit` (default 3 per turn) wait for an owner approval
@@ -431,11 +451,11 @@ Each entry: where, what was done, what right looks like.
 - **Collecting lease** (pt-core jobs): an artifact check that does not answer within the lease
   makes the job Lost, and its next Exited report collects again, so a slow fetch can run twice.
   Right: fetch progress reported to the core, and the lease measured from it.
-- **The node does not embed member** (`protectorate-node`): the hub carries headscale and member
-  (gzip, unpacked to `<home>/net/<name>-<sha256>`, checked every start), but the node finds
-  `member` next to itself (or `--member`). Right: the node binary carries member the same way,
-  so a node install is one file. A protectorate built without Go and no `go/bin` has no fleet
-  (`version` says so; the e2e skips).
+- **A binary built without Go has no member** (`protectorate`, `protectorate-node`): with no
+  `go/bin` and no Go to build it, the hub has no fleet (`version` says so; the fleet e2e skips)
+  and the node needs `--member PATH` (`--version` says so). The live nodes' units still pass
+  `--member /usr/local/lib/protectorate-node/member`, which wins over the embedded one. Right:
+  fine; a reinstall drops the flag.
 - **LAN-direct DERP is plain HTTP** (`pt-fleet` `Config::lan_direct`, node `member::command`):
   with an `http://` server URL both sides set `TS_DEBUG_USE_DERP_HTTP=1`, tailscale's debug knob,
   and the DERP map pins the IPv4 with STUN off. Right: production goes through Traefik with TLS
@@ -570,7 +590,7 @@ Each entry: where, what was done, what right looks like.
   service) before the Windows node takes the `Update` RPC.
 - **The node service does not run `releases/current`** (`protectorate-node install-service`):
   install-node.sh stages into `<state>/releases/<version>/` and runs `join` and `install-service`
-  from there, but `install-service` copies the binary and member into
+  from there, but `install-service` copies the binary into
   `/usr/local/lib/protectorate-node`, so the unit would not follow a switch. Right: the unit's
   `ExecStart` is `<state>/releases/current/protectorate-node` and the manifest lists the releases
   dir.
@@ -581,7 +601,8 @@ Each entry: where, what was done, what right looks like.
 - **APK, desktop and Android-node assets are hooks only** (`scripts/release.sh` step `app`):
   `protectorate-android.apk`, `protectorate-desktop-{linux,windows}-{amd64,arm64}` and
   `protectorate-node-android-arm64` (SPEC 6) are not built; the step says so, and `APP=1` fails.
-  The hub assets do embed the web build (step `web`) and their arch's headscale and member.
+  The hub assets do embed the web build (step `web`) and their arch's headscale and member, and
+  every node asset its target's member.
   Right: `flutter build apk` with the existing signing recipe, the desktop bundles (the Linux one
   needs cmake, ninja and GTK 3 on the build host), and the node once `pt-node` has Android code
   paths.
@@ -604,10 +625,11 @@ Each entry: where, what was done, what right looks like.
   Neither binary has a `doctor` subcommand yet (`pt-doctor-probe` prints the report) and failures
   mail nobody. Right: wire `doctor` into hub and node, add the quota-reader validity check, mail
   the owner on new problems.
-- **`protectorate-node --version` prints the crate version** (`0.0.0`, from `CARGO_PKG_VERSION`),
-  not the release stamp the hub prints (`PROTECTORATE_BUILD_VERSION`), so the node installers can
-  only check that the staged binary runs, not that it is the release they verified. Right: the
-  node reads `PROTECTORATE_BUILD_VERSION` like the hub, and the installers compare it with the tag.
+- **The version stamp falls back to `git describe`** (`pt-version`): a build without
+  `PROTECTORATE_BUILD_VERSION` (plain `cargo build` or `cargo test`) gets `git describe --tags
+  --always --dirty`, recomputed when HEAD, its branch or the tags move, so a `-dirty` mark is the
+  tree's at the last such move, not now. The installers check the staged binary's first
+  `--version` line against the tag. Right: fine; releases always set it.
 - **Own keyword index instead of SQLite FTS5** (`pt-history`, SPEC 3.7): segments, BM25 and
   merges are ours, to avoid `rusqlite` plus bundled C SQLite. Right if it proves insufficient
   (recall, query features, corruption we cannot explain, or size well past the measured 1 GiB of

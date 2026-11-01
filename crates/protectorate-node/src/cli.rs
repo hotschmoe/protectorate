@@ -19,7 +19,7 @@ fn usage() -> String {
   lower-idle PID                    drop a running process tree to idle priority
   idle-probe                        Windows: print this session's idle time as one JSON line
                                     (the service starts it inside the console session)
-  --version",
+  --version                         print the version, then whether member is embedded",
         crate::join::USAGE,
         crate::serve::USAGE,
         crate::service::USAGE,
@@ -30,7 +30,8 @@ fn usage() -> String {
 pub fn run(args: Vec<String>) -> i32 {
     let result = match args.first().map(String::as_str) {
         Some("--version") | Some("-V") => {
-            println!("protectorate-node {}", env!("CARGO_PKG_VERSION"));
+            println!("protectorate-node {}", pt_version::VERSION);
+            println!("{}", crate::member::embedded_line());
             Ok(())
         }
         Some("inventory") => {

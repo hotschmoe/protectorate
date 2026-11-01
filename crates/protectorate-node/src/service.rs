@@ -1,11 +1,11 @@
-//! The system service. Linux (D10): `install-service` copies this binary and member under
+//! The system service. Linux (D10): `install-service` copies this binary under
 //! /usr/local/lib/protectorate-node and writes a systemd unit that runs `serve` as root.
-//! Windows (D11): it copies both under %ProgramFiles%\protectorate-node, limits the state dir
+//! Windows (D11): it copies it under %ProgramFiles%\protectorate-node, limits the state dir
 //! to SYSTEM and Administrators, and registers (through sc.exe) an auto-start LocalSystem
-//! service running `serve --service`. Either way serve supervises member, and every path or
-//! service created goes into the install manifest; `uninstall` removes exactly what it lists.
-//! The state dir (node identity, member keys, jobs) was made by `join`, so it is not in the
-//! manifest and stays.
+//! service running `serve --service`. Either way serve supervises the member this binary
+//! embeds (unpacked under `<state>/net`), and every path or service created goes into the
+//! install manifest; `uninstall` removes exactly what it lists. The state dir (node identity,
+//! member keys, jobs) was made by `join`, so it is not in the manifest and stays.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,7 +16,7 @@ use crate::join::{is_root, system_state};
 #[cfg(not(windows))]
 use crate::member;
 
-pub const USAGE: &str = "  install-service [--state-dir DIR] [--member PATH]
+pub const USAGE: &str = "  install-service [--state-dir DIR]
                                     after join, as root or an elevated administrator: install
                                     and start the service (systemd protectorate-node.service,
                                     or the Windows service protectorate-node)
@@ -55,20 +55,17 @@ record! {
 
 pub(crate) struct Opts {
     pub(crate) state: PathBuf,
-    pub(crate) member: Option<PathBuf>,
 }
 
-fn opts(args: &[String], allow_member: bool) -> Result<Opts, String> {
+fn opts(args: &[String]) -> Result<Opts, String> {
     let mut o = Opts {
         state: system_state()?,
-        member: None,
     };
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut value = || it.next().ok_or_else(|| format!("{a} needs a value"));
         match a.as_str() {
             "--state-dir" => o.state = PathBuf::from(value()?),
-            "--member" if allow_member => o.member = Some(PathBuf::from(value()?)),
             other => return Err(format!("unknown option '{other}'")),
         }
     }
@@ -114,7 +111,7 @@ fn systemctl(args: &[&str]) -> Result<(), String> {
 }
 
 pub fn install(args: &[String]) -> Result<(), String> {
-    let o = opts(args, true)?;
+    let o = opts(args)?;
     #[cfg(windows)]
     return crate::winservice::install(&o);
     #[cfg(not(windows))]
@@ -137,11 +134,11 @@ fn install_systemd(o: &Opts) -> Result<(), String> {
             manifest_path(&o.state).display()
         ));
     }
-    let member_src = member::member_binary(o.member.as_deref())?;
+    // The unit runs the embedded member; unpacking it now proves it is there.
+    member::member_binary(None, &o.state)?;
     let exe = std::env::current_exe().map_err(|e| format!("finding this binary: {e}"))?;
     let prefix = Path::new(PREFIX);
     let bin = prefix.join("protectorate-node");
-    let member_bin = prefix.join("member");
     for p in [prefix, Path::new(UNIT_PATH)] {
         if p.exists() {
             return Err(format!(
@@ -166,12 +163,10 @@ fn install_systemd(o: &Opts) -> Result<(), String> {
     };
     fs::create_dir(prefix).map_err(|e| format!("creating {PREFIX}: {e}"))?;
     record(&mut m, prefix, "dir")?;
-    for (src, dst) in [(&exe, &bin), (&member_src, &member_bin)] {
-        fs::copy(src, dst)
-            .map_err(|e| format!("copying {} to {}: {e}", src.display(), dst.display()))?;
-        record(&mut m, dst, "file")?;
-        set_mode(dst, 0o755)?;
-    }
+    fs::copy(&exe, &bin)
+        .map_err(|e| format!("copying {} to {}: {e}", exe.display(), bin.display()))?;
+    record(&mut m, &bin, "file")?;
+    set_mode(&bin, 0o755)?;
     let state = o.state.display().to_string();
     let unit = format!(
         "# Written by protectorate-node install-service; removed by uninstall.
@@ -182,7 +177,7 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart={bin} serve --state-dir {state} --forward-socket {state}/agent.sock --member {member}
+ExecStart={bin} serve --state-dir {state} --forward-socket {state}/agent.sock
 Restart=always
 RestartSec=5
 
@@ -192,7 +187,6 @@ WantedBy=multi-user.target
         name = cfg.name,
         url = cfg.server_url,
         bin = bin.display(),
-        member = member_bin.display(),
     );
     fs::write(UNIT_PATH, unit).map_err(|e| format!("writing {UNIT_PATH}: {e}"))?;
     record(&mut m, Path::new(UNIT_PATH), "file")?;
@@ -207,7 +201,7 @@ WantedBy=multi-user.target
 }
 
 pub fn uninstall(args: &[String]) -> Result<(), String> {
-    let o = opts(args, false)?;
+    let o = opts(args)?;
     if cfg!(unix) && !is_root() {
         return Err("uninstall needs root (sudo)".into());
     }
