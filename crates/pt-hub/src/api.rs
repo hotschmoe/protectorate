@@ -97,21 +97,42 @@ pub fn from_token(hub: &Hub, view: &View, token: &str) -> Option<Principal> {
         .map(|s| sleeve_principal(&view.state, s.id))
 }
 
-/// The sleeve whose scope holds `pid`, read from `/proc/<pid>/cgroup`. A process inside a sleeve
-/// is that sleeve whatever token it presents.
-pub fn from_cgroup(hub: &Hub, view: &View, pid: i32) -> Option<Principal> {
-    let text = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
+/// The cgroup of `pid` from `/proc/<pid>/cgroup`, or `None` when it cannot be read (the
+/// process is gone, or never was).
+pub fn peer_cgroup(pid: i32) -> Option<String> {
+    if pid <= 0 {
+        return None;
+    }
+    std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()
+}
+
+pub enum CgroupSleeve {
+    /// In no sleeve scope of this hub.
+    None,
+    Live(Principal),
+    /// In the scope of a sleeve that is removed or unknown: refused.
+    Gone,
+}
+
+/// The sleeve whose scope a cgroup is. A process inside a sleeve is that sleeve whatever token
+/// it presents.
+pub fn cgroup_sleeve(hub: &Hub, view: &View, cgroup: &str) -> CgroupSleeve {
     let needle = format!("/pt-{}-", hub.tokens.hub_tag);
-    let at = text.find(&needle)? + needle.len();
-    let digits: String = text[at..]
+    let Some(at) = cgroup.find(&needle).map(|i| i + needle.len()) else {
+        return CgroupSleeve::None;
+    };
+    let digits: String = cgroup[at..]
         .chars()
         .take_while(char::is_ascii_digit)
         .collect();
-    let id = SleeveId(digits.parse().ok()?);
-    view.state
-        .sleeve(id)
-        .filter(|s| s.life != Life::Removed)
-        .map(|_| sleeve_principal(&view.state, id))
+    let Ok(n) = digits.parse() else {
+        return CgroupSleeve::Gone;
+    };
+    let id = SleeveId(n);
+    match view.state.sleeve(id) {
+        Some(s) if s.life != Life::Removed => CgroupSleeve::Live(sleeve_principal(&view.state, id)),
+        _ => CgroupSleeve::Gone,
+    }
 }
 
 type Result<T> = std::result::Result<T, ApiError>;

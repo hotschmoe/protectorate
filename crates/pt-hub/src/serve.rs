@@ -283,6 +283,15 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
     )
     .map_err(|e| e.to_string())?;
     servers.push(start_server("unix", unix));
+    let sleeve_sock = home.sleeve_socket();
+    clear_stale_socket(&sleeve_sock)?;
+    let sleeves = Server::bind_unix(
+        &sleeve_sock,
+        http_config(),
+        handler(hub.clone(), Listener::Sleeves, web.clone()),
+    )
+    .map_err(|e| e.to_string())?;
+    servers.push(start_server("sleeves", sleeves));
     if let Some(addr) = o.listen {
         let s = Server::bind_tcp(
             addr,

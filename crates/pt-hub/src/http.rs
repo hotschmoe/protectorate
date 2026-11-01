@@ -21,8 +21,10 @@ use crate::wire;
 
 #[derive(Clone, Copy, Debug)]
 pub enum Listener {
-    /// The unix socket: peer credentials, or a token.
+    /// The owner's unix socket: peer credentials, or a token. Never mounted into a sandbox.
     Unix,
+    /// The sleeves' unix socket: a sleeve capability, never peer credentials alone.
+    Sleeves,
     /// 127.0.0.1: a token.
     Loopback,
     /// Behind Traefik: only the trusted proxy's address, with a token.
@@ -60,31 +62,65 @@ fn bearer(req: &Request) -> Option<String> {
         .flatten()
 }
 
-fn principal(hub: &Hub, l: Listener, req: &Request, peer: &Peer) -> Result<Principal, ApiError> {
+/// Who is calling. A process inside a sleeve's scope is that sleeve whatever it presents; on
+/// the owner's socket a caller without a token is the owner only when its cgroup was read and
+/// names no sleeve of this hub. Anything that cannot be identified is refused.
+fn principal(
+    hub: &Hub,
+    l: Listener,
+    token: Option<&str>,
+    peer: &Peer,
+) -> Result<Principal, ApiError> {
     let view = hub.view();
-    let token = bearer(req);
     let by_token = |t: &str| {
         api::from_token(hub, &view, t)
             .ok_or_else(|| err(ErrorCode::Unauthenticated, "unknown token"))
     };
+    let unknown = || err(ErrorCode::Forbidden, "cannot identify the calling process");
     match (l, peer) {
-        (Listener::Unix, Peer::Unix(cred)) => {
-            if let Some(p) = api::from_cgroup(hub, &view, cred.pid) {
-                return Ok(p);
+        (Listener::Unix | Listener::Sleeves, Peer::Unix(cred)) if cred.uid != hub.uid => {
+            Err(err(ErrorCode::Forbidden, "not the hub's user"))
+        }
+        (Listener::Unix, Peer::Unix(cred)) => match api::peer_cgroup(cred.pid) {
+            None => Err(unknown()),
+            Some(cg) => match api::cgroup_sleeve(hub, &view, &cg) {
+                api::CgroupSleeve::Live(p) => Ok(p),
+                api::CgroupSleeve::Gone => Err(unknown()),
+                api::CgroupSleeve::None => match token {
+                    Some(t) => by_token(t),
+                    None => Ok(Principal::Owner),
+                },
+            },
+        },
+        (Listener::Sleeves, Peer::Unix(cred)) => {
+            let Some(t) = token else {
+                return Err(err(
+                    ErrorCode::Unauthenticated,
+                    "a sleeve capability is required on this socket",
+                ));
+            };
+            let p = by_token(t)?;
+            if !matches!(p, Principal::Sleeve(_) | Principal::Envoy(_)) {
+                return Err(err(
+                    ErrorCode::Forbidden,
+                    "only a sleeve capability is taken on this socket",
+                ));
             }
-            if let Some(t) = &token {
-                return by_token(t);
-            }
-            if cred.uid == hub.uid {
-                Ok(Principal::Owner)
-            } else {
-                Err(err(ErrorCode::Forbidden, "not the hub's user"))
+            match api::peer_cgroup(cred.pid).map(|cg| api::cgroup_sleeve(hub, &view, &cg)) {
+                Some(api::CgroupSleeve::Live(q)) if q != p => Err(err(
+                    ErrorCode::Forbidden,
+                    "that capability belongs to another sleeve",
+                )),
+                Some(api::CgroupSleeve::Gone) => Err(unknown()),
+                _ => Ok(p),
             }
         }
         (Listener::Proxy { trusted }, Peer::Tcp(addr)) if addr.ip() != trusted => {
             Err(err(ErrorCode::Forbidden, "not the trusted proxy"))
         }
-        (_, _) => match &token {
+        (Listener::Unix | Listener::Sleeves, Peer::Tcp(_))
+        | (Listener::Loopback | Listener::Proxy { .. }, Peer::Unix(_)) => Err(unknown()),
+        (Listener::Loopback | Listener::Proxy { .. }, Peer::Tcp(_)) => match token {
             Some(t) => by_token(t),
             None => Ok(Principal::Anonymous),
         },
@@ -114,7 +150,8 @@ pub fn handler(
                 _ => Response::method_not_allowed("GET, HEAD"),
             };
         };
-        let who = match principal(&hub, l, req, peer) {
+        let token = bearer(req);
+        let who = match principal(&hub, l, token.as_deref(), peer) {
             Ok(p) => p,
             Err(e) => return error(&e),
         };

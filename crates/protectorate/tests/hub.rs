@@ -712,3 +712,116 @@ exec '{real_git}' "$@""#,
     );
     assert_eq!(git_out(&kid_path, &["status", "--porcelain"]), "");
 }
+
+/// What a sleeve process can reach, probed from inside a real sandbox by a stand-in `pi` that
+/// then runs the real one: not the owner's socket, nothing on the sleeves' socket without its
+/// capability (even with scopes off, where no cgroup names it), no write to the hub's `run/`,
+/// and no login file of a harness it is not running, now or from an earlier incarnation.
+#[test]
+fn sandbox_reaches_only_its_own() {
+    if !have_runtime() {
+        return;
+    }
+    let real_pi = std::process::Command::new("sh")
+        .args(["-c", "command -v pi"])
+        .output()
+        .unwrap();
+    let real_pi = String::from_utf8_lossy(&real_pi.stdout).trim().to_string();
+    let dir = unique("sbx");
+    let owner = dir.join("owner");
+    let real_home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+    for rel in [
+        ".pi/agent/models.json",
+        ".pi/agent/settings.json",
+        ".pi/agent/auth.json",
+    ] {
+        if real_home.join(rel).is_file() {
+            std::fs::create_dir_all(owner.join(rel).parent().unwrap()).unwrap();
+            std::fs::copy(real_home.join(rel), owner.join(rel)).unwrap();
+        }
+    }
+    std::fs::create_dir_all(owner.join(".claude")).unwrap();
+    std::fs::write(owner.join(".claude/.credentials.json"), "OWNER-CLAUDE").unwrap();
+    let fake = dir.join("pi");
+    write_script(
+        &fake,
+        &format!(
+            r#"if [ "$1" != --version ]; then
+  run="${{PROTECTORATE_SOCKET%%/run/*}}/run"
+  {{
+    [ -S "$run/api.sock" ] && echo owner_socket=visible || echo owner_socket=hidden
+    env -u PROTECTORATE_TOKEN protectorate --json sleeve list >/dev/null 2>&1 && echo tokenless=ok || echo tokenless=refused
+    protectorate --json sleeve list >/dev/null 2>&1 && echo token=ok || echo token=refused
+    touch "$run/bin/probe" 2>/dev/null && echo bin=writable || echo bin=readonly
+    touch "$run/sleeves/probe" 2>/dev/null && echo sleeves=writable || echo sleeves=readonly
+    [ -e "$HOME/.claude/.credentials.json" ] && echo claude_login=visible || echo claude_login=hidden
+  }} < /dev/null > "$HOME/probe.txt"
+fi
+exec '{real_pi}' "$@""#
+        ),
+    );
+    let hub = Hub::start_config(
+        "sbx",
+        "pi_local",
+        &[
+            ("scopes", pt_json::Value::from(false)),
+            ("pi_program", fake.to_str().unwrap().into()),
+        ],
+        &[],
+        &[("HOME", owner.to_str().unwrap())],
+    );
+    let repo = temp_repo("sbx");
+    let s = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "sbx",
+            "--path",
+            repo.to_str().unwrap(),
+            "--harness",
+            "pi_local",
+            "--resleeve-to",
+            "claude",
+        ])
+        .json();
+    hub.wait("sbx", "idle", 120);
+    let id = s["id"].as_str().unwrap().to_string();
+    let home = hub.home.join(format!("sleeves/{id}/home"));
+    let probe = std::fs::read_to_string(home.join("probe.txt")).expect("the probe ran");
+    for want in [
+        "owner_socket=hidden",
+        "tokenless=refused",
+        "token=ok",
+        "bin=readonly",
+        "sleeves=readonly",
+        "claude_login=hidden",
+    ] {
+        assert!(probe.lines().any(|l| l == want), "want {want}:\n{probe}");
+    }
+    assert!(
+        !home.join(".claude/.credentials.json").exists(),
+        "a resleeve target's login is not copied in ahead of time"
+    );
+
+    // A login an earlier incarnation left behind is moved out before the next launch (after a
+    // turn, so the native session exists to resume).
+    hub.send("sbx", READY);
+    hub.wait("sbx", "idle", 180);
+    hub.cli(&["sleeve", "stop", "sbx"]).ok();
+    hub.wait("sbx", "ended", 60);
+    std::fs::create_dir_all(home.join(".claude")).unwrap();
+    std::fs::write(home.join(".claude/.credentials.json"), "OLD-CLAUDE").unwrap();
+    hub.cli(&["sleeve", "start", "sbx"]).ok();
+    hub.wait("sbx", "idle", 120);
+    let probe = std::fs::read_to_string(home.join("probe.txt")).unwrap();
+    assert!(probe.contains("claude_login=hidden"), "{probe}");
+    assert_eq!(
+        std::fs::read_to_string(hub.home.join(format!(
+            "sleeves/{id}/credentials/.claude/.credentials.json"
+        )))
+        .unwrap_or_default(),
+        "OLD-CLAUDE",
+        "kept outside every sandbox"
+    );
+}

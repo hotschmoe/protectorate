@@ -186,6 +186,46 @@ fn provisioned(hub: &Hub, id: SleeveId) -> bool {
     provision_barrier(hub, id).is_file()
 }
 
+/// Leaves only harness `h`'s login files in a sleeve's home: every other harness's move to
+/// `sleeves/<id>/credentials/`, which no sandbox sees, and move back when that harness runs
+/// again. Runs before a launch, once the previous incarnation's scope is empty.
+fn stage_credentials(
+    owner_home: &Path,
+    sleeve_dir: &Path,
+    home: &Path,
+    h: Harness,
+) -> io::Result<()> {
+    let keep = credential_files(h);
+    let stash = sleeve_dir.join("credentials");
+    let every = [
+        Harness::Claude,
+        Harness::Codex,
+        Harness::Grok,
+        Harness::PiVendor,
+    ];
+    for rel in every.into_iter().flat_map(credential_files) {
+        let (live, kept) = (home.join(rel), stash.join(rel));
+        let (from, to) = if keep.contains(rel) {
+            if live.symlink_metadata().is_ok() || kept.symlink_metadata().is_err() {
+                continue;
+            }
+            (kept, live)
+        } else {
+            if live.symlink_metadata().is_err() {
+                continue;
+            }
+            (live, kept)
+        };
+        let ctx = |e: io::Error| io::Error::new(e.kind(), format!("move {}: {e}", from.display()));
+        if let Some(dir) = to.parent() {
+            fs::create_dir_all(dir).map_err(ctx)?;
+            fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).map_err(ctx)?;
+        }
+        fs::rename(&from, &to).map_err(ctx)?;
+    }
+    seed_credentials(owner_home, home, h)
+}
+
 /// Whether the record is still exactly what this intent was released for.
 pub(crate) fn fresh(view: &View, effect: EffectId, attempt: u32, kind: &EffectKind) -> bool {
     let st = &view.state;
@@ -591,13 +631,25 @@ impl SleeveExec {
             .ok_or_else(|| format!("{} is not installed", wire::harness_wire(target.harness)))?;
         let home = hub.home.sleeve_home(s.id);
         fs::create_dir_all(&home).map_err(|e| format!("{}: {e}", home.display()))?;
-        seed_credentials(&hub.owner_home, &home, target.harness).map_err(|e| e.to_string())?;
+        stage_credentials(
+            &hub.owner_home,
+            &hub.home.sleeve_dir(s.id),
+            &home,
+            target.harness,
+        )
+        .map_err(|e| e.to_string())?;
         let work = workdir(&hub, s);
         let mut sb = pt_sandbox::SandboxSpec::new(&hub.scope_sleeve(s.id), g.0, work.clone(), home);
         sb.scope = hub.config.scopes;
         sb.masks = pt_sandbox::default_masks(&hub.owner_home);
         sb.masks.push(hub.home.root.clone());
-        sb.rw_paths.push(hub.home.run());
+        // Of the hub's state only the sleeves' socket and the CLI, read-only: a sleeve cannot
+        // reach the owner's socket, or replace or unlink what other sleeves use.
+        sb.ro_paths.push(hub.home.sleeve_run());
+        sb.ro_paths.push(hub.home.bin());
+        if let Ok(cli) = fs::canonicalize(hub.home.bin().join("protectorate")) {
+            sb.ro_paths.push(cli);
+        }
         if s.layout == Layout::Worktree {
             sb.git_dirs = pt_sandbox::resolve_git_dirs(&work).map_err(|e| e.to_string())?;
         }
@@ -607,7 +659,7 @@ impl SleeveExec {
             ("PROTECTORATE_TOKEN".into(), token),
             (
                 "PROTECTORATE_SOCKET".into(),
-                hub.home.socket().to_string_lossy().into_owned(),
+                hub.home.sleeve_socket().to_string_lossy().into_owned(),
             ),
             ("PROTECTORATE_SLEEVE".into(), s.name.clone()),
             (

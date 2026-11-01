@@ -277,26 +277,34 @@ Each entry: where, what was done, what right looks like.
   so jobs outlive the session). What SSH loses is NAT traversal, roaming and stable addresses (DHCP
   churn; the snapdragon laptop moved .176 to .172). The combined form is SSH as the protocol, with
   the official tailscale client on any machine the hub cannot route to.
-- **Sleeve credentials are seeded by copy** (`pt-hub`, exec.rs `credential_files`): at
-  provisioning and before each launch the hub copies the owner's login files for the harness
+- **Sleeve credentials are seeded by copy** (`pt-hub`, exec.rs `credential_files`): before each
+  launch the hub copies the owner's login files for the launching harness only
   (`~/.claude/.credentials.json` and `~/.claude.json`, `~/.codex/auth.json`, `~/.grok/auth.json`,
-  `~/.pi/agent/{auth,models,settings}.json`) into the sleeve's private home, once; a token the
-  harness refreshes in one home does not reach the others, and `~/.claude.json` carries the
-  owner's project list. Right: a doctor-guided login per sleeve home, or a shared read-only
-  credential mount.
-- **Same-uid callers on the unix socket are the owner** (`pt-hub`, http.rs): a process inside a
-  sleeve scope is identified by its cgroup and gets that sleeve's capability whatever it sends,
-  but a vendor general agent runs as the owner's user, so envoy-only holds only while it presents
-  its `PROTECTORATE_TOKEN`. Right: vendor agents under their own uid, or an owner token required
-  on the socket for anything that is not the owner's own shell.
+  `~/.pi/agent/{auth,models,settings}.json`) into the sleeve's private home, once, and moves every
+  other harness's files out to `sleeves/<id>/credentials/` (no sandbox sees it), back when that
+  harness runs again; a token the harness refreshes in one home does not reach the others, and
+  `~/.claude.json` carries the owner's project list. Right: a doctor-guided login per sleeve
+  home, or a shared read-only credential mount per harness.
+- **Same-uid callers on the owner's socket are the owner** (`pt-hub`, http.rs): sleeves never
+  see that socket (`run/api.sock`); they get `run/sleeves/api.sock`, which takes only a sleeve
+  capability (checked against the caller's scope cgroup when it has one), so with `scopes` off a
+  sleeve still cannot act as the owner. On the owner's socket a caller without a token is the
+  owner only when `/proc/<pid>/cgroup` of its SO_PEERCRED pid was read at the request and names
+  no sleeve of this hub; an exited peer is refused. The pid is read per request, not at accept,
+  so a peer that exits and whose pid is reused by an owner process in between would pass.
+  A vendor general agent runs as the owner's user, so envoy-only holds only while it presents
+  its `PROTECTORATE_TOKEN`. Right: identity captured at accept in pt-http (SO_PEERPIDFD or the
+  cgroup read then), and vendor agents under their own uid.
 - **The capability is in bwrap's argv** (`--setenv PROTECTORATE_TOKEN`), so `/proc/<pid>/cmdline`
   of the outer bwrap shows it to same-uid processes. Right: hand the environment over a file
   descriptor once the sandbox helper subcommand exists.
-- **The hub socket is reached through a bind of `run/`** (the whole directory, at its host path),
-  not a fixed path like `/run/protectorate.sock`: bwrap cannot create a mount point on the
-  read-only root, and a directory bind keeps a socket re-created by a restarted hub reachable.
-  Sleeves get `PROTECTORATE_SOCKET` and `run/bin/protectorate` (a link to the hub binary) on PATH.
-  Right: the sandbox helper makes the fixed mount point, or pt-sandbox gains src-to-dst binds.
+- **The sleeves' socket is reached through a read-only bind of `run/sleeves/`** (the
+  directory, at its host path), not a fixed path like `/run/protectorate.sock`: bwrap cannot
+  create a mount point on the read-only root, and a directory bind keeps a socket re-created by a
+  restarted hub reachable. `run/bin/` (the CLI link, first on PATH) and the binary it names are
+  bound read-only too, so a sleeve cannot replace or unlink what other sleeves use. Sleeves get
+  `PROTECTORATE_SOCKET`. Right: the sandbox helper makes the fixed mount point, or pt-sandbox
+  gains src-to-dst binds.
 - **A View child runs in a scratch dir** (`pt-hub`, exec.rs `workdir`): `SandboxSpec` binds the
   workspace writable, so a read-only view's cwd is `sleeves/<id>/view` and the root is visible
   read-only at its own path through `/` (not when the root sits under a masked directory). Right:
