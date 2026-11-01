@@ -1,0 +1,18 @@
+#scenario c230361d59e5991d
+# Event times near u64::MAX: timeouts compare elapsed time and never overflow.
+clock 18446744073709540000
+spawn root /w/a
+run
+tick 10s
+expect root life=Launching activity=Booting
+obs root ready
+send root m1
+run
+job j1
+policy poll=0
+run
+tick 1h
+tick 1h
+run
+expect root life=Running activity=Working
+expect-job 0 state=Running

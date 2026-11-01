@@ -364,3 +364,20 @@ Each entry: where, what was done, what right looks like.
 - **check-gen needs the Dart SDK** (`Makefile`): `pt-apigen`'s output is formatted with
   `dart format`, so `make check` needs `dart` on PATH (or `DART=`). Right: fine while the app is
   built on the same host; emit formatter-stable Dart directly if CI ever lacks Flutter.
+- **Node reports fenced by node, not by submit** (pt-core jobs): `JobStatus` names the node that
+  answered, and a report from any node but the job's current one is dropped. A node chosen again
+  for the same attempt, after its 10 min exclusion, is trusted to have no answer that old in
+  flight. Right: a per-submit token in `NodeSubmit` that the node echoes in every status.
+- **Prompt evidence by ordering** (pt-core, `prompt_evidence`): harness output confirms an
+  in-flight prompt or compaction only once its `Dispatched` is in, which relies on a sleeve's
+  observations and executor reports sharing one ordered stream. Right: drivers tag output with
+  the native turn id where the protocol has one, and evidence must match the prompt's turn.
+- **Cancel re-sent every Tick** (pt-core jobs): Cancelling re-sends an uncertain cancel at each
+  10 s Tick until the lease ends. Right: the per-job backoff of node polling.
+- **Torn batch versus corruption** (pt-journal, `open_segment`): a frame failing its CRC is cut as
+  a torn append only when no intact frame follows it; otherwise open fails. A group-commit batch
+  whose blocks reached disk out of order after a power loss also fails open, though none of it
+  was acknowledged. Right: a batch-end marker, so a torn batch is told apart from corruption.
+- **Collecting lease** (pt-core jobs): an artifact check that does not answer within the lease
+  makes the job Lost, and its next Exited report collects again, so a slow fetch can run twice.
+  Right: fetch progress reported to the core, and the lease measured from it.

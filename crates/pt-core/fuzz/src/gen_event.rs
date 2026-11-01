@@ -201,6 +201,7 @@ pub fn event(b: &mut Bytes) -> Event {
         24 => E::JobStatus {
             job: j(b),
             attempt: a(b),
+            node: NodeId(b.u64()),
             report: report(b),
         },
         25 => E::ArtifactsChecked {

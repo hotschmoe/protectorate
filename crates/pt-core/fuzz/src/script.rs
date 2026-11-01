@@ -17,13 +17,17 @@
 //!                                         desync screen=V usage=N disk=N forbidden
 //! exit NAME [oom] [code=N]          the incarnation's process tree dies
 //! tick DURATION                     e.g. 30s 16m 2h
+//! clock MILLIS                      the hub clock jumps to MILLIS (it never runs backwards)
 //! policy KEY=VALUE...               see `Policy`
-//! run | step | commit | crash [empty]
+//! run | step [N] | commit         step N executes the Nth released intent (from 0)
+//! crash [empty] [down=DURATION]     the hub dies at the last commit and restarts DURATION later
 //! job ID | cancel-job N | requeue-job N | abandon-job N
 //! expect NAME life=.. g=N activity=.. guard=.. harness=.. queue=N msg:ID=..
 //! expect-effect KEY state=.. attempt=N count=N
 //! expect-job N state=..           expect-none NAME
 //! ```
+//!
+//! An effect KEY ending in `*` matches the newest record whose key has that prefix.
 
 use pt_core::*;
 
@@ -101,12 +105,13 @@ fn target(h: Harness, pane: bool) -> Target {
 fn duration(s: &str) -> Result<Millis, String> {
     let (n, unit) = s.split_at(s.len().saturating_sub(1));
     let n: u64 = n.parse().map_err(|_| format!("bad duration {s}"))?;
-    Ok(n * match unit {
+    let unit = match unit {
         "s" => SECOND,
         "m" => MINUTE,
         "h" => HOUR,
         _ => return Err(format!("bad duration {s}")),
-    })
+    };
+    n.checked_mul(unit).ok_or(format!("duration {s} overflows"))
 }
 
 /// The variant name of a Debug-printed value: `Stopping { remove: false }` is `Stopping`.
@@ -116,6 +121,14 @@ fn variant(v: &impl std::fmt::Debug) -> String {
         .next()
         .unwrap_or("")
         .to_string()
+}
+
+/// A script KEY ending in `*` matches by prefix.
+fn key_matches(pattern: &str, key: &str) -> bool {
+    match pattern.strip_suffix('*') {
+        Some(prefix) => key.starts_with(prefix),
+        None => key == pattern,
+    }
 }
 
 fn num(s: &str) -> Result<u64, String> {
@@ -139,7 +152,7 @@ impl Runner {
             .st
             .effects
             .values()
-            .filter(|e| e.key == key)
+            .filter(|e| key_matches(key, &e.key))
             .map(|e| e.id)
             .next_back()
             .ok_or_else(|| format!("no effect {key}"))
@@ -293,6 +306,10 @@ impl Runner {
                 self.sim.crash_process(sleeve, g, cause);
             }
             "tick" => self.sim.tick(duration(arg(1)?)?),
+            "clock" => {
+                self.sim.now = num(arg(1)?)?;
+                self.sim.apply(E::Tick);
+            }
             "policy" => {
                 for w in &words[1..] {
                     let (k, v) = w.split_once('=').ok_or(format!("bad policy {w}"))?;
@@ -321,9 +338,8 @@ impl Runner {
             "run" => self.sim.run(&self.policy),
             "step" => {
                 self.sim.commit();
-                if let Some(i) = self.sim.pending.pop_front() {
-                    self.sim.exec(i, &self.policy);
-                }
+                let n = words.get(1).map(|n| num(n)).transpose()?.unwrap_or(0);
+                self.sim.exec_at(n as usize, &self.policy);
             }
             "expect-none" if self.checked => {
                 if self.id(arg(1)?).is_ok() {
@@ -331,7 +347,11 @@ impl Runner {
                 }
             }
             "commit" => self.sim.commit(),
-            "crash" => self.sim.crash(flag("empty")),
+            "crash" => {
+                let down = kv("down").map(duration).transpose()?.unwrap_or(0);
+                self.sim.now = self.sim.now.saturating_add(down);
+                self.sim.crash(flag("empty"));
+            }
             "job" => {
                 self.sim.apply(E::CreateJob {
                     request_id: arg(1)?.into(),
@@ -359,7 +379,7 @@ impl Runner {
                     .st
                     .effects
                     .values()
-                    .filter(|e| e.key == key)
+                    .filter(|e| key_matches(key, &e.key))
                     .collect();
                 if all.is_empty() && words.contains(&"count=0") {
                     return Ok(());

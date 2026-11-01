@@ -1,0 +1,19 @@
+#scenario 2332de683f38d89a
+# The Cancelling lease keeps its journaled start across a hub restart, so a hub that was down
+# past it finds the job Lost (12a item 6, 12b item 9). The node's next Running answer brings
+# back Cancelling, since the owner's cancel still stands.
+job j1
+policy poll=0
+run
+expect-job 0 state=Running
+cancel-job 0
+run
+expect-job 0 state=Cancelling
+crash down=6m
+expect-job 0 state=Lost
+run
+expect-job 0 state=Cancelling
+policy poll=8
+tick 10s
+run
+expect-job 0 state=Cancelled

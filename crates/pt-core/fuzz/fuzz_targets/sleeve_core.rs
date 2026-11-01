@@ -230,7 +230,8 @@ fuzz_target!(|data: &[u8]| {
                     91 * MINUTE,
                     2 * HOUR,
                     25 * HOUR,
-                ][b.below(11) as usize];
+                    Millis::MAX,
+                ][b.below(12) as usize];
                 sim.tick(by);
             }
             13 => sim.commit(),
