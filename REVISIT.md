@@ -718,6 +718,7 @@ Each entry: where, what was done, what right looks like.
   reads the single login in the owner's home (`~/.claude`, `~/.codex`, `~/.grok`). Two Grok
   accounts, for example, can't be told apart. Right: accounts as data. Each one is a named login
   (harness, a label, and the login home or config dir it lives in, such as `CLAUDE_CONFIG_DIR` or
-  `CODEX_HOME` where the harness supports one). There is one quota row and reader per account,
-  and the app's QUOTA screen lists every account. `select_target` weighs accounts rather than
+  `CODEX_HOME` where the harness supports one). The label is probably the account's email, read
+  from the login itself (owner's idea; to settle later). There is one quota row and reader per
+  account, and the app's QUOTA screen lists every account. `select_target` weighs accounts rather than
   harnesses, and a sleeve's incarnation records the account it draws on.
