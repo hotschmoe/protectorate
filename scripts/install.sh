@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Installs the Protectorate hub for this user from a GitHub release (SPEC 6, 6a). It downloads
-# protectorate, headscale and member for this machine, checks each against the release's
-# SHA256SUMS before using it, stages them in $PROTECTORATE_HOME/releases/<version>/ (the layout
-# pt-update keeps), points releases/current at that version (releases/previous keeps the old
+# protectorate for this machine (one file: it embeds headscale and member), checks it against the
+# release's SHA256SUMS before using it and checks that it reports that release with both
+# embedded, stages it in $PROTECTORATE_HOME/releases/<version>/ (the layout pt-update keeps), points releases/current at that version (releases/previous keeps the old
 # one), and runs the hub as a systemd user service with linger, so it starts at boot with no
 # login. It prints the plan first; --dry-run checks the release and stops there, writing nothing.
 #
@@ -148,13 +148,11 @@ main() {
 	[ "$said" = "$TAG" ] || die "the release's VERSION says $said, not $TAG"
 	[[ "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ && "$TAG" != current && "$TAG" != previous ]] || die "bad version $TAG"
 
-	local names=(protectorate headscale member) n
+	local asset=protectorate-linux-$arch
 	say "Protectorate hub $TAG for linux-$arch from $BASE"
 	if [ "$dry" = 1 ]; then
-		for n in "${names[@]}"; do
-			verify "$n-linux-$arch"
-			say "  verified $n-linux-$arch against SHA256SUMS"
-		done
+		verify "$asset"
+		say "  verified $asset against SHA256SUMS"
 	fi
 
 	local old linger exec_path=$rel/current/protectorate
@@ -162,7 +160,7 @@ main() {
 	linger=$(loginctl show-user "$USER" --property=Linger --value 2>/dev/null || echo unknown)
 	say "Plan:"
 	if [ -d "$rel/$TAG" ]; then say "  reuse    $rel/$TAG (checked against SHA256SUMS)"
-	else say "  stage    $rel/$TAG/{protectorate,headscale,member}"; fi
+	else say "  stage    $rel/$TAG/protectorate"; fi
 	if [ -n "$old" ] && [ "$old" != "$TAG" ]; then say "  point    $rel/current -> $TAG (previous -> $old)"
 	else say "  point    $rel/current -> $TAG"; fi
 	say "  write    $unit"
@@ -180,23 +178,22 @@ main() {
 	umask 077
 	mkdir -p -- "$rel" "$unit_dir"
 	if [ -d "$rel/$TAG" ]; then
-		for n in "${names[@]}"; do check_file "$n-linux-$arch" "$rel/$TAG/$n"; done
+		check_file "$asset" "$rel/$TAG/protectorate"
 	else
 		STAGING=$rel/.staging-$TAG-$$
 		mkdir -- "$STAGING"
 		# Removes only this run's own staging directory inside releases/, on any failure.
 		trap 'rm -rf -- "${STAGING:-}"' EXIT
-		for n in "${names[@]}"; do
-			fetch "$n-linux-$arch" "$STAGING/$n"
-			check_file "$n-linux-$arch" "$STAGING/$n"
-			chmod 755 -- "$STAGING/$n"
-		done
+		fetch "$asset" "$STAGING/protectorate"
+		check_file "$asset" "$STAGING/protectorate"
+		chmod 755 -- "$STAGING/protectorate"
 		printf '%s\n' "$SUMS" >"$STAGING/SHA256SUMS"
 		fetch VERSION "$STAGING/VERSION"
 		check_file VERSION "$STAGING/VERSION"
 		local reports
 		reports=$("$STAGING/protectorate" version) || die "the staged hub does not run"
-		[ "$reports" = "protectorate $TAG" ] || die "the staged hub reports '$reports', not $TAG"
+		[ "${reports%%$'\n'*}" = "protectorate $TAG" ] || die "the staged hub reports '${reports%%$'\n'*}', not $TAG"
+		[[ "$reports" != *missing* ]] || die "the staged hub does not embed headscale and member: $reports"
 		mv -T -- "$STAGING" "$rel/$TAG"
 		STAGING=''
 		trap - EXIT

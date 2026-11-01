@@ -1,7 +1,7 @@
 # Installs a Protectorate node on Windows from a GitHub release (SPEC 3.5, 6a). It downloads
-# protectorate-node.exe and member.exe for this machine, checks each against the release's
-# SHA256SUMS before using it, stages them in <state>\releases\<version>\ (the layout pt-update
-# keeps), makes releases\current point at that version, then runs
+# protectorate-node.exe for this machine (one file: it embeds member), checks it against the
+# release's SHA256SUMS before using it and checks that it reports that release, stages it in
+# <state>\releases\<version>\ (the layout pt-update keeps), makes releases\current point at that version, then runs
 # `protectorate-node join SERVER_URL` (scan to join: it shows a QR code and waits for the owner to
 # approve on the hub). It prints the plan first; -DryRun checks the release and stops there,
 # writing nothing.
@@ -111,26 +111,23 @@ if ((Sha $versionBytes) -ne (Want 'VERSION')) { Die 'VERSION does not match SHA2
 if ($said -ne $Tag) { Die "the release's VERSION says $said, not $Tag" }
 if ($Tag -notmatch '^[A-Za-z0-9][A-Za-z0-9._+-]*$' -or $Tag -in 'current', 'previous') { Die "bad version $Tag" }
 
-$assets = @("protectorate-node-windows-$arch.exe", "member-windows-$arch.exe")
-$names = @('protectorate-node.exe', 'member.exe')
+$asset = "protectorate-node-windows-$arch.exe"
 Say "Protectorate node $Tag for windows-$arch from $($script:Base)"
 if ($DryRun) {
-    foreach ($a in $assets) {
-        if ((Sha (Bytes $a)) -ne (Want $a)) { Die "$a does not match SHA256SUMS" }
-        Say "  verified $a against SHA256SUMS"
-    }
+    if ((Sha (Bytes $asset)) -ne (Want $asset)) { Die "$asset does not match SHA256SUMS" }
+    Say "  verified $asset against SHA256SUMS"
 }
 
 $rel = Join-Path $StateDir 'releases'
 $cur = Join-Path $rel 'current'
 $joined = Test-Path -LiteralPath (Join-Path $StateDir 'node.json')
 $haveCurrent = Test-Path -LiteralPath $cur
-$join = @('join', $ServerUrl, '--state-dir', $StateDir, '--member', (Join-Path $cur 'member.exe'))
+$join = @('join', $ServerUrl, '--state-dir', $StateDir)
 if ($Name) { $join += @('--name', $Name) }
 Say "Found: state $StateDir (joined: $joined, releases\current: $haveCurrent)"
 Say 'Plan:'
 if (Test-Path -LiteralPath (Join-Path $rel $Tag)) { Say "  reuse    $rel\$Tag (checked against SHA256SUMS)" }
-else { Say "  stage    $rel\$Tag\{protectorate-node.exe,member.exe}" }
+else { Say "  stage    $rel\$Tag\protectorate-node.exe" }
 if ($haveCurrent) { Say "  stop     $cur exists: already installed; update from the hub" }
 else { Say "  link     $cur -> $Tag" }
 if ($joined) { Say "  skip     join: $StateDir\node.json exists" }
@@ -142,25 +139,25 @@ if ($haveCurrent) { Die "$cur exists; this node is installed already" }
 New-Item -ItemType Directory -Force -Path $rel | Out-Null
 $vdir = Join-Path $rel $Tag
 if (Test-Path -LiteralPath $vdir) {
-    for ($i = 0; $i -lt 2; $i++) { CheckFile $assets[$i] (Join-Path $vdir $names[$i]) }
+    CheckFile $asset (Join-Path $vdir 'protectorate-node.exe')
 } else {
     $staging = Join-Path $rel ".staging-$Tag-$PID"
     New-Item -ItemType Directory -Path $staging | Out-Null
     try {
-        for ($i = 0; $i -lt 2; $i++) {
-            $dest = Join-Path $staging $names[$i]
-            if ($From) { Copy-Item -LiteralPath (Join-Path $From $assets[$i]) -Destination $dest }
-            else {
-                & curl.exe --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 3 `
-                    -o $dest "$($script:Base)/$($assets[$i])"
-                if ($LASTEXITCODE -ne 0) { Die "downloading $($assets[$i]) failed" }
-            }
-            CheckFile $assets[$i] $dest
+        $dest = Join-Path $staging 'protectorate-node.exe'
+        if ($From) { Copy-Item -LiteralPath (Join-Path $From $asset) -Destination $dest }
+        else {
+            & curl.exe --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 3 `
+                -o $dest "$($script:Base)/$asset"
+            if ($LASTEXITCODE -ne 0) { Die "downloading $asset failed" }
         }
+        CheckFile $asset $dest
         [IO.File]::WriteAllBytes((Join-Path $staging 'SHA256SUMS'), $sumsBytes)
         [IO.File]::WriteAllBytes((Join-Path $staging 'VERSION'), $versionBytes)
-        & (Join-Path $staging 'protectorate-node.exe') --version | Out-Null
+        $reports = @(& $dest --version)
         if ($LASTEXITCODE -ne 0) { Die 'the staged node binary does not run' }
+        if ($reports[0] -ne "protectorate-node $Tag") { Die "the staged node reports '$($reports[0])', not $Tag" }
+        if (-not ($reports -like 'member: embedded*')) { Die "the staged node does not embed member: $($reports -join ' ')" }
         Rename-Item -LiteralPath $staging -NewName $Tag
     } catch {
         # Only this run's own staging directory inside releases\.

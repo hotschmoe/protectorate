@@ -8,16 +8,18 @@
 #                                unless PUBLISH=1. Refuses a dirty tree or an untagged HEAD.
 #
 # Steps of `assets`, overlapped where they use different machines or toolchains:
-#   windows       officewin (ssh) builds protectorate-node for x64 and arm64 in a scratch folder;
-#                 the .exe files come back as base64 over ssh (scp pulls truncate) and are
-#                 checked by sha256 against the remote copy
 #   go            scripts/net-build.sh: headscale and member for every target (skipped when
 #                 go/bin is newer than every Go source)
 #   web           the Flutter web build (make web), once for both hub assets
+#   windows       officewin (ssh) builds protectorate-node for x64 and arm64 in a scratch folder,
+#                 embedding member-windows-*.exe sent over gzipped; the .exe files come back as
+#                 base64 over ssh (scp pulls truncate) and are checked by sha256 against the
+#                 remote copy
 #   linux-arm64   cargo, native
 #   linux-amd64   cargo zigbuild for glibc 2.31
-# The hub assets embed the web build and that arch's headscale and member, so both cargo steps
-# wait for go and web.
+# The hub assets embed the web build and that arch's headscale and member, and every node asset
+# embeds its target's member, so the cargo steps and windows wait for go (and the hub for web).
+# headscale and member are not release assets of their own.
 #   app           the Android APK and the Flutter desktop builds: later steps (REVISIT)
 # Every step reuses its caches (cargo target dirs, the Go build cache, officewin's target dir),
 # so a rebuild with no change is quick.
@@ -43,9 +45,6 @@ ASSETS=(
 	protectorate-linux-arm64 protectorate-linux-amd64
 	protectorate-node-linux-arm64 protectorate-node-linux-amd64
 	protectorate-node-windows-amd64.exe protectorate-node-windows-arm64.exe
-	headscale-linux-arm64 headscale-linux-amd64
-	member-linux-arm64 member-linux-amd64 member-windows-amd64.exe member-windows-arm64.exe
-	member-android-arm64
 	install.sh install-node.sh install-node.ps1
 	VERSION
 )
@@ -110,7 +109,7 @@ build_web() {
 	[ -f "$WEB_DIR/index.html" ] || die "no $WEB_DIR/index.html after the web build"
 }
 
-# The hub's build script only warns when headscale or member is missing; a release must not.
+# The build scripts only warn when headscale or member is missing; a release must not.
 check_embedded() {
 	local arch f
 	for arch in arm64 amd64; do
@@ -121,6 +120,8 @@ check_embedded() {
 	if "$TARGET/aarch64-unknown-linux-gnu/release/protectorate" version | grep -q missing; then
 		die "the arm64 hub does not embed headscale and member"
 	fi
+	"$TARGET/aarch64-unknown-linux-gnu/release/protectorate-node" --version | grep -q '^member: embedded' ||
+		die "the arm64 node does not embed member"
 }
 
 # win CMD: runs CMD through cmd.exe on the Windows host.
@@ -134,11 +135,22 @@ build_windows() {
 	git ls-files -z --cached --others --exclude-standard -- Cargo.toml Cargo.lock crates |
 		tar --null --ignore-failed-read -cf "$tar" -T -
 	win "if not exist %USERPROFILE%\\$WIN_DIR\\src mkdir %USERPROFILE%\\$WIN_DIR\\src"
+	win "if not exist %USERPROFILE%\\$WIN_DIR\\net mkdir %USERPROFILE%\\$WIN_DIR\\net"
 	scp -q -o BatchMode=yes "$tar" "$WIN_HOST:$WIN_DIR/src.tar"
+	# The node embeds member; officewin has no gzip, so it gets the gzip, which its build script
+	# inflates for the SHA-256.
+	local arch m
+	for arch in amd64 arm64; do
+		m=member-windows-$arch.exe
+		[ -f "go/bin/$m" ] || die "no go/bin/$m to embed"
+		gzip -n -9 -c "go/bin/$m" >"$TARGET/$m.gz"
+		scp -q -o BatchMode=yes "$TARGET/$m.gz" "$WIN_HOST:$WIN_DIR/net/$m.gz"
+	done
 	# The rustup toolchain first on PATH: the system Rust lacks the arm64 std (REVISIT).
 	win "cd /d %USERPROFILE%\\$WIN_DIR && tar -xf src.tar -C src && cd src" \
 		"&& set \"PATH=%USERPROFILE%\\.cargo\\bin;%PATH%\"" \
 		"&& set \"PROTECTORATE_BUILD_VERSION=$VERSION\"" \
+		"&& set \"PROTECTORATE_NET_DIR=%USERPROFILE%\\$WIN_DIR\\net\"" \
 		"&& set \"CARGO_TARGET_DIR=%USERPROFILE%\\$WIN_DIR\\target\"" \
 		"&& cargo +stable build --locked --release -j $CARGO_BUILD_JOBS -p protectorate-node" \
 		"--target x86_64-pc-windows-msvc --target aarch64-pc-windows-msvc"
@@ -180,7 +192,6 @@ collect() {
 	if [ "$WINDOWS" = 1 ]; then
 		install -m 755 "$TARGET"/release-windows/protectorate-node-windows-{amd64,arm64}.exe "$DIST/"
 	fi
-	for f in "${GO_OUT[@]}"; do install -m 755 "go/bin/$f" "$DIST/$f"; done
 	for f in install.sh install-node.sh install-node.ps1; do install -m 644 "scripts/$f" "$DIST/$f"; done
 	printf '%s\n' "$VERSION" >"$DIST/VERSION"
 	local present=()
@@ -226,16 +237,18 @@ assets() {
 	for f in cargo cargo-zigbuild go flutter gzip git sha256sum; do command -v "$f" >/dev/null || die "$f is required"; done
 	if [ "$WINDOWS" = 1 ]; then
 		win "ver" >/dev/null || die "cannot reach $WIN_HOST over ssh (WINDOWS=0 skips the Windows assets)"
-		step windows build_windows &
-		win_pid=$!
-	else
-		echo "   windows      skipped (WINDOWS=0)"
 	fi
 	step go build_go &
 	go_pid=$!
 	step web build_web &
 	web_pid=$!
 	wait "$go_pid" || die "the go step failed"
+	if [ "$WINDOWS" = 1 ]; then
+		step windows build_windows &
+		win_pid=$!
+	else
+		echo "   windows      skipped (WINDOWS=0)"
+	fi
 	wait "$web_pid" || die "the web step failed"
 	step linux-arm64 build_linux_arm64
 	check_embedded
@@ -249,7 +262,7 @@ assets() {
 	for f in "${ASSETS[@]}" SHA256SUMS; do
 		if [ -f "$DIST/$f" ]; then printf '   %-38s %10s bytes\n' "$f" "$(wc -c <"$DIST/$f")"; fi
 	done
-	say "wall time per step (windows overlaps everything, go and web overlap each other)"
+	say "wall time per step (go and web overlap each other; windows overlaps everything after go)"
 	for f in windows go web linux-arm64 linux-amd64 app collect; do
 		if [ -f "$LOGS/$f.ms" ]; then printf '   %-12s %8s s\n' "$f" "$(secs "$(cat "$LOGS/$f.ms")")"; fi
 	done

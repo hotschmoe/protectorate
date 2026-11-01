@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Installs a Protectorate node on Linux from a GitHub release (SPEC 3.5, 6a; D10: a system
-# service, so it runs as root). It downloads protectorate-node and member for this machine,
-# checks each against the release's SHA256SUMS before using it, stages them in
-# <state>/releases/<version>/ (the layout pt-update keeps), points releases/current at that
-# version, then runs `protectorate-node join SERVER_URL` (scan to join: it shows a QR code and
-# waits for the owner to approve on the hub) and `install-service`. It prints the plan first;
+# service, so it runs as root). It downloads protectorate-node for this machine (one file: it
+# embeds member), checks it against the release's SHA256SUMS before using it and checks that it
+# reports that release, stages it in <state>/releases/<version>/ (the layout pt-update keeps),
+# points releases/current at that version, then runs `protectorate-node join SERVER_URL` (scan to
+# join: it shows a QR code and waits for the owner to approve on the hub) and `install-service`. It prints the plan first;
 # --dry-run checks the release and the machine and stops there, writing nothing.
 #
 # Fetch this script at a commit, never a tag (SPEC 12a item 9), and compare its sha256 with the
@@ -145,13 +145,11 @@ main() {
 	[ "$said" = "$TAG" ] || die "the release's VERSION says $said, not $TAG"
 	[[ "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ && "$TAG" != current && "$TAG" != previous ]] || die "bad version $TAG"
 
-	local assets=("protectorate-node-linux-$arch" "member-linux-$arch") names=(protectorate-node member) i
+	local asset=protectorate-node-linux-$arch
 	say "Protectorate node $TAG for linux-$arch from $BASE"
 	if [ "$dry" = 1 ]; then
-		for i in 0 1; do
-			verify "${assets[$i]}"
-			say "  verified ${assets[$i]} against SHA256SUMS"
-		done
+		verify "$asset"
+		say "  verified $asset against SHA256SUMS"
 	fi
 
 	# What is on the machine already. Without root the state dir may be unreadable (0700).
@@ -171,11 +169,11 @@ main() {
 	say "Found: state $state (joined: $joined, service installed: $service, service ${active:-unknown})"
 
 	local cur=$rel/current
-	local join=("$cur/protectorate-node" join "$url" --state-dir "$state" --member "$cur/member")
+	local join=("$cur/protectorate-node" join "$url" --state-dir "$state")
 	[ -z "$name" ] || join+=(--name "$name")
 	say "Plan:"
 	if [ -d "$rel/$TAG" ]; then say "  reuse    $rel/$TAG (checked against SHA256SUMS)"
-	else say "  stage    $rel/$TAG/{protectorate-node,member}"; fi
+	else say "  stage    $rel/$TAG/protectorate-node"; fi
 	if [ -n "$old" ] && [ "$old" != "$TAG" ]; then say "  point    $cur -> $TAG (previous -> $old)"
 	else say "  point    $cur -> $TAG"; fi
 	case "$joined" in
@@ -184,8 +182,8 @@ main() {
 	*) say "  run      ${join[*]} (unless $state/node.json exists; needs root to tell)" ;;
 	esac
 	case "$service" in
-	no) say "  run      $cur/protectorate-node install-service --state-dir $state --member $cur/member" ;;
-	unknown) say "  run      $cur/protectorate-node install-service --state-dir $state --member $cur/member (unless installed; needs root to tell)" ;;
+	no) say "  run      $cur/protectorate-node install-service --state-dir $state" ;;
+	unknown) say "  run      $cur/protectorate-node install-service --state-dir $state (unless installed; needs root to tell)" ;;
 	*) say "  skip     install-service: already installed ($service); this installer does not replace a running node" ;;
 	esac
 	if [ "$joined" != no ] && [ "$service" != no ] && [ "$service" != unknown ]; then
@@ -200,21 +198,22 @@ main() {
 	mkdir -p -- "$rel"
 	chmod 700 -- "$state"
 	if [ -d "$rel/$TAG" ]; then
-		for i in 0 1; do check_file "${assets[$i]}" "$rel/$TAG/${names[$i]}"; done
+		check_file "$asset" "$rel/$TAG/protectorate-node"
 	else
 		STAGING=$rel/.staging-$TAG-$$
 		mkdir -- "$STAGING"
 		# Removes only this run's own staging directory inside releases/, on any failure.
 		trap 'rm -rf -- "${STAGING:-}"' EXIT
-		for i in 0 1; do
-			fetch "${assets[$i]}" "$STAGING/${names[$i]}"
-			check_file "${assets[$i]}" "$STAGING/${names[$i]}"
-			chmod 755 -- "$STAGING/${names[$i]}"
-		done
+		fetch "$asset" "$STAGING/protectorate-node"
+		check_file "$asset" "$STAGING/protectorate-node"
+		chmod 755 -- "$STAGING/protectorate-node"
 		printf '%s\n' "$SUMS" >"$STAGING/SHA256SUMS"
 		fetch VERSION "$STAGING/VERSION"
 		check_file VERSION "$STAGING/VERSION"
-		"$STAGING/protectorate-node" --version >/dev/null || die "the staged node binary does not run"
+		local reports
+		reports=$("$STAGING/protectorate-node" --version) || die "the staged node binary does not run"
+		[ "${reports%%$'\n'*}" = "protectorate-node $TAG" ] || die "the staged node reports '${reports%%$'\n'*}', not $TAG"
+		[[ "$reports" == *$'\n'"member: embedded"* ]] || die "the staged node does not embed member: $reports"
 		mv -T -- "$STAGING" "$rel/$TAG"
 		STAGING=''
 		trap - EXIT
@@ -230,7 +229,7 @@ main() {
 		"${join[@]}"
 	fi
 	if [ "$service" = no ]; then
-		"$cur/protectorate-node" install-service --state-dir "$state" --member "$cur/member"
+		"$cur/protectorate-node" install-service --state-dir "$state"
 	fi
 	say "Installed Protectorate node $TAG."
 }
