@@ -16,6 +16,8 @@ version = "0.0.0"
 name = "protectorate-node"
 version = "0.0.0"
 dependencies = [
+ "pt-frame",
+ "pt-json",
  "pt-node",
 ]
 
@@ -25,6 +27,13 @@ version = "0.0.0"
 
 [[package]]
 name = "pt-drivers"
+version = "0.0.0"
+dependencies = [
+ "pt-json",
+]
+
+[[package]]
+name = "pt-frame"
 version = "0.0.0"
 dependencies = [
  "pt-json",
@@ -55,6 +64,8 @@ name = "pt-node"
 version = "0.0.0"
 dependencies = [
  "libc",
+ "pt-frame",
+ "pt-json",
 ]
 
 [[package]]

@@ -13,4 +13,9 @@ name = "protectorate-node"
 path = "src/main.rs"
 
 [dependencies]
+pt-frame = { path = "../pt-frame" }
+pt-json = { path = "../pt-json" }
 pt-node = { path = "../pt-node" }
+
+[dev-dependencies]
+pt-json = { path = "../pt-json" }

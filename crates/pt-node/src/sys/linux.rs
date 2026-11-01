@@ -1,8 +1,8 @@
 use super::{CpuInfo, OsInfo, parallelism};
+use crate::clean;
 use crate::exec;
-use crate::inventory::{Disk, Gpu, Toolchain};
-use crate::json::clean;
 use crate::sample::{CpuTimes, Mem};
+use pt_frame::msg::{Disk, Gpu, Toolchain};
 use std::collections::BTreeSet;
 use std::fs;
 use std::io;
@@ -10,8 +10,29 @@ use std::path::Path;
 use std::time::Duration;
 
 #[allow(unsafe_code)]
-mod ffi {
+pub(super) mod ffi {
     use std::io;
+
+    /// Sends `sig` to every process in group `pgid`.
+    pub fn kill_group(pgid: u32, sig: i32) -> io::Result<()> {
+        let pgid = libc::pid_t::try_from(pgid)
+            .ok()
+            .filter(|&p| p > 1)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "not a process group"))?;
+        // SAFETY: kill takes plain integers; a negative pid addresses the group, and pgid > 1
+        // rules out 0 (our own group) and -1 (every process we may signal).
+        let rc = unsafe { libc::kill(-pgid, sig) };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+
+    pub fn euid() -> u32 {
+        // SAFETY: geteuid has no arguments and cannot fail.
+        unsafe { libc::geteuid() }
+    }
 
     /// (total, free-to-unprivileged) bytes of the filesystem at `path`.
     pub fn statvfs(path: &str) -> io::Result<(u64, u64)> {

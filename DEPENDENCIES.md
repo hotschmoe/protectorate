@@ -83,5 +83,6 @@ Bundled asset, not a package: JetBrains Mono 2.304 Regular and Bold (`app/assets
 |---|---|---|
 | bwrap | hub | light sleeve sandbox (REVISIT: own namespaces helper) |
 | systemd-run | hub, Linux nodes | per-incarnation and per-job scopes with limits |
+| systemctl | Linux nodes | signal, query and stop per-job scopes |
 | curl | hub, nodes | outbound HTTPS (releases, quota readers) instead of a Rust TLS stack (REVISIT) |
 | git | hub | workspaces, worktrees, pushes |
