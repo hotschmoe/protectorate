@@ -12,6 +12,7 @@
 //! Only the newest snapshot and its segment are read; older ones are kept on disk.
 
 #![forbid(unsafe_code)]
+#![cfg_attr(verus_keep_ghost, feature(proc_macro_hygiene))]
 
 pub mod codec;
 pub mod crc32c;
@@ -345,13 +346,16 @@ fn open_segment(path: &Path) -> io::Result<Segment> {
     }
     check_header(path, &data[..HEADER_LEN], &SEGMENT_MAGIC)?;
     let decoded = codec::decode_frames(&data[HEADER_LEN..]);
-    let good = (HEADER_LEN + decoded.valid_len) as u64;
-    if decoded.stop == Some(Stop::CrcMismatch) {
-        // A torn append damages only the last complete frame. A damaged frame with an intact
-        // one after it is corruption of committed data: cutting would lose that frame.
+    // A damaged frame with an intact one after it is corruption of committed data: cutting
+    // would lose that frame.
+    let intact_after = decoded.stop == Some(Stop::CrcMismatch) && {
         let bad = &data[HEADER_LEN + decoded.valid_len..];
         let end = codec::complete_len(bad).expect("a CRC mismatch is a complete frame");
-        if !codec::decode_frames(&bad[end..]).frames.is_empty() {
+        !codec::decode_frames(&bad[end..]).frames.is_empty()
+    };
+    let (prefix, torn) = match codec::recovery(decoded.valid_len, decoded.stop, intact_after) {
+        codec::Recovery::Corrupt(prefix) => {
+            let good = HEADER_LEN + prefix;
             return Err(invalid(
                 path,
                 format!(
@@ -360,9 +364,12 @@ fn open_segment(path: &Path) -> io::Result<Segment> {
                 ),
             ));
         }
-    }
+        codec::Recovery::Clean(prefix) => (prefix, None),
+        codec::Recovery::Torn(prefix, stop) => (prefix, Some(stop)),
+    };
+    let good = (HEADER_LEN + prefix) as u64;
     let frames = decoded.frames.iter().map(|f| f.to_vec()).collect();
-    let cut = match decoded.stop {
+    let cut = match torn {
         None => None,
         Some(stop) => {
             file.set_len(good).map_err(|e| ctx(e, "truncate", path))?;

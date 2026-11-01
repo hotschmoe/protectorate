@@ -25,7 +25,7 @@ CARGO_VERSION := PROTECTORATE_BUILD_VERSION='$(VERSION)'
 -include .env.e2e
 export PT_E2E_PI_PROVIDER PT_E2E_PI_MODEL PT_RELEASE_WIN_HOST PT_RELEASE_WIN_DIR ZIG PT_RELEASE_REPO
 
-.PHONY: build release release-assets release-snapshot release-publish web test test-paid check check-deps check-gen check-version gen fmt app-check version
+.PHONY: build release release-assets release-snapshot release-publish web test test-paid check verify check-deps check-gen check-version gen fmt app-check version
 
 DART ?= dart
 FLUTTER ?= flutter
@@ -78,6 +78,10 @@ check:
 	cargo fmt --all -- --check
 	$(CARGO_VERSION) cargo clippy --locked --workspace --all-targets -- -D warnings
 	$(MAKE) test check-deps check-gen app-check check-version
+
+# Separate from check: Verus is not installed on every development machine.
+verify:
+	bash scripts/verify.sh
 
 check-deps:
 	sh scripts/check-deps.sh

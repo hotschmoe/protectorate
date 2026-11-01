@@ -449,7 +449,9 @@ Each entry: where, what was done, what right looks like.
 - **Torn batch versus corruption** (pt-journal, `open_segment`): a frame failing its CRC is cut as
   a torn append only when no intact frame follows it; otherwise open fails. A group-commit batch
   whose blocks reached disk out of order after a power loss also fails open, though none of it
-  was acknowledged. Right: a batch-end marker, so a torn batch is told apart from corruption.
+  was acknowledged. The length is not checksummed, so a corrupted length is indistinguishable
+  from a torn append and is cut. Right: a batch-end marker, so a torn batch is told apart from
+  corruption, and a versioned format with protected headers.
 - **Collecting lease** (pt-core jobs): an artifact check that does not answer within the lease
   makes the job Lost, and its next Exited report collects again, so a slow fetch can run twice.
   Right: fetch progress reported to the core, and the lease measured from it.
@@ -738,3 +740,16 @@ Each entry: where, what was done, what right looks like.
   and `pi_local_model` default to empty, and doctor marks `pi_local` and `pi_durable` ineligible
   until both are set, so the default `resleeve_to` (`["pi_local"]`) parks a sleeve that must
   resleeve. Right: offer the configured local model when there is one, or ask for it at setup.
+- **Verus phase 1 boundaries** (`pt-journal`, `pt-frame`): the journal frame, CRC logic and pure
+  recovery decision, and the node frame codec and sticky decoder errors, are verified. File I/O
+  in `open_segment`, the frame reader's I/O, and `pt-frame::msg`/`pt-json` message parsing are not.
+  The CRC proof covers the Castagnoli table and byte recurrence, not collision resistance. Verus
+  trusts its specifications for Rust's standard collections and slices, including allocation behavior.
+  Right: verify message parsing and model the file operations around the recovery decision, and
+  maintain the existing differential fuzzing.
+- **Incremental frame buffering can exceed one frame** (`pt-frame`, `Decoder::feed`): decoded
+  payload length is capped at `MAX_PAYLOAD`, but a caller may feed an arbitrarily large slice,
+  and the decoder copies all of it before parsing. `FrameReader` reads in 64 KiB chunks and drains
+  frames between reads, but its initial `pending` input is also supplied by its caller. Right: a
+  backpressure API or segmented input that bounds each allocation while preserving streams with
+  many frames, then prove that bound. This allocation property is not covered by phase 1 yet.
