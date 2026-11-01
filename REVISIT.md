@@ -849,3 +849,9 @@ Each entry: where, what was done, what right looks like.
   frames between reads, but its initial `pending` input is also supplied by its caller. Right: a
   backpressure API or segmented input that bounds each allocation while preserving streams with
   many frames, then prove that bound. This allocation property is not covered by phase 1 yet.
+- **Wire changes without a PROTOCOL bump** (`pt-frame`, `msg::PROTOCOL`): `Update` changed from
+  `{version, url, sha256}` to `{version, api, repo, probation_secs}` while PROTOCOL stayed 2, so
+  `node update` against a node built before the change fails with "bad_request: url: missing"
+  instead of saying the node needs a reinstall (seen on the real nodes, 2026-11-01). Right: bump
+  PROTOCOL with every incompatible message change, and have the hub refuse a node older than its
+  own protocol with "reinstall this node" before sending it anything else.
