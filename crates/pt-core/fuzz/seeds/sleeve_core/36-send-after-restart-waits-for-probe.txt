@@ -1,0 +1,19 @@
+#scenario b79e6894b15e74ea
+# A message sent right after a hub restart, before the old incarnation's scope is probed, waits
+# for it: when the scope turns out empty, it goes to the resumed incarnation instead of being
+# fenced with g1 as "may have applied" (it never left the hub).
+spawn root /w/a
+run
+obs root ready
+send root m1
+run
+obs root settled
+expect root msg:m1=Delivered
+commit
+crash empty
+send root m2
+expect root msg:m2=Queued
+run
+obs root ready g=2
+run
+expect root g=2 msg:m2=Delivered

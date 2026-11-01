@@ -331,8 +331,40 @@ pub fn step(prev: &State, st: &State, sim: &Sim) {
             assert!(e.attempt >= p.attempt, "effect attempt went down");
         }
     }
+    unsent_messages(prev, st);
     approval_steps(prev, st);
     invariants(st, sim);
+}
+
+/// A message whose prompt or steer record ended while still Intent (never dispatched) is back
+/// in its queue: neither lost nor shown as "may have applied".
+fn unsent_messages(prev: &State, st: &State) {
+    for (sid, ps) in &prev.sleeves {
+        let Some(s) = st.sleeves.get(sid) else {
+            continue;
+        };
+        for (r, pm) in &ps.messages {
+            let MsgState::InFlight(e) = pm.state else {
+                continue;
+            };
+            let unsent = prev.effects.get(&e).map(|x| x.state) == Some(EffectState::Intent);
+            let ended = st
+                .effects
+                .get(&e)
+                .is_some_and(|x| x.state.terminal() && x.state != EffectState::Confirmed);
+            if !unsent || !ended {
+                continue;
+            }
+            let m = s.messages.get(r).map(|m| m.state);
+            assert!(
+                matches!(
+                    m,
+                    Some(MsgState::Queued | MsgState::SteerHeld | MsgState::InFlight(_))
+                ),
+                "message {r} of {sid:?} was never dispatched, yet is {m:?}"
+            );
+        }
+    }
 }
 
 /// The ledger only grows; an approval leaves Pending once, its decision is set at most once and
@@ -722,7 +754,8 @@ fn i9(st: &State, s: &Sleeve) {
             | EffectKind::MailDeliver { sleeve, .. } => *sleeve == s.id,
             _ => false,
         };
-        if msg {
+        // A record abandoned unsent (its message went back to the queue) leaves room for one more.
+        if msg && e.state != EffectState::Abandoned {
             assert!(
                 keys.insert(e.key.clone()),
                 "I9: {} has two delivery records",

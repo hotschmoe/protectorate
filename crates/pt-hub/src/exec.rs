@@ -946,21 +946,22 @@ impl SleeveExec {
     }
 
     /// Writes a prompt. Its `Dispatched` and verdict come from the pump, which sees the write's
-    /// entry and the ack in order with the output; only a write that never happened, or an
-    /// ack that never came, is reported here.
+    /// entry and the ack in order with the output; only a refused write, or an ack that never
+    /// came, is reported here. To an incarnation that has ended nothing is reported: the record
+    /// stays `Intent`, and the core returns its message to the queue once `Exited` fences it.
     fn prompt(&self, view: &View, p: Prompt) -> Outcome {
-        let refused = |why: String| {
-            self.submit(EventKind::Dispatched {
-                effect: p.effect,
-                attempt: p.attempt,
-            });
-            Outcome::Nacked(why)
+        let ended = || {
+            debug!(
+                "sleeve {}: g{} has ended; prompt {} waits for the next",
+                self.id.0, p.g.0, p.request_id
+            );
+            Outcome::Reported
         };
         let Some(session) = self.live_for(p.g) else {
-            return refused("no live session for that generation".into());
+            return ended();
         };
         if !self.expect(p.g, p.request_id, p.effect, p.attempt) {
-            return refused("the incarnation has exited".into());
+            return ended();
         }
         let from = Hub::from_label(&view.state, self.id, p.request_id);
         if Hub::envoy_id(&view.state) == Some(self.id) {
@@ -970,8 +971,16 @@ impl SleeveExec {
             Some(turn) => session.steer(p.request_id, &from, p.text, turn),
             None => session.send_user(p.request_id, &from, p.text),
         };
-        if let Err(e) = sent {
-            return refused(e.to_string());
+        match sent {
+            Ok(()) => {}
+            Err(pt_drivers::DriverError::Ended) => return ended(),
+            Err(e) => {
+                self.submit(EventKind::Dispatched {
+                    effect: p.effect,
+                    attempt: p.attempt,
+                });
+                return Outcome::Nacked(e.to_string());
+            }
         }
         match session.wait_ack(p.request_id, ACK_TIMEOUT) {
             Ack::Confirmed { .. } | Ack::Rejected { .. } => Outcome::Reported,

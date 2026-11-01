@@ -520,6 +520,13 @@ Each entry: where, what was done, what right looks like.
   id arrives later than 2 s stays unbound, so its turn cannot be steered. Right: drivers tag
   output with the native turn id where the protocol has one, and evidence must match the
   prompt's turn.
+- **A prompt that never left waits for the next incarnation** (pt-core `return_unsent`,
+  `deliverable`; `pt-hub` exec.rs `prompt`): after a restart nothing is delivered until the old
+  scope is probed, and a prompt or steer still `Intent` when its incarnation is fenced goes back
+  to the head of the queue. The executor leaves a prompt for an incarnation it has no live
+  session for (or whose driver says it ended) unreported, so the fence finds it `Intent`. A
+  prompt written to a harness that died before reading it is still "may have applied". Right:
+  fine.
 - **An unregistered systemd-run is found by its command line** (`pt-hub`, exec.rs
   `kill_unregistered`): before probing a scope it has no session for, the hub SIGKILLs any
   process of its uid whose argv is `systemd-run ... --unit <that scope>`, one a crashed hub

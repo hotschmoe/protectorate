@@ -67,6 +67,9 @@ with the hub (`HubRecovered`), is marked `orphan`; an orphaned action approval d
   output read before a write's `Dispatched` is applied before it. Harness output confirms an
   in-flight prompt or compaction only once its `Dispatched` is in.
 - `Exited` means the scope `pt-<sleeve>-g<g>` has no tasks, not merely that a pipe closed.
+- After `HubRecovered` nothing is delivered to an incarnation until its scope is probed. When an
+  incarnation is fenced, a prompt or steer record still `Intent` never left the hub: it is
+  `Abandoned` and its message goes back to the head of the queue, with no notice.
 - Effects never assumed: until an `Acked`, `Launched` or other evidence arrives, the core treats a
   write as possibly applied (Uncertain) and never as done.
 - Nothing waits forever. Each `Tick` sends an Uncertain Keyed or Idempotent record again while
