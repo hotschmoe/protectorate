@@ -13,8 +13,11 @@
 #                 checked by sha256 against the remote copy
 #   go            scripts/net-build.sh: headscale and member for every target (skipped when
 #                 go/bin is newer than every Go source)
+#   web           the Flutter web build (make web), once for both hub assets
 #   linux-arm64   cargo, native
 #   linux-amd64   cargo zigbuild for glibc 2.31
+# The hub assets embed the web build and that arch's headscale and member, so both cargo steps
+# wait for go and web.
 #   app           the Android APK and the Flutter desktop builds: later steps (REVISIT)
 # Every step reuses its caches (cargo target dirs, the Go build cache, officewin's target dir),
 # so a rebuild with no change is quick.
@@ -33,6 +36,7 @@ WIN_HOST=${WIN_HOST:-officewin}
 # Under %USERPROFILE% on the Windows host; the build's only footprint there.
 WIN_DIR=${WIN_DIR:-pt-release}
 WINDOWS=${WINDOWS:-1}
+WEB_DIR=$ROOT/app/build/web
 export CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-4}
 
 ASSETS=(
@@ -77,7 +81,8 @@ secs() { [ "$1" = failed ] && echo failed || printf '%d.%01d' $(($1 / 1000)) $((
 cargo_linux() { # TRIPLE [zigbuild]
 	local sub=build
 	if [ "${2:-}" = zig ]; then sub=zigbuild; fi
-	PROTECTORATE_BUILD_VERSION=$VERSION cargo $sub --locked --release --workspace --bins --target "$1"
+	PROTECTORATE_BUILD_VERSION=$VERSION PROTECTORATE_WEB_DIR=$WEB_DIR PROTECTORATE_NET_DIR=$ROOT/go/bin \
+		cargo $sub --locked --release --workspace --bins --target "$1"
 }
 
 build_linux_arm64() { cargo_linux aarch64-unknown-linux-gnu; }
@@ -98,6 +103,24 @@ build_go() {
 		return 0
 	fi
 	scripts/net-build.sh
+}
+
+build_web() {
+	(cd app && flutter build web --release --no-web-resources-cdn)
+	[ -f "$WEB_DIR/index.html" ] || die "no $WEB_DIR/index.html after the web build"
+}
+
+# The hub's build script only warns when headscale or member is missing; a release must not.
+check_embedded() {
+	local arch f
+	for arch in arm64 amd64; do
+		for f in headscale member; do
+			[ -f "go/bin/$f-linux-$arch" ] || die "no go/bin/$f-linux-$arch to embed"
+		done
+	done
+	if "$TARGET/aarch64-unknown-linux-gnu/release/protectorate" version | grep -q missing; then
+		die "the arm64 hub does not embed headscale and member"
+	fi
 }
 
 # win CMD: runs CMD through cmd.exe on the Windows host.
@@ -197,10 +220,10 @@ write_notes() {
 
 assets() {
 	mkdir -p "$DIST" "$LOGS"
-	local t0 win_pid='' go_pid='' f
+	local t0 win_pid='' go_pid='' web_pid='' f
 	t0=$(now_ms)
 	say "release $VERSION into $DIST (logs in $LOGS)"
-	for f in cargo cargo-zigbuild go git sha256sum; do command -v "$f" >/dev/null || die "$f is required"; done
+	for f in cargo cargo-zigbuild go flutter gzip git sha256sum; do command -v "$f" >/dev/null || die "$f is required"; done
 	if [ "$WINDOWS" = 1 ]; then
 		win "ver" >/dev/null || die "cannot reach $WIN_HOST over ssh (WINDOWS=0 skips the Windows assets)"
 		step windows build_windows &
@@ -210,9 +233,13 @@ assets() {
 	fi
 	step go build_go &
 	go_pid=$!
-	step linux-arm64 build_linux_arm64
-	step linux-amd64 build_linux_amd64
+	step web build_web &
+	web_pid=$!
 	wait "$go_pid" || die "the go step failed"
+	wait "$web_pid" || die "the web step failed"
+	step linux-arm64 build_linux_arm64
+	check_embedded
+	step linux-amd64 build_linux_amd64
 	[ -z "$win_pid" ] || wait "$win_pid" || die "the windows step failed"
 	step app skip_app
 	step collect collect
@@ -222,8 +249,8 @@ assets() {
 	for f in "${ASSETS[@]}" SHA256SUMS; do
 		if [ -f "$DIST/$f" ]; then printf '   %-38s %10s bytes\n' "$f" "$(wc -c <"$DIST/$f")"; fi
 	done
-	say "wall time per step (windows and go overlap the cargo builds)"
-	for f in windows go linux-arm64 linux-amd64 app collect; do
+	say "wall time per step (windows overlaps everything, go and web overlap each other)"
+	for f in windows go web linux-arm64 linux-amd64 app collect; do
 		if [ -f "$LOGS/$f.ms" ]; then printf '   %-12s %8s s\n' "$f" "$(secs "$(cat "$LOGS/$f.ms")")"; fi
 	done
 	printf '   %-12s %8s s\n' total "$(secs $total)"

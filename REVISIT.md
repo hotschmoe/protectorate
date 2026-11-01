@@ -565,9 +565,10 @@ Each entry: where, what was done, what right looks like.
 - **APK, desktop and Android-node assets are hooks only** (`scripts/release.sh` step `app`):
   `protectorate-android.apk`, `protectorate-desktop-{linux,windows}-{amd64,arm64}` and
   `protectorate-node-android-arm64` (SPEC 6) are not built; the step says so, and `APP=1` fails.
-  The hub embeds no Flutter web build yet either. Right: `flutter build apk` with the existing
-  signing recipe, the desktop bundles (the Linux one needs cmake, ninja and GTK 3 on the build
-  host), and the node once `pt-node` has Android code paths.
+  The hub assets do embed the web build (step `web`) and their arch's headscale and member.
+  Right: `flutter build apk` with the existing signing recipe, the desktop bundles (the Linux one
+  needs cmake, ninja and GTK 3 on the build host), and the node once `pt-node` has Android code
+  paths.
 - **Release publishing is untried** (`make release-publish`): it stops at a dry run unless
   `PUBLISH=1`, refuses a dirty tree, an untagged HEAD and a tag missing on origin, and uses
   `gh release create --verify-tag`; no release has been created from `next`. GitHub immutable
