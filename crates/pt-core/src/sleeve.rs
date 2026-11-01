@@ -785,7 +785,10 @@ impl Core<'_> {
         }
         let pane = s.target.mode == Mode::Pane;
         let steers = s.target.harness.steers() && s.life == Life::Running;
-        let working = s.proc == Proc::Up && s.activity == Activity::Working && s.turn.is_some();
+        let working = s.proc == Proc::Up
+            && s.activity == Activity::Working
+            && s.turn.is_some()
+            && !self.frozen(to);
         let delivering =
             matches!(s.activity, Activity::Delivering { .. }) && s.steer_slot.is_none();
         let queue_empty = s.queue.is_empty();
@@ -806,6 +809,10 @@ impl Core<'_> {
                 return self.refuse(Code::FailedPrecondition, "a pane cannot be steered");
             }
             insert(self, MsgState::Queued);
+            if self.frozen(to) {
+                self.sl(to).queue.push_back(request_id.to_string());
+                return self.reply(Reply::Queued);
+            }
             self.inbox(to, request_id);
             return self.reply(Reply::Inboxed);
         }
@@ -877,9 +884,6 @@ impl Core<'_> {
     /// A Send can go out as the next prompt now.
     pub(crate) fn deliverable(&self, sid: SleeveId) -> bool {
         let s = &self.st.sleeves[&sid];
-        let frozen = s
-            .parent
-            .is_some_and(|p| matches!(self.st.sleeves[&p].life, Life::Parked(_)));
         s.life == Life::Running
             && s.proc == Proc::Up
             && matches!(s.activity, Activity::Idle { .. })
@@ -888,7 +892,14 @@ impl Core<'_> {
                 s.guard.state,
                 GuardState::Armed | GuardState::Cooldown { .. }
             )
-            && !frozen
+            && !self.frozen(sid)
+    }
+
+    /// The sleeve's root is parked, which stops every send to its children (12b item 10).
+    fn frozen(&self, sid: SleeveId) -> bool {
+        self.st.sleeves[&sid]
+            .parent
+            .is_some_and(|p| matches!(self.st.sleeves[&p].life, Life::Parked(_)))
     }
 
     /// Dequeues the head message as the one prompt in flight (Delivering, 12b item 3). A pane
@@ -896,6 +907,9 @@ impl Core<'_> {
     pub(crate) fn deliver_next(&mut self, sid: SleeveId) {
         let s = &self.st.sleeves[&sid];
         if s.target.mode == Mode::Pane && s.life.live() {
+            if self.frozen(sid) {
+                return;
+            }
             while let Some(r) = self.sl(sid).queue.pop_front() {
                 self.inbox(sid, &r);
             }
@@ -992,7 +1006,13 @@ impl Core<'_> {
         s.turn_at = now;
         s.progress_at = now;
         let ready = s.turn.is_some() && s.proc == Proc::Up;
-        if ready && let Some(r) = s.steer_slot.take() {
+        if !ready {
+            return;
+        }
+        if self.frozen(sid) {
+            return self.return_steer(sid);
+        }
+        if let Some(r) = self.sl(sid).steer_slot.take() {
             self.steer(sid, &r);
         }
     }
