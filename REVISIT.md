@@ -264,3 +264,7 @@ Each entry: where, what was done, what right looks like.
   so jobs outlive the session). What SSH loses is NAT traversal, roaming and stable addresses (DHCP
   churn; the snapdragon laptop moved .176 to .172). The combined form is SSH as the protocol, with
   the official tailscale client on any machine the hub cannot route to.
+- **Node reports fenced by node, not by submit** (pt-core jobs): `JobStatus` names the node that
+  answered, and a report from any node but the job's current one is dropped. A node chosen again
+  for the same attempt, after its 10 min exclusion, is trusted to have no answer that old in
+  flight. Right: a per-submit token in `NodeSubmit` that the node echoes in every status.

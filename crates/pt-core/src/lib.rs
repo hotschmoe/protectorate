@@ -120,8 +120,9 @@ impl Core<'_> {
             E::JobStatus {
                 job,
                 attempt,
+                node,
                 report,
-            } => self.job_status(*job, *attempt, report),
+            } => self.job_status(*job, *attempt, *node, report),
             E::ArtifactsChecked { job, attempt, ok } => self.artifacts_checked(*job, *attempt, *ok),
 
             E::Observed { sleeve, g, obs } => self.observed(*sleeve, *g, obs),

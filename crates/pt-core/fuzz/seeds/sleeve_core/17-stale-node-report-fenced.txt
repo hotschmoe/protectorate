@@ -1,0 +1,29 @@
+#scenario 658fc30109466031
+# Node 1 refuses the submit, which is queued again on the same attempt and goes to node 2. A
+# delayed Running from node 1 must not confirm node 2's submit.
+job j1
+# Released: ScheduleJob, the reply.
+step
+step
+# Released: the submit to node 1, whose answer is lost.
+policy other=lost
+step
+expect-job 0 state=SubmitUncertain
+tick 10s
+# Released: the submit's probe, then a poll of node 1. The probe's answer is a refusal.
+policy poll=6
+step
+expect-job 0 state=Queued
+# Released: the poll of node 1, then ScheduleJob. Schedule first: node 2 is chosen.
+step 1
+expect-job 0 state=Submitting
+expect-effect job:0:1 state=Intent
+# Node 1's late answer to its poll says Running.
+policy poll=0
+step
+expect-job 0 state=Submitting
+expect-effect job:0:1 state=Intent
+policy other=ack
+run
+expect-job 0 state=Running
+expect-effect job:0:1 state=Confirmed

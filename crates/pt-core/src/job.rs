@@ -200,11 +200,13 @@ impl Core<'_> {
         }
     }
 
-    pub(crate) fn job_status(&mut self, id: JobId, attempt: u32, report: &JobReport) {
+    pub(crate) fn job_status(&mut self, id: JobId, attempt: u32, node: NodeId, report: &JobReport) {
         let Some(j) = self.st.jobs.get(&id) else {
             return;
         };
-        if j.attempt != attempt || j.node.is_none() {
+        // A refused attempt is scheduled again on the same attempt number, so the node fences
+        // the report: a late answer from the node that refused is not about this submit.
+        if j.attempt != attempt || j.node != Some(node) {
             return;
         }
         let state = j.state;

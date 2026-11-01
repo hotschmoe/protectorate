@@ -202,13 +202,16 @@ impl Sim {
                     return;
                 }
                 match kind {
-                    EffectKind::NodeSubmit { job, attempt, .. }
-                    | EffectKind::NodeCancel { job, attempt, .. }
-                    | EffectKind::NodeAckCollected { job, attempt, .. } => {
+                    EffectKind::NodeSubmit {
+                        job, attempt, node, ..
+                    }
+                    | EffectKind::NodeCancel { job, attempt, node }
+                    | EffectKind::NodeAckCollected { job, attempt, node } => {
                         let report = job_report(p.poll);
                         self.apply(EventKind::JobStatus {
                             job,
                             attempt,
+                            node,
                             report,
                         });
                     }
@@ -261,11 +264,12 @@ impl Sim {
                     epoch: 7,
                 });
             }
-            Intent::PollJob { job, attempt, .. } => {
+            Intent::PollJob { job, attempt, node } => {
                 let report = job_report(p.poll);
                 self.apply(EventKind::JobStatus {
                     job,
                     attempt,
+                    node,
                     report,
                 });
             }
