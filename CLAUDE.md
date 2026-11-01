@@ -52,7 +52,8 @@ app/           Flutter client (desktop, Android, web)
 make build       # debug build of the workspace
 make release     # release binaries for the host
 make test        # e2e tests
-make check       # fmt --check, clippy -D warnings, test, check-deps, check-gen, app-check
+make check       # fmt --check, clippy -D warnings, test, check-deps, check-gen, app-check, check-version
+make version     # the version builds carry: git describe of the v* tag, the one source of truth
 make check-deps  # fails on any third-party crate not listed in DEPENDENCIES.md
 make gen         # writes app/lib/api/api.g.dart from crates/pt-api (never hand-edit it); needs dart
 ```

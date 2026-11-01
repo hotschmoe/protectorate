@@ -3,14 +3,16 @@
 # release's SHA256SUMS before using it and checks that it reports that release, stages it in
 # <state>\releases\<version>\ (the layout pt-update keeps), makes releases\current point at that version, then runs
 # `protectorate-node join SERVER_URL` (scan to join: it shows a QR code and waits for the owner to
-# approve on the hub). It prints the plan first; -DryRun checks the release and stops there,
-# writing nothing.
+# approve on the hub) and `protectorate-node install-service`, which registers and starts the
+# Windows service protectorate-node. It prints the plan first; -DryRun checks the release and
+# stops there, writing nothing. The state dir defaults to the binary's own,
+# %ProgramData%\protectorate-node.
 #
 # Fetch this script at a commit, never a tag (SPEC 12a item 9), and compare its sha256 with the
 # one in the release notes before running it, from an elevated PowerShell:
 #   curl.exe -fsSLO https://raw.githubusercontent.com/hotschmoe/protectorate/<commit>/scripts/install-node.ps1
 #   Get-FileHash -Algorithm SHA256 .\install-node.ps1
-#   powershell -ExecutionPolicy Bypass -File .\install-node.ps1 -ServerUrl https://protectorate.hotschmoe.com -DryRun
+#   powershell -ExecutionPolicy Bypass -File .\install-node.ps1 -ServerUrl https://hub.example.lan -DryRun
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)][string]$ServerUrl,
@@ -19,7 +21,7 @@ param(
     [ValidateSet('stable', 'dev')][string]$Channel = 'stable',
     [string]$From = '',
     [string]$Repo = 'hotschmoe/protectorate',
-    [string]$StateDir = (Join-Path $env:ProgramData 'Protectorate\node'),
+    [string]$StateDir = (Join-Path $env:ProgramData 'protectorate-node'),
     [switch]$DryRun
 )
 
@@ -121,10 +123,12 @@ if ($DryRun) {
 $rel = Join-Path $StateDir 'releases'
 $cur = Join-Path $rel 'current'
 $joined = Test-Path -LiteralPath (Join-Path $StateDir 'node.json')
+$service = Test-Path -LiteralPath (Join-Path $StateDir 'install-manifest.json')
 $haveCurrent = Test-Path -LiteralPath $cur
 $join = @('join', $ServerUrl, '--state-dir', $StateDir)
 if ($Name) { $join += @('--name', $Name) }
-Say "Found: state $StateDir (joined: $joined, releases\current: $haveCurrent)"
+$installService = @('install-service', '--state-dir', $StateDir)
+Say "Found: state $StateDir (joined: $joined, service installed: $service, releases\current: $haveCurrent)"
 Say 'Plan:'
 if (Test-Path -LiteralPath (Join-Path $rel $Tag)) { Say "  reuse    $rel\$Tag (checked against SHA256SUMS)" }
 else { Say "  stage    $rel\$Tag\protectorate-node.exe" }
@@ -132,7 +136,8 @@ if ($haveCurrent) { Say "  stop     $cur exists: already installed; update from 
 else { Say "  link     $cur -> $Tag" }
 if ($joined) { Say "  skip     join: $StateDir\node.json exists" }
 else { Say "  run      $cur\protectorate-node.exe $($join -join ' ')" }
-Say '  note     no Windows service yet (REVISIT): run serve in the foreground after join'
+if ($service) { Say "  skip     install-service: $StateDir\install-manifest.json exists" }
+else { Say "  run      $cur\protectorate-node.exe $($installService -join ' ')" }
 if ($DryRun) { Say 'Dry run: nothing was written.'; exit 0 }
 if ($haveCurrent) { Die "$cur exists; this node is installed already" }
 
@@ -175,4 +180,8 @@ if (-not $joined) {
     & (Join-Path $cur 'protectorate-node.exe') @join
     if ($LASTEXITCODE -ne 0) { Die 'join failed' }
 }
-Say "Installed Protectorate node $Tag. Start it: $cur\protectorate-node.exe serve --state-dir $StateDir --listen-tcp 127.0.0.1:7475"
+if (-not $service) {
+    & (Join-Path $cur 'protectorate-node.exe') @installService
+    if ($LASTEXITCODE -ne 0) { Die 'install-service failed' }
+}
+Say "Installed Protectorate node $Tag as the Windows service protectorate-node."

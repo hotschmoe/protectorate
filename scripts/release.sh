@@ -1,43 +1,56 @@
 #!/usr/bin/env bash
 # Release assets, built locally (SPEC 6, D36: no CI build, no signing key).
 #
-#   scripts/release.sh assets    (make release-assets) builds every asset into dist/<version>/,
+#   scripts/release.sh assets [--snapshot]
+#                                (make release-assets) builds every asset into dist/<version>/,
 #                                writes VERSION and SHA256SUMS, and prints the wall time per step.
+#                                Refuses unless VERSION is a semver tag on HEAD of a clean tree;
+#                                --snapshot (make release-snapshot) builds any VERSION, for trying
+#                                the build, never for publishing.
 #   scripts/release.sh publish   (make release-publish) uploads dist/<version>/ with
 #                                `gh release create`; a dry run that only prints the command
 #                                unless PUBLISH=1. Refuses a dirty tree or an untagged HEAD.
+#
+# VERSION comes from the Makefile (git describe), the one source of the version; run this
+# through make. Machine-specific settings, from the environment or the gitignored .env.e2e at
+# the repo root:
+#   PT_RELEASE_WIN_HOST  ssh destination of a Windows machine (cmd.exe shell, rustup, MSVC) that
+#                        builds the Windows node assets; unset skips them
+#   PT_RELEASE_WIN_DIR   the build's folder under %USERPROFILE% there (default pt-release)
+#   ZIG                  the zig binary for the glibc 2.31 amd64 build (default: zig on PATH)
+#   PT_RELEASE_REPO      OWNER/NAME of the GitHub repo (default: install.sh's REPO)
 #
 # Steps of `assets`, overlapped where they use different machines or toolchains:
 #   go            scripts/net-build.sh: headscale and member for every target (skipped when
 #                 go/bin is newer than every Go source)
 #   web           the Flutter web build (make web), once for both hub assets
-#   windows       officewin (ssh) builds protectorate-node for x64 and arm64 in a scratch folder,
-#                 embedding member-windows-*.exe sent over gzipped; the .exe files come back as
-#                 base64 over ssh (scp pulls truncate) and are checked by sha256 against the
-#                 remote copy
+#   windows       the Windows host (ssh) builds protectorate-node for x64 and arm64 in a scratch
+#                 folder, embedding member-windows-*.exe sent over gzipped; the .exe files come
+#                 back as base64 over ssh (scp pulls truncate) and are checked by sha256 against
+#                 the remote copy
 #   linux-arm64   cargo, native
 #   linux-amd64   cargo zigbuild for glibc 2.31
 # The hub assets embed the web build and that arch's headscale and member, and every node asset
 # embeds its target's member, so the cargo steps and windows wait for go (and the hub for web).
 # headscale and member are not release assets of their own.
 #   app           the Android APK and the Flutter desktop builds: later steps (REVISIT)
-# Every step reuses its caches (cargo target dirs, the Go build cache, officewin's target dir),
+# Every step reuses its caches (cargo target dirs, the Go build cache, the Windows target dir),
 # so a rebuild with no change is quick.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
-REPO=${REPO:-hotschmoe/protectorate}
-VERSION=${VERSION:-$(git describe --tags --match 'v[0-9]*' --always --dirty)}
+if [ -f .env.e2e ]; then set -a; . ./.env.e2e; set +a; fi
+REPO=${PT_RELEASE_REPO:-$(sed -n 's/^REPO=//p' scripts/install.sh)}
+[ -n "${VERSION:-}" ] || { echo "release: VERSION is not set; run make release-assets or make release-publish" >&2; exit 2; }
 DIST=$ROOT/dist/$VERSION
 LOGS=$ROOT/dist/$VERSION.logs
 NOTES=$ROOT/dist/$VERSION.notes.md
 TARGET=${CARGO_TARGET_DIR:-$ROOT/target}
-ZIG_DIR=${ZIG_DIR:-/home/hotschmoe/tools/zig-aarch64-linux-0.16.0}
-WIN_HOST=${WIN_HOST:-officewin}
+ZIG=${ZIG:-$(command -v zig || true)}
+WIN_HOST=${PT_RELEASE_WIN_HOST:-}
 # Under %USERPROFILE% on the Windows host; the build's only footprint there.
-WIN_DIR=${WIN_DIR:-pt-release}
-WINDOWS=${WINDOWS:-1}
+WIN_DIR=${PT_RELEASE_WIN_DIR:-pt-release}
 WEB_DIR=$ROOT/app/build/web
 export CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-4}
 
@@ -77,18 +90,18 @@ step() {
 
 secs() { [ "$1" = failed ] && echo failed || printf '%d.%01d' $(($1 / 1000)) $((($1 % 1000) / 100)); }
 
-cargo_linux() { # TRIPLE [zigbuild]
+cargo_linux() { # TRIPLE [zig]
 	local sub=build
 	if [ "${2:-}" = zig ]; then sub=zigbuild; fi
 	PROTECTORATE_BUILD_VERSION=$VERSION PROTECTORATE_WEB_DIR=$WEB_DIR PROTECTORATE_NET_DIR=$ROOT/go/bin \
-		cargo $sub --locked --release --workspace --bins --target "$1"
+		cargo "$sub" --locked --release --workspace --bins --target "$1"
 }
 
 build_linux_arm64() { cargo_linux aarch64-unknown-linux-gnu; }
 
 build_linux_amd64() {
-	[ -x "$ZIG_DIR/zig" ] || die "no zig at $ZIG_DIR (set ZIG_DIR)"
-	PATH=$ZIG_DIR:$PATH cargo_linux x86_64-unknown-linux-gnu.2.31 zig
+	[ -n "$ZIG" ] && [ -x "$ZIG" ] || die "no zig: put it on PATH or set ZIG to the binary"
+	PATH=$(dirname "$ZIG"):$PATH cargo_linux x86_64-unknown-linux-gnu.2.31 zig
 }
 
 build_go() {
@@ -105,7 +118,7 @@ build_go() {
 }
 
 build_web() {
-	(cd app && flutter build web --release --no-web-resources-cdn)
+	make --no-print-directory web VERSION="$VERSION"
 	[ -f "$WEB_DIR/index.html" ] || die "no $WEB_DIR/index.html after the web build"
 }
 
@@ -137,7 +150,7 @@ build_windows() {
 	win "if not exist %USERPROFILE%\\$WIN_DIR\\src mkdir %USERPROFILE%\\$WIN_DIR\\src"
 	win "if not exist %USERPROFILE%\\$WIN_DIR\\net mkdir %USERPROFILE%\\$WIN_DIR\\net"
 	scp -q -o BatchMode=yes "$tar" "$WIN_HOST:$WIN_DIR/src.tar"
-	# The node embeds member; officewin has no gzip, so it gets the gzip, which its build script
+	# The node embeds member; Windows has no gzip, so it gets the gzip, which its build script
 	# inflates for the SHA-256.
 	local arch m
 	for arch in amd64 arm64; do
@@ -189,14 +202,14 @@ collect() {
 		install -m 755 "$TARGET/${t%%:*}/release/protectorate" "$DIST/protectorate-linux-${t##*:}"
 		install -m 755 "$TARGET/${t%%:*}/release/protectorate-node" "$DIST/protectorate-node-linux-${t##*:}"
 	done
-	if [ "$WINDOWS" = 1 ]; then
+	if [ -n "$WIN_HOST" ]; then
 		install -m 755 "$TARGET"/release-windows/protectorate-node-windows-{amd64,arm64}.exe "$DIST/"
 	fi
 	for f in install.sh install-node.sh install-node.ps1; do install -m 644 "scripts/$f" "$DIST/$f"; done
 	printf '%s\n' "$VERSION" >"$DIST/VERSION"
 	local present=()
 	for f in "${ASSETS[@]}"; do
-		if [ -f "$DIST/$f" ]; then present+=("$f"); else echo "missing $f (WINDOWS=$WINDOWS)"; fi
+		if [ -f "$DIST/$f" ]; then present+=("$f"); else echo "missing $f"; fi
 	done
 	(cd "$DIST" && sha256sum -- "${present[@]}") >"$DIST/SHA256SUMS.tmp"
 	mv -f "$DIST/SHA256SUMS.tmp" "$DIST/SHA256SUMS"
@@ -229,25 +242,43 @@ write_notes() {
 	} >"$NOTES"
 }
 
+# A semver tag as pt-update's Version::parse takes it: vMAJOR.MINOR.PATCH[-PRE], no build metadata.
+SEMVER='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-((0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)\.)*(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))?$'
+
+# A release is exactly a tag: VERSION a semver tag (not git describe's -N-gHASH or -dirty), that
+# tag on HEAD, and nothing uncommitted.
+release_version() {
+	if [[ "$VERSION" == *-dirty ]]; then die "VERSION $VERSION has uncommitted changes; commit first"; fi
+	if [[ "$VERSION" =~ -[0-9]+-g[0-9a-f]+$ ]]; then die "VERSION $VERSION is commits past a tag; tag HEAD"; fi
+	[[ "$VERSION" =~ $SEMVER ]] || die "VERSION $VERSION is not a semver tag (vX.Y.Z or vX.Y.Z-PRE)"
+	git tag --points-at HEAD | grep -qxF "$VERSION" || die "HEAD is not tagged $VERSION"
+	[ -z "$(git status --porcelain)" ] || die "the tree is dirty; commit first (a release is built from a commit)"
+}
+
 assets() {
+	if [ "${1:-}" = --snapshot ]; then
+		say "snapshot $VERSION: not a release, never publish it"
+	else
+		release_version
+	fi
 	mkdir -p "$DIST" "$LOGS"
 	local t0 win_pid='' go_pid='' web_pid='' f
 	t0=$(now_ms)
 	say "release $VERSION into $DIST (logs in $LOGS)"
 	for f in cargo cargo-zigbuild go flutter gzip git sha256sum; do command -v "$f" >/dev/null || die "$f is required"; done
-	if [ "$WINDOWS" = 1 ]; then
-		win "ver" >/dev/null || die "cannot reach $WIN_HOST over ssh (WINDOWS=0 skips the Windows assets)"
+	if [ -n "$WIN_HOST" ]; then
+		win "ver" >/dev/null || die "cannot reach $WIN_HOST over ssh (unset PT_RELEASE_WIN_HOST to skip the Windows assets)"
 	fi
 	step go build_go &
 	go_pid=$!
 	step web build_web &
 	web_pid=$!
 	wait "$go_pid" || die "the go step failed"
-	if [ "$WINDOWS" = 1 ]; then
+	if [ -n "$WIN_HOST" ]; then
 		step windows build_windows &
 		win_pid=$!
 	else
-		echo "   windows      skipped (WINDOWS=0)"
+		echo "   windows      skipped: PT_RELEASE_WIN_HOST is not set, so no Windows node assets"
 	fi
 	wait "$web_pid" || die "the web step failed"
 	step linux-arm64 build_linux_arm64
@@ -272,16 +303,13 @@ assets() {
 
 publish() {
 	local problems=() tag f
-	[ -z "$(git status --porcelain)" ] || die "the tree is dirty; commit first (a release is built from a commit)"
+	release_version
 	[ -f "$DIST/SHA256SUMS" ] || die "no $DIST/SHA256SUMS; run make release-assets"
 	(cd "$DIST" && sha256sum --quiet --strict -c SHA256SUMS) || die "$DIST does not match its SHA256SUMS"
 	[ "$(cat "$DIST/VERSION")" = "$VERSION" ] || die "$DIST/VERSION is not $VERSION"
 	command -v gh >/dev/null || die "gh is required"
-	tag=$(git describe --tags --exact-match --match 'v[0-9]*' HEAD 2>/dev/null || true)
-	if [ -z "$tag" ]; then
-		problems+=("HEAD has no v* tag; tag it (vX.Y.Z stable, vX.Y.Z-PRE dev) and push the tag")
-		tag=$VERSION
-	elif [ -z "$(git ls-remote --tags origin "refs/tags/$tag" 2>/dev/null)" ]; then
+	tag=$VERSION
+	if [ -z "$(git ls-remote --tags origin "refs/tags/$tag" 2>/dev/null)" ]; then
 		problems+=("tag $tag is not on origin; push it first (gh --verify-tag needs it)")
 	fi
 	local files=()
@@ -305,7 +333,7 @@ publish() {
 }
 
 case "${1:-}" in
-assets) assets ;;
+assets) assets "${2:-}" ;;
 publish) publish ;;
-*) echo "usage: $0 assets | publish" >&2; exit 2 ;;
+*) echo "usage: $0 assets [--snapshot] | publish" >&2; exit 2 ;;
 esac

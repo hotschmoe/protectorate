@@ -11,7 +11,7 @@
 # one in the release notes before running it:
 #   curl -fsSLO https://raw.githubusercontent.com/hotschmoe/protectorate/<commit>/scripts/install-node.sh
 #   sha256sum install-node.sh
-#   sudo bash install-node.sh https://protectorate.hotschmoe.com --dry-run
+#   sudo bash install-node.sh https://hub.example.lan --dry-run
 set -euo pipefail
 
 REPO=hotschmoe/protectorate

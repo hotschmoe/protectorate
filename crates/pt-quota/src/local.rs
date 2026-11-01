@@ -1,4 +1,4 @@
-//! The local model: an OpenAI-compatible endpoint (the b70 box). It has no quota; the reading is
+//! The local model: an OpenAI-compatible endpoint. It has no quota; the reading is
 //! its health (reachable) and the models it serves.
 //!
 //! The endpoint wants the API key Pi already holds for it: the `apiKey` of the provider named

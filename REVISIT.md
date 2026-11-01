@@ -722,3 +722,19 @@ Each entry: where, what was done, what right looks like.
   from the login itself (owner's idea; to settle later). There is one quota row and reader per
   account, and the app's QUOTA screen lists every account. `select_target` weighs accounts rather than
   harnesses, and a sleeve's incarnation records the account it draws on.
+- **Windows job identity, blocked** (`pt-node`, Windows job runner): the owner chose
+  (2026-11-01) ordinary jobs as LocalService or a restricted token, and maintenance jobs as
+  SYSTEM. Two agent attempts to write the token and logon code were cut off by a safety
+  classifier and not retried, so jobs still run as LocalSystem inside a Job Object. Next step:
+  the owner decides how to proceed; the planned design is in the devlog.
+- **An idle Pi sleeve that never had a turn does not resume after a hub restart** (`pt-hub`,
+  found by the durable agent): it fails to resume and parks. Right: resume (or freshly launch) a
+  Pi sleeve with no native session yet, as one whose session exists.
+- **Review coverage**: pt-core, pt-journal and pt-http have had an adversarial review, and pt-hub,
+  pt-drivers and pt-sandbox one each by GPT-6.1-Terra (2026-11-01; its findings are being fixed).
+  pt-quota, pt-history and pt-update have had none, and none of the fixes has been re-reviewed.
+  Right: review each before it is trusted with more than the owner's own machines.
+- **`pi_local` is unconfigured by default** (`pt-hub`, home.rs, doctor.rs): `pi_local_provider`
+  and `pi_local_model` default to empty, and doctor marks `pi_local` and `pi_durable` ineligible
+  until both are set, so the default `resleeve_to` (`["pi_local"]`) parks a sleeve that must
+  resleeve. Right: offer the configured local model when there is one, or ask for it at setup.
