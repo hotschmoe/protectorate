@@ -70,6 +70,11 @@ impl Embedded {
     /// `<dir>/<file_name>`, executable. A missing or mismatching file is inflated again into a
     /// temporary sibling, checked, then renamed in place.
     pub fn unpack(&self, dir: &Path) -> Result<PathBuf, String> {
+        // Threads of one process share the temporary name; one unpacks at a time.
+        static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _one = ONE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let ctx = |e: String| format!("unpacking the embedded {}: {e}", self.name);
         private_dir(dir).map_err(ctx)?;
         let path = dir.join(self.file_name());

@@ -86,6 +86,12 @@ pub struct Hub {
     pub jobs: JobStore,
     pub quotas: crate::quota::Quotas,
     pub history: crate::history::History,
+    pub doctor: crate::doctor::Doctor,
+    pub harness_updates: crate::harness_update::Updater,
+    /// Hub and node updates, one at a time.
+    pub update_lock: Mutex<()>,
+    /// Where `serve` waits; an update sends `Stop::Restart` here.
+    pub stop: Mutex<Option<Sender<crate::update::Stop>>>,
     input: Sender<Input>,
     view: Mutex<Arc<View>>,
 }
@@ -134,6 +140,10 @@ impl Hub {
             jobs,
             quotas: Default::default(),
             history,
+            doctor: Default::default(),
+            harness_updates: Default::default(),
+            update_lock: Mutex::new(()),
+            stop: Mutex::new(None),
             input,
             view: Mutex::new(Arc::new(view)),
         }

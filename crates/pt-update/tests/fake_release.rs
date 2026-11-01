@@ -228,7 +228,11 @@ fn stage_switch_rollback_and_refusals() {
         .stage(&src, &src.release("v1.0.0").unwrap(), &picks())
         .unwrap();
     assert!(!staged.reused);
-    assert_eq!(run(&staged.dir.join("member")), "member v1.0.0");
+    assert_eq!(run(&staged.dir.join("protectorate-node")), "node v1.0.0");
+    assert!(
+        !staged.dir.join("member").exists(),
+        "only the picked asset is staged"
+    );
     let sw = store.switch("v1.0.0").unwrap();
     assert_eq!(sw.from, None);
     assert_eq!(current_node(&store), "node v1.0.0");
@@ -273,10 +277,10 @@ fn stage_switch_rollback_and_refusals() {
     }
 
     // A version already on disk that no longer matches the release is refused, not replaced.
-    let member = store.version_dir("v1.0.0").join("member");
+    let node = store.version_dir("v1.0.0").join("protectorate-node");
     let mut f = std::fs::OpenOptions::new()
         .append(true)
-        .open(&member)
+        .open(&node)
         .unwrap();
     f.write_all(b"# changed\n").unwrap();
     drop(f);
@@ -304,41 +308,6 @@ fn health_check_and_probation() {
     }
     store.switch("v1.0.0").unwrap();
 
-    let e = store
-        .switch_checked(
-            "v1.1.0",
-            Duration::from_millis(300),
-            Duration::from_millis(50),
-            || Err("no answer on /health".into()),
-        )
-        .unwrap_err();
-    assert_eq!(e.kind, ErrorKind::Health, "{e}");
-    assert!(e.message.contains("rolled back to v1.0.0"), "{e}");
-    assert_eq!(current_node(&store), "node v1.0.0");
-
-    let mut tries = 0;
-    let check_store = store.clone();
-    store
-        .switch_checked(
-            "v1.1.0",
-            Duration::from_secs(5),
-            Duration::from_millis(20),
-            || {
-                tries += 1;
-                let seen = current_node(&check_store);
-                if tries < 3 {
-                    Err(format!("still starting ({seen})"))
-                } else if seen == "node v1.1.0" {
-                    Ok(())
-                } else {
-                    Err(seen)
-                }
-            },
-        )
-        .unwrap();
-    assert_eq!(tries, 3);
-    assert_eq!(current_node(&store), "node v1.1.0");
-
     // No hub contact within the window: the node reverts.
     store.switch("v1.0.0").unwrap();
     store
@@ -361,16 +330,53 @@ fn health_check_and_probation() {
     }
     assert_eq!(current_node(&store), "node v1.0.0");
     assert_eq!(store.check_probation().unwrap(), Verdict::Idle);
-    assert!(!store.hub_contacted().unwrap());
+    assert!(!store.confirm().unwrap());
     let p = store.probation().unwrap().unwrap();
     assert!(p.rolled_back_ms.is_some() && p.contacted_ms.is_none());
+    assert!(
+        p.reason.as_deref().unwrap().contains("not confirmed"),
+        "{p:?}"
+    );
+
+    // A release that keeps failing to start goes back after MAX_TRIAL_STARTS, long before
+    // its window ends; the counting runs from the previous release, before each start.
+    store
+        .switch_on_probation("v1.1.0", Duration::from_secs(3600))
+        .unwrap();
+    for _ in 0..pt_update::MAX_TRIAL_STARTS {
+        assert!(matches!(
+            store.start_attempt(pt_update::MAX_TRIAL_STARTS).unwrap(),
+            Verdict::Waiting { .. }
+        ));
+        assert_eq!(current_node(&store), "node v1.1.0");
+    }
+    match store.start_attempt(pt_update::MAX_TRIAL_STARTS).unwrap() {
+        Verdict::RolledBack(sw) => assert_eq!(sw.to, "v1.0.0"),
+        v => panic!("expected a rollback, got {v:?}"),
+    }
+    assert_eq!(current_node(&store), "node v1.0.0");
+    assert_eq!(
+        store.start_attempt(pt_update::MAX_TRIAL_STARTS).unwrap(),
+        Verdict::Idle
+    );
+
+    // A failed health check rolls back at once.
+    store
+        .switch_on_probation("v1.1.0", Duration::from_secs(3600))
+        .unwrap();
+    let sw = store.fail_probation("no answer on the socket").unwrap();
+    assert_eq!(sw.map(|s| s.to), Some("v1.0.0".to_string()));
+    assert_eq!(current_node(&store), "node v1.0.0");
+    let p = store.probation().unwrap().unwrap();
+    assert_eq!(p.reason.as_deref(), Some("no answer on the socket"));
+    assert_eq!(store.fail_probation("again").unwrap(), None);
 
     // Contact in time: the update stays past the deadline.
     store
         .switch_on_probation("v1.1.0", Duration::from_millis(400))
         .unwrap();
-    assert!(store.hub_contacted().unwrap());
-    assert!(!store.hub_contacted().unwrap());
+    assert!(store.confirm().unwrap());
+    assert!(!store.confirm().unwrap());
     thread::sleep(Duration::from_millis(500));
     assert_eq!(store.check_probation().unwrap(), Verdict::Confirmed);
     assert_eq!(current_node(&store), "node v1.1.0");

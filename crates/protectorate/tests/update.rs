@@ -1,0 +1,1040 @@
+//! Updates and doctor, all real binaries against a fake GitHub release served on loopback
+//! (`release_api`), never the live services and never a real update command:
+//!
+//! - The hub under a test-played supervisor that does what the systemd unit does: run
+//!   `releases/previous/protectorate hub probation`, then `releases/current/protectorate serve`,
+//!   restart on a failing exit. `hub update` stages, switches and restarts on probation; the new
+//!   hub's health check keeps it; `--rollback` swaps back; a release whose serve crashes is
+//!   switched back by the prestart after three starts; one that fails to start (its listener is
+//!   taken) switches itself back.
+//! - A node joined through the hub's headscale, under the same kind of supervisor: `node update`
+//!   has it fetch, check, switch and restart, and the hub's Hello confirms it; with the hub killed
+//!   right after the switch, the node switches itself back when its window passes.
+//! - Doctor: a harness whose `--version` fails is refused for spawn and start (409), Envoy on it
+//!   parks, and a `doctor --refresh` that finds it fixed starts Envoy again.
+//! - Harness updates: fake claude, codex, grok and pi programs record their update commands; the
+//!   24 h loop runs each once (and not again after a restart), and `harness update pi` waits for a
+//!   pi sleeve mid-turn.
+//!
+//! Release "binaries" are bash wrappers: they print their tag for the version check, else exec
+//! the real binary under the wrapper's own argv[0], as systemd would start it.
+
+mod common;
+
+use std::collections::BTreeMap;
+use std::fs;
+use std::io::{BufRead, BufReader};
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
+use std::thread;
+use std::time::Duration;
+
+use common::{Hub, LONG, Run, bin, eventually, free_port, tail, temp_repo};
+use pt_http::{Config, Request, Response, Server, ShutdownHandle};
+use pt_json::{Value, obj};
+
+fn arch() -> &'static str {
+    match std::env::consts::ARCH {
+        "x86_64" => "amd64",
+        "aarch64" => "arm64",
+        a => panic!("no release assets for {a}"),
+    }
+}
+
+fn dir(name: &str) -> PathBuf {
+    let t = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() % 1_000_000);
+    let d = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("upd-{name}-{}-{t}", std::process::id()));
+    fs::create_dir_all(&d).unwrap();
+    d
+}
+
+fn write_exec(path: &Path, text: &str) {
+    fs::write(path, text).unwrap();
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// A release binary: `<check>` prints `<program> <tag>`; anything else runs `real` with `extra`
+/// appended, unless `crash` says serve exits at once.
+fn wrapper(
+    program: &str,
+    check: &str,
+    tag: &str,
+    real: &Path,
+    extra: &str,
+    crash: bool,
+) -> Vec<u8> {
+    let crash = if crash {
+        "for a in \"$@\"; do [ \"$a\" = serve ] && { echo \"$0: crashing\" >&2; exit 1; }; done\n"
+    } else {
+        ""
+    };
+    format!(
+        "#!/bin/bash\nif [ \"$1\" = {check} ] && [ $# = 1 ]; then echo '{program} {tag}'; exit 0; fi\n{crash}exec -a \"$0\" '{}' \"$@\" {extra}\n",
+        real.display()
+    )
+    .into_bytes()
+}
+
+struct Rel {
+    tag: String,
+    assets: BTreeMap<String, Vec<u8>>,
+}
+
+fn release(tag: &str, files: Vec<(String, Vec<u8>)>) -> Rel {
+    let mut assets: BTreeMap<String, Vec<u8>> = files.into_iter().collect();
+    assets.insert("VERSION".into(), format!("{tag}\n").into_bytes());
+    let mut sums = String::new();
+    for (name, bytes) in &assets {
+        sums.push_str(&format!(
+            "{}  {name}\n",
+            pt_hash::to_hex(&pt_hash::sha256(bytes))
+        ));
+    }
+    assets.insert("SHA256SUMS".into(), sums.into_bytes());
+    Rel {
+        tag: tag.into(),
+        assets,
+    }
+}
+
+/// GitHub's releases API for `o/r`, as much of it as pt-update reads.
+struct Fake {
+    url: String,
+    handle: ShutdownHandle,
+}
+
+impl Drop for Fake {
+    fn drop(&mut self) {
+        self.handle.shutdown(Duration::from_secs(1));
+    }
+}
+
+fn release_json(base: &str, r: &Rel) -> String {
+    let assets: Vec<String> = r
+        .assets
+        .iter()
+        .map(|(name, bytes)| {
+            format!(
+                r#"{{"name":"{name}","size":{},"browser_download_url":"{base}/dl/{}/{name}"}}"#,
+                bytes.len(),
+                r.tag
+            )
+        })
+        .collect();
+    format!(
+        r#"{{"tag_name":"{}","draft":false,"prerelease":false,"assets":[{}]}}"#,
+        r.tag,
+        assets.join(",")
+    )
+}
+
+fn route(base: &str, rels: &[Rel], req: &Request) -> Response {
+    let path = req.path();
+    if path == "/repos/o/r/releases" {
+        let all: Vec<String> = rels.iter().map(|r| release_json(base, r)).collect();
+        return Response::json(200, format!("[{}]", all.join(",")));
+    }
+    if let Some(tag) = path.strip_prefix("/repos/o/r/releases/tags/") {
+        return match rels.iter().find(|r| r.tag == tag) {
+            Some(r) => Response::json(200, release_json(base, r)),
+            None => Response::not_found(),
+        };
+    }
+    let found = path
+        .strip_prefix("/dl/")
+        .and_then(|rest| rest.split_once('/'))
+        .and_then(|(tag, name)| rels.iter().find(|r| r.tag == tag)?.assets.get(name));
+    match found {
+        Some(bytes) => Response::bytes(200, "application/octet-stream", bytes.clone()),
+        None => Response::not_found(),
+    }
+}
+
+fn serve_releases(rels: Vec<Rel>) -> Fake {
+    let rels = Arc::new(rels);
+    let base = Arc::new(std::sync::OnceLock::<String>::new());
+    let (r2, b2) = (rels.clone(), base.clone());
+    let server = Server::bind_tcp(
+        "127.0.0.1:0".parse().unwrap(),
+        Config::default(),
+        move |req, _| route(b2.get().expect("base url"), &r2, req),
+    )
+    .unwrap();
+    let url = format!("http://{}", server.local_addr().unwrap());
+    base.set(url.clone()).unwrap();
+    let handle = server.shutdown_handle();
+    thread::spawn(move || server.run());
+    Fake { url, handle }
+}
+
+/// Installs `bytes` as release `tag` of `program` under `<root>/releases` and points
+/// `current` at it, as an installer does.
+fn install(root: &Path, tag: &str, program: &str, bytes: &[u8]) {
+    let d = root.join("releases").join(tag);
+    fs::create_dir_all(&d).unwrap();
+    write_exec(&d.join(program), std::str::from_utf8(bytes).unwrap());
+    std::os::unix::fs::symlink(tag, root.join("releases/current")).unwrap();
+}
+
+fn pointer(root: &Path, name: &str) -> Option<String> {
+    fs::read_link(root.join("releases").join(name))
+        .ok()
+        .map(|p| p.display().to_string())
+}
+
+fn probation(root: &Path) -> Value {
+    fs::read_to_string(root.join("releases/probation.json"))
+        .ok()
+        .and_then(|t| pt_json::parse(&t).ok())
+        .unwrap_or(Value::Null)
+}
+
+/// One start: the release `current` named, and how it exited (None while running).
+#[derive(Debug, Clone)]
+struct Start {
+    release: String,
+    code: Option<i32>,
+}
+
+/// Does what the systemd units do: before each start the previous release's `probation`
+/// command, then `releases/current/<program> <args>` with that path as argv[0]; restart after
+/// `delay` on any exit but 0.
+struct Supervisor {
+    stop: Arc<AtomicBool>,
+    child: Arc<Mutex<Option<Child>>>,
+    starts: Arc<Mutex<Vec<Start>>>,
+    log: PathBuf,
+}
+
+impl Supervisor {
+    fn start(
+        root: &Path,
+        program: &'static str,
+        prestart: Vec<String>,
+        args: Vec<String>,
+        env: Vec<(String, String)>,
+        delay: Duration,
+    ) -> Supervisor {
+        let s = Supervisor {
+            stop: Arc::new(AtomicBool::new(false)),
+            child: Arc::new(Mutex::new(None)),
+            starts: Arc::new(Mutex::new(Vec::new())),
+            log: root.join("supervised.log"),
+        };
+        let (stop, child, starts) = (s.stop.clone(), s.child.clone(), s.starts.clone());
+        let root = root.to_path_buf();
+        let log = s.log.clone();
+        thread::spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                let previous = root.join("releases/previous").join(program);
+                if previous.exists() {
+                    let out = Command::new(&previous).args(&prestart).output().unwrap();
+                    append(
+                        &log,
+                        &format!(
+                            "prestart: {}{}",
+                            String::from_utf8_lossy(&out.stdout),
+                            String::from_utf8_lossy(&out.stderr)
+                        ),
+                    );
+                }
+                let release = pointer(&root, "current").unwrap_or_default();
+                append(&log, &format!("start {release}\n"));
+                let err = fs::OpenOptions::new().append(true).open(&log).unwrap();
+                let mut cmd = Command::new(root.join("releases/current").join(program));
+                cmd.args(&args)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(err);
+                for (k, _) in std::env::vars().filter(|(k, _)| k.starts_with("CLAUDE")) {
+                    cmd.env_remove(k);
+                }
+                cmd.env_remove("PROTECTORATE_TOKEN")
+                    .env_remove("PROTECTORATE_SOCKET");
+                for (k, v) in &env {
+                    cmd.env(k, v);
+                }
+                let c = cmd.spawn().unwrap();
+                let i = {
+                    let mut st = starts.lock().unwrap();
+                    st.push(Start {
+                        release,
+                        code: None,
+                    });
+                    st.len() - 1
+                };
+                *child.lock().unwrap() = Some(c);
+                let code = loop {
+                    let mut g = child.lock().unwrap();
+                    let Some(c) = g.as_mut() else { return };
+                    if let Ok(Some(st)) = c.try_wait() {
+                        *g = None;
+                        break st.code().unwrap_or(-1);
+                    }
+                    drop(g);
+                    thread::sleep(Duration::from_millis(50));
+                };
+                starts.lock().unwrap()[i].code = Some(code);
+                append(&log, &format!("exited {code}\n"));
+                if code == 0 {
+                    return;
+                }
+                thread::sleep(delay);
+            }
+        });
+        s
+    }
+
+    fn starts(&self) -> Vec<Start> {
+        self.starts.lock().unwrap().clone()
+    }
+
+    fn log_text(&self) -> String {
+        fs::read_to_string(&self.log).unwrap_or_default()
+    }
+
+    /// Waits for the supervised process to be running `release` after `after` starts.
+    fn running(&self, release: &str, after: usize, secs: u64) {
+        let what = format!("{release} running after start {after}");
+        let ok = (0..secs * 10).any(|_| {
+            let st = self.starts();
+            let hit = st
+                .get(after..)
+                .is_some_and(|s| s.iter().any(|s| s.release == release && s.code.is_none()));
+            if !hit {
+                thread::sleep(Duration::from_millis(100));
+            }
+            hit
+        });
+        assert!(
+            ok,
+            "{what}: {:?}\n--- supervised log ---\n{}",
+            self.starts(),
+            tail(&self.log_text(), 60)
+        );
+    }
+}
+
+impl Drop for Supervisor {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(mut c) = self.child.lock().unwrap().take() {
+            let _ = c.kill();
+            let _ = c.wait();
+        }
+    }
+}
+
+fn append(path: &Path, text: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = f.write_all(text.as_bytes());
+    }
+}
+
+fn cli(home: &Path, args: &[&str]) -> Run {
+    let out = Command::new(bin())
+        .arg("--home")
+        .arg(home)
+        .args(args)
+        .env_remove("PROTECTORATE_TOKEN")
+        .env_remove("PROTECTORATE_SOCKET")
+        .output()
+        .unwrap();
+    Run {
+        status: out.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+    }
+}
+
+fn hub_started_ms(home: &Path) -> Option<u64> {
+    let r = cli(home, &["--json", "hub", "info"]);
+    (r.status == 0).then(|| r.json()["started_at_ms"].as_u64())?
+}
+
+/// Waits until a probation that started after `after_ms` is confirmed; returns its start.
+fn confirmed_after(home: &Path, after_ms: u64, what: &str) -> u64 {
+    eventually(what, Duration::from_secs(60), || {
+        let p = probation(home);
+        let switched = p["switched_ms"].as_u64()?;
+        (switched > after_ms && p["contacted_ms"].as_u64().is_some()).then_some(switched)
+    })
+}
+
+fn events(home: &Path) -> Vec<String> {
+    let v = cli(home, &["--json", "event", "list", "--limit", "1000"]).json();
+    v["events"]
+        .as_array()
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|e| e["text"].as_str().map(String::from))
+        .collect()
+}
+
+#[test]
+fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
+    let real = PathBuf::from(bin());
+    let a = arch();
+    let busy = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let busy_port = busy.local_addr().unwrap().port();
+    let asset = format!("protectorate-linux-{a}");
+    let hub_rel = |tag: &str, extra: &str, crash: bool| {
+        release(
+            tag,
+            vec![(
+                asset.clone(),
+                wrapper("protectorate", "version", tag, &real, extra, crash),
+            )],
+        )
+    };
+    let fake = serve_releases(vec![
+        hub_rel("v0.0.2", "", false),
+        hub_rel("v0.0.3", "", true),
+        hub_rel("v0.0.4", &format!("--listen 127.0.0.1:{busy_port}"), false),
+    ]);
+
+    let root = dir("hub");
+    let home = root.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let config = obj! {
+        // Envoy's harness is refused by doctor, so it parks instead of launching anything.
+        "envoy" => obj! { "harness" => "claude" },
+        "claude_program" => "/nonexistent/program",
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+        "release_api" => fake.url.as_str(),
+        "release_repo" => "o/r",
+    };
+    fs::write(home.join("config.json"), config.to_string()).unwrap();
+    install(
+        &home,
+        "v0.0.1",
+        "protectorate",
+        &wrapper("protectorate", "version", "v0.0.1", &real, "", false),
+    );
+    let home_s = home.display().to_string();
+    let sup = Supervisor::start(
+        &home,
+        "protectorate",
+        vec![
+            "--home".into(),
+            home_s.clone(),
+            "hub".into(),
+            "probation".into(),
+        ],
+        vec![
+            "--home".into(),
+            home_s.clone(),
+            "serve".into(),
+            "--listen".into(),
+            "off".into(),
+        ],
+        Vec::new(),
+        Duration::from_millis(300),
+    );
+    let up = |what: &str| {
+        eventually(what, Duration::from_secs(60), || hub_started_ms(&home));
+    };
+    up("the hub on v0.0.1");
+    assert!(
+        fs::read_link(home.join("run/bin/protectorate"))
+            .is_ok_and(|t| t.ends_with("releases/current/protectorate")),
+        "the CLI link follows releases/current"
+    );
+
+    let check = cli(
+        &home,
+        &["--json", "hub", "update", "--check", "--version", "v0.0.2"],
+    )
+    .json();
+    assert_eq!(check["available"].as_bool(), Some(true), "{check}");
+    assert_eq!(check["restarting"].as_bool(), Some(false), "{check}");
+    assert_eq!(check["current"].as_str(), Some("v0.0.1"), "{check}");
+
+    // A good release: staged, switched, restarted, kept once its health check passes.
+    let n = sup.starts().len();
+    let u = cli(&home, &["--json", "hub", "update", "--version", "v0.0.2"]).json();
+    assert_eq!(u["restarting"].as_bool(), Some(true), "{u}");
+    sup.running("v0.0.2", n, 60);
+    assert_eq!(sup.starts()[n - 1].code, Some(75), "the old hub exits 75");
+    let first = confirmed_after(&home, 0, "v0.0.2 confirmed");
+    up("the hub on v0.0.2");
+    assert_eq!(pointer(&home, "previous").as_deref(), Some("v0.0.1"));
+    assert!(
+        events(&home)
+            .iter()
+            .any(|e| e.contains("v0.0.2 passed its health check")),
+        "{:?}",
+        events(&home)
+    );
+
+    // Rollback swaps the pointers and restarts; updating again reuses the staged release.
+    let n = sup.starts().len();
+    let r = cli(&home, &["--json", "hub", "update", "--rollback"]).json();
+    assert_eq!(r["target"].as_str(), Some("v0.0.1"), "{r}");
+    sup.running("v0.0.1", n, 60);
+    up("the hub back on v0.0.1");
+    let n = sup.starts().len();
+    let again = cli(&home, &["--json", "hub", "update", "--version", "v0.0.2"]).json();
+    assert!(
+        again["note"]
+            .as_str()
+            .unwrap_or("")
+            .contains("already staged"),
+        "{again}"
+    );
+    sup.running("v0.0.2", n, 60);
+    confirmed_after(&home, first, "v0.0.2 confirmed again");
+    up("the hub on v0.0.2 again");
+
+    // A release whose serve dies at once: the prestart counts three starts, then switches back.
+    let n = sup.starts().len();
+    let u = cli(&home, &["--json", "hub", "update", "--version", "v0.0.3"]).json();
+    assert_eq!(u["restarting"].as_bool(), Some(true), "{u}");
+    sup.running("v0.0.2", n + 1, 90);
+    let crashed = sup.starts()[n..]
+        .iter()
+        .filter(|s| s.release == "v0.0.3")
+        .count();
+    assert_eq!(crashed, 3, "{:?}", sup.starts());
+    let p = probation(&home);
+    assert_eq!(p["version"].as_str(), Some("v0.0.3"), "{p}");
+    assert!(p["rolled_back_ms"].as_u64().is_some(), "{p}");
+    assert!(p["reason"].as_str().unwrap_or("").contains("starts"), "{p}");
+    up("the hub after the crash rollback");
+
+    // A release that cannot open its listener switches itself back before it exits.
+    let n = sup.starts().len();
+    cli(&home, &["--json", "hub", "update", "--version", "v0.0.4"]).json();
+    sup.running("v0.0.2", n + 1, 90);
+    let p = probation(&home);
+    assert_eq!(p["version"].as_str(), Some("v0.0.4"), "{p}");
+    assert!(
+        p["reason"]
+            .as_str()
+            .unwrap_or("")
+            .contains("failed to start"),
+        "{p}"
+    );
+    let v4: Vec<_> = sup.starts()[n..]
+        .iter()
+        .filter(|s| s.release == "v0.0.4")
+        .cloned()
+        .collect();
+    assert_eq!(v4.len(), 1, "{:?}", sup.starts());
+    assert_ne!(v4[0].code, Some(0));
+    up("the hub after the failed start");
+    assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
+    let not_from_releases = Command::new(bin())
+        .args(["--home", &home_s, "hub", "probation"])
+        .output()
+        .unwrap();
+    assert!(not_from_releases.status.success());
+    drop(busy);
+    drop(sup);
+}
+
+fn node_bin() -> Option<PathBuf> {
+    let p = Path::new(bin()).with_file_name("protectorate-node");
+    if p.is_file() {
+        return Some(p);
+    }
+    eprintln!(
+        "SKIP: {} is missing; run cargo test --workspace",
+        p.display()
+    );
+    None
+}
+
+/// A TCP port whose next port is free too: headscale binds STUN there.
+fn free_pair() -> u16 {
+    loop {
+        let p = free_port();
+        if p < u16::MAX && std::net::UdpSocket::bind(("127.0.0.1", p + 1)).is_ok() {
+            return p;
+        }
+    }
+}
+
+#[test]
+fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
+    let version = Command::new(bin()).arg("version").output().unwrap();
+    if String::from_utf8_lossy(&version.stdout).contains("missing") {
+        eprintln!("SKIP: this protectorate does not embed headscale and member");
+        return;
+    }
+    let Some(node_bin) = node_bin() else { return };
+    let asset = format!("protectorate-node-linux-{}", arch());
+    let node_rel = |tag: &str| {
+        release(
+            tag,
+            vec![(
+                asset.clone(),
+                wrapper("protectorate-node", "--version", tag, &node_bin, "", false),
+            )],
+        )
+    };
+    let fake = serve_releases(vec![node_rel("v0.0.2"), node_rel("v0.0.3")]);
+    let port = free_pair();
+    let listen = format!("127.0.0.1:{port}");
+    let tailnet = std::env::temp_dir().join(format!("pt-nodeupd-{}-{port}", std::process::id()));
+    let mut hub = Hub::start_config(
+        "nodeupd",
+        "pi_local",
+        &[
+            (
+                "fleet",
+                obj! {
+                    "listen" => listen.as_str(),
+                    "dir" => tailnet.to_str().unwrap(),
+                    "poll_secs" => 2u64,
+                },
+            ),
+            ("release_api", fake.url.as_str().into()),
+            ("release_repo", "o/r".into()),
+        ],
+        &[],
+        &[],
+    );
+    eventually("the fleet to come up", Duration::from_secs(120), || {
+        (hub.cli(&["--json", "node", "add"]).status == 0).then_some(())
+    });
+
+    let node_dir = hub.home.with_file_name("node");
+    fs::create_dir_all(&node_dir).unwrap();
+    let mut join = Command::new(&node_bin)
+        .args([
+            "join",
+            &format!("http://{listen}"),
+            "--name",
+            "e2e-upd",
+            "--state-dir",
+        ])
+        .arg(&node_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let (tx, rx) = mpsc::channel();
+    let out = join.stdout.take().unwrap();
+    thread::spawn(move || {
+        for l in BufReader::new(out).lines().map_while(Result::ok) {
+            if tx.send(l).is_err() {
+                break;
+            }
+        }
+    });
+    let payload = loop {
+        let l = rx
+            .recv_timeout(Duration::from_secs(60))
+            .expect("join shows its registration");
+        if let Some(p) = l.trim_start().strip_prefix("paste") {
+            break p.trim().to_string();
+        }
+    };
+    let pending = hub.cli(&["--json", "node", "add", &payload]).json();
+    let auth = pending["auth_id"].as_str().unwrap().to_string();
+    hub.cli(&["--json", "node", "approve", &auth]).json();
+    let joined = eventually("join to exit", Duration::from_secs(60), || {
+        join.try_wait().unwrap()
+    });
+    assert!(joined.success());
+
+    install(
+        &node_dir,
+        "v0.0.1",
+        "protectorate-node",
+        &wrapper(
+            "protectorate-node",
+            "--version",
+            "v0.0.1",
+            &node_bin,
+            "",
+            false,
+        ),
+    );
+    let presence = node_dir.join("presence");
+    fs::write(&presence, "AWAY").unwrap();
+    let state = node_dir.display().to_string();
+    let sup = Supervisor::start(
+        &node_dir,
+        "protectorate-node",
+        vec!["probation".into(), "--state-dir".into(), state.clone()],
+        vec![
+            "serve".into(),
+            "--state-dir".into(),
+            state.clone(),
+            "--forward-socket".into(),
+            format!("{state}/agent.sock"),
+            "--no-scope".into(),
+        ],
+        vec![(
+            "PROTECTORATE_NODE_TEST_PRESENCE".into(),
+            presence.display().to_string(),
+        )],
+        Duration::from_secs(2),
+    );
+    eventually("the node online", Duration::from_secs(120), || {
+        let v = hub.cli(&["--json", "node", "ls"]).json();
+        v["nodes"]
+            .as_array()?
+            .iter()
+            .any(|n| n["name"].as_str() == Some("e2e-upd") && n["online"].as_bool() == Some(true))
+            .then_some(())
+    });
+
+    // The hub has the node fetch v0.0.2 from the fake GitHub, then waits for it to answer
+    // Hello from it, which is the contact that keeps it.
+    let n = sup.starts().len();
+    let r = hub.cli(&[
+        "--json",
+        "node",
+        "update",
+        "e2e-upd",
+        "--version",
+        "v0.0.2",
+        "--probation",
+        "90",
+    ]);
+    assert_eq!(
+        r.status,
+        0,
+        "{}{}\n--- node ---\n{}\n--- hub ---\n{}",
+        r.stdout,
+        r.stderr,
+        tail(&sup.log_text(), 40),
+        tail(&hub.log_text(), 40)
+    );
+    let u = r.json();
+    let row = &u["nodes"][0];
+    assert_eq!(row["from"].as_str(), Some("v0.0.1"), "{u}");
+    assert_eq!(row["to"].as_str(), Some("v0.0.2"), "{u}");
+    assert!(
+        row["detail"].as_str().unwrap_or("").contains("confirmed"),
+        "{u}"
+    );
+    sup.running("v0.0.2", n, 30);
+    assert_eq!(sup.starts()[n - 1].code, Some(75), "{:?}", sup.starts());
+    eventually(
+        "the node to confirm v0.0.2",
+        Duration::from_secs(30),
+        || probation(&node_dir)["contacted_ms"].as_u64(),
+    );
+    assert!(
+        node_dir.join("releases/v0.0.2/SHA256SUMS").is_file(),
+        "staged with its sums"
+    );
+
+    // Switched, then the hub goes silent: the node switches back when its window passes.
+    let n = sup.starts().len();
+    let r = hub.cli(&[
+        "--json",
+        "node",
+        "update",
+        "e2e-upd",
+        "--version",
+        "v0.0.3",
+        "--probation",
+        "8",
+        "--no-wait",
+    ]);
+    hub.kill9();
+    assert_eq!(r.status, 0, "{}{}", r.stdout, r.stderr);
+    sup.running("v0.0.3", n, 30);
+    sup.running("v0.0.2", n + 1, 60);
+    let p = probation(&node_dir);
+    assert_eq!(p["version"].as_str(), Some("v0.0.3"), "{p}");
+    assert!(p["contacted_ms"].is_null(), "{p}");
+    assert!(
+        p["reason"].as_str().unwrap_or("").contains("not confirmed"),
+        "{p}"
+    );
+    let v3: Vec<_> = sup.starts()[n..]
+        .iter()
+        .filter(|s| s.release == "v0.0.3")
+        .cloned()
+        .collect();
+    assert_eq!(v3.len(), 1, "{:?}", sup.starts());
+    assert_eq!(v3[0].code, Some(75));
+    assert_eq!(pointer(&node_dir, "current").as_deref(), Some("v0.0.2"));
+    drop(sup);
+    // Nothing of the hub's fleet may outlive the test: restart and stop it cleanly.
+    hub.restart();
+    hub.stop();
+}
+
+/// The fake claude: `--version` fails while `<dir>/health` says broken; anything else exits 1.
+fn fake_claude(dir: &Path) -> PathBuf {
+    let p = dir.join("claude");
+    write_exec(
+        &p,
+        &format!(
+            "#!/bin/bash\nif [ \"$1\" = --version ]; then\n  if grep -q broken '{0}/health'; then echo 'claude: broken install' >&2; exit 3; fi\n  echo '2.0.0 (Claude Code)'; exit 0\nfi\necho 'fake claude does not run' >&2\nexit 1\n",
+            dir.display()
+        ),
+    );
+    p
+}
+
+#[test]
+fn doctor_refuses_an_ineligible_harness_and_envoy_waits_for_it() {
+    for tool in ["bwrap", "systemd-run", "git"] {
+        if !common::on_path(tool) {
+            eprintln!("SKIP: {tool} is not installed");
+            return;
+        }
+    }
+    let fakes = dir("doctor");
+    fs::write(fakes.join("health"), "broken\n").unwrap();
+    let claude = fake_claude(&fakes);
+    // An owner home with a claude login file, so only the program decides.
+    let owner = fakes.join("owner");
+    fs::create_dir_all(owner.join(".claude")).unwrap();
+    fs::write(owner.join(".claude/.credentials.json"), "{}").unwrap();
+    let hub = Hub::start_config(
+        "doctor",
+        "claude",
+        &[("claude_program", claude.to_str().unwrap().into())],
+        &[],
+        &[("HOME", owner.to_str().unwrap())],
+    );
+    eventually("Envoy to park", Duration::from_secs(90), || {
+        (hub.sleeve("envoy")["lifecycle"].as_str() == Some("parked")).then_some(())
+    });
+    let ev = events(&hub.home);
+    assert!(
+        ev.iter().any(
+            |e| e.contains("launch refused: harness claude is ineligible")
+                && e.contains("broken install")
+        ),
+        "{ev:?}"
+    );
+
+    let d = hub.cli(&["--json", "doctor"]).json();
+    let h = d["harnesses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["name"].as_str() == Some("claude"))
+        .cloned()
+        .unwrap();
+    assert_eq!(h["eligible"].as_bool(), Some(false), "{d}");
+    assert!(
+        h["reasons"][0].as_str().unwrap_or("").contains("--version"),
+        "{d}"
+    );
+    assert!(fs::metadata(hub.home.join("doctor.json")).is_ok());
+    let human = hub.cli(&["doctor"]);
+    assert!(human.ok().contains("claude"), "{}", human.stdout);
+
+    let repo = temp_repo("doctor");
+    let spawn = hub.cli(&[
+        "sleeve",
+        "spawn",
+        "nope",
+        "--path",
+        repo.to_str().unwrap(),
+        "--harness",
+        "claude",
+    ]);
+    assert_ne!(spawn.status, 0);
+    assert!(
+        spawn.stderr.contains("409") && spawn.stderr.contains("harness claude is ineligible"),
+        "{}",
+        spawn.stderr
+    );
+    let start = hub.cli(&["sleeve", "start", "envoy"]);
+    assert_ne!(start.status, 0);
+    assert!(start.stderr.contains("ineligible"), "{}", start.stderr);
+
+    // Fixed: the next doctor run finds claude eligible and starts Envoy again.
+    fs::write(fakes.join("health"), "fixed\n").unwrap();
+    let d = hub.cli(&["--json", "doctor", "--refresh"]).json();
+    assert!(
+        d["harnesses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|h| h["name"].as_str() == Some("claude") && h["eligible"].as_bool() == Some(true)),
+        "{d}"
+    );
+    eventually("Envoy to start again", Duration::from_secs(30), || {
+        events(&hub.home)
+            .iter()
+            .any(|e| e.contains("claude is eligible again; starting Envoy"))
+            .then_some(())
+    });
+}
+
+/// A fake harness program: `--version` prints `<dir>/<name>.version`; the update command
+/// records itself in `<dir>/calls` and bumps the version, or fails when `fails`. Anything else
+/// runs `real` when given.
+fn fake_program(dir: &Path, name: &str, fails: bool, real: Option<&Path>) -> PathBuf {
+    let p = dir.join(name);
+    let version = dir.join(format!("{name}.version"));
+    fs::write(&version, "1.0.0\n").unwrap();
+    let update = if fails {
+        "echo 'update server unreachable' >&2; exit 1".to_string()
+    } else {
+        format!(
+            "echo 'updated to 2.0.0'; echo 2.0.0 > '{}'; exit 0",
+            version.display()
+        )
+    };
+    let rest = match real {
+        Some(r) => format!("exec '{}' \"$@\"", r.display()),
+        None => "exit 1".into(),
+    };
+    write_exec(
+        &p,
+        &format!(
+            "#!/bin/bash\ncase \"$1\" in\n  --version) cat '{v}'; exit 0;;\n  update) echo \"{name} $*\" >> '{calls}'; {update};;\nesac\n{rest}\n",
+            v = version.display(),
+            calls = dir.join("calls").display(),
+        ),
+    );
+    p
+}
+
+fn calls(dir: &Path) -> Vec<String> {
+    fs::read_to_string(dir.join("calls"))
+        .unwrap_or_default()
+        .lines()
+        .map(String::from)
+        .collect()
+}
+
+#[test]
+fn harness_updates_run_daily_and_wait_for_a_sleeve_mid_turn() {
+    if !common::have_runtime() {
+        return;
+    }
+    let real_pi = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .map(|d| d.join("pi"))
+        .find(|p| p.is_file())
+        .unwrap();
+    let fakes = dir("harness");
+    let claude = fake_program(&fakes, "claude", false, None);
+    let codex = fake_program(&fakes, "codex", false, None);
+    let grok = fake_program(&fakes, "grok", true, None);
+    let pi = fake_program(&fakes, "pi", false, Some(&real_pi));
+    let mut hub = Hub::start_config(
+        "harnessupd",
+        "pi_local",
+        &[
+            ("harness_update_hours", 24u64.into()),
+            ("claude_program", claude.to_str().unwrap().into()),
+            ("codex_program", codex.to_str().unwrap().into()),
+            ("grok_program", grok.to_str().unwrap().into()),
+            ("pi_program", pi.to_str().unwrap().into()),
+        ],
+        &[],
+        &[],
+    );
+    let want = [
+        "claude update",
+        "codex update",
+        "grok update",
+        "pi update self",
+    ];
+    eventually(
+        "every program's update to run",
+        Duration::from_secs(120),
+        || {
+            let c = calls(&fakes);
+            want.iter().all(|w| c.iter().any(|l| l == w)).then_some(())
+        },
+    );
+    let ev = eventually("the update events", Duration::from_secs(30), || {
+        let ev = events(&hub.home);
+        ev.iter().any(|e| e.starts_with("pi: ")).then_some(ev)
+    });
+    assert!(
+        ev.iter()
+            .any(|e| e == "claude: 1.0.0 -> 2.0.0 (claude update)"),
+        "{ev:?}"
+    );
+    assert!(
+        ev.iter()
+            .any(|e| e.starts_with("grok: grok update failed") && e.contains("now 1.0.0")),
+        "{ev:?}"
+    );
+    assert!(
+        hub.log_text()
+            .contains("harness update claude: updated to 2.0.0"),
+        "the command's output is in the hub log"
+    );
+    let d = hub.cli(&["--json", "doctor", "--refresh"]).json();
+    let claude_row = d["harnesses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["name"].as_str() == Some("claude"))
+        .cloned()
+        .unwrap();
+    assert_eq!(claude_row["version"].as_str(), Some("2.0.0"), "{d}");
+    assert!(claude_row["updated_at_ms"].as_u64().is_some(), "{d}");
+
+    // The last runs are kept: a restart within the day runs nothing again.
+    let before = calls(&fakes).len();
+    hub.restart();
+    thread::sleep(Duration::from_secs(5));
+    assert_eq!(calls(&fakes).len(), before, "{:?}", calls(&fakes));
+
+    // Asked for while a pi sleeve is mid-turn, pi's update waits for the turn to end.
+    let repo = temp_repo("harnessupd");
+    hub.spawn_pi("busy", &repo);
+    hub.send("busy", LONG);
+    eventually("the long turn to start", Duration::from_secs(60), || {
+        let s = hub.sleeve("busy");
+        (s["incarnation"]["activity"]["state"].as_str() == Some("working")).then_some(())
+    });
+    let r = hub
+        .cli(&["--json", "harness", "update", "pi", "claude", "missing"])
+        .json();
+    let state = |p: &str| {
+        r["programs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["program"].as_str() == Some(p))
+            .and_then(|x| x["state"].as_str())
+            .map(String::from)
+    };
+    assert_eq!(state("pi").as_deref(), Some("deferred"), "{r}");
+    assert_eq!(state("claude").as_deref(), Some("started"), "{r}");
+    assert_eq!(state("missing").as_deref(), Some("skipped"), "{r}");
+    let pi_runs = || {
+        calls(&fakes)
+            .iter()
+            .filter(|l| *l == "pi update self")
+            .count()
+    };
+    eventually("claude's update", Duration::from_secs(30), || {
+        (calls(&fakes)
+            .iter()
+            .filter(|l| *l == "claude update")
+            .count()
+            == 2)
+            .then_some(())
+    });
+    let busy_now = hub.sleeve("busy")["incarnation"]["activity"]["state"]
+        .as_str()
+        .map(String::from);
+    if busy_now.as_deref() == Some("working") {
+        assert_eq!(pi_runs(), 1, "pi waits while the sleeve works");
+    }
+    hub.wait("busy", "idle", 300);
+    eventually(
+        "pi's update after the turn",
+        Duration::from_secs(30),
+        || (pi_runs() == 2).then_some(()),
+    );
+}

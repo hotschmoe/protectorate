@@ -1,8 +1,8 @@
 //! `doctor` (SPEC 7): checks of this machine as fixed JSON, cached in `doctor.json`, that gate
 //! harness eligibility for dispatch and resleeve.
 //!
-//! - Harness CLIs: path, version and install method (D33), the native update command (listed,
-//!   never run here) and whether login files or keys are present. Credentials are never read or
+//! - Harness CLIs: path, version and install method (D33), the native update command (run by
+//!   the hub, never here) and whether login files or keys are present. Credentials are never read or
 //!   printed; only their presence is.
 //! - `gh` login, the sandbox prerequisites (bwrap, `systemd-run --user`, `XDG_RUNTIME_DIR`,
 //!   linger), disk, clock, curl, and the Go toolchain with the headscale and member binaries.
@@ -13,6 +13,8 @@
 #![forbid(unsafe_code)]
 
 mod probe;
+
+pub use probe::Out;
 
 use pt_json::{ToJson, record, string_enum};
 use std::ffi::OsString;
@@ -57,13 +59,6 @@ record! {
         pub error: String,
     }
 
-    /// The harness's own updater, as it would be run. `dry_run` is always true here.
-    #[derive(Debug, Clone, PartialEq)]
-    pub struct Update {
-        pub argv: Vec<String>,
-        pub dry_run: bool,
-    }
-
     #[derive(Debug, Clone, PartialEq)]
     pub struct Credentials {
         /// False for a harness whose login location is not known (antigravity).
@@ -78,7 +73,10 @@ record! {
         /// The wire name the hub uses (`claude`, `pi_local`, ...).
         pub name: String,
         pub binary: Binary,
-        pub update: Update,
+        /// The harness's own updater (D33), its program resolved like `binary`; empty when it
+        /// has none. Codex's npm launcher tells `codex update` it is npm-managed, so the same
+        /// command serves both installs.
+        pub update: Vec<String>,
         pub credentials: Credentials,
         pub eligible: bool,
         pub reasons: Vec<String>,
@@ -188,6 +186,12 @@ impl Report {
     }
 }
 
+/// Runs `program args` with stdin closed, killed past `timeout`, keeping the first 64 KiB of
+/// each stream: how the hub runs a harness's update command and asks for its version.
+pub fn run_program(program: &Path, args: &[&str], timeout: Duration) -> Result<Out, String> {
+    probe::run(program, args, &[], timeout)
+}
+
 /// What to check. [`Config::from_env`] fills it from this process.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -196,6 +200,9 @@ pub struct Config {
     pub path: Option<OsString>,
     /// Harness checks are for the hub; a node sets this false.
     pub harnesses: bool,
+    /// A harness program's path by its name (`claude`, `pi`, ...), in place of PATH lookup:
+    /// the hub passes the programs it launches.
+    pub programs: Vec<(String, PathBuf)>,
     pub disk_paths: Vec<PathBuf>,
     /// headscale and member; when None, looked for beside this executable, then on PATH.
     pub headscale: Option<PathBuf>,
@@ -211,6 +218,7 @@ impl Config {
             home,
             path: std::env::var_os("PATH"),
             harnesses: true,
+            programs: Vec::new(),
             headscale: None,
             member: None,
             timeout: Duration::from_secs(20),
@@ -219,6 +227,13 @@ impl Config {
 
     fn which(&self, name: &str) -> Option<PathBuf> {
         probe::which(name, self.path.as_ref())
+    }
+
+    fn program(&self, name: &str) -> Option<PathBuf> {
+        match self.programs.iter().find(|(n, _)| n == name) {
+            Some((_, p)) => p.is_file().then(|| p.clone()),
+            None => self.which(name),
+        }
     }
 
     fn beside_exe_or_path(&self, given: &Option<PathBuf>, name: &str) -> Option<PathBuf> {
@@ -340,7 +355,7 @@ fn harnesses(cfg: &Config, sandbox_ok: &[String], node: &Binary) -> Vec<Harness>
                     scope.spawn(|| {
                         probe::binary(
                             s.program,
-                            cfg.which(s.program),
+                            cfg.program(s.program),
                             Some(&["--version"]),
                             cfg.timeout,
                         )
@@ -374,13 +389,16 @@ fn harnesses(cfg: &Config, sandbox_ok: &[String], node: &Binary) -> Vec<Harness>
                 reasons.push("node (D14) not on PATH".into());
             }
             reasons.extend(sandbox_ok.iter().cloned());
+            let mut update: Vec<String> = s.update.iter().map(|a| a.to_string()).collect();
+            if let Some(first) = update.first_mut()
+                && binary.present
+            {
+                first.clone_from(&binary.path);
+            }
             Harness {
                 name: s.name.to_string(),
                 binary,
-                update: Update {
-                    argv: s.update.iter().map(|a| a.to_string()).collect(),
-                    dry_run: true,
-                },
+                update,
                 credentials,
                 eligible: reasons.is_empty(),
                 reasons,

@@ -1,10 +1,13 @@
 //! Arbitrary bytes as every answer payload the hub reads from a node (which may be hostile):
-//! the hello, a job status, a list, both end frames and an error. Never a panic, and whatever
-//! parses survives a write and a second parse unchanged, the submit token included.
+//! the hello, a job status, a list, both end frames, an update answer and an error. Never a
+//! panic, and whatever parses survives a write and a second parse unchanged, the submit token
+//! included.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use pt_frame::msg::{self, ArtifactEnd, ErrorReply, HelloReply, JobList, JobReply, LogEnd};
+use pt_frame::msg::{
+    self, ArtifactEnd, ErrorReply, HelloReply, JobList, JobReply, LogEnd, UpdateReply,
+};
 use pt_json::{FromJson, ToJson};
 
 fn again<T: FromJson + ToJson + PartialEq + std::fmt::Debug>(v: &pt_json::Value) {
@@ -23,5 +26,6 @@ fuzz_target!(|data: &[u8]| {
     again::<JobList>(&v);
     again::<LogEnd>(&v);
     again::<ArtifactEnd>(&v);
+    again::<UpdateReply>(&v);
     again::<ErrorReply>(&v);
 });

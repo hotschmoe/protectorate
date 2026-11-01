@@ -73,6 +73,10 @@ impl Home {
     pub fn history(&self) -> PathBuf {
         self.root.join("history")
     }
+    /// The last run of each harness's own update command.
+    pub fn harness_updates(&self) -> PathBuf {
+        self.root.join("harness-updates.json")
+    }
 
     /// Creates the layout (mode 0700 at the root) and canonicalizes the root.
     pub fn prepare(root: &Path) -> io::Result<Home> {
@@ -203,6 +207,15 @@ pt_json::record! {
         pub d9_spawn_limit: u64 = 3,
         /// D9: how long a guarded call waits for the owner before it fails.
         pub d9_approval_timeout_secs: u64 = 900,
+        /// How often each installed harness's own update command runs (D33); 0 never runs it
+        /// on a schedule (`protectorate harness update` still does).
+        pub harness_update_hours: u64 = 24,
+        /// Where hub and node updates come from (SPEC 6a): the GitHub API (or a loopback
+        /// `http://` stand-in) and the repo.
+        pub release_api: String = "https://api.github.com".to_string(),
+        pub release_repo: String = "hotschmoe/protectorate".to_string(),
+        /// `stable` or `dev`: what `hub update` and `node update` take without `--version`.
+        pub release_channel: String = "stable".to_string(),
         pub fleet: FleetConf = FleetConf {
             listen: String::new(),
             dir: String::new(),

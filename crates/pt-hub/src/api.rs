@@ -170,6 +170,7 @@ pub fn call(hub: &Hub, who: &Principal, name: &str, body: &Value) -> Result<Valu
             ),
         });
     }
+    crate::doctor::precheck(hub, name, body)?;
     let c = Ctx { hub, who };
     routes!(&c, name, body;
         GetState => get_state,
@@ -211,6 +212,10 @@ pub fn call(hub: &Hub, who: &Principal, name: &str, body: &Value) -> Result<Valu
         AddDevice => add_device,
         PairDevice => pair_device,
         RevokeDevice => revoke_device,
+        GetDoctor => get_doctor,
+        UpdateHarnesses => update_harnesses,
+        UpdateHub => update_hub,
+        UpdateNodes => update_nodes,
     )
 }
 
@@ -1489,4 +1494,35 @@ fn revoke_device(c: &Ctx<'_>, r: api::DeviceRef) -> Result<api::Empty> {
         ));
     }
     Ok(api::Empty {})
+}
+
+// ---- doctor and updates --------------------------------------------------------------------
+
+fn get_doctor(c: &Ctx<'_>, r: api::GetDoctorRequest) -> Result<api::DoctorReport> {
+    if matches!(c.who, Principal::Sleeve(_)) {
+        return Err(err(
+            ErrorCode::Forbidden,
+            "the doctor report is for the owner and Envoy",
+        ));
+    }
+    let report = if r.refresh {
+        Some(crate::doctor::run_now(c.hub))
+    } else {
+        c.hub.doctor.report()
+    };
+    Ok(crate::doctor::api_report(c.hub, report.as_deref()))
+}
+
+fn update_harnesses(c: &Ctx<'_>, r: api::UpdateHarnessesRequest) -> Result<api::HarnessUpdates> {
+    Ok(api::HarnessUpdates {
+        programs: crate::harness_update::request(c.hub, &r.programs),
+    })
+}
+
+fn update_hub(c: &Ctx<'_>, r: api::UpdateHubRequest) -> Result<api::HubUpdate> {
+    crate::update::update_hub(c.hub, r)
+}
+
+fn update_nodes(c: &Ctx<'_>, r: api::UpdateNodesRequest) -> Result<api::NodeUpdates> {
+    crate::update::update_nodes(c.hub, r)
 }

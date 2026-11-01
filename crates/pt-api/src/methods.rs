@@ -49,6 +49,21 @@ api_enums! {
         Compaction = "compaction",
     }
 
+    /// Stable takes `vX.Y.Z` tags only; dev takes every `vX.Y.Z[-PRE]` tag.
+    pub enum ReleaseChannel {
+        Stable = "stable",
+        Dev = "dev",
+    }
+
+    pub enum HarnessUpdateState {
+        /// Running now, in the background; its outcome is a hub event.
+        Started = "started",
+        /// A sleeve on it is mid-turn: it runs once they are all idle.
+        Deferred = "deferred",
+        /// Not installed, without an update command, or already running.
+        Skipped = "skipped",
+    }
+
     pub enum ErrorCode {
         /// No credential, or one the hub does not know.
         Unauthenticated = "unauthenticated",
@@ -462,6 +477,115 @@ api_records! {
         /// The hub cut the range short; read on from the last doc's turn.
         pub more: bool = false,
     }
+
+    pub struct GetDoctorRequest {
+        /// Run the checks again (a few seconds) before answering.
+        pub refresh: bool = false,
+    }
+
+    /// A harness as `doctor` found it (SPEC 7, D33).
+    pub struct DoctorHarness {
+        /// The hub's name for it, `pi_durable` included.
+        pub name: String,
+        pub present: bool,
+        pub path: String,
+        pub version: String,
+        /// `native`, `npm`, `script`, `other` or `missing`.
+        pub install: String,
+        /// A login file or key was found (never read or shown).
+        pub login: bool,
+        /// Whether the hub spawns, starts or resleeves onto it.
+        pub eligible: bool,
+        /// Why it is not eligible: each failed check.
+        pub reasons: Vec<String> = Vec::new(),
+        /// Its own update command; empty when it has none.
+        pub update: Vec<String> = Vec::new(),
+        /// The last run of that command by the hub, and how it went.
+        pub updated_at_ms: Option<EpochMs>,
+        pub update_note: String = String::new(),
+    }
+
+    /// The hub machine's `doctor.json`, compacted.
+    pub struct DoctorReport {
+        /// 0 until the first run finishes.
+        pub checked_at_ms: EpochMs,
+        pub os: String,
+        pub arch: String,
+        pub harnesses: Vec<DoctorHarness> = Vec::new(),
+        pub gh_logged_in: bool,
+        pub gh_account: String,
+        pub sandbox_ok: bool,
+        /// Everything that needs the owner, one line each.
+        pub problems: Vec<String> = Vec::new(),
+    }
+
+    pub struct UpdateHarnessesRequest {
+        /// Programs (`claude`, `codex`, `grok`, `pi`); empty means every installed one.
+        pub programs: Vec<String> = Vec::new(),
+    }
+
+    pub struct HarnessUpdate {
+        pub program: String,
+        pub state: HarnessUpdateState,
+        pub detail: String = String::new(),
+    }
+
+    pub struct HarnessUpdates {
+        pub programs: Vec<HarnessUpdate> = Vec::new(),
+    }
+
+    pub struct UpdateHubRequest {
+        /// Only say what would be installed.
+        pub check: bool = false,
+        /// Default: the hub's `release_channel`.
+        pub channel: Option<ReleaseChannel>,
+        /// A release tag, in place of the channel's newest.
+        pub version: Option<String>,
+        /// Swap `releases/current` and `releases/previous`, then restart.
+        pub rollback: bool = false,
+    }
+
+    pub struct HubUpdate {
+        /// What `releases/current` named before.
+        pub current: Option<String>,
+        /// The release picked, or rolled back to.
+        pub target: String,
+        /// The target differs from `current`.
+        pub available: bool,
+        /// The hub exits so its service manager starts the target, which keeps it only if its
+        /// own health check passes within 2 minutes.
+        pub restarting: bool,
+        pub note: String = String::new(),
+    }
+
+    pub struct UpdateNodesRequest {
+        /// By id or name; leave empty with `all`.
+        pub nodes: Vec<String> = Vec::new(),
+        /// Every online node, one canary per OS and arch first.
+        pub all: bool = false,
+        /// A release tag, in place of the channel's newest.
+        pub version: Option<String>,
+        pub channel: Option<ReleaseChannel>,
+        /// How long a node waits for the hub after its restart before it rolls back (600).
+        pub probation_secs: Option<u64>,
+        /// Answer once each node has switched, without waiting for it to come back.
+        pub no_wait: bool = false,
+    }
+
+    pub struct NodeUpdate {
+        pub node_id: String,
+        pub name: String,
+        /// The release the node ran before, as it reported it.
+        pub from: String,
+        pub to: String,
+        pub ok: bool,
+        pub detail: String = String::new(),
+    }
+
+    pub struct NodeUpdates {
+        pub version: String,
+        pub nodes: Vec<NodeUpdate> = Vec::new(),
+    }
 }
 
 impl ApiError {
@@ -555,6 +679,17 @@ api_methods! {
 
     // Hub
     GetHubInfo(Empty) -> HubInfo: Sleeve,
+
+    // Doctor and updates (SPEC 6a, 7; D33)
+    /// The doctor report; Envoy and the owner only.
+    GetDoctor(GetDoctorRequest) -> DoctorReport: Sleeve,
+    /// Runs each harness's own update command now; one with a sleeve mid-turn waits for it.
+    UpdateHarnesses(UpdateHarnessesRequest) -> HarnessUpdates: Owner,
+    /// Stages a release from GitHub, checks it against SHA256SUMS, switches `releases/current`
+    /// and restarts the hub on probation.
+    UpdateHub(UpdateHubRequest) -> HubUpdate: Owner,
+    /// Has each node fetch, check and switch to a release, then waits for it to come back.
+    UpdateNodes(UpdateNodesRequest) -> NodeUpdates: Owner,
 
     // Devices: `pd1.` tokens for the apps
     ListDevices(Empty) -> DeviceList: Owner,

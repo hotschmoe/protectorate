@@ -6,9 +6,11 @@ use crate::sums::plain_name;
 use crate::{Error, ErrorKind, Pick, Release, Result, Source, Sums};
 use pt_json::{ToJson, record};
 use std::fs::{self, File};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const CURRENT: &str = "current";
@@ -42,8 +44,9 @@ pub struct Staged {
 }
 
 record! {
-    /// A node's update on trial (SPEC 6a): it reverts to `previous` unless the hub makes contact
-    /// before `deadline_ms`. Times are wall-clock milliseconds since the epoch.
+    /// A release on trial (SPEC 6a): it reverts to `previous` unless confirmed before
+    /// `deadline_ms` (a node: the hub made contact; the hub: its own health check passed).
+    /// Times are wall-clock milliseconds since the epoch.
     #[derive(Debug, Clone, PartialEq)]
     pub struct Probation {
         pub version: String,
@@ -52,6 +55,10 @@ record! {
         pub deadline_ms: u64,
         pub contacted_ms: Option<u64>,
         pub rolled_back_ms: Option<u64>,
+        /// Starts counted by [`Store::start_attempt`].
+        pub starts: u64 = 0,
+        /// Why it was rolled back.
+        pub reason: Option<String>,
     }
 }
 
@@ -63,8 +70,8 @@ pub enum Verdict {
     Waiting { remaining: Duration },
     /// The hub made contact; the update stays.
     Confirmed,
-    /// The window passed without contact and `current` went back. The caller exits so the
-    /// service manager restarts the previous binary.
+    /// The window passed without confirmation, or the release kept failing, and `current` went
+    /// back. The caller exits so the service manager restarts the previous binary.
     RolledBack(Switch),
 }
 
@@ -116,6 +123,18 @@ fn write_synced(path: &Path, bytes: &[u8]) -> Result<()> {
         .map_err(|e| Error::io(format!("writing {}", path.display()), e))
 }
 
+/// argv[0] as an absolute path.
+fn argv0() -> PathBuf {
+    let a = std::env::args_os()
+        .next()
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    if a.is_absolute() || a.parent().is_none_or(|p| p.as_os_str().is_empty()) {
+        return a;
+    }
+    std::env::current_dir().unwrap_or_default().join(a)
+}
+
 /// The local release store. Directories of old versions are never removed here.
 #[derive(Debug, Clone)]
 pub struct Store {
@@ -145,6 +164,97 @@ impl Store {
     /// `releases/current`, the path a service runs its binary through.
     pub fn current_dir(&self) -> PathBuf {
         self.dir.join(CURRENT)
+    }
+
+    /// Whether this process was started as `releases/current/<program>`, the only start a
+    /// switch of `current` changes. Read from argv[0], which a service manager sets to the path
+    /// it ran.
+    pub fn started_from_current(&self, program: &str) -> std::result::Result<(), String> {
+        let argv0 = argv0();
+        let parent = argv0.parent();
+        let ok = argv0.file_name().is_some_and(|f| f == program)
+            && parent
+                .and_then(|p| p.file_name())
+                .is_some_and(|f| f == CURRENT)
+            && parent
+                .and_then(Path::parent)
+                .and_then(|d| fs::canonicalize(d).ok())
+                .is_some_and(|d| fs::canonicalize(&self.dir).is_ok_and(|r| r == d));
+        if ok {
+            return Ok(());
+        }
+        Err(format!(
+            "this process runs {}, not {}/{CURRENT}/{program}, so a switch would not take \
+             effect; point the service at releases/{CURRENT} first",
+            argv0.display(),
+            self.dir.display()
+        ))
+    }
+
+    /// The release this process was started from, when argv[0] lies in this store: what
+    /// `current` named at the start, for a service run through it.
+    pub fn running_release(&self) -> Option<String> {
+        let real = fs::canonicalize(argv0()).ok()?;
+        let vdir = real.parent()?;
+        let name = vdir.file_name()?.to_str()?.to_string();
+        let store = fs::canonicalize(&self.dir).ok()?;
+        (version_name(&name) && vdir.parent()? == store).then_some(name)
+    }
+
+    /// Runs `releases/<version>/<program> <arg>` and checks that its first line is
+    /// `<program> <version>`, as the installers do: a binary for the wrong machine or release
+    /// never becomes `current`.
+    pub fn check_binary(&self, version: &str, program: &str, arg: &str) -> Result<()> {
+        const TIMEOUT: Duration = Duration::from_secs(30);
+        let bin = self.version_dir(version).join(program);
+        let health = |m: String| Error::new(ErrorKind::Health, m);
+        let mut child = Command::new(&bin)
+            .arg(arg)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| health(format!("running {}: {e}", bin.display())))?;
+        let mut stdout = child.stdout.take();
+        let reader = thread::spawn(move || {
+            let mut out = Vec::new();
+            if let Some(s) = stdout.as_mut() {
+                let _ = s.take(64 * 1024).read_to_end(&mut out);
+            }
+            out
+        });
+        let deadline = Instant::now() + TIMEOUT;
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(st)) => break Some(st),
+                Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+                Ok(None) | Err(_) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break None;
+                }
+            }
+        };
+        let out = reader.join().unwrap_or_default();
+        let line = String::from_utf8_lossy(&out)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let want = format!("{program} {version}");
+        match status {
+            None => Err(health(format!(
+                "{} {arg} did not finish in {} s",
+                bin.display(),
+                TIMEOUT.as_secs()
+            ))),
+            Some(st) if !st.success() || line != want => Err(health(format!(
+                "{} {arg} reports {line:?} ({st}), not {want:?}",
+                bin.display()
+            ))),
+            Some(_) => Ok(()),
+        }
     }
 
     fn lock(&self) -> Result<Lock> {
@@ -411,48 +521,8 @@ impl Store {
         })
     }
 
-    /// The hub supervisor's hook: switches, then calls `check` every `poll` until it passes or
-    /// `within` runs out, and then rolls back. The check usually restarts nothing itself; it asks
-    /// the new hub for its health.
-    pub fn switch_checked(
-        &self,
-        version: &str,
-        within: Duration,
-        poll: Duration,
-        mut check: impl FnMut() -> std::result::Result<(), String>,
-    ) -> Result<Switch> {
-        let sw = self.switch(version)?;
-        let deadline = Instant::now() + within;
-        let last = loop {
-            let e = match check() {
-                Ok(()) => return Ok(sw),
-                Err(e) => e,
-            };
-            let now = Instant::now();
-            if now >= deadline {
-                break e;
-            }
-            std::thread::sleep(poll.min(deadline - now));
-        };
-        let failed = format!(
-            "{version} failed its health check for {} s: {last}",
-            within.as_secs_f32()
-        );
-        if sw.from.is_none() || sw.from.as_deref() == Some(version) {
-            return Err(Error::new(
-                ErrorKind::Health,
-                format!("{failed}; nothing to roll back to"),
-            ));
-        }
-        let back = self.rollback().map_err(|e| e.context(&failed))?;
-        Err(Error::new(
-            ErrorKind::Health,
-            format!("{failed}; rolled back to {}", back.to),
-        ))
-    }
-
-    /// A node's update: switches and records a probation that [`Store::check_probation`] turns
-    /// into a rollback unless [`Store::hub_contacted`] is called within `window`.
+    /// Switches and records a probation that [`Store::check_probation`] turns into a rollback
+    /// unless [`Store::confirm`] is called within `window`.
     pub fn switch_on_probation(&self, version: &str, window: Duration) -> Result<Switch> {
         let from = self.current()?.ok_or_else(|| {
             store_err("no current release to fall back to; use switch for a first install")
@@ -469,6 +539,8 @@ impl Store {
             deadline_ms: now.saturating_add(window.as_millis() as u64),
             contacted_ms: None,
             rolled_back_ms: None,
+            starts: 0,
+            reason: None,
         };
         let _l = self.lock()?;
         self.write_probation(&p)?;
@@ -510,8 +582,8 @@ impl Store {
         Ok(open.then_some(p))
     }
 
-    /// Records the hub's contact. True when this confirmed an update on trial.
-    pub fn hub_contacted(&self) -> Result<bool> {
+    /// Keeps the release on trial. True when this confirmed one.
+    pub fn confirm(&self) -> Result<bool> {
         let _l = self.lock()?;
         let Some(mut p) = self.open_probation()? else {
             return Ok(false);
@@ -521,9 +593,30 @@ impl Store {
         Ok(true)
     }
 
-    /// Run at start and then periodically by the node.
+    /// Run at start and then periodically by the release on trial.
     pub fn check_probation(&self) -> Result<Verdict> {
         let _l = self.lock()?;
+        self.judge(false, 0)
+    }
+
+    /// Run by the service manager before each start, from the previous release (known to work):
+    /// counts the start, and rolls back once a release on trial has started more than
+    /// `max_starts` times without being confirmed, or its window has passed.
+    pub fn start_attempt(&self, max_starts: u64) -> Result<Verdict> {
+        let _l = self.lock()?;
+        self.judge(true, max_starts)
+    }
+
+    /// Rolls a release on trial back now, for `reason` (it failed its own health check).
+    pub fn fail_probation(&self, reason: &str) -> Result<Option<Switch>> {
+        let _l = self.lock()?;
+        let Some(mut p) = self.open_probation()? else {
+            return Ok(None);
+        };
+        self.roll_back_trial(&mut p, reason).map(Some)
+    }
+
+    fn judge(&self, count: bool, max_starts: u64) -> Result<Verdict> {
         let Some(mut p) = self.probation()? else {
             return Ok(Verdict::Idle);
         };
@@ -534,11 +627,27 @@ impl Store {
             return Ok(Verdict::Idle);
         }
         let now = now_ms();
+        if count {
+            p.starts += 1;
+            if p.starts > max_starts {
+                let why = format!("{} starts without passing its check", p.starts - 1);
+                return self.roll_back_trial(&mut p, &why).map(Verdict::RolledBack);
+            }
+            self.write_probation(&p)?;
+        }
         if now < p.deadline_ms {
             return Ok(Verdict::Waiting {
                 remaining: Duration::from_millis(p.deadline_ms - now),
             });
         }
+        let why = format!(
+            "not confirmed within {} s",
+            p.deadline_ms.saturating_sub(p.switched_ms) / 1000
+        );
+        self.roll_back_trial(&mut p, &why).map(Verdict::RolledBack)
+    }
+
+    fn roll_back_trial(&self, p: &mut Probation, reason: &str) -> Result<Switch> {
         if self.previous()?.as_deref() != Some(p.previous.as_str()) {
             return Err(store_err(format!(
                 "probation of {} expects previous {}, found {:?}",
@@ -548,8 +657,9 @@ impl Store {
             )));
         }
         let sw = self.rollback_locked()?;
-        p.rolled_back_ms = Some(now);
-        self.write_probation(&p)?;
-        Ok(Verdict::RolledBack(sw))
+        p.rolled_back_ms = Some(now_ms());
+        p.reason = Some(reason.to_string());
+        self.write_probation(p)?;
+        Ok(sw)
     }
 }

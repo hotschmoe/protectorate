@@ -42,6 +42,7 @@ pub const USAGE: &str =
 
 struct Node {
     runner: Runner,
+    releases: crate::update::Releases,
     sampler: Mutex<Sampler>,
     node_id: String,
     connections: AtomicUsize,
@@ -181,6 +182,7 @@ fn serve(f: Flags, ready: Box<dyn FnOnce() + Send>) -> Result<(), String> {
         },
     )?;
     let node = Arc::new(Node {
+        releases: crate::update::Releases::open(&dir),
         node_id: node_id(&dir)?,
         sampler: Mutex::new(Sampler::new()),
         runner,
@@ -431,19 +433,23 @@ fn answer(node: &Node, id: u64, payload: &[u8], w: &mut impl Write) -> io::Resul
         Err(e) => error(w, id, e.code, e.message, Some(epoch.clone())),
     };
     match req {
-        Request::Hello(_) => respond(
-            w,
-            id,
-            &HelloReply {
-                protocol: msg::PROTOCOL,
-                node_version: pt_version::VERSION.into(),
-                node_id: node.node_id.clone(),
-                journal_epoch: epoch.clone(),
-                hostname: pt_node::hostname(),
-                os: std::env::consts::OS.into(),
-                arch: std::env::consts::ARCH.into(),
-            },
-        ),
+        Request::Hello(_) => {
+            node.releases.contact();
+            respond(
+                w,
+                id,
+                &HelloReply {
+                    protocol: msg::PROTOCOL,
+                    node_version: pt_version::VERSION.into(),
+                    node_id: node.node_id.clone(),
+                    journal_epoch: epoch.clone(),
+                    hostname: pt_node::hostname(),
+                    os: std::env::consts::OS.into(),
+                    arch: std::env::consts::ARCH.into(),
+                    release: node.releases.started(),
+                },
+            )
+        }
         Request::Inventory => respond(w, id, &inventory::collect()),
         Request::Sample => {
             let s = node
@@ -505,13 +511,23 @@ fn answer(node: &Node, id: u64, payload: &[u8], w: &mut impl Write) -> io::Resul
                 jobs: r.list(),
             },
         ),
-        Request::Update(_) => error(
-            w,
-            id,
-            ErrorCode::Unsupported,
-            "node updates are not implemented yet".into(),
-            None,
-        ),
+        Request::Update(u) => match node.releases.update(&u, r.running()) {
+            Ok((reply, restart)) => {
+                respond(w, id, &reply)?;
+                w.flush()?;
+                if restart {
+                    crate::update::restart_soon(reply.to);
+                }
+                Ok(())
+            }
+            Err((code, message)) => {
+                eprintln!(
+                    "protectorate-node: update to {} refused: {message}",
+                    u.version
+                );
+                error(w, id, code, message, None)
+            }
+        },
     }
 }
 

@@ -343,7 +343,7 @@ straight from GitHub releases, on the stable or dev channel, as today.
 - **Verification:** every update checks the asset's sha256 against the release's `SHA256SUMS`
   before anything is staged (no signing key for now; section 6).
 - **Hub:**
-  - `protectorate update [--version]`, or the app's UPDATE key, downloads the release and stages it
+  - `protectorate hub update [--version]`, or the app's UPDATE key, downloads the release and stages it
     in `releases/<version>/`.
   - Headscale's database is snapshotted first, because its migrations are one-way.
   - The hub re-execs in place (D17), so sleeves keep running. The previous release stays on disk.

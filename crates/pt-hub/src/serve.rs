@@ -1,6 +1,7 @@
 //! `protectorate serve`: lay out the home, replay the journal, apply `HubRecovered`, start the
-//! core, the executors, the fleet, the tick and the listeners; on a signal stop the listeners
-//! and the fleet.
+//! core, the executors, the fleet, doctor, the harness updater, the tick and the listeners; on a
+//! signal, or an update's restart, stop the listeners and the fleet. A release on trial
+//! (`update.rs`) is switched back when this fails to start or fails its health check.
 
 use std::fs;
 use std::io;
@@ -22,6 +23,7 @@ use crate::home::{Config, Home, Tokens, random_hex, write_private};
 use crate::http::{Listener, Web, handler};
 use crate::hub::{ENVOY, Hub, Input, View};
 use crate::log::{info, warning};
+use crate::update::Stop;
 use crate::wire;
 
 pub struct ServeOptions {
@@ -90,8 +92,46 @@ fn http_config() -> HttpConfig {
     }
 }
 
-pub fn serve(o: ServeOptions) -> Result<(), String> {
+/// How `serve` ended.
+pub enum Exit {
+    Stopped,
+    /// Exit with `RESTART_CODE` so the service manager starts `releases/current`.
+    Restart,
+}
+
+/// `hub probation`, run by the unit before each start from `releases/previous`: counts the
+/// start of a release on trial and switches back after too many or once its window is over.
+pub fn probation_prestart(home: &Path) -> Result<String, String> {
+    let store = pt_update::Store::open(home).map_err(|e| e.to_string())?;
+    Ok(
+        match store
+            .start_attempt(pt_update::MAX_TRIAL_STARTS)
+            .map_err(|e| e.to_string())?
+        {
+            pt_update::Verdict::Idle => "no release on trial".into(),
+            pt_update::Verdict::Confirmed => "the release on trial was confirmed".into(),
+            pt_update::Verdict::Waiting { remaining } => {
+                format!("on trial, {} s left", remaining.as_secs())
+            }
+            pt_update::Verdict::RolledBack(sw) => format!(
+                "rolled back from {} to {}",
+                sw.from.as_deref().unwrap_or("-"),
+                sw.to
+            ),
+        },
+    )
+}
+
+pub fn serve(o: ServeOptions) -> Result<Exit, String> {
     let home = Home::prepare(&o.home).map_err(|e| e.to_string())?;
+    let trial = crate::update::probation_at_start(&home)?;
+    if let Some(v) = &trial {
+        info!("release {v} is on trial: it stays once the health check passes");
+    }
+    run(o, home.clone(), trial).map_err(|e| crate::update::failed_start(&home, &e))
+}
+
+fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, String> {
     let config = Config::load(&home).map_err(|e| e.to_string())?;
     let (tokens, new_owner) = Tokens::load_or_create(&home).map_err(|e| e.to_string())?;
     let devices = Devices::load(&home).map_err(|e| e.to_string())?;
@@ -117,7 +157,11 @@ pub fn serve(o: ServeOptions) -> Result<(), String> {
         state.effects.len()
     );
 
-    let exe = std::env::current_exe().map_err(ctx("current exe"))?;
+    let store = pt_update::Store::open(&home.root).map_err(|e| e.to_string())?;
+    let exe = match store.started_from_current("protectorate") {
+        Ok(()) => store.current_dir().join("protectorate"),
+        Err(_) => std::env::current_exe().map_err(ctx("current exe"))?,
+    };
     link_cli(&home, &exe)?;
     write_private(&home.envoy().join("CLAUDE.md"), ENVOY_MD.as_bytes())
         .map_err(|e| e.to_string())?;
@@ -196,6 +240,8 @@ pub fn serve(o: ServeOptions) -> Result<(), String> {
         }));
     }
 
+    crate::doctor::start(&hub, o.net);
+    crate::harness_update::start(&hub);
     crate::fleet::start(&hub, o.fleet, o.net);
     crate::quota::start(&hub);
     crate::history::start(&hub);
@@ -252,11 +298,35 @@ pub fn serve(o: ServeOptions) -> Result<(), String> {
     }
     info!("ready: {}", sock.display());
 
-    let sig = pt_sys::wait_term().map_err(|e| e.to_string())?;
-    info!("signal {sig}: stopping the listeners and the fleet");
+    let (stop_tx, stop_rx) = mpsc::channel();
+    pt_sys::install_term_handler().map_err(|e| e.to_string())?;
+    let signals = stop_tx.clone();
+    thread::Builder::new()
+        .name("pt-signals".into())
+        .spawn(move || match pt_sys::wait_term() {
+            Ok(sig) => drop(signals.send(Stop::Signal(sig))),
+            Err(e) => warning!("waiting for signals: {e}"),
+        })
+        .map_err(ctx("spawn the signal thread"))?;
+    *crate::transcript::lock(&hub.stop) = Some(stop_tx);
+    if let Some(v) = trial {
+        crate::update::watch_probation(&hub, v);
+    }
+
+    let exit = match stop_rx.recv() {
+        Ok(Stop::Signal(sig)) => {
+            info!("signal {sig}: stopping the listeners and the fleet");
+            Exit::Stopped
+        }
+        Ok(Stop::Restart(why)) => {
+            info!("restarting ({why}): stopping the listeners and the fleet");
+            Exit::Restart
+        }
+        Err(_) => return Err("the stop channel closed".into()),
+    };
     for s in &servers {
         s.shutdown(Duration::from_secs(2));
     }
     hub.fleet.shutdown();
-    Ok(())
+    Ok(exit)
 }

@@ -4,7 +4,7 @@
 # release's SHA256SUMS before using it and checks that it reports that release with both
 # embedded, stages it in $PROTECTORATE_HOME/releases/<version>/ (the layout pt-update keeps), points releases/current at that version (releases/previous keeps the old
 # one), and runs the hub as a systemd user service with linger, so it starts at boot with no
-# login. It prints the plan first; --dry-run checks the release and stops there, writing nothing.
+# login. The unit runs releases/current, which `protectorate hub update` switches on probation. It prints the plan first; --dry-run checks the release and stops there, writing nothing.
 #
 # Fetch this script at a commit, never a tag (SPEC 12a item 9), and compare its sha256 with the
 # one in the release notes before running it:
@@ -164,6 +164,7 @@ main() {
 	if [ -n "$old" ] && [ "$old" != "$TAG" ]; then say "  point    $rel/current -> $TAG (previous -> $old)"
 	else say "  point    $rel/current -> $TAG"; fi
 	say "  write    $unit"
+	say "           ExecStartPre=-$rel/previous/protectorate --home $home hub probation"
 	say "           ExecStart=$exec_path --home $home serve"
 	[ "$linger" = yes ] || say "  run      loginctl enable-linger $USER (linger is $linger; a headless hub needs it)"
 	if [ "$start" = 1 ]; then say "  run      systemctl --user daemon-reload; systemctl --user enable $UNIT; (re)start it"
@@ -216,6 +217,8 @@ main() {
 	Type=simple
 	Environment="PROTECTORATE_HOME=$home"
 	Environment="PATH=$path_line"
+	# A release on trial that keeps failing to start is switched back from the previous one.
+	ExecStartPre=-$rel/previous/protectorate --home $home hub probation
 	ExecStart=$exec_path --home $home serve
 	Restart=on-failure
 	RestartSec=5
