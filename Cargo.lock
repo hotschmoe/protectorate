@@ -27,6 +27,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pt-apigen"
+version = "0.0.0"
+dependencies = [
+ "pt-api",
+ "pt-json",
+]
+
+[[package]]
 name = "pt-drivers"
 version = "0.0.0"
 dependencies = [

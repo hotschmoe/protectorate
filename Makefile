@@ -1,6 +1,11 @@
 VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build release test test-paid check check-deps fmt
+.PHONY: build release test test-paid check check-deps check-gen gen fmt
+
+DART ?= dart
+API_DART := app/lib/api/api.g.dart
+# Inside app/ so dart format sees the app's language version and settings; .dart_tool is ignored.
+API_TMP := app/.dart_tool/apigen/api.g.dart
 
 build:
 	PROTECTORATE_BUILD_VERSION='$(VERSION)' cargo build --locked --workspace
@@ -21,7 +26,22 @@ fmt:
 check:
 	cargo fmt --all -- --check
 	cargo clippy --locked --workspace --all-targets -- -D warnings
-	$(MAKE) test check-deps
+	$(MAKE) test check-deps check-gen
 
 check-deps:
 	sh scripts/check-deps.sh
+
+# Writes the Dart client from crates/pt-api (pt-apigen, then dart format).
+gen:
+	mkdir -p $(dir $(API_TMP))
+	cargo run --locked --quiet --bin pt-apigen -- $(API_TMP)
+	$(DART) format $(API_TMP) >/dev/null
+	cp $(API_TMP) $(API_DART)
+
+# Fails when the committed Dart client differs from what crates/pt-api generates.
+check-gen:
+	mkdir -p $(dir $(API_TMP))
+	cargo run --locked --quiet --bin pt-apigen -- $(API_TMP)
+	$(DART) format $(API_TMP) >/dev/null
+	@cmp -s $(API_TMP) $(API_DART) || { echo "check-gen: $(API_DART) is stale; run make gen"; exit 1; }
+	@echo "check-gen: ok"
