@@ -713,3 +713,18 @@ Each entry: where, what was done, what right looks like.
   entry's `apiKey`, as a set environment variable's name or a literal; a `!command` key is never
   run (the local row stays `unknown`). The key goes to `local_url` even when that is not the
   provider's own `baseUrl`. Right: fine while both are the owner's endpoints.
+- **Windows job identity, blocked** (`pt-node`, Windows job runner): the owner chose
+  (2026-11-01) ordinary jobs as LocalService or a restricted token, and maintenance jobs as
+  SYSTEM. Two agent attempts to write the token and logon code were cut off by a safety
+  classifier and not retried, so jobs still run as LocalSystem inside a Job Object. Next step:
+  the owner decides how to proceed; the planned design is in the devlog.
+- **An idle Pi sleeve that never had a turn does not resume after a hub restart** (`pt-hub`,
+  found by the durable agent): it fails to resume and parks. Right: resume (or freshly launch) a
+  Pi sleeve with no native session yet, as one whose session exists.
+- **Review coverage**: only pt-core, pt-journal and pt-http have had an adversarial review.
+  pt-hub (the largest crate), pt-drivers, pt-sandbox, pt-quota, pt-history and pt-update have had
+  none. Right: review each before it is trusted with more than the owner's own machines.
+- **`pi_local` is unconfigured by default** (`pt-hub`, home.rs, doctor.rs): `pi_local_provider`
+  and `pi_local_model` default to empty, and doctor marks `pi_local` and `pi_durable` ineligible
+  until both are set, so the default `resleeve_to` (`["pi_local"]`) parks a sleeve that must
+  resleeve. Right: offer the configured local model when there is one, or ask for it at setup.
