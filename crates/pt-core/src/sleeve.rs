@@ -672,11 +672,56 @@ impl Core<'_> {
         if s.proc != Proc::Up || s.target.mode != Mode::Headless || !pending {
             return self.refuse(Code::FailedPrecondition, "no such pending approval");
         }
+        if let Some(sent) = self.answered(sid, approval) {
+            if sent == allow {
+                return self.reply(Reply::Duplicate);
+            }
+            return self.refuse(
+                Code::FailedPrecondition,
+                "a response to that approval is already sent or may have applied",
+            );
+        }
         self.respond(sid, approval, allow, note);
         self.reply(Reply::Accepted);
     }
 
-    pub(crate) fn respond(&mut self, sid: SleeveId, approval: &str, allow: bool, note: &str) {
+    /// The decision of a response to `approval` that was, or may yet be, written to the current
+    /// incarnation. Another write would answer twice (12b item 1). A Rejected record wrote
+    /// nothing, and an Abandoned one is the owner's explicit release.
+    fn answered(&self, sid: SleeveId, approval: &str) -> Option<bool> {
+        let g = self.st.sleeves[&sid].g;
+        self.st.effects.values().find_map(|e| match &e.kind {
+            EffectKind::RespondApproval {
+                sleeve,
+                g: eg,
+                approval: a,
+                allow,
+                ..
+            } if *sleeve == sid
+                && *eg == g
+                && a == approval
+                && !matches!(
+                    e.state,
+                    EffectState::Rejected | EffectState::Abandoned | EffectState::Failed
+                ) =>
+            {
+                Some(*allow)
+            }
+            _ => None,
+        })
+    }
+
+    /// Writes a response unless one is already outstanding; returns whether it did.
+    pub(crate) fn respond(
+        &mut self,
+        sid: SleeveId,
+        approval: &str,
+        allow: bool,
+        note: &str,
+    ) -> bool {
+        if self.answered(sid, approval).is_some() {
+            return false;
+        }
         let g = self.st.sleeves[&sid].g;
         let n = self.st.next_effect;
         self.new_effect(
@@ -689,6 +734,7 @@ impl Core<'_> {
             },
             format!("approval:{}:{}:{approval}:{n}", sid.0, g.0),
         );
+        true
     }
 
     pub(crate) fn viewed_cmd(&mut self, sid: SleeveId) {
