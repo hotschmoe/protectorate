@@ -178,9 +178,11 @@ Each entry: where, what was done, what right looks like.
   would open a second block with the same id. Grok sends no message id, so its blocks are
   numbered per turn and tool call. Right: per-harness block identity from content indexes if
   either shows up in real streams.
-- **App settings live in memory** (hub URL, device token, theme): lost on restart. Right: a small
-  file in the app support directory through `dart:io` and `localStorage` through
-  `dart:js_interop` on web, without path_provider or shared_preferences.
+- **App settings live in memory on desktop and Android** (`app/lib/local_io.dart`): the web build
+  keeps hub URL, device token and device id in `localStorage` (`local_web.dart`), but the
+  `dart:io` side forgets them on restart, so a phone pairs again each launch. Theme is not kept
+  anywhere. Right: a small file in the app support directory through `dart:io`, without
+  path_provider or shared_preferences.
 - **Linux desktop build unverified on the dev host**: it has no cmake, ninja or GTK 3 headers, so
   `flutter build linux` fails there. Right: install the toolchain on the build host and add the
   Linux bundle to the release.
@@ -308,9 +310,14 @@ Each entry: where, what was done, what right looks like.
 - **Node jobs are held, not run** (`pt-hub`, exec.rs jobs executor): the transport (SSH or the
   tailnet) is undecided, so `ScheduleJob` and the node effects are logged and never answered;
   no API method creates a job yet.
-- **The D9 code rule is not in code**: removing sleeves, node maintenance and protected pushes
-  asked for by a vendor agent rest on Envoy's CLAUDE.md. Right: the hub refuses those methods
-  for a request whose chain starts at an `agent:` message unless an owner approval names it.
+- **D9 covers three calls and the turn, not the request chain** (`pt-hub`, rule.rs): while
+  Envoy's current turn was started (or steered) by an `agent:` message, Envoy's own `sleeve rm`,
+  `job run` and spawns past `d9_spawn_limit` (default 3 per turn) wait for an owner approval
+  (`d9_approval_timeout_secs`, default 900, then `timeout`). The origin is cleared when the turn
+  settles, so a background process Envoy started in that turn acts as the owner's afterwards;
+  a sleeve Envoy prompted on the agent's behalf is not gated at all; no push or node maintenance
+  method exists yet to gate. Right: carry the origin through messages Envoy sends (a request
+  chain), and add pushes to the list when the API grows them.
 - **Who sent a message is a text prefix** (`pt-hub`, api.rs): mail reaches the harness as
   `[from sleeve <name>] ...` and agent requests as `[from agent:<name>] ...`, since a prompt has no
   other sender field; owner and Envoy messages are unprefixed. Right: revisit if a harness grows
@@ -333,14 +340,17 @@ Each entry: where, what was done, what right looks like.
   knob. The named sleeve's first settled turn in this hub process is reported to the core as
   `TurnEnd::UsageLimit`, which trips G1 and forces a resleeve; the e2e `forced_resleeve_with_brief`
   uses it. The hub warns at start when it is set. Never set it in production.
-- **RealHub never ran against a hub** (`app/lib/real_hub.dart`): written over the generated
-  `HubApi` before any hub serves the API; checked once against a throwaway dart:io server
-  (snapshot, deltas, resume with `from_seq`, errors). Reconnect backoff is 1 to 30 s; a
-  transcript loads its last 2000 entries with no paging back. Right: an e2e run of the app's
-  client against the built hub, and paging when a chat scrolls past its first entry.
-- **Device methods are placeholders** (`pt-api`): `ListDevices`, `PairDevice` and `RevokeDevice`
-  exist in the table with guessed shapes and answer `unavailable`. Right: design pairing (scan
-  to join for apps, how a `pd1.` token is issued and shown once, expiry) and reshape them.
+- **RealHub is exercised only by `scripts/app-e2e.sh`** (`app/lib/real_hub.dart`): the web build
+  against a real hub (pairing, Envoy chat, sleeves, a D9 approval denied from the app), outside
+  `make test` because it needs Chromium and the local model. Reconnect backoff is 1 to 30 s; a
+  transcript loads its last 2000 entries with no paging back. Right: paging when a chat scrolls
+  past its first entry, and the script in CI once a runner has Chromium.
+- **Pairing codes are in memory and unthrottled** (`pt-hub`, devices.rs): `AddDevice` makes a
+  ten-minute, single-use code (12 base32 characters, about 60 bits, with a small modulo bias);
+  pending codes die with the hub; `PairDevice` is public and has no attempt limit. Tokens are
+  stored as SHA-256 in `devices.json`; `last_seen` is written at most once a minute. Right: a
+  per-address attempt limit if the hub is ever reachable beyond the owner's networks, and a QR
+  code in the app for scan to join.
 - **TakeoverTerminal is a stub** (`pt-api`): it answers `unavailable`, and the app's TERMINAL
   view is a placeholder. Right: the PTY handoff of SPEC 3.3 and an xterm.dart view (build
   stage 6).
@@ -348,7 +358,7 @@ Each entry: where, what was done, what right looks like.
   `Authorization` on a WebSocket, so the web client sends `?access_token=` on `/api/events`,
   where Traefik's access log may record it. Right: a short-lived ticket from a POST, or a
   same-origin cookie for the web build the hub serves.
-- **Scopes are coarse** (`pt-api`, `Scope`): owner, sleeve or envoy_only per method. The subtree
+- **Scopes are coarse** (`pt-api`, `Scope`): owner, sleeve, envoy_only or public per method. The subtree
   rule for sleeve scope (own sleeve and children; Envoy reaches all) is the hub's job per
   request. Envoy cannot `Decide`, though the design lists answering sleeves as Envoy's; a child
   has no API path to mail its parent or Envoy (Wait `report` assumes one). Right: decide whether
@@ -358,9 +368,6 @@ Each entry: where, what was done, what right looks like.
   value would not. Right: send such fields as strings if one ever appears.
 - **Job log as lossy text** (`pt-api`, `JobLog`): log bytes go out as UTF-8 with invalid
   sequences replaced, so a binary log is not exact. Right: base64 bytes if exact logs matter.
-- **Web build served by the hub still starts on FakeHub** (`app/lib/main.dart`): the hub URL is
-  empty until set in SETTINGS, and settings last for the session only. Right: default to the
-  page's own origin on web when the hub serves it.
 - **check-gen needs the Dart SDK** (`Makefile`): `pt-apigen`'s output is formatted with
   `dart format`, so `make check` needs `dart` on PATH (or `DART=`). Right: fine while the app is
   built on the same host; emit formatter-stable Dart directly if CI ever lacks Flutter.
@@ -370,8 +377,12 @@ Each entry: where, what was done, what right looks like.
   flight. Right: a per-submit token in `NodeSubmit` that the node echoes in every status.
 - **Prompt evidence by ordering** (pt-core, `prompt_evidence`): harness output confirms an
   in-flight prompt or compaction only once its `Dispatched` is in, which relies on a sleeve's
-  observations and executor reports sharing one ordered stream. Right: drivers tag output with
-  the native turn id where the protocol has one, and evidence must match the prompt's turn.
+  observations and executor reports sharing one ordered stream. The hub meets it by handing a
+  sleeve's executor reports to its pump (`pt-hub`, exec.rs), which submits them after the
+  harness events it has received; the pump wakes every 10 ms to look for them, since std
+  channels have no select. Right: drivers tag output with the native turn id where the protocol
+  has one, and evidence must match the prompt's turn; a driver hook that puts the report into
+  its own event channel would drop the poll.
 - **Cancel re-sent every Tick** (pt-core jobs): Cancelling re-sends an uncertain cancel at each
   10 s Tick until the lease ends. Right: the per-job backoff of node polling.
 - **Torn batch versus corruption** (pt-journal, `open_segment`): a frame failing its CRC is cut as
@@ -381,3 +392,25 @@ Each entry: where, what was done, what right looks like.
 - **Collecting lease** (pt-core jobs): an artifact check that does not answer within the lease
   makes the job Lost, and its next Exited report collects again, so a slow fetch can run twice.
   Right: fetch progress reported to the core, and the lease measured from it.
+- **Approvals and hub events live in memory** (`pt-hub`, approvals.rs, bus.rs): a restart forgets
+  pending tool and D9 approvals (the waiting D9 call fails with the connection), the decided
+  list and the event log (500 entries). The stream's seq starts at the start time in ms so a
+  client resuming across a restart gets a fresh snapshot rather than a wrong delta. Right:
+  journal approvals and events, or rebuild tool approvals from transcripts at start.
+- **Quota readings are `unknown`** (`pt-hub`, wire.rs): one row per installed harness program,
+  no reader yet. Right: the per-vendor quota readers of the design (and G1 from them).
+- **pi_durable shows as pi_local in the API** (`pt-hub`, wire.rs): the experiment has no API
+  harness. Right: add one if it outlives the experiment.
+- **The web app embedded is about 17.7 MB** (`crates/protectorate/build.rs`): the release binary
+  is 19.4 MB with it and 1.7 MB without. Debug symbols, the experimental CanvasKit and the skwasm
+  renderers are left out; both CanvasKit variants stay (Chromium and the full one for other
+  browsers, only Chromium tested). Files go out uncompressed with an ETag. Right: precompressed
+  gzip copies with `Content-Encoding` and a check in Firefox and Safari.
+- **The events WebSocket checks Origin against Host** (`pt-hub`, http.rs): a browser page from
+  another origin is refused, so the web app works only from the hub that serves it (or a
+  client that sends no Origin, like dart:io). Right: an allowed-origins setting if a separately
+  hosted web app is ever wanted.
+- **The MCP bridge has tools only** (`protectorate mcp --envoy`): envoy_send, envoy_wait and
+  envoy_read over line-delimited JSON-RPC, protocol versions 2025-06-18, 2025-03-26 and
+  2024-11-05; no resources, prompts or notifications, and the agent name comes from `--as` or
+  `clientInfo.name`. Right: grow it with what the vendor apps actually call.
