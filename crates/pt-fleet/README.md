@@ -32,9 +32,10 @@ both exited; dropping the last `Fleet` clone also stops them.
 | `headscale_state()`, `member_state()`, `kill_child(which)` | supervisor state; kill for tests and doctor |
 
 `NodeClient` methods, one request at a time with a per-call deadline (`set_timeout`, 30 s
-default): `hello`, `inventory`, `sample`, `presence`, `submit_job`, `job_status`, `fetch_log`
-(bytes plus `LogEnd`), `cancel_job`, `ack_collected`, `list_jobs`. A node's error frame is
-`Error::Node(ErrorReply)`; a timeout or protocol error kills the connection (dial again).
+default): `hello`, `inventory`, `sample`, `presence`, `submit_job`, `job_status`, `fetch_log`,
+`fetch_artifact`, `cancel_job`, `ack_collected`, `list_jobs`, and `update`. A node's error frame
+is `Error::Node(ErrorReply)`; a timeout or malformed reply kills the connection. Before any other
+request the client checks Hello's protocol, refusing a mismatch with `Error::Protocol`.
 
 `Poller` (defaults): presence every 15 s, samples every 60 s, inventory every 10 min, node list
 every 15 s, one thread and one connection per node. `pt_api::Node.id` is headscale's node id;

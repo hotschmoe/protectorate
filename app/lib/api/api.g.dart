@@ -3494,6 +3494,7 @@ final class Node {
     required this.online,
     required this.lastSeen,
     required this.nodeVersion,
+    this.error,
     this.inventory,
     this.sample,
     required this.presence,
@@ -3507,6 +3508,7 @@ final class Node {
       online: _bool(j['online'], 'Node.online'),
       lastSeen: _time(j['last_seen_ms'], 'Node.last_seen_ms'),
       nodeVersion: _string(j['node_version'], 'Node.node_version'),
+      error: _opt(j['error'], (e0) => _string(e0, 'Node.error')),
       inventory: _opt(j['inventory'], Inventory.fromJson),
       sample: _opt(j['sample'], Sample.fromJson),
       presence: Presence.fromJson(j['presence']),
@@ -3523,6 +3525,8 @@ final class Node {
 
   final String nodeVersion;
 
+  final String? error;
+
   /// Absent until the first inventory arrives.
   final Inventory? inventory;
 
@@ -3536,6 +3540,7 @@ final class Node {
     'online': online,
     'last_seen_ms': lastSeen.millisecondsSinceEpoch,
     'node_version': nodeVersion,
+    if (error case final v?) 'error': v,
     if (inventory case final v?) 'inventory': v.toJson(),
     if (sample case final v?) 'sample': v.toJson(),
     'presence': presence.toJson(),

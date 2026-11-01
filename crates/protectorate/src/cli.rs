@@ -497,12 +497,13 @@ fn node_rows(nodes: &[api::Node]) {
                 } else {
                     n.node_version.clone()
                 },
+                n.error.clone().unwrap_or_default(),
             ]
         })
         .collect();
     table(
         &[
-            "ID", "NAME", "OS/ARCH", "LINK", "PRESENCE", "SEEN", "VERSION",
+            "ID", "NAME", "OS/ARCH", "LINK", "PRESENCE", "SEEN", "VERSION", "ERROR",
         ],
         &rows,
     );

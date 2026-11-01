@@ -4,16 +4,13 @@
 //! frames of bytes and then an end frame holding a `LogEnd` or an `ArtifactEnd`. All frames of one
 //! exchange carry the request's id.
 //!
-//! Protocol 2 adds the submit token (SPEC 12a fencing): the hub sends one with each submit, the
-//! node keeps it with the job and echoes it in every `JobInfo`, and refuses a cancel, ack or fetch
-//! whose token names another submit. It also adds `FetchArtifact`. A protocol 1 node ignores the
-//! token fields and does not know `FetchArtifact`.
+//! Bump PROTOCOL for every incompatible wire change; the hub refuses a different protocol.
 
 use std::collections::BTreeMap;
 
 use pt_json::{Error, FromJson, Map, ToJson, Value, record, string_enum};
 
-pub const PROTOCOL: u32 = 2;
+pub const PROTOCOL: u32 = 3;
 /// Longest submit token.
 pub const MAX_TOKEN: usize = 128;
 /// Longest artifact path.

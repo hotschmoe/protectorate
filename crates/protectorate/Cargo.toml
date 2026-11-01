@@ -19,6 +19,7 @@ pt-json = { path = "../pt-json" }
 [dev-dependencies]
 pt-core = { path = "../pt-core" }
 pt-journal = { path = "../pt-journal" }
+pt-sys = { path = "../pt-sys" }
 
 [build-dependencies]
 pt-embed = { path = "../pt-embed" }

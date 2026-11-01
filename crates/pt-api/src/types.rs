@@ -412,6 +412,7 @@ api_records! {
         pub online: bool,
         pub last_seen_ms: EpochMs,
         pub node_version: String,
+        pub error: Option<String>,
         /// Absent until the first inventory arrives.
         pub inventory: Option<Inventory>,
         pub sample: Option<Sample>,

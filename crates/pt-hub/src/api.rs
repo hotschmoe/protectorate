@@ -827,7 +827,13 @@ fn run_job(c: &Ctx<'_>, r: api::RunJobRequest) -> Result<api::Job> {
     };
     let what = format!("{} on {on}", r.argv.join(" "));
     let approval_id = rule::gate(c.hub, c.who, Guarded::RunJob(what))?;
-    fleet(c.hub)?;
+    let up = fleet(c.hub)?;
+    if let api::JobTarget::Node { node_id } = &r.target
+        && let Ok(node) = find_node(&up, node_id)
+        && let Some(e) = node.protocol_error()
+    {
+        return Err(err(ErrorCode::Unavailable, e.to_string()));
+    }
     let view = c.hub.view();
     let sleeve = match c.who {
         Principal::Envoy(x) | Principal::Sleeve(x) => Some(*x),

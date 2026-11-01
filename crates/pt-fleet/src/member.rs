@@ -7,10 +7,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use pt_json::Value;
 
+use crate::client::DeadlineStream;
 use crate::headscale::{Admin, HsNode, TAG_HUB};
 use crate::{Config, Error, Result};
 
@@ -19,6 +20,17 @@ const ENROLL_TIMEOUT: Duration = Duration::from_secs(60);
 const STATUS_TIMEOUT: Duration = Duration::from_secs(10);
 /// member's own dial timeout is 30 s; its answer line comes after that.
 const DIAL_TIMEOUT: Duration = Duration::from_secs(35);
+
+fn connect_timeout(normal: Duration) -> Duration {
+    #[cfg(debug_assertions)]
+    if let Some(ms) = std::env::var("PROTECTORATE_FLEET_TEST_MEMBER_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+    {
+        return Duration::from_millis(ms.max(1));
+    }
+    normal
+}
 
 pub(crate) fn state_dir(cfg: &Config) -> PathBuf {
     cfg.dir.join("member")
@@ -264,7 +276,7 @@ impl Status {
 }
 
 fn connect(socket: &Path, timeout: Duration) -> Result<UnixStream> {
-    let s = UnixStream::connect(socket)
+    let s = pt_sys::connect_unix_timeout(socket, connect_timeout(timeout))
         .map_err(|e| Error::new(format!("connecting to {}: {e}", socket.display())))?;
     s.set_read_timeout(Some(timeout))
         .and_then(|()| s.set_write_timeout(Some(timeout)))
@@ -273,7 +285,7 @@ fn connect(socket: &Path, timeout: Duration) -> Result<UnixStream> {
 }
 
 /// Reads one `\n`-terminated line a byte at a time, so nothing after it is consumed.
-fn read_line(s: &mut UnixStream) -> Result<String> {
+fn read_line(s: &mut impl Read) -> Result<String> {
     let mut line = Vec::new();
     let mut b = [0u8; 1];
     loop {
@@ -294,7 +306,12 @@ fn read_line(s: &mut UnixStream) -> Result<String> {
 }
 
 pub(crate) fn status(socket: &Path) -> Result<Status> {
-    let mut s = connect(socket, STATUS_TIMEOUT)?;
+    let timeout = STATUS_TIMEOUT;
+    let deadline = Instant::now() + timeout;
+    let mut s = DeadlineStream {
+        stream: connect(socket, timeout)?,
+        deadline,
+    };
     s.write_all(b"STATUS\n")
         .map_err(|e| Error::new(format!("member STATUS: {e}")))?;
     let mut body = Vec::new();
@@ -312,12 +329,17 @@ pub(crate) fn status(socket: &Path) -> Result<Status> {
 
 /// A raw stream to `target` (`<tailnet ip or name>:<port>`) through the hub member.
 pub(crate) fn dial(socket: &Path, target: &str) -> Result<UnixStream> {
-    let mut s = connect(socket, DIAL_TIMEOUT)?;
+    let timeout = DIAL_TIMEOUT;
+    let deadline = Instant::now() + timeout;
+    let mut s = DeadlineStream {
+        stream: connect(socket, timeout)?,
+        deadline,
+    };
     s.write_all(format!("DIAL {target}\n").as_bytes())
         .map_err(|e| Error::new(format!("DIAL {target}: {e}")))?;
     let line = read_line(&mut s).map_err(|e| e.context(format!("DIAL {target}")))?;
     match line.as_str() {
-        "OK" => Ok(s),
+        "OK" => Ok(s.stream),
         other => Err(Error::new(format!(
             "DIAL {target}: {}",
             other.strip_prefix("ERR ").unwrap_or(other)

@@ -9,8 +9,7 @@
 //!
 //! Each submit carries a token naming it (SPEC 12a fencing); a status whose token is not the
 //! current attempt's is ignored, and cancels, acks and fetches carry it so the node refuses them
-//! for any other submit. Artifacts come back through the node's `FetchArtifact`. A node below
-//! protocol 2 gets neither: no token check, and artifacts through `cat` jobs (REVISIT).
+//! for any other submit. Artifacts come back through the node's `FetchArtifact`.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions};
@@ -19,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use pt_api::{self as api, EpochMs, HubStreamMessage};
 use pt_core::{
@@ -45,12 +44,9 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a node executor waits for the core to take a `Dispatched`.
 const DISPATCH_TIMEOUT: Duration = Duration::from_secs(30);
 const SCHEDULE_EVERY: Duration = Duration::from_secs(2);
-const ARTIFACT_TIMEOUT_SECS: u64 = 300;
 const ARTIFACT_CAP: u64 = 64 << 20;
 /// Artifact bytes asked for per FetchArtifact.
 const ARTIFACT_FETCH: u64 = 4 << 20;
-/// The node protocol with submit tokens and FetchArtifact.
-const TOKEN_PROTOCOL: u32 = 2;
 
 pt_json::record! {
     /// What `RunJob` asked for. It rides through the core as the job spec's `command`, so the
@@ -412,17 +408,24 @@ impl JobExec {
             let _ = self.sched.send(intent);
             return;
         };
-        if let Some(tx) = self.nodes.get(&node) {
-            let _ = tx.send(intent);
-            return;
-        }
+        let intent = if let Some(tx) = self.nodes.get(&node) {
+            match tx.send(intent) {
+                Ok(()) => return,
+                Err(e) => {
+                    warning!("node {}: restarting its executor", node.0);
+                    self.nodes.remove(&node);
+                    e.0
+                }
+            }
+        } else {
+            intent
+        };
         let (tx, rx) = mpsc::channel();
         let exec = NodeExec {
             hub: self.hub.clone(),
             node,
             client: None,
             epoch: String::new(),
-            protocol: 0,
             pending_status: None,
         };
         match thread::Builder::new()
@@ -561,8 +564,6 @@ struct NodeExec {
     client: Option<NodeClient>,
     /// The agent's journal epoch from its last Hello.
     epoch: String,
-    /// The agent's protocol from its last Hello.
-    protocol: u32,
     /// A status the node returned with a write, submitted after the write's outcome.
     pending_status: Option<(JobId, u32, JobReply)>,
 }
@@ -615,8 +616,8 @@ impl NodeExec {
             let mut c = up.fleet.connect(&ip).map_err(|e| e.to_string())?;
             c.set_timeout(CALL_TIMEOUT).map_err(|e| e.to_string())?;
             let hello = c.hello().map_err(|e| e.to_string())?;
+            c.require_compatible().map_err(|e| e.to_string())?;
             self.epoch = hello.journal_epoch;
-            self.protocol = hello.protocol;
             self.client = Some(c);
         }
         self.client.as_mut().ok_or_else(|| "no connection".into())
@@ -625,15 +626,56 @@ impl NodeExec {
     fn call<T>(
         &mut self,
         what: &str,
-        f: impl FnOnce(&mut NodeClient) -> pt_fleet::Result<T>,
+        mut f: impl FnMut(&mut NodeClient) -> pt_fleet::Result<T>,
     ) -> Result<T, Fail> {
         let node = self.node.0;
         let c = self
             .connect()
             .map_err(|e| Fail::Reach(format!("node {node}: {e}")))?;
-        match f(c) {
+        let result = f(c);
+        let disconnected = c.disconnected();
+        match result {
             Ok(v) => Ok(v),
             Err(pt_fleet::Error::Node(r)) => Err(Fail::Node(r)),
+            Err(e)
+                if disconnected
+                    && matches!(
+                        what,
+                        "SubmitJob"
+                            | "CancelJob"
+                            | "AckCollected"
+                            | "JobStatus"
+                            | "FetchLog"
+                            | "FetchArtifact"
+                    ) =>
+            {
+                // The node retains each submitted job until this executor acknowledges collection.
+                self.client = None;
+                let before = self.epoch.clone();
+                self.connect().map_err(|retry| {
+                    Fail::Io(format!("node {node} {what}: {e}; reconnecting: {retry}"))
+                })?;
+                let after = self.epoch.clone();
+                if before != after {
+                    self.client = None;
+                    return Err(Fail::Io(format!(
+                        "node {node} {what}: {e}; journal epoch changed while reconnecting"
+                    )));
+                }
+                let c = self.client.as_mut().ok_or_else(|| {
+                    Fail::Io(format!(
+                        "node {node} {what}: no connection after reconnecting"
+                    ))
+                })?;
+                match f(c) {
+                    Ok(v) => Ok(v),
+                    Err(pt_fleet::Error::Node(r)) => Err(Fail::Node(r)),
+                    Err(retry) => {
+                        self.client = None;
+                        Err(Fail::Io(format!("node {node} {what}: {e}; retry: {retry}")))
+                    }
+                }
+            }
             Err(e) => {
                 self.client = None;
                 Err(Fail::Io(format!("node {node} {what}: {e}")))
@@ -654,9 +696,6 @@ impl NodeExec {
 
     /// Why a status is about another submit than the job's current one, if it is.
     fn stale(&self, view: &View, job: JobId, reply: &JobReply) -> Option<String> {
-        if self.protocol < TOKEN_PROTOCOL {
-            return None;
-        }
         let info = reply.job.as_ref()?;
         let want = self.token(view, job);
         (info.token != want).then(|| {
@@ -727,7 +766,7 @@ impl NodeExec {
                         job, attempt: a, ..
                     } => {
                         let r = self.job_ref(&view, job, a);
-                        self.call("CancelJob", |c| c.cancel_job(r))
+                        self.call("CancelJob", |c| c.cancel_job(r.clone()))
                             .map(|r| self.pending_status = Some((job, a, r)))
                     }
                     EffectKind::NodeAckCollected {
@@ -735,7 +774,7 @@ impl NodeExec {
                     } => {
                         // Nothing of ours to drop: gone, or another submit's.
                         let r = self.job_ref(&view, job, a);
-                        match self.call("AckCollected", |c| c.ack_collected(r)) {
+                        match self.call("AckCollected", |c| c.ack_collected(r.clone())) {
                             Err(Fail::Node(r))
                                 if matches!(
                                     r.code,
@@ -860,7 +899,7 @@ impl NodeExec {
             token: submit_token(&self.hub, j),
             maintenance: req.maintenance,
         };
-        match self.call("SubmitJob", |c| c.submit_job(spec)) {
+        match self.call("SubmitJob", |c| c.submit_job(spec.clone())) {
             Ok(reply) => {
                 if let Some(why) = self.stale(view, job, &reply) {
                     // The node already holds another submit under this id; ours never ran.
@@ -960,7 +999,7 @@ impl NodeExec {
                 max,
                 token: token.clone(),
             };
-            let (bytes, end) = match self.call("FetchLog", |c| c.fetch_log(q)) {
+            let (bytes, end) = match self.call("FetchLog", |c| c.fetch_log(q.clone())) {
                 Ok(v) => v,
                 Err(e) => break Err(e),
             };
@@ -1019,12 +1058,7 @@ impl NodeExec {
         let mut ok = true;
         let token = self.token(view, job);
         for (n, path) in wanted.iter().enumerate() {
-            let got = if self.protocol >= TOKEN_PROTOCOL {
-                self.fetch_artifact(job, attempt, n, path, token.clone())
-            } else {
-                let cwd = req.as_ref().and_then(|r| r.cwd.clone());
-                self.cat_artifact(job, attempt, n, path, cwd)
-            };
+            let got = self.fetch_artifact(job, attempt, n, path, token.clone());
             match got {
                 Ok(f) => {
                     info!(
@@ -1083,7 +1117,7 @@ impl NodeExec {
                 max: ARTIFACT_FETCH,
                 token: token.clone(),
             };
-            let (bytes, end) = self.call("FetchArtifact", |c| c.fetch_artifact(q))?;
+            let (bytes, end) = self.call("FetchArtifact", |c| c.fetch_artifact(q.clone()))?;
             if end.size > ARTIFACT_CAP {
                 return Err(Fail::Check(format!(
                     "{} bytes, over the {ARTIFACT_CAP} byte cap",
@@ -1133,104 +1167,5 @@ impl NodeExec {
             size_bytes: at,
             sha256: sha,
         })
-    }
-
-    /// A protocol 1 node has no FetchArtifact: a `cat` job writes the file into its log, and
-    /// the hub keeps that log as the artifact. Removed once every node runs protocol 2 (REVISIT).
-    fn cat_artifact(
-        &mut self,
-        job: JobId,
-        attempt: u32,
-        n: usize,
-        path: &str,
-        cwd: Option<String>,
-    ) -> Result<Fetched, Fail> {
-        let aid = format!("{}-a{attempt}-{n}", node_job_id(&self.hub, job));
-        let spec = SubmitJob {
-            job_id: aid.clone(),
-            attempt: 1,
-            argv: Some(vec!["cat".into(), "--".into(), path.into()]),
-            script: None,
-            cwd,
-            env: Default::default(),
-            timeout_secs: ARTIFACT_TIMEOUT_SECS,
-            log_cap: ARTIFACT_CAP,
-            even_if_present: true,
-            on_present: OnPresent::Lower,
-            token: None,
-            maintenance: false,
-        };
-        self.call("SubmitJob", |c| c.submit_job(spec))?;
-        let deadline = Instant::now() + Duration::from_secs(ARTIFACT_TIMEOUT_SECS + 30);
-        let info = loop {
-            let r = self.call("JobStatus", |c| c.job_status(&aid, Some(1)))?;
-            if let Some(i) = r.job.filter(|i| i.state.is_terminal()) {
-                break i;
-            }
-            if Instant::now() > deadline {
-                return Err(Fail::Io(format!("{aid} did not end in time")));
-            }
-            thread::sleep(Duration::from_millis(200));
-        };
-        let file = n.to_string();
-        let dest = self.hub.jobs.artifact_path(job, attempt, &file);
-        let result = (|| {
-            if info.state != msg::JobState::Succeeded {
-                return Err(Fail::Node(ErrorReply {
-                    code: NodeCode::NotFound,
-                    message: format!("reading it {} (exit {:?})", info.state, info.exit_code),
-                    journal_epoch: None,
-                }));
-            }
-            let io = |e: io::Error| Fail::Reach(format!("{}: {e}", dest.display()));
-            if let Some(d) = dest.parent() {
-                fs::create_dir_all(d).map_err(io)?;
-            }
-            let mut out = File::create(&dest).map_err(io)?;
-            let mut at = 0u64;
-            loop {
-                let q = FetchLog {
-                    job_id: aid.clone(),
-                    attempt: 1,
-                    offset: at,
-                    max: LOG_FETCH,
-                    token: None,
-                };
-                let (bytes, end) = self.call("FetchLog", |c| c.fetch_log(q))?;
-                let len = bytes.len() as u64;
-                if len > LOG_FETCH || at.saturating_add(len) > ARTIFACT_CAP {
-                    return Err(Fail::Check(format!(
-                        "the node sent {len} bytes at {at}, over the {ARTIFACT_CAP} byte cap"
-                    )));
-                }
-                out.write_all(&bytes).map_err(io)?;
-                at += len;
-                if end.truncated {
-                    return Err(Fail::Node(ErrorReply {
-                        code: NodeCode::NotFinished,
-                        message: format!("larger than {ARTIFACT_CAP} bytes"),
-                        journal_epoch: None,
-                    }));
-                }
-                if end.done || bytes.is_empty() {
-                    break;
-                }
-            }
-            out.sync_all().map_err(io)?;
-            let sha = pt_hash::sha256_file(&dest).map_err(io)?;
-            Ok(Fetched {
-                path: path.to_string(),
-                file: file.clone(),
-                size_bytes: at,
-                sha256: pt_hash::to_hex(&sha),
-            })
-        })();
-        let ack = JobRef {
-            job_id: aid.clone(),
-            attempt: 1,
-            token: None,
-        };
-        let _ = self.call("AckCollected", |c| c.ack_collected(ack));
-        result
     }
 }

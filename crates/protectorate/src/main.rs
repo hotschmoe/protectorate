@@ -50,7 +50,7 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   serve [--listen ADDR|off] [--proxy-listen ADDR --trusted-proxy IP] [--web-dir DIR]
         [--fleet-listen ADDR|off] [--fleet-dir DIR] [--fleet-udp-port N] [--fleet-server-url URL]
         [--log-level error|warn|info|debug]
-  version
+  version | --version
   hub info | hub state
   hub update [--check] [--channel stable|dev] [--version TAG] | hub update --rollback
   hub probation                     run by the unit before each start, without the API
@@ -365,7 +365,11 @@ fn run(a: &Args) -> Result<(), Fail> {
 }
 
 fn main() -> ExitCode {
-    let args = match Args::parse(std::env::args().skip(1).collect()) {
+    let mut raw: Vec<String> = std::env::args().skip(1).collect();
+    if raw.first().is_some_and(|a| a == "--version") {
+        raw[0] = "version".into();
+    }
+    let args = match Args::parse(raw) {
         Ok(a) => a,
         Err(e) => {
             eprintln!("{e}\n{USAGE}");

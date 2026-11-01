@@ -579,11 +579,16 @@ fn mcp_envoy_round_trip() {
 fn quota_readers_run() {
     let models = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let models_port = models.local_addr().unwrap().port();
+    let (ready_tx, ready_rx) = mpsc::channel();
     std::thread::spawn(move || {
+        let mut ready = Some(ready_rx);
         for c in models.incoming() {
             let Ok(mut c) = c else { continue };
             let mut req = [0u8; 4096];
             let _ = std::io::Read::read(&mut c, &mut req);
+            if let Some(ready) = ready.take() {
+                ready.recv_timeout(Duration::from_secs(30)).unwrap();
+            }
             let body = r#"{"object":"list","data":[{"id":"stand-in-model"}]}"#;
             let _ = write!(
                 c,
@@ -613,6 +618,8 @@ fn quota_readers_run() {
     );
     let owner = hub.printed("owner token (shown once): ");
     let mut s = ws(port, &format!("?access_token={owner}"), &[]).expect("events");
+    assert_eq!(next(&mut s)["type"].as_str(), Some("snapshot"));
+    ready_tx.send(()).unwrap();
     let seen = until(&mut s, "quota", |m| {
         m["quota"]["subscription"].as_str() == Some("local")
             && m["quota"]["reading"].as_str() == Some("ok")

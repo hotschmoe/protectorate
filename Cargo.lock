@@ -57,6 +57,7 @@ dependencies = [
  "pt-hub",
  "pt-journal",
  "pt-json",
+ "pt-sys",
  "pt-version",
 ]
 

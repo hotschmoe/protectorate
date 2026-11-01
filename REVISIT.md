@@ -397,12 +397,6 @@ Each entry: where, what was done, what right looks like.
   first in the owner's order wins. A new sleeve always names its harness (`SpawnSleeve.harness` is
   required), so nothing else is chosen by quota, and G1 does not read quota yet. Right: the task
   size from the sleeve's history (D27), node and probe health, and an optional harness on spawn.
-- **Protocol 1 nodes keep the old job path** (`pt-hub`, jobs.rs `TOKEN_PROTOCOL`, `cat_artifact`):
-  a node whose Hello says protocol 1 (agent-world and msr1-kids until they are upgraded) gets no
-  submit-token check, and its artifacts come back through `cat -- <path>` collection jobs whose
-  log is the file (64 MiB cap; exact only because a successful `cat` is silent). Right: once
-  both nodes run protocol 2, remove `cat_artifact` and every `protocol < TOKEN_PROTOCOL` branch,
-  and refuse a protocol 1 node.
 - **FetchArtifact reads one file at a time and hashes it twice** (`pt-node` `read_artifact`,
   `pt-hub` `fetch_artifact`): the hub asks 4 MiB slices; at the end the node re-reads the whole
   file for its SHA-256 and the hub compares it with the hash of what it received, so a file that
@@ -866,9 +860,10 @@ Each entry: where, what was done, what right looks like.
   frames between reads, but its initial `pending` input is also supplied by its caller. Right: a
   backpressure API or segmented input that bounds each allocation while preserving streams with
   many frames, then prove that bound. This allocation property is not covered by phase 1 yet.
-- **Wire changes without a PROTOCOL bump** (`pt-frame`, `msg::PROTOCOL`): `Update` changed from
-  `{version, url, sha256}` to `{version, api, repo, probation_secs}` while PROTOCOL stayed 2, so
-  `node update` against a node built before the change fails with "bad_request: url: missing"
-  instead of saying the node needs a reinstall (seen on the real nodes, 2026-11-01). Right: bump
-  PROTOCOL with every incompatible message change, and have the hub refuse a node older than its
-  own protocol with "reinstall this node" before sending it anything else.
+- **Node protocol bump discipline** (`pt-frame`, `msg::PROTOCOL`): protocol 3 covers the Update
+  change, and the hub refuses a mismatched Hello. Every incompatible wire change must bump the
+  protocol. Right: detect incompatible message changes without a bump automatically in CI.
+- **Four-hour fleet poller stall** (`pt-fleet`, d2dad77): the 2026-11-01 logs do not identify
+  the blocked thread or prove a cause. Poll RPCs and member replies now have whole-call deadlines,
+  and a finished node poll thread is restarted. Right: capture hub thread stacks and member logs
+  if a stall recurs.

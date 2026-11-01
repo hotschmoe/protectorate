@@ -8,6 +8,8 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, BufWriter, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+#[cfg(debug_assertions)]
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -46,6 +48,8 @@ struct Node {
     sampler: Mutex<Sampler>,
     node_id: String,
     connections: AtomicUsize,
+    #[cfg(debug_assertions)]
+    dropped_submit: AtomicBool,
 }
 
 pub struct Flags {
@@ -187,6 +191,8 @@ fn serve(f: Flags, ready: Box<dyn FnOnce() + Send>) -> Result<(), String> {
         sampler: Mutex::new(Sampler::new()),
         runner,
         connections: AtomicUsize::new(0),
+        #[cfg(debug_assertions)]
+        dropped_submit: AtomicBool::new(false),
     });
     eprintln!(
         "protectorate-node: node {} journal epoch {}; jobs run in {}",
@@ -379,10 +385,46 @@ fn serve_conn<S: Conn>(node: &Node, stream: &mut S) -> Result<(), String> {
         let frame = match reader.read() {
             Ok(Some(f)) => f,
             Ok(None) => return Ok(()),
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) =>
+            {
+                return Ok(());
+            }
             Err(e) => return Err(format!("reading a frame: {e}")),
         };
         if frame.kind != Kind::Request {
             return Err(format!("protocol: a {:?} frame from the hub", frame.kind));
+        }
+        #[cfg(debug_assertions)]
+        if std::env::var_os("PROTECTORATE_NODE_TEST_DROP_SUBMIT")
+            .is_some_and(|p| Path::new(&p).is_file())
+            && matches!(parse_request(&frame.payload), Ok(Request::SubmitJob(_)))
+            && !node.dropped_submit.swap(true, Ordering::SeqCst)
+        {
+            answer(node, frame.id, &frame.payload, &mut io::sink())
+                .map_err(|e| format!("answering dropped submit: {e}"))?;
+            eprintln!("protectorate-node: dropped a submit reply for testing");
+            return Ok(());
+        }
+        #[cfg(debug_assertions)]
+        if std::env::var_os("PROTECTORATE_NODE_TEST_SLOW_PRESENCE")
+            .and_then(|p| fs::read_to_string(p).ok())
+            .is_some_and(|s| s.trim() == "1")
+            && matches!(parse_request(&frame.payload), Ok(Request::Presence))
+        {
+            let mut response = Vec::new();
+            answer(node, frame.id, &frame.payload, &mut response)
+                .map_err(|e| format!("preparing slow presence: {e}"))?;
+            for byte in response {
+                w.write_all(&[byte])
+                    .and_then(|()| w.flush())
+                    .map_err(|e| format!("sending slow presence: {e}"))?;
+                thread::sleep(Duration::from_millis(250));
+            }
+            continue;
         }
         answer(node, frame.id, &frame.payload, &mut w)
             .and_then(|()| w.flush())
@@ -414,6 +456,25 @@ fn read_header(r: &mut impl Read) -> Result<(PeerHeader, Vec<u8>), String> {
     Ok((header, buf[end + 1..].to_vec()))
 }
 
+fn reported_protocol() -> u32 {
+    #[cfg(debug_assertions)]
+    if let Some(protocol) = std::env::var("PROTECTORATE_NODE_TEST_PROTOCOL")
+        .ok()
+        .and_then(|v| v.parse().ok())
+    {
+        return protocol;
+    }
+    msg::PROTOCOL
+}
+
+fn reported_version() -> String {
+    #[cfg(debug_assertions)]
+    if let Ok(version) = std::env::var("PROTECTORATE_NODE_TEST_VERSION") {
+        return version;
+    }
+    pt_version::VERSION.into()
+}
+
 fn answer(node: &Node, id: u64, payload: &[u8], w: &mut impl Write) -> io::Result<()> {
     let req = match parse_request(payload) {
         Ok(r) => r,
@@ -439,8 +500,8 @@ fn answer(node: &Node, id: u64, payload: &[u8], w: &mut impl Write) -> io::Resul
                 w,
                 id,
                 &HelloReply {
-                    protocol: msg::PROTOCOL,
-                    node_version: pt_version::VERSION.into(),
+                    protocol: reported_protocol(),
+                    node_version: reported_version(),
                     node_id: node.node_id.clone(),
                     journal_epoch: epoch.clone(),
                     hostname: pt_node::hostname(),

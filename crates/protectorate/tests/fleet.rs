@@ -3,33 +3,102 @@
 //! the hub's headscale (`join`, `node add`, `node approve`) with the member it embeds, and serves
 //! jobs over the tailnet. The test drives everything through the CLI: node listing with the
 //! node's version, a `uname -a` job and its log by offset, artifacts through FetchArtifact (a
-//! 3 MB binary, and symlink and `..` escapes that fail the job), a status from another submit
-//! under the job's id that the hub ignores, presence gating, cancelling a long job, a hub crash
-//! mid-job that the restarted hub reconciles, and a planned stop that leaves no headscale or
-//! member behind.
+//! 3 MB binary, and symlink and `..` escapes that fail the job), link recovery after restarts,
+//! lost replies, slow responses and a full member queue, protocol mismatches, submit fencing,
+//! presence gating, cancelling a long job, hub recovery and a clean stop.
 //!
 //! Skips when the protectorate binary does not embed headscale and member (no Go to build
 //! them), or when bwrap or protectorate-node is missing.
 
 mod common;
 
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use common::{Hub, Run, bin, eventually, tail};
 use pt_json::{Value, obj};
 
 struct Kill(Child);
 
-impl Drop for Kill {
-    fn drop(&mut self) {
+impl Kill {
+    fn stop(&mut self) {
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
+}
+
+impl Drop for Kill {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+struct Resume(Option<u32>);
+
+impl Drop for Resume {
+    fn drop(&mut self) {
+        if let Some(pid) = self.0.take() {
+            let _ = Command::new("kill")
+                .args(["-CONT", &pid.to_string()])
+                .status();
+        }
+    }
+}
+
+fn start_node(
+    bin: &Path,
+    dir: &Path,
+    sock: &Path,
+    presence: &Path,
+    version: Option<&str>,
+    protocol: Option<&str>,
+    drop_submit: Option<&Path>,
+) -> Kill {
+    let log = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("serve.log"))
+        .unwrap();
+    let mut cmd = Command::new(bin);
+    cmd.args(["serve", "--state-dir"])
+        .arg(dir)
+        .arg("--forward-socket")
+        .arg(sock)
+        .args(["--no-scope", "--presence-interval", "1"])
+        .env("PROTECTORATE_NODE_TEST_PRESENCE", presence)
+        .env(
+            "PROTECTORATE_NODE_TEST_SLOW_PRESENCE",
+            dir.join("slow-presence"),
+        )
+        .stdout(Stdio::null())
+        .stderr(log);
+    if let Some(v) = version {
+        cmd.env("PROTECTORATE_NODE_TEST_VERSION", v);
+    }
+    if let Some(p) = protocol {
+        cmd.env("PROTECTORATE_NODE_TEST_PROTOCOL", p);
+    }
+    if let Some(p) = drop_submit {
+        cmd.env("PROTECTORATE_NODE_TEST_DROP_SUBMIT", p);
+    }
+    Kill(cmd.spawn().unwrap())
+}
+
+#[test]
+fn version_flag_matches_version_command() {
+    let command = Command::new(bin()).arg("version").output().unwrap();
+    let flag = Command::new(bin()).arg("--version").output().unwrap();
+    assert!(command.status.success());
+    assert!(
+        flag.status.success(),
+        "{}",
+        String::from_utf8_lossy(&flag.stderr)
+    );
+    assert_eq!(flag.stdout, command.stdout);
 }
 
 fn node_bin() -> Option<PathBuf> {
@@ -165,7 +234,7 @@ fn hub_runs_the_fleet_and_node_jobs() {
             },
         )],
         &[],
-        &[],
+        &[("PROTECTORATE_FLEET_TEST_MEMBER_TIMEOUT_MS", "1000")],
     );
     let enrollment = eventually("the fleet to come up", Duration::from_secs(120), || {
         let r = hub.cli(&["--json", "node", "add"]);
@@ -253,21 +322,8 @@ fn hub_runs_the_fleet_and_node_jobs() {
     fs::write(&presence, "AWAY").unwrap();
     let work = node_dir.join("jobs-cwd");
     fs::create_dir_all(&work).unwrap();
-    let serve_log = fs::File::create(node_dir.join("serve.log")).unwrap();
     let sock = node_dir.join("agent.sock");
-    let _serve = Kill(
-        Command::new(&node_bin)
-            .args(["serve", "--state-dir"])
-            .arg(&node_dir)
-            .arg("--forward-socket")
-            .arg(&sock)
-            .args(["--no-scope", "--presence-interval", "1"])
-            .env("PROTECTORATE_NODE_TEST_PRESENCE", &presence)
-            .stdout(Stdio::null())
-            .stderr(serve_log)
-            .spawn()
-            .unwrap(),
-    );
+    let mut serve = start_node(&node_bin, &node_dir, &sock, &presence, None, None, None);
 
     // ListNodes from the poller's views.
     let node = eventually("the node online", Duration::from_secs(120), || {
@@ -356,6 +412,215 @@ fn hub_runs_the_fleet_and_node_jobs() {
         ])
         .json();
     assert_eq!(end["eof"].as_bool(), Some(true), "{end}");
+
+    #[cfg(debug_assertions)]
+    {
+        let old_seen = node["last_seen_ms"].as_u64().unwrap();
+        let before_log = fs::read_to_string(node_dir.join("serve.log"))
+            .unwrap()
+            .len();
+        serve.stop();
+        serve = start_node(
+            &node_bin,
+            &node_dir,
+            &sock,
+            &presence,
+            Some("restart-test"),
+            None,
+            Some(&node_dir.join("drop-submit")),
+        );
+        eventually(
+            "restarted node member to listen",
+            Duration::from_secs(60),
+            || {
+                let log = fs::read_to_string(node_dir.join("serve.log")).ok()?;
+                log[before_log..]
+                    .contains("started mode=node")
+                    .then_some(())
+            },
+        );
+        let ready = Instant::now();
+        let fresh = eventually(
+            "restarted node's fresh Hello",
+            Duration::from_secs(8),
+            || {
+                let v = hub.cli(&["--json", "node", "show", &node_id]).json();
+                (v["node_version"].as_str() == Some("restart-test")
+                    && v["online"].as_bool() == Some(true)
+                    && v["last_seen_ms"].as_u64()? > old_seen)
+                    .then_some(v)
+            },
+        );
+        assert!(ready.elapsed() < Duration::from_secs(8), "{fresh}");
+        let effect_log = hub.log_text().len();
+        let restarted = run_job(&hub, &[], &["echo", "after-restart"]);
+        let done = wait_job(&hub, &restarted, &["succeeded", "failed", "lost"], 90);
+        assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
+        let log = hub.log_text();
+        assert!(
+            !log[effect_log..]
+                .lines()
+                .any(|l| (l.contains("effect ") && l.contains("SubmitJob"))
+                    || l.contains("apply Lost {")
+                    || l.contains("apply Nacked {")),
+            "{}",
+            &log[effect_log..]
+        );
+
+        fs::write(node_dir.join("drop-submit"), "drop").unwrap();
+        let replay = run_job(
+            &hub,
+            &["--cwd", work.to_str().unwrap()],
+            &["sh", "-c", "printf x >> exactly-once"],
+        );
+        let done = wait_job(&hub, &replay, &["succeeded", "failed", "lost"], 90);
+        assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
+        assert_eq!(fs::read(work.join("exactly-once")).unwrap(), b"x");
+        assert!(
+            fs::read_to_string(node_dir.join("serve.log"))
+                .unwrap()
+                .contains("dropped a submit reply for testing")
+        );
+
+        fs::write(node_dir.join("slow-presence"), "1").unwrap();
+        eventually(
+            "a trickling poll to time out",
+            Duration::from_secs(12),
+            || {
+                let n = hub.cli(&["--json", "node", "show", &node_id]).json();
+                n["error"]
+                    .as_str()?
+                    .contains("Presence: timed out")
+                    .then_some(())
+            },
+        );
+        fs::write(node_dir.join("slow-presence"), "0").unwrap();
+        eventually(
+            "polling to recover after a slow response",
+            Duration::from_secs(15),
+            || {
+                let n = hub.cli(&["--json", "node", "show", &node_id]).json();
+                (n["online"].as_bool() == Some(true) && n["error"].is_null()).then_some(())
+            },
+        );
+
+        let member_path = tailnet.join("member");
+        let member = processes_with(member_path.to_str().unwrap())
+            .into_iter()
+            .find(|(_, cmd)| cmd.contains("--mode hub"))
+            .expect("the hub's member")
+            .0;
+        let before = hub.log_text().len();
+        assert!(
+            Command::new("kill")
+                .args(["-STOP", &member.to_string()])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let resume = Resume(Some(member));
+        let socket = tailnet.join("member.sock");
+        let mut queued = Vec::new();
+        let mut full = false;
+        for _ in 0..5000 {
+            match pt_sys::connect_unix_timeout(&socket, Duration::from_millis(100)) {
+                Ok(s) => queued.push(s),
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                    full = true;
+                    break;
+                }
+                Err(e) => panic!("filling member's accept queue: {e}"),
+            }
+        }
+        assert!(full, "member's accept queue did not fill");
+        eventually(
+            "a full member queue to time out",
+            Duration::from_secs(15),
+            || {
+                let log = hub.log_text();
+                log[before..]
+                    .lines()
+                    .any(|l| l.contains("poller:") && l.contains("unix connect timed out"))
+                    .then_some(())
+            },
+        );
+        drop(queued);
+        drop(resume);
+        eventually(
+            "polling after the member resumes",
+            Duration::from_secs(30),
+            || {
+                let n = hub.cli(&["--json", "node", "show", &node_id]).json();
+                (n["online"].as_bool() == Some(true) && n["error"].is_null()).then_some(())
+            },
+        );
+
+        for protocol in ["2", "9"] {
+            let before_log = fs::read_to_string(node_dir.join("serve.log"))
+                .unwrap()
+                .len();
+            serve.stop();
+            serve = start_node(
+                &node_bin,
+                &node_dir,
+                &sock,
+                &presence,
+                None,
+                Some(protocol),
+                None,
+            );
+            let message =
+                format!("node speaks protocol {protocol}, the hub speaks 3: reinstall the node");
+            eventually("incompatible protocol", Duration::from_secs(60), || {
+                let v = hub.cli(&["--json", "node", "show", &node_id]).json();
+                (v["error"].as_str() == Some(message.as_str())).then_some(())
+            });
+            assert!(hub.cli(&["node", "ls"]).ok().contains(&message));
+            assert!(hub.cli(&["node", "show", &node_id]).ok().contains(&message));
+            let r = hub.cli(&["job", "run", "--node", "e2e-hubfleet", "--", "true"]);
+            assert_ne!(r.status, 0);
+            assert!(r.stderr.contains(&message), "{}", r.stderr);
+            let r = hub.cli(&["node", "update", "e2e-hubfleet", "--version", "v0.0.1"]);
+            assert_ne!(r.status, 0);
+            assert!(r.stderr.contains(&message), "{} {}", r.stdout, r.stderr);
+            let log = fs::read_to_string(node_dir.join("serve.log")).unwrap();
+            assert!(
+                !log[before_log..].contains("incompatible protocol received"),
+                "{}",
+                &log[before_log..]
+            );
+        }
+
+        serve.stop();
+        hub.kill9();
+        serve = start_node(&node_bin, &node_dir, &sock, &presence, None, None, None);
+        hub.restart();
+        let first = eventually(
+            "polling after hub and node restart",
+            Duration::from_secs(120),
+            || {
+                let v = hub.cli(&["--json", "node", "show", &node_id]);
+                if v.status != 0 {
+                    return None;
+                }
+                let n = v.json();
+                (n["online"].as_bool() == Some(true)
+                    && n["node_version"].as_str() == Some(version.as_str()))
+                .then_some(n)
+            },
+        );
+        let last_seen = first["last_seen_ms"].as_u64().unwrap();
+        eventually(
+            "polling to continue after restart",
+            Duration::from_secs(12),
+            || {
+                let n = hub.cli(&["--json", "node", "show", &node_id]).json();
+                (n["online"].as_bool() == Some(true) && n["last_seen_ms"].as_u64()? > last_seen)
+                    .then_some(())
+            },
+        );
+        assert!(serve.0.try_wait().unwrap().is_none());
+    }
 
     // A job that leaves an artifact in its directory.
     let cwd = work.to_str().unwrap();
@@ -563,4 +828,14 @@ fn hub_runs_the_fleet_and_node_jobs() {
     let net = hub.home.join("net");
     let left = processes_with(net.to_str().unwrap());
     assert!(left.is_empty(), "left behind: {left:?}");
+    serve.stop();
+    eventually(
+        "the node and its member to stop",
+        Duration::from_secs(15),
+        || {
+            processes_with(node_dir.to_str().unwrap())
+                .is_empty()
+                .then_some(())
+        },
+    );
 }

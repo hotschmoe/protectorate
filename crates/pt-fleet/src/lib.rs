@@ -103,6 +103,10 @@ impl Config {
 pub enum Error {
     /// The node answered with an error frame.
     Node(pt_frame::msg::ErrorReply),
+    Protocol {
+        node: u32,
+        hub: u32,
+    },
     Failed(String),
 }
 
@@ -118,6 +122,7 @@ impl Error {
                 r.message = format!("{ctx}: {}", r.message);
                 Error::Node(r)
             }
+            e @ Error::Protocol { .. } => e,
         }
     }
 }
@@ -126,6 +131,10 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Node(r) => write!(f, "node refused ({}): {}", r.code, r.message),
+            Error::Protocol { node, hub } => write!(
+                f,
+                "node speaks protocol {node}, the hub speaks {hub}: reinstall the node"
+            ),
             Error::Failed(m) => f.write_str(m),
         }
     }

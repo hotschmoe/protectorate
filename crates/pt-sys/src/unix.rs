@@ -1,7 +1,11 @@
 use crate::PeerCred;
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+#[cfg(target_os = "linux")]
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::UnixStream;
+#[cfg(target_os = "linux")]
+use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
@@ -13,6 +17,72 @@ fn cvt(rc: libc::c_int) -> io::Result<libc::c_int> {
     } else {
         Ok(rc)
     }
+}
+
+#[cfg(target_os = "linux")]
+/// Connects even when the listener's accept queue is full, up to the deadline.
+pub fn connect_unix_timeout(path: &Path, timeout: Duration) -> io::Result<UnixStream> {
+    let bytes = path.as_os_str().as_bytes();
+    // SAFETY: sockaddr_un is a plain C structure, and zero is a valid initial value.
+    let mut addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    if bytes.is_empty() || bytes.contains(&0) || bytes.len() >= addr.sun_path.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid unix socket path",
+        ));
+    }
+    addr.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    for (out, byte) in addr.sun_path.iter_mut().zip(bytes) {
+        *out = *byte as libc::c_char;
+    }
+    let len =
+        (std::mem::offset_of!(libc::sockaddr_un, sun_path) + bytes.len() + 1) as libc::socklen_t;
+    // SAFETY: the arguments specify a new Unix stream socket with no borrowed pointers.
+    let fd = cvt(unsafe {
+        libc::socket(
+            libc::AF_UNIX,
+            libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+            0,
+        )
+    })?;
+    // SAFETY: socket returned a new fd, now owned exactly once by OwnedFd.
+    let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+    let deadline = Instant::now().checked_add(timeout).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "unix connect timeout is too large",
+        )
+    })?;
+    loop {
+        // SAFETY: fd is live, and addr contains a valid Unix address of len bytes.
+        let rc = unsafe { libc::connect(fd.as_raw_fd(), (&raw const addr).cast(), len) };
+        if rc == 0 {
+            break;
+        }
+        let e = io::Error::last_os_error();
+        // Linux returns EAGAIN for a full Unix listener queue.
+        match e.raw_os_error() {
+            Some(libc::EISCONN) => break,
+            Some(libc::EAGAIN | libc::EINPROGRESS | libc::EALREADY | libc::EINTR) => {}
+            _ => return Err(e),
+        }
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "unix connect timed out",
+            ));
+        }
+        std::thread::sleep(left.min(Duration::from_millis(20)));
+    }
+    let stream = UnixStream::from(fd);
+    stream.set_nonblocking(false)?;
+    Ok(stream)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn connect_unix_timeout(_path: &std::path::Path, _timeout: Duration) -> io::Result<UnixStream> {
+    Err(crate::unsupported("unix connect timeout"))
 }
 
 #[cfg(target_os = "linux")]

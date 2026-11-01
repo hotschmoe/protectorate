@@ -22,7 +22,7 @@ pub struct PollConfig {
     pub inventory_every: Duration,
     /// How often the node list is re-read from headscale and member.
     pub list_every: Duration,
-    /// Per call; a dial is bounded by member's own 30 s.
+    /// Per call; presence is also bounded by its cadence. A dial is bounded by member's 30 s.
     pub call_timeout: Duration,
 }
 
@@ -55,6 +55,16 @@ pub struct NodeView {
     pub ip: Option<String>,
     /// The last round's error, while the node is unreachable.
     pub error: Option<String>,
+}
+
+impl NodeView {
+    pub fn protocol_error(&self) -> Option<crate::Error> {
+        let node = self.hello.as_ref()?.protocol;
+        (node != pt_frame::msg::PROTOCOL).then_some(crate::Error::Protocol {
+            node,
+            hub: pt_frame::msg::PROTOCOL,
+        })
+    }
 }
 
 pub(crate) type Publish = Arc<dyn Fn(FleetEvent) + Send + Sync>;
@@ -188,6 +198,12 @@ fn refresh(
                 .is_some_and(|p| p.online),
             last_seen_secs: n.last_seen_secs,
         };
+        if links.get(&n.id).is_some_and(|(_, t)| t.is_finished()) {
+            if let Some((_, t)) = links.remove(&n.id) {
+                let _ = t.join();
+            }
+            eprintln!("pt-fleet: restarting poller thread for node {}", n.id);
+        }
         if let Some((link, _)) = links.get(&n.id) {
             *lock(&link.info) = info;
             continue;
@@ -244,6 +260,7 @@ fn poll_node(s: &Shared, link: &Link, id: u64) {
             online: false,
             last_seen_ms: EpochMs(0),
             node_version: String::new(),
+            error: None,
             inventory: None,
             sample: None,
             presence: view::unknown_presence(),
@@ -266,7 +283,11 @@ fn poll_node(s: &Shared, link: &Link, id: u64) {
         let info = lock(&link.info).clone();
         view.node.name = info.name.clone();
         view.ip = info.ip.clone();
-        let result = round(s, &info, &mut client, &mut view, &mut due);
+        let mut result = round(s, &info, &mut client, &mut view, &mut due);
+        if result.is_err() && client.as_ref().is_some_and(NodeClient::disconnected) {
+            client = None;
+            result = round(s, &info, &mut client, &mut view, &mut due);
+        }
         match result {
             Ok(()) => {
                 last_ok = Some(EpochMs::now());
@@ -283,6 +304,7 @@ fn poll_node(s: &Shared, link: &Link, id: u64) {
             }
         }
         view.node.online = info.peer_online && result_ok(&view);
+        view.node.error = view.error.clone();
         view.node.last_seen_ms = last_ok
             .unwrap_or_else(|| EpochMs(info.last_seen_secs.map_or(0, |s| s.max(0) as u64 * 1000)));
         lock(&s.views).insert(id, view.clone());
@@ -315,10 +337,17 @@ fn round(
         let hello = c.hello().map_err(|e| e.to_string())?;
         view.node.node_version = hello.node_version.clone();
         view.hello = Some(hello);
+        c.require_compatible().map_err(|e| e.to_string())?;
         *client = Some(c);
     }
     let c = client.as_mut().ok_or("no connection")?;
     let now = Instant::now();
+    c.set_timeout(s.cfg.call_timeout.min(s.cfg.presence_every))
+        .map_err(|e| e.to_string())?;
+    view.node.presence = view::presence(&c.presence().map_err(|e| e.to_string())?);
+    due.presence = now + s.cfg.presence_every;
+    c.set_timeout(s.cfg.call_timeout)
+        .map_err(|e| e.to_string())?;
     if now >= due.inventory {
         view.node.inventory = Some(view::inventory(&c.inventory().map_err(|e| e.to_string())?));
         due.inventory = now + s.cfg.inventory_every;
@@ -326,10 +355,6 @@ fn round(
     if now >= due.sample {
         view.node.sample = Some(view::sample(&c.sample().map_err(|e| e.to_string())?));
         due.sample = now + s.cfg.sample_every;
-    }
-    if now >= due.presence {
-        view.node.presence = view::presence(&c.presence().map_err(|e| e.to_string())?);
-        due.presence = now + s.cfg.presence_every;
     }
     Ok(())
 }

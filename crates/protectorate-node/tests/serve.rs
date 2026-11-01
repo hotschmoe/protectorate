@@ -38,7 +38,7 @@ fn a_peer_without_the_hub_tag_is_refused() {
         Some(0)
     );
     let hello = a.ok("Hello", "{}");
-    assert_eq!(num(&hello, "protocol"), 2);
+    assert_eq!(num(&hello, "protocol"), 3);
     let version = std::process::Command::new(common::BIN)
         .arg("--version")
         .output()

@@ -341,6 +341,16 @@ pub fn update_nodes(hub: &Hub, r: api::UpdateNodesRequest) -> Result<api::NodeUp
     if r.all == !r.nodes.is_empty() {
         return Err(err(ErrorCode::Invalid, "name the nodes, or all of them"));
     }
+    let views = up.poller.nodes();
+    for name in &r.nodes {
+        let v = views
+            .iter()
+            .find(|v| &v.node.id == name || &v.node.name == name)
+            .ok_or_else(|| err(ErrorCode::NotFound, format!("no node {name:?}")))?;
+        if let Some(e) = v.protocol_error() {
+            return Err(err(ErrorCode::Unavailable, e.to_string()));
+        }
+    }
     let src = source(hub)?;
     let rel = release(hub, &src, r.version.as_deref(), r.channel)?;
     let tag = rel.tag.clone();
@@ -351,7 +361,6 @@ pub fn update_nodes(hub: &Hub, r: api::UpdateNodesRequest) -> Result<api::NodeUp
             format!("probation must be 1 to {MAX_NODE_PROBATION} s"),
         ));
     }
-    let views = up.poller.nodes();
     let target = |v: &pt_fleet::NodeView| -> Option<Target> {
         let h = v.hello.as_ref()?;
         Some(Target {
@@ -366,6 +375,17 @@ pub fn update_nodes(hub: &Hub, r: api::UpdateNodesRequest) -> Result<api::NodeUp
     let mut results = Vec::new();
     let mut todo: Vec<Target> = Vec::new();
     if r.all {
+        for v in &views {
+            if let Some(e) = v.protocol_error() {
+                results.push(failed(
+                    &v.node.id,
+                    &v.node.name,
+                    &v.node.node_version,
+                    &tag,
+                    &e.to_string(),
+                ));
+            }
+        }
         for v in views.iter().filter(|v| v.node.online) {
             match target(v) {
                 Some(t) => todo.push(t),
@@ -464,12 +484,13 @@ fn update_one(
     let ext = if t.os == "windows" { ".exe" } else { "" };
     let asset = format!("protectorate-node-{}-{}{ext}", t.os, t.arch);
     rel.asset(&asset).map_err(|e| e.message)?;
-    if t.release == rel.tag {
-        return Ok("already on it".into());
-    }
     let mut c = up.fleet.connect(&t.ip).map_err(|e| e.to_string())?;
     c.set_timeout(NODE_CALL_TIMEOUT)
         .map_err(|e| e.to_string())?;
+    c.require_compatible().map_err(|e| e.to_string())?;
+    if t.release == rel.tag {
+        return Ok("already on it".into());
+    }
     let reply = c
         .update(msg::Update {
             version: rel.tag.clone(),

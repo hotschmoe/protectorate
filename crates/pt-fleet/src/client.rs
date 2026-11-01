@@ -2,9 +2,9 @@
 //! `<node>:7475`. One request at a time; every call has a deadline, and a connection that timed
 //! out or broke protocol is dead (dial again).
 
-use std::io::{BufWriter, Write};
+use std::io::{self, BufWriter, Read, Write};
 use std::os::unix::net::UnixStream;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use pt_frame::Kind;
 use pt_frame::msg::{
@@ -23,11 +23,47 @@ const FETCH_SLACK: u64 = 64 << 10;
 
 pub struct NodeClient {
     target: String,
-    reader: FrameReader<UnixStream>,
-    writer: BufWriter<UnixStream>,
-    stream: UnixStream,
+    reader: FrameReader<DeadlineStream>,
+    writer: BufWriter<DeadlineStream>,
+    timeout: Duration,
+    protocol: Option<u32>,
     next_id: u64,
     broken: Option<String>,
+    disconnected: bool,
+}
+
+pub(crate) struct DeadlineStream {
+    pub(crate) stream: UnixStream,
+    pub(crate) deadline: Instant,
+}
+
+impl DeadlineStream {
+    fn remaining(&self) -> io::Result<Duration> {
+        let left = self.deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            Err(io::Error::new(io::ErrorKind::TimedOut, "deadline expired"))
+        } else {
+            Ok(left)
+        }
+    }
+}
+
+impl Read for DeadlineStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.stream.set_read_timeout(Some(self.remaining()?))?;
+        self.stream.read(buf)
+    }
+}
+
+impl Write for DeadlineStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.stream.set_write_timeout(Some(self.remaining()?))?;
+        self.stream.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.stream.flush()
+    }
 }
 
 enum Answer {
@@ -42,34 +78,62 @@ impl NodeClient {
             s.try_clone()
                 .map_err(|e| Error::new(format!("{target}: {e}")))
         };
-        let mut c = NodeClient {
+        let deadline = Instant::now() + DEFAULT_TIMEOUT;
+        Ok(NodeClient {
             target: target.to_string(),
-            reader: FrameReader::new(dup(&stream)?, &[]),
-            writer: BufWriter::new(dup(&stream)?),
-            stream,
+            reader: FrameReader::new(
+                DeadlineStream {
+                    stream: dup(&stream)?,
+                    deadline,
+                },
+                &[],
+            ),
+            writer: BufWriter::new(DeadlineStream { stream, deadline }),
+            timeout: DEFAULT_TIMEOUT,
+            protocol: None,
             next_id: 1,
             broken: None,
-        };
-        c.set_timeout(DEFAULT_TIMEOUT)?;
-        Ok(c)
+            disconnected: false,
+        })
     }
 
     pub fn target(&self) -> &str {
         &self.target
     }
 
-    /// The deadline for each read and write of a call.
+    /// The deadline for a whole call, including every read and write.
     pub fn set_timeout(&mut self, t: Duration) -> Result<()> {
-        self.stream
-            .set_read_timeout(Some(t))
-            .and_then(|()| self.stream.set_write_timeout(Some(t)))
-            .map_err(|e| Error::new(format!("{}: {e}", self.target)))
+        if t.is_zero() || Instant::now().checked_add(t).is_none() {
+            return Err(Error::new(format!("{}: invalid call timeout", self.target)));
+        }
+        self.timeout = t;
+        Ok(())
     }
 
     pub fn hello(&mut self) -> Result<HelloReply> {
-        self.typed(&Request::Hello(Hello {
+        let hello: HelloReply = self.typed(&Request::Hello(Hello {
             hub_version: Some(pt_version::VERSION.into()),
-        }))
+        }))?;
+        self.protocol = Some(hello.protocol);
+        Ok(hello)
+    }
+
+    pub fn require_compatible(&mut self) -> Result<()> {
+        let protocol = match self.protocol {
+            Some(p) => p,
+            None => self.hello()?.protocol,
+        };
+        if protocol != msg::PROTOCOL {
+            return Err(Error::Protocol {
+                node: protocol,
+                hub: msg::PROTOCOL,
+            });
+        }
+        Ok(())
+    }
+
+    pub fn disconnected(&self) -> bool {
+        self.disconnected
     }
 
     pub fn inventory(&mut self) -> Result<Inventory> {
@@ -157,6 +221,12 @@ impl NodeClient {
         if let Some(b) = &self.broken {
             return Err(Error::new(format!("connection is dead ({b}); dial again")));
         }
+        if !matches!(req, Request::Hello(_)) {
+            self.require_compatible()?;
+        }
+        let deadline = Instant::now() + self.timeout;
+        self.reader.get_mut().deadline = deadline;
+        self.writer.get_mut().deadline = deadline;
         let id = self.next_id;
         self.next_id += 1;
         let method = req.method();
@@ -177,6 +247,7 @@ impl NodeClient {
         if let Err(e) = sent {
             let m = io(e);
             self.broken = Some(m.clone());
+            self.disconnected = true;
             return Err(Error::new(m));
         }
         let mut log = Vec::new();
@@ -186,11 +257,13 @@ impl NodeClient {
                 Ok(None) => {
                     let m = format!("{target} {method}: the node closed the connection");
                     self.broken = Some(m.clone());
+                    self.disconnected = true;
                     return Err(Error::new(m));
                 }
                 Err(e) => {
                     let m = io(e);
                     self.broken = Some(m.clone());
+                    self.disconnected = true;
                     return Err(Error::new(m));
                 }
             };
