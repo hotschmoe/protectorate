@@ -203,8 +203,19 @@ fn api_surface() {
         .find(|d| d["name"].as_str() == Some("phone"))
         .and_then(|d| d["id"].as_str())
         .unwrap();
+    let mut on_phone = ws(port, &format!("?access_token={phone}"), &[]).unwrap();
+    assert_eq!(next(&mut on_phone)["type"].as_str(), Some("snapshot"));
     hub.cli(&["device", "revoke", id]).ok();
     assert_eq!(post(port, "GetState", Some(&phone), "{}").0, 401, "revoked");
+    // A stream the device opened before is closed too, within a second or so.
+    let closed = loop {
+        match on_phone.recv() {
+            Ok(pt_http::Message::Close(code, _)) => break Some(code),
+            Ok(_) => {}
+            Err(_) => break None,
+        }
+    };
+    assert_eq!(closed, Some(1008), "the revoked device's stream ends");
 
     // The web build: files with ETags, the SPA fallback, 404 for a missing asset.
     let index = get(port, "/", &[]);

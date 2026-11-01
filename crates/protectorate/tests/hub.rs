@@ -4,6 +4,7 @@
 mod common;
 
 use std::collections::HashSet;
+use std::os::unix::process::CommandExt;
 use std::time::Duration;
 
 use common::*;
@@ -60,6 +61,36 @@ fn sleeve_lifecycle() {
     hub.cli(&["sleeve", "stop", "one"]).ok();
     hub.wait("one", "ended", 60);
     assert!(scope_pids(&scope).is_empty(), "{scope} is gone after stop");
+    // Removed, the sleeve keeps nothing open in the hub: its executor ends, its transcript
+    // closes.
+    hub.cli(&["sleeve", "rm", "one"]).ok();
+    let log = hub.home.join(format!("sleeves/{id}/transcript.jsonl"));
+    let pid = serve_pid(&hub.home);
+    let open = || {
+        std::fs::read_dir(format!("/proc/{pid}/fd"))
+            .map(|d| {
+                d.flatten()
+                    .any(|f| std::fs::read_link(f.path()).ok() == Some(log.clone()))
+            })
+            .unwrap_or(false)
+    };
+    let threads = || {
+        std::fs::read_dir(format!("/proc/{pid}/task"))
+            .map(|d| {
+                d.flatten()
+                    .filter(|t| {
+                        std::fs::read_to_string(t.path().join("comm"))
+                            .is_ok_and(|c| c.trim() == format!("pt-exec-{id}"))
+                    })
+                    .count()
+            })
+            .unwrap_or(0)
+    };
+    eventually(
+        "the removed sleeve's files and thread to go",
+        Duration::from_secs(10),
+        || (!open() && threads() == 0).then_some(()),
+    );
 
     assert_eq!(
         git_out(&repo, &["status", "--porcelain"]),
@@ -97,8 +128,23 @@ fn crash_mid_turn_recovers() {
         Duration::from_secs(20),
         || scope_pids(&hub.scope(&id, 1)).is_empty().then_some(()),
     );
+    // A systemd-run the dead hub started that never registered its scope: recovery kills it
+    // before probing, or it would register g1 after the probe found g1 empty.
+    let mut stale = Reaped(
+        std::process::Command::new("sh")
+            .arg0("systemd-run")
+            .args(["-c", "while :; do sleep 1; done", "--unit"])
+            .arg(hub.scope(&id, 1))
+            .spawn()
+            .unwrap(),
+    );
 
     hub.restart();
+    eventually(
+        "recovery to kill the unregistered systemd-run",
+        Duration::from_secs(30),
+        || stale.0.try_wait().unwrap().map(drop),
+    );
     let log = hub.log_text();
     assert!(
         log.contains("apply HubRecovered"),
@@ -168,6 +214,16 @@ fn crash_mid_turn_recovers() {
     );
 }
 
+/// A child killed and reaped when the test ends, passing or not.
+struct Reaped(std::process::Child);
+
+impl Drop for Reaped {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 /// The Envoy round trip a vendor general agent uses: send, wait for the settled reply, read.
 #[test]
 fn envoy_round_trip() {
@@ -201,6 +257,30 @@ fn envoy_round_trip() {
     assert!(
         read.ok()
             .contains("owner: Reply with exactly the word PONG")
+    );
+    // A vendor agent reads its own exchanges with Envoy, never the owner's.
+    let agent_token = hub.printed("envoy-only token: ");
+    let as_agent = [("PROTECTORATE_TOKEN", agent_token.as_str())];
+    hub.cli_env(
+        &as_agent,
+        &[
+            "envoy",
+            "send",
+            "Reply with exactly the word BETA and nothing else.",
+        ],
+    )
+    .ok();
+    let beta = hub.cli_env(&as_agent, &["envoy", "wait", "--timeout", "180"]);
+    assert!(
+        beta.ok().contains("BETA"),
+        "Envoy answered: {}",
+        beta.stdout
+    );
+    let theirs = hub.cli_env(&as_agent, &["envoy", "read"]);
+    let theirs = theirs.ok();
+    assert!(
+        theirs.contains("BETA") && !theirs.contains("PONG"),
+        "an agent's read: {theirs}"
     );
     assert!(
         std::fs::read_to_string(hub.home.join("envoy/CLAUDE.md"))
@@ -302,6 +382,8 @@ fn capabilities_are_scoped() {
         &["sleeve", "transcript", "b5"],
         &["sleeve", "wait", "b5", "--timeout", "1"],
         &["envoy", "send", "hello"],
+        &["envoy", "read"],
+        &["envoy", "wait", "--timeout", "1"],
     ] {
         let r = hub.cli_env(&as_a, args);
         assert_eq!(
@@ -312,6 +394,23 @@ fn capabilities_are_scoped() {
     }
     hub.cli_env(&as_a, &["sleeve", "transcript", "a5"]).ok();
     assert_eq!(hub.sleeve("b5")["lifecycle"].as_str(), Some("running"));
+
+    // Any node job from a sleeve waits for the owner, `--maintenance` or not: a node runs
+    // every job with its own account. Denied, it fails before it reaches the fleet.
+    std::thread::scope(|t| {
+        let run = t.spawn(|| hub.cli_env(&as_a, &["job", "run", "--arch", "amd64", "--", "true"]));
+        let ask = eventually("the job's approval", Duration::from_secs(30), || {
+            let v = hub.cli(&["--json", "approval", "list"]).json();
+            v["approvals"].as_array()?.iter().find_map(|a| {
+                let open = a["state"].as_str() == Some("pending")
+                    && a.to_string().contains("run node job true");
+                open.then(|| a["id"].as_str().unwrap().to_string())
+            })
+        });
+        hub.cli(&["approval", "decide", &ask, "deny"]).ok();
+        let r = run.join().unwrap();
+        assert_eq!(r.status, 4, "a denied job: {} {}", r.stdout, r.stderr);
+    });
 
     let envoy_only = hub.printed("envoy-only token: ");
     let as_agent = [("PROTECTORATE_TOKEN", envoy_only.as_str())];
@@ -824,4 +923,18 @@ exec '{real_pi}' "$@""#
         "OLD-CLAUDE",
         "kept outside every sandbox"
     );
+}
+
+/// The pid of the `serve` running on `home`.
+fn serve_pid(home: &std::path::Path) -> u32 {
+    let want = format!("--home\0{}\0serve\0", home.display());
+    std::fs::read_dir("/proc")
+        .unwrap()
+        .flatten()
+        .filter_map(|e| e.file_name().to_str()?.parse::<u32>().ok())
+        .find(|pid| {
+            std::fs::read(format!("/proc/{pid}/cmdline"))
+                .is_ok_and(|c| String::from_utf8_lossy(&c).contains(&want))
+        })
+        .expect("the hub's serve process")
 }

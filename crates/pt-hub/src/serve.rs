@@ -85,14 +85,6 @@ fn start_server(name: &str, server: Server) -> ShutdownHandle {
     h
 }
 
-fn http_config() -> HttpConfig {
-    HttpConfig {
-        // Wait and EnvoyWait hold a request open up to an hour.
-        idle_timeout: Duration::from_secs(3700),
-        ..HttpConfig::default()
-    }
-}
-
 /// How `serve` ended.
 pub enum Exit {
     Stopped,
@@ -278,7 +270,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
     clear_stale_socket(&sock)?;
     let unix = Server::bind_unix(
         &sock,
-        http_config(),
+        HttpConfig::default(),
         handler(hub.clone(), Listener::Unix, web.clone()),
     )
     .map_err(|e| e.to_string())?;
@@ -287,7 +279,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
     clear_stale_socket(&sleeve_sock)?;
     let sleeves = Server::bind_unix(
         &sleeve_sock,
-        http_config(),
+        HttpConfig::default(),
         handler(hub.clone(), Listener::Sleeves, web.clone()),
     )
     .map_err(|e| e.to_string())?;
@@ -295,7 +287,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
     if let Some(addr) = o.listen {
         let s = Server::bind_tcp(
             addr,
-            http_config(),
+            HttpConfig::default(),
             handler(hub.clone(), Listener::Loopback, web.clone()),
         )
         .map_err(|e| e.to_string())?;
@@ -308,7 +300,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
             .ok_or("--proxy-listen needs --trusted-proxy")?;
         let s = Server::bind_tcp(
             addr,
-            http_config(),
+            HttpConfig::default(),
             handler(hub.clone(), Listener::Proxy { trusted }, web.clone()),
         )
         .map_err(|e| e.to_string())?;

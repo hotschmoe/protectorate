@@ -387,15 +387,24 @@ Each entry: where, what was done, what right looks like.
   the system `gzip -9`; officewin, which has none, gets member gzipped by release.sh. Right:
   prune old unpacked versions once the owner agrees to that rule; table-driven decoding if
   unpack time ever shows.
-- **D9 covers three calls and the turn, not the request chain** (`pt-hub`, rule.rs): while
-  Envoy's current turn was started (or steered) by an `agent:` message, Envoy's own `sleeve rm`,
-  `job run` and spawns past `d9_spawn_limit` (default 3 per turn) wait for an owner approval
+- **D9 covers two calls and the turn, not the request chain** (`pt-hub`, rule.rs): while
+  Envoy's current turn was started (or steered) by an `agent:` message, Envoy's own `sleeve rm`
+  and spawns past `d9_spawn_limit` (default 3 per turn) wait for an owner approval
   (`d9_approval_timeout_secs`, default 900, then `timeout`). The origin is cleared when the turn
   settles, so a background process Envoy started in that turn acts as the owner's afterwards;
   a sleeve Envoy prompted on the agent's behalf is not gated at all; no push method exists yet
-  to gate. A `maintenance` node job from any sleeve, Envoy included, always waits for the owner,
-  whatever started the turn. Right: carry the origin through messages Envoy sends (a request
-  chain), and add pushes to the list when the API grows them.
+  to gate. Every node job from any sleeve, Envoy included, waits for the owner whatever started
+  the turn: a node runs every job with its own account and ignores `maintenance`, so the flag
+  marks nothing it enforces. Right: carry the origin through messages Envoy sends (a request
+  chain), add pushes to the list when the API grows them, and let non-maintenance jobs through
+  ungated once the runner account exists.
+- **Vendor agents read a filtered Envoy transcript** (`pt-hub`, api.rs `agent_transcript`):
+  `EnvoyRead` with the envoy-only token shows each `ga:` message and the assistant text and
+  settle of the turn it started, up to another sender's message; owner and sleeve messages,
+  tools and reasoning are left out. All agents share the one token, so they see each other's
+  exchanges, and an answer can still quote what Envoy learned elsewhere. It reads the whole
+  transcript per call. Sleeves get none of `EnvoyRead` or `EnvoyWait`. Right: a token per
+  agent, and an index of agent turns if transcripts grow large.
 - **Who sent a message is a text prefix** (`pt-hub`, api.rs): mail reaches the harness as
   `[from sleeve <name>] ...` and agent requests as `[from agent:<name>] ...`, since a prompt has no
   other sender field; owner and Envoy messages are unprefixed. Right: revisit if a harness grows
@@ -416,11 +425,18 @@ Each entry: where, what was done, what right looks like.
   socket and the journal lock is held (no other hub can own it). This is the one file product
   code deletes; the owner may prefer a fresh socket name per start.
 - **Wait and EnvoyWait hold a connection thread** for up to an hour, out of 256. Fine for a few
-  clients; right if Envoy fans out: wait on the event stream instead.
-- **`PT_TEST_FAULT=usage_limit:<sleeve name>`** (`pt-hub`, hub.rs `Fault`): the one test-only
-  knob. The named sleeve's first settled turn in this hub process is reported to the core as
-  `TurnEnd::UsageLimit`, which trips G1 and forces a resleeve; the e2e `forced_resleeve_with_brief`
-  uses it. The hub warns at start when it is set. Never set it in production.
+  clients; right if Envoy fans out: wait on the event stream instead. The idle keep-alive is
+  pt-http's 60 s (a request being answered is not idle), so up to 256 idle clients can still hold
+  every slot for a minute. Right: a pt-http option that closes the oldest idle connection when
+  the slots run out, and a shorter idle limit for unauthenticated connections.
+- **A revoked caller's event stream ends within a second** (`pt-hub`, http.rs `events`): the
+  stream re-runs the caller's authentication once per bus wait (at most 1 s) and sends close
+  1008 once it no longer yields the same principal. Right: a revocation notice on the bus that
+  wakes every stream of that token at once.
+- **`PT_TEST_FAULT=usage_limit:<sleeve name>`** (`pt-hub`, hub.rs `Fault`): one of two
+  test-only knobs (the other is pt-update's `PT_TEST_CRASH_AT`). The named sleeve's first settled
+  turn in this hub process is reported to the core as `TurnEnd::UsageLimit`, which trips G1 and
+  forces a resleeve; the e2e `forced_resleeve_with_brief` uses it. The hub warns at start when it is set. Never set it in production.
 - **RealHub is exercised only by `scripts/app-e2e.sh`** (`app/lib/real_hub.dart`): the web build
   against a real hub (pairing, Envoy chat, sleeves, a D9 approval denied from the app), outside
   `make test` because it needs Chromium and the local model. Reconnect backoff is 1 to 30 s; a
@@ -458,12 +474,22 @@ Each entry: where, what was done, what right looks like.
   flight. Right: a per-submit token in `NodeSubmit` that the node echoes in every status.
 - **Prompt evidence by ordering** (pt-core, `prompt_evidence`): harness output confirms an
   in-flight prompt or compaction only once its `Dispatched` is in, which relies on a sleeve's
-  observations and executor reports sharing one ordered stream. The hub meets it by handing a
-  sleeve's executor reports to its pump (`pt-hub`, exec.rs), which submits them after the
-  harness events it has received; the pump wakes every 10 ms to look for them, since std
-  channels have no select. Right: drivers tag output with the native turn id where the protocol
-  has one, and evidence must match the prompt's turn; a driver hook that puts the report into
-  its own event channel would drop the poll.
+  observations and executor reports sharing one ordered stream. The hub meets it in the pump
+  (`pt-hub`, exec.rs): a prompt's `Dispatched` is submitted when the driver's `user_message`
+  for it comes through the event stream, so output read before the write is the previous
+  turn's, and its `Acked` (with the native turn id from the ack or, failing that, from the
+  `turn_started` that follows within 2 s) or `Nacked` when the ack does. Other executor reports
+  are handed to the pump, which submits them after the harness events it has received; it wakes
+  every 10 ms to look for them, since std channels have no select. A confirmed prompt whose turn
+  id arrives later than 2 s stays unbound, so its turn cannot be steered. Right: drivers tag
+  output with the native turn id where the protocol has one, and evidence must match the
+  prompt's turn.
+- **An unregistered systemd-run is found by its command line** (`pt-hub`, exec.rs
+  `kill_unregistered`): before probing a scope it has no session for, the hub SIGKILLs any
+  process of its uid whose argv is `systemd-run ... --unit <that scope>`, one a crashed hub
+  started that has not yet become the sandbox, and waits for it to go; otherwise it could
+  register the scope after the probe found none. Right: pt-sandbox registers the scope through
+  the user manager's D-Bus API before forking the sandbox, so no unregistered launcher exists.
 - **Cancel re-sent every Tick** (pt-core jobs): Cancelling re-sends an uncertain cancel at each
   10 s Tick until the lease ends. Right: the per-job backoff of node polling.
 - **Torn batch versus corruption** (pt-journal, `open_segment`): a frame failing its CRC is cut as
@@ -627,6 +653,14 @@ Each entry: where, what was done, what right looks like.
   does not check the fleet or launch a sleeve. The headscale snapshot is taken only while the
   fleet is up. Old `releases/<version>` directories are never pruned. Right: re-exec with the
   listeners and sandboxes handed over, and a health check that includes a fleet round trip.
+- **Release switches order their writes for crashes** (`pt-update` store.rs): a switch on
+  probation writes `probation.json` first, then `previous`, then `current`, under one lock; a
+  rollback sets `current` before `previous`. A crash at any step leaves `current` on a release
+  that worked, or the new one with its trial open; a crash inside a rollback can leave both
+  pointers on the old release, losing the way forward, never the way back. `PT_TEST_CRASH_AT`
+  (`probation-written`, `switch-previous`, `rollback-current`) ends the process after that step,
+  for the e2e. `confirm` takes the version whose check passed, so a late check never keeps a
+  release switched in since. Right: fine.
 - **Probation counts on wall-clock time and on the new binary's own watch** (`pt-update`): the
   units run `releases/previous/<bin> probation` before each start, which rolls back after
   `MAX_TRIAL_STARTS` (3) failed starts or a passed window, and the release on trial watches its

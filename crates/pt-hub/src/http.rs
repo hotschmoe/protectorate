@@ -175,7 +175,11 @@ pub fn handler(
                 return error(&err(ErrorCode::Forbidden, "cross-origin event stream"));
             }
             let from = req.query_param(FROM_SEQ_PARAM).and_then(|s| s.parse().ok());
-            return events(hub.clone(), from);
+            let (h, peer) = (hub.clone(), peer.clone());
+            // A revoked device, or a token or sleeve that no longer names this caller, ends
+            // the stream within a second.
+            let still = move || principal(&h, l, token.as_deref(), &peer).is_ok_and(|p| p == who);
+            return events(hub.clone(), from, still);
         }
         if req.method() != "POST" {
             return Response::method_not_allowed("POST");
@@ -255,8 +259,12 @@ fn snapshot(hub: &Hub) -> (u64, String) {
 
 /// The WebSocket fan-out: replays from `from_seq` while the ring or the stream log still holds
 /// every kept message from it, else starts with a snapshot; then streams every message, deltas
-/// included.
-fn events(hub: Arc<Hub>, from: Option<u64>) -> Response {
+/// included, for as long as `still` holds.
+fn events(
+    hub: Arc<Hub>,
+    from: Option<u64>,
+    still: impl Fn() -> bool + Send + Sync + 'static,
+) -> Response {
     Response::websocket(move |mut ws| {
         let writer = ws.writer();
         let closed = Arc::new(AtomicBool::new(false));
@@ -297,6 +305,10 @@ fn events(hub: Arc<Hub>, from: Option<u64>) -> Response {
             }
         };
         while !closed.load(Ordering::SeqCst) {
+            if !still() {
+                let _ = writer.close(1008, "no longer authorized");
+                return;
+            }
             match hub.bus.since(cursor, Duration::from_secs(1)) {
                 Since::Items(items) => {
                     for i in items {

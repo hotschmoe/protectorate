@@ -2,10 +2,11 @@
 //! the actions listed here wait for the owner's approval whatever Envoy decides. The origin is
 //! recorded per Envoy turn by the executor that writes the prompt (`EnvoyTurn`).
 //!
-//! The list: removing a sleeve, running a node job, and spawning more than
-//! `config.d9_spawn_limit` sleeves in one such turn. Pushes join it with the push method
-//! (REVISIT). A node maintenance job from any sleeve, Envoy included, always waits for the
-//! owner (SPEC 3.1).
+//! The list: removing a sleeve and spawning more than `config.d9_spawn_limit` sleeves in one
+//! such turn. Pushes join it with the push method (REVISIT). A node job from any sleeve, Envoy
+//! included, always waits for the owner whatever started the turn: a node runs every job with
+//! its own account (the runner account is deferred, REVISIT), so `maintenance` marks nothing a
+//! node enforces.
 
 use pt_api::ApiError;
 use pt_core::SleeveId;
@@ -16,27 +17,33 @@ use crate::transcript::lock;
 
 pub enum Guarded<'a> {
     Remove(&'a str),
-    /// The command line and where it would run.
-    RunJob(String),
     Spawn(&'a str),
 }
 
-/// A node maintenance job (`what`: the command line and where it would run): from any sleeve,
-/// Envoy included, it waits for the owner whatever started the turn.
-pub fn gate_maintenance(
+/// A node job (`what`: the command line and where it would run): from any sleeve, Envoy
+/// included, it waits for the owner.
+pub fn gate_job(
     hub: &Hub,
     who: &Principal,
     what: &str,
+    maintenance: bool,
 ) -> Result<Option<String>, ApiError> {
     let (Principal::Envoy(sleeve) | Principal::Sleeve(sleeve)) = *who else {
         return Ok(None);
     };
+    let kind = if maintenance {
+        "node maintenance job"
+    } else {
+        "node job"
+    };
     ask(
         hub,
         sleeve,
-        format!("run node maintenance job {what}"),
-        "A sleeve asked for a node maintenance job. Code requires the owner's approval for it."
-            .into(),
+        format!("run {kind} {what}"),
+        format!(
+            "A sleeve asked for a {kind}. A node runs every job with its own account, so code \
+             requires the owner's approval for it."
+        ),
     )
 }
 
@@ -53,7 +60,6 @@ pub fn gate(hub: &Hub, who: &Principal, action: Guarded<'_>) -> Result<Option<St
         };
         let title = match action {
             Guarded::Remove(name) => format!("remove sleeve {name}"),
-            Guarded::RunJob(what) => format!("run node job {what}"),
             Guarded::Spawn(name) => {
                 t.spawns += 1;
                 let limit = hub.config.d9_spawn_limit;

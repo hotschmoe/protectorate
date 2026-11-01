@@ -821,17 +821,13 @@ fn run_job(c: &Ctx<'_>, r: api::RunJobRequest) -> Result<api::Job> {
     if timeout_secs == 0 || timeout_secs > pt_frame::msg::MAX_TIMEOUT_SECS {
         return Err(err(ErrorCode::Invalid, "timeout_secs is 1 s to 24 h"));
     }
-    fleet(c.hub)?;
     let on = match &r.target {
         api::JobTarget::Node { node_id } => format!("node {node_id}"),
         api::JobTarget::Arch { arch } => format!("a node of arch {arch}"),
     };
     let what = format!("{} on {on}", r.argv.join(" "));
-    let approval_id = if r.maintenance {
-        rule::gate_maintenance(c.hub, c.who, &what)?
-    } else {
-        rule::gate(c.hub, c.who, Guarded::RunJob(what))?
-    };
+    let approval_id = rule::gate_job(c.hub, c.who, &what, r.maintenance)?;
+    fleet(c.hub)?;
     let view = c.hub.view();
     let sleeve = match c.who {
         Principal::Envoy(x) | Principal::Sleeve(x) => Some(*x),
@@ -1017,9 +1013,59 @@ fn envoy_send(c: &Ctx<'_>, r: api::EnvoySendRequest) -> Result<api::Sent> {
     Ok(api::Sent { request_id })
 }
 
+/// The owner's scope reads Envoy's whole transcript; vendor agents read only their own
+/// messages and the answers of the turns those started; a sleeve reads none of it.
 fn envoy_read(c: &Ctx<'_>, r: api::EnvoyReadRequest) -> Result<api::Transcript> {
     let id = envoy(&c.hub.view())?;
-    transcript(c.hub, id, Some(r.from_seq), r.limit)
+    match c.who {
+        Principal::Sleeve(_) => Err(not_for_sleeves()),
+        Principal::EnvoyOnly => agent_transcript(c.hub, id, r.from_seq, r.limit),
+        _ => transcript(c.hub, id, Some(r.from_seq), r.limit),
+    }
+}
+
+fn not_for_sleeves() -> ApiError {
+    err(
+        ErrorCode::Forbidden,
+        "sleeves reach Envoy through their parent, not the Envoy methods",
+    )
+}
+
+/// What vendor agents see of Envoy's transcript: each `ga:` message, then the assistant text
+/// and settle of the turn it started, until another sender's message. No tool calls, no
+/// reasoning, nothing the owner or a sleeve said.
+fn agent_transcript(
+    hub: &Hub,
+    id: SleeveId,
+    from: u64,
+    limit: Option<u64>,
+) -> Result<api::Transcript> {
+    let limit = limit.unwrap_or(TRANSCRIPT_DEFAULT).clamp(1, TRANSCRIPT_MAX) as usize;
+    let store = hub.transcripts.get(id).map_err(internal)?;
+    let lines = lock(&store).all().map_err(internal)?;
+    let mut agent = false;
+    let mut shown = lines.iter().filter(|l| {
+        let keep = match &l.entry {
+            Entry::UserMessage { request_id, .. } => {
+                agent = request_id.starts_with("ga:");
+                agent
+            }
+            Entry::AssistantText { .. } => agent,
+            Entry::TurnSettled { .. } => std::mem::replace(&mut agent, false),
+            _ => false,
+        };
+        keep && l.seq >= from
+    });
+    let entries: Vec<_> = shown
+        .by_ref()
+        .take(limit)
+        .map(|l| wire::chat_entry(id, l, false))
+        .collect();
+    Ok(api::Transcript {
+        sleeve_id: id.0.to_string(),
+        entries,
+        more: shown.next().is_some(),
+    })
 }
 
 fn get_envoy_token(c: &Ctx<'_>, _: api::Empty) -> Result<api::EnvoyToken> {
@@ -1079,6 +1125,9 @@ fn envoy_wait(c: &Ctx<'_>, r: api::EnvoyWaitRequest) -> Result<api::EnvoyReply> 
     let hub = c.hub;
     let view = hub.view();
     let id = envoy(&view)?;
+    if matches!(c.who, Principal::Sleeve(_)) {
+        return Err(not_for_sleeves());
+    }
     let party = c.who.party();
     let request_id = match r.request_id.filter(|r| !r.is_empty()) {
         Some(r) => r,
