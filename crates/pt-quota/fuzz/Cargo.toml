@@ -1,0 +1,50 @@
+[package]
+name = "pt-quota-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+pt-api = { path = "../../pt-api" }
+pt-quota = { path = ".." }
+
+[workspace]
+
+[[bin]]
+name = "select"
+path = "fuzz_targets/select.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_claude"
+path = "fuzz_targets/parse_claude.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_codex"
+path = "fuzz_targets/parse_codex.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_grok"
+path = "fuzz_targets/parse_grok.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_local"
+path = "fuzz_targets/parse_local.rs"
+test = false
+doc = false
+bench = false

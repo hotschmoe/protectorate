@@ -466,3 +466,26 @@ Each entry: where, what was done, what right looks like.
   envoy_read over line-delimited JSON-RPC, protocol versions 2025-06-18, 2025-03-26 and
   2024-11-05; no resources, prompts or notifications, and the agent name comes from `--as` or
   `clientInfo.name`. Right: grow it with what the vendor apps actually call.
+- **Quota readers drop the old extras** (`pt-quota`): no reset credits (Claude cedar_ember, Codex
+  rate-limit-reset-credits, Grok GetRemainingResets and its protobuf walker), because
+  `pt_api::Quota` has no field for them; no Claude `extra` overage window; no Codex `app-server`
+  path (it would launch the CLI, which may refresh a token; the wham endpoint is the only source);
+  no Antigravity reader (no `Subscription` for it, the `agy` CLI is not installed here, and
+  Antigravity is pane-only, D13). Right: add a resets field to `Quota` when dispatch uses
+  credits; revisit Codex `app-server` if wham breaks; Antigravity when it has a subscription.
+- **Quota `unknown` is an `error` reading with a note prefix** (`pt-quota`, `pt-api`):
+  `QuotaReading` has `ok`, `stale`, `error` only, so unknown (nothing to read: not logged in,
+  local endpoint unset) is `error` with the note starting `unknown: `, and `pt_quota::state` tells
+  the four apart. Right: add `unknown` to `QuotaReading` (and the Dart enum) in one commit.
+- **Local endpoint address is configuration** (`pt-quota`): the b70 URL comes from the probe flag
+  or `PT_LOCAL_URL`; the hub must pass it to `Local { base_url }`. Right: hub config key.
+- **Quota selection constants are untuned** (`pt-quota`): usable-now minimums per task size
+  (5, 15, 30 percent), the 48 h half-life and the 168 h stand-in for an unknown reset are the old
+  dev-hotschmoe values; `TaskSize` thresholds and N are caller inputs with no defaults. Right: tune
+  from real dispatch history once a workspace has any.
+- **`select_target` takes `now_ms`** (`pt-quota`): the pure function needs a clock for time to
+  reset, so it is the first argument. Pi with a vendor login (`PiVendor`) and Antigravity are never
+  selected (no quota subscription behind them).
+- **Quota fuzz runs wrote corpus into `fuzz/seeds`** (`pt-quota`): `cargo fuzz run <t> seeds/<t>`
+  adds new inputs to the seed dir; only the hand-written seeds (named, not hex) are committed.
+  Right: run with `corpus` as first dir and seeds as the second.

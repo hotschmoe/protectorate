@@ -125,6 +125,14 @@ name = "pt-qr"
 version = "0.0.0"
 
 [[package]]
+name = "pt-quota"
+version = "0.0.0"
+dependencies = [
+ "pt-api",
+ "pt-json",
+]
+
+[[package]]
 name = "pt-sandbox"
 version = "0.0.0"
 
