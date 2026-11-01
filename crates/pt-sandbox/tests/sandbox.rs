@@ -329,7 +329,10 @@ fn a_rewritten_gitdir_never_reaches_the_next_launch() {
     s.git_dirs = resolve_git_dirs(&wt, &main).expect("the honest worktree resolves");
     assert_eq!(stdout(&sh(&s, &probe)), "ran");
 
+    // Each launch gets its own generation: a scope name is not reusable until systemd unloads
+    // the last one.
     for evil in [Path::new("/"), &owner, &fake] {
+        s.generation += 1;
         let out = sh(
             &s,
             &format!(
@@ -337,9 +340,15 @@ fn a_rewritten_gitdir_never_reaches_the_next_launch() {
                 evil.display()
             ),
         );
-        assert_eq!(stdout(&out), "REWROTE");
+        assert_eq!(
+            stdout(&out),
+            "REWROTE",
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         if let Ok(dirs) = resolve_git_dirs(&wt, &main) {
             let mut next = s.clone();
+            next.generation += 100;
             next.git_dirs = dirs;
             if let Ok(mut cmd) = next.command() {
                 let o = cmd.args(["sh", "-c", &probe]).output().unwrap();
