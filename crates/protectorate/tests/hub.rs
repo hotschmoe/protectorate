@@ -395,15 +395,33 @@ fn capabilities_are_scoped() {
     hub.cli_env(&as_a, &["sleeve", "transcript", "a5"]).ok();
     assert_eq!(hub.sleeve("b5")["lifecycle"].as_str(), Some("running"));
 
-    // Any node job from a sleeve waits for the owner, `--maintenance` or not: a node runs
-    // every job with its own account. Denied, it fails before it reaches the fleet.
+    // An ordinary node job from a sleeve is not asked about: with no fleet it fails at once.
+    let r = hub.cli_env(&as_a, &["job", "run", "--arch", "amd64", "--", "true"]);
+    assert_ne!(r.status, 0, "{} {}", r.stdout, r.stderr);
+    assert!(r.stderr.contains("no fleet is configured"), "{}", r.stderr);
+    let v = hub.cli(&["--json", "approval", "list"]).json();
+    assert!(!v.to_string().contains("run node job"), "{v}");
+    // A maintenance job waits for the owner. Denied, it fails before it reaches the fleet.
     std::thread::scope(|t| {
-        let run = t.spawn(|| hub.cli_env(&as_a, &["job", "run", "--arch", "amd64", "--", "true"]));
+        let run = t.spawn(|| {
+            hub.cli_env(
+                &as_a,
+                &[
+                    "job",
+                    "run",
+                    "--arch",
+                    "amd64",
+                    "--maintenance",
+                    "--",
+                    "true",
+                ],
+            )
+        });
         let ask = eventually("the job's approval", Duration::from_secs(30), || {
             let v = hub.cli(&["--json", "approval", "list"]).json();
             v["approvals"].as_array()?.iter().find_map(|a| {
                 let open = a["state"].as_str() == Some("pending")
-                    && a.to_string().contains("run node job true");
+                    && a.to_string().contains("run node maintenance job true");
                 open.then(|| a["id"].as_str().unwrap().to_string())
             })
         });

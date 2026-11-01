@@ -423,17 +423,19 @@ Each entry: where, what was done, what right looks like.
   the system `gzip -9`; officewin, which has none, gets member gzipped by release.sh. Right:
   prune old unpacked versions once the owner agrees to that rule; table-driven decoding if
   unpack time ever shows.
-- **D9 covers two calls and the turn, not the request chain** (`pt-hub`, rule.rs): while
-  Envoy's current turn was started (or steered) by an `agent:` message, Envoy's own `sleeve rm`
-  and spawns past `d9_spawn_limit` (default 3 per turn) wait for an owner approval
+- **D9 covers three calls and the turn, not the request chain** (`pt-hub`, rule.rs): while
+  Envoy's current turn was started (or steered) by an `agent:` message, Envoy's own `sleeve rm`,
+  `job run` and spawns past `d9_spawn_limit` (default 3 per turn) wait for an owner approval
   (`d9_approval_timeout_secs`, default 900, then `timeout`). The origin is cleared when the turn
   settles, so a background process Envoy started in that turn acts as the owner's afterwards;
   a sleeve Envoy prompted on the agent's behalf is not gated at all; no push method exists yet
-  to gate. Every node job from any sleeve, Envoy included, waits for the owner whatever started
-  the turn: a node runs every job with its own account and ignores `maintenance`, so the flag
-  marks nothing it enforces. Right: carry the origin through messages Envoy sends (a request
-  chain), add pushes to the list when the API grows them, and let non-maintenance jobs through
-  ungated once the runner account exists.
+  to gate. A `maintenance` node job from any sleeve, Envoy included, always waits for the owner;
+  other node jobs from sleeves run unasked (owner, 2026-11-01: jobs may run as root, and the
+  owner is not to be the bottleneck). A node runs every job with its own account (root, or
+  LocalSystem on Windows) and does not enforce `maintenance`, so the flag is a sleeve's own
+  declaration: a sleeve that leaves it off runs anything as the node's account. Right: carry the
+  origin through messages Envoy sends (a request chain), add pushes to the list when the API
+  grows them, and a runner account for ordinary jobs so `maintenance` means a privilege.
 - **Vendor agents read a filtered Envoy transcript** (`pt-hub`, api.rs `agent_transcript`):
   `EnvoyRead` with the envoy-only token shows each `ga:` message and the assistant text and
   settle of the turn it started, up to another sender's message; owner and sleeve messages,
