@@ -57,24 +57,45 @@ impl Write for Stream {
     }
 }
 
-/// A stream whose reads share one deadline: each read gets only the time left, so a client
+/// A stream whose reads and writes share one deadline: each gets only the time left, so a peer
 /// trickling a byte at a time cannot stretch a timeout. Without a deadline, the socket's own
-/// read timeout applies.
+/// timeouts apply.
 pub(crate) struct Timed {
     pub(crate) stream: Stream,
     pub(crate) deadline: Option<Instant>,
 }
 
+impl Timed {
+    fn left(&self) -> io::Result<Option<Duration>> {
+        let Some(deadline) = self.deadline else {
+            return Ok(None);
+        };
+        match deadline.saturating_duration_since(Instant::now()) {
+            left if left.is_zero() => Err(io::ErrorKind::TimedOut.into()),
+            left => Ok(Some(left)),
+        }
+    }
+}
+
 impl Read for Timed {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if let Some(deadline) = self.deadline {
-            let left = deadline.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                return Err(io::ErrorKind::TimedOut.into());
-            }
+        if let Some(left) = self.left()? {
             self.stream.set_read_timeout(Some(left))?;
         }
         self.stream.read(buf)
+    }
+}
+
+impl Write for Timed {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if let Some(left) = self.left()? {
+            self.stream.set_write_timeout(Some(left))?;
+        }
+        self.stream.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }
 
@@ -237,6 +258,12 @@ pub(crate) fn parse_request(head: Head) -> Result<Request, Error> {
         }
         _ => return Err(Error::Status(400, "bad request line")),
     };
+    // RFC 9112 3.2: HTTP/1.1 needs a Host, and no request may carry two.
+    match head.headers.get_all("Host").count() {
+        0 if !http10 => return Err(Error::Status(400, "missing Host")),
+        0 | 1 => {}
+        _ => return Err(Error::Status(400, "more than one Host")),
+    }
     Ok(Request {
         method: method.to_string(),
         path_len: target.find('?').unwrap_or(target.len()),
@@ -504,7 +531,15 @@ pub fn fuzz_request(data: &[u8]) {
         assert!(head.headers.0.len() <= MAX_HEADERS);
         let Ok(req) = parse_request(head) else { return };
         assert!(req.path().len() <= HEAD);
+        let hosts = req.headers.get_all("Host").count();
+        assert!(
+            hosts == 1 || (req.http10 && hosts == 0),
+            "{hosts} Host fields"
+        );
         let _ = req.query_param("a");
+        if crate::ws::check_handshake(&req).is_ok() {
+            assert_canonical_key(req.header("Sec-WebSocket-Key").unwrap_or(""));
+        }
         let Ok(framing) = framing(&req.headers) else {
             return;
         };
@@ -513,4 +548,22 @@ pub fn fuzz_request(data: &[u8]) {
             Err(_) => return,
         }
     }
+}
+
+/// An accepted Sec-WebSocket-Key decodes to 16 bytes that encode back to the same text.
+fn assert_canonical_key(key: &str) {
+    const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let (mut bytes, mut acc, mut bits) = (Vec::new(), 0u32, 0);
+    for c in key.trim_end_matches('=').bytes() {
+        let v = A.iter().position(|&a| a == c).expect("base64 alphabet");
+        acc = acc << 6 | v as u32;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            bytes.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    assert_eq!(bytes.len(), 16, "{key}");
+    assert_eq!(crate::ws::base64(&bytes), key);
 }

@@ -8,9 +8,11 @@ use std::io::{self, BufReader, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const MAX_HEAD: usize = 64 << 10;
+/// 1xx answers skipped before the final response.
+const MAX_INTERIM: usize = 16;
 
 #[derive(Debug, Clone)]
 enum Target {
@@ -67,7 +69,9 @@ impl Client {
         self
     }
 
-    /// Per read. For a WebSocket it is the idle time before a ping, then before giving up.
+    /// The deadline for a whole request: sending it and reading all of the response, however
+    /// slowly the server trickles it. For a WebSocket it covers the handshake; after that it is
+    /// the idle time before a ping, then the wait for its pong, and the longest one frame may take.
     pub fn read_timeout(mut self, t: Option<Duration>) -> Client {
         self.read_timeout = t;
         self
@@ -103,7 +107,7 @@ impl Client {
                 &format!("Connection: close\r\n{length}"),
             )
             .map_err(ctx)?;
-        reader.get_mut().stream.write_all(body).map_err(ctx)?;
+        reader.get_mut().write_all(body).map_err(ctx)?;
         read_response(&mut reader, method == "HEAD", self.max_body).map_err(|e| ctx(e.into()))
     }
 
@@ -126,9 +130,22 @@ impl Client {
         if status != 101 {
             return Err(bad(format!("handshake answered {status}")));
         }
+        if !head.headers.has_token("Upgrade", "websocket")
+            || !head.headers.has_token("Connection", "upgrade")
+        {
+            return Err(bad(
+                "101 without Upgrade: websocket and Connection: Upgrade".into(),
+            ));
+        }
         if head.headers.get("Sec-WebSocket-Accept") != Some(ws::accept_key(&key).as_str()) {
             return Err(bad("wrong Sec-WebSocket-Accept".into()));
         }
+        // The handshake left the socket with only the rest of its deadline for writes.
+        reader
+            .get_ref()
+            .stream
+            .set_write_timeout(self.read_timeout)
+            .map_err(ctx)?;
         WebSocket::new(reader, true, self.max_body, self.read_timeout).map_err(ctx)
     }
 
@@ -163,7 +180,7 @@ impl Client {
             head.push_str(&format!("{n}: {v}\r\n"));
         }
         head.push_str("\r\n");
-        let mut stream = match &self.target {
+        let stream = match &self.target {
             Target::Tcp(a) => {
                 let s = TcpStream::connect_timeout(a, self.connect_timeout)?;
                 s.set_nodelay(true)?;
@@ -171,13 +188,12 @@ impl Client {
             }
             Target::Unix(p) => Stream::Unix(UnixStream::connect(p)?),
         };
-        stream.set_read_timeout(self.read_timeout)?;
-        stream.set_write_timeout(self.read_timeout)?;
-        stream.write_all(head.as_bytes())?;
-        Ok(BufReader::new(Timed {
+        let mut timed = Timed {
             stream,
-            deadline: None,
-        }))
+            deadline: self.read_timeout.map(|t| Instant::now() + t),
+        };
+        timed.write_all(head.as_bytes())?;
+        Ok(BufReader::new(timed))
     }
 }
 
@@ -186,7 +202,7 @@ fn read_response(
     head_request: bool,
     max: usize,
 ) -> Result<ClientResponse, Error> {
-    loop {
+    for _ in 0..=MAX_INTERIM {
         let head = wire::read_head(r, MAX_HEAD)?;
         let head = head.ok_or_else(|| {
             Error::Io(io::Error::new(
@@ -212,4 +228,5 @@ fn read_response(
             body,
         });
     }
+    Err(Error::Status(502, "too many interim responses"))
 }

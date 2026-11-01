@@ -2,7 +2,8 @@
 #![allow(dead_code)]
 
 use pt_http::{Config, Message, Peer, Request, Response, Server, ShutdownHandle};
-use std::net::SocketAddr;
+use std::io::Read;
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -58,6 +59,7 @@ pub fn route(static_dir: &Path, req: &Request, peer: &Peer) -> Response {
             }
             Ok(())
         }),
+        ("GET", "/panic") => panic!("test handler panics on purpose"),
         ("GET", "/slow") => {
             thread::sleep(Duration::from_millis(400));
             Response::text(200, "slow done\n")
@@ -125,6 +127,42 @@ pub fn start_unix(config: Config, path: &Path) -> Running {
         addr: None,
         handle,
         thread: thread::spawn(move || server.run()),
+    }
+}
+
+/// A hostile server for our client: accepts one connection, reads the request head and hands the
+/// socket and that head to `f` on its own thread.
+pub fn fake_server(f: impl FnOnce(TcpStream, String) + Send + 'static) -> SocketAddr {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    thread::spawn(move || {
+        let (mut c, _) = l.accept().unwrap();
+        let head = read_head(&mut c);
+        f(c, head);
+    });
+    addr
+}
+
+/// Reads a message head byte by byte, so nothing after it is consumed.
+pub fn read_head(c: &mut TcpStream) -> String {
+    let mut head = Vec::new();
+    let mut b = [0u8; 1];
+    while !head.ends_with(b"\r\n\r\n") {
+        c.read_exact(&mut b).unwrap();
+        head.push(b[0]);
+    }
+    String::from_utf8(head).unwrap()
+}
+
+/// True once the peer has closed `c`, by EOF or reset, within its read timeout.
+pub fn closed_by_peer(c: &mut TcpStream) -> bool {
+    let mut buf = [0u8; 4096];
+    loop {
+        match c.read(&mut buf) {
+            Ok(0) => return true,
+            Ok(_) => {}
+            Err(e) => return e.kind() == std::io::ErrorKind::ConnectionReset,
+        }
     }
 }
 

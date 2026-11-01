@@ -32,7 +32,8 @@ pub struct Config {
     pub idle_timeout: Duration,
     pub write_timeout: Duration,
     pub ws_max_message: usize,
-    /// Ping a WebSocket peer after this long without a frame; drop it if another passes.
+    /// Ping a WebSocket peer after this long without a frame; drop it if this long passes again
+    /// without a pong (other frames do not count), or if one frame takes longer than this.
     pub ws_ping_interval: Option<Duration>,
 }
 
@@ -246,16 +247,23 @@ impl Server {
             }
             conns.insert(id, slot.clone());
         }
-        let shared = self.shared.clone();
-        let spawned = thread::Builder::new()
+        // Moved into the thread, so the slot is released however it ends: by returning, by
+        // unwinding from a panicking handler, or by never starting.
+        let guard = SlotGuard(self.shared.clone(), id);
+        let _ = thread::Builder::new()
             .name("http-conn".into())
             .spawn(move || {
-                serve(&shared, stream, &peer, &slot);
-                shared.conns().remove(&id);
+                let guard = guard;
+                serve(&guard.0, stream, &peer, &slot);
             });
-        if spawned.is_err() {
-            self.shared.conns().remove(&id);
-        }
+    }
+}
+
+struct SlotGuard(Arc<Shared>, u64);
+
+impl Drop for SlotGuard {
+    fn drop(&mut self) {
+        self.0.conns().remove(&self.1);
     }
 }
 

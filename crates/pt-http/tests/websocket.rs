@@ -2,11 +2,12 @@
 
 mod common;
 
-use common::{curl, start};
+use common::{closed_by_peer, curl, fake_server, start};
 use pt_http::{Client, Config, Message};
 use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::time::Duration;
+use std::thread;
+use std::time::{Duration, Instant};
 
 const SAMPLE_KEY: &str = "dGhlIHNhbXBsZSBub25jZQ==";
 // RFC 6455 section 1.3.
@@ -147,6 +148,118 @@ fn shutdown_closes_open_websockets() {
     s.stop();
     assert!(started.elapsed() < Duration::from_secs(1));
     assert!(ws.recv().is_err());
+}
+
+/// A frame whose bytes arrive one at a time, each well inside the ping interval, is still dropped
+/// once the whole frame takes longer than the interval.
+#[test]
+fn trickled_frame_is_dropped() {
+    let s = start(Config {
+        ws_ping_interval: Some(Duration::from_millis(300)),
+        ..Config::default()
+    });
+    let mut c = raw_handshake(s.addr.unwrap());
+    let frame = masked(true, 1, &[b'a'; 100]);
+    let mut w = c.try_clone().unwrap();
+    let trickler = thread::spawn(move || {
+        for b in frame {
+            thread::sleep(Duration::from_millis(50));
+            if w.write_all(&[b]).is_err() {
+                return;
+            }
+        }
+    });
+    let start = Instant::now();
+    assert!(closed_by_peer(&mut c), "server still holds the connection");
+    assert!(
+        start.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        start.elapsed()
+    );
+    trickler.join().unwrap();
+    s.stop();
+}
+
+/// Data frames do not answer a ping: a peer that keeps sending text but never a pong is dropped.
+#[test]
+fn only_a_pong_answers_a_ping() {
+    let s = start(Config {
+        ws_ping_interval: Some(Duration::from_millis(300)),
+        ..Config::default()
+    });
+    let mut c = raw_handshake(s.addr.unwrap());
+    assert_eq!(read_frame(&mut c), (true, 9, vec![]));
+    let pinged = Instant::now();
+    let mut w = c.try_clone().unwrap();
+    let chatter = thread::spawn(move || {
+        for _ in 0..50 {
+            if w.write_all(&masked(true, 1, b"still here")).is_err() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    });
+    assert!(
+        closed_by_peer(&mut c),
+        "server kept a peer that never pongs"
+    );
+    assert!(
+        pinged.elapsed() < Duration::from_secs(2),
+        "{:?}",
+        pinged.elapsed()
+    );
+    chatter.join().unwrap();
+    s.stop();
+}
+
+/// A peer that answers each ping stays connected across many intervals.
+#[test]
+fn pong_keeps_a_quiet_peer_connected() {
+    let s = start(Config {
+        ws_ping_interval: Some(Duration::from_millis(150)),
+        ..Config::default()
+    });
+    let mut c = raw_handshake(s.addr.unwrap());
+    for _ in 0..4 {
+        assert_eq!(read_frame(&mut c), (true, 9, vec![]));
+        c.write_all(&masked(true, 10, b"")).unwrap();
+    }
+    c.write_all(&masked(true, 1, b"alive")).unwrap();
+    loop {
+        match read_frame(&mut c) {
+            (true, 9, _) => c.write_all(&masked(true, 10, b"")).unwrap(),
+            f => break assert_eq!(f, (true, 1, b"alive".to_vec())),
+        }
+    }
+    s.stop();
+}
+
+/// Our client refuses a 101 that lacks `Upgrade: websocket` or `Connection: Upgrade`, here from a
+/// proxy that strips one of them from the real server's answer.
+#[test]
+fn client_rejects_101_without_upgrade_headers() {
+    let s = start(Config::default());
+    let server = s.addr.unwrap();
+    for strip in ["upgrade:", "connection:"] {
+        let proxy = fake_server(move |mut c, head| {
+            let mut up = TcpStream::connect(server).unwrap();
+            up.write_all(head.as_bytes()).unwrap();
+            let answer: String = common::read_head(&mut up)
+                .split_inclusive("\r\n")
+                .filter(|l| !l.to_ascii_lowercase().starts_with(strip))
+                .collect();
+            let _ = c.write_all(answer.as_bytes());
+            thread::sleep(Duration::from_millis(500));
+        });
+        let r = Client::tcp(proxy)
+            .read_timeout(Some(Duration::from_secs(5)))
+            .websocket("/ws", &[]);
+        let e = r
+            .err()
+            .unwrap_or_else(|| panic!("accepted a 101 without {strip}"));
+        assert_eq!(e.kind(), std::io::ErrorKind::InvalidData, "{e}");
+    }
+    s.stop();
 }
 
 fn masked(fin: bool, opcode: u8, payload: &[u8]) -> Vec<u8> {

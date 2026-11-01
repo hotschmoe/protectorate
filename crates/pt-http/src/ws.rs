@@ -7,7 +7,7 @@ use std::hash::{BuildHasher, Hasher};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::Shutdown;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const CONT: u8 = 0;
 const TEXT: u8 = 1;
@@ -49,7 +49,12 @@ pub(crate) fn check_handshake(req: &Request) -> Result<String, Response> {
     }
     let key = h.get("Sec-WebSocket-Key").unwrap_or("");
     let b64 = |c: u8| c.is_ascii_alphanumeric() || c == b'+' || c == b'/';
-    if key.len() != 24 || !key.ends_with("==") || !key.bytes().take(22).all(b64) {
+    // Base64 of 16 bytes: the 22nd character holds their last 2 bits and 4 zero padding bits.
+    if key.len() != 24
+        || !key.ends_with("==")
+        || !key.bytes().take(22).all(b64)
+        || !matches!(key.as_bytes()[21], b'A' | b'Q' | b'g' | b'w')
+    {
         return Err(Response::text(400, "bad Sec-WebSocket-Key\n"));
     }
     Ok(accept_key(key))
@@ -339,12 +344,14 @@ pub struct WebSocket {
     assembler: Assembler,
     max: usize,
     ping: Option<Duration>,
-    awaiting_pong: bool,
+    /// When our keepalive ping went out; only a pong clears it.
+    ping_sent: Option<Instant>,
     client: bool,
 }
 
 impl WebSocket {
-    /// `ping`: after this long without a frame, send a ping; after as long again, fail TimedOut.
+    /// `ping`: after this long without a frame, send a ping; without a pong within as long again,
+    /// fail TimedOut. It also bounds how long one frame may take once its first byte is in.
     pub(crate) fn new(
         mut reader: BufReader<Timed>,
         client: bool,
@@ -365,7 +372,7 @@ impl WebSocket {
             assembler: Assembler::default(),
             max,
             ping,
-            awaiting_pong: false,
+            ping_sent: None,
             client,
         })
     }
@@ -388,11 +395,15 @@ impl WebSocket {
         let client = self.client;
         loop {
             self.wait_frame()?;
+            self.reader.get_mut().deadline = self.ping.map(|p| Instant::now() + p);
             let event = read_frame(&mut self.reader, !client, self.max)
                 .and_then(|f| self.assembler.push(f, self.max));
-            self.awaiting_pong = false;
             match event {
                 Ok(None) => {}
+                Ok(Some(Event::Message(Message::Pong(p)))) => {
+                    self.ping_sent = None;
+                    return Ok(Message::Pong(p));
+                }
                 Ok(Some(Event::Ping(p))) => match self.writer.frame(PONG, &p) {
                     Err(e) if e.kind() != io::ErrorKind::NotConnected => return Err(e),
                     _ => {}
@@ -413,7 +424,18 @@ impl WebSocket {
                         format!("websocket: {why}"),
                     ));
                 }
-                Err(WsError::Io(e)) => return Err(e),
+                Err(WsError::Io(e)) => {
+                    // A frame broke off midway, so the stream cannot be read further.
+                    self.writer.shutdown();
+                    return Err(if is_timeout(&e) {
+                        io::Error::new(
+                            io::ErrorKind::TimedOut,
+                            "websocket: frame arrived too slowly",
+                        )
+                    } else {
+                        e
+                    });
+                }
             }
         }
     }
@@ -429,7 +451,16 @@ impl WebSocket {
     }
 
     fn wait_frame(&mut self) -> io::Result<()> {
+        let stopped =
+            || io::Error::new(io::ErrorKind::TimedOut, "websocket: peer stopped answering");
         loop {
+            let now = Instant::now();
+            let deadline = self.ping.map(|p| self.ping_sent.unwrap_or(now) + p);
+            // Checked here too, since a peer that keeps sending never lets the read time out.
+            if self.ping_sent.is_some() && deadline.is_some_and(|d| now >= d) {
+                return Err(stopped());
+            }
+            self.reader.get_mut().deadline = deadline;
             match self.reader.fill_buf() {
                 Ok([]) => {
                     return Err(io::Error::new(
@@ -439,16 +470,11 @@ impl WebSocket {
                 }
                 Ok(_) => return Ok(()),
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-                Err(e) if is_timeout(&e) && self.ping.is_some() && !self.awaiting_pong => {
-                    self.awaiting_pong = true;
+                Err(e) if is_timeout(&e) && self.ping.is_some() && self.ping_sent.is_none() => {
                     self.writer.ping(b"")?;
+                    self.ping_sent = Some(Instant::now());
                 }
-                Err(e) if is_timeout(&e) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        "websocket: peer stopped answering",
-                    ));
-                }
+                Err(e) if is_timeout(&e) => return Err(stopped()),
                 Err(e) => return Err(e),
             }
         }
