@@ -148,10 +148,12 @@ Each entry: where, what was done, what right looks like.
   Claude and Grok answers stay `confirmed: false`, so per SPEC 12a item 4 the hub must keep
   them Uncertain. Right: take the matching `tool_result` (or its absence at `turn_settled`) as
   the harness's evidence.
-- **Claude prompt ack is matched in order** (`pt-drivers`, claude.rs): the
-  `--replay-user-messages` echo carries no client id, so echoes pop the oldest unechoed request
-  id. Safe while only one send is in flight per sleeve (SPEC 12b item 3). Right: key by a
-  client id if Claude ever echoes one.
+- **Claude prompt ack rides an undocumented echo** (`pt-drivers`, claude.rs): each stdin
+  message carries a `uuid` we make (a random per-incarnation prefix plus a counter), and the
+  `--replay-user-messages` echo returns it (checked on Claude Code 2.1.316), so an echo
+  confirms exactly its own message; a late echo of a settled one is a notice, an unknown one a
+  protocol error. If Claude stops echoing our uuid, no prompt is ever confirmed (the e2e
+  `ready_resume_tool` catches it). Right: `doctor` reruns that e2e after every Claude update.
 - **Claude session_info before init** (`pt-drivers`): `system/init` arrives only after the first
   input, so the driver reports the assigned (`--session-id`) or resumed id at spawn and checks it
   at init and at each `result`; a mismatch is a protocol error, and the hub kills (G14).
@@ -159,7 +161,9 @@ Each entry: where, what was done, what right looks like.
   `sandbox workspace-write`, likely to clash with bwrap) and supervised Grok (no
   `--always-approve`) have mappings but no e2e run yet, to save quota. Unsupervised Codex is
   `never` plus `danger-full-access`: the hub's sandbox is the boundary. Pi has no gate, so a
-  supervised Pi spawn is refused. Right: one e2e each before supervised sleeves ship.
+  supervised Pi spawn is refused. Grok decisions never widen: allow-once without an
+  `allow_once` option is refused (unsupervised it cancels), deny without `reject_once`
+  cancels instead of `reject_always`. Right: one e2e each before supervised sleeves ship.
 - **Pi extension dialogs are cancelled** (`pt-drivers`, pi.rs): `extension_ui_request`
   select/confirm/input/editor gets `cancelled: true` plus a notice. Right: route confirm and
   select to `approval_request` if the owner runs a Pi extension gate.
@@ -181,10 +185,21 @@ Each entry: where, what was done, what right looks like.
   Explicit compaction is not exposed either (native only, SPEC 3.7). Right: `compact()` per
   harness (Codex `thread/compact/start`, Pi `compact`) when the hub asks for it.
 - **Text block ids** (`pt-drivers`, emit.rs): a late authoritative end for an already-closed
-  block is dropped (Pi ends thinking after its text began), but a late *delta* for a closed id
-  would open a second block with the same id. Grok sends no message id, so its blocks are
-  numbered per turn and tool call. Right: per-harness block identity from content indexes if
-  either shows up in real streams.
+  block is dropped (Pi ends thinking after its text began). A delta for a closed id (a steer's
+  ack or a notice landed mid-block, as in the Pi `steer` e2e) opens a continuation block
+  `<id>~<n>` that keeps only the streamed text; ids are remembered for the last 64 blocks.
+  Blocks are cut at 1 MiB with a marker, and live deltas stop there. Grok sends no message id,
+  so its blocks are numbered per turn and tool call. Right: per-harness block identity from
+  content indexes if either shows up in real streams.
+- **Pi turn ids are ours** (`pt-drivers`, pi.rs): Pi's rpc names no turn, so acks and
+  `turn_started` carry `pi-turn-<n>`, counted per incarnation, and a steer must name the
+  running one or gets `TurnEnded`. A steer Pi queued just as its run ended stays in Pi's own
+  queue (Pi's behavior), so it can surface in the next run. A settle before Pi answered our
+  prompt is taken as the previous run's and dropped. Right: Pi's own turn id if rpc gains one.
+- **Grok prompt identity from `_meta.promptId`** (`pt-drivers`, grok.rs): `session/update`,
+  `_x.ai/queue/changed` (`runningPromptId`) and the prompt reply name Grok's prompt id, an
+  x.ai extension outside ACP. Notices naming one of the last 16 ended prompts, or another
+  prompt than the running one, are dropped. Right: ACP's own prompt id if it gains one.
 - **App settings live in memory on desktop and Android** (`app/lib/local_io.dart`): the web build
   keeps hub URL, device token and device id in `localStorage` (`local_web.dart`), but the
   `dart:io` side forgets them on restart, so a phone pairs again each launch. Theme is not kept
