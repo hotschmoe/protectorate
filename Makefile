@@ -1,6 +1,6 @@
 VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build release release-assets release-publish web test test-paid check check-deps check-gen gen fmt app-check
+.PHONY: build release release-assets release-publish web test test-paid check verify check-deps check-gen gen fmt app-check
 
 DART ?= dart
 FLUTTER ?= flutter
@@ -45,6 +45,10 @@ check:
 	cargo fmt --all -- --check
 	cargo clippy --locked --workspace --all-targets -- -D warnings
 	$(MAKE) test check-deps check-gen app-check
+
+# Separate from check: Verus is not installed on every development machine.
+verify:
+	bash scripts/verify.sh
 
 check-deps:
 	sh scripts/check-deps.sh
