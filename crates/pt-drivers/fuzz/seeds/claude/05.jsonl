@@ -1,0 +1,27 @@
+# resume=11111111-1111-4111-8111-111111111111 supervised
+!send A
+{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","session_id":"11111111-1111-4111-8111-111111111111","usage":{"input_tokens":5,"output_tokens":1}}
+!send B
+{"type":"user","message":{"role":"user","content":"A"},"session_id":"11111111-1111-4111-8111-111111111111","parent_tool_use_id":null,"uuid":"00000000-0000-4000-8000-000000000001","isReplay":true}
+{"type":"user","message":{"role":"user","content":"B"},"session_id":"11111111-1111-4111-8111-111111111111","parent_tool_use_id":null,"uuid":"00000000-0000-4000-8000-000000000002","isReplay":true}
+{"type":"user","message":{"role":"user","content":"B"},"session_id":"11111111-1111-4111-8111-111111111111","parent_tool_use_id":null,"uuid":"99999999-9999-4999-8999-999999999999","isReplay":true}
+{"type":"stream_event","event":{"type":"content_block_start","index":18446744073709551615},"session_id":"11111111-1111-4111-8111-111111111111","parent_tool_use_id":null}
+{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"x"},{"type":"text","text":"y"}],"usage":{"input_tokens":18446744073709551615,"cache_read_input_tokens":18446744073709551615}},"session_id":"11111111-1111-4111-8111-111111111111","parent_tool_use_id":null}
+{"type":"control_request","request_id":"c1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"tu1"}}
+{"type":"control_request","request_id":"c1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"rm -rf /"},"tool_use_id":"tu2"}}
+!approve c1
+{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","session_id":"11111111-1111-4111-8111-111111111111","total_cost_usd":1e300,"usage":{"input_tokens":18446744073709551615,"output_tokens":99999999999999999999999},"modelUsage":{"m":{"contextWindow":18446744073709551615},"n":{"contextWindow":200000}}}
+!send C
+!wrote
+{"type":"user","message":{"role":"user","content":"C"},"session_id":"11111111-1111-4111-8111-111111111111","parent_tool_use_id":null,"uuid":"00000000-0000-4000-8000-000000000003","isReplay":true}
+!interrupt
+{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Claude usage limit reached","session_id":"11111111-1111-4111-8111-111111111111","usage":{}}
+!send D
+{"type":"user","message":{"role":"user","content":"D"},"session_id":"11111111-1111-4111-8111-111111111111","parent_tool_use_id":null,"uuid":"00000000-0000-4000-8000-000000000004","isReplay":true}
+!interrupt
+{"type":"control_response","response":{"subtype":"success","request_id":"pt-interrupt-2","response":{"still_queued":[]}}}
+{"type":"result","subtype":"error_during_execution","is_error":true,"terminal_reason":"aborted_streaming","session_id":"11111111-1111-4111-8111-111111111111","usage":{}}
+!send E
+!interrupt
+{"type":"control_response","response":{"subtype":"success","request_id":"pt-interrupt-3","response":{}}}
+{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","session_id":"11111111-1111-4111-8111-111111111111","usage":{}}

@@ -195,10 +195,11 @@ pt_json::record! {
         pub grok_model: String = String::new(),
         pub pi_vendor_provider: String = String::new(),
         pub pi_vendor_model: String = String::new(),
-        /// The local OpenAI-compatible endpoint, as a provider in Pi's own models.json.
-        pub pi_local_provider: String = "hotschmoe".to_string(),
-        pub pi_local_model: String =
-            "qwen3.8-27b-FP8-official-W8A16-mtp3-r187-xpugraph-cacheon-ctx200000-daily".to_string(),
+        /// The local OpenAI-compatible endpoint, as a provider in Pi's own models.json, and the
+        /// model to ask it for. While either is empty, doctor finds `pi_local` (and `pi_durable`,
+        /// which uses the same model) ineligible, so nothing spawns or resleeves onto it.
+        pub pi_local_provider: String = String::new(),
+        pub pi_local_model: String = String::new(),
         /// The same endpoint's base URL (with or without `/v1`), read for its health as the
         /// local quota with that provider's API key. Empty: the provider's own `baseUrl`.
         pub local_url: String = String::new(),

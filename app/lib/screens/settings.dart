@@ -124,7 +124,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       kv('HUB URL', Field(
         controller: _url,
         prompt: '',
-        hint: 'https://protectorate.hotschmoe.com (empty: scripted fake hub)',
+        hint: 'https://hub.example.lan (empty: scripted fake hub)',
         onSubmit: (_) => save(),
       )),
       kv('PAIRING CODE', Field(

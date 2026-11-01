@@ -29,8 +29,8 @@ const UNIT: &str = "protectorate-node.service";
 /// The Windows service name.
 #[cfg(windows)]
 pub const SERVICE: &str = "protectorate-node";
-/// Where the Windows service's member forwards hub connections.
-#[cfg(windows)]
+/// Where member forwards the hub's connections (tailnet port 7475) to `serve` without a unix
+/// socket: the Windows service, and `join`'s hint for a foreground run.
 pub const LISTEN: &str = "127.0.0.1:7476";
 #[cfg(not(windows))]
 const UNIT_PATH: &str = "/etc/systemd/system/protectorate-node.service";

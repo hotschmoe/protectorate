@@ -177,7 +177,8 @@ struct Prompt<'a> {
     attempt: u32,
     request_id: &'a str,
     text: &'a str,
-    steer: bool,
+    /// The turn a steer is for; none for a prompt.
+    steer: Option<&'a str>,
 }
 
 enum Outcome {
@@ -594,7 +595,7 @@ impl SleeveExec {
             },
             EffectKind::StartIncarnation {
                 g, target, resume, ..
-            } => match self.launch(s, g, &target, resume) {
+            } => match self.launch(view, s, g, &target, resume) {
                 Ok(()) => Outcome::Reported,
                 Err(e) => {
                     warning!("sleeve {}: launch g{} failed: {e}", s.name, g.0);
@@ -629,21 +630,31 @@ impl SleeveExec {
                 ref request_id,
                 ref text,
                 ..
-            }
-            | EffectKind::Steer {
-                g,
-                ref request_id,
-                ref text,
-                ..
             } => {
-                let steer = matches!(kind, EffectKind::Steer { .. });
                 let p = Prompt {
                     g,
                     effect,
                     attempt,
                     request_id,
                     text,
-                    steer,
+                    steer: None,
+                };
+                self.prompt(view, p)
+            }
+            EffectKind::Steer {
+                g,
+                ref request_id,
+                ref text,
+                ref expected_turn,
+                ..
+            } => {
+                let p = Prompt {
+                    g,
+                    effect,
+                    attempt,
+                    request_id,
+                    text,
+                    steer: Some(expected_turn),
                 };
                 self.prompt(view, p)
             }
@@ -783,6 +794,7 @@ impl SleeveExec {
 
     fn launch(
         &mut self,
+        view: &View,
         s: &Sleeve,
         g: Gen,
         target: &Target,
@@ -816,7 +828,12 @@ impl SleeveExec {
             sb.ro_paths.push(cli);
         }
         if s.layout == Layout::Worktree {
-            sb.git_dirs = pt_sandbox::resolve_git_dirs(&work).map_err(|e| e.to_string())?;
+            let parent = s
+                .parent
+                .and_then(|p| view.state.sleeve(p))
+                .ok_or("the parent is gone")?;
+            sb.git_dirs = pt_sandbox::resolve_git_dirs(&work, Path::new(&parent.claim.path))
+                .map_err(|e| e.to_string())?;
         }
         let token = hub.tokens.sleeve(s.id);
         let path = std::env::var("PATH").unwrap_or_default();
@@ -928,12 +945,11 @@ impl SleeveExec {
         }
         let from = Hub::from_label(&view.state, self.id, p.request_id);
         if Hub::envoy_id(&view.state) == Some(self.id) {
-            self.note_envoy_origin(&from, p.steer);
+            self.note_envoy_origin(&from, p.steer.is_some());
         }
-        let sent = if p.steer {
-            session.steer(p.request_id, &from, p.text)
-        } else {
-            session.send_user(p.request_id, &from, p.text)
+        let sent = match p.steer {
+            Some(turn) => session.steer(p.request_id, &from, p.text, turn),
+            None => session.send_user(p.request_id, &from, p.text),
         };
         if let Err(e) = sent {
             return refused(e.to_string());

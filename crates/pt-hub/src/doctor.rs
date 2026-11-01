@@ -100,6 +100,12 @@ fn config(hub: &Hub, net: &Net) -> pt_doctor::Config {
             cfg.programs.push((name.to_string(), found));
         }
     }
+    for h in [Harness::PiLocal, Harness::PiDurable] {
+        if let Some(why) = unconfigured(hub, h) {
+            cfg.unconfigured
+                .push((wire::harness_wire(h).to_string(), why.to_string()));
+        }
+    }
     let (headscale, member) = lock(&hub.doctor.unpacked)
         .get_or_insert_with(|| {
             let dir = hub.home.net();
@@ -238,11 +244,26 @@ pub fn refresh(hub: &Hub) {
     hub.doctor.wake.notify_all();
 }
 
-/// Why `h` may not be used, from the report as it stands; a hub with no report yet allows it.
+/// Why the config alone rules `h` out: the local model's harnesses need a provider and a model.
+fn unconfigured(hub: &Hub, h: Harness) -> Option<&'static str> {
+    let c = &hub.config;
+    (matches!(h, Harness::PiLocal | Harness::PiDurable)
+        && (c.pi_local_provider.is_empty() || c.pi_local_model.is_empty()))
+    .then_some(
+        "not configured: set pi_local_provider (a provider in Pi's models.json) and \
+         pi_local_model in config.json, then restart the hub",
+    )
+}
+
+/// Why `h` may not be used, from the report as it stands; a hub with no report yet allows a
+/// harness its config does not rule out.
 pub fn check(hub: &Hub, h: Harness) -> Result<(), String> {
     match hub.doctor.report() {
         Some(r) => verdict(&r, h),
-        None => Ok(()),
+        None => match unconfigured(hub, h) {
+            Some(why) => Err(format!("harness {} is {why}", wire::harness_wire(h))),
+            None => Ok(()),
+        },
     }
 }
 

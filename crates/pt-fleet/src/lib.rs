@@ -50,7 +50,7 @@ pub struct Config {
     pub headscale: PathBuf,
     pub member: PathBuf,
     pub bwrap: PathBuf,
-    /// What nodes use as control URL: `https://protectorate.hotschmoe.com` behind Traefik, or
+    /// What nodes use as control URL: `https://hub.example.lan` behind a TLS proxy, or
     /// `http://<listen>` LAN-direct.
     pub server_url: String,
     /// headscale's listener: the hub's LAN address.
@@ -58,7 +58,7 @@ pub struct Config {
     /// headscale binds a STUN socket while DERP is on, though the map turns STUN off.
     pub stun_listen: SocketAddr,
     pub derp: Derp,
-    /// Proxies whose X-Forwarded-For headscale trusts (stronghold).
+    /// Proxies whose X-Forwarded-For headscale trusts (the TLS proxy).
     pub trusted_proxies: Vec<String>,
     /// The hub member's tailnet hostname.
     pub hub_name: String,

@@ -99,6 +99,19 @@ Each entry: where, what was done, what right looks like.
   with a new credential location needs an entry in `default_masks`.
 - **pt-sandbox has no fuzz target** for `resolve_git_dirs` (the one parser). Right: add one with
   the other crates' fuzz targets.
+- **pt-sandbox: other roots are hidden only if the hub masks them** (SPEC 3.4 light isolation).
+  The read-only `/` shows every other workspace; the hub is to push every other sleeve's claim
+  onto `masks` (not a child's own root, which holds its git dirs; a View child needs its root
+  visible). A claim made after a launch stays visible until the next incarnation, like the
+  credential masks.
+- **pt-sandbox: the runtime dir is private and empty.** The host's `$XDG_RUNTIME_DIR` is covered
+  by a 0700 tmpfs, so the user bus and the systemd user manager (which would start units outside
+  the scope and sandbox) are gone, and so are the keyring, ssh-agent, gpg-agent and pipewire
+  sockets. Abstract unix sockets still reach the host, since the network namespace is shared
+  (X11 `@/tmp/.X11-unix`, other users' buses). Right: a network namespace or the own helper.
+- **pt-sandbox: the docker socket is always masked.** The owner's supplementary groups survive the
+  user namespace (shown as nogroup), so `/run/docker.sock` was root on the host from any sleeve.
+  A sleeve that needs docker has none. Right: an explicit per-sleeve opt-in if one is wanted.
 - **Own namespaces helper instead of bwrap** stays a later option (host dependency on bwrap's
   version; 0.13.1 here).
 - **Control-key pin is checked by a separate fetch** (`go/cmd/member`): member fetches `/key` and
@@ -148,10 +161,12 @@ Each entry: where, what was done, what right looks like.
   Claude and Grok answers stay `confirmed: false`, so per SPEC 12a item 4 the hub must keep
   them Uncertain. Right: take the matching `tool_result` (or its absence at `turn_settled`) as
   the harness's evidence.
-- **Claude prompt ack is matched in order** (`pt-drivers`, claude.rs): the
-  `--replay-user-messages` echo carries no client id, so echoes pop the oldest unechoed request
-  id. Safe while only one send is in flight per sleeve (SPEC 12b item 3). Right: key by a
-  client id if Claude ever echoes one.
+- **Claude prompt ack rides an undocumented echo** (`pt-drivers`, claude.rs): each stdin
+  message carries a `uuid` we make (a random per-incarnation prefix plus a counter), and the
+  `--replay-user-messages` echo returns it (checked on Claude Code 2.1.316), so an echo
+  confirms exactly its own message; a late echo of a settled one is a notice, an unknown one a
+  protocol error. If Claude stops echoing our uuid, no prompt is ever confirmed (the e2e
+  `ready_resume_tool` catches it). Right: `doctor` reruns that e2e after every Claude update.
 - **Claude session_info before init** (`pt-drivers`): `system/init` arrives only after the first
   input, so the driver reports the assigned (`--session-id`) or resumed id at spawn and checks it
   at init and at each `result`; a mismatch is a protocol error, and the hub kills (G14).
@@ -159,7 +174,9 @@ Each entry: where, what was done, what right looks like.
   `sandbox workspace-write`, likely to clash with bwrap) and supervised Grok (no
   `--always-approve`) have mappings but no e2e run yet, to save quota. Unsupervised Codex is
   `never` plus `danger-full-access`: the hub's sandbox is the boundary. Pi has no gate, so a
-  supervised Pi spawn is refused. Right: one e2e each before supervised sleeves ship.
+  supervised Pi spawn is refused. Grok decisions never widen: allow-once without an
+  `allow_once` option is refused (unsupervised it cancels), deny without `reject_once`
+  cancels instead of `reject_always`. Right: one e2e each before supervised sleeves ship.
 - **Pi extension dialogs are cancelled** (`pt-drivers`, pi.rs): `extension_ui_request`
   select/confirm/input/editor gets `cancelled: true` plus a notice. Right: route confirm and
   select to `approval_request` if the owner runs a Pi extension gate.
@@ -181,10 +198,21 @@ Each entry: where, what was done, what right looks like.
   Explicit compaction is not exposed either (native only, SPEC 3.7). Right: `compact()` per
   harness (Codex `thread/compact/start`, Pi `compact`) when the hub asks for it.
 - **Text block ids** (`pt-drivers`, emit.rs): a late authoritative end for an already-closed
-  block is dropped (Pi ends thinking after its text began), but a late *delta* for a closed id
-  would open a second block with the same id. Grok sends no message id, so its blocks are
-  numbered per turn and tool call. Right: per-harness block identity from content indexes if
-  either shows up in real streams.
+  block is dropped (Pi ends thinking after its text began). A delta for a closed id (a steer's
+  ack or a notice landed mid-block, as in the Pi `steer` e2e) opens a continuation block
+  `<id>~<n>` that keeps only the streamed text; ids are remembered for the last 64 blocks.
+  Blocks are cut at 1 MiB with a marker, and live deltas stop there. Grok sends no message id,
+  so its blocks are numbered per turn and tool call. Right: per-harness block identity from
+  content indexes if either shows up in real streams.
+- **Pi turn ids are ours** (`pt-drivers`, pi.rs): Pi's rpc names no turn, so acks and
+  `turn_started` carry `pi-turn-<n>`, counted per incarnation, and a steer must name the
+  running one or gets `TurnEnded`. A steer Pi queued just as its run ended stays in Pi's own
+  queue (Pi's behavior), so it can surface in the next run. A settle before Pi answered our
+  prompt is taken as the previous run's and dropped. Right: Pi's own turn id if rpc gains one.
+- **Grok prompt identity from `_meta.promptId`** (`pt-drivers`, grok.rs): `session/update`,
+  `_x.ai/queue/changed` (`runningPromptId`) and the prompt reply name Grok's prompt id, an
+  x.ai extension outside ACP. Notices naming one of the last 16 ended prompts, or another
+  prompt than the running one, are dropped. Right: ACP's own prompt id if it gains one.
 - **App settings live in memory on desktop and Android** (`app/lib/local_io.dart`): the web build
   keeps hub URL, device token and device id in `localStorage` (`local_web.dart`), but the
   `dart:io` side forgets them on restart, so a phone pairs again each launch. Theme is not kept
@@ -223,7 +251,9 @@ Each entry: where, what was done, what right looks like.
   commit, torn-tail recovery), with compaction that drops collected jobs.
 - **Linux jobs without systemd-run** (`pt-node`, `sys/linux_job.rs`): when a trial
   `systemd-run --scope` fails, jobs run in a plain process group. A job that calls `setsid`
-  escapes cancel, timeout and lowering, and nothing outlives a dead agent's timeout. `--no-scope`
+  escapes cancel, timeout and lowering, and nothing outlives a dead agent's timeout. After a
+  restart the reaper kills only members it can prove (pidfds taken while the stopped leader holds
+  the group id), so the members of a job whose leader already died live on. `--no-scope`
   forces this mode (the tests use it). Right: the system service's delegated cgroup subtree
   (design report 1.3), one cgroup per job with `cgroup.kill`.
 - **Job isolation is limits only** (`pt-node`): a job gets its timeout, a capped log and a scope,
@@ -495,7 +525,9 @@ Each entry: where, what was done, what right looks like.
 - **Torn batch versus corruption** (pt-journal, `open_segment`): a frame failing its CRC is cut as
   a torn append only when no intact frame follows it; otherwise open fails. A group-commit batch
   whose blocks reached disk out of order after a power loss also fails open, though none of it
-  was acknowledged. Right: a batch-end marker, so a torn batch is told apart from corruption.
+  was acknowledged. The length is not checksummed, so a corrupted length is indistinguishable
+  from a torn append and is cut. Right: a batch-end marker, so a torn batch is told apart from
+  corruption, and a versioned format with protected headers.
 - **Collecting lease** (pt-core jobs): an artifact check that does not answer within the lease
   makes the job Lost, and its next Exited report collects again, so a slow fetch can run twice.
   Right: fetch progress reported to the core, and the lease measured from it.
@@ -776,3 +808,32 @@ Each entry: where, what was done, what right looks like.
   from the login itself (owner's idea; to settle later). There is one quota row and reader per
   account, and the app's QUOTA screen lists every account. `select_target` weighs accounts rather than
   harnesses, and a sleeve's incarnation records the account it draws on.
+- **Windows job identity, blocked** (`pt-node`, Windows job runner): the owner chose
+  (2026-11-01) ordinary jobs as LocalService or a restricted token, and maintenance jobs as
+  SYSTEM. Two agent attempts to write the token and logon code were cut off by a safety
+  classifier and not retried, so jobs still run as LocalSystem inside a Job Object. Next step:
+  the owner decides how to proceed; the planned design is in the devlog.
+- **An idle Pi sleeve that never had a turn does not resume after a hub restart** (`pt-hub`,
+  found by the durable agent): it fails to resume and parks. Right: resume (or freshly launch) a
+  Pi sleeve with no native session yet, as one whose session exists.
+- **Review coverage**: pt-core, pt-journal and pt-http have had an adversarial review, and pt-hub,
+  pt-drivers and pt-sandbox one each by GPT-6.1-Terra (2026-11-01; its findings are being fixed).
+  pt-quota, pt-history and pt-update have had none, and none of the fixes has been re-reviewed.
+  Right: review each before it is trusted with more than the owner's own machines.
+- **`pi_local` is unconfigured by default** (`pt-hub`, home.rs, doctor.rs): `pi_local_provider`
+  and `pi_local_model` default to empty, and doctor marks `pi_local` and `pi_durable` ineligible
+  until both are set, so the default `resleeve_to` (`["pi_local"]`) parks a sleeve that must
+  resleeve. Right: offer the configured local model when there is one, or ask for it at setup.
+- **Verus phase 1 boundaries** (`pt-journal`, `pt-frame`): the journal frame, CRC logic and pure
+  recovery decision, and the node frame codec and sticky decoder errors, are verified. File I/O
+  in `open_segment`, the frame reader's I/O, and `pt-frame::msg`/`pt-json` message parsing are not.
+  The CRC proof covers the Castagnoli table and byte recurrence, not collision resistance. Verus
+  trusts its specifications for Rust's standard collections and slices, including allocation behavior.
+  Right: verify message parsing and model the file operations around the recovery decision, and
+  maintain the existing differential fuzzing.
+- **Incremental frame buffering can exceed one frame** (`pt-frame`, `Decoder::feed`): decoded
+  payload length is capped at `MAX_PAYLOAD`, but a caller may feed an arbitrarily large slice,
+  and the decoder copies all of it before parsing. `FrameReader` reads in 64 KiB chunks and drains
+  frames between reads, but its initial `pending` input is also supplied by its caller. Right: a
+  backpressure API or segmented input that bounds each allocation while preserving streams with
+  many frames, then prove that bound. This allocation property is not covered by phase 1 yet.

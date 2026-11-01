@@ -72,7 +72,7 @@ ApiException _error(int status, String body) {
 }
 
 /// The hub API: `POST /api/<Method>` per method and the `GET /api/events` WebSocket.
-/// `baseUrl` is the hub's origin, such as `https://protectorate.hotschmoe.com`; `token` a
+/// `baseUrl` is the hub's origin, such as `https://hub.example.lan`; `token` a
 /// `pd1.` device token or another bearer credential.
 final class HubApi {
   HubApi(this.baseUrl, {this.token});

@@ -1,0 +1,33 @@
+# supervised
+{"id":1,"result":{}}
+{"id":2,"result":{"thread":{"id":"T"}}}
+!send A
+{"id":3}
+{"method":"turn/started","params":{"threadId":"T","turn":{"id":"t1"}}}
+{"id":10,"method":"item/commandExecution/requestApproval","params":{"threadId":"T","command":"ls"}}
+{"id":"10","method":"item/commandExecution/requestApproval","params":{"threadId":"T","command":"rm"}}
+{"id":10,"method":"item/commandExecution/requestApproval","params":{"threadId":"T","command":"dup"}}
+{"id":null,"method":"item/commandExecution/requestApproval","params":{"threadId":"T","command":"null id"}}
+!approve codex-10
+!deny codex-s:10
+{"method":"serverRequest/resolved","params":{"threadId":"T","requestId":10}}
+{"method":"serverRequest/resolved","params":{"threadId":"T","requestId":"10"}}
+!steer t1
+{"id":4,"result":{}}
+!steer t9
+{"method":"turn/started","params":{"threadId":"T","turn":{"id":"t7"}}}
+{"method":"turn/completed","params":{"threadId":"T","turn":{"id":"t1","status":"completed"}}}
+{"method":"turn/completed","params":{"threadId":"T","turn":{"id":"t1","status":"completed"}}}
+!send B
+!wrote
+{"method":"turn/completed","params":{"threadId":"T","turn":{"id":"t1","status":"completed"}}}
+{"method":"turn/started","params":{"threadId":"T","turn":{"id":"t1"}}}
+{"id":5,"result":{"turn":{"id":"t2"}}}
+{"method":"thread/tokenUsage/updated","params":{"threadId":"T","tokenUsage":{"total":{"inputTokens":18446744073709551615,"outputTokens":99999999999999999999},"last":{"inputTokens":18446744073709551615},"modelContextWindow":18446744073709551615}}}
+{"method":"turn/completed","params":{"threadId":"T","turn":{"id":"t9","status":"completed"}}}
+{"method":"turn/completed","params":{"threadId":"T","turn":{"id":"t2","status":"completed"}}}
+!send C
+{"method":"turn/completed","params":{"threadId":"T","turn":{"id":"t3","status":"failed","error":{"message":"usage limit reached"}}}}
+{"id":6,"result":{"turn":{"id":"t3"}}}
+!send D
+{"id":7,"error":{"message":"bad"},"result":{"turn":{"id":"t4"}}}

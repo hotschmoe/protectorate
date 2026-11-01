@@ -6,14 +6,24 @@
 #   scripts/app-e2e.sh [OUT_DIR]
 #
 # Needs a release binary with the web app embedded (make web release), chromium, node >= 22
-# (global WebSocket) and the pi_local provider (PT_E2E_PI_PROVIDER, PT_E2E_PI_MODEL).
+# (global WebSocket) and Pi with a local model for pi_local:
+#   PT_E2E_PI_PROVIDER  a provider in Pi's ~/.pi/agent/models.json (an OpenAI-compatible endpoint)
+#   PT_E2E_PI_MODEL     the model to ask it for
+# Both are read from the environment, else from the gitignored .env.e2e at the repo root.
+# PROTECTORATE_BIN and CHROMIUM override the binary and the browser.
 set -eu
 
+root=$(cd "$(dirname "$0")/.." && pwd)
+if [ -f "$root/.env.e2e" ]; then set -a; . "$root/.env.e2e"; set +a; fi
 out=${1:-${TMPDIR:-/tmp}/pt-app-e2e}
 bin=${PROTECTORATE_BIN:-${CARGO_TARGET_DIR:-target}/release/protectorate}
 chromium=${CHROMIUM:-chromium}
-provider=${PT_E2E_PI_PROVIDER:-hotschmoe}
-model=${PT_E2E_PI_MODEL:-qwen3.8-27b-FP8-official-W8A16-mtp3-r187-xpugraph-cacheon-ctx200000-daily}
+provider=${PT_E2E_PI_PROVIDER:-}
+model=${PT_E2E_PI_MODEL:-}
+if [ -z "$provider" ] || [ -z "$model" ]; then
+    echo "app-e2e: set PT_E2E_PI_PROVIDER and PT_E2E_PI_MODEL (or put them in .env.e2e)" >&2
+    exit 2
+fi
 
 mkdir -p "$out"
 work=$(mktemp -d "${TMPDIR:-/tmp}/pt-app-e2e.XXXXXX")

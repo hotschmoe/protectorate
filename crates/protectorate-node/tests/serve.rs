@@ -1,7 +1,7 @@
 //! `serve` and `rpc` against each other: the real binary on real sockets and processes. Presence
 //! is forced with PROTECTORATE_NODE_TEST_PRESENCE (a file holding PRESENT, AWAY or UNKNOWN), so
 //! the job gate and the mid-job watcher run the same on a desk or a headless box. Linux only:
-//! the Windows path is checked by hand on officewin (REVISIT).
+//! the Windows path is checked by hand on a Windows machine (REVISIT).
 #![cfg(target_os = "linux")]
 
 mod common;
@@ -155,11 +155,14 @@ fn restart_mid_job(extra: &[&str]) {
         .as_str()
         .unwrap()
         .to_string();
-    let submit = r#"{"job_id":"long","attempt":1,"script":"sleep 20"}"#;
+    // The background sleep is a second member of the job's process group (and scope).
+    let submit = r#"{"job_id":"long","attempt":1,"script":"sleep 300 & echo $!; sleep 20"}"#;
     let pid = num(&a.submit(submit), "pid");
+    let member = member_pid(&a, "long");
     let short = a.submit(r#"{"job_id":"short","attempt":1,"script":"sleep 1"}"#);
     a.kill();
     assert!(alive(pid), "the job died with the agent");
+    assert!(alive(member), "the job's member died with the agent");
     std::thread::sleep(2 * SECS);
     a.restart();
 
@@ -170,6 +173,7 @@ fn restart_mid_job(extra: &[&str]) {
     let long = a.status("long", 1);
     assert_eq!(text(&long, "state"), "interrupted", "{long}");
     assert!(!alive(pid), "the interrupted job still runs");
+    wait_dead(member, "the interrupted job's group member");
     let short_now = a.status("short", 1);
     assert_eq!(text(&short_now, "state"), "lost", "{short_now}");
     assert_eq!(num(&short_now, "pid"), num(&short, "pid"));
@@ -180,6 +184,46 @@ fn restart_mid_job(extra: &[&str]) {
     let next = a.submit(r#"{"job_id":"long","attempt":2,"script":"exit 0"}"#);
     assert_ne!(num(&next, "pid"), pid);
     a.wait_state("long", 2, &["succeeded"], 10 * SECS);
+}
+
+/// The pid a job script printed as its first log line.
+fn member_pid(a: &Agent, job: &str) -> u64 {
+    let deadline = std::time::Instant::now() + 10 * SECS;
+    loop {
+        let log = String::from_utf8_lossy(&a.fetch(job, 1, 0, 100).0).into_owned();
+        if let Some(pid) = log.lines().next().and_then(|l| l.trim().parse().ok()) {
+            return pid;
+        }
+        assert!(std::time::Instant::now() < deadline, "{job} printed no pid");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn wait_dead(pid: u64, what: &str) {
+    let deadline = std::time::Instant::now() + 10 * SECS;
+    while alive(pid) {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{what} ({pid}) still runs"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// The leader exits while a member of its group runs on; the member goes with it. The leader is
+/// reaped only after that kill, so the group id cannot have been reused in between.
+#[test]
+fn a_finished_leader_takes_its_group_with_it() {
+    for extra in [&[][..], &["--no-scope"]] {
+        let a = Agent::start("leftover", extra);
+        let j = a.submit(r#"{"job_id":"l","attempt":1,"script":"sleep 300 & echo $!; exit 0"}"#);
+        let pid = num(&j, "pid");
+        let member = member_pid(&a, "l");
+        let j = a.wait_state("l", 1, &["succeeded"], 10 * SECS);
+        assert_eq!(j["exit_code"].as_i64(), Some(0), "{j}");
+        wait_dead(member, "the finished job's group member");
+        wait_dead(pid, "the finished job's leader");
+    }
 }
 
 #[test]

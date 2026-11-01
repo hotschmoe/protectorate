@@ -1,0 +1,10 @@
+#
+{"id":1,"result":{}}
+{"id":2,"result":{"thread":{"id":"T"}}}
+!send C
+{"method":"turn/completed","params":{"threadId":"T","turn":{"status":"failed","error":{"message":"usage limit reached"}}}}
+{"id":3,"result":{"turn":{"id":"t3"}}}
+!send D
+{"method":"turn/completed","params":{"threadId":"T"}}
+!wrote
+{"id":4,"result":{"turn":{"id":"t4"}}}

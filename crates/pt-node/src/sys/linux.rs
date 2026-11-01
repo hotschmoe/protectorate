@@ -12,6 +12,7 @@ use std::time::Duration;
 #[allow(unsafe_code)]
 pub(super) mod ffi {
     use std::io;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 
     /// Sends `sig` to every process in group `pgid`.
     pub fn kill_group(pgid: u32, sig: i32) -> io::Result<()> {
@@ -27,6 +28,70 @@ pub(super) mod ffi {
         } else {
             Err(io::Error::last_os_error())
         }
+    }
+
+    /// A pidfd for `pid`: it names that process alone, so a signal sent through it can never
+    /// reach a process that later reuses the number.
+    pub fn pidfd_open(pid: u32) -> io::Result<OwnedFd> {
+        let pid = libc::pid_t::try_from(pid)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "pid out of range"))?;
+        // SAFETY: pidfd_open takes a pid and a flags word, both plain integers.
+        let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+        if fd < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: the syscall returned a new fd that nothing else owns.
+        Ok(unsafe { OwnedFd::from_raw_fd(fd as RawFd) })
+    }
+
+    /// Sends `sig` to the pidfd's process; signal 0 only checks that it still exists.
+    pub fn pidfd_send_signal(fd: &OwnedFd, sig: i32) -> io::Result<()> {
+        // SAFETY: a live pidfd borrowed from `fd`, a plain signal number, a null siginfo (which
+        // makes it act like kill(2)) and no flags.
+        let rc = unsafe {
+            libc::syscall(
+                libc::SYS_pidfd_send_signal,
+                fd.as_raw_fd(),
+                sig,
+                std::ptr::null::<libc::siginfo_t>(),
+                0,
+            )
+        };
+        if rc == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+
+    /// The exit of our child `pid` without reaping it, so the zombie keeps holding its pid and
+    /// process group id: `Some(code)` once it has exited (128 + signal for a signal death).
+    pub fn exited_unreaped(pid: u32) -> io::Result<Option<i64>> {
+        let id = libc::id_t::from(pid);
+        // SAFETY: siginfo_t is plain old data and all-zero is a valid value; si_pid stays 0
+        // when WNOHANG finds no exited child.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // SAFETY: `info` is a writable siginfo_t; the other arguments are plain integers.
+        let rc = unsafe {
+            libc::waitid(
+                libc::P_PID,
+                id,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            )
+        };
+        if rc != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: waitid filled `info` for a child state change, or left it zeroed.
+        let (child, status) = unsafe { (info.si_pid(), info.si_status()) };
+        if child == 0 {
+            return Ok(None);
+        }
+        Ok(Some(match info.si_code {
+            libc::CLD_EXITED => i64::from(status),
+            _ => 128 + i64::from(status),
+        }))
     }
 
     pub fn euid() -> u32 {

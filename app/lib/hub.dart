@@ -1,5 +1,8 @@
 import 'api/api.g.dart';
 
+/// This build's version: the git tag, passed by the Makefile as `--dart-define`.
+const kVersion = String.fromEnvironment('PROTECTORATE_VERSION', defaultValue: 'dev');
+
 /// What the app needs from a hub: state as streams, actions as futures. Each action maps onto one
 /// hub API method (`POST /api/<Method>`); the streams onto `GET /api/events`.
 abstract class HubClient {

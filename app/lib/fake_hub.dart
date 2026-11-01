@@ -217,10 +217,10 @@ class FakeHub implements HubClient {
     if (t.contains('test')) {
       final job = 'j-${(_jobSeq++).toRadixString(16)}';
       cmd = 'protectorate job run --on arch=arm64 -- make test';
-      out = 'job $job queued on ms-r1 (arm64, AWAY 3h)';
-      reply = 'Dispatched `make test` to ms-r1 as $job. It is AWAY, so the job runs at normal '
+      out = 'job $job queued on build-arm64 (arm64, AWAY 3h)';
+      reply = 'Dispatched `make test` to build-arm64 as $job. It is AWAY, so the job runs at normal '
           'priority. I will report the exit code here.';
-      effect = () => _runJob(job, 'n-msr1', 'make test', 'envoy', 9000);
+      effect = () => _runJob(job, 'n-arm64', 'make test', 'envoy', 9000);
     } else if (t.contains('spawn') || t.contains('start') || t.contains('new')) {
       final n = _sleeves.where((s) => s['parent_id'] == 's-proto').length + 1;
       final name = 'fix-$n';
@@ -678,8 +678,8 @@ class FakeHub implements HubClient {
       if (working.isNotEmpty) 'Working: ${working.join(', ')}.',
       if (blocked.isNotEmpty) 'Blocked on you: ${blocked.join(', ')}.',
       if (other.isNotEmpty) '${other.join('; ')}.',
-      '$pending approval${pending == 1 ? '' : 's'} pending. ms-r1 is AWAY and free for jobs; '
-          'officepc has someone at it; officewin is offline.',
+      '$pending approval${pending == 1 ? '' : 's'} pending. build-arm64 is AWAY and free for jobs; '
+          'desk-amd64 has someone at it; build-win is offline.',
     ].join(' ');
   }
 
@@ -725,8 +725,8 @@ class FakeHub implements HubClient {
 
   void _seed() {
     _hub = {
-      'name': 'stronghold',
-      'version': '0.7.0-next',
+      'name': 'protectorate',
+      'version': kVersion,
       'started_at_ms': _t0 - const Duration(days: 11, hours: 4, minutes: 12).inMilliseconds,
     };
     _workspaces.addAll([
@@ -828,8 +828,8 @@ class FakeHub implements HubClient {
       },
       {
         'id': 'a-32', 'sleeve_id': 's-envoy', 'kind': 'action', 'title': 'node_job',
-        'summary': 'pacman -Syu on ms-r1',
-        'detail': 'Maintenance job on ms-r1 (AWAY 3h): sudo pacman -Syu --noconfirm, '
+        'summary': 'pacman -Syu on build-arm64',
+        'detail': 'Maintenance job on build-arm64 (AWAY 3h): sudo pacman -Syu --noconfirm, '
             'then reboot if the kernel changed. Node maintenance jobs need the owner.',
         'requested_at_ms': at(47), 'timeout_at_ms': at(47) + 30 * 60000, 'state': 'pending',
       },
@@ -852,22 +852,22 @@ class FakeHub implements HubClient {
           'la/app (codex) is building the app shell; fuzz-wire (pi_local) fuzzes the frame '
           'codec between rounds; herdr-port finished its port overnight and you have not '
           'looked yet. notes-site is PARKED after three crashes in an hour; it needs a look '
-          'from you before it runs again.\n\nNodes: ms-r1 is AWAY and free, officepc has '
-          'someone at it, officewin has been offline since 06:40.'), turn: 29),
+          'from you before it runs again.\n\nNodes: build-arm64 is AWAY and free, desk-amd64 has '
+          'someone at it, build-win has been offline since 06:40.'), turn: 29),
       e(1, settled(58400, 200000), turn: 29),
       e(30, user('owner', 'run make test on arm64 for la/app and tell me'), turn: 30),
       ...tool(30, 34, 'c-e2', 'Bash',
           'protectorate job run --on arch=arm64 --sleeve la/app -- make test',
           'protectorate job run --on arch=arm64 --sleeve la/app -- make test',
-          turn: 30, output: 'job j-4f2a on ms-r1\n... 412 tests, 0 failed\nexit 0 in 3m12s'),
-      e(34, say('Tests pass on arm64: j-4f2a on ms-r1, 412 tests, exit 0 in 3m12s.'), turn: 30),
+          turn: 30, output: 'job j-4f2a on build-arm64\n... 412 tests, 0 failed\nexit 0 in 3m12s'),
+      e(34, say('Tests pass on arm64: j-4f2a on build-arm64, 412 tests, exit 0 in 3m12s.'), turn: 30),
       e(34, settled(59900, 200000), turn: 30),
       e(44, user('mail:la/app', 'Tests are green on amd64 and arm64. '
           'Requesting approval to push la/app (a-31).'), turn: 31),
-      e(45, say('la/app wants to push its branch; that approval is yours (a-31). While ms-r1 '
+      e(45, say('la/app wants to push its branch; that approval is yours (a-31). While build-arm64 '
           'is idle I would also like to run system updates on it.'), turn: 31),
       e(47, {'type': 'approval_request', 'approval_id': 'a-32', 'title': 'node_job',
-          'summary': 'pacman -Syu on ms-r1'}, turn: 31),
+          'summary': 'pacman -Syu on build-arm64'}, turn: 31),
     ];
 
     _tx['s-proto'] = [
@@ -936,12 +936,12 @@ class FakeHub implements HubClient {
     };
     _onDecide['a-32'] = (ok) {
       if (!ok) {
-        _say('s-envoy', 'Leaving ms-r1 as it is.');
+        _say('s-envoy', 'Leaving build-arm64 as it is.');
         return;
       }
       final job = 'j-${(_jobSeq++).toRadixString(16)}';
-      _say('s-envoy', 'Running the updates on ms-r1 as $job.');
-      _runJob(job, 'n-msr1', 'sudo pacman -Syu --noconfirm', 'envoy', 7000);
+      _say('s-envoy', 'Running the updates on build-arm64 as $job.');
+      _runJob(job, 'n-arm64', 'sudo pacman -Syu --noconfirm', 'envoy', 7000);
     };
 
     _tx['s-fuzz'] = [
@@ -982,14 +982,14 @@ class FakeHub implements HubClient {
       'name': name,
       'online': online,
       'last_seen_ms': _ago(Duration(minutes: lastSeenAgoMin)),
-      'node_version': '0.7.0-next',
+      'node_version': kVersion,
       'inventory': {...inv, 'collected_at_ms': _ago(const Duration(minutes: 6))},
       'sample': sample == null ? null : {...sample, 'sampled_at_ms': _now},
       'presence': {...presence, 'sampled_at_ms': _ago(Duration(minutes: lastSeenAgoMin))},
     };
     _nodes.addAll([
-      node('n-msr1', 'ms-r1', {
-        'hostname': 'ms-r1', 'os': 'linux', 'os_version': 'Arch Linux ARM (6.6.10)',
+      node('n-arm64', 'build-arm64', {
+        'hostname': 'build-arm64', 'os': 'linux', 'os_version': 'Arch Linux ARM (6.6.10)',
         'arch': 'arm64', 'cpu_model': 'CIX P1 CD8180', 'cpu_count': 12, 'ram_bytes': 64 * _gib,
         'gpus': [{'name': 'Mali-G720-Immortalis', 'driver': 'panthor', 'util_pct': 3.0}],
         'disks': [
@@ -1003,8 +1003,8 @@ class FakeHub implements HubClient {
         ],
       }, {'cpu_pct': 41.0, 'load1': 4.9, 'mem_avail_bytes': 38 * _gib, 'swap_used_bytes': 0},
           {'state': 'away', 'idle_secs': 11040, 'locked': true, 'source': 'logind'}),
-      node('n-officepc', 'officepc', {
-        'hostname': 'officepc', 'os': 'linux', 'os_version': 'Fedora 43 (6.17.4)',
+      node('n-desk', 'desk-amd64', {
+        'hostname': 'desk-amd64', 'os': 'linux', 'os_version': 'Fedora 43 (6.17.4)',
         'arch': 'amd64', 'cpu_model': 'AMD Ryzen 9 7950X', 'cpu_count': 32, 'ram_bytes': 96 * _gib,
         'gpus': [
           {'name': 'NVIDIA GeForce RTX 4070', 'driver': 'nvidia 580.95', 'vram_bytes': 12 * _gib,
@@ -1020,8 +1020,8 @@ class FakeHub implements HubClient {
         ],
       }, {'cpu_pct': 8.0, 'load1': 2.6, 'mem_avail_bytes': 71 * _gib, 'swap_used_bytes': 0},
           {'state': 'present', 'idle_secs': 40, 'locked': false, 'source': 'evdev'}),
-      node('n-officewin', 'officewin', {
-        'hostname': 'OFFICEWIN', 'os': 'windows', 'os_version': 'Windows 11 Pro 25H2',
+      node('n-win', 'build-win', {
+        'hostname': 'BUILD-WIN', 'os': 'windows', 'os_version': 'Windows 11 Pro 25H2',
         'arch': 'amd64', 'cpu_model': 'Intel Core i7-12700', 'cpu_count': 20, 'ram_bytes': 32 * _gib,
         'gpus': [{'name': 'Intel UHD Graphics 770', 'driver': '32.0.101.6314'}],
         'disks': [
@@ -1037,27 +1037,27 @@ class FakeHub implements HubClient {
 
     _jobs.addAll([
       {
-        'id': 'j-4f2a', 'node_id': 'n-msr1', 'target': {'type': 'arch', 'arch': 'arm64'},
+        'id': 'j-4f2a', 'node_id': 'n-arm64', 'target': {'type': 'arch', 'arch': 'arm64'},
         'argv': ['make', 'test'], 'state': 'succeeded',
         'requested_by': 'envoy', 'attempt': 1, 'queued_at_ms': at(30), 'started_at_ms': at(30),
         'ended_at_ms': at(34) - 48000, 'exit_code': 0,
       },
       {
-        'id': 'j-4e91', 'node_id': 'n-officepc', 'state': 'succeeded',
+        'id': 'j-4e91', 'node_id': 'n-desk', 'state': 'succeeded',
         'target': {'type': 'arch', 'arch': 'amd64'},
         'argv': ['cargo', 'build', '--release', '--workspace'], 'requested_by': 'protectorate',
         'attempt': 1, 'queued_at_ms': at(8), 'started_at_ms': at(8), 'ended_at_ms': at(12),
         'exit_code': 0,
       },
       {
-        'id': 'j-4d10', 'node_id': 'n-officewin', 'state': 'lost',
-        'target': {'type': 'node', 'node_id': 'n-officewin'}, 'maintenance': true,
+        'id': 'j-4d10', 'node_id': 'n-win', 'state': 'lost',
+        'target': {'type': 'node', 'node_id': 'n-win'}, 'maintenance': true,
         'argv': ['winget', 'upgrade', '--all', '--silent'], 'requested_by': 'envoy', 'attempt': 1,
         'queued_at_ms': _ago(const Duration(hours: 3, minutes: 5)),
         'started_at_ms': _ago(const Duration(hours: 3, minutes: 4)),
       },
       {
-        'id': 'j-4c77', 'node_id': 'n-msr1', 'state': 'failed',
+        'id': 'j-4c77', 'node_id': 'n-arm64', 'state': 'failed',
         'target': {'type': 'arch', 'arch': 'arm64'}, 'argv': ['make', 'test'],
         'requested_by': 'la/app', 'attempt': 1,
         'queued_at_ms': _ago(const Duration(hours: 6)),
@@ -1091,7 +1091,7 @@ class FakeHub implements HubClient {
         ],
       },
       {
-        'subscription': 'local', 'plan': 'llama.cpp on stronghold', 'reading': 'ok',
+        'subscription': 'local', 'plan': 'llama.cpp (local)', 'reading': 'ok',
         'fetched_at_ms': _now, 'note': 'unmetered; 1 slot of 2 busy',
         'windows': [{'label': 'slots'}],
       },
@@ -1105,21 +1105,21 @@ class FakeHub implements HubClient {
       });
     }
 
-    ev(0, 'hub', 'stronghold', 'hub update check: 0.7.0-next is current');
+    ev(0, 'hub', 'protectorate', 'hub update check: $kVersion is current');
     ev(2, 'approval', 'protectorate', 'asks: Bash cargo +nightly fuzz build (a-29)', level: 'warn');
     ev(3, 'approval', 'owner', 'approved a-29', target: 'protectorate');
     ev(6, 'guardrail', 'fuzz-wire', 'G1 quota_exhausted (claude 5h) -> resleeve to pi_local',
         level: 'warn');
     ev(9, 'approval', 'owner', 'denied a-30 (git push origin main)', target: 'herdr-port');
-    ev(12, 'job', 'j-4e91', 'exited 0 (officepc) in 4m02s');
+    ev(12, 'job', 'j-4e91', 'exited 0 (desk-amd64) in 4m02s');
     ev(18, 'guardrail', 'notes-site', 'parked: third resleeve within an hour', level: 'alarm');
-    ev(30, 'job', 'j-4f2a', 'queued on ms-r1: make test');
-    ev(34, 'job', 'j-4f2a', 'exited 0 (ms-r1) in 3m12s');
-    ev(36, 'node', 'officewin', 'unreachable for 3h; presence UNKNOWN', level: 'alarm', read: false);
+    ev(30, 'job', 'j-4f2a', 'queued on build-arm64: make test');
+    ev(34, 'job', 'j-4f2a', 'exited 0 (build-arm64) in 3m12s');
+    ev(36, 'node', 'build-win', 'unreachable for 3h; presence UNKNOWN', level: 'alarm', read: false);
     ev(44, 'mail', 'la/app', 'request: approve push of la/app', target: 'envoy', read: false);
     ev(44, 'approval', 'la/app', 'asks: Bash git push origin la/app (a-31)', level: 'warn',
         read: false);
-    ev(47, 'approval', 'envoy', 'asks: node_job pacman -Syu on ms-r1 (a-32)', level: 'warn',
+    ev(47, 'approval', 'envoy', 'asks: node_job pacman -Syu on build-arm64 (a-32)', level: 'warn',
         read: false);
   }
 }

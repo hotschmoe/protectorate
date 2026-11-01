@@ -21,7 +21,7 @@ void main() {
   runApp(const App());
 }
 
-/// Deep links (`?screen=nodes&theme=light`, `?sleeve=la/app`, `?node=ms-r1`) open a screen
+/// Deep links (`?screen=nodes&theme=light`, `?sleeve=la/app`, `?node=build-arm64`) open a screen
 /// directly; on desktop and Android the query is empty. On web the app talks to the hub that
 /// served it unless `?hub=<url>` names another or `?hub=fake` asks for the scripted FakeHub;
 /// `?pair=<code>` pairs this browser with a code from `protectorate device add`.

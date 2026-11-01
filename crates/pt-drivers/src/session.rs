@@ -1,7 +1,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
-use std::process::{Child, Command, Stdio};
+use std::path::Path;
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::thread;
@@ -15,6 +16,8 @@ const MAX_LINE: usize = 8 << 20;
 const MAX_MESSAGE: usize = 1 << 20;
 const STDERR_RING: usize = 64 << 10;
 const STDERR_TAIL: usize = 4 << 10;
+/// Bytes queued for a harness that is not reading its stdin before the session fails.
+const MAX_QUEUED: usize = 32 << 20;
 
 /// What the protocol said about a sent message so far.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,7 +50,9 @@ struct Core {
     proto: Box<dyn Protocol>,
     out: Out,
     events: Sender<Event>,
-    stdin: Option<Sender<Vec<u8>>>,
+    stdin: Option<Sender<Queued>>,
+    /// Bytes handed to the writer and not yet written.
+    queued: usize,
     acks: HashMap<String, Ack>,
     native_id: Option<String>,
     exited: bool,
@@ -58,15 +63,41 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+/// A stdin line for the writer thread.
+struct Queued {
+    bytes: Vec<u8>,
+    request: Option<String>,
+}
+
 impl Core {
-    /// Releases what the last protocol step produced, in order.
-    fn pump(&mut self) {
-        for line in self.out.writes.drain(..) {
-            if let Some(stdin) = &self.stdin {
-                let mut text = String::new();
-                line.write(&mut text);
-                text.push('\n');
-                let _ = stdin.send(text.into_bytes());
+    /// Releases what the last protocol step produced, in order. False when the harness has
+    /// stopped reading its stdin: the queue is over its bound and the session must fail.
+    fn pump(&mut self) -> bool {
+        let mut ok = true;
+        for w in std::mem::take(&mut self.out.writes) {
+            let Some(stdin) = &self.stdin else {
+                break;
+            };
+            let mut text = String::new();
+            w.line.write(&mut text);
+            text.push('\n');
+            let len = text.len();
+            if self.queued.saturating_add(len) > MAX_QUEUED {
+                ok = false;
+                let queued = self.queued;
+                self.stdin = None;
+                self.out.error(
+                    ErrorClass::Protocol,
+                    format!("harness stopped reading its stdin with {queued} bytes queued"),
+                );
+                break;
+            }
+            let line = Queued {
+                bytes: text.into_bytes(),
+                request: w.request,
+            };
+            if stdin.send(line).is_ok() {
+                self.queued += len;
             }
         }
         for event in self.out.events.drain(..) {
@@ -92,12 +123,24 @@ impl Core {
             }
             let _ = self.events.send(event);
         }
+        ok
+    }
+}
+
+impl Shared {
+    /// Pumps `core`, and kills the harness when its stdin queue overflowed.
+    fn release(&self, core: &mut Core) -> bool {
+        let ok = core.pump();
+        if !ok {
+            let _ = lock(&self.child).kill();
+        }
+        ok
     }
 }
 
 /// Starts the harness. Events arrive on the receiver until `Entry::Exited`, which is last.
 pub fn spawn(mut spec: SpawnSpec) -> Result<(Session, Receiver<Event>), DriverError> {
-    let (args, mut proto) = plan(&spec)?;
+    let (args, mut proto) = plan(&spec, &mut crate::emit::new_uuid)?;
     let mut cmd = match spec.prefix.take() {
         Some(mut prefix) => {
             prefix.arg(&spec.program);
@@ -134,7 +177,7 @@ pub fn spawn(mut spec: SpawnSpec) -> Result<(Session, Receiver<Event>), DriverEr
     };
 
     let (events_tx, events_rx) = mpsc::channel();
-    let (stdin_tx, stdin_rx) = mpsc::channel::<Vec<u8>>();
+    let (stdin_tx, stdin_rx) = mpsc::channel::<Queued>();
     let mut out = Out::new(spec.g);
     proto.start(&mut out);
     let shared = Arc::new(Shared {
@@ -143,6 +186,7 @@ pub fn spawn(mut spec: SpawnSpec) -> Result<(Session, Receiver<Event>), DriverEr
             out,
             events: events_tx,
             stdin: Some(stdin_tx),
+            queued: 0,
             acks: HashMap::new(),
             native_id: None,
             exited: false,
@@ -152,14 +196,16 @@ pub fn spawn(mut spec: SpawnSpec) -> Result<(Session, Receiver<Event>), DriverEr
         child: Mutex::new(child),
         stderr: Mutex::new(VecDeque::new()),
     });
-    lock(&shared.core).pump();
+    shared.release(&mut lock(&shared.core));
 
     let harness = spec.harness;
     let name = harness.as_str();
+    let fail = |source: io::Error| abort_spawn(&shared, &spec.program, source);
+    let writer = Arc::clone(&shared);
     thread::Builder::new()
         .name(format!("pt-{name}-stdin"))
-        .spawn(move || write_stdin(stdin, stdin_rx))
-        .map_err(|source| spawn_thread_error(&spec.program, source))?;
+        .spawn(move || write_stdin(&writer, stdin, stdin_rx))
+        .map_err(fail)?;
     let (stdout_done_tx, stdout_done_rx) = mpsc::channel::<()>();
     let reader = Arc::clone(&shared);
     thread::Builder::new()
@@ -168,17 +214,17 @@ pub fn spawn(mut spec: SpawnSpec) -> Result<(Session, Receiver<Event>), DriverEr
             read_stdout(&reader, harness, stdout);
             drop(stdout_done_tx);
         })
-        .map_err(|source| spawn_thread_error(&spec.program, source))?;
+        .map_err(fail)?;
     let ring = Arc::clone(&shared);
     thread::Builder::new()
         .name(format!("pt-{name}-stderr"))
         .spawn(move || read_stderr(&ring, stderr))
-        .map_err(|source| spawn_thread_error(&spec.program, source))?;
+        .map_err(fail)?;
     let waiter = Arc::clone(&shared);
     thread::Builder::new()
         .name(format!("pt-{name}-wait"))
         .spawn(move || wait_exit(&waiter, &stdout_done_rx))
-        .map_err(|source| spawn_thread_error(&spec.program, source))?;
+        .map_err(fail)?;
 
     Ok((
         Session {
@@ -190,16 +236,50 @@ pub fn spawn(mut spec: SpawnSpec) -> Result<(Session, Receiver<Event>), DriverEr
     ))
 }
 
-fn spawn_thread_error(program: &std::path::Path, source: io::Error) -> DriverError {
+/// A thread failed to start after the child did: kill and reap the child, and close the
+/// writer's queue so its thread (if it started) ends too.
+fn abort_spawn(shared: &Shared, program: &Path, source: io::Error) -> DriverError {
+    {
+        let mut core = lock(&shared.core);
+        core.stopping = true;
+        core.stdin = None;
+    }
+    let mut child = lock(&shared.child);
+    let _ = child.kill();
+    let _ = child.wait();
     DriverError::Spawn {
         program: program.to_owned(),
         source,
     }
 }
 
-fn write_stdin(mut stdin: std::process::ChildStdin, lines: Receiver<Vec<u8>>) {
+/// Writes queued lines in order. Once a user message's line is written, its `user_message`
+/// entry enters the event stream, so everything read before it predates the write.
+fn write_stdin(shared: &Shared, mut stdin: ChildStdin, lines: Receiver<Queued>) {
     for line in lines {
-        if stdin.write_all(&line).and_then(|()| stdin.flush()).is_err() {
+        let result = stdin.write_all(&line.bytes).and_then(|()| stdin.flush());
+        let mut core = lock(&shared.core);
+        core.queued = core.queued.saturating_sub(line.bytes.len());
+        match &result {
+            Ok(()) => {
+                if let Some(request_id) = &line.request {
+                    core.out.written(request_id);
+                }
+            }
+            Err(e) => {
+                if !core.exited && !core.stopping {
+                    core.out.notice(
+                        "stdin",
+                        format!("writing to the harness's stdin failed: {e}"),
+                    );
+                }
+                core.stdin = None;
+            }
+        }
+        shared.release(&mut core);
+        drop(core);
+        shared.changed.notify_all();
+        if result.is_err() {
             break;
         }
     }
@@ -265,7 +345,7 @@ fn read_stdout(shared: &Shared, harness: Harness, stdout: impl Read) {
                 handle_line(core.proto.as_mut(), &mut core.out, harness, &buf);
             }
         }
-        core.pump();
+        shared.release(&mut core);
         drop(core);
         shared.changed.notify_all();
     }
@@ -358,21 +438,22 @@ fn wait_exit(shared: &Shared, stdout_done: &Receiver<()>) {
         requested,
         stderr_tail: tail,
     });
-    core.pump();
+    shared.release(&mut core);
     core.exited = true;
     core.stdin = None;
     drop(core);
     shared.changed.notify_all();
 }
 
-/// Validates and writes a user message, then records it as an entry.
+/// Validates and writes a user message; `steer` names the turn it is meant for. Its entry
+/// follows once the line is written.
 pub(crate) fn deliver(
     proto: &mut dyn Protocol,
     out: &mut Out,
     request_id: &str,
     from: &str,
     text: &str,
-    steer: bool,
+    steer: Option<&str>,
 ) -> Result<(), DriverError> {
     if request_id.is_empty() || request_id.len() > 256 {
         return Err(DriverError::Invalid("request id must have 1 to 256 bytes"));
@@ -381,12 +462,15 @@ pub(crate) fn deliver(
         return Err(DriverError::Invalid("message must have 1 to 1 MiB"));
     }
     proto.send_user(request_id, text, steer, out)?;
-    out.emit(Entry::UserMessage {
-        request_id: request_id.to_owned(),
-        from: from.to_owned(),
-        text: text.to_owned(),
-        steer,
-    });
+    out.after_write(
+        request_id,
+        Entry::UserMessage {
+            request_id: request_id.to_owned(),
+            from: from.to_owned(),
+            text: text.to_owned(),
+            steer: steer.is_some(),
+        },
+    );
     Ok(())
 }
 
@@ -417,14 +501,20 @@ impl Session {
             return Err(DriverError::Ended);
         }
         let result = f(&mut core);
-        core.pump();
+        let queued = self.shared.release(&mut core);
         drop(core);
         self.shared.changed.notify_all();
+        if !queued {
+            return Err(DriverError::Ended);
+        }
         result
     }
 
-    /// Starts a turn with `text`. `Err` means nothing was written. The verdict comes as
-    /// `Entry::PromptAck` and through [`Session::wait_ack`].
+    /// Starts a turn with `text`. `Err` means nothing was written. `Entry::UserMessage`
+    /// enters the event stream once the line is written to the harness, never after the
+    /// harness's answer to it: harness output before it predates the prompt and is no
+    /// evidence for it. The verdict comes as `Entry::PromptAck` and through
+    /// [`Session::wait_ack`].
     pub fn send_user(&self, request_id: &str, from: &str, text: &str) -> Result<(), DriverError> {
         self.with_core(|core| {
             deliver(
@@ -433,13 +523,21 @@ impl Session {
                 request_id,
                 from,
                 text,
-                false,
+                None,
             )
         })
     }
 
-    /// Adds `text` to the running turn where the harness steers natively (Codex, Pi).
-    pub fn steer(&self, request_id: &str, from: &str, text: &str) -> Result<(), DriverError> {
+    /// Adds `text` to the running turn `expected_turn` (a `native_turn_id` from its ack)
+    /// where the harness steers natively (Codex, Pi). [`DriverError::TurnEnded`] when that
+    /// turn is no longer the running one; nothing was written then.
+    pub fn steer(
+        &self,
+        request_id: &str,
+        from: &str,
+        text: &str,
+        expected_turn: &str,
+    ) -> Result<(), DriverError> {
         self.with_core(|core| {
             deliver(
                 core.proto.as_mut(),
@@ -447,7 +545,7 @@ impl Session {
                 request_id,
                 from,
                 text,
-                true,
+                Some(expected_turn),
             )
         })
     }
