@@ -7,10 +7,6 @@
 //!   turns it into `pt_api::Quota` values.
 //! - `select_target` and `spare_trigger` are pure functions over those values; `task_size`
 //!   derives the size class (D27).
-//!
-//! A `pt_api::Quota` has three reading values (`ok`, `stale`, `error`). The fourth state here,
-//! unknown (nothing to read: not logged in, not configured), is an `error` reading whose note
-//! starts with [`UNKNOWN_PREFIX`]; `state` tells the four apart.
 
 #![forbid(unsafe_code)]
 
@@ -37,8 +33,6 @@ pub use select::{
 pub use task_size::{TaskSize, Thresholds, derive, median_of_last};
 pub use time::{fmt_age, now_ms, parse_rfc3339};
 
-pub const UNKNOWN_PREFIX: &str = "unknown: ";
-
 /// The four reading states of a quota.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
@@ -63,7 +57,7 @@ pub fn state(q: &Quota) -> State {
     match q.reading {
         QuotaReading::Ok => State::Fresh,
         QuotaReading::Stale => State::Stale,
-        QuotaReading::Error if q.note.starts_with(UNKNOWN_PREFIX) => State::Unknown,
+        QuotaReading::Unknown => State::Unknown,
         QuotaReading::Error => State::Error,
     }
 }

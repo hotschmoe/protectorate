@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use pt_api::{EpochMs, Quota, QuotaReading};
 
-use crate::{Error, Reader, Snapshot, UNKNOWN_PREFIX, fmt_age};
+use crate::{Error, Reader, Snapshot, fmt_age};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
@@ -130,11 +130,9 @@ impl Slot {
         let err_note = self.last_err.as_ref().map(ToString::to_string);
         let Some((snap, fetched)) = &self.good else {
             let (reading, note) = match (&self.last_err, self.last_attempt_ms) {
-                (Some(Error::Unavailable(d)), _) => {
-                    (QuotaReading::Error, format!("{UNKNOWN_PREFIX}{d}"))
-                }
+                (Some(Error::Unavailable(d)), _) => (QuotaReading::Unknown, d.to_string()),
                 (Some(e), _) => (QuotaReading::Error, e.to_string()),
-                (None, _) => (QuotaReading::Error, format!("{UNKNOWN_PREFIX}not read yet")),
+                (None, _) => (QuotaReading::Unknown, "not read yet".to_string()),
             };
             return Quota {
                 subscription,

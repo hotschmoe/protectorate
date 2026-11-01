@@ -1,7 +1,6 @@
 //! Input generation for the pt-quota fuzz targets.
 
 use pt_api::{EpochMs, Harness, Quota, QuotaReading, QuotaWindow, Subscription};
-use pt_quota::UNKNOWN_PREFIX;
 
 /// Reads fuzz bytes as choices; past the end every choice is 0.
 pub struct Bytes<'a> {
@@ -67,9 +66,9 @@ pub fn quota(b: &mut Bytes, now_ms: u64) -> Quota {
     let reading = match b.below(4) {
         0 | 1 => QuotaReading::Ok,
         2 => QuotaReading::Stale,
+        3 if b.bool() => QuotaReading::Unknown,
         _ => QuotaReading::Error,
     };
-    let note = if reading == QuotaReading::Error && b.bool() { UNKNOWN_PREFIX.to_string() } else { String::new() };
     let windows = (0..b.below(4))
         .map(|_| QuotaWindow {
             label: LABELS[b.below(LABELS.len())].to_string(),
@@ -87,6 +86,6 @@ pub fn quota(b: &mut Bytes, now_ms: u64) -> Quota {
         reading,
         fetched_at_ms: EpochMs(now_ms.saturating_sub(u64::from(b.u32()) * 10)),
         windows,
-        note,
+        note: String::new(),
     }
 }

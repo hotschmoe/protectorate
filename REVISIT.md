@@ -473,10 +473,6 @@ Each entry: where, what was done, what right looks like.
   no Antigravity reader (no `Subscription` for it, the `agy` CLI is not installed here, and
   Antigravity is pane-only, D13). Right: add a resets field to `Quota` when dispatch uses
   credits; revisit Codex `app-server` if wham breaks; Antigravity when it has a subscription.
-- **Quota `unknown` is an `error` reading with a note prefix** (`pt-quota`, `pt-api`):
-  `QuotaReading` has `ok`, `stale`, `error` only, so unknown (nothing to read: not logged in,
-  local endpoint unset) is `error` with the note starting `unknown: `, and `pt_quota::state` tells
-  the four apart. Right: add `unknown` to `QuotaReading` (and the Dart enum) in one commit.
 - **Local endpoint address is configuration** (`pt-quota`): the b70 URL comes from the probe flag
   or `PT_LOCAL_URL`; the hub must pass it to `Local { base_url }`. Right: hub config key.
 - **Quota selection constants are untuned** (`pt-quota`): usable-now minimums per task size
