@@ -11,6 +11,11 @@ checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 [[package]]
 name = "protectorate"
 version = "0.0.0"
+dependencies = [
+ "pt-http",
+ "pt-hub",
+ "pt-json",
+]
 
 [[package]]
 name = "protectorate-node"
@@ -39,6 +44,20 @@ name = "pt-http"
 version = "0.0.0"
 dependencies = [
  "pt-hash",
+ "pt-sys",
+]
+
+[[package]]
+name = "pt-hub"
+version = "0.0.0"
+dependencies = [
+ "pt-core",
+ "pt-drivers",
+ "pt-hash",
+ "pt-http",
+ "pt-journal",
+ "pt-json",
+ "pt-sandbox",
  "pt-sys",
 ]
 
