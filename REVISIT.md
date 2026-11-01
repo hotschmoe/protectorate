@@ -255,3 +255,12 @@ Each entry: where, what was done, what right looks like.
   Under an sshd without PAM there is no logind session or user bus, so `systemd-run --user` fails
   and jobs fall back to process groups. Not on Windows. Right: once SSH or member is chosen, the
   system service owns the agent and always listens on `agent.sock`; `--stdio` stays a splice.
+- **SSH instead of headscale for hub-to-node** (owner, 2026-11-01: keep headscale for now and
+  revisit). Plain OpenSSH would carry the same frames: the hub runs `ssh node`, and the node's
+  authorized_keys pins the hub's key to `restrict,command="protectorate-node serve --stdio"`.
+  Nothing on the hub would listen for nodes, so headscale's control and DERP, the one surface nodes
+  reach today, would disappear, as would the whole `go/` tree, headscale's 49 MB and member's 18 MB.
+  `serve --stdio` already works behind real sshd on msr1-kids and agent-world (with a resident agent
+  so jobs outlive the session). What SSH loses is NAT traversal, roaming and stable addresses (DHCP
+  churn; the snapdragon laptop moved .176 to .172). The combined form is SSH as the protocol, with
+  the official tailscale client on any machine the hub cannot route to.

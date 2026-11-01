@@ -631,6 +631,7 @@ All decided. The owner's answers are recorded in `docs/sessions/2026-11-01-decis
 | D36 | Release signing key | **none for now**; releases built locally and checked against SHA256SUMS; revisit |
 | D37 | Third-party dependencies | as few as possible, pinned exactly, forked and trimmed when large; listed in `DEPENDENCIES.md` |
 | D38 | Primary interface | chat with Envoy; sleeve chats next; terminal takeover is last resort |
+| D39 | Hub-to-node transport: headscale and member, or plain SSH | **headscale for now**; SSH logged in REVISIT.md (`serve --stdio` stays as a tested path) |
 
 ## 14. Build order
 
