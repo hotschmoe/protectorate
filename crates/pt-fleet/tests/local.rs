@@ -392,6 +392,7 @@ fn local_fleet_end_to_end() {
             even_if_present: false,
             on_present: pt_frame::msg::OnPresent::Lower,
             token: None,
+            maintenance: false,
         })
         .expect("submit");
     assert_eq!(reply.journal_epoch, hello.journal_epoch);

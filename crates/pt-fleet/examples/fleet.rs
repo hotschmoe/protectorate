@@ -175,6 +175,7 @@ fn command(fleet: &Fleet, poller: &Poller, w: &[String]) -> Result<Value, String
                 even_if_present: false,
                 on_present: OnPresent::Lower,
                 token: None,
+                maintenance: false,
             })
             .map_err(e)?;
             let deadline = Instant::now() + Duration::from_secs(150);

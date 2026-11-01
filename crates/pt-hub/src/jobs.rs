@@ -835,6 +835,7 @@ impl NodeExec {
                 api::OnPresent::Kill => OnPresent::Kill,
             },
             token: submit_token(&self.hub, j),
+            maintenance: req.maintenance,
         };
         match self.call("SubmitJob", |c| c.submit_job(spec)) {
             Ok(reply) => {
@@ -1107,6 +1108,7 @@ impl NodeExec {
             even_if_present: true,
             on_present: OnPresent::Lower,
             token: None,
+            maintenance: false,
         };
         self.call("SubmitJob", |c| c.submit_job(spec))?;
         let deadline = Instant::now() + Duration::from_secs(ARTIFACT_TIMEOUT_SECS + 30);
