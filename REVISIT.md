@@ -307,6 +307,23 @@ Each entry: where, what was done, what right looks like.
   so jobs outlive the session). What SSH loses is NAT traversal, roaming and stable addresses (DHCP
   churn; the snapdragon laptop moved .176 to .172). The combined form is SSH as the protocol, with
   the official tailscale client on any machine the hub cannot route to.
+- **SSH enrollment and key rotation** (`docs/design/network-without-go.md`): the isolated SSH
+  proof of concept uses pre-provisioned keys. Right: owner-only enrollment with an authenticated
+  out-of-band exchange in both directions, durable node IDs, host-key pinning on every dial,
+  revocation, and an overlap and recovery procedure for both host and hub keys.
+- **SSH on Windows and service privilege separation** (`protectorate-node`, `stdio.rs`): the
+  existing stdio splice only works on Unix, and a system service and its sshd account cannot
+  automatically share a mode-0600 socket. Right: authenticated, access-controlled local IPC and
+  a long-lived service on each supported OS, with Windows forced-command and presence/job behavior
+  proved on an actual Windows node; verify macOS and Termux separately.
+- **SSH for nodes outside the routed private networks** (`docs/design/network-without-go.md`):
+  plain SSH does not do NAT traversal or relay. Right: prefer the owner's private WireGuard or
+  tailnet; if a separate private jump host is needed, design and test its restricted reverse
+  tunnels, pins, failure recovery and isolation from hub listeners before using it.
+- **One-way trust on physical networks** (`docs/design/network-without-go.md`): SSH authenticates
+  the node connection but does not stop a compromised node from initiating unrelated LAN, VPN or
+  proxy connections to the hub. Right: enforce the source zones, return traffic and proxy policy
+  end to end, including IPv6 and spoofing, before retiring the tailnet policy.
 - **Other sleeves' workspaces are masked as of the launch** (`pt-hub`, exec.rs
   `other_claims`): a sandbox masks every live claim but its parent's and its children's, read
   from the view when the incarnation starts. A root spawned later stays visible to sandboxes

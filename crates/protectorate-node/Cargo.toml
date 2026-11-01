@@ -13,9 +13,23 @@ workspace = true
 name = "protectorate-node"
 path = "src/main.rs"
 
+[[bin]]
+name = "pt-ssh-poc"
+path = "src/ssh_poc.rs"
+required-features = ["ssh-poc"]
+
+[[test]]
+name = "ssh_poc"
+path = "tests/ssh_poc.rs"
+required-features = ["ssh-poc"]
+
+[features]
+ssh-poc = ["dep:pt-hash"]
+
 [dependencies]
 pt-embed = { path = "../pt-embed" }
 pt-frame = { path = "../pt-frame" }
+pt-hash = { path = "../pt-hash", optional = true }
 pt-json = { path = "../pt-json" }
 pt-node = { path = "../pt-node" }
 pt-qr = { path = "../pt-qr" }
