@@ -46,6 +46,9 @@ reads no clock, so `replay(journal) == live state`. The hub's core thread is its
 - Report `Dispatched` before writing. An Unsafe kind (prompts, steers, approvals, compaction)
   is never retried by any path: the core sends it once, and the hub must never resend it. A
   repeated `RespondApproval` while a response may apply answers `Duplicate` or is refused.
+- A sleeve's observations and its executor's reports reach the core in one ordered stream:
+  output read before a write's `Dispatched` is applied before it. Harness output confirms an
+  in-flight prompt or compaction only once its `Dispatched` is in.
 - `Exited` means the scope `pt-<sleeve>-g<g>` has no tasks, not merely that a pipe closed.
 - Effects never assumed: until an `Acked`, `Launched` or other evidence arrives, the core treats a
   write as possibly applied (Uncertain) and never as done.

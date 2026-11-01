@@ -1155,7 +1155,6 @@ impl Core<'_> {
                 if self.st.sleeves[&sid].activity != Activity::Compacting {
                     return;
                 }
-                self.sl(sid).activity = Activity::Idle { seen: true };
                 let pending: Vec<EffectId> = self
                     .st
                     .effects
@@ -1165,6 +1164,14 @@ impl Core<'_> {
                     })
                     .map(|e| e.id)
                     .collect();
+                // Not this compaction's: its first byte has not left yet.
+                if pending
+                    .iter()
+                    .any(|&e| self.effect_state(e) == Some(EffectState::Intent))
+                {
+                    return;
+                }
+                self.sl(sid).activity = Activity::Idle { seen: true };
                 for e in pending {
                     self.evidence(e);
                 }
@@ -1188,9 +1195,12 @@ impl Core<'_> {
         }
     }
 
-    /// Harness output while a prompt is in flight shows the prompt landed.
+    /// Harness output while a prompt is in flight shows the prompt landed, but only once its
+    /// first byte has left: output before that is the previous turn's (README, ordering).
     fn prompt_evidence(&mut self, sid: SleeveId) {
-        if let Activity::Delivering { effect } = self.st.sleeves[&sid].activity {
+        if let Activity::Delivering { effect } = self.st.sleeves[&sid].activity
+            && self.effect_state(effect) != Some(EffectState::Intent)
+        {
             self.evidence(effect);
         }
     }

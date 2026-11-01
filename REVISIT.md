@@ -268,3 +268,7 @@ Each entry: where, what was done, what right looks like.
   answered, and a report from any node but the job's current one is dropped. A node chosen again
   for the same attempt, after its 10 min exclusion, is trusted to have no answer that old in
   flight. Right: a per-submit token in `NodeSubmit` that the node echoes in every status.
+- **Prompt evidence by ordering** (pt-core, `prompt_evidence`): harness output confirms an
+  in-flight prompt or compaction only once its `Dispatched` is in, which relies on a sleeve's
+  observations and executor reports sharing one ordered stream. Right: drivers tag output with
+  the native turn id where the protocol has one, and evidence must match the prompt's turn.

@@ -1,0 +1,27 @@
+#scenario a786e460180fc9d5
+# TurnSettled starts delivering the queued m2; late output of the settled turn arrives before
+# m2's first byte is sent, and must not confirm it.
+spawn root /w/a
+run
+obs root ready
+send root m1
+run
+expect root activity=Working msg:m1=Delivered
+send root m2
+obs root settled
+expect root activity=Delivering msg:m2=InFlight
+obs root progress
+obs root approval=x
+obs root settled
+expect root activity=Delivering msg:m2=InFlight
+expect-effect m2 state=Intent
+run
+expect root activity=Working msg:m2=Delivered
+# Output after the first byte left does confirm a prompt whose ack never comes.
+obs root settled
+policy prompt=none
+send root m3
+run
+expect-effect m3 state=Sent
+obs root progress
+expect root activity=Working msg:m3=Delivered
