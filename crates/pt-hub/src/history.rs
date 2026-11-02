@@ -72,7 +72,8 @@ struct Track {
 #[derive(Default)]
 struct Passes {
     tracks: BTreeMap<SleeveId, Track>,
-    choices: HashMap<String, Choice>,
+    /// Native session id, per sleeve. One sleeve's id never selects another's log.
+    choices: HashMap<(SleeveId, String), Choice>,
     /// The last error per source and of the last commit, so a lasting one is logged once.
     errors: HashMap<PathBuf, String>,
     commit_error: Option<String>,
@@ -237,13 +238,6 @@ impl History {
         let home = hub.home.sleeve_home(s.id);
         let mut found: HashMap<SourceKind, HashMap<String, PathBuf>> = HashMap::new();
         for seen in &track.seen {
-            let choice = p
-                .choices
-                .entry(seen.native_id.clone())
-                .or_insert(Choice::Undecided);
-            if *choice != Choice::Undecided {
-                continue;
-            }
             let logs = found.entry(seen.kind).or_insert_with(|| {
                 pt_history::discover(seen.kind, &log_root(&home, seen.kind))
                     .unwrap_or_default()
@@ -251,6 +245,13 @@ impl History {
                     .map(|src| (src.session, src.path))
                     .collect()
             });
+            let choice = p
+                .choices
+                .entry((s.id, seen.native_id.clone()))
+                .or_insert(Choice::Undecided);
+            if *choice != Choice::Undecided {
+                continue;
+            }
             // One source per session: a headless session is in both its native log and the
             // transcript. The native log wins when the hub can find it: it is the harness's own
             // record (compaction summaries, per-call context usage, lines written while the hub
@@ -274,8 +275,13 @@ impl History {
         let mut skip = Vec::new();
         let mut hold = None;
         for seen in &track.seen {
-            match &p.choices[&seen.native_id] {
-                Choice::Native(path) => {
+            match &p.choices[&(s.id, seen.native_id.clone())] {
+                // Only a path this pass's discover returned from this sleeve's own log root.
+                Choice::Native(path)
+                    if found
+                        .get(&seen.kind)
+                        .is_some_and(|logs| logs.get(&seen.native_id) == Some(path)) =>
+                {
                     if !skip.contains(&seen.native_id) {
                         skip.push(seen.native_id.clone());
                         sources.push(
@@ -284,6 +290,7 @@ impl History {
                         );
                     }
                 }
+                Choice::Native(_) => {}
                 Choice::Undecided => {
                     hold.get_or_insert(seen.offset);
                 }

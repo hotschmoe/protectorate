@@ -280,6 +280,8 @@ the same dispatch code. There are no external sources such as email, calendar or
   - What it does: a tokenizer for paths and identifiers (camelCase and snake_case parts),
     positional postings, BM25, all-terms and phrase queries, and filters by sleeve, harness,
     session, time and role. Ingest tails each log by byte offset; small segments are merged.
+    A source cursor is per sleeve, and a native session id selects a log only under that
+    sleeve's home.
     `history read` applies the caller's sleeve scope before it copies text, then stops at 200
     docs or 8 MiB of source text and says when the range was cut. Tool paths are kept to the
     same budget as tool text (512 bytes).

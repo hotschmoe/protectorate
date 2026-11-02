@@ -180,8 +180,17 @@ fn invalid(path: impl std::fmt::Display, msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, format!("history {path}: {msg}"))
 }
 
+/// What a document records as its source. The path is the part after the first colon.
 fn source_key(kind: SourceKind, path: &str) -> String {
     format!("{kind}:{path}")
+}
+
+/// The cursor key. Two sleeves that name the same path do not share a cursor.
+fn cursor_key(kind: SourceKind, path: &str, sleeve: Option<&str>) -> String {
+    match sleeve {
+        Some(s) => format!("{kind}:{s}:{path}"),
+        None => format!("{kind}:{path}"),
+    }
 }
 
 impl Index {
@@ -222,7 +231,8 @@ impl Index {
             live_len: 0,
         };
         for s in m.sources {
-            ix.sources.insert(source_key(s.kind, &s.path), s);
+            ix.sources
+                .insert(cursor_key(s.kind, &s.path, s.sleeve.as_deref()), s);
         }
         for d in m.drops {
             ix.drop_source(d.source, d.below);
@@ -304,7 +314,8 @@ impl Index {
             .path
             .to_str()
             .ok_or_else(|| invalid(source.path.display(), "path is not UTF-8"))?;
-        let key = source_key(source.kind, path);
+        let key = cursor_key(source.kind, path, source.sleeve.as_deref());
+        let stored = source_key(source.kind, path);
         let mut rec = self
             .sources
             .get(&key)
@@ -323,7 +334,7 @@ impl Index {
             ..Ingested::default()
         };
         if opened.reset {
-            self.drop_source(key.clone(), self.next_doc);
+            self.drop_source(stored.clone(), self.next_doc);
             rec.state = fresh_state(source);
             self.dirty = true;
         }
@@ -377,7 +388,7 @@ impl Index {
                         .text
                         .len()
                         .saturating_add(draft.session.len())
-                        .saturating_add(key.len())
+                        .saturating_add(stored.len())
                         .saturating_add(source.sleeve.as_ref().map_or(0, String::len))
                         .saturating_add(draft.tool.as_ref().map_or(0, String::len))
                         .saturating_add(128),
@@ -387,7 +398,7 @@ impl Index {
                 self.pending.push(Pending {
                     id: self.next_doc,
                     offset,
-                    source: key.clone(),
+                    source: stored.clone(),
                     sleeve: source.sleeve.clone(),
                     draft,
                 });

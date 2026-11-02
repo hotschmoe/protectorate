@@ -835,9 +835,12 @@ Each entry: where, what was done, what right looks like.
 - **One source per session, decided per hub run** (`pt-hub`, history.rs): a headless session
   is in both its native log and the transcript; the native log wins once found, the transcript
   covers a session that ended without one, and the transcript waits at a live session's
-  `session_info` until its log appears. Decisions are not persisted, so a session indexed from
-  the transcript whose log appears in a later run (a native resume of a session that had none) is
-  indexed twice. Right: keep the choice per session in the index manifest.
+  `session_info` until its log appears. The choice is per sleeve, and the cursor is per sleeve
+  plus path, so one sleeve's session id does not select another's log. A pass opens a native
+  log only when that sleeve's own discover returned it. Decisions are not persisted, so a
+  session indexed from the transcript whose log appears in a later run (a native resume of a
+  session that had none) is indexed twice. Right: keep the choice per session in the index
+  manifest.
 - **Native logs are found by session id under the sleeve's home** (`pt-hub`, history.rs): the
   drivers report the session id, not the log path, so the hub walks the harness's log root in the
   sleeve's private home (`pt_history::discover`), each second while a live session has no log
