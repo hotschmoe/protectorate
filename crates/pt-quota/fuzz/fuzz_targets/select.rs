@@ -96,6 +96,16 @@ fuzz_target!(|data: &[u8]| {
                 Some(usable) => panic!("picked a row at {usable}% usable: {t:?}"),
                 None => panic!("picked a row with nothing usable: {t:?}"),
             }
+            // SPEC 8. A cap under the minimum does not block an unspecified model. When that
+            // candidate is chosen, the reason names the tightest such cap.
+            if let Some((_, label)) = limiting_cap(fresh, &t.model, min, now) {
+                let phrase = format!("; {label} under the minimum");
+                assert!(
+                    t.reason.contains(&phrase),
+                    "chosen unspecified model did not name {label}: {}",
+                    t.reason
+                );
+            }
         }
         if t.harness == Harness::PiLocal {
             assert_eq!(t.subscription, Subscription::Local);
@@ -175,7 +185,7 @@ fuzz_target!(|data: &[u8]| {
             {
                 assert_ne!(state(q), State::Error, "a failed reading was spent");
                 // SPEC 8. Caps for other models are no reading for this candidate.
-                if only_other_scopes(q, &c.model, size.min_usable_pct()) {
+                if only_other_scopes(q, &c.model) {
                     assert!(
                         reason.contains("without a fresh quota reading"),
                         "other models' caps were not treated as no reading: {reason}"
@@ -193,9 +203,13 @@ fuzz_target!(|data: &[u8]| {
                     }
                     assert!(!enforcing, "a passed exhausted window was spent");
                     if let Some(usable) = usable {
+                        assert!(usable + 1e-9 >= min, "row at {usable}% usable was spent");
+                    }
+                    if let Some((_, label)) = limiting_cap(q, &c.model, min, now) {
+                        let phrase = format!("; {label} under the minimum");
                         assert!(
-                            usable + 1e-9 >= min,
-                            "row at {usable}% usable was spent"
+                            reason.contains(&phrase),
+                            "spent unspecified model did not name {label}: {reason}"
                         );
                     }
                 }
@@ -209,8 +223,9 @@ fuzz_target!(|data: &[u8]| {
                 assert_ne!(state(q), State::Stale, "a stale local reading was spent");
             }
         }
-        (None, Err(_)) => {
+        (None, Err(reason)) => {
             let min = size.min_usable_pct();
+            let mut cap: Option<(f64, String)> = None;
             for c in &open {
                 // SPEC 8. Park only when no candidate is unknown, reset, or missing a row.
                 if unknown_or_reset(c, &quotas, now, min) {
@@ -225,6 +240,21 @@ fuzz_target!(|data: &[u8]| {
                 {
                     panic!("stale row at {usable}% usable was parked");
                 }
+                if let Some(sub) = metered(c.harness)
+                    && let Some(q) = quotas.iter().find(|q| q.subscription == sub)
+                    && matches!(state(q), State::Fresh | State::Stale)
+                    && let Some(found) = limiting_cap(q, &c.model, min, now)
+                    && cap.as_ref().is_none_or(|(have, _)| found.0 < *have)
+                {
+                    cap = Some(found);
+                }
+            }
+            if let Some((_, label)) = cap {
+                let phrase = format!("; {label} under the minimum");
+                assert!(
+                    reason.contains(&phrase),
+                    "parked unspecified model did not name {label}: {reason}"
+                );
             }
         }
     }
@@ -270,41 +300,87 @@ fuzz_target!(|data: &[u8]| {
     }
 });
 
+fn fold(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+/// SPEC 8. No model, or the model `default`.
+fn unspecified(model: &str) -> bool {
+    let folded = fold(model);
+    folded.is_empty() || folded == "default"
+}
+
+/// SPEC 8. `opusplan` is both Opus and Sonnet. Otherwise each contained family counts.
+fn families(s: &str) -> Vec<&'static str> {
+    let folded = fold(s);
+    if folded.contains("opusplan") {
+        return vec!["opus", "sonnet"];
+    }
+    ["sonnet", "opus", "haiku"]
+        .into_iter()
+        .filter(|name| folded.contains(name))
+        .collect()
+}
+
 /// SPEC 8. An account window always applies: anything that is not `wk` plus a name, including
 /// bare `wk`. A cap applies to the same family (opus, sonnet, haiku), ignoring case and
-/// version, so `Sonnet 4.5` applies to `sonnet` and `claude-sonnet-4-5`. A candidate with no
-/// model is gated only by a cap under the task minimum. Any other name applies when the model
-/// contains it.
-fn applies(label: &str, model: &str, used: f64, min: f64) -> bool {
+/// version, so `Sonnet 4.5` applies to `sonnet` and `claude-sonnet-4-5`. `opusplan` applies
+/// to both Opus and Sonnet. No model and `default` are not gated by a cap. A scope that is
+/// not one of those families still applies when its name is at least three letters and the
+/// model name contains it.
+fn applies(label: &str, model: &str) -> bool {
     let Some(rest) = label.strip_prefix("wk ") else {
         return true;
     };
-    if rest.is_empty() {
-        return true;
+    if rest.is_empty() || unspecified(model) {
+        return rest.is_empty();
     }
-    if model.is_empty() {
-        return (100.0 - used).clamp(0.0, 100.0) < min;
+    let caps = families(rest);
+    if caps.is_empty() {
+        let name = fold(rest);
+        return name.len() >= 3 && fold(model).contains(&name);
     }
-    let fold = |s: &str| -> String {
-        s.chars()
-            .filter(|c| c.is_ascii_alphanumeric())
-            .flat_map(|c| c.to_lowercase())
-            .collect()
-    };
-    let family = |s: &str| -> Option<&'static str> {
-        let folded = fold(s);
-        ["sonnet", "opus", "haiku"]
-            .into_iter()
-            .find(|name| folded.contains(name))
-    };
-    match (family(rest), family(model)) {
-        (Some(cap), Some(got)) => cap == got,
-        (Some(_), None) => false,
-        (None, _) => {
-            let name = fold(rest);
-            name.len() >= 3 && fold(model).contains(&name)
+    let got = families(model);
+    caps.iter().any(|cap| got.contains(cap))
+}
+
+/// SPEC 8. Tightest `wk <name>` cap under `min` on an unspecified model. An open cap does
+/// not count, and neither does one whose reset has passed. The chosen or parked reason
+/// names it as `; <label> under the minimum`.
+fn limiting_cap(q: &Quota, model: &str, min: f64, now_ms: u64) -> Option<(f64, String)> {
+    if !unspecified(model) {
+        return None;
+    }
+    let mut best: Option<(f64, String)> = None;
+    for w in &q.windows {
+        let Some(scope) = w.label.strip_prefix("wk ") else {
+            continue;
+        };
+        if scope.is_empty() {
+            continue;
+        }
+        let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
+            continue;
+        };
+        if w.resets_at_ms
+            .map(|r| r.0)
+            .filter(|t| *t > 0)
+            .is_some_and(|r| r <= now_ms)
+        {
+            continue;
+        }
+        let remaining = (100.0 - used).clamp(0.0, 100.0);
+        if remaining >= min {
+            continue;
+        }
+        if best.as_ref().is_none_or(|(have, _)| remaining < *have) {
+            best = Some((remaining, w.label.clone()));
         }
     }
+    best
 }
 
 fn map_windows(quotas: &[Quota], mut f: impl FnMut(&mut QuotaWindow)) -> Vec<Quota> {
@@ -319,14 +395,14 @@ fn map_windows(quotas: &[Quota], mut f: impl FnMut(&mut QuotaWindow)) -> Vec<Quo
 
 /// SPEC 8. A row whose only finite windows are caps for other models is no reading
 /// for this candidate.
-fn only_other_scopes(q: &Quota, model: &str, min: f64) -> bool {
+fn only_other_scopes(q: &Quota, model: &str) -> bool {
     let mut saw = false;
     for w in &q.windows {
-        let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
+        if !w.used_pct.is_some_and(|u| u.is_finite()) {
             continue;
-        };
+        }
         saw = true;
-        if applies(&w.label, model, used, min) {
+        if applies(&w.label, model) {
             return false;
         }
     }
@@ -369,7 +445,7 @@ fn unknown_or_reset(c: &Candidate, quotas: &[Quota], now: u64, min: f64) -> bool
         State::Unknown => true,
         State::Error => false,
         State::Fresh | State::Stale => {
-            if only_other_scopes(q, &c.model, min) {
+            if only_other_scopes(q, &c.model) {
                 return true;
             }
             if still_enforcing(q, now, min, &c.model) {
@@ -403,7 +479,7 @@ fn open_usable(q: &Quota, now_ms: u64, model: &str, min: f64) -> Option<f64> {
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
             continue;
         };
-        if !applies(&w.label, model, used, min) {
+        if !applies(&w.label, model) {
             continue;
         }
         // SPEC 8. A stale exhausted window with no reset stops blocking once the row is older
@@ -441,7 +517,7 @@ fn still_enforcing(q: &Quota, now_ms: u64, min: f64, model: &str) -> bool {
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
             return false;
         };
-        if !applies(&w.label, model, used, min) {
+        if !applies(&w.label, model) {
             return false;
         }
         if (100.0 - used).clamp(0.0, 100.0) >= min {

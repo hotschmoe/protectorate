@@ -468,7 +468,7 @@ impl SleeveExec {
                 let envoy_gated = Hub::envoy_id(&view.state) == Some(sleeve)
                     && hub.doctor.gated(sleeve).is_some();
                 let chosen = if envoy_gated {
-                    Err("Envoy's harness failed doctor")
+                    Err("Envoy's harness failed doctor".to_string())
                 } else {
                     crate::select::select_target(
                         now_ms(),

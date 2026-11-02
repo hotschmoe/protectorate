@@ -34,6 +34,12 @@ fn line_of<'a>(out: &'a str, name: &str) -> &'a str {
         .unwrap_or_else(|| panic!("no {name} line in:\n{out}"))
 }
 
+fn target_of(out: &str) -> &str {
+    out.lines()
+        .find(|l| l.starts_with("target "))
+        .unwrap_or_else(|| panic!("no target line in:\n{out}"))
+}
+
 fn state_of(line: &str) -> &str {
     let state = line.split(' ').nth(1).unwrap_or("");
     assert!(STATES.contains(&state), "bad state in {line:?}");
@@ -256,8 +262,8 @@ fn fixture_readers_over_real_curl() {
 
 /// The local endpoint behind a bearer token, as the owner's is: the reader finds the key and the
 /// base URL in a fixture `~/.pi/agent/models.json` (provider named by `--pi-provider`), sends the
-/// key over curl, and gets a fresh reading; a wrong key is a 401 and is unknown, like an expired
-/// login; an `apiKey` naming a set
+/// key over curl, and gets a fresh reading; a wrong key is a 401 and stays a failed read, because
+/// the local endpoint does not refresh a login; an `apiKey` naming a set
 /// environment variable sends that variable's value; a `!command` key is never run. No key is
 /// ever printed.
 #[test]
@@ -293,8 +299,24 @@ fn local_reader_sends_the_pi_provider_key() {
 
     models(&home, "wrong-secret-key");
     let local = run(&home, &[]);
-    assert_eq!(state_of(&local), "unknown", "{local}");
+    assert_eq!(state_of(&local), "error", "{local}");
     assert!(local.contains("401"), "{local}");
+    let parked = probe(&[
+        "--home",
+        home.to_str().unwrap(),
+        "--pi-provider",
+        "lab",
+        "--allow",
+        "pi_local",
+    ]);
+    assert!(
+        parked.contains("target none: the local endpoint's last reading is stale or failed"),
+        "{parked}"
+    );
+    assert!(
+        !parked.contains("without a fresh quota reading"),
+        "{parked}"
+    );
 
     models(&home, "PT_E2E_LOCAL_KEY");
     let local = run(&home, &[("PT_E2E_LOCAL_KEY", "local-secret-key")]);
@@ -809,7 +831,7 @@ fn a_rejected_or_unscoped_login_is_unknown() {
     assert!(!denied.contains("insufficient fresh quota"), "{denied}");
     assert!(!denied.contains("failed quota reading"), "{denied}");
 
-    let scope = run("HTTP 403 Forbidden\n{\"error\":\"missing scope\"}");
+    let scope = run("HTTP 403 Forbidden\n{\"error\":\"insufficient_scope\"}");
     let line = line_of(&scope, "claude");
     assert_eq!(state_of(line), "unknown", "{scope}");
     assert!(line.contains("scope"), "{line}");
@@ -818,11 +840,29 @@ fn a_rejected_or_unscoped_login_is_unknown() {
             .contains("target Claude: first eligible in resleeve_to without a fresh quota reading"),
         "{scope}"
     );
+
+    let typed = run(
+        "HTTP 403 Forbidden\n{\"error\":{\"type\":\"permission_error\",\"message\":\"permission denied\"}}",
+    );
+    assert_eq!(state_of(line_of(&typed, "claude")), "unknown", "{typed}");
+    assert!(
+        typed
+            .contains("target Claude: first eligible in resleeve_to without a fresh quota reading"),
+        "{typed}"
+    );
+
+    let noise = run("HTTP 403 Forbidden\n{\"message\":\"permission denied for this resource\"}");
+    assert_eq!(state_of(line_of(&noise, "claude")), "error", "{noise}");
+    assert!(
+        noise.contains("target none: all eligible resleeve targets have a failed quota reading"),
+        "{noise}"
+    );
+    assert!(!noise.contains("without a fresh quota reading"), "{noise}");
 }
 
 /// A weekly Sonnet cap is shown on the row. It does not exhaust an Opus candidate while the
 /// account window has room, and the local model is not chosen ahead of that. A candidate
-/// with no model is gated by the full cap, since the default may be Sonnet.
+/// with no model is not blocked by the cap; the chosen reason names it.
 #[test]
 fn a_model_scoped_window_does_not_exhaust_the_subscription() {
     let home = scratch(&format!("scoped-window-{}", std::process::id()));
@@ -865,15 +905,16 @@ fn a_model_scoped_window_does_not_exhaust_the_subscription() {
     assert!(!both.contains("target PiLocal"), "{both}");
 
     let bare = run("claude");
+    let chosen = target_of(&bare);
     assert!(
-        bare.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        chosen.starts_with("target Claude:") && chosen.contains("; wk sonnet under the minimum"),
         "{bare}"
     );
-    assert!(!bare.contains("target Claude:"), "{bare}");
+    assert!(!bare.contains("target none:"), "{bare}");
 }
 
 /// `Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus. A candidate
-/// with no model is gated by that full cap.
+/// with no model is not blocked; the chosen reason names that cap.
 #[test]
 fn a_versioned_cap_gates_its_model_family() {
     let home = scratch(&format!("versioned-cap-{}", std::process::id()));
@@ -891,7 +932,7 @@ fn a_versioned_cap_gates_its_model_family() {
     let shown = run("claude:opus");
     let line = line_of(&shown, "claude");
     assert!(line.contains("sonnet") && line.contains("100%"), "{line}");
-    for model in ["claude:sonnet", "claude:claude-sonnet-4-5", "claude"] {
+    for model in ["claude:sonnet", "claude:claude-sonnet-4-5"] {
         let out = run(model);
         assert!(
             out.contains(
@@ -901,6 +942,12 @@ fn a_versioned_cap_gates_its_model_family() {
         );
         assert!(!out.contains("target Claude:"), "{model}: {out}");
     }
+    let bare_out = run("claude");
+    let bare = target_of(&bare_out);
+    assert!(
+        bare.starts_with("target Claude:") && bare.contains("; wk sonnet 4.5 under the minimum"),
+        "{bare}"
+    );
     assert!(
         shown.contains("target Claude:") && shown.contains("5h"),
         "{shown}"
@@ -969,6 +1016,112 @@ fn a_model_cap_gates_the_candidate_that_runs_that_model() {
             "{label}: {only}"
         );
     }
+}
+
+/// No model and `default` stay eligible under a full cap, and rank below an equal candidate
+/// that the cap does not touch. `opusplan` is gated by either cap. A better account window
+/// still beats a worse one. A bare candidate that is also short of the account window parks,
+/// and that reason names the cap.
+#[test]
+fn an_unspecified_model_ranks_below_a_cap() {
+    let home = scratch(&format!("rank-cap-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"rank-claude"}}"#,
+    );
+    write(
+        &home.join(".codex/auth.json"),
+        r#"{"tokens":{"access_token":"rank-codex"}}"#,
+    );
+    let sonnet_body = r#"{"five_hour":{"utilization":0,"resets_at":"2100-01-01T00:00:00Z"},"seven_day_sonnet":{"utilization":100,"resets_at":"2100-01-08T00:00:00Z"}}"#;
+    let (port, _) = serve(vec![
+        ("/api/oauth/usage", sonnet_body.to_string()),
+        (
+            "/wham/usage",
+            r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":80,"limit_window_seconds":18000,"reset_at":4102444800}}}"#
+                .to_string(),
+        ),
+    ]);
+    let base = format!("http://127.0.0.1:{port}");
+    let home_s = home.to_str().unwrap();
+    let run = |allow: &str| {
+        probe(&[
+            "--home",
+            home_s,
+            "--claude-url",
+            &base,
+            "--codex-url",
+            &base,
+            "--allow",
+            allow,
+        ])
+    };
+
+    let ranked_out = run("claude,claude:opus");
+    let ranked = target_of(&ranked_out);
+    assert!(
+        ranked.contains("[opus]") && !ranked.contains("under the minimum"),
+        "{ranked}"
+    );
+
+    let bare_out = run("claude");
+    let bare = target_of(&bare_out);
+    assert!(
+        bare.starts_with("target Claude:") && bare.contains("; wk sonnet under the minimum"),
+        "{bare}"
+    );
+    let fallback_out = run("claude:default");
+    let fallback = target_of(&fallback_out);
+    assert!(
+        fallback.contains("[default]") && fallback.contains("; wk sonnet under the minimum"),
+        "{fallback}"
+    );
+
+    let plan = run("claude:opusplan");
+    assert!(
+        plan.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{plan}"
+    );
+    assert!(!plan.contains("target Claude:"), "{plan}");
+
+    let better_out = run("claude,codex");
+    let better = target_of(&better_out);
+    assert!(
+        better.starts_with("target Claude:")
+            && better.contains("; wk sonnet under the minimum")
+            && !better.contains("target Codex:"),
+        "{better}"
+    );
+
+    let (port, _) = serve(vec![(
+        "/api/oauth/usage",
+        r#"{"five_hour":{"utilization":0,"resets_at":"2100-01-01T00:00:00Z"},"seven_day_opus":{"utilization":100,"resets_at":"2100-01-08T00:00:00Z"}}"#,
+    )]);
+    let base = format!("http://127.0.0.1:{port}");
+    let opus = probe(&[
+        "--home",
+        home_s,
+        "--claude-url",
+        &base,
+        "--allow",
+        "claude:opusplan",
+    ]);
+    assert!(
+        opus.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{opus}"
+    );
+
+    let (port, _) = serve(vec![(
+        "/api/oauth/usage",
+        r#"{"five_hour":{"utilization":99,"resets_at":"2100-01-01T00:00:00Z"},"seven_day_sonnet":{"utilization":100,"resets_at":"2100-01-08T00:00:00Z"}}"#,
+    )]);
+    let base = format!("http://127.0.0.1:{port}");
+    let parked = probe(&["--home", home_s, "--claude-url", &base, "--allow", "claude"]);
+    let line = target_of(&parked);
+    assert!(
+        line.contains("insufficient fresh quota") && line.contains("; wk sonnet under the minimum"),
+        "{parked}"
+    );
 }
 
 /// Pi with a vendor login has no quota reader. A missing reading is not "unknown", so the

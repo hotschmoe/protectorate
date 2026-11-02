@@ -314,7 +314,9 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   - interrupt unresponsive, protocol desync.
 - **Guardrail actions:** interrupt, resume (at most twice in 10 min), resleeve, or park. Automatic
   resleeves go to headless mode, walking the sleeve's ordered `resleeve_to` list (default
-  `[pi_local]`). A third resleeve within an hour parks the sleeve.
+  `[pi_local]`). A third resleeve within an hour parks the sleeve. When that trip is an auth
+  failure, the park reason names the login that was rejected (`flapping (<harness> login rejected)`).
+  Any other flap stays `flapping`. The hourly limit itself is unchanged.
 - **Testing:** each machine is a pure function with a fuzz target. The target checks invariants I1
   to I10 against a table-driven reference model and checks `replay(journal) == live`.
 
@@ -446,9 +448,14 @@ windows. A fresh reading may be chosen; a stale or failed one may not. A local r
 never read may still be spent.
 
 A candidate with no reading may still be spent. That is `unknown`: no login file, the reader
-is not running, the login is expired, the provider rejected it (HTTP 401), the login lacks
-the usage scope, or the hub has not read yet (including just after a restart; readings are
-not journaled). The harness CLI refreshes the token; the reader does not. A
+is not running, the login is expired, or the hub has not read yet (including just after a
+restart; readings are not journaled). For a Claude, Codex, or Grok OAuth login, a rejection
+(HTTP 401) or a missing usage scope is the same, because that CLI refreshes the login and can
+only do so if a sleeve launches. The scope case is the provider's structured error: `error`
+is `insufficient_scope` or `invalid_scope`, or `error` is an object whose `type` or `code` is
+`permission_error`, `insufficient_scope`, or `invalid_scope`. A 403 whose text merely says
+permission is a failed reading, and so is a wrong key on the local endpoint. The harness CLI
+refreshes the token; the reader does not. A
 failed reading may not. That is `error`: the body did not parse, some other HTTP status came
 back, or the
 read timed out and left no earlier windows. The park reason names what blocks: a failed
@@ -463,10 +470,14 @@ reset, and so does a window once the grace has ended. The fallback may then spen
 because its windows have reset. That is not a missing reading. A reset at or before the epoch
 is no reset time, and the percent still counts. Model-scoped Claude windows (`wk <name>`) stay on the quota row
 and gate a candidate of the same family (opus, sonnet, haiku), ignoring case and version
-(`Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus). A candidate
-with no model is gated by any of those caps that is under the usable minimum, since the
-default may be that model. A name that is not one of those families still gates when the
-model name contains it. The account windows always gate
+(`Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus). `opusplan`
+counts as both Opus and Sonnet, so that model is gated by either cap, and a cap whose name
+contains `opusplan` gates either model. A candidate with no model, and a candidate whose
+model is `default`, are not blocked by a model cap. A cap under the usable minimum only ranks
+that candidate below an otherwise equal one that is not under it. When that candidate is
+chosen or parked, the reason names the tightest such cap as `; <label> under the minimum`.
+A scope that is not one of those families still gates when its name is at least three letters
+and the model name contains it. The account windows always gate
 (`5h`, `wk`), as does the single credit or rate-limit window of the other subscriptions. A
 row whose only windows are caps for other models is an unknown reading for that candidate
 and may be spent. `pi_vendor` and Antigravity have no

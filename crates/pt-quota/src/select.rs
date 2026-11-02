@@ -19,35 +19,49 @@ fn reset_at(w: &QuotaWindow) -> Option<u64> {
     w.resets_at_ms.map(|r| r.0).filter(|t| *t > 0)
 }
 
-/// Model families. A cap and a candidate match when both carry the same one, ignoring
-/// case and version digits (`Sonnet 4.5` is `sonnet`).
+/// Model families. A cap and a candidate match when they share one, ignoring case and
+/// version digits (`Sonnet 4.5` is `sonnet`). `opusplan` is both Opus and Sonnet.
 const FAMILIES: [&str; 3] = ["sonnet", "opus", "haiku"];
 
-/// Account windows always gate. A model cap gates the same family. With no model, only a
-/// cap under `min` gates, because the default may be that model. `None` ignores caps.
-fn gates(label: &str, model: &str, used: f64, min: Option<f64>) -> bool {
+/// Account windows always gate. A model cap gates a candidate of the same family. No model
+/// and the model `default` are never gated by a cap. A scope that is not a family still
+/// gates when its name is at least three letters and the model name contains it.
+fn gates(label: &str, model: &str) -> bool {
     let Some(scope) = label.strip_prefix("wk ") else {
         return true;
     };
     if scope.is_empty() {
         return true;
     }
-    if model.is_empty() {
-        return min.is_some_and(|min| (100.0 - used).clamp(0.0, 100.0) < min);
+    if unspecified(model) {
+        return false;
     }
-    match (family(scope), family(model)) {
-        (Some(cap), Some(got)) => cap == got,
-        (Some(_), None) => false,
-        (None, _) => {
-            let name = letters(scope);
-            name.len() >= 3 && letters(model).contains(&name)
-        }
+    let caps = families(scope);
+    if caps.is_empty() {
+        let name = letters(scope);
+        return name.len() >= 3 && letters(model).contains(&name);
     }
+    let got = families(model);
+    caps.iter().any(|cap| got.contains(cap))
 }
 
-fn family(s: &str) -> Option<&'static str> {
+/// No model, or the model `default`, ignoring case and characters that are not letters or digits.
+fn unspecified(model: &str) -> bool {
+    let folded = letters(model);
+    folded.is_empty() || folded == "default"
+}
+
+/// Families named by `s`. `opusplan` is Opus and Sonnet; otherwise the first contained
+/// family would hide the other (`opusplan` contains `opus` and not `sonnet`).
+fn families(s: &str) -> Vec<&'static str> {
     let folded = letters(s);
-    FAMILIES.into_iter().find(|name| folded.contains(name))
+    if folded.contains("opusplan") {
+        return vec!["opus", "sonnet"];
+    }
+    FAMILIES
+        .into_iter()
+        .filter(|name| folded.contains(name))
+        .collect()
 }
 
 fn letters(s: &str) -> String {
@@ -58,14 +72,14 @@ fn letters(s: &str) -> String {
 }
 
 /// The row has finite usage windows, and none of them apply to `model`.
-fn other_scopes_only(q: &Quota, model: &str, min: f64) -> bool {
+fn other_scopes_only(q: &Quota, model: &str) -> bool {
     let mut any = false;
     for w in &q.windows {
-        let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
+        if !w.used_pct.is_some_and(|u| u.is_finite()) {
             continue;
-        };
+        }
         any = true;
-        if gates(&w.label, model, used, Some(min)) {
+        if gates(&w.label, model) {
             return false;
         }
     }
@@ -87,8 +101,8 @@ pub struct Health {
     pub healthy: bool,
 }
 
-/// One ordered resleeve candidate. An empty `model` gates on the account windows and on any
-/// exhausted model cap.
+/// One ordered resleeve candidate. An empty `model`, or `default`, gates on the account
+/// windows only. A model cap does not block it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Candidate {
     pub harness: Harness,
@@ -159,7 +173,8 @@ fn projected_unused(w: &QuotaWindow, used: f64, fetched_ms: u64, now_ms: u64) ->
 }
 
 /// Scores a fresh quota by its windows that have not yet reset. `None` when nothing is usable.
-/// `min` is what makes an empty model notice an exhausted cap. `None` ignores caps.
+/// `min` ages out a stale exhausted window that names no reset. A model cap does not score
+/// an unspecified model.
 fn score(q: &Quota, now_ms: u64, model: &str, min: Option<f64>) -> Option<Scored> {
     struct Cand {
         label: String,
@@ -172,7 +187,7 @@ fn score(q: &Quota, now_ms: u64, model: &str, min: Option<f64>) -> Option<Scored
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
             continue;
         };
-        if !gates(&w.label, model, used, min) {
+        if !gates(&w.label, model) {
             continue;
         }
         if stale_limit_passed(q, w, now_ms, min, used) {
@@ -252,7 +267,7 @@ fn past_blocks(q: &Quota, now_ms: u64, min: f64, model: &str) -> bool {
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
             return false;
         };
-        if !gates(&w.label, model, used, Some(min)) {
+        if !gates(&w.label, model) {
             return false;
         }
         let Some(reset) = reset_at(w) else {
@@ -326,7 +341,7 @@ fn availability(now_ms: u64, size: TaskSize, cand: &Candidate, quotas: &[Quota])
         return Availability::Unknown;
     }
     // Caps for other models say nothing about this candidate.
-    if other_scopes_only(q, model, size.min_usable_pct()) {
+    if other_scopes_only(q, model) {
         return Availability::Unknown;
     }
     if past_blocks(q, now_ms, size.min_usable_pct(), model) {
@@ -335,19 +350,18 @@ fn availability(now_ms: u64, size: TaskSize, cand: &Candidate, quotas: &[Quota])
     match score(q, now_ms, model, Some(size.min_usable_pct())) {
         Some(s) if s.usable < size.min_usable_pct() => Availability::Exhausted,
         Some(_) => Availability::Available,
-        None if counted_reset(q, now_ms, model, size.min_usable_pct()) => Availability::Reset,
+        None if counted_reset(q, now_ms, model) => Availability::Reset,
         None => Availability::Unknown,
     }
 }
 
 /// A gating window whose reset has passed. Once it no longer blocks, the row is a reset,
 /// not a candidate with no reading.
-fn counted_reset(q: &Quota, now_ms: u64, model: &str, min: f64) -> bool {
+fn counted_reset(q: &Quota, now_ms: u64, model: &str) -> bool {
     q.windows.iter().any(|w| {
-        let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
-            return false;
-        };
-        gates(&w.label, model, used, Some(min)) && reset_at(w).is_some_and(|r| r <= now_ms)
+        w.used_pct.is_some_and(|u| u.is_finite())
+            && gates(&w.label, model)
+            && reset_at(w).is_some_and(|r| r <= now_ms)
     })
 }
 
@@ -362,7 +376,7 @@ pub fn select_with_fallback(
     size: TaskSize,
     candidates: &[Candidate],
     quotas: &[Quota],
-) -> Result<(usize, String), &'static str> {
+) -> Result<(usize, String), String> {
     if let Some(target) = select_target(now_ms, size, candidates, Mode::Headless, &[], quotas, &[])
         && let Some(idx) = candidates
             .iter()
@@ -371,13 +385,17 @@ pub fn select_with_fallback(
         return Ok((idx, target.reason));
     }
     let avail = |cand: &Candidate| availability(now_ms, size, cand, quotas);
+    let min = size.min_usable_pct();
     if let Some(idx) = candidates
         .iter()
         .position(|cand| avail(cand) == Availability::Available)
     {
         return Ok((
             idx,
-            "first eligible in resleeve_to whose last reading still has spare quota".into(),
+            with_cap(
+                "first eligible in resleeve_to whose last reading still has spare quota",
+                named_cap(now_ms, min, &candidates[idx], quotas),
+            ),
         ));
     }
     if let Some(idx) = candidates
@@ -388,15 +406,18 @@ pub fn select_with_fallback(
             Availability::Reset => "first eligible in resleeve_to whose quota windows have reset",
             _ => "first eligible in resleeve_to without a fresh quota reading",
         };
-        return Ok((idx, reason.into()));
+        return Ok((
+            idx,
+            with_cap(reason, named_cap(now_ms, min, &candidates[idx], quotas)),
+        ));
     }
     if candidates.is_empty() {
-        Err("no eligible resleeve target")
+        Err("no eligible resleeve target".to_string())
     } else if candidates
         .iter()
         .all(|cand| avail(cand) == Availability::Unmetered)
     {
-        Err("no eligible resleeve target has a quota meter")
+        Err("no eligible resleeve target has a quota meter".to_string())
     } else {
         Err(park_reason(now_ms, size, candidates, quotas))
     }
@@ -404,19 +425,23 @@ pub fn select_with_fallback(
 
 /// Why nothing could be spent. A fresh row under the minimum is short of quota. A failed
 /// reading, a stale short row, and a local endpoint that has gone stale or failed say so.
-fn park_reason(
-    now_ms: u64,
-    size: TaskSize,
-    candidates: &[Candidate],
-    quotas: &[Quota],
-) -> &'static str {
+fn park_reason(now_ms: u64, size: TaskSize, candidates: &[Candidate], quotas: &[Quota]) -> String {
     let mut fresh = false;
     let mut failed = false;
     let mut stale = false;
     let mut local = false;
+    let mut cap: Option<(f64, String)> = None;
+    let min = size.min_usable_pct();
     for cand in candidates {
         if availability(now_ms, size, cand, quotas) != Availability::Exhausted {
             continue;
+        }
+        if let Some(found) = tightest_cap_for(now_ms, min, cand, quotas)
+            && cap
+                .as_ref()
+                .is_none_or(|(remaining, _)| found.0 < *remaining)
+        {
+            cap = Some(found);
         }
         if cand.harness == Harness::PiLocal {
             local = true;
@@ -431,7 +456,7 @@ fn park_reason(
             _ => fresh = true,
         }
     }
-    match (fresh, failed, stale, local) {
+    let sentence = match (fresh, failed, stale, local) {
         (true, false, false, false) => {
             "all eligible resleeve targets have insufficient fresh quota"
         }
@@ -439,6 +464,59 @@ fn park_reason(
         (false, false, true, false) => "all eligible resleeve targets are stale and short of quota",
         (false, false, false, true) => "the local endpoint's last reading is stale or failed",
         _ => "every eligible resleeve target is short of quota, stale, or failed",
+    };
+    with_cap(sentence, cap.map(|(_, label)| label))
+}
+
+/// The tightest model cap under `min` on an unspecified model, and its remaining percent.
+/// An open cap does not count, and neither does one whose reset has passed.
+fn tightest_cap(q: &Quota, model: &str, min: f64, now_ms: u64) -> Option<(f64, String)> {
+    if !unspecified(model) {
+        return None;
+    }
+    let mut best: Option<(f64, String)> = None;
+    for w in &q.windows {
+        let Some(scope) = w.label.strip_prefix("wk ") else {
+            continue;
+        };
+        if scope.is_empty() {
+            continue;
+        }
+        let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
+            continue;
+        };
+        if reset_at(w).is_some_and(|r| r <= now_ms) {
+            continue;
+        }
+        let remaining = (100.0 - used).clamp(0.0, 100.0);
+        if remaining >= min {
+            continue;
+        }
+        if best.as_ref().is_none_or(|(have, _)| remaining < *have) {
+            best = Some((remaining, w.label.clone()));
+        }
+    }
+    best
+}
+
+fn tightest_cap_for(
+    now_ms: u64,
+    min: f64,
+    cand: &Candidate,
+    quotas: &[Quota],
+) -> Option<(f64, String)> {
+    let (_, sub) = SUBSCRIBED.iter().find(|(h, _)| *h == cand.harness)?;
+    tightest_cap(row(quotas, *sub)?, &cand.model, min, now_ms)
+}
+
+fn named_cap(now_ms: u64, min: f64, cand: &Candidate, quotas: &[Quota]) -> Option<String> {
+    tightest_cap_for(now_ms, min, cand, quotas).map(|(_, label)| label)
+}
+
+fn with_cap(reason: &str, cap: Option<String>) -> String {
+    match cap {
+        Some(label) => format!("{reason}; {label} under the minimum"),
+        None => reason.to_string(),
     }
 }
 
@@ -447,8 +525,8 @@ fn park_reason(
 /// - A subscription is eligible when its harness is allowed, supports `mode`, is not excluded
 ///   or unhealthy, and has a fresh reading with at least `size.min_usable_pct()` usable in its
 ///   tightest window. Stale, unknown and error readings never count.
-/// - The best is the highest `unused at reset / (1 + hours to reset / 48)`; ties go to the
-///   earlier of Claude, Codex, Grok.
+/// - The best is the highest `unused at reset / (1 + hours to reset / 48)`. An equal score keeps
+///   the earlier candidate, unless that one is under a model cap and this one is not.
 /// - Only when none is eligible does the local model (`PiLocal`) win, and only if it is allowed,
 ///   not excluded or unhealthy, and its own reading is fresh (its endpoint answered).
 pub fn select_target(
@@ -467,6 +545,8 @@ pub fn select_target(
             && supports(h, mode)
     };
     let mut best: Option<Target> = None;
+    let mut best_capped = false;
+    let min = size.min_usable_pct();
     for (harness, subscription) in SUBSCRIBED {
         if !usable(harness) {
             continue;
@@ -475,31 +555,45 @@ pub fn select_target(
             continue;
         };
         for cand in allow.iter().filter(|c| c.harness == harness) {
-            if past_blocks(q, now_ms, size.min_usable_pct(), &cand.model) {
+            if past_blocks(q, now_ms, min, &cand.model) {
                 continue;
             }
-            if other_scopes_only(q, &cand.model, size.min_usable_pct()) {
+            if other_scopes_only(q, &cand.model) {
                 continue;
             }
-            let Some(s) = score(q, now_ms, &cand.model, Some(size.min_usable_pct())) else {
+            let Some(s) = score(q, now_ms, &cand.model, Some(min)) else {
                 continue;
             };
-            if s.usable < size.min_usable_pct() || best.as_ref().is_some_and(|b| s.score <= b.score)
-            {
+            if s.usable < min {
                 continue;
+            }
+            let cap = tightest_cap(q, &cand.model, min, now_ms);
+            let capped = cap.is_some();
+            // An equal score keeps the earlier candidate, unless it is under a model cap and
+            // this one is not. The numeric score stays the account windows, so a better window
+            // still wins.
+            if let Some(b) = &best {
+                let tied = s.score == b.score;
+                if s.score < b.score || (tied && (capped || !best_capped)) {
+                    continue;
+                }
             }
             let reset = match s.hours {
                 Some(h) => format!("resets in {}", crate::fmt_age((h * HOUR_MS) as u64)),
                 None => "reset time unknown".to_string(),
             };
+            best_capped = capped;
             best = Some(Target {
                 harness,
                 model: cand.model.clone(),
                 subscription,
                 score: s.score,
-                reason: format!(
-                    "{} window {reset}: ~{:.0}% expiring unused, {:.0}% usable now",
-                    s.window, s.expiring, s.usable
+                reason: with_cap(
+                    &format!(
+                        "{} window {reset}: ~{:.0}% expiring unused, {:.0}% usable now",
+                        s.window, s.expiring, s.usable
+                    ),
+                    cap.map(|(_, label)| label),
                 ),
             });
         }

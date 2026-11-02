@@ -4595,6 +4595,7 @@ final class Sleeve {
   final Lifecycle lifecycle;
 
   /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed or `g<N>`.
+  /// A flap after a rejected login is `flapping (<harness> login rejected)`.
   final String? parkReason;
 
   /// The directory the incarnation works in (a child's worktree, a root's claim).

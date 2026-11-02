@@ -172,9 +172,12 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn target_line(candidates: &[Candidate], picked: Result<(usize, String), &'static str>) -> String {
+fn target_line(candidates: &[Candidate], picked: Result<(usize, String), String>) -> String {
     match picked {
-        Ok((idx, reason)) => format!("target {:?}: {reason}", candidates[idx].harness),
+        Ok((idx, reason)) => {
+            let cand = &candidates[idx];
+            format!("target {:?}: {reason} [{}]", cand.harness, cand.model)
+        }
         Err(reason) => format!("target none: {reason}"),
     }
 }

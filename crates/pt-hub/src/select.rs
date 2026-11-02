@@ -2,7 +2,8 @@
 //! candidates that are headless, not excluded and eligible, `pt_quota::select_with_fallback`
 //! picks by fresh quota, then a stale row that still has spare, then a candidate with no
 //! reading. A failed reading is not spent, and neither is a harness that has no meter.
-//! Each candidate keeps its model, so a Claude model cap gates only that model.
+//! Each candidate keeps its model. A model cap gates that model. No model and `default`
+//! are not blocked by a cap; one under the minimum only loses a tie and is named in the reason.
 
 use pt_api as api;
 use pt_core::{Mode, Target};
@@ -17,7 +18,7 @@ pub fn select_target(
     exclude: &[Target],
     eligible: &dyn Fn(&Target) -> bool,
     quotas: &[api::Quota],
-) -> Result<(Target, String), &'static str> {
+) -> Result<(Target, String), String> {
     let open: Vec<&Target> = candidates
         .iter()
         .filter(|t| t.mode == Mode::Headless && !exclude.contains(t) && eligible(t))
@@ -30,6 +31,8 @@ pub fn select_target(
         })
         .collect();
     let (idx, why) = pt_quota::select_with_fallback(now_ms, TaskSize::Medium, &allow, quotas)?;
-    let target = open.get(idx).ok_or("no eligible resleeve target")?;
+    let target = open
+        .get(idx)
+        .ok_or_else(|| "no eligible resleeve target".to_string())?;
     Ok(((*target).clone(), why))
 }

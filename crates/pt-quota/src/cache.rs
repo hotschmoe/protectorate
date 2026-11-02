@@ -3,7 +3,7 @@
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
-use pt_api::{EpochMs, Quota, QuotaReading};
+use pt_api::{EpochMs, Quota, QuotaReading, Subscription};
 
 use crate::{Error, Reader, Snapshot, fmt_age};
 
@@ -168,15 +168,21 @@ impl Slot {
     fn quota(&self, opts: &Options) -> (Quota, Option<Duration>) {
         let subscription = self.reader.subscription();
         let Some((snap, fetched, instant)) = &self.good else {
+            // Expired and missing logins are not a failed window. A rejected login or a
+            // missing usage scope is the same only for the vendor OAuth CLIs, which refresh
+            // the login once a sleeve launches. A wrong key on the local endpoint stays a
+            // failed read.
+            let vendor = matches!(
+                subscription,
+                Subscription::Claude | Subscription::Codex | Subscription::Grok
+            );
             let (reading, note) = match &self.last_err {
-                // Expired, rejected, and missing-scope logins are not a failed window: the
-                // harness CLI refreshes the login, and it can only do that if a sleeve launches.
                 Some(Error::Unavailable(d)) => (QuotaReading::Unknown, d.to_string()),
                 Some(Error::Expired) => (QuotaReading::Unknown, Error::Expired.to_string()),
-                Some(Error::Unauthorized) => {
+                Some(Error::Unauthorized) if vendor => {
                     (QuotaReading::Unknown, Error::Unauthorized.to_string())
                 }
-                Some(Error::Scope) => (QuotaReading::Unknown, Error::Scope.to_string()),
+                Some(Error::Scope) if vendor => (QuotaReading::Unknown, Error::Scope.to_string()),
                 Some(e) => (QuotaReading::Error, e.to_string()),
                 None => (QuotaReading::Unknown, "not read yet".to_string()),
             };
