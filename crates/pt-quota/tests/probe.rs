@@ -659,3 +659,52 @@ fn a_read_that_finishes_after_the_deadline_is_kept() {
         "{out}"
     );
 }
+
+/// A Codex `reset_at` of 0 is not a reset, so a full window still blocks. A stamp that has
+/// already passed blocks while the percent is over the line, and does not when the window
+/// still had room.
+#[test]
+fn a_passed_reset_still_blocks_an_exhausted_window() {
+    let home = scratch(&format!("passed-reset-{}", std::process::id()));
+    write(
+        &home.join(".codex/auth.json"),
+        r#"{"tokens":{"access_token":"passed-codex"}}"#,
+    );
+    let home_s = home.to_str().unwrap();
+    let run = |body: &'static str| {
+        let (port, _) = serve(vec![("/wham/usage", body)]);
+        let base = format!("http://127.0.0.1:{port}");
+        probe(&["--home", home_s, "--codex-url", &base, "--allow", "codex"])
+    };
+    let zero = run(
+        r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":100,"limit_window_seconds":18000,"reset_at":0}}}"#,
+    );
+    let line = line_of(&zero, "codex");
+    assert_eq!(state_of(line), "fresh", "{zero}");
+    assert!(
+        line.contains("[5h 100%]") && !line.contains("reset passed"),
+        "{line}"
+    );
+    assert!(
+        zero.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{zero}"
+    );
+
+    let passed = run(
+        r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":100,"limit_window_seconds":18000,"reset_at":1}}}"#,
+    );
+    let line = line_of(&passed, "codex");
+    assert!(line.contains("reset passed"), "{line}");
+    assert!(
+        passed.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{passed}"
+    );
+
+    let room = run(
+        r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":18000,"reset_at":1}}}"#,
+    );
+    assert!(
+        room.contains("target Codex: first eligible in resleeve_to without a fresh quota reading"),
+        "{room}"
+    );
+}

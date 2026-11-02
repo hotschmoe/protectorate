@@ -187,7 +187,9 @@ Resleeve targets are weighted by fresh readings; known-exhausted candidates are 
 sleeve parks if all eligible candidates are exhausted. A stale reading keeps its last windows:
 under the usable minimum it counts as exhausted, and with spare left the fallback may still
 choose it. A candidate with no reading (`unknown`: no login, or not read yet) can still be
-selected. A failed reading (`error`) cannot; it parks the same way an exhausted window does. A local
+selected. A failed reading (`error`) cannot; it parks the same way an exhausted window does. A
+window whose reset time has already passed still blocks while it is over that line; a reset at
+or before the epoch is ignored and the percent still counts. A local
 endpoint may use HTTPS or loopback HTTP; other HTTP
 endpoints are reported as misconfigured and are not contacted.
 

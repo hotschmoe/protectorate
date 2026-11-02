@@ -445,7 +445,9 @@ A candidate with no reading may still be spent. That is `unknown`: no login file
 is not running, or the hub has not read yet (including just after a restart; readings are not
 journaled). A failed reading may not. That is `error`: the body did not parse, the request
 failed, the login is expired, or the read timed out and left no earlier windows. It parks the
-same way an exhausted window does.
+same way an exhausted window does. A window whose reset time has passed still blocks while its
+remaining percent is under the task minimum. A reset at or before the epoch is no reset time,
+and the percent still counts.
 
 A read that finishes after its deadline is kept and published on the next refresh. Each request
 inside that read gets only the time still left, so a follow-up call cannot discard a body that

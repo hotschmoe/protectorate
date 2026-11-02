@@ -116,6 +116,12 @@ fuzz_target!(|data: &[u8]| {
                 && let Some(q) = quotas.iter().find(|q| q.subscription == sub)
             {
                 assert_ne!(state(q), State::Error, "a failed reading was spent");
+                if matches!(state(q), State::Fresh | State::Stale) {
+                    assert!(
+                        !past_blocks(q, now, size.min_usable_pct()),
+                        "a passed exhausted window was spent"
+                    );
+                }
                 if state(q) == State::Stale
                     && let Some(usable) = open_usable(q, now)
                 {
@@ -138,6 +144,7 @@ fuzz_target!(|data: &[u8]| {
                 if let Some(sub) = metered(*h)
                     && let Some(q) = quotas.iter().find(|q| q.subscription == sub)
                     && state(q) == State::Stale
+                    && !past_blocks(q, now, size.min_usable_pct())
                     && let Some(usable) = open_usable(q, now)
                     && usable + 1e-9 >= size.min_usable_pct()
                 {
@@ -204,11 +211,28 @@ fn open_usable(q: &Quota, now_ms: u64) -> Option<f64> {
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
             continue;
         };
-        if w.resets_at_ms.is_some_and(|r| r.0 <= now_ms) {
+        // A reset at or before the epoch is not a reset. A later stamp that has passed is.
+        if w.resets_at_ms
+            .map(|r| r.0)
+            .filter(|t| *t > 0)
+            .is_some_and(|r| r <= now_ms)
+        {
             continue;
         }
         let remaining = (100.0 - used).clamp(0.0, 100.0);
         usable = Some(usable.map_or(remaining, |m: f64| m.min(remaining)));
     }
     usable
+}
+
+fn past_blocks(q: &Quota, now_ms: u64, min: f64) -> bool {
+    q.windows.iter().any(|w| {
+        let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
+            return false;
+        };
+        let Some(reset) = w.resets_at_ms.map(|r| r.0).filter(|t| *t > 0) else {
+            return false;
+        };
+        reset <= now_ms && (100.0 - used).clamp(0.0, 100.0) < min
+    })
 }

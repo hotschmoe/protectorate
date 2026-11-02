@@ -14,6 +14,11 @@ const UNKNOWN_RESET_HOURS: f64 = 168.0;
 const MIN_ELAPSED_FRACTION: f64 = 0.05;
 const HOUR_MS: f64 = 3_600_000.0;
 
+/// A reset at or before the epoch is "no reset": the percent still counts.
+fn reset_at(w: &QuotaWindow) -> Option<u64> {
+    w.resets_at_ms.map(|r| r.0).filter(|t| *t > 0)
+}
+
 /// The harnesses that draw on a metered subscription, in tie-break order.
 const SUBSCRIBED: [(Harness, Subscription); 3] = [
     (Harness::Claude, Subscription::Claude),
@@ -100,14 +105,14 @@ fn score(q: &Quota, now_ms: u64) -> Option<Scored> {
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
             continue;
         };
-        if w.resets_at_ms.is_some_and(|r| r.0 <= now_ms) {
+        if reset_at(w).is_some_and(|r| r <= now_ms) {
             continue;
         }
         cands.push(Cand {
             label: w.label.clone(),
             remaining: (100.0 - used).clamp(0.0, 100.0),
             projected: projected_unused(w, used, q.fetched_at_ms.0, now_ms),
-            hours: w.resets_at_ms.map(|r| (r.0 - now_ms) as f64 / HOUR_MS),
+            hours: reset_at(w).map(|r| (r - now_ms) as f64 / HOUR_MS),
         });
     }
     let usable = cands
@@ -132,6 +137,20 @@ fn score(q: &Quota, now_ms: u64) -> Option<Scored> {
         }
     }
     best
+}
+
+/// A window whose reset has passed and whose remaining percent is under `min` still blocks.
+/// The vendor can be enforcing the old counter for a moment after the stamp.
+fn past_blocks(q: &Quota, now_ms: u64, min: f64) -> bool {
+    q.windows.iter().any(|w| {
+        let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
+            return false;
+        };
+        let Some(reset) = reset_at(w) else {
+            return false;
+        };
+        reset <= now_ms && (100.0 - used).clamp(0.0, 100.0) < min
+    })
 }
 
 fn row<'a>(quotas: &'a [Quota], sub: Subscription) -> Option<&'a Quota> {
@@ -178,6 +197,9 @@ fn availability(now_ms: u64, size: TaskSize, harness: Harness, quotas: &[Quota])
     }
     if state(q) != State::Fresh && state(q) != State::Stale {
         return Availability::Unknown;
+    }
+    if past_blocks(q, now_ms, size.min_usable_pct()) {
+        return Availability::Exhausted;
     }
     match score(q, now_ms) {
         Some(s) if s.usable < size.min_usable_pct() => Availability::Exhausted,
@@ -256,7 +278,13 @@ pub fn select_target(
         if !usable(harness) {
             continue;
         }
-        let Some(s) = fresh_for(quotas, subscription).and_then(|q| score(q, now_ms)) else {
+        let Some(q) = fresh_for(quotas, subscription) else {
+            continue;
+        };
+        if past_blocks(q, now_ms, size.min_usable_pct()) {
+            continue;
+        }
+        let Some(s) = score(q, now_ms) else {
             continue;
         };
         if s.usable < size.min_usable_pct() || best.as_ref().is_some_and(|b| s.score <= b.score) {

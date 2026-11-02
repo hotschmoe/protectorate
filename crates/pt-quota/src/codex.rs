@@ -106,9 +106,12 @@ pub fn parse_usage(body: &[u8]) -> Result<Snapshot> {
             .and_then(Value::as_i64)
             .filter(|n| *n > 0)
             .ok_or_else(|| Error::other(format!("usage response has invalid {key} length")))?;
+        // `0` is not a reset time. Stored as epoch ms it is always in the past, and the
+        // percent would then be dropped.
         let reset = w
             .get("reset_at")
             .and_then(Value::as_i64)
+            .filter(|n| *n > 0)
             .and_then(secs_to_ms);
         snap.windows
             .push(window(window_label(secs / 60), pct, reset));
