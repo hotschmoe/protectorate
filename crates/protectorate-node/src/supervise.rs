@@ -1,12 +1,13 @@
 //! `supervise`: what the systemd unit does for a Linux node, as one process; the Windows service
 //! runs it (the SCM has no ExecStartPre and cannot restart a service from inside it). Before
-//! each start it finishes any release switch a crash interrupted, runs
-//! `releases/previous/protectorate-node probation` (a failure skips the start, as a failed
-//! ExecStartPre does), then runs `releases/current/protectorate-node serve --state-dir DIR ...`
-//! with that path as argv[0], so the node may take updates. It starts the node again 1 s after
-//! it exits [`RESTART_CODE`] (an update or a rollback) and 5 s after any other exit. Stopping the
-//! supervisor ends the node: on Windows the node runs in a kill-on-close Job Object, on Linux it
-//! gets SIGTERM (and SIGKILL should the supervisor die).
+//! each start it finishes any release switch a crash interrupted and runs
+//! `releases/previous/protectorate-node probation` in a kill-on-close job with a timeout, then
+//! runs `releases/current/protectorate-node serve --state-dir DIR ...` with that path as argv[0],
+//! so the node may take updates. Unlike systemd, a failed or hung probation does not keep the
+//! node down (see [`prestart`]). It starts the node again 1 s after it exits [`RESTART_CODE`]
+//! (an update or a rollback) and 5 s after any other exit. Stopping the supervisor ends the node
+//! and a running probation: on Windows they run in kill-on-close Job Objects, on Linux they get
+//! SIGTERM (and SIGKILL should the supervisor die).
 
 use std::fs::File;
 #[cfg(windows)]
@@ -28,6 +29,8 @@ pub const USAGE: &str = "  supervise --state-dir DIR [--service] SERVE-OPTIONS..
 const PROGRAM: &str = "protectorate-node";
 const UPDATE_DELAY: Duration = Duration::from_secs(1);
 const RESTART_DELAY: Duration = Duration::from_secs(5);
+/// `probation` takes milliseconds; one that runs this long is hung.
+const PROBATION_TIMEOUT: Duration = Duration::from_secs(60);
 
 struct Plan {
     state: PathBuf,
@@ -137,15 +140,13 @@ fn supervise(plan: &Plan, log: Option<&File>, stop: Stop) -> Result<(), String> 
     let exe = format!("{PROGRAM}{}", std::env::consts::EXE_SUFFIX);
     let mut starts = 0u64;
     loop {
-        if let Err(e) = prestart(&plan.state, &releases.join("previous").join(&exe), log) {
-            eprintln!(
-                "protectorate-node: supervise: {e}; trying again in {} s",
-                RESTART_DELAY.as_secs()
-            );
-            if pause(&stop, RESTART_DELAY) {
-                return Ok(());
-            }
-            continue;
+        if !prestart(
+            &plan.state,
+            &releases.join("previous").join(&exe),
+            log,
+            &stop,
+        ) {
+            return Ok(());
         }
         starts += 1;
         let release = std::fs::read_link(releases.join("current"))
@@ -176,20 +177,102 @@ fn supervise(plan: &Plan, log: Option<&File>, stop: Stop) -> Result<(), String> 
 }
 
 /// Finishes an interrupted switch (so `previous` exists), then runs the previous release's
-/// `probation`.
-fn prestart(state: &Path, previous: &Path, log: Option<&File>) -> Result<(), String> {
-    pt_update::Store::open(state).map_err(|e| format!("releases: {e}"))?;
+/// `probation` in a kill-on-close job, for at most [`PROBATION_TIMEOUT`]. Should that fail or
+/// hang, this binary's own probation code counts the start instead, and the node starts on
+/// `current` whatever happened: `current` is the release the store names (any other binary
+/// would not run as `releases/current` and could take no update), and a release on trial still
+/// has its own watch and the next start's count. False when the supervisor was stopped.
+fn prestart(state: &Path, previous: &Path, log: Option<&File>, stop: &Stop) -> bool {
+    let say = |m: String| eprintln!("protectorate-node: supervise: {m}");
+    if let Err(e) = pt_update::Store::open(state) {
+        say(format!("releases: {e}"));
+    }
+    let failed = match probation(state, previous, log, stop) {
+        Ok(Some(())) => return true,
+        Ok(None) => return false,
+        Err(e) => e,
+    };
+    say(format!(
+        "{failed}; counting the start with this supervisor's probation"
+    ));
+    let verdict =
+        pt_update::Store::open(state).and_then(|s| s.start_attempt(pt_update::MAX_TRIAL_STARTS));
+    match verdict {
+        Ok(pt_update::Verdict::RolledBack(sw)) => say(format!(
+            "release {} rolled back to {}",
+            sw.from.as_deref().unwrap_or("-"),
+            sw.to
+        )),
+        Ok(pt_update::Verdict::Waiting { remaining }) => say(format!(
+            "release on probation, {} s left for the hub to make contact",
+            remaining.as_secs()
+        )),
+        Ok(pt_update::Verdict::Idle | pt_update::Verdict::Confirmed) => {}
+        Err(e) => say(format!("probation: {e}; starting releases/current anyway")),
+    }
+    true
+}
+
+/// `Some` when the previous release's probation succeeded, `None` when the supervisor was
+/// stopped meanwhile.
+fn probation(
+    state: &Path,
+    previous: &Path,
+    log: Option<&File>,
+    stop: &Stop,
+) -> Result<Option<()>, String> {
+    #[cfg(debug_assertions)]
+    let timeout = std::env::var("PT_TEST_PROBATION_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .map_or(PROBATION_TIMEOUT, Duration::from_millis);
+    #[cfg(not(debug_assertions))]
+    let timeout = PROBATION_TIMEOUT;
     let mut cmd = Command::new(previous);
     cmd.args(["probation", "--state-dir"]).arg(state);
     output_to(&mut cmd, log)?;
-    no_window(&mut cmd);
-    let st = cmd
-        .status()
-        .map_err(|e| format!("running {} probation: {e}", previous.display()))?;
-    if !st.success() {
-        return Err(format!("{} probation: {st}", previous.display()));
+    let (mut child, _job) =
+        spawn(&mut cmd).map_err(|e| format!("running {} probation: {e}", previous.display()))?;
+    match wait(&mut child, stop, Some(timeout))? {
+        Waited::Exited(0) => Ok(Some(())),
+        Waited::Exited(code) => Err(format!("{} probation exited {code}", previous.display())),
+        Waited::TimedOut => {
+            end(&mut child);
+            Err(format!(
+                "{} probation did not finish in {} s and was killed",
+                previous.display(),
+                timeout.as_secs()
+            ))
+        }
+        Waited::Stopped => {
+            end(&mut child);
+            Ok(None)
+        }
     }
-    Ok(())
+}
+
+enum Waited {
+    Exited(i32),
+    TimedOut,
+    Stopped,
+}
+
+fn wait(child: &mut Child, stop: &Stop, timeout: Option<Duration>) -> Result<Waited, String> {
+    let deadline = timeout.map(|t| std::time::Instant::now() + t);
+    loop {
+        if let Some(st) = child
+            .try_wait()
+            .map_err(|e| format!("waiting for {}: {e}", child.id()))?
+        {
+            return Ok(Waited::Exited(st.code().unwrap_or(-1)));
+        }
+        if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+            return Ok(Waited::TimedOut);
+        }
+        if pause(stop, Duration::from_millis(100)) {
+            return Ok(Waited::Stopped);
+        }
+    }
 }
 
 fn output_to(cmd: &mut Command, log: Option<&File>) -> Result<(), String> {
@@ -201,16 +284,6 @@ fn output_to(cmd: &mut Command, log: Option<&File>) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(windows)]
-fn no_window(cmd: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    cmd.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(windows))]
-fn no_window(_cmd: &mut Command) {}
-
 /// Runs the node until it exits (its code) or the supervisor is stopped (`None`).
 fn run_node(
     bin: &Path,
@@ -221,18 +294,13 @@ fn run_node(
     let mut cmd = Command::new(bin);
     cmd.arg("serve").args(&plan.serve);
     output_to(&mut cmd, log)?;
-    let running = spawn(&mut cmd).map_err(|e| format!("starting {}: {e}", bin.display()))?;
-    let (mut child, _job) = running;
-    loop {
-        if let Some(st) = child
-            .try_wait()
-            .map_err(|e| format!("waiting for the node: {e}"))?
-        {
-            return Ok(Some(st.code().unwrap_or(-1)));
-        }
-        if pause(stop, Duration::from_millis(200)) {
+    let (mut child, _job) =
+        spawn(&mut cmd).map_err(|e| format!("starting {}: {e}", bin.display()))?;
+    match wait(&mut child, stop, None)? {
+        Waited::Exited(code) => Ok(Some(code)),
+        Waited::TimedOut | Waited::Stopped => {
             end(&mut child);
-            return Ok(None);
+            Ok(None)
         }
     }
 }

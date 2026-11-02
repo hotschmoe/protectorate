@@ -30,6 +30,14 @@ service protectorate-node (LocalSystem, auto start, SCM restarts it 5 s, 5 s, th
 - Rollback is the same as on Linux: the release on trial switches back when the hub has not made
   contact within the window, and `probation`, run from the previous release before each start,
   switches back a release that has started three times without contact.
+- `probation` runs in a kill-on-close job and is killed after 60 s. If it fails or hangs, the
+  supervisor counts the start with its own probation code and starts `current` anyway: that is
+  the release the store names, the only one that runs as `releases\current` and can take another
+  update, and a release on trial still has its own watch. Stopping the service ends a running
+  probation with the rest.
+- A Windows node refuses `Update` to a release whose `--version` lacks the line `supervise: 1`
+  (v0.7.0-dev.5 and older), before anything is switched: such a binary could not be updated or
+  rolled back under the supervisor.
 - Permissions: everything runs as LocalSystem, which may create directory symlinks. The state dir
   (releases included) is limited to SYSTEM and Administrators by `install-service`, so only they
   can change the binaries the service starts. Jobs also run as LocalSystem (REVISIT "No runner
@@ -57,6 +65,42 @@ sc.exe qc protectorate-node                                             # superv
 the new binary into `releases\<tag>\`, points `current` at it and `previous` at the old release,
 copies it under `%ProgramFiles%` as the supervisor and starts the service. The node keeps its
 name and id; `protectorate node ls` shows it on the new release.
+
+## Replace the supervisor from the hub
+
+`node update` never replaces the supervisor (the `%ProgramFiles%` copy), and no remote command
+does. A node that needs a new supervisor, or the reinstall above, without anyone at it gets it
+from a `--maintenance` job that reruns the installer. The job cannot do it itself: it runs under
+the service, and uninstalling stops the service, which kills the job. So the job only stages a
+script and hands it to Task Scheduler, which runs it as SYSTEM outside the service. Never run yet;
+try it on a spare box first.
+
+1. A maintenance job downloads the new `protectorate-node-windows-<arch>.exe` and its release's
+   `SHA256SUMS` into `C:\ProgramData\protectorate-node\reinstall\`, inside the state dir that only
+   SYSTEM and Administrators may write (a new folder elsewhere under `%ProgramData%` may be
+   writable by every user, and SYSTEM runs what lands there) (`curl.exe -fsSLO ...`),
+   checks the hash (`certutil -hashfile protectorate-node.exe SHA256`, after renaming it to
+   `protectorate-node.exe`) and runs it with `--version` (`supervise: 1` must be there).
+2. A maintenance job writes `C:\ProgramData\protectorate-node\reinstall\reinstall.cmd` (for
+   example with PowerShell `Set-Content`):
+
+   ```
+   set S=%ProgramData%\protectorate-node
+   set N=C:\ProgramData\protectorate-node\reinstall\protectorate-node.exe
+   "%S%\releases\current\protectorate-node.exe" uninstall --state-dir "%S%" > "%S%\reinstall.log" 2>&1
+   "%N%" install-service --state-dir "%S%" >> "%S%\reinstall.log" 2>&1
+   ```
+
+3. Two more maintenance jobs hand it to Task Scheduler and end at once:
+
+   ```
+   protectorate job run --node ID --maintenance -- schtasks /create /f /tn pt-reinstall /ru SYSTEM /sc once /st 23:59 /tr C:\ProgramData\protectorate-node\reinstall\reinstall.cmd
+   protectorate job run --node ID --maintenance -- schtasks /run /tn pt-reinstall
+   ```
+
+4. The node drops off for the reinstall and comes back on the new release; `reinstall.log` in the
+   state dir says what happened. Delete the task afterwards (`schtasks /delete /tn pt-reinstall
+   /f`, as a job).
 
 ## Manual check on a real Windows node
 

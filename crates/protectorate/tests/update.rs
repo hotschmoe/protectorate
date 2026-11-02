@@ -1776,6 +1776,8 @@ fn no_pointer_leftovers(root: &Path) {
 
 #[test]
 fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_switch() {
+    // Also: a watch that meets a half-done switch, a hung probation of the previous release,
+    // and a stop while a probation runs.
     let node = node_bin().expect("cargo build --workspace must build protectorate-node");
     let asset = format!("protectorate-node-linux-{}", arch());
     let rel = |tag: &str, crash: bool| {
@@ -1787,12 +1789,37 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
             )],
         )
     };
+    let root = dir("node-supervise");
+    // v0.0.5's `probation` hangs, under a name this run can look for.
+    let hung = format!("pt-hung-{}", root.file_name().unwrap().to_string_lossy());
+    let hanging = {
+        let w = String::from_utf8(wrapper(
+            "protectorate-node",
+            "--version",
+            "v0.0.5",
+            &node,
+            "",
+            false,
+        ))
+        .unwrap();
+        let (bang, rest) = w.split_once('\n').unwrap();
+        format!("{bang}\n[ \"$1\" = probation ] && exec -a {hung} sleep 300\n{rest}").into_bytes()
+    };
     let fake = serve_releases(vec![
         rel("v0.0.2", false),
         rel("v0.0.3", true),
         rel("v0.0.4", false),
+        release("v0.0.5", vec![(asset.clone(), hanging)]),
+        rel("v0.0.6", false),
     ]);
-    let root = dir("node-supervise");
+    let hung_alive = || {
+        Command::new("pgrep")
+            .args(["-f", &hung])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    };
     install(
         &root,
         "v0.0.1",
@@ -1889,4 +1916,87 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
     assert_eq!(pointer(&root, "previous").as_deref(), Some("v0.0.2"));
     no_pointer_leftovers(&root);
     assert!(sup.stop(), "{}", sup.log_text());
+    drop(sup);
+
+    let mut sup = Supervise::start(
+        &node,
+        &root,
+        &sock,
+        &[("PT_TEST_PROBATION_TIMEOUT_MS", "2000")],
+    );
+    sup.wait_log("restart", "start 1, release v0.0.4", 20);
+    eventually("node v0.0.4 again", Duration::from_secs(20), hello);
+
+    // A switch found half done while a release is on trial (no `current`, `.current-new` naming
+    // the trial): the trial's own watch finishes it instead of reading the trial as over, so
+    // hub contact still confirms the release.
+    let out = update("v0.0.5");
+    assert_eq!(out.status, 0, "{} {}", out.stdout, out.stderr);
+    sup.wait_log("v0.0.5 started", "start 2, release v0.0.5", 20);
+    eventually("node v0.0.5", Duration::from_secs(20), hello);
+    let finished = sup
+        .log_text()
+        .matches("finished an interrupted switch")
+        .count();
+    fs::rename(
+        root.join("releases/current"),
+        root.join("releases/.current-new"),
+    )
+    .unwrap();
+    eventually("watch finished the switch", Duration::from_secs(10), || {
+        (sup.log_text()
+            .matches("finished an interrupted switch")
+            .count()
+            > finished)
+            .then_some(())
+    });
+    assert_eq!(pointer(&root, "current").as_deref(), Some("v0.0.5"));
+    assert_eq!(node_rpc(&node, &sock, "Presence", "{}").status, 0);
+    eventually("v0.0.5 confirmed", Duration::from_secs(10), || {
+        let p = probation(&root);
+        (p["version"].as_str() == Some("v0.0.5"))
+            .then(|| p["contacted_ms"].as_u64())
+            .flatten()
+    });
+    no_pointer_leftovers(&root);
+
+    // The next update makes v0.0.5 previous, and its probation hangs: the supervisor kills it
+    // at the timeout, counts the start itself and starts the new release.
+    let out = update("v0.0.6");
+    assert_eq!(out.status, 0, "{} {}", out.stdout, out.stderr);
+    sup.wait_log(
+        "hung probation",
+        "probation did not finish in 2 s and was killed",
+        20,
+    );
+    sup.wait_log(
+        "fallback",
+        "counting the start with this supervisor's probation",
+        10,
+    );
+    sup.wait_log("v0.0.6 started", "start 3, release v0.0.6", 20);
+    assert!(!hung_alive(), "the hung probation outlived its timeout");
+    eventually("node v0.0.6", Duration::from_secs(20), hello);
+    assert_eq!(node_rpc(&node, &sock, "Presence", "{}").status, 0);
+    eventually("v0.0.6 confirmed", Duration::from_secs(10), || {
+        let p = probation(&root);
+        (p["version"].as_str() == Some("v0.0.6"))
+            .then(|| p["contacted_ms"].as_u64())
+            .flatten()
+    });
+    assert!(sup.stop(), "{}", sup.log_text());
+    drop(sup);
+
+    // Stopping the supervisor while a probation runs ends that probation too, and starts nothing.
+    let starts = |sup: &Supervise| sup.log_text().matches("supervise: start ").count();
+    let mut sup = Supervise::start(&node, &root, &sock, &[]);
+    eventually("probation hanging", Duration::from_secs(20), || {
+        hung_alive().then_some(())
+    });
+    let before = starts(&sup);
+    assert!(sup.stop(), "{}", sup.log_text());
+    eventually("probation ended", Duration::from_secs(10), || {
+        (!hung_alive()).then_some(())
+    });
+    assert_eq!(starts(&sup), before, "{}", sup.log_text());
 }
