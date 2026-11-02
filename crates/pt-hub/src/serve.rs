@@ -186,6 +186,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
         events.push(codec::decode(f).map_err(|e| format!("journal frame {i}: {e}"))?);
     }
     let state = pt_core::replay(&events);
+    crate::update::stop_orphan_scopes(&tokens.hub_tag, state.next_sleeve);
     info!(
         "replayed {} events: {} sleeves, {} effects",
         events.len(),

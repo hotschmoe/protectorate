@@ -181,6 +181,22 @@ pub fn worktree_add(
     {
         return Err(format!("{} goes through a symlink", path.display()));
     }
+    // A cut-short add of this sleeve left the marker. Any other occupant of `path`
+    // is a leftover checkout; adopting it would reset someone else's worktree.
+    let marker = state_dir.join("worktree.path");
+    let mine = fs::read(&marker)
+        .ok()
+        .is_some_and(|b| b == path.as_os_str().as_encoded_bytes());
+    if !mine {
+        if fs::symlink_metadata(path).is_ok() || registered(root, path)? {
+            return Err(format!(
+                "{} already exists; a new sleeve does not adopt an existing worktree",
+                path.display()
+            ));
+        }
+        crate::home::write_private(&marker, path.as_os_str().as_encoded_bytes())
+            .map_err(|e| e.to_string())?;
+    }
     let commit = head(root).ok_or("the root's repository has no commit")?;
     if !registered(root, path)? {
         let has_branch = rev_parse(root, &["--verify", "-q", &format!("refs/heads/{branch}")])
@@ -206,7 +222,10 @@ pub fn worktree_add(
     Ok(())
 }
 
-/// Whether `path` is a work tree of the root's repository.
+pub fn worktree_registered(root: &Path, path: &Path) -> Result<bool, String> {
+    registered(root, path)
+}
+
 fn registered(root: &Path, path: &Path) -> Result<bool, String> {
     let mut c = git(root);
     c.args(["worktree", "list", "--porcelain"]);

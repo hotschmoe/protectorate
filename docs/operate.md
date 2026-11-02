@@ -304,8 +304,12 @@ unit runs before each start. Automatic rollback restores both snapshots before s
 the whole journal directory is replaced, so events after the journal snapshot are lost, and
 headscale changes after its snapshot are lost. This includes nodes enrolled after the headscale
 snapshot; enroll them again. Sleeve directories whose id is at or above `next_sleeve` from the
-journal snapshot, and the git worktree records those sleeves claim, are moved to
-`<home>/update-aside/<time>-<pid>/` and are not deleted. The prestart log names that directory.
+journal snapshot are moved to `<home>/update-aside/<time>-<pid>/` and are not deleted.
+Worktree checkouts and their gitdirs stay; the prestart log names them. Remove a leftover
+checkout when you no longer want it. Its `pt/<name>` branch survives, so a new sleeve with
+the same name starts from those commits. A new worktree does not adopt a path that already
+exists. Prestart and the next hub start stop the systemd scopes of the quarantined sleeves.
+The prestart log names the quarantine directory.
 A configured fleet must be running so the database can be snapshotted. The service
 must run the snapshot-aware `hub probation` before each start and stop if it fails; regenerate an
 older unit with the current installer before relying on this rollback. `--check` only reports what

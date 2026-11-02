@@ -372,9 +372,11 @@ straight from GitHub releases, on the stable or dev channel, as today.
   - If the new hub fails its health check within 2 minutes, prestart (the previous release)
     restores the snapshots before switching `current` back. The whole journal directory is
     replaced. Journal events after the journal snapshot and headscale changes after its snapshot
-    are lost. Sleeve directories with an id at or above the recorded `next_sleeve`, and the git
-    worktree admin directories those sleeves claim, move to
-    `<home>/update-aside/<time>-<pid>/`. They are not deleted.
+    are lost. Sleeve directories with an id at or above the recorded `next_sleeve` move to
+    `<home>/update-aside/<time>-<pid>/` and are not deleted. Worktree checkouts and gitdirs
+    stay; prestart lists them and stops those sleeves' scopes. The owner removes a leftover
+    checkout. Its `pt/<name>` branch survives, so a new sleeve with the same name starts from
+    those commits, and a new worktree does not adopt a path that already exists.
   - Manual `hub update --rollback` runs the restore offline before switching. It always restores
     headscale when there is a snapshot. It keeps the journal when the previous release can decode
     every intact frame; a torn final frame is ignored, the same way the journal opens. Otherwise

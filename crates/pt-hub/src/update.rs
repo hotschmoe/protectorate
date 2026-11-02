@@ -687,16 +687,11 @@ fn swap_journal(home: &Path, staged: PathBuf) -> Result<PathBuf, RestoreError> {
     Ok(aside)
 }
 
-/// Puts moved sleeves and worktree records back. The destination is removed only when that
-/// succeeds: a sleeve that could not be put back stays in the aside directory.
-fn quarantine_undo(
-    dest: &Path,
-    sleeves: &[(PathBuf, PathBuf)],
-    gitdirs: &[(PathBuf, PathBuf)],
-    why: String,
-) -> RestoreError {
+/// Puts moved sleeves back. The destination is removed only when that succeeds: a sleeve
+/// that could not be put back stays in the aside directory.
+fn quarantine_undo(dest: &Path, sleeves: &[(PathBuf, PathBuf)], why: String) -> RestoreError {
     let mut stuck = Vec::new();
-    for (from, to) in sleeves.iter().rev().chain(gitdirs.iter().rev()) {
+    for (from, to) in sleeves.iter().rev() {
         if let Err(e) = fs::rename(from, to) {
             stuck.push(format!("{} -> {}: {e}", from.display(), to.display()));
         }
@@ -712,9 +707,18 @@ fn quarantine_undo(
     }
 }
 
-fn worktree_gitdir(sleeve: &Path) -> Option<PathBuf> {
-    let claim = fs::read(sleeve.join("provisioned")).ok()?;
-    let claim = PathBuf::from(String::from_utf8(claim).ok()?);
+fn claim_path(sleeve: &Path) -> Option<PathBuf> {
+    let bytes = fs::read(sleeve.join("provisioned")).ok()?;
+    Some(PathBuf::from(String::from_utf8(bytes).ok()?))
+}
+
+/// The checkout and gitdir of a worktree claim. A root whose `.git` is a directory, and a
+/// view of a kept parent, are not listed: those trees are not the trial's to remove.
+fn worktree_left(sleeve: &Path, kept: &[PathBuf]) -> Option<(PathBuf, PathBuf)> {
+    let claim = claim_path(sleeve)?;
+    if kept.iter().any(|p| p == &claim) {
+        return None;
+    }
     let text = fs::read_to_string(claim.join(".git")).ok()?;
     let rel = text.lines().next()?.trim().strip_prefix("gitdir:")?.trim();
     let gitdir = if Path::new(rel).is_absolute() {
@@ -725,14 +729,52 @@ fn worktree_gitdir(sleeve: &Path) -> Option<PathBuf> {
     if gitdir.parent().and_then(|p| p.file_name()) != Some(std::ffi::OsStr::new("worktrees")) {
         return None;
     }
-    gitdir.is_dir().then_some(gitdir)
+    gitdir.is_dir().then_some((claim, gitdir))
 }
 
-/// Moves `sleeves/<id>` for every id >= `next_sleeve`, and that sleeve's git worktree admin
-/// directory, into a new directory under `update-aside`. Nothing is deleted.
+fn hub_tag(home: &Path) -> Option<String> {
+    let bytes = fs::read(home.join("tokens")).ok()?;
+    let v: pt_json::Value = pt_json::from_bytes(&bytes).ok()?;
+    v["hub_tag"].as_str().map(str::to_string)
+}
+
+/// Stops systemd user scopes whose sleeve id is `>= next_sleeve`. Those ids are not in the
+/// restored journal. No user bus means no such scope exists.
+pub(crate) fn stop_orphan_scopes(tag: &str, next_sleeve: u64) {
+    if tag.is_empty() || !pt_sandbox::user_bus_ready() {
+        return;
+    }
+    let units = match pt_sandbox::list_scope_units() {
+        Ok(units) => units,
+        Err(e) => {
+            eprintln!("update: could not list sleeve scopes: {e}");
+            return;
+        }
+    };
+    for unit in units {
+        let Some(id) = pt_sandbox::scope_sleeve_id(tag, &unit) else {
+            continue;
+        };
+        if id < next_sleeve {
+            continue;
+        }
+        match pt_sandbox::kill_scope(&unit) {
+            Ok(()) => eprintln!("update: stopped {unit}"),
+            Err(e) => eprintln!("update: stopping {unit}: {e}"),
+        }
+    }
+}
+
+/// Moves `sleeves/<id>` for every id >= `next_sleeve` into a new directory under
+/// `update-aside`. Worktree checkouts and gitdirs stay; their paths are printed.
+/// Nothing is deleted.
 fn quarantine_sleeves(home: &Path, next_sleeve: u64) -> Result<Option<PathBuf>, RestoreError> {
+    if let Some(tag) = hub_tag(home) {
+        stop_orphan_scopes(&tag, next_sleeve);
+    }
     let sleeves = home.join("sleeves");
     let mut ids = Vec::new();
+    let mut kept = Vec::new();
     if let Ok(entries) = fs::read_dir(&sleeves) {
         for entry in entries.flatten() {
             let name = entry.file_name();
@@ -740,8 +782,13 @@ fn quarantine_sleeves(home: &Path, next_sleeve: u64) -> Result<Option<PathBuf>, 
             let Ok(id) = name.parse::<u64>() else {
                 continue;
             };
-            if id >= next_sleeve && name == id.to_string() && entry.path().is_dir() {
+            if name != id.to_string() || !entry.path().is_dir() {
+                continue;
+            }
+            if id >= next_sleeve {
                 ids.push(id);
+            } else if let Some(path) = claim_path(&entry.path()) {
+                kept.push(path);
             }
         }
     }
@@ -749,48 +796,27 @@ fn quarantine_sleeves(home: &Path, next_sleeve: u64) -> Result<Option<PathBuf>, 
     if ids.is_empty() {
         return Ok(None);
     }
+    let mut left = Vec::new();
+    for id in &ids {
+        if let Some(pair) = worktree_left(&sleeves.join(id.to_string()), &kept)
+            && !left.iter().any(|(_, gitdir)| gitdir == &pair.1)
+        {
+            left.push(pair);
+        }
+    }
     let dest =
         home.join("update-aside")
             .join(format!("{}-{}", crate::home::now_ms(), std::process::id()));
     fs::create_dir_all(dest.join("sleeves"))
         .map_err(|e| RestoreError::failed(format!("creating {}: {e}", dest.display())))?;
     let mut moved_sleeves = Vec::new();
-    let mut moved_gitdirs = Vec::new();
     for id in ids {
         let src = sleeves.join(id.to_string());
-        if let Some(gitdir) = worktree_gitdir(&src) {
-            let name = gitdir.file_name().unwrap_or_default();
-            let to = dest.join("gitdirs").join(id.to_string()).join(name);
-            if let Some(parent) = to.parent()
-                && let Err(e) = fs::create_dir_all(parent)
-            {
-                return Err(quarantine_undo(
-                    &dest,
-                    &moved_sleeves,
-                    &moved_gitdirs,
-                    format!("creating {}: {e}", parent.display()),
-                ));
-            }
-            if let Err(e) = fs::rename(&gitdir, &to) {
-                return Err(quarantine_undo(
-                    &dest,
-                    &moved_sleeves,
-                    &moved_gitdirs,
-                    format!(
-                        "moving worktree record {} to {}: {e}",
-                        gitdir.display(),
-                        to.display()
-                    ),
-                ));
-            }
-            moved_gitdirs.push((to, gitdir));
-        }
         let to = dest.join("sleeves").join(id.to_string());
         if let Err(e) = fs::rename(&src, &to) {
             return Err(quarantine_undo(
                 &dest,
                 &moved_sleeves,
-                &moved_gitdirs,
                 format!("moving {} to {}: {e}", src.display(), to.display()),
             ));
         }
@@ -798,6 +824,13 @@ fn quarantine_sleeves(home: &Path, next_sleeve: u64) -> Result<Option<PathBuf>, 
     }
     let _ = sync_dir(&dest);
     let _ = sync_dir(&sleeves);
+    for (checkout, gitdir) in &left {
+        eprintln!(
+            "update: left worktree {} and gitdir {} in place",
+            checkout.display(),
+            gitdir.display()
+        );
+    }
     Ok(Some(dest))
 }
 
