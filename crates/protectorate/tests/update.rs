@@ -672,14 +672,16 @@ fn hub_rollbacks_restore_a_journal_the_previous_binary_cannot_read() {
             at: 1,
             kind: pt_core::EventKind::Tick,
         });
-        event[9] = 33;
+        let unknown = pt_core::codec::MAX_EVENT_TAG + 1;
+        event[9] = unknown;
         journal.append(&event).unwrap();
         drop(journal);
         let old = home.join("releases/previous/protectorate");
         let refuses = Command::new(&old).args(&serve).output().unwrap();
         assert!(!refuses.status.success(), "{refuses:?}");
         assert!(
-            String::from_utf8_lossy(&refuses.stderr).contains("unknown event tag 33"),
+            String::from_utf8_lossy(&refuses.stderr)
+                .contains(&format!("unknown event tag {unknown}")),
             "{refuses:?}"
         );
         let next = probation(&home)["next_sleeve"]
