@@ -726,6 +726,8 @@ Each entry: where, what was done, what right looks like.
   core does not yet write journal snapshots or rotate segments. An update still refuses a journal
   that already has more than one segment. Rollback replaces the whole journal directory, so a
   trial release that rotates later is swapped out wholesale rather than segment by segment.
+  The readability check does not decode `snapshot-*` payloads until the core writes journal
+  snapshots.
   Right: snapshot a rotating journal the same way once the core writes one.
 - **Starting a just-written binary can fail with ETXTBSY** (`pt-update`, the node supervisor):
   on Linux a file still open for writing anywhere, including a descriptor a concurrent fork
