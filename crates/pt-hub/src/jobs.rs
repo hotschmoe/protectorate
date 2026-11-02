@@ -1141,8 +1141,10 @@ impl NodeExec {
         result.map(|()| done)
     }
 
-    /// Exited: the rest of the log, then each artifact, then `ArtifactsChecked`. A connection
-    /// failure reports nothing: the lease makes the job Lost and its next status collects again.
+    /// Exited: the rest of the log, then each artifact. A dropped connection saves what was
+    /// fetched and reports nothing: the lease makes the job Lost and its next status collects
+    /// again. A node refusal or a failed local save is submitted; a byte mismatch is an
+    /// incomplete collection and counts toward the verify limit.
     fn collect(&mut self, view: &View, job: JobId, attempt: u32) {
         let mut refusals = view
             .state
@@ -1174,6 +1176,7 @@ impl NodeExec {
             .unwrap_or_default();
         let mut fetched = self.hub.jobs.fetched(job, attempt);
         let mut incomplete = None;
+        let mut link_lost = false;
         let token = self.token(view, job);
         for (n, path) in wanted.iter().enumerate() {
             if refusals.iter().any(|r| r.path == *path) || fetched.iter().any(|f| f.path == *path) {
@@ -1198,6 +1201,11 @@ impl NodeExec {
                         reason,
                     });
                 }
+                Err(Fail::Io(e) | Fail::Reach(e)) => {
+                    warning!("job {}: artifact {path}: {e}", job.0);
+                    link_lost = true;
+                    break;
+                }
                 Err(e) => {
                     warning!("job {}: artifact {path}: {}", job.0, e.text());
                     incomplete.get_or_insert_with(|| format!("artifact {path}: {}", e.text()));
@@ -1208,8 +1216,13 @@ impl NodeExec {
             if let Err(e) = self.hub.jobs.save_fetched(job, attempt, fetched) {
                 warning!("job {}: {e}", job.0);
                 incomplete.get_or_insert_with(|| format!("saving artifact metadata: {e}"));
+                link_lost = false;
+            } else {
+                stream(&self.hub, job);
             }
-            stream(&self.hub, job);
+        }
+        if link_lost && incomplete.is_none() {
+            return;
         }
         self.submit(EventKind::ArtifactCollection {
             job,
