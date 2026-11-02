@@ -27,6 +27,7 @@ use pt_drivers::{Ack, AckKind, Decision, Entry, ErrorClass, Session, Stop};
 use pt_json::obj;
 
 use crate::brief;
+use crate::envoy::{envoy_id, from_label};
 use crate::git;
 use crate::home::now_ms;
 use crate::hub::Hub;
@@ -528,8 +529,8 @@ impl SleeveExec {
                 };
                 let quotas = hub.quotas.list();
                 // Envoy whose own harness doctor refused parks rather than moving elsewhere.
-                let envoy_gated = Hub::envoy_id(&view.state) == Some(sleeve)
-                    && hub.doctor.gated(sleeve).is_some();
+                let envoy_gated =
+                    envoy_id(&view.state) == Some(sleeve) && hub.doctor.gated(sleeve).is_some();
                 let chosen = if envoy_gated {
                     Err("Envoy's harness failed doctor".to_string())
                 } else {
@@ -921,7 +922,7 @@ impl SleeveExec {
             sb.env.push(("PROTECTORATE_PARENT".into(), name));
         }
         sb.env
-            .push(("PROTECTORATE_ENVOY".into(), crate::hub::ENVOY.into()));
+            .push(("PROTECTORATE_ENVOY".into(), crate::envoy::ENVOY.into()));
         sb.env.push((
             "PROTECTORATE_MAIL".into(),
             "protectorate sleeve send <name> <text>".into(),
@@ -1036,8 +1037,8 @@ impl SleeveExec {
         if !self.expect(p.g, p.request_id, p.effect, p.attempt) {
             return ended();
         }
-        let from = Hub::from_label(&view.state, self.id, p.request_id);
-        if Hub::envoy_id(&view.state) == Some(self.id) {
+        let from = from_label(&view.state, self.id, p.request_id);
+        if envoy_id(&view.state) == Some(self.id) {
             self.note_envoy_origin(view, p.request_id, &from, p.steer.is_some());
         }
         let noted = self.mail_note(view, p.request_id, p.steer.is_some());
@@ -1076,10 +1077,10 @@ impl SleeveExec {
             return None;
         }
         let s = view.state.sleeve(self.id)?;
-        if s.turned || Hub::envoy_id(&view.state) == Some(self.id) {
+        if s.turned || envoy_id(&view.state) == Some(self.id) {
             return None;
         }
-        let envoy = crate::hub::ENVOY;
+        let envoy = crate::envoy::ENVOY;
         let parent = s
             .parent
             .and_then(|p| view.state.sleeve(p))
@@ -1133,7 +1134,7 @@ impl SleeveExec {
         let path = self.hub.home.sleeve_dir(self.id).join("inbox.jsonl");
         let line = obj! {
             "request_id" => request_id,
-            "from" => Hub::from_label(&view.state, self.id, request_id),
+            "from" => from_label(&view.state, self.id, request_id),
             "text" => text,
             "time_ms" => now_ms(),
         };
@@ -1535,7 +1536,7 @@ impl Pump {
         let exited = matches!(entry, Entry::Exited { .. });
         // An exit keeps the origin and the count. The continuation replaces the origin;
         // a resleeve brief is the owner's prompt and must not have to.
-        if clear_envoy_turn && Hub::envoy_id(&hub.view().state) == Some(id) {
+        if clear_envoy_turn && envoy_id(&hub.view().state) == Some(id) {
             *crate::lock::lock(&hub.envoy_turn) = Default::default();
         }
         let note = Note {

@@ -15,9 +15,10 @@ use pt_core::{EventKind, Harness, Life, ParkReason, SleeveId};
 use pt_doctor::Report;
 use pt_json::FromJson;
 
+use crate::envoy::{ENVOY, envoy_id};
 use crate::fleet::Net;
 use crate::home::now_ms;
-use crate::hub::{ENVOY, Hub};
+use crate::hub::Hub;
 use crate::lock::lock;
 use crate::log::{info, warning};
 use crate::wire;
@@ -172,7 +173,7 @@ fn announce(hub: &Hub, before: Option<&Report>, now: &Report) {
 /// Envoy parked by the gate starts again once its harness is eligible.
 fn unpark_envoy(hub: &Hub, report: &Report) {
     let view = hub.view();
-    let Some(id) = Hub::envoy_id(&view.state) else {
+    let Some(id) = envoy_id(&view.state) else {
         return;
     };
     let Some(s) = view.state.sleeve(id) else {

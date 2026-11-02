@@ -317,9 +317,9 @@ fn read_slice(path: &std::path::Path, offset: u64, limit: u64) -> io::Result<(Ve
 }
 
 /// A core job as the API shows it.
-pub fn view(hub: &Hub, j: &Job) -> api::Job {
+pub fn view(store: &JobStore, j: &Job) -> api::Job {
     let req = JobRequest::of(&j.spec);
-    let fetched = hub.jobs.fetched(j.id, j.attempt);
+    let fetched = store.fetched(j.id, j.attempt);
     let artifacts = req
         .as_ref()
         .map(|r| r.artifacts.as_slice())
@@ -353,7 +353,7 @@ pub fn view(hub: &Hub, j: &Job) -> api::Job {
         on_present: req.as_ref().map_or(api::OnPresent::Idle, |r| r.on_present),
         approval_id: req.as_ref().and_then(|r| r.approval_id.clone()),
         queued_at_ms: EpochMs(req.as_ref().map_or(0, |r| r.queued_at_ms)),
-        started_at_ms: hub.jobs.started(j.id, j.attempt).map(EpochMs),
+        started_at_ms: store.started(j.id, j.attempt).map(EpochMs),
         ended_at_ms: ended(j.state).then_some(EpochMs(j.state_at)),
         exit_code: j.exit.map(i64::from),
         error: match j.state {
@@ -373,7 +373,7 @@ pub fn view(hub: &Hub, j: &Job) -> api::Job {
             }
             _ => None,
         },
-        log_bytes: hub.jobs.log_len(j.id, j.attempt),
+        log_bytes: store.log_len(j.id, j.attempt),
         cwd: req.as_ref().and_then(|r| r.cwd.clone()),
         artifacts,
     }
@@ -382,7 +382,7 @@ pub fn view(hub: &Hub, j: &Job) -> api::Job {
 fn stream(hub: &Hub, job: JobId) {
     let v = hub.view();
     if let Some(j) = v.state.jobs.get(&job) {
-        let job = view(hub, j);
+        let job = view(&hub.jobs, j);
         hub.bus.push(|seq| HubStreamMessage::Job { seq, job });
     }
 }

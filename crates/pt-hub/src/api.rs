@@ -13,6 +13,7 @@ use pt_core::{
 use pt_drivers::Entry;
 use pt_json::{FromJson, ToJson, Value};
 
+use crate::envoy::envoy_id;
 use crate::fleet::{Status as FleetStatus, Up};
 use crate::home::{now_ms, random_hex};
 use crate::hub::{CommandError, Hub};
@@ -20,6 +21,7 @@ use crate::jobs::JobRequest;
 use crate::lock::lock;
 use crate::log::info;
 use crate::rule::{self, Guarded};
+use crate::snapshot;
 use crate::view::View;
 use crate::wire;
 
@@ -73,7 +75,7 @@ impl Principal {
 }
 
 pub fn sleeve_principal(state: &State, id: SleeveId) -> Principal {
-    if Hub::envoy_id(state) == Some(id) {
+    if envoy_id(state) == Some(id) {
         Principal::Envoy(id)
     } else {
         Principal::Sleeve(id)
@@ -299,7 +301,7 @@ fn sleeve_view(hub: &Hub, id: SleeveId) -> Result<api::Sleeve> {
     let view = hub.view();
     view.state
         .sleeve(id)
-        .map(|s| wire::sleeve(hub, &view, s))
+        .map(|s| wire::sleeve(&hub.transcripts, &view, s))
         .ok_or_else(|| err(ErrorCode::NotFound, format!("sleeve {} is gone", id.0)))
 }
 
@@ -316,7 +318,7 @@ fn timeout(ms: u64) -> Duration {
 fn get_state(c: &Ctx<'_>, _: api::Empty) -> Result<api::HubState> {
     let (seq, _) = c.hub.bus.mark();
     let view = c.hub.view();
-    Ok(wire::state(c.hub, &view, seq, &|_| true))
+    Ok(snapshot::state(c.hub, &view, seq, &|_| true))
 }
 
 fn list_sleeves(c: &Ctx<'_>, _: api::Empty) -> Result<api::SleeveList> {
@@ -327,7 +329,7 @@ fn list_sleeves(c: &Ctx<'_>, _: api::Empty) -> Result<api::SleeveList> {
             .sleeves
             .values()
             .filter(|s| s.life != Life::Removed && reaches(st, c.who, s.id))
-            .map(|s| wire::sleeve(c.hub, &view, s))
+            .map(|s| wire::sleeve(&c.hub.transcripts, &view, s))
             .collect(),
     })
 }
@@ -943,7 +945,7 @@ fn prefix(state: &State, who: &Principal, agent: &str, text: &str) -> String {
     }
 }
 
-/// A request id that names its sender's kind; `Hub::from_label` reads the agent name back.
+/// A request id that names its sender's kind; `envoy::from_label` reads the agent name back.
 fn new_request(c: &Ctx<'_>, agent: &str) -> Result<String> {
     let r = random_hex(16).map_err(internal)?;
     Ok(match c.who {
@@ -967,7 +969,7 @@ fn may_mail(state: &State, who: &Principal, id: SleeveId) -> bool {
     let Principal::Sleeve(me) = *who else {
         return false;
     };
-    Hub::envoy_id(state) == Some(id) || state.sleeve(me).and_then(|s| s.parent) == Some(id)
+    envoy_id(state) == Some(id) || state.sleeve(me).and_then(|s| s.parent) == Some(id)
 }
 
 fn send_message(c: &Ctx<'_>, r: api::SendMessageRequest) -> Result<api::Sent> {
@@ -1475,7 +1477,7 @@ fn job_view(hub: &Hub, id: pt_core::JobId) -> Result<api::Job> {
     view.state
         .jobs
         .get(&id)
-        .map(|j| crate::jobs::view(hub, j))
+        .map(|j| crate::jobs::view(&hub.jobs, j))
         .ok_or_else(|| err(ErrorCode::NotFound, format!("job {} is gone", id.0)))
 }
 
@@ -1599,7 +1601,7 @@ fn list_jobs(c: &Ctx<'_>, r: api::ListJobsRequest) -> Result<api::JobList> {
         .filter(|j| node.is_none_or(|n| j.node.map(|x| x.0) == Some(n)))
         .filter(|j| job_visible(&view.state, c.who, JobRequest::of(&j.spec).as_ref()))
         .take(limit)
-        .map(|j| crate::jobs::view(c.hub, j))
+        .map(|j| crate::jobs::view(&c.hub.jobs, j))
         .collect();
     jobs.reverse();
     Ok(api::JobList {
@@ -1698,7 +1700,7 @@ fn mark_events_read(c: &Ctx<'_>, r: api::MarkEventsReadRequest) -> Result<api::E
 // ---- Envoy ---------------------------------------------------------------------------------
 
 fn envoy(view: &View) -> Result<SleeveId> {
-    Hub::envoy_id(&view.state).ok_or_else(|| err(ErrorCode::Unavailable, "Envoy is not running"))
+    envoy_id(&view.state).ok_or_else(|| err(ErrorCode::Unavailable, "Envoy is not running"))
 }
 
 fn envoy_send(c: &Ctx<'_>, r: api::EnvoySendRequest) -> Result<api::Sent> {
@@ -1989,7 +1991,7 @@ fn upward_report(
         dests.push(p);
     }
     if !parent_only
-        && let Some(e) = Hub::envoy_id(state)
+        && let Some(e) = envoy_id(state)
         && !dests.contains(&e)
     {
         dests.push(e);
@@ -2016,8 +2018,8 @@ fn wait(c: &Ctx<'_>, r: api::WaitRequest) -> Result<api::WaitResult> {
     if r.until == api::WaitUntil::Report {
         let view = c.hub.view();
         let resolved = find(&view.state, &r.sleeve_id).ok();
-        if r.sleeve_id == crate::hub::ENVOY
-            || resolved.is_some_and(|id| Hub::envoy_id(&view.state) == Some(id))
+        if r.sleeve_id == crate::envoy::ENVOY
+            || resolved.is_some_and(|id| envoy_id(&view.state) == Some(id))
         {
             return Err(err(
                 ErrorCode::Invalid,
@@ -2267,7 +2269,7 @@ fn read_history(c: &Ctx<'_>, r: api::ReadHistoryRequest) -> Result<api::HistoryR
 }
 
 fn get_hub_info(c: &Ctx<'_>, _: api::Empty) -> Result<api::HubInfo> {
-    Ok(wire::hub_info(c.hub))
+    Ok(snapshot::hub_info(c.hub))
 }
 
 // ---- devices -------------------------------------------------------------------------------

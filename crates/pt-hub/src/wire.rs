@@ -5,9 +5,9 @@ use pt_api::EpochMs;
 use pt_core::{Activity, Harness, Layout, Life, Mode, ParkReason, Sleeve, SleeveId, State, Target};
 use pt_drivers as drv;
 
+use crate::envoy::envoy_id;
 use crate::home::Config;
-use crate::hub::Hub;
-use crate::transcript::Line;
+use crate::transcript::{Line, Transcripts};
 use crate::view::View;
 
 pub fn harness_from(s: &str) -> Option<Harness> {
@@ -136,16 +136,16 @@ pub fn root_of(state: &State, s: &Sleeve) -> SleeveId {
 pub fn role(state: &State, s: &Sleeve) -> api::SleeveRole {
     if s.parent.is_some() {
         api::SleeveRole::Child
-    } else if Some(s.id) == Hub::envoy_id(state) {
+    } else if Some(s.id) == envoy_id(state) {
         api::SleeveRole::Envoy
     } else {
         api::SleeveRole::Root
     }
 }
 
-pub fn sleeve(hub: &Hub, view: &View, s: &Sleeve) -> api::Sleeve {
+pub fn sleeve(transcripts: &Transcripts, view: &View, s: &Sleeve) -> api::Sleeve {
     let st = &view.state;
-    let stats = hub.transcripts.stats(s.id);
+    let stats = transcripts.stats(s.id);
     let incarnation = (s.g.0 > 0).then(|| api::Incarnation {
         g: s.g.0,
         mode: match s.target.mode {
@@ -212,60 +212,6 @@ pub fn workspace(s: &Sleeve) -> api::Workspace {
         id: format!("w{}", s.id.0),
         name: s.claim.path.rsplit('/').next().unwrap_or("").to_string(),
         path: s.claim.path.clone(),
-    }
-}
-
-pub fn hub_info(hub: &Hub) -> api::HubInfo {
-    let mut info = crate::lock::lock(&hub.info).clone();
-    info.history_capped = hub.history.capped_sleeves();
-    info
-}
-
-/// What the poller last learned of every node; none while the fleet is off or down.
-pub fn nodes(hub: &Hub) -> Vec<api::Node> {
-    match hub.fleet.status() {
-        crate::fleet::Status::Up(up) => up.poller.nodes().into_iter().map(|v| v.node).collect(),
-        _ => Vec::new(),
-    }
-}
-
-/// The full snapshot at stream seq `seq`, limited to the sleeves `visible` admits.
-pub fn state(
-    hub: &Hub,
-    view: &View,
-    seq: u64,
-    visible: &dyn Fn(SleeveId) -> bool,
-) -> api::HubState {
-    let st = &view.state;
-    let shown: Vec<&Sleeve> = st
-        .sleeves
-        .values()
-        .filter(|s| s.life != Life::Removed && visible(s.id))
-        .collect();
-    let approvals = st
-        .approvals
-        .values()
-        .filter(|a| visible(a.sleeve))
-        .map(crate::approvals::view)
-        .collect();
-    api::HubState {
-        seq,
-        hub: hub_info(hub),
-        workspaces: shown
-            .iter()
-            .filter(|s| s.parent.is_none())
-            .map(|s| workspace(s))
-            .collect(),
-        sleeves: shown.iter().map(|s| sleeve(hub, view, s)).collect(),
-        approvals,
-        nodes: nodes(hub),
-        jobs: st
-            .jobs
-            .values()
-            .map(|j| crate::jobs::view(hub, j))
-            .collect(),
-        quotas: hub.quotas.list(),
-        events: hub.bus.recent_events(crate::bus::SNAPSHOT_EVENTS),
     }
 }
 

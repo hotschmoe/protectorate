@@ -182,12 +182,12 @@ fn announce_changes(hub: &Hub, before: &View, after: &View) {
             hub.bus
                 .push(|seq| HubStreamMessage::Workspace { seq, workspace });
         }
-        let sleeve = wire::sleeve(hub, after, s);
+        let sleeve = wire::sleeve(&hub.transcripts, after, s);
         hub.bus.push(|seq| HubStreamMessage::Sleeve { seq, sleeve });
     }
     for j in after.state.jobs.values() {
         if before.state.jobs.get(&j.id) != Some(j) {
-            let job = crate::jobs::view(hub, j);
+            let job = crate::jobs::view(&hub.jobs, j);
             hub.bus.push(|seq| HubStreamMessage::Job { seq, job });
         }
     }

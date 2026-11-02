@@ -17,7 +17,6 @@ use crate::api::{self, Principal, err};
 use crate::bus::{Resume, Since};
 use crate::hub::Hub;
 use crate::log::debug;
-use crate::wire;
 
 #[derive(Clone, Copy, Debug)]
 pub enum Listener {
@@ -252,7 +251,7 @@ fn static_file(req: &Request, web: &Web) -> Response {
 fn snapshot(hub: &Hub) -> (u64, String) {
     let (seq, pos) = hub.bus.mark();
     let view = hub.view();
-    let state = wire::state(hub, &view, seq, &|_| true);
+    let state = crate::snapshot::state(hub, &view, seq, &|_| true);
     let msg = HubStreamMessage::Snapshot { seq, state };
     (pos, msg.to_json().to_string())
 }

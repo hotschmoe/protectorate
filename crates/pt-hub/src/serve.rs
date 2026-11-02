@@ -19,10 +19,11 @@ use pt_http::{Config as HttpConfig, Server, ShutdownHandle};
 use pt_journal::Journal;
 
 use crate::devices::Devices;
+use crate::envoy::{ENVOY, envoy_id};
 use crate::fleet::{FleetFlags, Net};
 use crate::home::{Config, Home, Tokens, random_hex, write_private};
 use crate::http::{Listener, Web, handler};
-use crate::hub::{ENVOY, Hub, Input, Stop};
+use crate::hub::{Hub, Input, Stop};
 use crate::log::{info, warning};
 use crate::view::View;
 use crate::wire;
@@ -216,7 +217,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
         reply: None,
     })
     .map_err(|_| "core channel closed")?;
-    let envoy_missing = Hub::envoy_id(&state).is_none();
+    let envoy_missing = envoy_id(&state).is_none();
     let view = View {
         state: state.clone(),
         batch: 0,
