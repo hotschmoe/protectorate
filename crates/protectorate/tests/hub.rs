@@ -2900,7 +2900,8 @@ fn serve_pid(home: &std::path::Path) -> u32 {
 
 /// A transcript longer than any page, with a crash's torn line mid-file, a corrupt line and a
 /// torn last line: the hub's next entry continues the seqs on a line of its own, and pages from
-/// the start, the middle and the end skip exactly the broken lines.
+/// the start, the middle and the end skip exactly the broken lines. A vendor agent reads only
+/// the turn it started.
 #[test]
 fn transcript_pages_skip_torn_and_corrupt_lines() {
     // No model: Envoy parks, and its notice is the only entry the hub adds.
@@ -2918,13 +2919,29 @@ fn transcript_pages_skip_torn_and_corrupt_lines() {
         let id = hub.sleeve("envoy")["id"].as_str()?.to_string();
         (!id.is_empty()).then_some(id)
     });
+    let agent = hub.printed("envoy-only token: ");
     hub.stop();
     let path = hub.home.join(format!("sleeves/{id}/transcript.jsonl"));
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let (asked, answered, settled) = (5990u64, 5991u64, 5992u64);
     let line = |seq: u64| {
-        format!(
-            r#"{{"seq":{seq},"g":1,"time_ms":{seq},"entry":{{"type":"user_message","request_id":"fixture-{seq}","from":"owner","text":"line {seq}"}}}}"#
-        )
+        let entry = match seq {
+            s if s == asked => {
+                r#"{"type":"user_message","request_id":"ga:grokbot-1","from":"owner","text":"q"}"#
+                    .to_string()
+            }
+            s if s == answered => {
+                r#"{"type":"assistant_text","id":"a","text":"agent answer","final":true}"#
+                    .to_string()
+            }
+            s if s == settled => {
+                r#"{"type":"turn_settled","stop":"end_turn","usage":{}}"#.to_string()
+            }
+            _ => format!(
+                r#"{{"type":"user_message","request_id":"fixture-{seq}","from":"owner","text":"line {seq}"}}"#
+            ),
+        };
+        format!(r#"{{"seq":{seq},"g":1,"time_ms":{seq},"entry":{entry}}}"#)
     };
     let n = 6000u64;
     let (torn, corrupt) = (1234u64, 5500u64);
@@ -2985,4 +3002,19 @@ fn transcript_pages_skip_torn_and_corrupt_lines() {
         (vec![5498, 5499, 5501], true),
         "a page across the corrupt line"
     );
+
+    let v = hub
+        .cli_env(
+            &[("PROTECTORATE_TOKEN", agent.as_str())],
+            &["--json", "envoy", "read", "--limit", "2"],
+        )
+        .json();
+    let seqs: Vec<u64> = v["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["seq"].as_u64().unwrap())
+        .collect();
+    assert_eq!(seqs, [asked, answered], "{v}");
+    assert_eq!(v["more"].as_bool(), Some(true), "{v}");
 }

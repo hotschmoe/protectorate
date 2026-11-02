@@ -1,7 +1,8 @@
 //! Per-sleeve transcript: an append-only JSONL file of the drivers' normalized entries with a
-//! monotonic seq and the hub's turn number, plus an in-memory tail. Streaming text deltas never
-//! reach the file; the final block does. `wire::chat_entry` turns a line into the API's entry.
-//! A read the tail cannot answer reads the file outside every lock, up to the length it had.
+//! monotonic seq and the hub's turn number. Streaming text deltas never reach the file; the
+//! final block does. `wire::chat_entry` turns a line into the API's entry. Reads run on the file
+//! outside every lock, up to the length it had when they started: the latest entries from the
+//! end back, older ones from the start.
 
 use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
@@ -18,7 +19,8 @@ use pt_json::ToJson;
 use crate::home::Home;
 use crate::lock::lock;
 
-const TAIL: usize = 4096;
+/// What a backward read takes from the file at a time, more when one line is longer.
+const CHUNK: u64 = 64 * 1024;
 
 pt_json::record! {
     /// One stored entry. `harness` is set on `session_info` (the drivers say only `pi`), `level`
@@ -90,8 +92,6 @@ pub struct Store {
     file: Option<File>,
     next_seq: u64,
     turn: u64,
-    /// The latest entries: every one from the front's seq on.
-    tail: VecDeque<Line>,
     pub stats: Stats,
 }
 
@@ -125,6 +125,44 @@ fn scan(path: &Path, len: u64, mut f: impl FnMut(Line) -> ControlFlow<()>) -> io
     }
 }
 
+/// Each entry in the first `len` bytes of the file, from the last to the first, until `f`
+/// breaks. It skips the lines `scan` skips.
+fn rscan(path: &Path, len: u64, mut f: impl FnMut(Line) -> ControlFlow<()>) -> io::Result<()> {
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(ctx(path)(e)),
+    };
+    // The bytes from `pos` up to the end of the lines not read yet; the first line in it is
+    // whole only at `pos` 0.
+    let mut pos = len;
+    let mut buf = Vec::new();
+    loop {
+        if let Some(i) = buf.iter().rposition(|b| *b == b'\n') {
+            if let Ok(e) = pt_json::from_bytes::<Line>(&buf[i + 1..])
+                && f(e).is_break()
+            {
+                return Ok(());
+            }
+            buf.truncate(i);
+            continue;
+        }
+        if pos == 0 {
+            if let Ok(e) = pt_json::from_bytes::<Line>(&buf) {
+                let _ = f(e);
+            }
+            return Ok(());
+        }
+        let n = CHUNK.max(buf.len() as u64).min(pos);
+        pos -= n;
+        let mut chunk = vec![0; n as usize];
+        file.seek(SeekFrom::Start(pos)).map_err(ctx(path))?;
+        file.read_exact(&mut chunk).map_err(ctx(path))?;
+        chunk.extend_from_slice(&buf);
+        buf = chunk;
+    }
+}
+
 impl Store {
     pub fn open(path: PathBuf) -> io::Result<Store> {
         if let Some(dir) = path.parent() {
@@ -132,15 +170,10 @@ impl Store {
         }
         let mut stats = Stats::default();
         let (mut next_seq, mut turn) = (1, 0);
-        let mut tail = VecDeque::new();
         scan(&path, u64::MAX, |e| {
             stats.fold(&e);
             next_seq = e.seq + 1;
             turn = e.turn;
-            if tail.len() == TAIL {
-                tail.pop_front();
-            }
-            tail.push_back(e);
             ControlFlow::Continue(())
         })?;
         let mut file = OpenOptions::new()
@@ -164,7 +197,6 @@ impl Store {
             file: Some(file),
             next_seq,
             turn,
-            tail,
             stats,
         })
     }
@@ -206,18 +238,7 @@ impl Store {
         self.next_seq += 1;
         self.turn = e.turn;
         self.stats.fold(&e);
-        if self.tail.len() == TAIL {
-            self.tail.pop_front();
-        }
-        self.tail.push_back(e.clone());
         Ok(e)
-    }
-
-    /// Whether the tail holds every entry with seq greater than `after`.
-    fn holds_after(&self, after: u64) -> bool {
-        self.tail
-            .front()
-            .map_or(self.next_seq <= after + 1, |f| f.seq <= after + 1)
     }
 
     /// The file's length: every line before it was written whole by an append under this lock,
@@ -254,16 +275,14 @@ impl Transcripts {
         Ok(lock(&self.map).entry(id).or_insert(s).clone())
     }
 
-    /// Closes a removed sleeve's file and drops its tail. The store stays, so an entry its
-    /// ending pump still records takes the next seq: a store opened again would count seqs
-    /// from the file while the old one was still appending.
+    /// Closes a removed sleeve's file. The store stays, so an entry its ending pump still
+    /// records takes the next seq: a store opened again would count seqs from the file while
+    /// the old one was still appending.
     pub fn close(&self, id: SleeveId) {
         let Some(store) = lock(&self.map).get(&id).cloned() else {
             return;
         };
-        let mut s = lock(&store);
-        s.file = None;
-        s.tail = VecDeque::new();
+        lock(&store).file = None;
     }
 
     pub fn stats(&self, id: SleeveId) -> Stats {
@@ -272,53 +291,83 @@ impl Transcripts {
             .unwrap_or_default()
     }
 
-    /// Entries with seq greater than `after`, at most `limit`.
+    /// Entries with seq greater than `after`, at most `limit`, oldest first.
     pub fn after(&self, id: SleeveId, after: u64, limit: usize) -> io::Result<Vec<Line>> {
         self.page(id, |_| after, limit)
     }
 
-    /// The last `n` entries.
+    /// The last `n` entries, oldest first.
     pub fn last(&self, id: SleeveId, n: usize) -> io::Result<Vec<Line>> {
         self.page(id, |next_seq| next_seq.saturating_sub(n as u64 + 1), n)
     }
 
     /// The whole transcript.
     pub fn all(&self, id: SleeveId) -> io::Result<Vec<Line>> {
-        self.after(id, 0, usize::MAX)
+        let mut out = Vec::new();
+        self.scan(id, |e| {
+            out.push(e);
+            ControlFlow::Continue(())
+        })?;
+        Ok(out)
     }
 
-    /// Entries with seq greater than what `after` makes of the next seq, at most `limit`: from
-    /// the tail, else read from the file outside the store lock and stopped at `limit`.
+    /// Each entry from the first, until `f` breaks.
+    pub fn scan(&self, id: SleeveId, f: impl FnMut(Line) -> ControlFlow<()>) -> io::Result<()> {
+        let (path, len, _) = self.cut(id)?;
+        scan(&path, len, f)
+    }
+
+    /// Each entry from the last back, until `f` breaks.
+    pub fn rscan(&self, id: SleeveId, f: impl FnMut(Line) -> ControlFlow<()>) -> io::Result<()> {
+        let (path, len, _) = self.cut(id)?;
+        rscan(&path, len, f)
+    }
+
+    /// The file, its length and the next seq: what a read outside the store lock may see.
+    fn cut(&self, id: SleeveId) -> io::Result<(PathBuf, u64, u64)> {
+        let store = self.get(id)?;
+        let s = lock(&store);
+        Ok((s.path.clone(), s.len()?, s.next_seq))
+    }
+
+    /// Entries with seq greater than what `after` makes of the next seq, at most `limit`.
+    /// Seqs ascend through the file, so a page in its newer half is read from the end back down
+    /// to `after`, keeping the oldest `limit`, and an older one from the start up to `limit`.
     fn page(
         &self,
         id: SleeveId,
         after: impl FnOnce(u64) -> u64,
         limit: usize,
     ) -> io::Result<Vec<Line>> {
-        let store = self.get(id)?;
-        let (after, path, len) = {
-            let s = lock(&store);
-            let after = after(s.next_seq);
-            if s.holds_after(after) {
-                let page = s.tail.iter().filter(|e| e.seq > after).take(limit);
-                return Ok(page.cloned().collect());
-            }
-            (after, s.path.clone(), s.len()?)
-        };
-        let mut out = Vec::new();
         if limit == 0 {
-            return Ok(out);
+            return Ok(Vec::new());
         }
-        scan(&path, len, |e| {
-            if e.seq > after {
-                out.push(e);
-            }
-            if out.len() == limit {
-                ControlFlow::Break(())
-            } else {
+        let (path, len, next_seq) = self.cut(id)?;
+        let after = after(next_seq);
+        let mut out = VecDeque::new();
+        if after.saturating_mul(2) >= next_seq {
+            rscan(&path, len, |e| {
+                if e.seq <= after {
+                    return ControlFlow::Break(());
+                }
+                if out.len() == limit {
+                    out.pop_back();
+                }
+                out.push_front(e);
                 ControlFlow::Continue(())
-            }
-        })?;
-        Ok(out)
+            })?;
+        } else {
+            scan(&path, len, |e| {
+                if e.seq > after {
+                    out.push_back(e);
+                }
+                if out.len() == limit {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            })?;
+        }
+        Ok(out.into())
     }
 }
