@@ -181,18 +181,24 @@ One row per subscription (Claude, Codex, Grok, the local endpoint): the reading,
 percent used, and a note. The readers are read-only: they use the hub's harness logins (below)
 and never refresh or print a token, so a harness no sleeve has run for a while can read `login
 expired` until one does. They run every `quota_poll_secs` (60; 0 turns them off); a reading is
-refreshed after 5 minutes and becomes stale after 10. A response with a malformed usage window,
+refreshed after 5 minutes and becomes stale after 10. A read that finishes after its deadline
+is kept, and ages from when it finished. A response with a malformed usage window,
 or with no window at all, is reported as an error.
 Resleeve targets are weighted by fresh readings; known-exhausted candidates are skipped, and the
 sleeve parks if all eligible candidates are exhausted. A stale reading keeps its last windows:
 under the usable minimum it counts as exhausted, and with spare left the fallback may still
-choose it. The local endpoint has no such windows: a stale reading is not spent, the same as
+choose it. One that is exhausted and names no reset stops blocking after its own length, or
+after five hours when that length is unknown, and may then be spent as a candidate with no
+reading. The local endpoint has no such windows: a stale reading is not spent, the same as
 a failed one, while one that was never read still may be. A candidate with no reading
-(`unknown`: no login, an expired login, or not read yet) can still be selected. A failed
-reading (`error`) cannot; it parks the same way an exhausted
-window does. A window whose reset time has already passed still blocks while it is over that
-line. Taken before the reset, the block lasts ten minutes after the reset. Taken with the
-reset already a few seconds behind, it lasts ten minutes after the reading. A stamp that was
+(`unknown`: no login, an expired login, a rejected login, a login that lacks the usage scope,
+or not read yet) can still be selected. A failed
+reading (`error`: a body that did not parse, another HTTP status, or a timeout) cannot. The park reason names a failed reading, a stale row that is
+short of quota, or a local endpoint whose last reading is stale or failed. A fresh row
+under the minimum still says it is short of fresh quota. A window whose reset time has already passed still blocks while it is over that
+line. The block lasts the same ten minutes a reading stays fresh. Taken before the reset,
+it lasts that long after the reset. Taken with the reset already a few seconds behind, it
+lasts that long after the reading. A stamp that was
 already long past, and a window once that grace has ended, count as reset, and the fallback
 may spend the row for that reason. It is not a missing reading. A reset at or before the
 epoch is ignored and the percent still counts.

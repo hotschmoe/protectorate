@@ -13,8 +13,6 @@ const UNKNOWN_RESET_HOURS: f64 = 168.0;
 /// Pace extrapolation needs at least this much of the window elapsed.
 const MIN_ELAPSED_FRACTION: f64 = 0.05;
 const HOUR_MS: f64 = 3_600_000.0;
-/// How long a passed reset still blocks. Matches the cache's default stale window.
-const RESET_GRACE_MS: u64 = 600_000;
 
 /// A reset at or before the epoch is "no reset": the percent still counts.
 fn reset_at(w: &QuotaWindow) -> Option<u64> {
@@ -177,6 +175,9 @@ fn score(q: &Quota, now_ms: u64, model: &str, min: Option<f64>) -> Option<Scored
         if !gates(&w.label, model, used, min) {
             continue;
         }
+        if stale_limit_passed(q, w, now_ms, min, used) {
+            continue;
+        }
         if reset_at(w).is_some_and(|r| r <= now_ms) {
             continue;
         }
@@ -211,11 +212,41 @@ fn score(q: &Quota, now_ms: u64, model: &str, min: Option<f64>) -> Option<Scored
     best
 }
 
+/// Five hours, when a window's length was not stored and its label does not say.
+const UNKNOWN_WINDOW_MS: u64 = 5 * 3_600_000;
+
+fn window_bound_ms(w: &QuotaWindow) -> u64 {
+    w.length_ms
+        .filter(|&ms| ms > 0)
+        .or_else(|| window_length_ms(&w.label))
+        .unwrap_or(UNKNOWN_WINDOW_MS)
+}
+
+/// A stale window under `min` with no reset stops counting once the row is older than the
+/// window. The next good read may never come, so the candidate becomes an unknown reading.
+fn stale_limit_passed(
+    q: &Quota,
+    w: &QuotaWindow,
+    now_ms: u64,
+    min: Option<f64>,
+    used: f64,
+) -> bool {
+    let Some(min) = min else {
+        return false;
+    };
+    if state(q) != State::Stale || reset_at(w).is_some() {
+        return false;
+    }
+    let remaining = (100.0 - used).clamp(0.0, 100.0);
+    remaining < min && now_ms.saturating_sub(q.fetched_at_ms.0) >= window_bound_ms(w)
+}
+
 /// A window whose reset has passed and whose remaining percent is under `min` still blocks.
-/// Fetched before the reset, the block lasts `RESET_GRACE_MS` after the stamp. Fetched with
-/// the reset already behind, but by less than that grace, the block lasts `RESET_GRACE_MS`
-/// after the fetch. A stamp already long past at fetch time counts as reset.
+/// Fetched before the reset, the block lasts one stale window after the stamp. Fetched with
+/// the reset already behind, but by less than that, the block lasts one stale window after
+/// the fetch. A stamp already long past at fetch time counts as reset.
 fn past_blocks(q: &Quota, now_ms: u64, min: f64, model: &str) -> bool {
+    let grace = u64::try_from(crate::cache::STALE_AFTER.as_millis()).unwrap_or(u64::MAX);
     let fetched = q.fetched_at_ms.0;
     q.windows.iter().any(|w| {
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
@@ -232,10 +263,9 @@ fn past_blocks(q: &Quota, now_ms: u64, min: f64, model: &str) -> bool {
             return false;
         }
         if fetched < reset {
-            now_ms < reset.saturating_add(RESET_GRACE_MS)
+            now_ms < reset.saturating_add(grace)
         } else {
-            fetched < reset.saturating_add(RESET_GRACE_MS)
-                && now_ms < fetched.saturating_add(RESET_GRACE_MS)
+            fetched < reset.saturating_add(grace) && now_ms < fetched.saturating_add(grace)
         }
     })
 }
@@ -368,7 +398,47 @@ pub fn select_with_fallback(
     {
         Err("no eligible resleeve target has a quota meter")
     } else {
-        Err("all eligible resleeve targets have insufficient fresh quota")
+        Err(park_reason(now_ms, size, candidates, quotas))
+    }
+}
+
+/// Why nothing could be spent. A fresh row under the minimum is short of quota. A failed
+/// reading, a stale short row, and a local endpoint that has gone stale or failed say so.
+fn park_reason(
+    now_ms: u64,
+    size: TaskSize,
+    candidates: &[Candidate],
+    quotas: &[Quota],
+) -> &'static str {
+    let mut fresh = false;
+    let mut failed = false;
+    let mut stale = false;
+    let mut local = false;
+    for cand in candidates {
+        if availability(now_ms, size, cand, quotas) != Availability::Exhausted {
+            continue;
+        }
+        if cand.harness == Harness::PiLocal {
+            local = true;
+            continue;
+        }
+        let Some((_, sub)) = SUBSCRIBED.iter().find(|(h, _)| *h == cand.harness) else {
+            continue;
+        };
+        match row(quotas, *sub).map(state) {
+            Some(State::Error) => failed = true,
+            Some(State::Stale) => stale = true,
+            _ => fresh = true,
+        }
+    }
+    match (fresh, failed, stale, local) {
+        (true, false, false, false) => {
+            "all eligible resleeve targets have insufficient fresh quota"
+        }
+        (false, true, false, false) => "all eligible resleeve targets have a failed quota reading",
+        (false, false, true, false) => "all eligible resleeve targets are stale and short of quota",
+        (false, false, false, true) => "the local endpoint's last reading is stale or failed",
+        _ => "every eligible resleeve target is short of quota, stale, or failed",
     }
 }
 

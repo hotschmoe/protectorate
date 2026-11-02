@@ -714,10 +714,11 @@ Each entry: where, what was done, what right looks like.
   reset, so it is the first argument. Pi with a vendor login (`PiVendor`) and Antigravity are never
   selected, including by the resleeve fallback (no quota subscription behind them).
 - **A late quota read has no deterministic probe** (`pt-quota` cache.rs): a body that arrives
-  after the deadline is kept, stamped when the read finished, and a late error does not add a
-  second backoff. Showing that needs the read to outlive the deadline without a test-only flag,
-  and the timed probe flaked under load. Right: a deterministic e2e if one can be had without
-  hooks; until then the behavior is this paragraph.
+  after the deadline is kept, stamped when the read finished, and aged from that finish rather
+  than from the refresh that collects it. A late error does not add a second backoff. Showing
+  that needs the read to outlive the deadline without a test-only flag, and the timed probe
+  flaked under load. Right: a deterministic e2e if one can be had without hooks; until then the
+  behavior is this paragraph.
 - **Quota fuzz runs wrote corpus into `fuzz/seeds`** (`pt-quota`): `cargo fuzz run <t> seeds/<t>`
   adds new inputs to the seed dir; only the hand-written seeds (named, not hex) are committed.
   Right: run with `corpus` as first dir and seeds as the second.

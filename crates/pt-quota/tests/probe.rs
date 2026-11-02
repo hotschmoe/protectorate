@@ -130,10 +130,17 @@ fn serve_guarded<S: Into<String>>(
                     "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                         .to_string()
                 }
-                Some(b) => format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}",
-                    b.len()
-                ),
+                // A body "HTTP <code>\n<payload>" answers with that status. Anything else is 200.
+                Some(b) => {
+                    let (code, payload) = b
+                        .strip_prefix("HTTP ")
+                        .and_then(|rest| rest.split_once('\n'))
+                        .unwrap_or(("200 OK", b.as_str()));
+                    format!(
+                        "HTTP/1.1 {code}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                        payload.len()
+                    )
+                }
                 None => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                     .to_string(),
             };
@@ -249,7 +256,8 @@ fn fixture_readers_over_real_curl() {
 
 /// The local endpoint behind a bearer token, as the owner's is: the reader finds the key and the
 /// base URL in a fixture `~/.pi/agent/models.json` (provider named by `--pi-provider`), sends the
-/// key over curl, and gets a fresh reading; a wrong key is a 401 error; an `apiKey` naming a set
+/// key over curl, and gets a fresh reading; a wrong key is a 401 and is unknown, like an expired
+/// login; an `apiKey` naming a set
 /// environment variable sends that variable's value; a `!command` key is never run. No key is
 /// ever printed.
 #[test]
@@ -285,7 +293,7 @@ fn local_reader_sends_the_pi_provider_key() {
 
     models(&home, "wrong-secret-key");
     let local = run(&home, &[]);
-    assert_eq!(state_of(&local), "error", "{local}");
+    assert_eq!(state_of(&local), "unknown", "{local}");
     assert!(local.contains("401"), "{local}");
 
     models(&home, "PT_E2E_LOCAL_KEY");
@@ -377,7 +385,9 @@ fn partial_responses_and_exhausted_selection() {
     let out = run(args(&mixed));
     assert_eq!(state_of(line_of(&out, "codex")), "error", "{out}");
     assert!(
-        out.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        out.contains(
+            "target none: every eligible resleeve target is short of quota, stale, or failed"
+        ),
         "{out}"
     );
 
@@ -406,7 +416,7 @@ fn partial_responses_and_exhausted_selection() {
         assert!(line.contains(reason), "{line}");
     }
     assert!(
-        out.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        out.contains("target none: all eligible resleeve targets have a failed quota reading"),
         "{out}"
     );
 }
@@ -557,7 +567,7 @@ fn stale_windows_still_gate_the_fallback() {
     );
     assert!(
         exhausted.contains(
-            "aged target none: all eligible resleeve targets have insufficient fresh quota"
+            "aged target none: all eligible resleeve targets are stale and short of quota"
         ),
         "{exhausted}"
     );
@@ -685,7 +695,7 @@ fn a_passed_reset_blocks_only_inside_the_grace() {
     let inside = run(now_s.saturating_sub(120));
     assert!(
         inside.contains(
-            "aged target none: all eligible resleeve targets have insufficient fresh quota"
+            "aged target none: all eligible resleeve targets are stale and short of quota"
         ),
         "{inside}"
     );
@@ -723,12 +733,91 @@ fn a_stale_local_reading_is_not_spent() {
     assert!(out.contains("target PiLocal:"), "{out}");
     assert!(out.contains("aged local stale"), "{out}");
     assert!(
-        out.contains(
-            "aged target none: all eligible resleeve targets have insufficient fresh quota"
-        ),
+        out.contains("aged target none: the local endpoint's last reading is stale or failed"),
         "{out}"
     );
     assert!(!out.contains("without a fresh quota reading"), "{out}");
+}
+
+/// A stale exhausted window with no reset stops blocking after its length. Five hours is that
+/// length for a `5h` label. The backdated row is a day old, so the aged candidate may be spent.
+#[test]
+#[cfg(debug_assertions)]
+fn a_stale_exhausted_window_with_no_reset_becomes_unknown() {
+    let home = scratch(&format!("stale-no-reset-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"stale-no-reset"}}"#,
+    );
+    let (port, _) = serve(vec![(
+        "/api/oauth/usage",
+        r#"{"five_hour":{"utilization":100}}"#,
+    )]);
+    let base = format!("http://127.0.0.1:{port}");
+    let out = probe(&[
+        "--home",
+        home.to_str().unwrap(),
+        "--claude-url",
+        &base,
+        "--allow",
+        "claude",
+        "--test-cache-ms",
+        "150",
+    ]);
+    assert_eq!(state_of(line_of(&out, "claude")), "fresh", "{out}");
+    assert!(
+        out.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{out}"
+    );
+    assert!(
+        out.contains("aged claude stale") && out.contains("100%"),
+        "{out}"
+    );
+    assert!(
+        out.contains(
+            "aged target Claude: first eligible in resleeve_to without a fresh quota reading"
+        ),
+        "{out}"
+    );
+    assert!(!out.contains("failed quota reading"), "{out}");
+}
+
+/// A 401 or a scope rejection is not a failed window. The harness may launch so its CLI can
+/// refresh the login, the same as an expired one.
+#[test]
+fn a_rejected_or_unscoped_login_is_unknown() {
+    let home = scratch(&format!("rejected-login-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"rejected-claude"}}"#,
+    );
+    let home_s = home.to_str().unwrap();
+    let run = |body: &str| {
+        let (port, _) = serve(vec![("/api/oauth/usage", body.to_string())]);
+        let base = format!("http://127.0.0.1:{port}");
+        probe(&["--home", home_s, "--claude-url", &base, "--allow", "claude"])
+    };
+    let denied = run("HTTP 401 Unauthorized\n");
+    let line = line_of(&denied, "claude");
+    assert_eq!(state_of(line), "unknown", "{denied}");
+    assert!(line.contains("401"), "{line}");
+    assert!(
+        denied
+            .contains("target Claude: first eligible in resleeve_to without a fresh quota reading"),
+        "{denied}"
+    );
+    assert!(!denied.contains("insufficient fresh quota"), "{denied}");
+    assert!(!denied.contains("failed quota reading"), "{denied}");
+
+    let scope = run("HTTP 403 Forbidden\n{\"error\":\"missing scope\"}");
+    let line = line_of(&scope, "claude");
+    assert_eq!(state_of(line), "unknown", "{scope}");
+    assert!(line.contains("scope"), "{line}");
+    assert!(
+        scope
+            .contains("target Claude: first eligible in resleeve_to without a fresh quota reading"),
+        "{scope}"
+    );
 }
 
 /// A weekly Sonnet cap is shown on the row. It does not exhaust an Opus candidate while the

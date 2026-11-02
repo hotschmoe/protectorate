@@ -4,7 +4,7 @@ use libfuzzer_sys::fuzz_target;
 use pt_api::{Harness, Mode, Quota, QuotaWindow, Subscription};
 use pt_quota::{
     Candidate, Health, State, TaskSize, Thresholds, derive, select_target, select_with_fallback,
-    spare_trigger, state,
+    spare_trigger, state, window_length_ms,
 };
 use pt_quota_fuzz::{Bytes, HARNESSES, quota};
 
@@ -311,6 +311,15 @@ fn metered(h: Harness) -> Option<Subscription> {
     }
 }
 
+/// SPEC 8. The stored length, else the label, else five hours.
+fn bound_ms(w: &QuotaWindow) -> u64 {
+    const FIVE_HOURS_MS: u64 = 5 * 3_600_000;
+    w.length_ms
+        .filter(|ms| *ms > 0)
+        .or_else(|| window_length_ms(&w.label))
+        .unwrap_or(FIVE_HOURS_MS)
+}
+
 /// Tightest remaining percent of windows that have not reset. `None` when nothing scores.
 fn open_usable(q: &Quota, now_ms: u64, model: &str, min: f64) -> Option<f64> {
     let mut usable = None;
@@ -319,6 +328,15 @@ fn open_usable(q: &Quota, now_ms: u64, model: &str, min: f64) -> Option<f64> {
             continue;
         };
         if !applies(&w.label, model, used, min) {
+            continue;
+        }
+        // SPEC 8. A stale exhausted window with no reset stops blocking once the row is older
+        // than that window's length, or five hours when the length is unknown.
+        if state(q) == State::Stale
+            && w.resets_at_ms.map(|r| r.0).filter(|t| *t > 0).is_none()
+            && (100.0 - used).clamp(0.0, 100.0) < min
+            && now_ms.saturating_sub(q.fetched_at_ms.0) >= bound_ms(w)
+        {
             continue;
         }
         // A reset at or before the epoch is not a reset. A later stamp that has passed is.

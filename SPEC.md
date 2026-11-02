@@ -439,19 +439,25 @@ class, and code clamps it (D27).
 A stale reading keeps the windows of its last good fetch. The resleeve fallback treats those
 windows like a fresh reading's: under the task's usable minimum the subscription is exhausted,
 and at or above it the fallback may still choose that harness, ahead of a candidate with no
-reading. `select_target` itself stays on fresh rows. The local endpoint has no percent
+reading. A stale window that is under the minimum and names no reset stops blocking once the
+row is older than that window's length, or five hours when the length is unknown. It is then
+an unknown reading and may be spent. `select_target` itself stays on fresh rows. The local endpoint has no percent
 windows. A fresh reading may be chosen; a stale or failed one may not. A local row that was
 never read may still be spent.
 
 A candidate with no reading may still be spent. That is `unknown`: no login file, the reader
-is not running, the login is expired (its CLI refreshes the token; the reader does not), or
-the hub has not read yet (including just after a restart; readings are not journaled). A
-failed reading may not. That is `error`: the body did not parse, the request failed, or the
-read timed out and left no earlier windows. It parks the
-same way an exhausted window does. A window whose reset time has passed still blocks while its
-remaining percent is under the task minimum. Fetched before the reset, that lasts ten minutes
-after the reset. Fetched with the reset already behind, but by less than those ten minutes, it
-lasts ten minutes after the fetch: a body that says the window is full and the reset was a few
+is not running, the login is expired, the provider rejected it (HTTP 401), the login lacks
+the usage scope, or the hub has not read yet (including just after a restart; readings are
+not journaled). The harness CLI refreshes the token; the reader does not. A
+failed reading may not. That is `error`: the body did not parse, some other HTTP status came
+back, or the
+read timed out and left no earlier windows. The park reason names what blocks: a failed
+reading, a stale row that is short of quota, or a local endpoint whose last reading is stale
+or failed. A fresh row under the minimum still says it is short of fresh quota. A window whose reset time has passed still blocks while its
+remaining percent is under the task minimum. That grace is the cache's stale window, ten
+minutes, and it is the only such constant. Fetched before the reset, it lasts that long
+after the reset. Fetched with the reset already behind, but by less than that, it
+lasts that long after the fetch: a body that says the window is full and the reset was a few
 seconds ago is still that limit. A stamp already long past when the row was fetched counts as
 reset, and so does a window once the grace has ended. The fallback may then spend the row
 because its windows have reset. That is not a missing reading. A reset at or before the epoch
@@ -471,7 +477,8 @@ and can be coarser (`119` seconds is `1m`). A minute label is still a length whe
 did not name one.
 
 A read that finishes after its deadline is kept and published on the next refresh, stamped
-with the time the read finished. A late failure does not count again toward the backoff. Each
+with the time the read finished. Its age counts from that finish, not from the refresh that
+collects it, so a late body does not look new. A late failure does not count again toward the backoff. Each
 request inside that read gets only the time still left, so a follow-up call cannot discard a
 body that already arrived.
 

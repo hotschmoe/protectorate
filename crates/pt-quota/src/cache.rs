@@ -7,6 +7,9 @@ use pt_api::{EpochMs, Quota, QuotaReading};
 
 use crate::{Error, Reader, Snapshot, fmt_age};
 
+/// How long a reading stays fresh. A passed reset blocks for this long too.
+pub(crate) const STALE_AFTER: Duration = Duration::from_secs(600);
+
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
     pub ttl: Duration,
@@ -20,7 +23,7 @@ impl Default for Options {
     fn default() -> Self {
         Options {
             ttl: Duration::from_secs(300),
-            stale_after: Duration::from_secs(600),
+            stale_after: STALE_AFTER,
             backoff_base: Duration::from_secs(30),
             backoff_max: Duration::from_secs(3600),
             read_timeout: Duration::from_secs(45),
@@ -43,7 +46,7 @@ struct Slot {
     last_attempt: Option<Instant>,
     failures: u32,
     last_err: Option<Error>,
-    pending: Option<mpsc::Receiver<(u64, crate::Result<Snapshot>)>>,
+    pending: Option<mpsc::Receiver<(u64, Instant, crate::Result<Snapshot>)>>,
 }
 
 pub struct Cache {
@@ -78,10 +81,10 @@ impl Cache {
                             slot.pending = Some(pending);
                             continue;
                         }
-                        Ok((finished_ms, result)) => {
-                            // The read missed the previous deadline. Stamp it when it finished,
-                            // and do not count a second failure on top of the timeout.
-                            slot.settle(finished_ms, result, false);
+                        Ok((finished_ms, finished_at, result)) => {
+                            // The read missed the previous deadline. Stamp and age it from when
+                            // it finished, and do not count a second failure on top of the timeout.
+                            slot.settle(finished_ms, finished_at, result, false);
                             continue;
                         }
                         Err(mpsc::TryRecvError::Disconnected) => {}
@@ -95,12 +98,12 @@ impl Cache {
                     let (tx, rx) = mpsc::channel();
                     std::thread::spawn(move || {
                         let result = reader.read(now_ms, opts.read_timeout);
-                        let _ = tx.send((crate::now_ms(), result));
+                        let _ = tx.send((crate::now_ms(), Instant::now(), result));
                     });
                     // This refresh's clock is the stamp. A result that arrives after the
                     // deadline is stamped later, when the read actually returned.
                     let result = match rx.recv_timeout(opts.read_timeout) {
-                        Ok((_, result)) => result,
+                        Ok((_, _, result)) => result,
                         Err(mpsc::RecvTimeoutError::Timeout) => {
                             slot.pending = Some(rx);
                             Err(Error::Timeout)
@@ -110,7 +113,7 @@ impl Cache {
                             slot.reader.subscription()
                         ))),
                     };
-                    slot.settle(now_ms, result, true);
+                    slot.settle(now_ms, Instant::now(), result, true);
                 });
             }
         });
@@ -127,18 +130,23 @@ impl Cache {
 }
 
 impl Slot {
-    fn settle(&mut self, now_ms: u64, result: crate::Result<Snapshot>, count_failure: bool) {
-        let now = Instant::now();
+    fn settle(
+        &mut self,
+        now_ms: u64,
+        at: Instant,
+        result: crate::Result<Snapshot>,
+        count_failure: bool,
+    ) {
         match result {
             Ok(snap) => {
-                self.last_attempt = Some(now);
-                self.good = Some((snap, now_ms, now));
+                self.last_attempt = Some(at);
+                self.good = Some((snap, now_ms, at));
                 self.failures = 0;
                 self.last_err = None;
             }
             Err(e) => {
                 if count_failure {
-                    self.last_attempt = Some(now);
+                    self.last_attempt = Some(at);
                     self.failures = self.failures.saturating_add(1);
                 }
                 self.last_err = Some(e);
@@ -161,10 +169,14 @@ impl Slot {
         let subscription = self.reader.subscription();
         let Some((snap, fetched, instant)) = &self.good else {
             let (reading, note) = match &self.last_err {
-                // Expired is not a failed window: the harness CLI refreshes the login, and it
-                // can only do that if a sleeve is allowed to launch.
+                // Expired, rejected, and missing-scope logins are not a failed window: the
+                // harness CLI refreshes the login, and it can only do that if a sleeve launches.
                 Some(Error::Unavailable(d)) => (QuotaReading::Unknown, d.to_string()),
                 Some(Error::Expired) => (QuotaReading::Unknown, Error::Expired.to_string()),
+                Some(Error::Unauthorized) => {
+                    (QuotaReading::Unknown, Error::Unauthorized.to_string())
+                }
+                Some(Error::Scope) => (QuotaReading::Unknown, Error::Scope.to_string()),
                 Some(e) => (QuotaReading::Error, e.to_string()),
                 None => (QuotaReading::Unknown, "not read yet".to_string()),
             };
