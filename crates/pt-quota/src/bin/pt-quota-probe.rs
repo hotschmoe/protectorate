@@ -111,8 +111,15 @@ fn main() -> ExitCode {
         std::thread::sleep(std::time::Duration::from_millis(
             ms.saturating_mul(2).saturating_add(50),
         ));
-        for q in cache.quotas() {
-            println!("aged {}", line(&q, now));
+        let aged = cache.quotas();
+        for q in &aged {
+            println!("aged {}", line(q, now));
+        }
+        if let Some(candidates) = &allow {
+            match pt_quota::select_with_fallback(now, TaskSize::Medium, candidates, &aged) {
+                Ok((harness, reason)) => println!("aged target {harness:?}: {reason}"),
+                Err(reason) => println!("aged target none: {reason}"),
+            }
         }
     }
     if let Some(candidates) = allow {

@@ -398,6 +398,8 @@ Each entry: where, what was done, what right looks like.
   candidates that are headless, not excluded, installed and not `ineligible` in `doctor.json` go
   to quota selection with task size Medium and no health list; when a reading is unavailable the
   first unknown candidate in the owner's order can win, while known-exhausted candidates cannot.
+  A stale row is not unavailable: its last windows still block under the usable minimum, and a
+  stale row that still has spare can win ahead of an unknown candidate.
   A new sleeve always names its harness (`SpawnSleeve.harness` is
   required), so nothing else is chosen by quota, and G1 does not read quota yet. Right: the task
   size from the sleeve's history (D27), node and probe health, and an optional harness on spawn.

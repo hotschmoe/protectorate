@@ -134,20 +134,28 @@ fn score(q: &Quota, now_ms: u64) -> Option<Scored> {
     best
 }
 
+fn row<'a>(quotas: &'a [Quota], sub: Subscription) -> Option<&'a Quota> {
+    quotas.iter().find(|q| q.subscription == sub)
+}
+
 fn fresh_for(quotas: &[Quota], sub: Subscription) -> Option<&Quota> {
-    quotas
-        .iter()
-        .find(|q| q.subscription == sub && state(q) == State::Fresh)
+    row(quotas, sub).filter(|q| state(q) == State::Fresh)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Availability {
+    /// Fresh spare, or a stale row whose last windows still clear the minimum.
     Available,
     Exhausted,
+    /// No row, a row that was never a reading, or a row with nothing left to score.
     Unknown,
 }
 
-/// Whether a candidate has usable fresh quota, insufficient quota, or no usable reading.
+/// Whether a candidate has usable quota, insufficient quota, or no usable reading.
+///
+/// A stale row keeps the windows of its last good read. Under the task minimum that is
+/// exhausted, the same as a fresh row; with spare it may still be chosen. Unknown is only a
+/// row with no scored window.
 fn availability(now_ms: u64, size: TaskSize, harness: Harness, quotas: &[Quota]) -> Availability {
     if harness == Harness::PiLocal {
         return if fresh_for(quotas, Subscription::Local).is_some() {
@@ -159,7 +167,13 @@ fn availability(now_ms: u64, size: TaskSize, harness: Harness, quotas: &[Quota])
     let Some((_, subscription)) = SUBSCRIBED.iter().find(|(h, _)| *h == harness) else {
         return Availability::Unknown;
     };
-    match fresh_for(quotas, *subscription).and_then(|q| score(q, now_ms)) {
+    let Some(q) = row(quotas, *subscription) else {
+        return Availability::Unknown;
+    };
+    if !matches!(state(q), State::Fresh | State::Stale) {
+        return Availability::Unknown;
+    }
+    match score(q, now_ms) {
         Some(s) if s.usable < size.min_usable_pct() => Availability::Exhausted,
         Some(_) => Availability::Available,
         None => Availability::Unknown,
@@ -167,6 +181,10 @@ fn availability(now_ms: u64, size: TaskSize, harness: Harness, quotas: &[Quota])
 }
 
 /// Selects from already eligible candidates, retaining their order when readings are missing.
+///
+/// Fresh spare wins through `select_target`. A stale row whose last windows still clear the
+/// minimum is next, ahead of a candidate with no reading, so an exhausted account is not
+/// spent and a subscription that still had room is not parked.
 pub fn select_with_fallback(
     now_ms: u64,
     size: TaskSize,
@@ -177,9 +195,19 @@ pub fn select_with_fallback(
     {
         return Ok((target.harness, target.reason));
     }
+    let avail = |harness| availability(now_ms, size, harness, quotas);
     if let Some(&harness) = candidates
         .iter()
-        .find(|&&harness| availability(now_ms, size, harness, quotas) == Availability::Unknown)
+        .find(|&&harness| avail(harness) == Availability::Available)
+    {
+        return Ok((
+            harness,
+            "first eligible in resleeve_to whose last reading still has spare quota".into(),
+        ));
+    }
+    if let Some(&harness) = candidates
+        .iter()
+        .find(|&&harness| avail(harness) == Availability::Unknown)
     {
         return Ok((
             harness,

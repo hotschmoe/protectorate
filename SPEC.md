@@ -436,6 +436,11 @@ quota, health)` is pure code, using fresh data only. It weighs projected unused 
 called at spawn and at guardrail time. Code derives the task-size class, Envoy may nudge it one
 class, and code clamps it (D27).
 
+A stale reading keeps the windows of its last good fetch. The resleeve fallback treats those
+windows like a fresh reading's: under the task's usable minimum the subscription is exhausted,
+and at or above it the fallback may still choose that harness, ahead of a candidate with no
+reading. `select_target` itself stays on fresh rows.
+
 **Spare quota (PROBLEMS P6).** A code rule triggers: projected unused capacity at reset is above X%
 and no high-priority work is queued. When it fires, the next backlog item goes to that harness.
 Envoy picks which item; code decides when and where. Work on public repos lands in a review inbox

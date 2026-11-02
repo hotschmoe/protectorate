@@ -184,8 +184,10 @@ expired` until one does. They run every `quota_poll_secs` (60; 0 turns them off)
 refreshed after 5 minutes and becomes stale after 10. A response with a malformed usage window,
 or with no window at all, is reported as an error.
 Resleeve targets are weighted by fresh readings; known-exhausted candidates are skipped, and the
-sleeve parks if all eligible candidates are exhausted. When a reading is unavailable, an unknown
-candidate can still be selected. A local endpoint may use HTTPS or loopback HTTP; other HTTP
+sleeve parks if all eligible candidates are exhausted. A stale reading keeps its last windows:
+under the usable minimum it counts as exhausted, and with spare left the fallback may still
+choose it. When a reading is unavailable, an unknown candidate can still be selected. A local
+endpoint may use HTTPS or loopback HTTP; other HTTP
 endpoints are reported as misconfigured and are not contacted.
 
 ## History

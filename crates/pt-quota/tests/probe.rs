@@ -517,3 +517,58 @@ fn cache_uses_monotonic_time_for_ttl_backoff_and_age() {
         "{seen:?}"
     );
 }
+
+/// A stale row keeps the windows of its last good read. Under the usable minimum the fallback
+/// does not spend it; at or above the minimum it still may, instead of parking.
+#[test]
+#[cfg(debug_assertions)]
+fn stale_windows_still_gate_the_fallback() {
+    let home = scratch(&format!("stale-windows-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"stale-claude"}}"#,
+    );
+    let home_s = home.to_str().unwrap();
+    let run = |body: &'static str| {
+        let (port, _) = serve(vec![("/api/oauth/usage", body)]);
+        let base = format!("http://127.0.0.1:{port}");
+        probe(&[
+            "--home",
+            home_s,
+            "--claude-url",
+            &base,
+            "--allow",
+            "claude",
+            "--test-cache-ms",
+            "150",
+        ])
+    };
+    let exhausted = run(
+        r#"{"five_hour":{"utilization":99,"resets_at":"2100-01-01T00:00:00Z"},"seven_day":{"utilization":10,"resets_at":"2100-01-08T00:00:00Z"}}"#,
+    );
+    assert!(
+        exhausted.contains("aged claude stale") && exhausted.contains("99%"),
+        "{exhausted}"
+    );
+    assert!(
+        exhausted.contains(
+            "aged target none: all eligible resleeve targets have insufficient fresh quota"
+        ),
+        "{exhausted}"
+    );
+    assert!(
+        !exhausted.contains("without a fresh quota reading"),
+        "{exhausted}"
+    );
+
+    let spare = run(
+        r#"{"five_hour":{"utilization":0,"resets_at":"2100-01-01T00:00:00Z"},"seven_day":{"utilization":10,"resets_at":"2100-01-08T00:00:00Z"}}"#,
+    );
+    assert!(spare.contains("aged claude stale"), "{spare}");
+    assert!(
+        spare.contains(
+            "aged target Claude: first eligible in resleeve_to whose last reading still has spare quota"
+        ),
+        "{spare}"
+    );
+}

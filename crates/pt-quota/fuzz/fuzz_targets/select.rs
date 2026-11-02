@@ -1,8 +1,11 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use pt_api::{Harness, Mode, Subscription};
-use pt_quota::{Health, State, TaskSize, Thresholds, derive, select_target, spare_trigger, state};
+use pt_api::{Harness, Mode, Quota, Subscription};
+use pt_quota::{
+    Health, State, TaskSize, Thresholds, derive, select_target, select_with_fallback,
+    spare_trigger, state,
+};
 use pt_quota_fuzz::{Bytes, HARNESSES, quota};
 
 fuzz_target!(|data: &[u8]| {
@@ -12,33 +15,56 @@ fuzz_target!(|data: &[u8]| {
     let mode = if b.bool() { Mode::Headless } else { Mode::Pane };
     let pick = |b: &mut Bytes| -> Vec<Harness> {
         let mask = b.u8();
-        HARNESSES.iter().enumerate().filter(|(i, _)| mask >> i & 1 == 1).map(|(_, h)| *h).collect()
+        HARNESSES
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| mask >> i & 1 == 1)
+            .map(|(_, h)| *h)
+            .collect()
     };
     let allow = pick(&mut b);
     let exclude = pick(&mut b);
     let mut health = Vec::new();
     for h in HARNESSES {
         if b.bool() {
-            health.push(Health { harness: h, healthy: b.bool() });
+            health.push(Health {
+                harness: h,
+                healthy: b.bool(),
+            });
         }
     }
     let quotas: Vec<_> = (0..b.below(8)).map(|_| quota(&mut b, now)).collect();
 
     let eligible = |h: Harness| {
-        allow.contains(&h) && !exclude.contains(&h) && health.iter().all(|e| e.harness != h || e.healthy)
+        allow.contains(&h)
+            && !exclude.contains(&h)
+            && health.iter().all(|e| e.harness != h || e.healthy)
     };
     let got = select_target(now, size, &allow, mode, &exclude, &quotas, &health);
 
     if let Some(t) = &got {
-        assert!(eligible(t.harness), "picked an excluded, disallowed or unhealthy harness: {t:?}");
-        let first_fresh = quotas.iter().find(|q| q.subscription == t.subscription && state(q) == State::Fresh);
-        assert!(first_fresh.is_some(), "picked a target with no fresh reading: {t:?}");
+        assert!(
+            eligible(t.harness),
+            "picked an excluded, disallowed or unhealthy harness: {t:?}"
+        );
+        let first_fresh = quotas
+            .iter()
+            .find(|q| q.subscription == t.subscription && state(q) == State::Fresh);
+        assert!(
+            first_fresh.is_some(),
+            "picked a target with no fresh reading: {t:?}"
+        );
         assert!(t.score.is_finite() && t.score >= 0.0);
         if t.harness == Harness::PiLocal {
             assert_eq!(t.subscription, Subscription::Local);
-            let without_local: Vec<Harness> = allow.iter().copied().filter(|h| *h != Harness::PiLocal).collect();
+            let without_local: Vec<Harness> = allow
+                .iter()
+                .copied()
+                .filter(|h| *h != Harness::PiLocal)
+                .collect();
             assert!(
-                select_target(now, size, &without_local, mode, &exclude, &quotas, &health).is_none(),
+                select_target(now, size, &without_local, mode, &exclude, &quotas, &health)
+                    .is_none(),
                 "fell back to local while a subscription was eligible"
             );
         } else {
@@ -49,18 +75,67 @@ fuzz_target!(|data: &[u8]| {
             if let Some(next) = select_target(now, size, &allow, mode, &ex2, &quotas, &health)
                 && next.harness != Harness::PiLocal
             {
-                assert!(next.score <= t.score, "winner is not the best: {t:?} vs {next:?}");
+                assert!(
+                    next.score <= t.score,
+                    "winner is not the best: {t:?} vs {next:?}"
+                );
             }
         }
     } else {
         // Nothing eligible: no allowed, healthy harness has a fresh quota for its subscription.
-        let without_local: Vec<Harness> = allow.iter().copied().filter(|h| *h != Harness::PiLocal).collect();
-        assert!(select_target(now, size, &without_local, mode, &exclude, &quotas, &health).is_none());
+        let without_local: Vec<Harness> = allow
+            .iter()
+            .copied()
+            .filter(|h| *h != Harness::PiLocal)
+            .collect();
+        assert!(
+            select_target(now, size, &without_local, mode, &exclude, &quotas, &health).is_none()
+        );
     }
 
     // Stale, unknown and error readings alone never produce a pick.
-    let unfresh: Vec<_> = quotas.iter().filter(|q| state(q) != State::Fresh).cloned().collect();
+    let unfresh: Vec<_> = quotas
+        .iter()
+        .filter(|q| state(q) != State::Fresh)
+        .cloned()
+        .collect();
     assert!(select_target(now, size, &allow, mode, &exclude, &unfresh, &health).is_none());
+
+    // The fallback may spend a stale row only when its last open windows still clear the
+    // minimum. `select_target` itself stays fresh-only, and the fallback agrees with it.
+    let fallback = select_with_fallback(now, size, &allow, &quotas);
+    match (&got, &fallback) {
+        (Some(t), Ok((h, _))) => assert_eq!(t.harness, *h),
+        (Some(t), Err(e)) => panic!("fallback dropped {t:?}: {e}"),
+        (None, Ok((h, _))) => {
+            assert!(
+                allow.contains(h),
+                "fallback picked a harness that was not a candidate"
+            );
+            if let Some(sub) = metered(*h)
+                && let Some(q) = quotas.iter().find(|q| q.subscription == sub)
+                && state(q) == State::Stale
+                && let Some(usable) = open_usable(q, now)
+            {
+                assert!(
+                    usable + 1e-9 >= size.min_usable_pct(),
+                    "stale row at {usable}% usable was spent"
+                );
+            }
+        }
+        (None, Err(_)) => {
+            for h in &allow {
+                if let Some(sub) = metered(*h)
+                    && let Some(q) = quotas.iter().find(|q| q.subscription == sub)
+                    && state(q) == State::Stale
+                    && let Some(usable) = open_usable(q, now)
+                    && usable + 1e-9 >= size.min_usable_pct()
+                {
+                    panic!("stale row at {usable}% usable was parked");
+                }
+            }
+        }
+    }
 
     // Spare trigger: nothing while high-priority work is queued; fresh only; above threshold; sorted.
     let threshold = f64::from(b.u8()) * 100.0 / 255.0;
@@ -68,17 +143,29 @@ fuzz_target!(|data: &[u8]| {
     let spare = spare_trigger(now, &quotas, threshold, false);
     for s in &spare {
         assert!(s.unused_pct > threshold && s.unused_pct <= 100.0);
-        assert!(quotas.iter().any(|q| q.subscription == s.subscription && state(q) == State::Fresh));
+        assert!(
+            quotas
+                .iter()
+                .any(|q| q.subscription == s.subscription && state(q) == State::Fresh)
+        );
     }
     assert!(spare.windows(2).all(|w| w[0].unused_pct >= w[1].unused_pct));
     assert!(spare_trigger(now, &unfresh, threshold, false).is_empty());
 
     // Task size: the owner's class is final; otherwise Envoy moves it at most one class.
     let history: Vec<u64> = (0..b.below(12)).map(|_| u64::from(b.u32())).collect();
-    let th = Thresholds { small_max: u64::from(b.u32()), large_min: u64::from(b.u32()) };
+    let th = Thresholds {
+        small_max: u64::from(b.u32()),
+        large_min: u64::from(b.u32()),
+    };
     let n = b.below(10);
     let nudge = b.u8() as i8;
-    let owner = [None, Some(TaskSize::Small), Some(TaskSize::Medium), Some(TaskSize::Large)][b.below(4)];
+    let owner = [
+        None,
+        Some(TaskSize::Small),
+        Some(TaskSize::Medium),
+        Some(TaskSize::Large),
+    ][b.below(4)];
     let got = derive(&history, n, th, owner, nudge);
     if let Some(o) = owner {
         assert_eq!(got, o);
@@ -90,3 +177,28 @@ fuzz_target!(|data: &[u8]| {
         }
     }
 });
+
+fn metered(h: Harness) -> Option<Subscription> {
+    match h {
+        Harness::Claude => Some(Subscription::Claude),
+        Harness::Codex => Some(Subscription::Codex),
+        Harness::Grok => Some(Subscription::Grok),
+        _ => None,
+    }
+}
+
+/// Tightest remaining percent of windows that have not reset. `None` when nothing scores.
+fn open_usable(q: &Quota, now_ms: u64) -> Option<f64> {
+    let mut usable = None;
+    for w in &q.windows {
+        let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
+            continue;
+        };
+        if w.resets_at_ms.is_some_and(|r| r.0 <= now_ms) {
+            continue;
+        }
+        let remaining = (100.0 - used).clamp(0.0, 100.0);
+        usable = Some(usable.map_or(remaining, |m: f64| m.min(remaining)));
+    }
+    usable
+}
