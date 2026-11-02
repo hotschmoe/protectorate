@@ -11,23 +11,17 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
 
 use pt_api::Harness as ApiHarness;
 use pt_core::{Life, Proc, Sleeve, SleeveId};
 use pt_drivers::{Entry, Harness};
 use pt_history::{ContextUsage, Doc, Filters, Hit, Index, Query, Selector, Source, SourceKind};
 
-use crate::home::now_ms;
-use crate::hub::Hub;
+use crate::home::{Home, now_ms};
 use crate::lock::lock;
 use crate::log::{debug, info, warning};
 use crate::transcript::Line;
-
-const POLL: Duration = Duration::from_secs(1);
-/// Longest wait after a failed commit before the next catch-up.
-const COMMIT_BACKOFF_MAX: Duration = Duration::from_secs(30);
+use crate::view::View;
 
 /// Why a history read failed.
 #[derive(Debug)]
@@ -213,22 +207,26 @@ impl History {
     /// Tails every source of `only` (or of every sleeve) to its end and commits. The brief calls
     /// this before its pre-run search, so the outgoing session's last lines are in. True when
     /// that commit failed.
-    pub fn catch_up(&self, hub: &Hub, only: Option<SleeveId>) -> bool {
+    pub fn catch_up(
+        &self,
+        home: &Home,
+        view: impl Fn() -> Arc<View>,
+        only: Option<SleeveId>,
+    ) -> bool {
         let mut p = lock(&self.passes);
-        let view = hub.view();
+        let view_now = view();
         let mut changed = false;
-        for s in view.state.sleeves.values() {
+        for s in view_now.state.sleeves.values() {
             if s.life == Life::Removed {
                 continue;
             }
             if only.is_none_or(|o| o == s.id) {
-                changed |= self.sleeve_pass(hub, &mut p, s);
+                changed |= self.sleeve_pass(home, &mut p, s);
             }
         }
         // A pass that started before the removal can mark the sleeve again. Clear from
         // the view published since, before this pass copies the set out.
-        let removed_now: Vec<String> = hub
-            .view()
+        let removed_now: Vec<String> = view()
             .state
             .sleeves
             .values()
@@ -283,8 +281,8 @@ impl History {
 
     /// One sleeve: new `session_info` lines, a source per session, then the reads. Returns
     /// whether anything was read.
-    fn sleeve_pass(&self, hub: &Hub, p: &mut Passes, s: &Sleeve) -> bool {
-        let transcript = hub.home.transcript(s.id);
+    fn sleeve_pass(&self, home: &Home, p: &mut Passes, s: &Sleeve) -> bool {
+        let transcript = home.transcript(s.id);
         let track = p.tracks.entry(s.id).or_default();
         if let Err(e) = scan(&transcript, track) {
             debug!("history: scan {}: {e}", transcript.display());
@@ -299,7 +297,7 @@ impl History {
             .last()
             .filter(|l| l.g == s.g.0 && s.proc != Proc::Down)
             .map(|l| l.native_id.clone());
-        let home = hub.home.sleeve_home(s.id);
+        let home = home.sleeve_home(s.id);
         let mut found: HashMap<SourceKind, HashMap<String, PathBuf>> = HashMap::new();
         for seen in &track.seen {
             let choice = p
@@ -467,29 +465,5 @@ fn scan(path: &Path, track: &mut Track) -> io::Result<()> {
         if opened.start.offset >= opened.len || opened.start.offset == start {
             return Ok(());
         }
-    }
-}
-
-/// The ingest thread: a catch-up pass about once a second until the hub is gone.
-pub fn start(hub: &Arc<Hub>) {
-    let weak = Arc::downgrade(hub);
-    let started = thread::Builder::new()
-        .name("pt-history".into())
-        .spawn(move || {
-            let mut pause = POLL;
-            loop {
-                let Some(hub) = weak.upgrade() else { return };
-                let failed = hub.history.catch_up(&hub, None);
-                drop(hub);
-                thread::sleep(pause);
-                pause = if failed {
-                    pause.saturating_mul(2).min(COMMIT_BACKOFF_MAX)
-                } else {
-                    POLL
-                };
-            }
-        });
-    if let Err(e) = started {
-        warning!("history: starting the ingest thread: {e}");
     }
 }

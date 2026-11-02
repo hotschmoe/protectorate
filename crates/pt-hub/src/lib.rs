@@ -43,6 +43,7 @@ mod transcript;
 mod update;
 mod view;
 mod wire;
+mod workers;
 
 pub use fleet::{FleetFlags, Net};
 pub use http::{Web, WebFile};

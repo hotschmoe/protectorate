@@ -1279,7 +1279,7 @@ fn remove_node(c: &Ctx<'_>, r: api::RemoveNodeRequest) -> Result<api::RemovedNod
     }
     let (removal, forgotten) = up.poller.remove(id);
     if forgotten {
-        crate::fleet::removed(c.hub, id);
+        c.hub.fleet.removed(&c.hub.bus, id);
     }
     let removal = removal.map_err(|e| {
         let m = e.to_string();
@@ -1359,7 +1359,7 @@ fn rename_node(c: &Ctx<'_>, r: api::RenameNodeRequest) -> Result<api::RenamedNod
     })?;
     if n.name != from {
         if let Some(v) = up.poller.node(&id.to_string()) {
-            crate::fleet::renamed(c.hub, v.node);
+            c.hub.fleet.renamed(&c.hub.bus, v.node);
         }
         let text = format!("node {from} renamed {}", n.name);
         info!("{text} (headscale node {id})");

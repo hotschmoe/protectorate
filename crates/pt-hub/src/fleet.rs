@@ -5,16 +5,16 @@
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::{Arc, Condvar, Mutex, Weak};
-use std::thread;
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use pt_api::{self as api, EventKind as Kind, HubStreamMessage, Level};
-use pt_fleet::{Embedded, Fleet, FleetEvent, PollConfig, Poller};
+use pt_fleet::{Embedded, Fleet, FleetEvent, Poller};
 
-use crate::hub::Hub;
+use crate::bus::Bus;
+use crate::home::{Config, Home};
 use crate::lock::lock;
-use crate::log::{info, warning};
+use crate::log::info;
 
 /// headscale and member as this binary carries them; `missing` says why one is absent.
 #[derive(Clone, Copy, Debug)]
@@ -112,6 +112,89 @@ impl FleetSlot {
         }
     }
 
+    /// The fleet is starting.
+    pub fn starting(&self) {
+        self.set(Slot::Starting);
+    }
+
+    /// The fleet is configured but not running, for `why`.
+    pub fn down(&self, why: String) {
+        self.set(Slot::Down(why));
+    }
+
+    /// Puts the started fleet in the slot, or stops it when the hub stopped meanwhile.
+    pub fn started(&self, up: Up) {
+        let mut slot = lock(&self.slot);
+        if matches!(*slot, Slot::Starting) {
+            *slot = Slot::Up(up);
+            self.cv.notify_all();
+        } else {
+            drop(slot);
+            up.fleet.shutdown();
+        }
+    }
+
+    /// The owner removed node `id` (`Poller::remove` announces nothing): off the stream now.
+    pub fn removed(&self, bus: &Bus, id: u64) {
+        let id = id.to_string();
+        lock(&self.streamed).remove(&id);
+        bus.push(|seq| HubStreamMessage::NodeRemoved { seq, id });
+    }
+
+    /// The owner renamed a node (`Poller::rename` announces nothing): streamed under its new name.
+    pub fn renamed(&self, bus: &Bus, node: api::Node) {
+        lock(&self.streamed).insert(node.id.clone(), quiet(&node));
+        bus.push(|seq| HubStreamMessage::Node { seq, node });
+    }
+
+    /// One poller round: streamed when something besides the timestamps changed, and an event
+    /// line when the node came up, went down or changed presence.
+    pub fn published(&self, bus: &Bus, e: FleetEvent) {
+        match e {
+            FleetEvent::Node(n) => {
+                let key = quiet(&n);
+                let before = lock(&self.streamed).insert(n.id.clone(), key.clone());
+                if before.as_ref() == Some(&key) {
+                    return;
+                }
+                let node = (*n).clone();
+                bus.push(|seq| HubStreamMessage::Node { seq, node });
+                let was = before.as_ref();
+                if was.map(|b| b.online) != Some(n.online) {
+                    let (level, text) = if n.online {
+                        (Level::Info, format!("node {} is online", n.name))
+                    } else if was.is_some() {
+                        (Level::Warn, format!("node {} went offline", n.name))
+                    } else {
+                        (Level::Warn, format!("node {} is offline", n.name))
+                    };
+                    bus.event(Kind::Node, level, &n.name, "owner", &text);
+                } else if was.is_some_and(|b| b.presence.state != n.presence.state) {
+                    bus.event(
+                        Kind::Node,
+                        Level::Info,
+                        &n.name,
+                        "owner",
+                        &format!("node {} is {}", n.name, n.presence.state),
+                    );
+                }
+            }
+            FleetEvent::Removed(id) => {
+                let name = lock(&self.streamed)
+                    .remove(&id)
+                    .map_or_else(|| id.clone(), |n| n.name);
+                bus.push(|seq| HubStreamMessage::NodeRemoved { seq, id });
+                bus.event(
+                    Kind::Node,
+                    Level::Warn,
+                    &name,
+                    "owner",
+                    &format!("node {name} left the tailnet"),
+                );
+            }
+        }
+    }
+
     /// Stops the poller, then member and headscale; returns once they have exited.
     pub fn shutdown(&self) {
         let prev = std::mem::replace(
@@ -145,8 +228,12 @@ fn proxy_prefix(p: &str) -> Result<String, String> {
 }
 
 /// The fleet config from `config.json` and the flags, or `None` when no fleet is configured.
-fn config(hub: &Hub, flags: &FleetFlags) -> Result<Option<pt_fleet::Config>, String> {
-    let c = &hub.config.fleet;
+pub fn config(
+    config: &Config,
+    home: &Home,
+    flags: &FleetFlags,
+) -> Result<Option<pt_fleet::Config>, String> {
+    let c = &config.fleet;
     let listen = flags.listen.clone().unwrap_or_else(|| c.listen.clone());
     if listen.is_empty() || listen == "off" {
         return Ok(None);
@@ -159,7 +246,7 @@ fn config(hub: &Hub, flags: &FleetFlags) -> Result<Option<pt_fleet::Config>, Str
     }
     let dir = match (&flags.dir, c.dir.as_str()) {
         (Some(d), _) => d.clone(),
-        (None, "") => hub.home.tailnet(),
+        (None, "") => home.tailnet(),
         (None, d) => PathBuf::from(d),
     };
     let dir = if dir.is_absolute() {
@@ -222,7 +309,7 @@ fn config(hub: &Hub, flags: &FleetFlags) -> Result<Option<pt_fleet::Config>, Str
     Ok(Some(cfg))
 }
 
-fn unpack(hub: &Hub, net: &Net) -> Result<(PathBuf, PathBuf), String> {
+pub fn unpack(home: &Home, net: &Net) -> Result<(PathBuf, PathBuf), String> {
     let (Some(hs), Some(m)) = (net.headscale, net.member) else {
         return Err(format!(
             "the fleet is disabled: this protectorate binary does not embed {} ({})",
@@ -234,87 +321,10 @@ fn unpack(hub: &Hub, net: &Net) -> Result<(PathBuf, PathBuf), String> {
             net.missing
         ));
     };
-    let dir = hub.home.net();
+    let dir = home.net();
     let hs_path = hs.unpack(&dir).map_err(|e| e.to_string())?;
     let m_path = m.unpack(&dir).map_err(|e| e.to_string())?;
     Ok((hs_path, m_path))
-}
-
-/// Starts the fleet in the background when one is configured. A configured fleet that cannot
-/// start (no embedded binaries, a bad config, headscale failing) leaves the hub running with
-/// node and job methods answering `unavailable` and the reason.
-pub fn start(hub: &Arc<Hub>, flags: FleetFlags, net: Net) {
-    let cfg = match config(hub, &flags) {
-        Ok(None) => return info!("fleet: not configured"),
-        Ok(Some(c)) => c,
-        Err(e) => {
-            warning!("fleet: {e}");
-            return hub.fleet.set(Slot::Down(e));
-        }
-    };
-    hub.fleet.set(Slot::Starting);
-    let weak = Arc::downgrade(hub);
-    let started = thread::Builder::new()
-        .name("pt-fleet-start".into())
-        .spawn(move || {
-            let Some(hub) = weak.upgrade() else { return };
-            match run(&hub, cfg, &net) {
-                Ok(up) => {
-                    let mut slot = lock(&hub.fleet.slot);
-                    if matches!(*slot, Slot::Starting) {
-                        *slot = Slot::Up(up);
-                        hub.fleet.cv.notify_all();
-                    } else {
-                        drop(slot);
-                        up.fleet.shutdown();
-                    }
-                }
-                Err(e) => {
-                    warning!("fleet: {e}");
-                    hub.fleet.set(Slot::Down(e));
-                }
-            }
-        });
-    if let Err(e) = started {
-        hub.fleet
-            .set(Slot::Down(format!("starting the fleet thread: {e}")));
-    }
-}
-
-fn run(hub: &Arc<Hub>, mut cfg: pt_fleet::Config, net: &Net) -> Result<Up, String> {
-    let (headscale, member) = unpack(hub, net)?;
-    info!(
-        "fleet: headscale {} and member {}",
-        headscale.display(),
-        member.display()
-    );
-    cfg.headscale = headscale;
-    cfg.member = member;
-    let (dir, url) = (cfg.dir.clone(), cfg.server_url.clone());
-    let fleet = Fleet::start(cfg).map_err(|e| e.to_string())?;
-    let fp = fleet.control_fingerprint().map_err(|e| e.to_string())?;
-    info!("fleet up: {} control {url} key {fp}", dir.display());
-    let every = Duration::from_secs(hub.config.fleet.poll_secs.max(1));
-    let poll = PollConfig {
-        presence_every: every,
-        list_every: every,
-        ..PollConfig::default()
-    };
-    let weak: Weak<Hub> = Arc::downgrade(hub);
-    let poller = fleet
-        .poll(poll, move |e| {
-            if let Some(hub) = weak.upgrade() {
-                published(&hub, e);
-            }
-        })
-        .map_err(|e| {
-            fleet.shutdown();
-            e.to_string()
-        })?;
-    Ok(Up {
-        fleet,
-        poller: Arc::new(poller),
-    })
 }
 
 fn quiet(n: &api::Node) -> api::Node {
@@ -322,67 +332,4 @@ fn quiet(n: &api::Node) -> api::Node {
     n.last_seen_ms = api::EpochMs(0);
     n.presence.sampled_at_ms = None;
     n
-}
-
-/// The owner removed node `id` (`Poller::remove` announces nothing): off the stream now.
-pub fn removed(hub: &Hub, id: u64) {
-    let id = id.to_string();
-    lock(&hub.fleet.streamed).remove(&id);
-    hub.bus
-        .push(|seq| HubStreamMessage::NodeRemoved { seq, id });
-}
-
-/// The owner renamed a node (`Poller::rename` announces nothing): streamed under its new name.
-pub fn renamed(hub: &Hub, node: api::Node) {
-    lock(&hub.fleet.streamed).insert(node.id.clone(), quiet(&node));
-    hub.bus.push(|seq| HubStreamMessage::Node { seq, node });
-}
-
-/// One poller round: streamed when something besides the timestamps changed, and an event
-/// line when the node came up, went down or changed presence.
-fn published(hub: &Hub, e: FleetEvent) {
-    match e {
-        FleetEvent::Node(n) => {
-            let key = quiet(&n);
-            let before = lock(&hub.fleet.streamed).insert(n.id.clone(), key.clone());
-            if before.as_ref() == Some(&key) {
-                return;
-            }
-            let node = (*n).clone();
-            hub.bus.push(|seq| HubStreamMessage::Node { seq, node });
-            let was = before.as_ref();
-            if was.map(|b| b.online) != Some(n.online) {
-                let (level, text) = if n.online {
-                    (Level::Info, format!("node {} is online", n.name))
-                } else if was.is_some() {
-                    (Level::Warn, format!("node {} went offline", n.name))
-                } else {
-                    (Level::Warn, format!("node {} is offline", n.name))
-                };
-                hub.bus.event(Kind::Node, level, &n.name, "owner", &text);
-            } else if was.is_some_and(|b| b.presence.state != n.presence.state) {
-                hub.bus.event(
-                    Kind::Node,
-                    Level::Info,
-                    &n.name,
-                    "owner",
-                    &format!("node {} is {}", n.name, n.presence.state),
-                );
-            }
-        }
-        FleetEvent::Removed(id) => {
-            let name = lock(&hub.fleet.streamed)
-                .remove(&id)
-                .map_or_else(|| id.clone(), |n| n.name);
-            hub.bus
-                .push(|seq| HubStreamMessage::NodeRemoved { seq, id });
-            hub.bus.event(
-                Kind::Node,
-                Level::Warn,
-                &name,
-                "owner",
-                &format!("node {name} left the tailnet"),
-            );
-        }
-    }
 }

@@ -98,7 +98,7 @@ pub fn write(hub: &Hub, view: &View, workdir: &Path, spec: &Spec<'_>) -> Result<
         .get(s.id)
         .and_then(|t| crate::lock::lock(&t).all())
         .map_err(|e| format!("read transcript: {e}"))?;
-    hub.history.catch_up(hub, Some(s.id));
+    hub.history.catch_up(&hub.home, || hub.view(), Some(s.id));
     let text = build(hub, view, workdir, spec, &entries);
     let path = workdir.join(FILE);
     if let Some(dir) = path.parent() {
