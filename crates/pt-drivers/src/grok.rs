@@ -9,11 +9,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use pt_json::{Value, obj};
 
 use crate::emit::{Out, bounded_output, content_text, id_key, opt_str};
+use crate::error::DriverError;
 use crate::event::{
     AckKind, Decision, Entry, ErrorClass, Harness, Stop, ToolKind, ToolStatus, TouchedPath, Usage,
     classify,
 };
-use crate::{DriverError, Permission, Protocol, SpawnSpec};
+use crate::protocol::Protocol;
+use crate::spec::{Permission, SpawnSpec};
 
 pub(crate) struct Grok {
     cwd: String,

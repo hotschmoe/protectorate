@@ -9,8 +9,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::emit::Out;
+use crate::error::DriverError;
 use crate::event::{AckKind, Decision, Entry, ErrorClass, Event, Harness, classify};
-use crate::{DriverError, Protocol, SpawnSpec, plan};
+use crate::plan::{plan, vet_effort};
+use crate::protocol::Protocol;
+use crate::spec::SpawnSpec;
 
 const MAX_LINE: usize = 8 << 20;
 const MAX_MESSAGE: usize = 1 << 20;
@@ -141,7 +144,7 @@ impl Shared {
 
 /// Starts the harness. Events arrive on the receiver until `Entry::Exited`, which is last.
 pub fn spawn(mut spec: SpawnSpec) -> Result<(Session, Receiver<Event>), DriverError> {
-    let effort_note = crate::vet_effort(&mut spec);
+    let effort_note = vet_effort(&mut spec);
     let (args, mut proto) = plan(&spec, &mut crate::emit::new_uuid)?;
     let mut cmd = match spec.prefix.take() {
         Some(mut prefix) => {

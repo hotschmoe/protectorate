@@ -5,7 +5,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::emit::{MAX_BLOCK, Out};
 use crate::event::{AckKind, Decision, Entry, Event, Harness};
-use crate::{Permission, SpawnSpec, plan, session};
+use crate::plan::plan;
+use crate::protocol::Protocol;
+use crate::session;
+use crate::spec::{Permission, SpawnSpec};
 
 /// Drives a protocol mapper with arbitrary input. An optional first line `#` with
 /// `resume=<id>` and `supervised` sets the spawn options. Lines starting with `!` are calls:
@@ -80,7 +83,7 @@ pub fn fuzz_feed(harness: Harness, input: &[u8]) -> usize {
     n
 }
 
-fn answer(p: &mut dyn crate::Protocol, out: &mut Out, id: &str, d: Decision) -> bool {
+fn answer(p: &mut dyn Protocol, out: &mut Out, id: &str, d: Decision) -> bool {
     p.respond_approval(id, d, out).is_ok()
 }
 

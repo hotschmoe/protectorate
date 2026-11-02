@@ -8,11 +8,13 @@ use std::collections::HashMap;
 use pt_json::{Value, obj};
 
 use crate::emit::{Out, add_count, bounded_output, content_text, opt_str};
+use crate::error::DriverError;
 use crate::event::{
     AckKind, Decision, Entry, ErrorClass, Harness, Stop, ToolKind, ToolStatus, TouchedPath, Usage,
     classify,
 };
-use crate::{DriverError, Protocol, SpawnSpec};
+use crate::protocol::Protocol;
+use crate::spec::SpawnSpec;
 
 pub(crate) struct Pi {
     /// The id on argv (`--session` when resuming, `--session-id` otherwise).
