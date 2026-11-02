@@ -873,6 +873,7 @@ exit 1"#,
     [ -S "$run/api.sock" ] && echo owner_socket=visible || echo owner_socket=hidden
     env -u PROTECTORATE_TOKEN protectorate --json sleeve list >/dev/null 2>&1 && echo tokenless=ok || echo tokenless=refused
     protectorate --json sleeve list >/dev/null 2>&1 && echo token=ok || echo token=refused
+    protectorate job ls | head -1
     touch "$run/bin/probe" 2>/dev/null && echo bin=writable || echo bin=readonly
     touch "$run/sleeves/probe" 2>/dev/null && echo sleeves=writable || echo sleeves=readonly
     [ -e "$HOME/.claude/.credentials.json" ] && echo claude_login=visible || echo claude_login=hidden
@@ -948,6 +949,7 @@ exec '{real_pi}' "$@""#,
         "pi_login=shared",
         "login_shell_cli=ok",
         "other_root=hidden",
+        "Showing only this sleeve's and its children's jobs.",
         "commit=ok",
         "committer=Owner \"Q\" Name <owner@example.test>",
     ] {

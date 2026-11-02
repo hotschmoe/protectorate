@@ -1116,7 +1116,10 @@ fn list_jobs(c: &Ctx<'_>, r: api::ListJobsRequest) -> Result<api::JobList> {
         .map(|j| crate::jobs::view(c.hub, j))
         .collect();
     jobs.reverse();
-    Ok(api::JobList { jobs })
+    Ok(api::JobList {
+        jobs,
+        scoped_to_caller: matches!(c.who, Principal::Sleeve(_)),
+    })
 }
 
 fn get_job(c: &Ctx<'_>, r: api::JobRef) -> Result<api::Job> {

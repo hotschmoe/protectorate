@@ -749,7 +749,12 @@ fn job_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 limit: a.num("--limit")?,
             };
             let v = c.call::<m::ListJobs>(&req)?;
-            o.show(&v, |v| job_rows(&v.jobs));
+            o.show(&v, |v| {
+                if v.scoped_to_caller {
+                    println!("Showing only this sleeve's and its children's jobs.");
+                }
+                job_rows(&v.jobs);
+            });
         }
         "show" => {
             let v = c.call::<m::GetJob>(&job(a)?)?;

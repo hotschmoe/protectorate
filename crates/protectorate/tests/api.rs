@@ -93,6 +93,7 @@ fn api_surface() {
     }
     let (s, jobs) = post(port, "ListJobs", Some(&owner), "{}");
     assert_eq!((s, jobs["jobs"].as_array().map(<[_]>::len)), (200, Some(0)));
+    assert_eq!(jobs["scoped_to_caller"].as_bool(), Some(false));
     let (s, nodes) = post(port, "ListNodes", Some(&owner), "{}");
     assert_eq!(
         (s, nodes["nodes"].as_array().map(<[_]>::len)),

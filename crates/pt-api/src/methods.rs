@@ -227,6 +227,8 @@ api_records! {
 
     pub struct JobList {
         pub jobs: Vec<Job> = Vec::new(),
+        /// Only the caller's and its children's jobs are visible.
+        pub scoped_to_caller: bool = false,
     }
 
     pub struct GetJobArtifactRequest {

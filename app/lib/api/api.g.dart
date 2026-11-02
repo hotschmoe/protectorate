@@ -3180,7 +3180,7 @@ final class JobArtifactData {
 }
 
 final class JobList {
-  const JobList({this.jobs = const <Job>[]});
+  const JobList({this.jobs = const <Job>[], this.scopedToCaller = false});
 
   factory JobList.fromJson(Object? json) {
     final j = _object(json, 'JobList');
@@ -3190,13 +3190,22 @@ final class JobList {
         const <Job>[],
         (e0) => _list(e0, 'JobList.jobs', Job.fromJson),
       ),
+      scopedToCaller: _or(
+        j['scoped_to_caller'],
+        false,
+        (e0) => _bool(e0, 'JobList.scoped_to_caller'),
+      ),
     );
   }
 
   final List<Job> jobs;
 
+  /// Only the caller's and its children's jobs are visible.
+  final bool scopedToCaller;
+
   Map<String, Object?> toJson() => {
     'jobs': [for (final e0 in jobs) e0.toJson()],
+    'scoped_to_caller': scopedToCaller,
   };
 }
 
