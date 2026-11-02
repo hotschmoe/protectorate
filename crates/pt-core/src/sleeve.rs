@@ -12,7 +12,8 @@ use crate::state::*;
 const BRIEF_PROMPT: &str = "Continue from .protectorate/BRIEF.md: read it first, then carry on \
                             with the task it describes.";
 
-fn name_ok(name: &str) -> bool {
+/// A sleeve name: 1-64 bytes of `[A-Za-z0-9._-]`.
+pub fn name_ok(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
         && name
@@ -144,8 +145,11 @@ impl Core<'_> {
                 "claim path must be absolute and normalized",
             );
         }
-        if !spec.target.valid() || !spec.resleeve_to.iter().all(Target::valid) {
-            return no(InvalidArgument, "that harness has no headless mode");
+        if let Some(why) = std::iter::once(&spec.target)
+            .chain(&spec.resleeve_to)
+            .find_map(Target::invalid_reason)
+        {
+            return Err((InvalidArgument, why));
         }
         let others = || self.st.sleeves.values().filter(|s| s.life != Life::Removed);
         if others().any(|s| s.name == spec.name) {
@@ -602,8 +606,8 @@ impl Core<'_> {
                 "only a parked or stopped sleeve starts",
             );
         }
-        if target.is_some_and(|t| !t.valid()) {
-            return self.refuse(Code::InvalidArgument, "that harness has no headless mode");
+        if let Some(why) = target.and_then(Target::invalid_reason) {
+            return self.refuse(Code::InvalidArgument, why);
         }
         if let Some(p) = s.parent {
             if !self.st.sleeves[&p].life.live() {

@@ -22,7 +22,7 @@ pub use event::{Ask, Event, EventKind, JobReport, JobSpec, Obs, SpawnSpec};
 pub use guard::limits;
 pub use intent::{Class, Code, EffectKind, Intent, Notice, Reply};
 pub use model::*;
-pub use sleeve::overlap_refusal;
+pub use sleeve::{name_ok, overlap_refusal};
 pub use state::*;
 
 /// Applies one event and returns the intents to execute once the event is durable.

@@ -368,8 +368,8 @@ impl Core<'_> {
         let Some(s) = self.st.sleeve(sid).filter(|s| s.life != Life::Removed) else {
             return self.refuse(Code::NotFound, "no such sleeve");
         };
-        if target.is_some_and(|t| !t.valid()) {
-            return self.refuse(Code::InvalidArgument, "that harness has no headless mode");
+        if let Some(why) = target.and_then(Target::invalid_reason) {
+            return self.refuse(Code::InvalidArgument, why);
         }
         let armed = matches!(
             s.guard.state,

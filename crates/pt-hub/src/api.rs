@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use pt_api::{self as api, ApiError, ErrorCode, Method, Scope, method as m};
 use pt_core::{
     Claim, Code, EventKind, Layout, Life, MsgState, Party, Reply, SendMode, SleeveId, SpawnSpec,
-    State, Target, overlap_refusal, path_ok, path_within,
+    State, Target, name_ok, overlap_refusal, path_ok, path_within,
 };
 use pt_drivers::Entry;
 use pt_json::{FromJson, ToJson, Value};
@@ -400,14 +400,6 @@ fn name_taken(st: &State, name: &str) -> bool {
         .any(|s| s.life != Life::Removed && s.name == name)
 }
 
-/// The core's spawn name rule. Checked before a new project is created.
-fn spawn_name_ok(name: &str) -> bool {
-    (1..=64).contains(&name.len())
-        && name
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
-}
-
 /// The absolute directory a new project will occupy, or why it will not.
 fn resolve_new_project(hub: &Hub, given: &str) -> Result<String> {
     let given = given.strip_suffix('/').unwrap_or(given);
@@ -771,7 +763,7 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
     if creating.is_some() && name_taken(st, &r.name) {
         return Err(err(ErrorCode::Conflict, "a sleeve has that name"));
     }
-    if creating.is_some() && !spawn_name_ok(&r.name) {
+    if creating.is_some() && !name_ok(&r.name) {
         return Err(err(
             ErrorCode::Invalid,
             "name must be 1-64 of [A-Za-z0-9._-]",
@@ -820,8 +812,12 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         r.model.as_deref().unwrap_or(""),
     );
     let resleeve_to = targets(hub, &r.resleeve_to);
-    if creating.is_some() && (!target.valid() || resleeve_to.iter().any(|t| !t.valid())) {
-        return Err(err(ErrorCode::Invalid, "that harness has no headless mode"));
+    if creating.is_some()
+        && let Some(why) = std::iter::once(&target)
+            .chain(&resleeve_to)
+            .find_map(Target::invalid_reason)
+    {
+        return Err(err(ErrorCode::Invalid, why));
     }
     if creating.is_some()
         && let Some(why) = overlap_claim(st, &path)
