@@ -1,6 +1,6 @@
 //! The index directory: manifest, segments, ingest, commit and merges.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::FileExt;
@@ -140,6 +140,26 @@ struct Pending {
     draft: Draft,
 }
 
+/// One live doc in a sleeve's id order. `seg` is the segment index, or `None` while pending.
+struct Loc {
+    source: String,
+    charge: u64,
+    seg: Option<usize>,
+}
+
+/// Live docs of one sleeve, oldest id first, plus their byte total.
+#[derive(Default)]
+struct SleeveDocs {
+    by_id: BTreeMap<u64, Loc>,
+    total: u64,
+}
+
+/// Live docs of one source, oldest id first. The value is the doc's charge.
+#[derive(Default)]
+struct SourceDocs {
+    by_id: BTreeMap<u64, u64>,
+}
+
 /// What one [`Index::ingest`] call read.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Ingested {
@@ -180,10 +200,18 @@ pub struct Index {
     /// Live indexed bytes per stored source key, including pending docs. Each doc
     /// contributes its source text plus the per-doc overhead in [`queued_bytes`].
     kept: BTreeMap<String, u64>,
+    /// Live docs per sleeve, kept current as docs are added and removed.
+    sleeves: BTreeMap<String, SleeveDocs>,
+    /// Live docs per source, kept current as docs are added and removed.
+    by_source: BTreeMap<String, SourceDocs>,
+    /// Source keys of each sleeve, so a flag update does not scan every source.
+    members: BTreeMap<String, BTreeSet<String>>,
+    /// Sleeves whose capped flag is set.
+    capped_ids: BTreeSet<String>,
     /// Dead docs by source symbol: ids below the value were dropped.
     dead: std::collections::HashMap<u32, u64>,
     usage: BTreeMap<String, ContextUsage>,
-    pending: Vec<Pending>,
+    pending: BTreeMap<u64, Pending>,
     pending_bytes: usize,
     dirty: bool,
     pub(crate) live_docs: u64,
@@ -255,9 +283,13 @@ impl Index {
             sources: BTreeMap::new(),
             drops: BTreeMap::new(),
             kept: BTreeMap::new(),
+            sleeves: BTreeMap::new(),
+            by_source: BTreeMap::new(),
+            members: BTreeMap::new(),
+            capped_ids: BTreeSet::new(),
             dead: Default::default(),
             usage: BTreeMap::new(),
-            pending: Vec::new(),
+            pending: BTreeMap::new(),
             pending_bytes: 0,
             dirty: false,
             live_docs: 0,
@@ -286,7 +318,9 @@ impl Index {
         }
         ix.reclaim()?;
         ix.recount();
+        ix.bind_members();
         ix.release_if_budget_raised(stored_budget);
+        ix.rebuild_capped_ids();
         Ok(ix)
     }
 
@@ -359,7 +393,26 @@ impl Index {
     fn drop_source(&mut self, source: String, below: u64) {
         let sym = self.syms.intern(&source);
         self.dead.insert(sym, below);
-        self.drops.insert(source, below);
+        self.drops.insert(source.clone(), below);
+        // Pending docs stay for `discard_pending`. Older live docs of this source die
+        // with the watermark, so their charges leave the totals here.
+        let gone: Vec<(u64, u64)> = self
+            .by_source
+            .get(&source)
+            .map(|d| {
+                d.by_id
+                    .range(..below)
+                    .map(|(&id, &charge)| (id, charge))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let sleeve = self.sources.get(&source).and_then(|s| s.sleeve.clone());
+        for (id, charge) in gone {
+            if self.pending.contains_key(&id) {
+                continue;
+            }
+            self.unlink(id, &source, charge, sleeve.as_deref());
+        }
     }
 
     /// Drops every doc from `path` and forgets its cursor. A renamed native log calls this
@@ -371,7 +424,8 @@ impl Index {
         let stored = source_key(kind, path, sleeve);
         self.drop_source(stored.clone(), self.next_doc);
         self.discard_pending(&stored);
-        self.kept.insert(stored.clone(), 0);
+        self.kept.remove(&stored);
+        self.unbind_source(&stored, sleeve);
         self.sources.remove(&stored);
         self.dirty = true;
     }
@@ -383,22 +437,62 @@ impl Index {
     fn recount(&mut self) {
         let (mut n, mut len) = (0, 0);
         let mut kept: BTreeMap<String, u64> = BTreeMap::new();
-        for s in &self.segs {
+        let mut by_source: BTreeMap<String, SourceDocs> = BTreeMap::new();
+        let mut sleeves: BTreeMap<String, SleeveDocs> = BTreeMap::new();
+        for (si, s) in self.segs.iter().enumerate() {
             for m in s.docs.iter().filter(|m| self.live(m)) {
                 n += 1;
                 len += u64::from(m.len);
-                if let Some(src) = self.syms.name(m.source) {
-                    *kept.entry(src.to_owned()).or_default() += self.doc_charge(m);
+                let Some(src) = self.syms.name(m.source) else {
+                    continue;
+                };
+                let charge = self.doc_charge(m);
+                *kept.entry(src.to_owned()).or_default() += charge;
+                by_source
+                    .entry(src.to_owned())
+                    .or_default()
+                    .by_id
+                    .insert(m.id, charge);
+                if let Some(sleeve) = self.syms.name(m.sleeve) {
+                    let slot = sleeves.entry(sleeve.to_owned()).or_default();
+                    slot.total = slot.total.saturating_add(charge);
+                    slot.by_id.insert(
+                        m.id,
+                        Loc {
+                            source: src.to_owned(),
+                            charge,
+                            seg: Some(si),
+                        },
+                    );
                 }
             }
         }
-        for p in &self.pending {
-            *kept.entry(p.source.clone()).or_default() +=
-                queued_bytes(&p.draft, &p.source, p.sleeve.as_deref()) as u64;
+        for (&id, p) in &self.pending {
+            let charge = queued_bytes(&p.draft, &p.source, p.sleeve.as_deref()) as u64;
+            *kept.entry(p.source.clone()).or_default() += charge;
+            by_source
+                .entry(p.source.clone())
+                .or_default()
+                .by_id
+                .insert(id, charge);
+            if let Some(sleeve) = &p.sleeve {
+                let slot = sleeves.entry(sleeve.clone()).or_default();
+                slot.total = slot.total.saturating_add(charge);
+                slot.by_id.insert(
+                    id,
+                    Loc {
+                        source: p.source.clone(),
+                        charge,
+                        seg: None,
+                    },
+                );
+            }
         }
         self.live_docs = n;
         self.live_len = len;
         self.kept = kept;
+        self.by_source = by_source;
+        self.sleeves = sleeves;
     }
 
     /// Reads `source` from its cursor to its current end (or `limit`) and queues the docs it
@@ -432,7 +526,7 @@ impl Index {
         if opened.reset {
             self.drop_source(stored.clone(), self.next_doc);
             self.discard_pending(&stored);
-            self.kept.insert(stored.clone(), 0);
+            self.kept.remove(&stored);
             rec.state = fresh_state(source);
             rec.cursor = opened.start.clone();
             rec.capped = false;
@@ -443,13 +537,8 @@ impl Index {
         }
         let was_capped = rec.capped;
         self.sources.insert(key.clone(), rec.clone());
-        // One sum of this sleeve's sources for the whole call. Later docs adjust it.
-        let mut shed = Shed {
-            aged: None,
-            sleeve: None,
-            total: source.sleeve.as_deref().map(|s| self.sleeve_kept(s)),
-            dropped: false,
-        };
+        self.bind_source(&key, source.sleeve.as_deref());
+        let mut dropped = false;
         let end = source.limit.unwrap_or(opened.len).min(opened.len);
         loop {
             let start = opened.start.offset;
@@ -496,23 +585,26 @@ impl Index {
                 let bytes = queued_bytes(&draft, &stored, source.sleeve.as_deref());
                 let charge = bytes as u64;
                 self.pending_bytes = self.pending_bytes.saturating_add(bytes);
-                *self.kept.entry(stored.clone()).or_default() += charge;
-                if let Some(t) = shed.total.as_mut() {
-                    *t = t.saturating_add(charge);
-                }
-                self.pending.push(Pending {
+                self.add_live(id, &stored, charge, source.sleeve.as_deref());
+                self.pending.insert(
                     id,
-                    offset,
-                    source: stored.clone(),
-                    sleeve: source.sleeve.clone(),
-                    draft,
-                });
+                    Pending {
+                        id,
+                        offset,
+                        source: stored.clone(),
+                        sleeve: source.sleeve.clone(),
+                        draft,
+                    },
+                );
                 self.next_doc += 1;
-                if !self.fit(&stored, source.sleeve.as_deref(), id, charge, &mut shed) {
-                    self.undo_pending(id, &stored, charge, bytes, &mut shed.total);
+                if !self.fit(&stored, source.sleeve.as_deref(), id, charge, &mut dropped) {
+                    self.remove_pending(id);
+                    if self.next_doc == id.saturating_add(1) {
+                        self.next_doc = id;
+                    }
                     got.docs = got.docs.saturating_sub(1);
                 }
-                if shed.dropped && !rec.capped {
+                if dropped && !rec.capped {
                     rec.capped = true;
                     self.mark_capped(&stored, source.sleeve.as_deref());
                 }
@@ -523,11 +615,6 @@ impl Index {
             self.sources.insert(key.clone(), rec.clone());
             if self.pending_bytes >= flush_limit() {
                 self.commit()?;
-                shed.aged = None;
-                shed.sleeve = None;
-                if let Some(s) = source.sleeve.as_deref() {
-                    shed.total = Some(self.sleeve_kept(s));
-                }
             }
             if opened.start.offset >= end || opened.start.offset == start {
                 break;
@@ -543,18 +630,7 @@ impl Index {
     }
 
     fn sleeve_kept(&self, sleeve: &str) -> u64 {
-        let mut seen = std::collections::HashSet::new();
-        let mut n = 0u64;
-        for s in self.sources.values() {
-            if s.sleeve.as_deref() != Some(sleeve) {
-                continue;
-            }
-            let key = source_key(s.kind, &s.path, s.sleeve.as_deref());
-            if seen.insert(key.clone()) {
-                n = n.saturating_add(self.kept_of(&key));
-            }
-        }
-        n
+        self.sleeves.get(sleeve).map(|s| s.total).unwrap_or(0)
     }
 
     /// Drops older docs until `stored` is within its own budget and its sleeve is within
@@ -566,192 +642,144 @@ impl Index {
         sleeve: Option<&str>,
         keep: u64,
         need: u64,
-        shed: &mut Shed,
+        dropped: &mut bool,
     ) -> bool {
-        if need > self.budget || shed.total.is_some_and(|_| need > self.budget) {
+        if need > self.budget {
             return false;
         }
         while self.kept_of(stored) > self.budget {
-            if !self.drop_oldest_except(stored, keep, &mut shed.aged, &mut shed.total) {
+            if !self.drop_oldest_except(stored, keep) {
                 return false;
             }
-            shed.dropped = true;
+            *dropped = true;
         }
         if let Some(sleeve) = sleeve {
-            while shed.total.is_some_and(|n| n > self.budget) {
-                if !self.evict_oldest(sleeve, keep, &mut shed.sleeve, &mut shed.total) {
+            while self.sleeve_kept(sleeve) > self.budget {
+                if !self.evict_oldest(sleeve, keep) {
                     return false;
                 }
-                shed.dropped = true;
+                *dropped = true;
             }
         }
         true
     }
 
     /// Drops the oldest live doc of `sleeve` other than `keep`.
-    fn evict_oldest(
-        &mut self,
-        sleeve: &str,
-        keep: u64,
-        aged: &mut Option<SleeveWalk>,
-        sleeve_total: &mut Option<u64>,
-    ) -> bool {
-        if aged.is_none() {
-            *aged = Some(SleeveWalk {
-                docs: self.sleeve_docs(sleeve),
-                at: 0,
-            });
-        }
-        let walk = aged.as_mut().unwrap();
-        while walk.at < walk.docs.len() {
-            let doc = walk.docs[walk.at].clone();
-            walk.at += 1;
-            let (id, len, source) = (doc.id, doc.len, doc.source);
-            if id == keep {
-                continue;
-            }
-            if let Some(i) = self.pending.iter().position(|p| p.id == id) {
-                let p = self.pending.remove(i);
-                let bytes = queued_bytes(&p.draft, &p.source, p.sleeve.as_deref());
-                self.pending_bytes = self.pending_bytes.saturating_sub(bytes);
-                self.sub_kept(&p.source, bytes as u64);
-                sub_charge(sleeve_total, bytes as u64);
-                return true;
-            }
-            let Some(sym) = self.syms.get(&source) else {
-                continue;
-            };
-            let live = self.segs.iter().any(|s| {
-                s.docs
-                    .iter()
-                    .any(|m| m.id == id && m.source == sym && self.live(m))
-            });
-            if !live {
-                continue;
-            }
-            self.drop_source(source.clone(), id.saturating_add(1));
-            self.sub_kept(&source, len);
-            sub_charge(sleeve_total, len);
-            return true;
-        }
-        false
-    }
-
-    fn sleeve_docs(&self, sleeve: &str) -> Vec<SleeveDoc> {
-        let mut docs = Vec::new();
-        if let Some(sym) = self.syms.get(sleeve) {
-            for s in &self.segs {
-                for m in &s.docs {
-                    if m.sleeve == sym
-                        && self.live(m)
-                        && let Some(src) = self.syms.name(m.source)
-                    {
-                        docs.push(SleeveDoc {
-                            id: m.id,
-                            len: self.doc_charge(m),
-                            source: src.to_owned(),
-                        });
-                    }
-                }
-            }
-        }
-        for p in &self.pending {
-            if p.sleeve.as_deref() == Some(sleeve) {
-                docs.push(SleeveDoc {
-                    id: p.id,
-                    len: queued_bytes(&p.draft, &p.source, p.sleeve.as_deref()) as u64,
-                    source: p.source.clone(),
-                });
-            }
-        }
-        docs.sort_by_key(|d| d.id);
-        docs
-    }
-
-    fn drop_oldest_except(
-        &mut self,
-        stored: &str,
-        keep: u64,
-        aged: &mut Option<(Vec<(u64, u64)>, usize)>,
-        sleeve_total: &mut Option<u64>,
-    ) -> bool {
-        if aged.is_none() {
-            *aged = Some((self.aged_docs(stored), 0));
-        }
-        let (docs, at) = aged.as_mut().unwrap();
-        while *at < docs.len() {
-            let (id, len) = docs[*at];
-            *at += 1;
-            if id == keep || id < self.drops.get(stored).copied().unwrap_or(0) {
-                continue;
-            }
-            self.drop_source(stored.to_owned(), id.saturating_add(1));
-            self.sub_kept(stored, len);
-            sub_charge(sleeve_total, len);
-            return true;
-        }
-        let Some(i) = self
-            .pending
-            .iter()
-            .position(|p| p.source == stored && p.id != keep)
-        else {
+    fn evict_oldest(&mut self, sleeve: &str, keep: u64) -> bool {
+        let Some((id, source, pending)) = self.oldest_in_sleeve(sleeve, keep) else {
             return false;
         };
-        let p = self.pending.remove(i);
-        let bytes = queued_bytes(&p.draft, stored, p.sleeve.as_deref());
+        if pending {
+            self.remove_pending(id)
+        } else {
+            self.drop_source(source, id.saturating_add(1));
+            true
+        }
+    }
+
+    fn oldest_in_sleeve(&self, sleeve: &str, keep: u64) -> Option<(u64, String, bool)> {
+        let slot = self.sleeves.get(sleeve)?;
+        let mut it = slot.by_id.iter();
+        let (&first, first_loc) = it.next()?;
+        let (id, loc) = if first == keep {
+            it.next().map(|(&id, loc)| (id, loc))?
+        } else {
+            (first, first_loc)
+        };
+        Some((id, loc.source.clone(), loc.seg.is_none()))
+    }
+
+    /// Drops the oldest live doc of `stored` other than `keep`.
+    fn drop_oldest_except(&mut self, stored: &str, keep: u64) -> bool {
+        let Some(id) = self.oldest_in_source(stored, keep) else {
+            return false;
+        };
+        if self.pending.contains_key(&id) {
+            self.remove_pending(id)
+        } else {
+            self.drop_source(stored.to_owned(), id.saturating_add(1));
+            true
+        }
+    }
+
+    fn oldest_in_source(&self, stored: &str, keep: u64) -> Option<u64> {
+        let docs = self.by_source.get(stored)?;
+        let mut it = docs.by_id.keys();
+        let &id = it.next()?;
+        if id == keep {
+            it.next().copied()
+        } else {
+            Some(id)
+        }
+    }
+
+    fn add_live(&mut self, id: u64, source: &str, charge: u64, sleeve: Option<&str>) {
+        self.by_source
+            .entry(source.to_owned())
+            .or_default()
+            .by_id
+            .insert(id, charge);
+        *self.kept.entry(source.to_owned()).or_default() += charge;
+        let Some(sleeve) = sleeve else {
+            return;
+        };
+        let slot = self.sleeves.entry(sleeve.to_owned()).or_default();
+        slot.total = slot.total.saturating_add(charge);
+        slot.by_id.insert(
+            id,
+            Loc {
+                source: source.to_owned(),
+                charge,
+                seg: None,
+            },
+        );
+    }
+
+    fn unlink(&mut self, id: u64, source: &str, charge: u64, sleeve: Option<&str>) {
+        let empty = self.by_source.get_mut(source).is_some_and(|docs| {
+            docs.by_id.remove(&id);
+            docs.by_id.is_empty()
+        });
+        if empty {
+            self.by_source.remove(source);
+        }
+        self.sub_kept(source, charge);
+        let Some(sleeve) = sleeve else {
+            return;
+        };
+        let gone = if let Some(slot) = self.sleeves.get_mut(sleeve) {
+            if let Some(loc) = slot.by_id.remove(&id) {
+                slot.total = slot.total.saturating_sub(loc.charge);
+            }
+            slot.by_id.is_empty()
+        } else {
+            false
+        };
+        if gone {
+            self.sleeves.remove(sleeve);
+        }
+    }
+
+    /// Removes one pending doc and its charge. False when `id` is not pending.
+    fn remove_pending(&mut self, id: u64) -> bool {
+        let Some(p) = self.pending.remove(&id) else {
+            return false;
+        };
+        let bytes = queued_bytes(&p.draft, &p.source, p.sleeve.as_deref());
         self.pending_bytes = self.pending_bytes.saturating_sub(bytes);
-        self.sub_kept(stored, bytes as u64);
-        sub_charge(sleeve_total, bytes as u64);
+        self.unlink(id, &p.source, bytes as u64, p.sleeve.as_deref());
         true
     }
 
-    fn aged_docs(&self, stored: &str) -> Vec<(u64, u64)> {
-        let Some(sym) = self.syms.get(stored) else {
-            return Vec::new();
-        };
-        let mut docs = Vec::new();
-        for s in &self.segs {
-            for m in &s.docs {
-                if m.source == sym && self.live(m) {
-                    docs.push((m.id, self.doc_charge(m)));
-                }
-            }
-        }
-        docs.sort_by_key(|(id, _)| *id);
-        docs
-    }
-
-    fn undo_pending(
-        &mut self,
-        id: u64,
-        stored: &str,
-        charge: u64,
-        bytes: usize,
-        sleeve_total: &mut Option<u64>,
-    ) {
-        let Some(i) = self.pending.iter().position(|p| p.id == id) else {
-            return;
-        };
-        self.pending.remove(i);
-        self.pending_bytes = self.pending_bytes.saturating_sub(bytes);
-        self.sub_kept(stored, charge);
-        sub_charge(sleeve_total, charge);
-        if self.next_doc == id.saturating_add(1) {
-            self.next_doc = id;
-        }
-    }
-
     fn discard_pending(&mut self, stored: &str) {
-        let n = self.pending.len();
-        self.pending.retain(|p| p.source != stored);
-        if self.pending.len() == n {
-            return;
+        let ids: Vec<u64> = self
+            .by_source
+            .get(stored)
+            .map(|d| d.by_id.keys().copied().collect())
+            .unwrap_or_default();
+        for id in ids {
+            self.remove_pending(id);
         }
-        self.pending_bytes = self
-            .pending
-            .iter()
-            .map(|p| queued_bytes(&p.draft, &p.source, p.sleeve.as_deref()))
-            .sum();
     }
 
     fn sub_kept(&mut self, stored: &str, n: u64) {
@@ -813,7 +841,7 @@ impl Index {
         if !self.pending.is_empty() {
             let pending = std::mem::take(&mut self.pending);
             let docs: Vec<DocIn<'_>> = pending
-                .iter()
+                .values()
                 .map(|p| DocIn {
                     id: p.id,
                     time_ms: p.draft.time_ms,
@@ -849,6 +877,9 @@ impl Index {
             self.write_manifest()?;
         }
         self.dirty = false;
+        // Pending docs are in a segment now. Rebuild before reclaim so a failed
+        // reclaim does not leave them indexed as pending.
+        self.recount();
         self.reclaim()?;
         self.recount();
         self.merge()?;
@@ -1234,15 +1265,66 @@ impl Index {
     /// finds the total under a raised budget. Readers of the hub copy this set out so
     /// `doctor` does not take the index lock.
     pub fn capped_sleeves(&self) -> Vec<String> {
-        let mut seen = std::collections::BTreeSet::new();
+        self.capped_ids.iter().cloned().collect()
+    }
+
+    fn bind_members(&mut self) {
+        self.members.clear();
+        let pairs: Vec<(String, Option<String>)> = self
+            .sources
+            .iter()
+            .map(|(k, s)| (k.clone(), s.sleeve.clone()))
+            .collect();
+        for (key, sleeve) in pairs {
+            self.bind_source(&key, sleeve.as_deref());
+        }
+    }
+
+    fn bind_source(&mut self, key: &str, sleeve: Option<&str>) {
+        let Some(sleeve) = sleeve else {
+            return;
+        };
+        self.members
+            .entry(sleeve.to_owned())
+            .or_default()
+            .insert(key.to_owned());
+    }
+
+    fn unbind_source(&mut self, key: &str, sleeve: Option<&str>) {
+        let Some(sleeve) = sleeve else {
+            return;
+        };
+        let empty = self.members.get_mut(sleeve).is_some_and(|keys| {
+            keys.remove(key);
+            keys.is_empty()
+        });
+        if empty {
+            self.members.remove(sleeve);
+        }
+        self.refresh_capped_id(sleeve);
+    }
+
+    fn refresh_capped_id(&mut self, sleeve: &str) {
+        let on = self.members.get(sleeve).is_some_and(|keys| {
+            keys.iter()
+                .any(|k| self.sources.get(k).is_some_and(|s| s.capped))
+        });
+        if on {
+            self.capped_ids.insert(sleeve.to_owned());
+        } else {
+            self.capped_ids.remove(sleeve);
+        }
+    }
+
+    fn rebuild_capped_ids(&mut self) {
+        self.capped_ids.clear();
         for s in self.sources.values() {
             if s.capped
                 && let Some(sleeve) = &s.sleeve
             {
-                seen.insert(sleeve.clone());
+                self.capped_ids.insert(sleeve.clone());
             }
         }
-        seen.into_iter().collect()
     }
 
     /// A manifest with no recorded budget counts as not-yet-raised: flags clear only where
@@ -1275,12 +1357,20 @@ impl Index {
             .collect();
         let mut changed = false;
         for sleeve in &clear_sleeves {
-            for s in self.sources.values_mut() {
-                if s.sleeve.as_deref() == Some(sleeve.as_str()) && s.capped {
+            let keys: Vec<String> = self
+                .members
+                .get(sleeve)
+                .map(|keys| keys.iter().cloned().collect())
+                .unwrap_or_default();
+            for key in keys {
+                if let Some(s) = self.sources.get_mut(&key)
+                    && s.capped
+                {
                     s.capped = false;
                     changed = true;
                 }
             }
+            self.capped_ids.remove(sleeve);
         }
         for key in &clear_sources {
             if let Some(s) = self.sources.get_mut(key)
@@ -1298,12 +1388,21 @@ impl Index {
     fn mark_capped(&mut self, stored: &str, sleeve: Option<&str>) {
         let mut changed = false;
         if let Some(sleeve) = sleeve {
-            for s in self.sources.values_mut() {
-                if s.sleeve.as_deref() == Some(sleeve) && !s.capped {
+            self.bind_source(stored, Some(sleeve));
+            let keys: Vec<String> = self
+                .members
+                .get(sleeve)
+                .map(|keys| keys.iter().cloned().collect())
+                .unwrap_or_default();
+            for key in keys {
+                if let Some(s) = self.sources.get_mut(&key)
+                    && !s.capped
+                {
                     s.capped = true;
                     changed = true;
                 }
             }
+            self.capped_ids.insert(sleeve.to_owned());
         } else if let Some(s) = self.sources.get_mut(stored)
             && !s.capped
         {
@@ -1317,10 +1416,7 @@ impl Index {
 
     fn is_capped(&self, stored: &str, sleeve: Option<&str>) -> bool {
         match sleeve {
-            Some(sleeve) => self
-                .sources
-                .values()
-                .any(|s| s.sleeve.as_deref() == Some(sleeve) && s.capped),
+            Some(sleeve) => self.capped_ids.contains(sleeve),
             None => self.sources.get(stored).is_some_and(|s| s.capped),
         }
     }
@@ -1385,33 +1481,6 @@ fn inject_failure(phase: &str) -> io::Result<()> {
     }
     let _ = phase;
     Ok(())
-}
-
-#[derive(Clone)]
-struct SleeveDoc {
-    id: u64,
-    len: u64,
-    source: String,
-}
-
-struct SleeveWalk {
-    docs: Vec<SleeveDoc>,
-    at: usize,
-}
-
-/// Oldest-doc cursors and the sleeve total for one ingest call.
-struct Shed {
-    aged: Option<(Vec<(u64, u64)>, usize)>,
-    sleeve: Option<SleeveWalk>,
-    total: Option<u64>,
-    /// This call dropped a doc to stay inside the budget.
-    dropped: bool,
-}
-
-fn sub_charge(total: &mut Option<u64>, n: u64) {
-    if let Some(t) = total.as_mut() {
-        *t = t.saturating_sub(n);
-    }
 }
 
 fn queued_bytes(draft: &Draft, stored: &str, sleeve: Option<&str>) -> usize {
