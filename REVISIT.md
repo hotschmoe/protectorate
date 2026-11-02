@@ -723,9 +723,10 @@ Each entry: where, what was done, what right looks like.
   syncs `current` back to the confirmed release, restores the earlier `previous`, then records
   the outcome. Debug-only `PT_TEST_CRASH_AT` exercises selected crash points. Right: fine.
 - **Hub update snapshots require the core's current single-segment journal** (`pt-journal`): the
-  core does not yet write journal snapshots or rotate segments. An update refuses a journal with
-  multiple segments or a journal snapshot instead of restoring only part of it. Right: snapshot
-  and restore the complete directory atomically when the core gains journal rotation.
+  core does not yet write journal snapshots or rotate segments. An update still refuses a journal
+  that already has more than one segment. Rollback replaces the whole journal directory, so a
+  trial release that rotates later is swapped out wholesale rather than segment by segment.
+  Right: snapshot a rotating journal the same way once the core writes one.
 - **Starting a just-written binary can fail with ETXTBSY** (`pt-update`, the node supervisor):
   on Linux a file still open for writing anywhere, including a descriptor a concurrent fork
   inherited for a moment before exec, cannot be executed. The update e2e hit it once under load
