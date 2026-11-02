@@ -67,7 +67,8 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   sleeve start <sleeve> [--harness H] [--provider P] [--model M]
   sleeve resleeve <sleeve> --harness H [--provider P] [--model M]
   sleeve transcript <sleeve> [--from SEQ] [--limit N]
-  sleeve wait <sleeve> [--until idle|done|blocked|parked|ended|report] [--timeout SECS]
+  sleeve wait <sleeve> [--until idle|done|blocked|parked|ended|report]
+        [--after-seq N] [--timeout SECS]
   approval list [--pending] | approval decide <id> allow|allow-session|deny
   node ls | node show <node> | node add [REGISTRATION] | node approve <auth_id>
         [--name NAME] [--fingerprint FP]

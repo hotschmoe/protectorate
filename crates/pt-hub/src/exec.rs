@@ -1081,9 +1081,17 @@ impl SleeveExec {
         if Hub::envoy_id(&view.state) == Some(self.id) {
             self.note_envoy_origin(view, p.request_id, &from, p.steer.is_some());
         }
+        let noted = self.mail_note(view, p.request_id, p.steer.is_some());
+        let owned;
+        let text = if let Some(note) = &noted {
+            owned = format!("{note}{}", p.text);
+            owned.as_str()
+        } else {
+            p.text
+        };
         let sent = match p.steer {
-            Some(turn) => session.steer(p.request_id, &from, p.text, turn),
-            None => session.send_user(p.request_id, &from, p.text),
+            Some(turn) => session.steer(p.request_id, &from, text, turn),
+            None => session.send_user(p.request_id, &from, text),
         };
         match sent {
             Ok(()) => {}
@@ -1100,6 +1108,31 @@ impl SleeveExec {
             Ack::Confirmed { .. } | Ack::Rejected { .. } => Outcome::Reported,
             Ack::Pending => Outcome::Lost,
         }
+    }
+
+    /// The first prompt of a new sleeve names the mail variables. Envoy already has them in
+    /// its instructions, and a resleeve brief repeats them.
+    fn mail_note(&self, view: &View, request_id: &str, steer: bool) -> Option<String> {
+        if steer || request_id.starts_with("resleeve:") {
+            return None;
+        }
+        let s = view.state.sleeve(self.id)?;
+        if s.turned || Hub::envoy_id(&view.state) == Some(self.id) {
+            return None;
+        }
+        let envoy = crate::hub::ENVOY;
+        let parent = s
+            .parent
+            .and_then(|p| view.state.sleeve(p))
+            .map(|p| p.name.as_str());
+        Some(match parent {
+            Some(name) => format!(
+                "Mail your parent ({name}, $PROTECTORATE_PARENT) or Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`).\n\n"
+            ),
+            None => format!(
+                "Mail Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`).\n\n"
+            ),
+        })
     }
 
     /// D9: records who started Envoy's next turn before its prompt is written. A prompt starts

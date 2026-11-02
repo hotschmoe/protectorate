@@ -4536,6 +4536,7 @@ final class Sleeve {
     this.queued = 0,
     this.budgetUsed,
     this.budgetLimit,
+    this.d9 = false,
   });
 
   factory Sleeve.fromJson(Object? json) {
@@ -4569,6 +4570,7 @@ final class Sleeve {
         j['budget_limit'],
         (e0) => _int(e0, 'Sleeve.budget_limit'),
       ),
+      d9: _or(j['d9'], false, (e0) => _bool(e0, 'Sleeve.d9')),
     );
   }
 
@@ -4608,6 +4610,10 @@ final class Sleeve {
 
   final int? budgetLimit;
 
+  /// Permanent for this sleeve id. A D9-origin turn spawned it or sent to it, or a
+  /// marked sleeve sent to it.
+  final bool d9;
+
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
@@ -4624,6 +4630,7 @@ final class Sleeve {
     'queued': queued,
     if (budgetUsed case final v?) 'budget_used': v,
     if (budgetLimit case final v?) 'budget_limit': v,
+    'd9': d9,
   };
 }
 
@@ -5181,6 +5188,7 @@ final class WaitRequest {
     required this.sleeveId,
     required this.until,
     this.timeoutMs = 60000,
+    this.afterSeq,
   });
 
   factory WaitRequest.fromJson(Object? json) {
@@ -5193,6 +5201,7 @@ final class WaitRequest {
         60000,
         (e0) => _int(e0, 'WaitRequest.timeout_ms'),
       ),
+      afterSeq: _opt(j['after_seq'], (e0) => _int(e0, 'WaitRequest.after_seq')),
     );
   }
 
@@ -5203,21 +5212,27 @@ final class WaitRequest {
   /// The hub caps it.
   final int timeoutMs;
 
+  /// `until=report` only. Count mail with a seq above this. Absent uses the waiter's
+  /// newest message to the sleeve, or every past report when the waiter has sent none.
+  final int? afterSeq;
+
   Map<String, Object?> toJson() => {
     'sleeve_id': sleeveId,
     'until': until.toJson(),
     'timeout_ms': timeoutMs,
+    if (afterSeq case final v?) 'after_seq': v,
   };
 }
 
 final class WaitResult {
-  const WaitResult({required this.reached, required this.sleeve});
+  const WaitResult({required this.reached, required this.sleeve, this.seq});
 
   factory WaitResult.fromJson(Object? json) {
     final j = _object(json, 'WaitResult');
     return WaitResult(
       reached: _bool(j['reached'], 'WaitResult.reached'),
       sleeve: Sleeve.fromJson(j['sleeve']),
+      seq: _opt(j['seq'], (e0) => _int(e0, 'WaitResult.seq')),
     );
   }
 
@@ -5226,9 +5241,13 @@ final class WaitResult {
 
   final Sleeve sleeve;
 
+  /// The newest report seq that satisfied `until=report`. Absent otherwise.
+  final int? seq;
+
   Map<String, Object?> toJson() => {
     'reached': reached,
     'sleeve': sleeve.toJson(),
+    if (seq case final v?) 'seq': v,
   };
 }
 
@@ -5243,7 +5262,7 @@ enum WaitUntil {
   /// Waiting on an approval.
   blocked('blocked'),
 
-  /// The sleeve mailed its parent or Envoy.
+  /// The sleeve mailed its parent or Envoy since the cursor.
   report('report'),
 
   /// The incarnation ended.

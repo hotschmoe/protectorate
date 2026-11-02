@@ -461,6 +461,8 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         r.provider.as_deref().unwrap_or(""),
         r.model.as_deref().unwrap_or(""),
     );
+    // Before the gate: an approval wait can outlive the turn that made this spawn count.
+    let d9 = marks_d9(hub, c.who);
     rule::gate(hub, c.who, Guarded::Spawn(&r.name))?;
     let spec = SpawnSpec {
         request_id: new_id("spawn:")?,
@@ -476,7 +478,7 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         resleeve_to: targets(hub, &r.resleeve_to),
         budget: r.budget,
         disk_limit: None,
-        d9: marks_d9(hub, c.who),
+        d9,
     };
     let id = match command(hub, EventKind::Spawn(spec))? {
         Reply::Spawned(id) => id,
@@ -491,7 +493,7 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
                 from: c.who.party(),
                 text: prefix(&view.state, c.who, "", &text),
                 mode: SendMode::Queue,
-                d9: marks_d9(hub, c.who),
+                d9,
             },
         )?;
     }
@@ -551,18 +553,21 @@ fn send_message(c: &Ctx<'_>, r: api::SendMessageRequest) -> Result<api::Sent> {
         return Err(err(ErrorCode::Invalid, "text is required"));
     }
     let request_id = new_request(c, "")?;
+    let from = c.who.party();
+    let sender_marked =
+        matches!(from, Party::Sleeve(id) if view.state.sleeve(id).is_some_and(|s| s.d9));
     command(
         c.hub,
         EventKind::Send {
             to: id,
             request_id: request_id.clone(),
-            from: c.who.party(),
+            from,
             text: prefix(&view.state, c.who, "", &r.text),
             mode: match r.delivery {
                 api::Delivery::Queue => SendMode::Queue,
                 api::Delivery::Steer => SendMode::Steer,
             },
-            d9: marks_d9(c.hub, c.who),
+            d9: marks_d9(c.hub, c.who) || sender_marked,
         },
     )?;
     Ok(api::Sent { request_id })
@@ -1497,13 +1502,18 @@ fn report_watermark(state: &State, waited: SleeveId, waiter: Party) -> Option<u6
     })
 }
 
-/// Upward mail from `waited` that is newer than the waiter's last message to it.
+/// The newest upward report from `waited` with a seq above the cursor.
+/// `after` replaces the default, which is the waiter's newest message to `waited`
+/// (or every past report when the waiter has sent none).
 /// A parent counts only mail in its own mailbox. Anyone else also counts mail to Envoy.
-fn upward_since(state: &State, waited: SleeveId, waiter: Party) -> usize {
-    let Some(s) = state.sleeve(waited) else {
-        return 0;
-    };
-    let watermark = report_watermark(state, waited, waiter);
+fn upward_report(
+    state: &State,
+    waited: SleeveId,
+    waiter: Party,
+    after: Option<u64>,
+) -> Option<u64> {
+    let s = state.sleeve(waited)?;
+    let floor = after.or_else(|| report_watermark(state, waited, waiter));
     let parent_only = matches!(waiter, Party::Sleeve(me) if s.parent == Some(me));
     let mut dests = Vec::new();
     if let Some(p) = s.parent {
@@ -1515,18 +1525,18 @@ fn upward_since(state: &State, waited: SleeveId, waiter: Party) -> usize {
     {
         dests.push(e);
     }
-    let mut n = 0;
+    let mut best = None;
     for d in dests {
         let Some(dest) = state.sleeve(d) else {
             continue;
         };
-        n += dest
-            .messages
-            .values()
-            .filter(|m| m.from == Party::Sleeve(waited) && watermark.is_none_or(|w| m.seq > w))
-            .count();
+        for m in dest.messages.values() {
+            if m.from == Party::Sleeve(waited) && floor.is_none_or(|w| m.seq > w) {
+                best = Some(best.map_or(m.seq, |b: u64| b.max(m.seq)));
+            }
+        }
     }
-    n
+    best
 }
 
 fn wait(c: &Ctx<'_>, r: api::WaitRequest) -> Result<api::WaitResult> {
@@ -1538,22 +1548,24 @@ fn wait(c: &Ctx<'_>, r: api::WaitRequest) -> Result<api::WaitResult> {
             || resolved.is_some_and(|id| Hub::envoy_id(&view.state) == Some(id))
         {
             return Err(err(
-                ErrorCode::Conflict,
-                "Envoy does not send mail; wait for a sleeve",
+                ErrorCode::Invalid,
+                "Envoy never sends as a sleeve; wait for a sleeve",
             ));
         }
         let id = target_sleeve(c, &view, &r.sleeve_id)?;
         let waiter = c.who.party();
+        let after = r.after_seq;
         let got = wait_for(c.hub, deadline, |v| {
-            if upward_since(&v.state, id, waiter) > 0 {
-                return Some(true);
+            if let Some(seq) = upward_report(&v.state, id, waiter, after) {
+                return Some(Some(seq));
             }
             let s = v.state.sleeve(id)?;
-            matches!(s.life, Life::Stopped | Life::Removed | Life::Parked(_)).then_some(false)
+            matches!(s.life, Life::Stopped | Life::Removed | Life::Parked(_)).then_some(None)
         });
         return Ok(api::WaitResult {
-            reached: got == Some(true),
+            reached: got.as_ref().is_some_and(Option::is_some),
             sleeve: sleeve_view(c.hub, id)?,
+            seq: got.flatten(),
         });
     }
     let id = target_sleeve(c, &c.hub.view(), &r.sleeve_id)?;
@@ -1568,6 +1580,7 @@ fn wait(c: &Ctx<'_>, r: api::WaitRequest) -> Result<api::WaitResult> {
     Ok(api::WaitResult {
         reached: got == Some(true),
         sleeve: sleeve_view(c.hub, id)?,
+        seq: None,
     })
 }
 

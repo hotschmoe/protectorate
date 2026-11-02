@@ -212,6 +212,7 @@ pub fn sleeve(hub: &Hub, view: &View, s: &Sleeve) -> api::Sleeve {
         queued: s.queue.len() as u64,
         budget_used: s.budget.map(|_| s.used),
         budget_limit: s.budget,
+        d9: s.d9,
     }
 }
 

@@ -299,6 +299,9 @@ api_records! {
         /// Tokens.
         pub budget_used: Option<u64>,
         pub budget_limit: Option<u64>,
+        /// Permanent for this sleeve id. A D9-origin turn spawned it or sent to it, or a
+        /// marked sleeve sent to it.
+        pub d9: bool = false,
     }
 
     /// Token counts the harness reported for one turn.

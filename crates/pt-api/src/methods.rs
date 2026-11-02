@@ -20,7 +20,7 @@ api_enums! {
         Done = "done",
         /// Waiting on an approval.
         Blocked = "blocked",
-        /// The sleeve mailed its parent or Envoy.
+        /// The sleeve mailed its parent or Envoy since the cursor.
         Report = "report",
         /// The incarnation ended.
         Ended = "ended",
@@ -390,12 +390,17 @@ api_records! {
         pub until: WaitUntil,
         /// The hub caps it.
         pub timeout_ms: u64 = 60_000,
+        /// `until=report` only. Count mail with a seq above this. Absent uses the waiter's
+        /// newest message to the sleeve, or every past report when the waiter has sent none.
+        pub after_seq: Option<u64>,
     }
 
     pub struct WaitResult {
         /// False when the timeout came first.
         pub reached: bool,
         pub sleeve: Sleeve,
+        /// The newest report seq that satisfied `until=report`. Absent otherwise.
+        pub seq: Option<u64>,
     }
 
     /// The envoy-only capability for vendor general agents (D9).
