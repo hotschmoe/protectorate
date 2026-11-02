@@ -18,7 +18,7 @@ capability). `--json` prints the API's answer; `protectorate --help` lists every
 | `sleeve spawn <name> --path <dir> --harness H [--model M] [--message TEXT]` | a root sleeve on a directory (one root per directory) |
 | `sleeve spawn <name> --parent <root> --harness H [--readonly]` | a child on its own worktree and branch `pt/<name>` (or a read-only view) |
 | `sleeve send <s> <text>` | queue a message (its next prompt); `--steer` adds it to the running turn. A sleeve may send to itself, its children, its parent, or `envoy` |
-| `sleeve wait <s> --until idle --timeout <secs>` | block until it settles (`done`, `blocked`, `parked`, `ended` too). `--until report` returns when that sleeve mails its parent or you after the wait started |
+| `sleeve wait <s> --until idle --timeout <secs>` | block until it settles (`done`, `blocked`, `parked`, `ended` too). `--until report` returns when that sleeve has mailed since your most recent message to it. Your wait counts mail to you or to that sleeve's parent. A parent's wait counts only mail to that parent. Waiting on yourself for a report is refused |
 | `sleeve transcript <s> [--from SEQ]` | its chat: prompts, replies, tool calls |
 | `sleeve interrupt|stop|rm <s>` | end the turn; stop it and its children; remove it |
 | `sleeve start <s>` / `sleeve resleeve <s> --harness H` | start a stopped or parked sleeve; move a settled one |
@@ -59,13 +59,21 @@ A message that starts with `[from sleeve <name>]` is mail from one of the sleeve
 
 A sleeve may mail its parent and you, and nothing else (not a sibling, not another tree, not the
 owner's methods). It runs `protectorate sleeve send <parent> <text>` or
-`protectorate sleeve send envoy <text>`. Its parent's name is `$PROTECTORATE_PARENT` when it has
-one. Tell a sleeve it can ask you that way for help or for a design recommendation.
+`protectorate sleeve send envoy <text>`. A newly spawned sleeve is told how: its parent's name is
+`$PROTECTORATE_PARENT` when it has one, your name is `$PROTECTORATE_ENVOY`, and
+`$PROTECTORATE_MAIL` is the command. Tell a sleeve it can ask you that way for help or for a
+design recommendation.
 
 The message is an ordinary send: it is queued for your next turn (or steered into the running
-one) and arrives marked `[from sleeve <name>]`. One sleeve can land at most 8 messages on you
-per 10 minutes; further mail is refused until that window moves, so it cannot keep starting your
-turns. Mail to a parent is not counted. Sleeve mail does not by itself put the turn under the D9
-rule above. D9 applies when a vendor agent started the turn.
+one) and arrives marked `[from sleeve <name>]`. One tree can land at most 8 messages on you per
+10 minutes, counted on that tree's root. Further mail is refused, and the refusal says when the
+window reopens, so a tree cannot keep starting your turns. Upward mail to a parent who is not
+you has the same bound per sender. When the parent is you, that mail spends the tree's budget.
 
-`sleeve wait <s> --until report` returns when `s` mails its parent or you after the wait started.
+A sleeve you spawned or sent to during a turn that already had D9 origin is marked, and so are
+its children. Mail from a marked sleeve starts your turn under the D9 rule above. Mail from an
+unmarked sleeve does not.
+
+`sleeve wait <s> --until report` returns when `s` has mailed since your most recent message to
+it. Your wait counts mail to you or to that sleeve's parent. A parent's wait counts only mail to
+that parent. Waiting on yourself for a report is refused.

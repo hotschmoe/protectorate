@@ -79,8 +79,8 @@ CLI on the hub machine (section 3.1).
         enrolling or approving nodes, and deciding approvals are owner-only methods;
       - credentials and keys (`~/.ssh`, other harnesses' logins, hub tokens, headscale keys)
         stay masked from sleeves;
-      - D9 still applies: in a turn a vendor agent started, Envoy's removals, mass spawns and
-        node jobs wait for the owner. This is the one remaining approval.
+      - D9 still applies: in a turn a vendor agent or a D9-marked sleeve started, Envoy's
+        removals, mass spawns and node jobs wait for the owner. This is the one remaining approval.
 
 ## 3. Layers
 
@@ -109,11 +109,19 @@ CLI on the hub machine (section 3.1).
   `$PROTECTORATE_PARENT`). `envoy send` is the vendor-agent door and refuses a sleeve. Mail is an
   ordinary `Send` (queue or steer; a pane gets `MailDeliver`) with the same marking as any sleeve
   message: the text starts with `[from sleeve <name>]` and the request id is `mail:<id>:...`.
-  One sleeve may land at most 8 messages on Envoy in 10 minutes. The core journals those times on
-  the sender and refuses the rest until the window moves, so one sleeve cannot start Envoy turns
-  without a bound. Mail to a parent is not counted. A sleeve's message does not start a D9 turn.
-  D9 still applies only when a vendor agent started Envoy's turn. `Wait --until report` returns
-  when the waited-on sleeve sends to its parent or to Envoy after the wait started.
+  One tree may land at most 8 messages on Envoy in 10 minutes, counted on the tree's root. Upward
+  mail to a parent who is not Envoy has the same bound per sender. Mail to Envoy spends only the
+  tree's budget. The core journals the events and replay rebuilds the times. A refusal says when
+  the window reopens. A turn with D9 origin that spawns a sleeve or sends to one marks that
+  sleeve. The mark is journaled and inherited by its children. Mail from a marked sleeve starts
+  an Envoy turn with D9 origin, so the same removals, node jobs and mass spawns wait for the
+  owner. Mail from an unmarked sleeve does not. `Wait --until report` returns when the waited-on
+  sleeve has mailed after the waiter's most recent message to it. The owner's or Envoy's wait
+  counts mail to the parent or to Envoy. A parent's wait counts only mail to that parent. A wait
+  on Envoy is refused, because Envoy does not send as a sleeve. A
+  newly spawned sleeve learns how to mail from `$PROTECTORATE_PARENT` (when it has one),
+  `$PROTECTORATE_ENVOY` and `$PROTECTORATE_MAIL`, and a resleeve repeats it in the continuation
+  brief.
 - The web build is embedded in the hub binary and served from the same origin.
 
 ### 3.2 Network
@@ -165,8 +173,9 @@ One Linux machine, one `protectorate` process plus its headscale and member chil
 - **Events and waits:** `Wait(until idle|done|blocked|report|ended|parked)` reads the state channel.
 - **Quota:** read-only readers per subscription, which feed dispatch.
 - **Mail:** delivery, re-delivery and escalation. Who may send is in section 3.1. `Wait --until
-  report` is the upward edge: the waited-on sleeve mailed its parent or Envoy after the wait
-  started.
+  report` is the upward edge: the waited-on sleeve mailed after the waiter's most recent message
+  to it. The owner's or Envoy's wait counts mail to the parent or to Envoy. A parent's wait
+  counts only mail to that parent. A wait on Envoy is refused.
 - **Approvals:** routing and timeouts.
 - **History:** an index over native session logs (section 3.7).
 - **Snapshots and backups**, and **audit**.

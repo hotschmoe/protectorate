@@ -33,8 +33,9 @@ pt_json::string_enum! {
     pub enum Scope {
         /// The owner token (CLI) and `pd1.` device tokens (apps).
         Owner = "owner",
-        /// Also a sleeve's `pc1.` capability, for its own sleeve and its children. Envoy's
-        /// capability reaches every sleeve, since Envoy drives them.
+        /// Also a sleeve's `pc1.` capability, for its own sleeve and its children. Mail also
+        /// reaches its parent and Envoy. Envoy's capability reaches every sleeve, since Envoy
+        /// drives them.
         Sleeve = "sleeve",
         /// Also the envoy-only capability of vendor general agents (D9).
         EnvoyOnly = "envoy_only",
