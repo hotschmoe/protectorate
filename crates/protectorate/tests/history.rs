@@ -223,8 +223,6 @@ fn history_search_scope_and_rebuild() {
 #[test]
 #[cfg(debug_assertions)]
 fn failed_history_commit_retries_without_new_transcript_data() {
-    use std::io::Write;
-
     let arm = unique("history-arm");
     let hub = Hub::start_with(
         "history-retry",
@@ -245,7 +243,10 @@ fn failed_history_commit_retries_without_new_transcript_data() {
         .append(true)
         .open(&transcript)
         .unwrap();
-    writeln!(file, "{{\"seq\":10000,\"g\":1,\"time_ms\":1000,\"entry\":{{\"type\":\"user_message\",\"request_id\":\"fixture\",\"from\":\"owner\",\"text\":\"historyretryquartz\"}}}}").unwrap();
+    write_transcript_line(
+        &mut file,
+        r#"{"seq":10000,"g":1,"time_ms":1000,"entry":{"type":"user_message","request_id":"fixture","from":"owner","text":"historyretryquartz"}}"#,
+    );
     drop(file);
     eventually(
         "the injected commit failure",
@@ -264,6 +265,49 @@ fn failed_history_commit_retries_without_new_transcript_data() {
         len,
         "retry did not need new transcript bytes"
     );
+    let index = hub.home.join("history");
+    eventually(
+        "every history segment named by the manifest",
+        Duration::from_secs(15),
+        || referenced_segments(&index).then_some(()),
+    );
+}
+
+/// Every `seg-*` file is named by the manifest, and no partial rewrite is left behind.
+fn referenced_segments(index: &std::path::Path) -> bool {
+    let Ok(manifest) = fs::read_to_string(index.join("manifest")) else {
+        return false;
+    };
+    let Ok(entries) = fs::read_dir(index) else {
+        return false;
+    };
+    let mut segs = 0;
+    for ent in entries {
+        let Ok(ent) = ent else {
+            return false;
+        };
+        let name = ent.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.starts_with("seg-") {
+            continue;
+        }
+        if name.ends_with(".tmp") || !manifest.contains(name) {
+            return false;
+        }
+        segs += 1;
+    }
+    segs > 0
+}
+
+fn write_transcript_line(file: &mut fs::File, line: &str) {
+    use std::io::Write;
+    let mut buf = Vec::with_capacity(line.len() + 1);
+    buf.extend_from_slice(line.as_bytes());
+    buf.push(b'\n');
+    let n = file.write(&buf).expect("write a transcript line");
+    assert_eq!(n, buf.len(), "a transcript line must fit in one write");
 }
 
 /// Indexed user text is clipped to 32 KiB, so the fixture is many lines.
@@ -330,12 +374,11 @@ fn history_budget_in_config_caps_the_sleeve() {
         .append(true)
         .open(&transcript)
         .unwrap();
-    use std::io::Write;
-    writeln!(file, "{}", user_line(10_000, &oldest)).unwrap();
+    write_transcript_line(&mut file, &user_line(10_000, &oldest));
     for seq in 1..n - 1 {
-        writeln!(file, "{}", user_line(10_000 + seq as u64, &fill)).unwrap();
+        write_transcript_line(&mut file, &user_line(10_000 + seq as u64, &fill));
     }
-    writeln!(file, "{}", user_line(10_000 + n as u64, &newest)).unwrap();
+    write_transcript_line(&mut file, &user_line(10_000 + n as u64, &newest));
     drop(file);
     found(&hub, "quartznewestline", 20);
     let gone = hits(

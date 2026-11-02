@@ -200,36 +200,7 @@ fn commit_retries_preserve_documents_and_cursors() {
             "{stdout}"
         );
         assert!(stdout.contains("rebuild=identical"), "{stdout}");
-        assert_referenced_segments(&dir.join("index/a"));
-        assert_referenced_segments(&dir.join("index/b"));
     }
-}
-
-/// Every `seg-*` file is named by the manifest, and no partial rewrite is left behind.
-fn assert_referenced_segments(index: &Path) {
-    let manifest = fs::read_to_string(index.join("manifest")).expect("manifest");
-    let mut segs = 0;
-    for ent in fs::read_dir(index).unwrap() {
-        let name = ent.unwrap().file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        if !name.starts_with("seg-") {
-            continue;
-        }
-        assert!(
-            !name.ends_with(".tmp"),
-            "leftover {name} in {}",
-            index.display()
-        );
-        assert!(
-            manifest.contains(name),
-            "{name} is not in the manifest of {}",
-            index.display()
-        );
-        segs += 1;
-    }
-    assert!(segs > 0, "no segment files in {}", index.display());
 }
 
 #[test]
