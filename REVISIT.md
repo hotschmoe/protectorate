@@ -197,6 +197,10 @@ Each entry: where, what was done, what right looks like.
   is unverified, and the driver turns any unseen `turn/completed` into a settle
   (`on_turn_completed`, around lines 611-680), which would drop every continuation silently.
   Right: one real Codex resume after a mid-turn kill.
+- **Envoy's D9 spawn count lives in memory** (`pt-hub`, hub.rs `EnvoyTurn`): an Envoy crash
+  keeps the count for the continued turn, but a hub restart mid-turn starts it at zero, so an
+  agent turn can get a second spawn allowance across a hub restart. Right: journal the count
+  with the turn origin if hub restarts mid-turn become common.
 - **No driver-side handshake timeout** (`pt-drivers`): a Codex or Grok handshake that never
   replies leaves the session without `session_info`; the hub's G5 (Booting 60 s) covers it.
   Explicit compaction is not exposed either (native only, SPEC 3.7). Right: `compact()` per
