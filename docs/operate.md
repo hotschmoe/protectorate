@@ -189,7 +189,9 @@ under the usable minimum it counts as exhausted, and with spare left the fallbac
 choose it. A candidate with no reading (`unknown`: no login, or not read yet) can still be
 selected. A failed reading (`error`) cannot; it parks the same way an exhausted window does. A
 window whose reset time has already passed still blocks while it is over that line; a reset at
-or before the epoch is ignored and the percent still counts. A local
+or before the epoch is ignored and the percent still counts. A model-scoped Claude window
+(the weekly Sonnet or Opus cap, shown as `wk <model>`) is displayed and does not by itself
+block a Claude resleeve. A local
 endpoint may use HTTPS or loopback HTTP; other HTTP
 endpoints are reported as misconfigured and are not contacted.
 

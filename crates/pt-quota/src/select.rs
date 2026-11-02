@@ -19,6 +19,13 @@ fn reset_at(w: &QuotaWindow) -> Option<u64> {
     w.resets_at_ms.map(|r| r.0).filter(|t| *t > 0)
 }
 
+/// Account windows gate dispatch. Claude's model-scoped windows (`wk sonnet`, `wk opus`,
+/// `wk <name>`) stay on the row for the UI and do not.
+fn gates_dispatch(label: &str) -> bool {
+    let mut parts = label.split_whitespace();
+    !matches!((parts.next(), parts.next()), (Some("wk"), Some(_)))
+}
+
 /// The harnesses that draw on a metered subscription, in tie-break order.
 const SUBSCRIBED: [(Harness, Subscription); 3] = [
     (Harness::Claude, Subscription::Claude),
@@ -102,6 +109,9 @@ fn score(q: &Quota, now_ms: u64) -> Option<Scored> {
     }
     let mut cands = Vec::new();
     for w in &q.windows {
+        if !gates_dispatch(&w.label) {
+            continue;
+        }
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
             continue;
         };
@@ -143,6 +153,9 @@ fn score(q: &Quota, now_ms: u64) -> Option<Scored> {
 /// The vendor can be enforcing the old counter for a moment after the stamp.
 fn past_blocks(q: &Quota, now_ms: u64, min: f64) -> bool {
     q.windows.iter().any(|w| {
+        if !gates_dispatch(&w.label) {
+            return false;
+        }
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
             return false;
         };

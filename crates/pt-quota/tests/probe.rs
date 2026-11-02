@@ -708,3 +708,54 @@ fn a_passed_reset_still_blocks_an_exhausted_window() {
         "{room}"
     );
 }
+
+/// A weekly Sonnet cap is shown on the row and does not exhaust Claude when the account
+/// window still has room. The local model is not chosen ahead of that account window.
+#[test]
+fn a_model_scoped_window_does_not_exhaust_the_subscription() {
+    let home = scratch(&format!("scoped-window-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"scoped-claude"}}"#,
+    );
+    let (port, _) = serve(vec![
+        (
+            "/api/oauth/usage",
+            r#"{"five_hour":{"utilization":0,"resets_at":"2100-01-01T00:00:00Z"},"seven_day_sonnet":{"utilization":100,"resets_at":"2100-01-08T00:00:00Z"}}"#,
+        ),
+        ("/v1/models", r#"{"data":[{"id":"local-model"}]}"#),
+    ]);
+    let base = format!("http://127.0.0.1:{port}");
+    let home_s = home.to_str().unwrap();
+    let run = |allow: &str| {
+        probe(&[
+            "--home",
+            home_s,
+            "--claude-url",
+            &base,
+            "--local",
+            &base,
+            "--allow",
+            allow,
+        ])
+    };
+    let both = run("claude,pi_local");
+    let claude = line_of(&both, "claude");
+    assert_eq!(state_of(claude), "fresh", "{both}");
+    assert!(
+        claude.contains("[5h 0%") && claude.contains("sonnet") && claude.contains("100%"),
+        "{claude}"
+    );
+    assert!(
+        both.contains("target Claude:") && both.contains("5h"),
+        "{both}"
+    );
+    assert!(!both.contains("target PiLocal"), "{both}");
+
+    let only = run("claude");
+    assert!(
+        only.contains("target Claude:") && only.contains("5h"),
+        "{only}"
+    );
+    assert!(!only.contains("target none"), "{only}");
+}

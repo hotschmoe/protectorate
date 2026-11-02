@@ -195,6 +195,11 @@ fuzz_target!(|data: &[u8]| {
     }
 });
 
+fn gates_dispatch(label: &str) -> bool {
+    let mut parts = label.split_whitespace();
+    !matches!((parts.next(), parts.next()), (Some("wk"), Some(_)))
+}
+
 fn metered(h: Harness) -> Option<Subscription> {
     match h {
         Harness::Claude => Some(Subscription::Claude),
@@ -208,6 +213,9 @@ fn metered(h: Harness) -> Option<Subscription> {
 fn open_usable(q: &Quota, now_ms: u64) -> Option<f64> {
     let mut usable = None;
     for w in &q.windows {
+        if !gates_dispatch(&w.label) {
+            continue;
+        }
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
             continue;
         };
@@ -227,6 +235,9 @@ fn open_usable(q: &Quota, now_ms: u64) -> Option<f64> {
 
 fn past_blocks(q: &Quota, now_ms: u64, min: f64) -> bool {
     q.windows.iter().any(|w| {
+        if !gates_dispatch(&w.label) {
+            return false;
+        }
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
             return false;
         };
