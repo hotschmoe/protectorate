@@ -17,7 +17,7 @@ an e2e test, run on a real machine, or only dry-run.
 | headscale behind a TLS reverse proxy | a stand-in Go reverse proxy in `scripts/net-e2e.sh` only |
 | device pairing | e2e (`crates/protectorate/tests/api.rs`, `scripts/app-e2e.sh` for the web app) |
 | node `join`, approval, system service (Linux) | real Linux nodes run as system services, enrolled LAN-direct |
-| node service (Windows) | install, run and uninstall checked by hand, not through a hub |
+| node service (Windows) | install, run and uninstall checked by hand, not through a hub; the update supervisor and its pointer switch e2e on Linux only |
 | `make release-publish` | never run |
 
 ## Release assets
@@ -232,8 +232,9 @@ powershell -ExecutionPolicy Bypass -File .\install-node.ps1 -ServerUrl SERVER_UR
 Parameters: `-Version`, `-Channel`, `-From`, `-Repo`, `-StateDir` (default
 `%ProgramData%\protectorate-node`, the binary's own). It stages the binary, links
 `releases\current`, runs `join`, then `protectorate-node install-service`, which registers and
-starts the LocalSystem service `protectorate-node`. Only dry runs of the script have happened. A
-Windows node cannot take updates from the hub yet; updating one is a reinstall.
+starts the LocalSystem service `protectorate-node` (a supervisor that runs `releases\current`,
+so the node takes `node update` from the hub; see [Windows node updates](windows-node-update.md)).
+Only dry runs of the script have happened.
 
 ### Join and approve
 

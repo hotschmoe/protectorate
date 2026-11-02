@@ -1,12 +1,14 @@
-//! The system service. Linux (D10): `install-service` puts this binary in the release store,
-//! `<state>/releases/<version>/` with `releases/current` naming it, and writes a systemd unit
-//! that runs `serve` as root from `releases/current` (so updates switch it, see `update.rs`).
-//! Windows (D11): it copies it under %ProgramFiles%\protectorate-node, limits the state dir
-//! to SYSTEM and Administrators, and registers (through sc.exe) an auto-start LocalSystem
-//! service running `serve --service`. Either way serve supervises the member this binary
-//! embeds (unpacked under `<state>/net`), and every path or service created goes into the
-//! install manifest; `uninstall` removes exactly what it lists. The state dir (node identity,
-//! member keys, jobs) was made by `join`, so it is not in the manifest and stays.
+//! The system service. Either way `install-service` puts this binary in the release store,
+//! `<state>/releases/<version>/` with `releases/current` and `releases/previous` naming it, so
+//! updates switch it (see `update.rs`). Linux (D10): a systemd unit runs `probation` from
+//! `releases/previous`, then `serve` as root from `releases/current`. Windows (D11): it limits the
+//! state dir to SYSTEM and Administrators, copies this binary under
+//! %ProgramFiles%\protectorate-node and registers (through sc.exe) an auto-start LocalSystem
+//! service running that copy's `supervise --service`, which does what the unit does (see
+//! `supervise.rs`). serve supervises the member this binary embeds (unpacked under
+//! `<state>/net`), and every path or service created goes into the install manifest; `uninstall`
+//! removes exactly what it lists. The state dir (node identity, member keys, jobs, releases) was
+//! made by `join`, so it is not in the manifest and stays.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -193,8 +195,7 @@ WantedBy=multi-user.target
 /// The service runs `<state>/releases/current/protectorate-node`, the path updates switch. This
 /// binary is copied in as release `pt_version::VERSION` unless it runs from there already. The
 /// releases are state: uninstall keeps them.
-#[cfg(not(windows))]
-fn into_releases(state: &Path) -> Result<String, String> {
+pub(crate) fn into_releases(state: &Path) -> Result<String, String> {
     let store = pt_update::Store::open(state).map_err(|e| e.to_string())?;
     let version = match store.running_release() {
         Some(v) => v,
@@ -202,7 +203,7 @@ fn into_releases(state: &Path) -> Result<String, String> {
             let v = pt_version::VERSION.to_string();
             let exe = std::env::current_exe().map_err(|e| format!("finding this binary: {e}"))?;
             let dir = store.version_dir(&v);
-            let bin = dir.join("protectorate-node");
+            let bin = dir.join(format!("protectorate-node{}", std::env::consts::EXE_SUFFIX));
             if dir.exists() {
                 let same = fs::read(&exe)
                     .ok()
@@ -317,7 +318,7 @@ fn set_mode(p: &Path, mode: u32) -> Result<(), String> {
         .map_err(|e| format!("chmod {}: {e}", p.display()))
 }
 
-#[cfg(not(any(unix, windows)))]
+#[cfg(not(unix))]
 fn set_mode(_p: &Path, _mode: u32) -> Result<(), String> {
     Ok(())
 }

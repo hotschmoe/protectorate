@@ -32,14 +32,12 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 pub const USAGE: &str =
     "  serve --state-dir DIR (--forward-socket PATH | --listen-tcp 127.0.0.1:PORT | --stdio)...
         [--presence-interval SECS] [--away-after SECS] [--no-scope] [--idle-exit SECS]
-        [--member PATH | --no-member] [--service]
+        [--member PATH | --no-member]
                                     serve the hub link: one header line from member, then frames;
                                     once joined (DIR/node.json), also run member (the embedded
                                     one unless --member) and restart it;
                                     --stdio: frames on stdin/stdout for an sshd forced command,
                                     through a resident agent that keeps jobs across sessions;
-                                    --service: Windows, run under the service manager (what
-                                    install-service registers), logging to DIR\\node.log;
                                     PROTECTORATE_NODE_TEST_PRESENCE=FILE forces presence (tests)";
 
 struct Node {
@@ -64,7 +62,6 @@ pub struct Flags {
     pub idle_exit: Option<u64>,
     member: Option<PathBuf>,
     no_member: bool,
-    service: bool,
 }
 
 fn flags(args: &[String]) -> Result<Flags, String> {
@@ -79,7 +76,6 @@ fn flags(args: &[String]) -> Result<Flags, String> {
         idle_exit: None,
         member: None,
         no_member: false,
-        service: false,
     };
     let mut it = args.iter();
     while let Some(flag) = it.next() {
@@ -106,7 +102,6 @@ fn flags(args: &[String]) -> Result<Flags, String> {
             "--idle-exit" => f.idle_exit = Some(crate::cli::number(flag, Some(value()?))?),
             "--member" => f.member = Some(PathBuf::from(value()?)),
             "--no-member" => f.no_member = true,
-            "--service" if cfg!(windows) => f.service = true,
             other => return Err(format!("serve: unknown option '{other}'")),
         }
     }
@@ -123,9 +118,6 @@ fn flags(args: &[String]) -> Result<Flags, String> {
     if f.presence_interval == 0 {
         return Err("--presence-interval must be at least 1".into());
     }
-    if f.service && (f.stdio || f.state_dir.is_none()) {
-        return Err("--service needs --state-dir and takes no --stdio".into());
-    }
     Ok(f)
 }
 
@@ -134,44 +126,15 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if f.stdio {
         return crate::stdio::run(&f);
     }
-    #[cfg(windows)]
-    if f.service {
-        return as_service(f);
-    }
-    serve(f, Box::new(|| {}))
+    serve(f)
 }
 
-/// Under the SCM there is no console: stdio goes to `<state>\node.log`, and the service reports
-/// RUNNING once member is started. Stopping the service ends the process, and with it member
-/// and every job (kill-on-close Job Objects).
-#[cfg(windows)]
-fn as_service(f: Flags) -> Result<(), String> {
-    let dir = f.state_dir.clone().ok_or("serve needs --state-dir")?;
-    let path = dir.join("node.log");
-    let log = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .map_err(|e| format!("opening {}: {e}", path.display()))?;
-    pt_node::windows::redirect_stdio(log)
-        .map_err(|e| format!("logging to {}: {e}", path.display()))?;
-    eprintln!(
-        "protectorate-node: service {} starting (pid {})",
-        crate::service::SERVICE,
-        std::process::id()
-    );
-    let result = pt_node::windows::run_service(
-        crate::service::SERVICE,
-        Box::new(move |ready| serve(f, ready)),
-    );
-    match &result {
-        Ok(()) => eprintln!("protectorate-node: service stopped"),
-        Err(e) => eprintln!("protectorate-node: service failed: {e}"),
-    }
-    result
+/// Whether `args` are valid serve options.
+pub fn check(args: &[String]) -> Result<(), String> {
+    flags(args).map(drop)
 }
 
-fn serve(f: Flags, ready: Box<dyn FnOnce() + Send>) -> Result<(), String> {
+fn serve(f: Flags) -> Result<(), String> {
     let dir = f.state_dir.clone().ok_or("serve needs --state-dir")?;
     let detector = Arc::new(Mutex::new(Detector::new(Config {
         away_after_secs: f.away_after,
@@ -221,7 +184,6 @@ fn serve(f: Flags, ready: Box<dyn FnOnce() + Send>) -> Result<(), String> {
     if !f.no_member {
         start_member(&f, &dir)?;
     }
-    ready();
     for a in accepts {
         let _ = a.join();
     }

@@ -521,26 +521,39 @@ pub struct Job(isize);
 
 impl Job {
     pub fn new() -> io::Result<Job> {
+        let job = Job::create()?;
+        job.set_limits(0, None)?;
+        Ok(job)
+    }
+
+    /// A kill-on-close job whose members' own children are not in it: they belong in jobs of
+    /// their own (the node's member, jobs, and an idle probe in the console session, which may
+    /// not share a job with session 0).
+    pub fn without_descendants() -> io::Result<Job> {
+        const SILENT_BREAKAWAY_OK: u32 = 0x1000;
+        let job = Job::create()?;
+        job.set_limits(SILENT_BREAKAWAY_OK, None)?;
+        Ok(job)
+    }
+
+    fn create() -> io::Result<Job> {
         // SAFETY: null attributes and a null name are allowed (an unnamed, non-inheritable job).
         let h = unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) };
         if h == 0 {
             return Err(io::Error::last_os_error());
         }
-        let job = Job(h);
-        job.set_limits(false)?;
-        Ok(job)
+        Ok(Job(h))
     }
 
-    fn set_limits(&self, idle: bool) -> io::Result<()> {
+    fn set_limits(&self, flags: u32, priority_class: Option<u32>) -> io::Result<()> {
         const KILL_ON_JOB_CLOSE: u32 = 0x2000;
         const LIMIT_PRIORITY_CLASS: u32 = 0x20;
-        const IDLE_PRIORITY_CLASS: u32 = 0x40;
         const EXTENDED_LIMIT_INFORMATION: i32 = 9;
         let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        info.basic.limit_flags = KILL_ON_JOB_CLOSE;
-        if idle {
+        info.basic.limit_flags = KILL_ON_JOB_CLOSE | flags;
+        if let Some(class) = priority_class {
             info.basic.limit_flags |= LIMIT_PRIORITY_CLASS;
-            info.basic.priority_class = IDLE_PRIORITY_CLASS;
+            info.basic.priority_class = class;
         }
         // SAFETY: `self.0` is a job handle we own; `info` is a live, fully initialised struct of
         // the size passed.
@@ -600,7 +613,8 @@ impl Job {
 
     /// IDLE_PRIORITY_CLASS for every process in the job, running or started later.
     pub fn lower(&self) -> io::Result<()> {
-        self.set_limits(true)
+        const IDLE_PRIORITY_CLASS: u32 = 0x40;
+        self.set_limits(0, Some(IDLE_PRIORITY_CLASS))
     }
 }
 

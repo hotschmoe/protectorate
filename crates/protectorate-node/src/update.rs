@@ -1,10 +1,11 @@
 //! Updates (SPEC 6a). The hub sends `Update`; the node fetches the release from GitHub itself,
 //! stages `<state>/releases/<tag>/protectorate-node` (checked against SHA256SUMS, then run once),
-//! switches `releases/current` on probation and exits with [`RESTART_CODE`] for systemd to start
-//! the new binary. The new process keeps the release once it has fully answered a non-Hello
-//! request on a `tag:hub` connection; otherwise it switches back and exits again. A binary
-//! that cannot even start is switched back by `probation`, which the unit runs from
-//! `releases/previous` before each start.
+//! switches `releases/current` on probation and exits with [`RESTART_CODE`] for the service
+//! manager to start the new binary: systemd on Linux, the service's `supervise` on Windows. The
+//! new process keeps the release once it has fully answered a non-Hello request on a `tag:hub`
+//! connection; otherwise it switches back and exits again. A binary that cannot even start is
+//! switched back by `probation`, which the unit (or `supervise`) runs from `releases/previous`
+//! before each start.
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -135,11 +136,6 @@ impl Releases {
     /// `Update`: stage, check, switch and schedule the restart before sending the reply.
     pub fn update(&self, u: &Update, runner: &Runner) -> Result<UpdateReply, (ErrorCode, String)> {
         let unsupported = |m: String| (ErrorCode::Unsupported, m);
-        if cfg!(windows) {
-            return Err(unsupported(
-                "updating a Windows node is not supported yet; reinstall it".into(),
-            ));
-        }
         let mut gate = self.updating.lock().unwrap_or_else(|p| p.into_inner());
         if *gate {
             return Err((ErrorCode::Busy, "an update is already running".into()));
@@ -253,7 +249,7 @@ fn watch(store: Store) {
     }
 }
 
-/// `probation`: the unit's ExecStartPre.
+/// `probation`: the unit's ExecStartPre, and `supervise`'s step before each start.
 pub fn probation(args: &[String]) -> Result<(), String> {
     let mut state = crate::join::system_state()?;
     let mut it = args.iter();

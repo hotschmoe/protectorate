@@ -117,6 +117,74 @@ fn set_executable(_path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Test knob: `PT_TEST_POINTER_ASIDE=1` switches pointers the Windows way on Unix too.
+#[cfg(all(unix, debug_assertions))]
+fn aside_pointers() -> bool {
+    std::env::var("PT_TEST_POINTER_ASIDE").is_ok_and(|s| s == "1")
+}
+
+#[cfg(all(unix, not(debug_assertions)))]
+fn aside_pointers() -> bool {
+    false
+}
+
+/// A relative link `link` -> `version`, beside the version directory.
+#[cfg(unix)]
+fn make_link(version: &str, link: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(version, link)
+}
+
+/// A directory symlink, as `mklink /D` makes; creating one needs SeCreateSymbolicLinkPrivilege,
+/// which LocalSystem and elevated administrators hold.
+#[cfg(windows)]
+fn make_link(version: &str, link: &Path) -> io::Result<()> {
+    std::os::windows::fs::symlink_dir(version, link)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn make_link(_version: &str, _link: &Path) -> io::Result<()> {
+    Err(io::Error::other("release pointers need Unix or Windows"))
+}
+
+/// Removes a pointer link (never what it points at), if it exists.
+fn remove_link(link: &Path) -> Result<()> {
+    let Ok(meta) = fs::symlink_metadata(link) else {
+        return Ok(());
+    };
+    if !meta.file_type().is_symlink() {
+        return Err(store_err(format!("{} is not a symlink", link.display())));
+    }
+    // A directory symlink on Windows is removed as a directory, which leaves its target alone.
+    let res = if cfg!(windows) {
+        fs::remove_dir(link)
+    } else {
+        fs::remove_file(link)
+    };
+    res.map_err(|e| Error::io(format!("removing {}", link.display()), e))
+}
+
+/// A rename; on Windows retried for a few seconds while another process (a virus scanner on a
+/// fresh download, a starting service) still holds the source open.
+fn rename_retrying(from: &Path, to: &Path) -> Result<()> {
+    let mut tries = if cfg!(windows) { 20 } else { 1 };
+    loop {
+        match fs::rename(from, to) {
+            Err(e) if tries > 1 && e.kind() == io::ErrorKind::PermissionDenied => {
+                tries -= 1;
+                thread::sleep(Duration::from_millis(250));
+            }
+            r => {
+                return r.map_err(|e| {
+                    Error::io(
+                        format!("renaming {} to {}", from.display(), to.display()),
+                        e,
+                    )
+                });
+            }
+        }
+    }
+}
+
 fn write_synced(path: &Path, bytes: &[u8]) -> Result<()> {
     File::create(path)
         .and_then(|mut f| {
@@ -127,7 +195,8 @@ fn write_synced(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 /// Test knob: `PT_TEST_CRASH_AT=<step>` ends the process right after that step of a switch or
-/// rollback, as a power loss would.
+/// rollback, as a power loss would. Steps of a Windows pointer swap are `<pointer>-aside` and
+/// `<pointer>-swapped`.
 #[cfg(debug_assertions)]
 fn crash_point(step: &str) {
     if std::env::var("PT_TEST_CRASH_AT").is_ok_and(|s| s == step) {
@@ -160,12 +229,15 @@ pub struct Store {
 struct Lock(#[allow(dead_code)] File);
 
 impl Store {
-    /// `<root>/releases`, created if missing.
+    /// `<root>/releases`, created if missing, with any pointer change a crash interrupted
+    /// finished.
     pub fn open(root: &Path) -> Result<Store> {
         let dir = root.join("releases");
         fs::create_dir_all(&dir)
             .map_err(|e| Error::io(format!("creating {}", dir.display()), e))?;
-        Ok(Store { dir })
+        let store = Store { dir };
+        store.repair()?;
+        Ok(store)
     }
 
     pub fn dir(&self) -> &Path {
@@ -181,13 +253,14 @@ impl Store {
         self.dir.join(CURRENT)
     }
 
-    /// Whether this process was started as `releases/current/<program>`, the only start a
-    /// switch of `current` changes. Read from argv[0], which a service manager sets to the path
-    /// it ran.
+    /// Whether this process was started as `releases/current/<program>` (`.exe` on Windows),
+    /// the only start a switch of `current` changes. Read from argv[0], which a service manager
+    /// (or the Windows service's supervisor) sets to the path it ran.
     pub fn started_from_current(&self, program: &str) -> std::result::Result<(), String> {
         let argv0 = argv0();
         let parent = argv0.parent();
-        let ok = argv0.file_name().is_some_and(|f| f == program)
+        let file = format!("{program}{}", std::env::consts::EXE_SUFFIX);
+        let ok = argv0.file_name().is_some_and(|f| f == file.as_str())
             && parent
                 .and_then(|p| p.file_name())
                 .is_some_and(|f| f == CURRENT)
@@ -199,7 +272,7 @@ impl Store {
             return Ok(());
         }
         Err(format!(
-            "this process runs {}, not {}/{CURRENT}/{program}, so a switch would not take \
+            "this process runs {}, not {}/{CURRENT}/{file}, so a switch would not take \
              effect; point the service at releases/{CURRENT} first",
             argv0.display(),
             self.dir.display()
@@ -216,7 +289,7 @@ impl Store {
         (version_name(&name) && vdir.parent()? == store).then_some(name)
     }
 
-    /// Runs `releases/<version>/<program> <arg>` and checks that its first line is
+    /// Runs `releases/<version>/<program>` (`.exe` on Windows) with `<arg>` and checks that its first line is
     /// `<program> <version>`, as the installers do: a binary for the wrong machine or release
     /// never becomes `current`.
     pub fn check_binary(&self, version: &str, program: &str, arg: &str) -> Result<()> {
@@ -229,7 +302,9 @@ impl Store {
             .unwrap_or(TIMEOUT);
         #[cfg(not(debug_assertions))]
         let timeout = TIMEOUT;
-        let bin = self.version_dir(version).join(program);
+        let bin = self
+            .version_dir(version)
+            .join(format!("{program}{}", std::env::consts::EXE_SUFFIX));
         let health = |m: String| Error::new(ErrorKind::Health, m);
         let mut command = Command::new(&bin);
         command
@@ -398,26 +473,77 @@ impl Store {
         }
     }
 
-    #[cfg(unix)]
+    /// Points `name` at `version`. On Unix a new symlink renames over the old one. Windows
+    /// cannot rename over a directory link, so there the old link is renamed aside first;
+    /// see [`Store::set_pointer_aside`].
     fn set_pointer(&self, name: &str, version: &str) -> Result<()> {
-        let tmp = self.dir.join(unique(name));
-        std::os::unix::fs::symlink(version, &tmp)
-            .map_err(|e| Error::io(format!("creating {}", tmp.display()), e))?;
-        let dst = self.dir.join(name);
-        fs::rename(&tmp, &dst).map_err(|e| {
-            let _ = fs::remove_file(&tmp);
-            Error::io(
-                format!("renaming {} to {}", tmp.display(), dst.display()),
-                e,
-            )
-        })
+        #[cfg(unix)]
+        if !aside_pointers() {
+            let tmp = self.dir.join(unique(name));
+            make_link(version, &tmp)
+                .map_err(|e| Error::io(format!("creating {}", tmp.display()), e))?;
+            let dst = self.dir.join(name);
+            return fs::rename(&tmp, &dst).map_err(|e| {
+                let _ = fs::remove_file(&tmp);
+                Error::io(
+                    format!("renaming {} to {}", tmp.display(), dst.display()),
+                    e,
+                )
+            });
+        }
+        self.set_pointer_aside(name, version)
     }
 
-    #[cfg(not(unix))]
-    fn set_pointer(&self, name: &str, _version: &str) -> Result<()> {
-        Err(store_err(format!(
-            "switching releases/{name} is not implemented on this OS yet"
-        )))
+    /// `.<name>-new` is made first, then `<name>` goes to `.<name>-old` and `.<name>-new` to
+    /// `<name>`. A crash between those leaves no `<name>`; [`Store::open`] then finishes the
+    /// change, so a crash ends before or after it, as with a rename over the old link.
+    fn set_pointer_aside(&self, name: &str, version: &str) -> Result<()> {
+        let dst = self.dir.join(name);
+        let new = self.dir.join(format!(".{name}-new"));
+        let old = self.dir.join(format!(".{name}-old"));
+        for stale in [&new, &old] {
+            remove_link(stale)?;
+        }
+        make_link(version, &new)
+            .map_err(|e| Error::io(format!("creating {}", new.display()), e))?;
+        sync_dir(&self.dir)?;
+        if fs::symlink_metadata(&dst).is_ok() {
+            rename_retrying(&dst, &old)?;
+            sync_dir(&self.dir)?;
+            crash_point(&format!("{name}-aside"));
+        }
+        rename_retrying(&new, &dst)?;
+        sync_dir(&self.dir)?;
+        crash_point(&format!("{name}-swapped"));
+        remove_link(&old)
+    }
+
+    /// Finishes a pointer change that a crash interrupted (see [`Store::set_pointer_aside`]).
+    fn repair(&self) -> Result<()> {
+        let _l = self.lock()?;
+        for name in [CURRENT, PREVIOUS] {
+            let dst = self.dir.join(name);
+            let new = self.dir.join(format!(".{name}-new"));
+            let old = self.dir.join(format!(".{name}-old"));
+            if fs::symlink_metadata(&dst).is_err() {
+                let from = if fs::symlink_metadata(&new).is_ok() {
+                    &new
+                } else {
+                    &old
+                };
+                if fs::symlink_metadata(from).is_ok() {
+                    rename_retrying(from, &dst)?;
+                    sync_dir(&self.dir)?;
+                    eprintln!(
+                        "releases: finished an interrupted switch of {}",
+                        dst.display()
+                    );
+                }
+            }
+            remove_link(&new)?;
+            remove_link(&old)?;
+        }
+        Ok(())
     }
 
     /// Downloads `picks` of `release` into `releases/<tag>/` under their `install_as` names,
@@ -512,12 +638,7 @@ impl Store {
                 self.verify_dir(&vdir, &sums, picks)?;
                 return Ok(true);
             }
-            fs::rename(&staging, &vdir).map_err(|e| {
-                Error::io(
-                    format!("renaming {} to {}", staging.display(), vdir.display()),
-                    e,
-                )
-            })?;
+            rename_retrying(&staging, &vdir)?;
             sync_dir(&self.dir)?;
             Ok(false)
         };

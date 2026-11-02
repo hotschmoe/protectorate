@@ -586,16 +586,17 @@ Each entry: where, what was done, what right looks like.
   paths, but no test or machine has exercised it on Linux, since that deletes files. (Windows ran
   it on officewin, after a partial install and after a full one.) Right: run it on a throwaway VM
   (or a container with systemd) in an e2e, then reinstall.
-- **Windows service through sc.exe** (`protectorate-node`, winservice.rs, serve.rs): our own
+- **Windows service through sc.exe** (`protectorate-node`, winservice.rs, supervise.rs): our own
   dispatcher and control handler (pt-node `sys/win32_service.rs`), but create, start, stop,
   delete and failure actions go through `sc.exe`, and the state dir is limited to SYSTEM and
   Administrators through `icacls.exe` (not recorded: the state dir is not ours to undo). Stop
-  reports STOPPED and ends the process, so member and running jobs die by kill-on-close and the
-  jobs read Lost after the next start. `uninstall` must run from a copy outside
+  reports STOPPED and ends the supervisor, so the node, member and running jobs die by
+  kill-on-close and the jobs read Lost after the next start. `uninstall` must run from a copy outside
   `%ProgramFiles%\protectorate-node` (Windows cannot delete the running exe). Tested on officewin
   with a sleeping stand-in for member (officewin must not join a fleet for this): install, member
   in the job, killing serve kills member and the SCM restarts serve, a job ran as SYSTEM, stop,
-  uninstall left no service, files or process. A reboot was not tried there. Right: our own SCM
+  uninstall left no service, files or process (that was `serve --service` before the
+  supervisor). A reboot was not tried there. Right: our own SCM
   calls if sc.exe output parsing bites, a reboot test on a spare box, and stop that lets jobs
   finish or records them as interrupted.
 - **`join` leaves the Windows state dir open until install-service** (`protectorate-node`):
@@ -727,14 +728,25 @@ Each entry: where, what was done, what right looks like.
   own window. A new binary that starts and then hangs is never restarted, so it stays until the
   next start. The deadline is wall-clock milliseconds, so a clock jump moves it. Right: a
   systemd watchdog (`WatchdogSec`) the binaries ping, and a boot-relative deadline.
-- **Release pointers are Unix-only** (`pt-update` `set_pointer`): switching `current` and
-  `previous` is a symlink plus rename; on Windows it returns an error. `install-node.ps1` makes
-  the first `current` with `mklink /D` and refuses to run on an installed node. Right: a tested
-  Windows swap (directory symlink replaced by `MoveFileEx`, or a pointer file read by the
-  service) before the Windows node takes the `Update` RPC. Until then a Windows node answers
-  `Update` with `unsupported`, its service still runs the copy under %ProgramFiles%, and there is
-  no restart path (the SCM restarts on failure only if configured to); updating one is a
-  reinstall.
+- **Windows release pointers are renamed aside** (`pt-update` `set_pointer_aside`): a rename
+  cannot replace a directory symlink on Windows, so `current` and `previous` change in three steps
+  (`.X-new` made, `X` to `.X-old`, `.X-new` to `X`); a crash between the renames leaves no `X`
+  until the next `Store::open` (the supervisor's, before each start) finishes the switch. Tested
+  only on Linux, where the debug knob `PT_TEST_POINTER_ASIDE=1` takes this path (with crash points
+  `<pointer>-aside` and `<pointer>-swapped`); Windows directory-symlink rename and removal
+  semantics are from the documentation, not a run. Right: run docs/windows-node-update.md's
+  manual check on a spare Windows box, then a Windows e2e once a Windows runner exists.
+- **The Windows service is a frozen supervisor** (`protectorate-node` supervise.rs, D11): the SCM
+  runs `supervise --service` from the %ProgramFiles% copy made at install, which runs
+  `releases\previous` probation and `releases\current` serve in a kill-on-close job with silent
+  breakaway (the node's own children, including the idle probe in the console session, which may
+  not share a job with session 0, go to jobs of their own), and restarts it 1 s after exit 75 and
+  5 s after any other. Updates never replace the supervisor, so a fix to it needs a reinstall;
+  installs from v0.7.0-dev.5 and older run `serve --service` directly and must be reinstalled
+  once. Never run on a real Windows node: the loop is e2e-tested on Linux only, and the
+  breakaway, `CREATE_NO_WINDOW` children and stdio into node.log are compiled for Windows but
+  untried. Right: the manual check in docs/windows-node-update.md on a spare box; a supervisor
+  that updates itself only if a real need appears.
 - **Node releases are state** (`protectorate-node install-service`): the unit runs
   `<state>/releases/current/protectorate-node`; install-service copies a binary that does not
   already run from there into `releases/<its version>/`. The manifest lists only the unit, so
