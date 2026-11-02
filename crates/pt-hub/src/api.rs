@@ -1492,6 +1492,14 @@ fn history_err(e: crate::history::Failure) -> ApiError {
     }
 }
 
+/// D26: a sleeve reads its own run only. Envoy, the owner and a device read every sleeve.
+fn history_reaches(who: &Principal, id: SleeveId) -> bool {
+    match who {
+        Principal::Sleeve(x) => id == *x,
+        other => other.full(),
+    }
+}
+
 /// The index's sleeve keys a history call covers; `None` is every sleeve. Names match removed
 /// sleeves too, since their history stays.
 fn history_sleeves(c: &Ctx<'_>, st: &State, asked: &[String]) -> Result<Option<Vec<String>>> {
@@ -1508,7 +1516,7 @@ fn history_sleeves(c: &Ctx<'_>, st: &State, asked: &[String]) -> Result<Option<V
         }
         let reached: Vec<SleeveId> = named
             .into_iter()
-            .filter(|id| reaches(st, c.who, *id))
+            .filter(|id| history_reaches(c.who, *id))
             .collect();
         if reached.is_empty() {
             return Err(err(
@@ -1525,7 +1533,7 @@ fn history_sleeves(c: &Ctx<'_>, st: &State, asked: &[String]) -> Result<Option<V
         ids = st
             .sleeves
             .values()
-            .filter(|s| reaches(st, c.who, s.id))
+            .filter(|s| history_reaches(c.who, s.id))
             .map(|s| s.id)
             .collect();
     }

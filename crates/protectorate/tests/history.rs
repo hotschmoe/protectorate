@@ -135,6 +135,46 @@ fn history_search_scope_and_rebuild() {
     let r = as_alpha(&["history", "search", "--mode", "any", BETA_WORD, "OK"]);
     assert!(!r.ok().contains("beta"), "{}", r.stdout);
 
+    // D26: a parent sleeve does not see its child's runs.
+    const CHILD_WORD: &str = "TERN-9144";
+    let kid = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "tern",
+            "--parent",
+            "alpha",
+            "--harness",
+            "pi_local",
+        ])
+        .json();
+    assert_eq!(kid["role"].as_str(), Some("child"), "{kid:?}");
+    hub.wait("tern", "idle", 120);
+    hub.send(
+        "tern",
+        &format!("Remember the code word {CHILD_WORD}. Reply with exactly OK."),
+    );
+    hub.wait("tern", "idle", 180);
+    let child_hits = found(&hub, CHILD_WORD, 30);
+    assert!(
+        child_hits
+            .iter()
+            .all(|x| x["doc"]["sleeve"].as_str() == Some("tern")),
+        "{child_hits:?}"
+    );
+    assert!(
+        hits(&as_alpha(&["--json", "history", "search", CHILD_WORD]).json()).is_empty(),
+        "a parent does not see its child's history"
+    );
+    let r = as_alpha(&["history", "search", "--sleeve", "tern", CHILD_WORD]);
+    assert_ne!(r.status, 0);
+    assert!(r.stderr.contains("outside this capability"), "{}", r.stderr);
+    let child_doc = child_hits[0]["doc"]["doc_id"].as_u64().unwrap().to_string();
+    let r = as_alpha(&["history", "read", "--doc", &child_doc]);
+    assert_ne!(r.status, 0);
+    assert!(r.stderr.contains("no history doc"), "{}", r.stderr);
+
     // Corrupt a copy of the index and point the hub at it: the hub starts, moves the copy aside
     // and rebuilds it from the sources. The original is left as it was.
     hub.stop();

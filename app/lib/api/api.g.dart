@@ -4442,7 +4442,8 @@ final class SearchHistoryRequest {
 
   final HistoryMode mode;
 
-  /// Sleeves by id or name, removed ones too. Empty means every sleeve the caller reaches.
+  /// Sleeves by id or name, removed ones too. Empty means every sleeve this caller may
+  /// read: its own, or every sleeve for Envoy and the owner (D26).
   final List<String> sleeves;
 
   /// `pi_local` and `pi_vendor` both match every Pi session.
