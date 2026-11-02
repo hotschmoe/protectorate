@@ -818,8 +818,9 @@ fn a_versioned_cap_gates_its_model_family() {
     );
 }
 
-/// The Opus weekly cap gates a Claude candidate whose model is Opus, and does not gate Sonnet.
-/// A row that only has that cap is not spent as if it had no reading.
+/// The Opus weekly cap gates a Claude candidate whose model is Opus, and does not gate Sonnet
+/// while the account window has room. A row that only has that cap, full or empty, is a
+/// candidate with no reading for Sonnet.
 #[test]
 fn a_model_cap_gates_the_candidate_that_runs_that_model() {
     let home = scratch(&format!("model-cap-{}", std::process::id()));
@@ -849,24 +850,36 @@ fn a_model_cap_gates_the_candidate_that_runs_that_model() {
         "{sonnet}"
     );
 
-    let (port, _) = serve(vec![(
-        "/api/oauth/usage",
-        r#"{"seven_day_opus":{"utilization":100,"resets_at":"2100-01-08T00:00:00Z"}}"#,
-    )]);
-    let base = format!("http://127.0.0.1:{port}");
-    let only = probe(&[
-        "--home",
-        home_s,
-        "--claude-url",
-        &base,
-        "--allow",
-        "claude:sonnet",
-    ]);
-    assert!(
-        only.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
-        "{only}"
-    );
-    assert!(!only.contains("without a fresh quota reading"), "{only}");
+    for (pct, label) in [(0, "open"), (100, "full")] {
+        let body = format!(
+            r#"{{"seven_day_opus":{{"utilization":{pct},"resets_at":"2100-01-08T00:00:00Z"}}}}"#
+        );
+        let (port, _) = serve(vec![("/api/oauth/usage", body)]);
+        let base = format!("http://127.0.0.1:{port}");
+        let only = probe(&[
+            "--home",
+            home_s,
+            "--claude-url",
+            &base,
+            "--allow",
+            "claude:sonnet",
+        ]);
+        assert_eq!(
+            state_of(line_of(&only, "claude")),
+            "fresh",
+            "{label}: {only}"
+        );
+        assert!(
+            only.contains(
+                "target Claude: first eligible in resleeve_to without a fresh quota reading"
+            ),
+            "{label}: {only}"
+        );
+        assert!(
+            !only.contains("insufficient fresh quota"),
+            "{label}: {only}"
+        );
+    }
 }
 
 /// Pi with a vendor login has no quota reader. A missing reading is not "unknown", so the

@@ -141,7 +141,7 @@ fuzz_target!(|data: &[u8]| {
             assert_eq!(t.model, c.model);
         }
         (Some(t), Err(e)) => panic!("fallback dropped {t:?}: {e}"),
-        (None, Ok((idx, _))) => {
+        (None, Ok((idx, reason))) => {
             let c = &allow[*idx];
             let h = c.harness;
             assert!(
@@ -155,10 +155,13 @@ fuzz_target!(|data: &[u8]| {
                 && let Some(q) = quotas.iter().find(|q| q.subscription == sub)
             {
                 assert_ne!(state(q), State::Error, "a failed reading was spent");
-                assert!(
-                    !only_other_scopes(q, &c.model, size.min_usable_pct()),
-                    "a row with only other models' caps was spent"
-                );
+                // SPEC 8. Caps for other models are no reading for this candidate.
+                if only_other_scopes(q, &c.model, size.min_usable_pct()) {
+                    assert!(
+                        reason.contains("without a fresh quota reading"),
+                        "other models' caps were not treated as no reading: {reason}"
+                    );
+                }
                 if matches!(state(q), State::Fresh | State::Stale) {
                     let min = size.min_usable_pct();
                     assert!(

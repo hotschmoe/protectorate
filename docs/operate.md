@@ -200,7 +200,8 @@ A model-scoped Claude window (the weekly Sonnet or Opus cap, shown as `wk <name>
 resleeve of the same family, ignoring case and version, so `Sonnet 4.5` gates `sonnet` and
 `claude-sonnet-4-5`. A candidate with no model is gated by any of those caps that is under
 the usable minimum. A row that only reports
-other models' caps is not spent. The account windows always count. Pi with a vendor login and
+other models' caps may be spent, as a candidate with no reading for that
+model. The account windows always count. Pi with a vendor login and
 Antigravity have no meter and are never chosen. A resleeve list that is only those is not
 reported as short of quota. A Codex window keeps the length the vendor
 reported, which the dispatch weight uses.

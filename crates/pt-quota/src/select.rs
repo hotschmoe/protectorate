@@ -266,7 +266,7 @@ enum Availability {
 /// A stale subscription keeps the windows of its last good read. Under the task minimum that
 /// is exhausted, the same as a fresh row; with spare it may still be chosen. A row whose
 /// gating windows have all reset is not a missing reading. Unknown is a row with nothing to
-/// score.
+/// score, including one whose only windows are caps for other models.
 fn availability(now_ms: u64, size: TaskSize, cand: &Candidate, quotas: &[Quota]) -> Availability {
     let harness = cand.harness;
     let model = cand.model.as_str();
@@ -295,9 +295,9 @@ fn availability(now_ms: u64, size: TaskSize, cand: &Candidate, quotas: &[Quota])
     if state(q) != State::Fresh && state(q) != State::Stale {
         return Availability::Unknown;
     }
-    // A row that only names other models' caps is not "no reading": spending it would ignore them.
+    // Caps for other models say nothing about this candidate.
     if other_scopes_only(q, model, size.min_usable_pct()) {
-        return Availability::Exhausted;
+        return Availability::Unknown;
     }
     if past_blocks(q, now_ms, size.min_usable_pct(), model) {
         return Availability::Exhausted;

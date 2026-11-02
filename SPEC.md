@@ -462,8 +462,8 @@ with no model is gated by any of those caps that is under the usable minimum, si
 default may be that model. A name that is not one of those families still gates when the
 model name contains it. The account windows always gate
 (`5h`, `wk`), as does the single credit or rate-limit window of the other subscriptions. A
-row whose only windows are caps for other models is exhausted, not an unknown reading that
-may be spent. `pi_vendor` and Antigravity have no
+row whose only windows are caps for other models is an unknown reading for that candidate
+and may be spent. `pi_vendor` and Antigravity have no
 meter and are never chosen on this path. A candidate list that is only those is not reported
 as short of quota. The pace projection uses a vendor window length when
 the reading included one (Codex stores `limit_window_seconds`). The label stays what is shown
