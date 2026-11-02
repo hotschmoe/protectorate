@@ -1,7 +1,8 @@
 //! The hub's `member --mode hub`: its one-time enrollment (the hub registers and tags itself),
 //! the supervised run, and the unix socket it serves: STATUS and DIAL.
 
-use std::io::{BufRead, BufReader, Read, Write};
+use std::fs;
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -14,7 +15,7 @@ use pt_json::Value;
 use crate::client::DeadlineStream;
 use crate::config::Config;
 use crate::error::{Error, Result};
-use crate::files::{append_log, private_dir};
+use crate::files::{append_log, private_dir, write_file};
 use crate::headscale::{Admin, HsNode, TAG_HUB};
 
 const LINE_MAX: usize = 1024;
@@ -38,8 +39,23 @@ pub(crate) fn state_dir(cfg: &Config) -> PathBuf {
     cfg.dir.join("member")
 }
 
-pub(crate) fn enrolled(cfg: &Config) -> bool {
-    state_dir(cfg).join("tailscaled.state").exists()
+/// Written once the hub member is registered and tagged; holds its headscale node id. tsnet's
+/// own `tailscaled.state` exists from member's first start, before any registration.
+fn marker(cfg: &Config) -> PathBuf {
+    state_dir(cfg).join("hub-enrolled")
+}
+
+pub(crate) fn enrolled(cfg: &Config) -> Result<bool> {
+    let path = marker(cfg);
+    match fs::read_to_string(&path) {
+        Ok(s) => s
+            .trim()
+            .parse::<u64>()
+            .map(|_| true)
+            .map_err(|e| Error::new(format!("{}: {e}", path.display()))),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(Error::new(format!("reading {}: {e}", path.display()))),
+    }
 }
 
 /// The environment member gets: nothing of the hub's, plus the knobs it needs.
@@ -64,7 +80,9 @@ fn control_url(cfg: &Config) -> String {
 }
 
 /// Registers the hub's own member: `--print-registration`, a fingerprint check against
-/// headscale's `/key`, then `auth register` and `tag:hub`.
+/// headscale's `/key`, then `auth register`, `tag:hub` and the marker. A member an earlier
+/// enrollment registered but did not mark reports itself registered at once; it is found by
+/// its address and tagged.
 pub(crate) fn enroll(cfg: &Config, admin: &Admin, fingerprint: &str) -> Result<HsNode> {
     let dir = state_dir(cfg);
     private_dir(&dir)?;
@@ -101,20 +119,26 @@ pub(crate) fn enroll(cfg: &Config, admin: &Admin, fingerprint: &str) -> Result<H
         }
     });
     let result = (|| {
-        let reg = next_event(&rx, "registration")?;
-        let key = reg.get("control_key").and_then(Value::as_str).unwrap_or("");
+        let ev = next_event(&rx, &["registration", "registered"])?;
+        let key = ev.get("control_key").and_then(Value::as_str).unwrap_or("");
         if key != fingerprint {
             return Err(Error::new(format!(
                 "hub member sees control key {key}, headscale serves {fingerprint}"
             )));
         }
-        let auth_id = reg
-            .get("auth_id")
-            .and_then(Value::as_str)
-            .ok_or_else(|| Error::new(format!("registration without auth_id: {reg}")))?;
-        let node = admin.register(auth_id)?;
-        next_event(&rx, "registered")?;
-        let node = admin.tag(node.id, TAG_HUB)?;
+        let id = if ev.get("event").and_then(Value::as_str) == Some("registration") {
+            let auth_id = ev
+                .get("auth_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| Error::new(format!("registration without auth_id: {ev}")))?;
+            let node = admin.register(auth_id)?;
+            next_event(&rx, &["registered"])?;
+            node.id
+        } else {
+            registered_id(admin, &ev)?
+        };
+        let node = admin.tag(id, TAG_HUB)?;
+        write_file(&marker(cfg), format!("{}\n", node.id).as_bytes())?;
         Ok(node)
     })();
     match &result {
@@ -134,16 +158,38 @@ pub(crate) fn enroll(cfg: &Config, admin: &Admin, fingerprint: &str) -> Result<H
     result.map_err(|e| e.context("enrolling the hub member"))
 }
 
-fn next_event(rx: &mpsc::Receiver<String>, event: &str) -> Result<Value> {
+/// The headscale node that holds one of the addresses in member's `registered` event.
+fn registered_id(admin: &Admin, ev: &Value) -> Result<u64> {
+    let ips: Vec<&str> = ev
+        .get("ips")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    admin
+        .nodes()?
+        .into_iter()
+        .find(|n| n.ips.iter().any(|ip| ips.contains(&ip.as_str())))
+        .map(|n| n.id)
+        .ok_or_else(|| {
+            Error::new(format!(
+                "member is registered, but headscale has no node at {ips:?}"
+            ))
+        })
+}
+
+fn next_event(rx: &mpsc::Receiver<String>, events: &[&str]) -> Result<Value> {
     loop {
         let line = rx.recv_timeout(ENROLL_TIMEOUT).map_err(|_| {
             Error::new(format!(
-                "no {event} event from member within {} s",
+                "no {} event from member within {} s",
+                events.join(" or "),
                 ENROLL_TIMEOUT.as_secs()
             ))
         })?;
         if let Ok(v) = pt_json::parse(&line)
-            && v.get("event").and_then(Value::as_str) == Some(event)
+            && v.get("event")
+                .and_then(Value::as_str)
+                .is_some_and(|e| events.contains(&e))
         {
             return Ok(v);
         }

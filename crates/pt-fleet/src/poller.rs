@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -75,6 +75,9 @@ struct Shared {
     fleet: Fleet,
     cfg: PollConfig,
     stop: AtomicBool,
+    /// `nap` waits on `wake` under `gate`; whoever sets a stop flag calls `wake`.
+    gate: Mutex<()>,
+    wake: Condvar,
     views: Mutex<BTreeMap<u64, NodeView>>,
     /// Each polled node's link, for a rename or removal from outside the poller.
     links: Mutex<BTreeMap<u64, Arc<Link>>>,
@@ -96,6 +99,8 @@ impl Poller {
             fleet,
             cfg,
             stop: AtomicBool::new(false),
+            gate: Mutex::new(()),
+            wake: Condvar::new(),
             views: Mutex::new(BTreeMap::new()),
             links: Mutex::new(BTreeMap::new()),
             publish,
@@ -157,6 +162,8 @@ impl Poller {
                 link.stop.store(true, Ordering::SeqCst);
             }
             views.remove(&id);
+            drop(views);
+            wake(s);
         }
         (removed, !listed)
     }
@@ -165,6 +172,7 @@ impl Poller {
 impl Drop for Poller {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::SeqCst);
+        wake(&self.shared);
         if let Some(t) = self.thread.take() {
             let _ = t.join();
         }
@@ -176,8 +184,9 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 /// Sleeps up to `d`, waking early once any flag is set.
-fn nap(flags: &[&AtomicBool], d: Duration) {
+fn nap(s: &Shared, flags: &[&AtomicBool], d: Duration) {
     let deadline = Instant::now() + d;
+    let mut g = lock(&s.gate);
     loop {
         if flags.iter().any(|f| f.load(Ordering::SeqCst)) {
             return;
@@ -186,8 +195,19 @@ fn nap(flags: &[&AtomicBool], d: Duration) {
         if left.is_zero() {
             return;
         }
-        thread::sleep(left.min(Duration::from_millis(100)));
+        g = s
+            .wake
+            .wait_timeout(g, left)
+            .unwrap_or_else(|p| p.into_inner())
+            .0;
     }
+}
+
+/// Wakes every `nap` after a stop flag was set. Taking `gate` first means a napper is either
+/// before its flag check, and sees the flag, or already waiting, and gets the notification.
+fn wake(s: &Shared) {
+    drop(lock(&s.gate));
+    s.wake.notify_all();
 }
 
 #[derive(Clone, Default)]
@@ -203,33 +223,54 @@ struct Link {
     stop: AtomicBool,
 }
 
+/// A link `refresh` dropped: its thread is told to stop but not joined yet.
+struct Gone {
+    id: u64,
+    thread: JoinHandle<()>,
+    /// `Poller::remove` stopped it, and its caller announced it.
+    announced: bool,
+}
+
 fn manage(s: &Arc<Shared>) {
     let mut links: BTreeMap<u64, (Arc<Link>, JoinHandle<()>)> = BTreeMap::new();
     while !s.stop.load(Ordering::SeqCst) {
         let g = s.fleet.nodes_lock();
-        match s.fleet.admin().nodes() {
+        let gone = match s.fleet.admin().nodes() {
             Ok(list) => {
                 let nodes: Vec<HsNode> = list.into_iter().filter(|n| n.has_tag(TAG_NODE)).collect();
-                refresh(s, &mut links, &nodes);
+                refresh(s, &mut links, &nodes)
             }
-            Err(e) => eprintln!("pt-fleet: poller: listing nodes: {e}"),
-        }
+            Err(e) => {
+                eprintln!("pt-fleet: poller: listing nodes: {e}");
+                Vec::new()
+            }
+        };
+        // A gone link's thread may be mid-round, up to two dials long.
         drop(g);
-        nap(&[&s.stop], s.cfg.list_every);
+        for l in gone {
+            let _ = l.thread.join();
+            lock(&s.views).remove(&l.id);
+            if !l.announced {
+                (s.publish)(FleetEvent::Removed(l.id.to_string()));
+            }
+        }
+        nap(s, &[&s.stop], s.cfg.list_every);
     }
     for (link, _) in links.values() {
         link.stop.store(true, Ordering::SeqCst);
     }
+    wake(s);
     for (_, (_, t)) in links {
         let _ = t.join();
     }
 }
 
+/// Starts and updates a link per node; returns the links whose node is gone, stopped.
 fn refresh(
     s: &Arc<Shared>,
     links: &mut BTreeMap<u64, (Arc<Link>, JoinHandle<()>)>,
     nodes: &[HsNode],
-) {
+) -> Vec<Gone> {
     let status = s.fleet.status();
     if let Err(e) = &status {
         eprintln!("pt-fleet: poller: {e}");
@@ -272,24 +313,27 @@ fn refresh(
             Err(e) => eprintln!("pt-fleet: poller thread for node {id}: {e}"),
         }
     }
-    let gone: Vec<u64> = links
+    let ids: Vec<u64> = links
         .keys()
         .filter(|id| !nodes.iter().any(|n| n.id == **id))
         .copied()
         .collect();
-    for id in gone {
+    let mut gone = Vec::new();
+    for id in ids {
         lock(&s.links).remove(&id);
-        let Some((link, t)) = links.remove(&id) else {
+        let Some((link, thread)) = links.remove(&id) else {
             continue;
         };
-        // A link `Poller::remove` stopped was announced by its caller.
-        let announced = link.stop.swap(true, Ordering::SeqCst);
-        let _ = t.join();
-        lock(&s.views).remove(&id);
-        if !announced {
-            (s.publish)(FleetEvent::Removed(id.to_string()));
-        }
+        gone.push(Gone {
+            id,
+            thread,
+            announced: link.stop.swap(true, Ordering::SeqCst),
+        });
     }
+    if !gone.is_empty() {
+        wake(s);
+    }
+    gone
 }
 
 /// When each kind of call is next due.
@@ -331,7 +375,7 @@ fn poll_node(s: &Shared, link: &Link, id: u64) {
         let next = due.presence.min(due.sample).min(due.inventory);
         let wait = next.saturating_duration_since(Instant::now());
         if !wait.is_zero() {
-            nap(&[&link.stop, &s.stop], wait);
+            nap(s, &[&link.stop, &s.stop], wait);
             continue;
         }
         let info = lock(&link.info).clone();

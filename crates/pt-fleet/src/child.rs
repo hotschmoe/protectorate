@@ -41,13 +41,46 @@ pub struct ChildState {
     pub last_error: Option<String>,
 }
 
-#[derive(Default)]
-struct Flags {
-    state: ChildState,
-    paused: bool,
-    stopping: bool,
+/// What the owner asked for. `Stop` is final: `pause` and `resume` leave it in place.
+#[derive(Clone, Copy, PartialEq)]
+enum Want {
+    Run,
+    Pause,
+    Stop,
+}
+
+/// Where the supervisor thread is.
+#[derive(Clone, Copy)]
+enum Phase {
+    /// No child: before the first start, in backoff, or paused.
+    Waiting,
+    /// Inside `spawn`; a child may exist that has no pid here yet.
+    Spawning,
+    Running {
+        pid: u32,
+        healthy: bool,
+    },
     /// The supervisor thread has returned: no child runs and none will start.
-    done: bool,
+    Done,
+}
+
+struct Flags {
+    want: Want,
+    phase: Phase,
+    starts: u64,
+    last_error: Option<String>,
+}
+
+impl Flags {
+    fn ask(&mut self, want: Want) {
+        if self.want != Want::Stop {
+            self.want = want;
+        }
+    }
+
+    fn healthy(&self) -> bool {
+        matches!(self.phase, Phase::Running { healthy: true, .. })
+    }
 }
 
 struct Shared {
@@ -72,7 +105,12 @@ impl Supervisor {
         let name = spec.name;
         let shared = Arc::new(Shared {
             spec,
-            flags: Mutex::new(Flags::default()),
+            flags: Mutex::new(Flags {
+                want: Want::Run,
+                phase: Phase::Waiting,
+                starts: 0,
+                last_error: None,
+            }),
             cv: Condvar::new(),
         });
         let s = shared.clone();
@@ -90,22 +128,31 @@ impl Supervisor {
     }
 
     pub fn state(&self) -> ChildState {
-        self.shared.lock().state.clone()
+        let f = self.shared.lock();
+        let (pid, healthy) = match f.phase {
+            Phase::Running { pid, healthy } => (Some(pid), healthy),
+            Phase::Waiting | Phase::Spawning | Phase::Done => (None, false),
+        };
+        ChildState {
+            pid,
+            healthy,
+            starts: f.starts,
+            last_error: f.last_error.clone(),
+        }
     }
 
     /// Waits until the child passes its health check, or `timeout`.
     pub fn wait_healthy(&self, timeout: Duration) -> Result<()> {
         let deadline = Instant::now() + timeout;
         let mut f = self.shared.lock();
-        while !f.state.healthy {
+        while !f.healthy() {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
                 return Err(Error::new(format!(
                     "{} not healthy within {} s{}",
                     self.shared.spec.name,
                     timeout.as_secs(),
-                    f.state
-                        .last_error
+                    f.last_error
                         .as_ref()
                         .map_or(String::new(), |e| format!(": {e}"))
                 )));
@@ -123,34 +170,34 @@ impl Supervisor {
     /// Stops the child and keeps it stopped until `resume`; returns once it has exited.
     pub fn pause(&self) {
         let mut f = self.shared.lock();
-        f.paused = true;
+        f.ask(Want::Pause);
         self.shared.cv.notify_all();
-        while f.state.pid.is_some() {
+        while matches!(f.phase, Phase::Spawning | Phase::Running { .. }) {
             f = self.shared.cv.wait(f).unwrap_or_else(|p| p.into_inner());
         }
     }
 
     pub fn resume(&self) {
-        self.shared.lock().paused = false;
+        self.shared.lock().ask(Want::Run);
         self.shared.cv.notify_all();
     }
 
     /// Stops the child for good and returns once the supervisor thread is done.
     pub fn stop(&self) {
         let mut f = self.shared.lock();
-        f.stopping = true;
+        f.ask(Want::Stop);
         self.shared.cv.notify_all();
-        while !f.done {
+        while !matches!(f.phase, Phase::Done) {
             f = self.shared.cv.wait(f).unwrap_or_else(|p| p.into_inner());
         }
     }
 
     /// Kills the current child so the supervisor starts a new one (tests, and a stuck child).
     pub fn kill_child(&self) -> Result<()> {
-        let pid = self.shared.lock().state.pid;
-        match pid {
-            Some(pid) => signal(pid, "KILL"),
-            None => Err(Error::new(format!(
+        let phase = self.shared.lock().phase;
+        match phase {
+            Phase::Running { pid, .. } => signal(pid, "KILL"),
+            Phase::Waiting | Phase::Spawning | Phase::Done => Err(Error::new(format!(
                 "{} is not running",
                 self.shared.spec.name
             ))),
@@ -160,7 +207,7 @@ impl Supervisor {
 
 impl Drop for Supervisor {
     fn drop(&mut self) {
-        self.shared.lock().stopping = true;
+        self.shared.lock().ask(Want::Stop);
         self.shared.cv.notify_all();
         if let Some(t) = self.thread.take() {
             let _ = t.join();
@@ -173,7 +220,7 @@ struct Done<'a>(&'a Shared);
 
 impl Drop for Done<'_> {
     fn drop(&mut self) {
-        self.0.lock().done = true;
+        self.0.lock().phase = Phase::Done;
         self.0.cv.notify_all();
     }
 }
@@ -183,12 +230,13 @@ fn run(s: &Shared) {
     loop {
         {
             let mut f = s.lock();
-            while f.paused && !f.stopping {
+            while f.want == Want::Pause {
                 f = s.cv.wait(f).unwrap_or_else(|p| p.into_inner());
             }
-            if f.stopping {
+            if f.want == Want::Stop {
                 return;
             }
+            f.phase = Phase::Spawning;
         }
         let started = Instant::now();
         let outcome = match spawn(&s.spec) {
@@ -196,24 +244,23 @@ fn run(s: &Shared) {
             Err(e) => Exit::Failed(e.to_string()),
         };
         let mut f = s.lock();
-        f.state.pid = None;
-        f.state.healthy = false;
+        f.phase = Phase::Waiting;
         if let Exit::Failed(e) = &outcome {
             eprintln!("pt-fleet: {}: {e}", s.spec.name);
-            f.state.last_error = Some(e.clone());
+            f.last_error = Some(e.clone());
         }
         s.cv.notify_all();
-        if f.stopping {
-            return;
-        }
-        if f.paused || matches!(outcome, Exit::Asked) {
-            continue;
+        match f.want {
+            Want::Stop => return,
+            Want::Pause => continue,
+            Want::Run if matches!(outcome, Exit::Asked) => continue,
+            Want::Run => {}
         }
         if started.elapsed() >= STABLE_RUN {
             backoff = BACKOFF_MIN;
         }
         let deadline = Instant::now() + backoff;
-        while !f.stopping {
+        while f.want != Want::Stop {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
                 break;
@@ -258,10 +305,14 @@ enum Exit {
 
 fn watch(s: &Shared, mut child: Child) -> Exit {
     let spec = &s.spec;
+    let pid = child.id();
     {
         let mut f = s.lock();
-        f.state.pid = Some(child.id());
-        f.state.starts += 1;
+        f.phase = Phase::Running {
+            pid,
+            healthy: false,
+        };
+        f.starts += 1;
     }
     let started = Instant::now();
     let mut healthy = false;
@@ -275,7 +326,7 @@ fn watch(s: &Shared, mut child: Child) -> Exit {
         }
         {
             let f = s.lock();
-            if f.stopping || f.paused {
+            if f.want != Want::Run {
                 drop(f);
                 stop(spec, &mut child);
                 return Exit::Asked;
@@ -286,8 +337,8 @@ fn watch(s: &Shared, mut child: Child) -> Exit {
                 healthy = true;
                 last_check = Instant::now();
                 let mut f = s.lock();
-                f.state.healthy = true;
-                f.state.last_error = None;
+                f.phase = Phase::Running { pid, healthy: true };
+                f.last_error = None;
                 s.cv.notify_all();
             } else if started.elapsed() >= spec.ready_within {
                 stop(spec, &mut child);
@@ -309,7 +360,7 @@ fn watch(s: &Shared, mut child: Child) -> Exit {
             }
         }
         let f = s.lock();
-        if !f.stopping && !f.paused {
+        if f.want == Want::Run {
             let _ = s.cv.wait_timeout(f, POLL);
         }
     }

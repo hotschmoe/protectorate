@@ -8,7 +8,9 @@
 //! rename, the enrollment record failing to write after headscale changed (the rename is put
 //! back, the removal is finished by retrying it by id), a rename repeated after a crash
 //! repairing the record, the event log, a removed node that cannot come back on its old
-//! key, and everything surviving a hub restart, which reads headscale's own database again.
+//! key, and everything surviving a hub restart, which reads headscale's own database again and
+//! completes a hub member enrollment that stopped before its marker, and an approval whose
+//! record cannot be written deleting the node again so it can join anew.
 //!
 //! Skips when the protectorate binary does not embed headscale and member, or when bwrap or
 //! protectorate-node is missing.
@@ -63,6 +65,22 @@ fn join(hub: &Hub, node_bin: &Path, url: &str, name: &str, dir: &Path) -> String
         "{}",
         String::from_utf8_lossy(&digits.stderr)
     );
+    let (mut join, auth) = registration(hub, node_bin, url, name, dir);
+    let r = hub.cli(&["node", "approve", &auth, "--name", "1234"]);
+    assert!(r.stderr.contains("reads as a node id"), "{}", r.stderr);
+    let approved = hub.cli(&["--json", "node", "approve", &auth]).json();
+    assert_eq!(approved["name"].as_str(), Some(name), "{approved}");
+    let status = eventually("join to exit", Duration::from_secs(60), || {
+        join.0.try_wait().unwrap()
+    });
+    assert!(status.success(), "join exited {status}");
+    approved["node_id"].as_str().unwrap().to_string()
+}
+
+/// `protectorate-node join` and the owner pasting its registration: the running join and the
+/// registration's auth id.
+fn registration(hub: &Hub, node_bin: &Path, url: &str, name: &str, dir: &Path) -> (Kill, String) {
+    fs::create_dir_all(dir).unwrap();
     let mut join = Kill(
         Command::new(node_bin)
             .args(["join", url, "--name", name, "--state-dir"])
@@ -74,12 +92,11 @@ fn join(hub: &Hub, node_bin: &Path, url: &str, name: &str, dir: &Path) -> String
     );
     let (tx, rx) = mpsc::channel();
     let out = join.0.stdout.take().unwrap();
+    // Read to the end: join's output after the registration must not hit a closed pipe.
     std::thread::spawn(move || {
         for l in BufReader::new(out).lines() {
             let Ok(l) = l else { break };
-            if tx.send(l).is_err() {
-                break;
-            }
+            let _ = tx.send(l);
         }
     });
     let payload = loop {
@@ -94,15 +111,7 @@ fn join(hub: &Hub, node_bin: &Path, url: &str, name: &str, dir: &Path) -> String
         .as_str()
         .unwrap()
         .to_string();
-    let r = hub.cli(&["node", "approve", &auth, "--name", "1234"]);
-    assert!(r.stderr.contains("reads as a node id"), "{}", r.stderr);
-    let approved = hub.cli(&["--json", "node", "approve", &auth]).json();
-    assert_eq!(approved["name"].as_str(), Some(name), "{approved}");
-    let status = eventually("join to exit", Duration::from_secs(60), || {
-        join.0.try_wait().unwrap()
-    });
-    assert!(status.success(), "join exited {status}");
-    approved["node_id"].as_str().unwrap().to_string()
+    (join, auth)
 }
 
 fn serve(node_bin: &Path, dir: &Path) -> Kill {
@@ -223,7 +232,11 @@ impl Blocker {
     }
 
     fn lift(self) {
-        fs::rename(&self.0, self.0.with_file_name("enrolled.tmp-aside")).unwrap();
+        let aside = (1..)
+            .map(|n| self.0.with_file_name(format!("enrolled.tmp-aside-{n}")))
+            .find(|p| !p.exists())
+            .unwrap();
+        fs::rename(&self.0, aside).unwrap();
     }
 }
 
@@ -412,9 +425,15 @@ fn owner_removes_a_stale_node_and_renames_its_successor() {
         .collect();
     assert_eq!(ids, vec![new.clone()], "{}", tail(&hub.log_text(), 40));
 
-    // A restarted hub reads headscale's database again: one node, under its new name.
+    // A restarted hub reads headscale's database again: one node, under its new name. Its
+    // member's enrollment marker is gone, as after a first start cut short once the member was
+    // registered: the member reports itself registered, and the hub finds it and marks it.
+    let marker = tailnet.join("member").join("hub-enrolled");
+    let hub_id = fs::read_to_string(&marker).unwrap();
+    fs::remove_file(&marker).unwrap();
     hub.restart();
     let n = online(&hub, &new, true);
+    assert_eq!(fs::read_to_string(&marker).unwrap(), hub_id);
     assert_eq!(n["name"].as_str(), Some("e2e-old"));
     assert_eq!(nodes(&hub).len(), 1);
 
@@ -442,6 +461,42 @@ fn owner_removes_a_stale_node_and_renames_its_successor() {
             .contains("left the tailnet")),
         "an owner's removal is not reported as the node leaving"
     );
+
+    // An approval whose record cannot be written deletes the node in headscale again, so the
+    // machine joins anew under the same name.
+    let blocker = Blocker::new(&tailnet);
+    let third_dir = tailnet.with_file_name(format!("pt-noderm-{}-{port}-3", std::process::id()));
+    let (mut refused, auth) = registration(&hub, &node_bin, &url, "e2e-third", &third_dir);
+    let r = hub.cli(&["node", "approve", &auth]);
+    assert_ne!(r.status, 0);
+    assert!(
+        r.stderr
+            .contains("is deleted again: run protectorate-node join on the node again"),
+        "{}",
+        r.stderr
+    );
+    // Its member may wait on for an approval that is gone; it goes with its join.
+    let _ = Command::new("pkill")
+        .args(["-KILL", "-f"])
+        .arg(&third_dir)
+        .status();
+    refused.stop();
+    blocker.lift();
+    let again = tailnet.with_file_name(format!("pt-noderm-{}-{port}-3b", std::process::id()));
+    let third = join(&hub, &node_bin, &url, "e2e-third", &again);
+    eventually(
+        "only the rejoined node listed",
+        Duration::from_secs(30),
+        || {
+            let ids: Vec<String> = nodes(&hub)
+                .iter()
+                .filter_map(|n| n["id"].as_str().map(String::from))
+                .collect();
+            (ids == [third.clone()]).then_some(())
+        },
+    );
+    assert!(enrolled(&tailnet).iter().all(|(id, _)| *id == third));
+
     let status = hub.stop().expect("the hub ran");
     assert!(status.success(), "the hub exited {status}");
 }

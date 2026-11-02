@@ -8,7 +8,7 @@ use crate::client::NodeClient;
 use crate::config::{Config, NODE_PORT};
 use crate::error::{Error, Result};
 use crate::files::private_dir;
-use crate::headscale::{self, Admin, TAG_HUB};
+use crate::headscale::{self, Admin};
 use crate::member::{self, Status};
 
 struct Inner {
@@ -35,7 +35,8 @@ const READY: Duration = Duration::from_secs(60);
 
 impl Fleet {
     /// Writes headscale's config, starts it in its sandbox and waits for `/health`, makes the
-    /// fleet user, enrolls the hub's own member on first start, then starts that member.
+    /// fleet user, enrolls the hub's own member until one enrollment completes, then starts
+    /// that member.
     pub fn start(cfg: Config) -> Result<Fleet> {
         let ctx = |e: Error| e.context("starting the fleet");
         private_dir(&cfg.dir).map_err(ctx)?;
@@ -56,7 +57,7 @@ impl Fleet {
         let admin = Admin::new(&cfg);
         admin.ensure_user().map_err(ctx)?;
         let fingerprint = headscale::control_fingerprint(&cfg).map_err(ctx)?;
-        if !member::enrolled(&cfg) {
+        if !member::enrolled(&cfg).map_err(ctx)? {
             member::enroll(&cfg, &admin, &fingerprint).map_err(ctx)?;
         }
 
@@ -80,7 +81,7 @@ impl Fleet {
         .map_err(ctx)?;
         m.wait_healthy(READY).map_err(ctx)?;
 
-        let fleet = Fleet {
+        Ok(Fleet {
             inner: Arc::new(Inner {
                 cfg,
                 admin,
@@ -92,24 +93,7 @@ impl Fleet {
                 enroll: Mutex::new(()),
                 nodes: Mutex::new(()),
             }),
-        };
-        fleet.ensure_hub_tag().map_err(ctx)?;
-        Ok(fleet)
-    }
-
-    /// An enrollment cut short after `auth register` leaves the hub untagged; tag it now.
-    fn ensure_hub_tag(&self) -> Result<()> {
-        let st = self.status()?;
-        let id: u64 = st
-            .this
-            .as_ref()
-            .and_then(|p| p.stable_id.parse().ok())
-            .ok_or_else(|| Error::new("hub member STATUS has no self"))?;
-        let node = self.admin().node(id)?;
-        if !node.has_tag(TAG_HUB) {
-            self.admin().tag(id, TAG_HUB)?;
-        }
-        Ok(())
+        })
     }
 
     pub fn config(&self) -> &Config {
