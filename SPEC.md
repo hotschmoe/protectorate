@@ -363,10 +363,22 @@ straight from GitHub releases, on the stable or dev channel, as today.
 - **Hub:**
   - `protectorate hub update [--version]`, or the app's UPDATE key, downloads the release and stages it
     in `releases/<version>/`.
-  - Headscale's database is snapshotted first, because its migrations are one-way.
+  - Before switching, the hub snapshots the journal at a durable batch boundary and, if the
+    fleet is running, headscale's database. Headscale's migrations are one-way.
   - The hub re-execs in place (D17), so sleeves keep running. The previous release stays on disk.
-  - If the new hub fails its health check within 2 minutes, a supervisor wrapper switches the
-    `current` pointer back and restarts it.
+  - If the new hub fails its health check within 2 minutes, prestart restores both snapshots
+    before switching `current` back. Journal events after the journal snapshot and headscale
+    changes after its snapshot are lost.
+  - Manual `hub update --rollback` runs the restore offline before switching. It always restores
+    headscale when there is a snapshot. It keeps the journal if the target declares an event-tag
+    limit and every current frame is within it; otherwise it restores the journal snapshot and
+    loses events after that snapshot. Releases must give every incompatible event encoding a new
+    event tag, and advertise the highest tag they read. A rollback without a matching journal or
+    required headscale snapshot is refused. A new update and a manual rollback both require
+    snapshot-aware rollback in the target release, which runs prestart.
+  - If a snapshot cannot be restored, prestart keeps the trial release and reports the error.
+    Repair the snapshot and retry the offline restore. If the trial binary itself cannot start,
+    service needs that repair: neither an unreadable journal nor a failed binary can serve.
 - **Nodes, triggered by the hub:**
   - The hub sends `Update(version)` over its own connection. The node downloads the release from
     GitHub itself: outbound to GitHub, not to the hub.

@@ -295,17 +295,38 @@ hub update --rollback
 ```
 
 `hub update` downloads the release from GitHub, checks it against `SHA256SUMS`, stages it in
-`<home>/releases/<version>/`, snapshots headscale's database, switches `releases/current` on
+`<home>/releases/<version>/`, snapshots the journal and headscale's database, switches `releases/current` on
 probation and restarts. The new hub keeps the release once its health check passes within 2
 minutes; a release that keeps failing to start is switched back by `hub probation`, which the
-unit runs before each start. Before the rollback it restores the headscale database snapshot;
-nodes enrolled after the snapshot, including during the failed trial, are lost and must be
-enrolled again. A configured fleet must be running so the database can be snapshotted. The service
+unit runs before each start. Automatic rollback restores both snapshots before switching back:
+events after the journal snapshot and headscale changes after its snapshot are lost. This includes
+nodes enrolled after the headscale snapshot; enroll them again. A configured fleet must be running
+so the database can be snapshotted. The service
 must run the snapshot-aware `hub probation` before each start and stop if it fails; regenerate an
 older unit with the current installer before relying on this rollback. `--check` only reports what
-it would do; `--rollback` goes back to `releases/previous`. The channel defaults to
+it would do. `--rollback` requests an offline switch to `releases/previous`, including during a
+trial. It restores the headscale snapshot, losing changes since that snapshot. It keeps the whole
+journal if the target declares a supported event-tag limit and every frame fits; otherwise it
+restores the journal snapshot, losing events after its recorded time. The prestart log reports
+which happened. The matching snapshot record and any snapshot needed for the restore must be
+available. The target must support snapshot-aware prestart; a release installed before journal
+snapshots were introduced cannot be rolled back this way. New updates require a target that
+supports this rollback protocol. The channel defaults to
 `release_channel` in `config.json` (`stable`).
 Sleeves do not survive the restart: they resume as after a crash.
+
+An update is refused if the stopped headscale snapshot still contains SQLite WAL or SHM files,
+or if the hub journal has more than its current single segment. These layouts cannot yet be
+restored atomically by the updater.
+
+If a snapshot cannot be restored, prestart reports the path and error, cancels the rollback, and
+keeps the trial release as `current`. Some data may already have been restored before the error.
+Repair the named snapshot from backup, stop the hub, and run
+`<home>/releases/previous/protectorate --home <home> hub probation --retry-rollback`, then start
+the service. This retry restores both snapshots and loses changes after each snapshot. If the trial
+binary cannot start, the hub stays unavailable until the snapshot is repaired; do not point the old
+binary at an unreadable journal. The first update from a binary predating journal snapshots is not
+protected by this mechanism, because that binary takes the snapshot and runs prestart.
 
 **Nodes:**
 

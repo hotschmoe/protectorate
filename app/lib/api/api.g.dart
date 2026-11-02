@@ -5038,7 +5038,7 @@ final class UpdateHubRequest {
   /// A release tag, in place of the channel's newest.
   final String? version;
 
-  /// Swap `releases/current` and `releases/previous`, then restart.
+  /// Restore the required snapshots and restart on `releases/previous`.
   final bool rollback;
 
   Map<String, Object?> toJson() => {

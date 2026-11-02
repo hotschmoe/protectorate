@@ -719,9 +719,13 @@ Each entry: where, what was done, what right looks like.
   fleet is up. Old `releases/<version>` directories are never pruned. Right: re-exec with the
   listeners and sandboxes handed over, and a health check that includes a fleet round trip.
 - **Release switches order their writes for crashes** (`pt-update` store.rs): probation and
-  `previous` are each synced before `current` changes. Trial rollback restores the snapshot,
-  syncs `current` back to the confirmed release, then records the outcome; `previous` stays
-  confirmed. Debug-only `PT_TEST_CRASH_AT` exercises selected crash points. Right: fine.
+  `previous` are each synced before `current` changes. Trial rollback restores the snapshots,
+  syncs `current` back to the confirmed release, restores the earlier `previous`, then records
+  the outcome. Debug-only `PT_TEST_CRASH_AT` exercises selected crash points. Right: fine.
+- **Hub update snapshots require the core's current single-segment journal** (`pt-journal`): the
+  core does not yet write journal snapshots or rotate segments. An update refuses a journal with
+  multiple segments or a journal snapshot instead of restoring only part of it. Right: snapshot
+  and restore the complete directory atomically when the core gains journal rotation.
 - **Starting a just-written binary can fail with ETXTBSY** (`pt-update`, the node supervisor):
   on Linux a file still open for writing anywhere, including a descriptor a concurrent fork
   inherited for a moment before exec, cannot be executed. The update e2e hit it once under load
