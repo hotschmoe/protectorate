@@ -1,6 +1,22 @@
 use std::cmp::Ordering;
 use std::fmt;
 
+use crate::sums::plain_name;
+
+pub(crate) const CURRENT: &str = "current";
+pub(crate) const PREVIOUS: &str = "previous";
+
+/// A name usable as `releases/<version>`: a tag such as `v1.2.3-dev.4`, never a pointer name.
+pub(crate) fn version_name(v: &str) -> bool {
+    plain_name(v)
+        && v.len() <= 128
+        && v.as_bytes()[0].is_ascii_alphanumeric()
+        && v.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'+' | b'-'))
+        && v != CURRENT
+        && v != PREVIOUS
+}
+
 pt_json::string_enum! {
     /// Stable takes tags without a pre-release part (`v1.2.3`). Dev takes every tag
     /// (`v1.3.0-dev.4` and stable ones), so it is never behind stable.

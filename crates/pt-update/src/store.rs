@@ -1,9 +1,12 @@
 //! `<root>/releases/`: one directory per version, plus the `current` and `previous` symlinks,
 //! `probation.json` and the `.lock` file that serialises changes.
 
+use crate::error::{Error, ErrorKind, Result};
 use crate::fetch::{MAX_ASSET, MAX_SUMS, MAX_VERSION};
+use crate::pick::Pick;
 use crate::sums::plain_name;
-use crate::{Error, ErrorKind, Pick, Release, Result, Source, Sums};
+use crate::version::{CURRENT, PREVIOUS, version_name};
+use crate::{Release, Source, Sums};
 use pt_json::{ToJson, record};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
@@ -14,21 +17,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const CURRENT: &str = "current";
-const PREVIOUS: &str = "previous";
 const PROBATION: &str = "probation.json";
 const CONFIRMED: &str = "confirmed-probation.json";
-
-/// A name usable as `releases/<version>`: a tag such as `v1.2.3-dev.4`, never a pointer name.
-pub(crate) fn version_name(v: &str) -> bool {
-    plain_name(v)
-        && v.len() <= 128
-        && v.as_bytes()[0].is_ascii_alphanumeric()
-        && v.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'+' | b'-'))
-        && v != CURRENT
-        && v != PREVIOUS
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Switch {

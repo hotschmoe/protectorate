@@ -1,6 +1,7 @@
 //! The GitHub releases API and asset downloads, through the system curl.
 
-use crate::{Channel, Error, ErrorKind, Result, Version};
+use crate::error::{Error, ErrorKind, Result};
+use crate::{Channel, Version};
 use pt_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -188,7 +189,7 @@ impl Source {
     }
 
     pub fn release(&self, tag: &str) -> Result<Release> {
-        if !crate::store::version_name(tag) {
+        if !crate::version::version_name(tag) {
             return Err(rel(format!("{tag:?} is not a release tag")));
         }
         let url = format!("{}/repos/{}/releases/tags/{tag}", self.api, self.repo);

@@ -1,4 +1,4 @@
-use crate::{Error, ErrorKind, Result};
+use crate::error::{Error, ErrorKind, Result};
 use std::collections::BTreeMap;
 use std::path::Path;
 
