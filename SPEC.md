@@ -321,7 +321,8 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   one short continuation prompt, and at most one for that owner turn. A turn the continuation
   itself started is not continued again; the owner and the parent get `TurnNeedsPrompt`. An owner
   interrupt, or a guardrail that interrupts (silent, loop, turn wallclock), is not continued and
-  gets no warning. The hub journals a `Continue` event and the effect is allocated only when that
+  gets no warning, including when a protocol desync kills the sleeve during that interrupt.
+  The hub journals a `Continue` event and the effect is allocated only when that
   event is applied, so a journal recorded before the event existed replays to the same effects.
   It is not sent after a planned stop, a hub restart of an idle sleeve, or a manual resleeve (the
   brief is that continuation). A debt still held when recovery finds that incarnation already idle

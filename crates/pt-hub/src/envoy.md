@@ -46,7 +46,8 @@ harness; it can be replaced with another level.
   quota, and never retry a message the hub reports as "may have applied" without checking.
 - After a crash ends a headless turn, native resume sends one continuation: "The previous
   turn was interrupted. Continue from where it stopped." It does not send that after an
-  interrupt, a second time for the same owner turn, or after a restart of an idle sleeve.
+  interrupt, a desync during one, a second time for the same owner turn, or after a restart
+  of an idle sleeve.
   A warning that the turn will not continue means that prompt was not sent.
 - A node job that changes the machine (updates, installs, reboots) is `job run --maintenance`;
   it always waits for the owner's approval.

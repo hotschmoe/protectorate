@@ -1249,12 +1249,19 @@ impl Core<'_> {
             }
             Obs::Desync { .. } => {
                 let s = &self.st.sleeves[&sid];
-                let active = matches!(
-                    s.activity,
-                    Activity::Working | Activity::Blocked { .. } | Activity::Interrupting
-                ) || matches!(s.activity, Activity::Delivering { effect } if self.effect_state(effect) != Some(EffectState::Intent));
+                // An interrupt already stopped this turn. Counting it as active would set
+                // desync_during_turn, the kill would leave activity Unknown, and resume
+                // would continue the turn the owner stopped. `turn` is cleared for the
+                // same reason: it stays set across the interrupt.
+                let interrupting = s.activity == Activity::Interrupting;
+                let active = !interrupting
+                    && (matches!(s.activity, Activity::Working | Activity::Blocked { .. })
+                        || matches!(s.activity, Activity::Delivering { effect } if self.effect_state(effect) != Some(EffectState::Intent)));
                 let s = self.sl(sid);
                 s.desync_during_turn |= active;
+                if interrupting {
+                    s.turn = None;
+                }
                 s.activity = Activity::Unknown;
                 self.trip(sid, Guardrail::ProtocolDesync);
             }
