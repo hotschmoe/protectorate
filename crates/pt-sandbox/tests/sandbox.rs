@@ -97,19 +97,6 @@ fn disk_scratch_is_short_and_survives_incarnations() {
 }
 
 #[test]
-fn bwrap_does_not_preserve_the_harness_kill_signal() {
-    use std::os::unix::process::ExitStatusExt;
-
-    let base = fixture("exit-status");
-    let mut s = spec("exit-status", &base);
-    s.scope = false;
-    let killed = sh(&s, "kill -9 $$").status;
-    let exited = sh(&s, "exit 137").status;
-    assert_eq!((killed.code(), killed.signal()), (Some(137), None));
-    assert_eq!((exited.code(), exited.signal()), (Some(137), None));
-}
-
-#[test]
 fn mask_and_runtime_tmpfs_have_small_limits() {
     let base = fixture("mask-limits");
     let mask = sub(&base, "masked");

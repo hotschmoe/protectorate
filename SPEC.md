@@ -185,8 +185,7 @@ crash, every incarnation goes to Recovering and resumes natively.
     harness's shared hub login (`<home>/logins/`) and the owner's cargo registry, Go and pub
     caches bound read-write;
   - a systemd scope per incarnation with limits and `cgroup.kill`, plus the orphan reaper.
-    The guardrail requires a scope OOM kill and the harness's SIGKILL exit; bwrap can obscure
-    the harness's exit signal (REVISIT.md).
+    The guardrail requires a scope OOM kill and a launcher exit by SIGKILL or code 137.
 
   Cut from today's sandbox: the network namespace, the egress proxy, cache overlays, nested cgroup
   delegation and the pin-approval gate. Sleeves share the host network and the owner's download

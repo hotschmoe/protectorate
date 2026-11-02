@@ -693,7 +693,7 @@ while True: a.append(bytearray(4*1024*1024))'
 touch "$CARGO_TARGET_DIR/child-killed$g"
 while [ ! -e "$TMPDIR/exit$g" ]; do sleep 0.1; done
 if [ "$g" = 1 ]; then exit 1; fi
-exit 137"#,
+exit 2"#,
     );
     let config = pt_json::obj! {
         "envoy" => pt_json::obj! { "harness" => "claude" },
@@ -778,6 +778,96 @@ exit 137"#,
         .join("\n");
     assert!(!notices.contains("guardrail G4"), "{notices}");
     assert_ne!(hub.sleeve("oom")["lifecycle"].as_str(), Some("parked"));
+}
+
+#[test]
+fn repeated_scope_oom_parks_and_reports_the_memory_limit() {
+    let bus = std::process::Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .output();
+    if !bus.is_ok_and(|o| o.status.success()) {
+        eprintln!("SKIP: no systemd user bus for scope OOM test");
+        return;
+    }
+    let dir = unique("oom-kill");
+    let home = dir.join("home");
+    let fake = dir.join("claude");
+    std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
+    std::fs::write(home.join("logins/.claude/.credentials.json"), "{}").unwrap();
+    write_script(
+        &fake,
+        r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi
+g=1
+if [ -f "$HOME/g" ]; then g=$(($(cat "$HOME/g") + 1)); fi
+echo "$g" > "$HOME/g"
+touch "$CARGO_TARGET_DIR/ready$g"
+while [ ! -e "$TMPDIR/go$g" ]; do sleep 0.1; done
+exec python3 -c 'a=[]
+while True: a.append(bytearray(4*1024*1024))'"#,
+    );
+    let config = pt_json::obj! {
+        "envoy" => pt_json::obj! { "harness" => "claude" },
+        "claude_program" => fake.to_str().unwrap(),
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+    };
+    std::fs::write(home.join("config.json"), config.to_string()).unwrap();
+    let hub = Hub::open(home, &[], &[]);
+    let repo = temp_repo("oom-kill");
+    let s = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "oom",
+            "--path",
+            repo.to_str().unwrap(),
+            "--harness",
+            "claude",
+        ])
+        .json();
+    let id = s["id"].as_str().unwrap();
+    let scratch = hub.home.join(format!("sleeves/{id}/scratch"));
+    for g in 1..=2 {
+        eventually("the test harness to start", Duration::from_secs(60), || {
+            scratch
+                .join(format!("target/ready{g}"))
+                .exists()
+                .then_some(())
+        });
+        let scope = hub.scope(id, g);
+        let status = std::process::Command::new("systemctl")
+            .args([
+                "--user",
+                "set-property",
+                "--runtime",
+                &scope,
+                "MemoryMax=96M",
+            ])
+            .status()
+            .unwrap();
+        assert!(status.success(), "set memory limit on {scope}");
+        std::thread::sleep(Duration::from_secs(1));
+        std::fs::write(scratch.join(format!("tmp/go{g}")), "go").unwrap();
+    }
+    eventually(
+        "the second OOM to park the sleeve",
+        Duration::from_secs(60),
+        || (hub.sleeve("oom")["lifecycle"].as_str() == Some("parked")).then_some(()),
+    );
+    eventually("both OOM notices", Duration::from_secs(10), || {
+        let entries = hub.transcript("oom");
+        let notices = of_type(&entries, "notice")
+            .iter()
+            .filter_map(|e| e["entry"]["text"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        (notices
+            .matches("guardrail G4 tripped: the memory limit")
+            .count()
+            == 2)
+            .then_some(())
+    });
 }
 
 /// A sleeve controls its repo's config and `.gitattributes` (a child, the shared git dir): the

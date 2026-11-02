@@ -1184,7 +1184,7 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Rece
         refusal: None,
         prev_error: None,
         cause: ExitCause::Killed,
-        signal: None,
+        oom_exit: false,
         expects: HashMap::new(),
         held: None,
     };
@@ -1236,7 +1236,7 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Rece
     }
     if let Some(watch) = &run.oom {
         match watch.finish() {
-            Ok(true) if p.signal == Some(i64::from(pt_sys::SIGKILL)) => p.cause = ExitCause::Oom,
+            Ok(true) if p.oom_exit => p.cause = ExitCause::Oom,
             Ok(true) => {}
             Ok(false) => {}
             Err(e) => warning!("{scope}: OOM status unknown: {e}"),
@@ -1260,7 +1260,7 @@ struct Pump {
     /// the driver writes right before `Exited`.
     prev_error: Option<ErrorClass>,
     cause: ExitCause,
-    signal: Option<i64>,
+    oom_exit: bool,
     /// Prompts being written, by request id.
     expects: HashMap<String, Expect>,
     /// A confirmed prompt whose ack had no native turn id: the harness's turn start may.
@@ -1481,7 +1481,7 @@ impl Pump {
             }
             Entry::Compaction { .. } => obs.push(Obs::CompactDone),
             Entry::Exited { code, signal, .. } => {
-                self.signal = *signal;
+                self.oom_exit = *signal == Some(i64::from(pt_sys::SIGKILL)) || *code == Some(137);
                 self.cause = match (self.refusal.or(before), code, signal) {
                     (Some(ErrorClass::Auth), ..) => ExitCause::Auth,
                     (Some(ErrorClass::Quota), ..) => ExitCause::Quota,
