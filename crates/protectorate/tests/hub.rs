@@ -1658,6 +1658,218 @@ for line in sys.stdin:
     assert_eq!(hub.sleeve("victim")["lifecycle"].as_str(), Some("running"));
 }
 
+/// A fake Claude that echoes one user message, then either settles or exits.
+fn claude_that(body: &str) -> String {
+    let body = body
+        .lines()
+        .map(|l| format!("    {l}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        r#"#!/usr/bin/env python3
+import json, os, sys, time
+if "--version" in sys.argv:
+    print("2.0.0 (Claude Code)")
+    raise SystemExit(0)
+scratch = os.environ.get("CARGO_TARGET_DIR", "/tmp")
+def text_of(msg):
+    message = msg.get("message") or {{}}
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(str(p.get("text", "")) for p in content if isinstance(p, dict))
+    return ""
+def echo(msg):
+    out = {{"type": "user", "isReplay": True, "uuid": msg.get("uuid", ""), "message": msg.get("message", {{}})}}
+    sys.stdout.write(json.dumps(out) + "\n")
+    sys.stdout.flush()
+def result():
+    sys.stdout.write(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "stop_reason": "end_turn"}}) + "\n")
+    sys.stdout.flush()
+def hold(name):
+    open(os.path.join(scratch, name), "w").close()
+    while not os.path.exists(os.path.join(scratch, name + "-go")):
+        time.sleep(0.05)
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        msg = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if msg.get("type") != "user":
+        continue
+    echo(msg)
+    text = text_of(msg)
+{body}
+"#,
+    )
+}
+
+fn ask_remove(hub: &Hub, token: &str, envoy_id: &str) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (home, token) = (hub.home.clone(), token.to_string());
+    std::thread::spawn(move || {
+        let out = std::process::Command::new(bin())
+            .arg("--home")
+            .arg(home)
+            .args(["sleeve", "rm", "victim"])
+            .env_remove("PROTECTORATE_TOKEN")
+            .env_remove("PROTECTORATE_SOCKET")
+            .env("PROTECTORATE_TOKEN", token)
+            .output()
+            .expect("run rm");
+        let _ = tx.send(out);
+    });
+    let approval = eventually("the D9 approval", Duration::from_secs(20), || {
+        let v = hub.cli(&["--json", "approval", "list", "--pending"]).json();
+        v["approvals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["title"].as_str() == Some("remove sleeve victim"))
+            .cloned()
+    });
+    assert_eq!(approval["kind"].as_str(), Some("action"));
+    assert_eq!(approval["sleeve_id"].as_str(), Some(envoy_id));
+    assert!(
+        approval["summary"]
+            .as_str()
+            .unwrap()
+            .contains("agent:grokbot"),
+        "{approval}"
+    );
+    assert!(rx.try_recv().is_err(), "the removal waits for the owner");
+    hub.cli(&[
+        "approval",
+        "decide",
+        approval["id"].as_str().unwrap(),
+        "deny",
+    ])
+    .ok();
+    let out = rx
+        .recv_timeout(Duration::from_secs(20))
+        .expect("rm returns");
+    assert_eq!(out.status.code(), Some(4), "denied: {out:?}");
+    assert!(String::from_utf8_lossy(&out.stderr).contains("did not allow"));
+    assert_eq!(hub.sleeve("victim")["lifecycle"].as_str(), Some("running"));
+}
+
+fn envoy_on_fake(name: &str, script: &str, env: &[(&str, &str)]) -> (Hub, String, String) {
+    let dir = unique(name);
+    let home = dir.join("home");
+    let fake = dir.join("claude");
+    std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
+    std::fs::write(home.join("logins/.claude/.credentials.json"), "{}").unwrap();
+    std::fs::write(&fake, script).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    write_script(&dir.join("systemd-run"), "exit 0");
+    let config = pt_json::obj! {
+        "envoy" => pt_json::obj! { "harness" => "claude" },
+        "claude_program" => fake.to_str().unwrap(),
+        "scopes" => false,
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+    };
+    std::fs::write(home.join("config.json"), config.to_string()).unwrap();
+    let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
+    let mut all = vec![("PATH", path.as_str())];
+    all.extend_from_slice(env);
+    let hub = Hub::open(home, &[], &all);
+    let socket = hub
+        .home
+        .join("run/sleeves/api.sock")
+        .to_string_lossy()
+        .into_owned();
+    eventually("Envoy to be running", Duration::from_secs(90), || {
+        (hub.sleeve("envoy")["lifecycle"].as_str() == Some("running")).then_some(())
+    });
+    let envoy_id = hub.sleeve("envoy")["id"].as_str().unwrap().to_string();
+    let token = env_get(&sleeve_process_env(&socket, "envoy"), "PROTECTORATE_TOKEN")
+        .unwrap()
+        .to_string();
+    let repo = temp_repo(name);
+    hub.cli(&[
+        "--json",
+        "sleeve",
+        "spawn",
+        "victim",
+        "--path",
+        repo.to_str().unwrap(),
+        "--harness",
+        "claude",
+    ])
+    .ok();
+    eventually("victim to be running", Duration::from_secs(90), || {
+        (hub.sleeve("victim")["lifecycle"].as_str() == Some("running")).then_some(())
+    });
+    let agent = hub.printed("envoy-only token: ");
+    hub.cli_env(
+        &[("PROTECTORATE_TOKEN", agent.as_str())],
+        &["envoy", "send", "--as", "grokbot", "remove a sleeve"],
+    )
+    .ok();
+    (hub, envoy_id, token)
+}
+
+/// A quota settle starts a resleeve. The brief is the owner's prompt, and the only
+/// candidate is the harness that just failed, so Envoy parks. The removal still asks.
+#[test]
+fn agent_quota_settle_still_asks_before_remove() {
+    let script = claude_that(
+        r#"result()
+"#,
+    );
+    let (hub, envoy_id, token) =
+        envoy_on_fake("d9q", &script, &[("PT_TEST_FAULT", "usage_limit:envoy")]);
+    let end = std::time::Instant::now() + Duration::from_secs(90);
+    loop {
+        let s = hub.sleeve("envoy");
+        if s["lifecycle"].as_str() == Some("parked") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < end,
+            "envoy did not park: {s}\n{}",
+            tail(&hub.log_text(), 80)
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    ask_remove(&hub, &token, &envoy_id);
+}
+
+/// A crash mid-turn continues as the agent. The removal during that continuation still asks.
+#[test]
+fn agent_crash_still_asks_before_remove() {
+    let script = claude_that(
+        r#"if "previous turn was interrupted" in text:
+    hold("continued")
+    result()
+else:
+    os._exit(1)
+"#,
+    );
+    let (hub, envoy_id, token) = envoy_on_fake("d9c", &script, &[]);
+    let scratch = hub.home.join(format!("sleeves/{envoy_id}/scratch/target"));
+    let end = std::time::Instant::now() + Duration::from_secs(120);
+    loop {
+        if scratch.join("continued").exists() {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < end,
+            "no continuation: {}\n{}",
+            hub.sleeve("envoy"),
+            tail(&hub.log_text(), 80)
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    ask_remove(&hub, &token, &envoy_id);
+}
+
 #[test]
 fn repeated_scope_oom_parks_and_reports_the_memory_limit() {
     let bus = std::process::Command::new("systemctl")

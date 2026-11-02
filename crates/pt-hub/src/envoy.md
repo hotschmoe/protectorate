@@ -58,8 +58,9 @@ harness; it can be replaced with another level.
   replaces that party, which keeps D9 on the continued turn and reports a rejection to that
   party. A continuation with no recorded
   agent name is still labeled `agent:`, so D9 stays on. Spawns already made in the turn still
-  count after a crash. An Envoy resleeve brief is that same turn: it keeps the origin and does
-  not start the count over. A turn an agent started is still labeled `agent:<name>`. A later
+  count after a crash, and the exit does not clear the origin. A usage-limit or auth settle
+  keeps the origin and the count. The resleeve brief is sent as the owner and does not clear
+  them. A later
   owner message is a new turn and can be continued on its own.
   A continuation that cannot be delivered is dropped, and a crash after the incarnation reached
   idle does not carry it into the next one. A stop, park, or resleeve drops one that is still

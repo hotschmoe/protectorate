@@ -82,8 +82,10 @@ CLI on the hub machine (section 3.1).
         stay masked from sleeves;
       - D9 still applies: in a turn a vendor agent or a D9-marked sleeve started, Envoy's
         removals, mass spawns and node jobs wait for the owner. This is the one remaining approval.
-        A crash keeps the spawn count; the continuation of that turn does not start it over.
-        The brief of an Envoy resleeve keeps that origin and that count.
+        A crash keeps the origin and the spawn count; the exit does not clear them, and the
+        continuation of that turn does not start the count over. A usage-limit or auth settle
+        keeps them too. The brief of an Envoy resleeve is sent as the owner and does not clear
+        that origin or that count.
 
 ## 3. Layers
 
@@ -431,8 +433,9 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   The prompt is sent as the party that opened that owner turn. An agent steer, or mail from a
   D9-marked sleeve, replaces that party, which keeps D9 on the continued turn and reports a
   rejection to that party. A continuation does not clear an origin the turn already has, and it
-  does not reset the spawn count. An Envoy resleeve brief (`resleeve:`) keeps that origin and
-  that count the same way, and a turn an agent started is still labeled `agent:<name>`. An agent
+  does not reset the spawn count. An exit keeps that origin too. A usage-limit or auth settle
+  keeps the origin and the count, and the Envoy resleeve brief is sent as the owner, so it does
+  not clear them. An agent
   continuation with no recorded name is labeled
   `agent:`, so D9 still applies. The owner
   still hears when the prompt cannot be sent.

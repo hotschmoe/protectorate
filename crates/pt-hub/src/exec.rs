@@ -1143,24 +1143,21 @@ impl SleeveExec {
     /// a new turn. A steer from an agent, or from a D9-marked sleeve, taints the running one.
     /// Mail from an unmarked sleeve clears the origin. A continuation keeps the origin and the
     /// spawn count of the turn it resumes, and restores a marked-mail or agent origin after a crash.
-    /// An Envoy resleeve brief (`resleeve:`) is that same turn: it keeps both, and a brief is not
-    /// a message, so a marked-mail origin is read from who opened the turn.
+    /// An Envoy resleeve brief is sent as the owner, so it does not replace the origin. The exit
+    /// and a quota or auth settle leave the origin in place; this prompt must not clear it.
     fn note_envoy_origin(&self, view: &View, request_id: &str, from: &str, steer: bool) {
-        let sleeve = view.state.sleeve(self.id);
-        let marked_sender = |party: Party| match party {
-            Party::Sleeve(id) => view.state.sleeve(id).is_some_and(|s| s.d9),
-            _ => false,
-        };
-        // A resleeve brief has no message row. The process exit already cleared the origin,
-        // so the turn that brief resumes is what puts a marked-mail origin back.
-        let marked = if let Some(m) = sleeve.and_then(|s| s.messages.get(request_id)) {
-            marked_sender(m.from)
-        } else {
-            request_id.starts_with("resleeve:")
-                && sleeve.is_some_and(|s| marked_sender(s.turn_from))
-        };
+        let marked = view
+            .state
+            .sleeve(self.id)
+            .and_then(|s| s.messages.get(request_id))
+            .is_some_and(|m| match m.from {
+                Party::Sleeve(id) => view.state.sleeve(id).is_some_and(|s| s.d9),
+                _ => false,
+            });
         let origin = (from.starts_with("agent:") || marked).then(|| from.to_string());
         let mut t = crate::transcript::lock(&self.hub.envoy_turn);
+        // A resleeve brief has no message, so `from` is owner and `origin` is None. Keeping
+        // the turn means leaving whatever the exit left, not writing that owner label in.
         let resumed = request_id.starts_with("continue:") || request_id.starts_with("resleeve:");
         if !steer {
             if resumed {
@@ -1494,6 +1491,9 @@ impl Pump {
         self.prompt_reports(hub, &entry);
         let before = self.prev_error.take();
         let mut obs = Vec::new();
+        // A finished settle ends the D9 turn. A usage limit or a rejected login resleeves,
+        // and the brief is sent as the owner, so clearing here would drop the origin for good.
+        let mut clear_envoy_turn = false;
         match &entry {
             Entry::SessionInfo { native_id, .. } => {
                 self.ready = true;
@@ -1550,6 +1550,7 @@ impl Pump {
                     end = TurnEnd::UsageLimit;
                 }
                 self.last_error = None;
+                clear_envoy_turn = !matches!(end, TurnEnd::UsageLimit | TurnEnd::AuthFailed);
                 obs.push(Obs::TurnSettled { end });
             }
             Entry::Error { class, text } => {
@@ -1577,17 +1578,10 @@ impl Pump {
             Entry::UserMessage { .. } | Entry::PromptAck { .. } | Entry::Notice { .. } => {}
         }
         let exited = matches!(entry, Entry::Exited { .. });
-        if (exited || matches!(entry, Entry::TurnSettled { .. }))
-            && Hub::envoy_id(&hub.view().state) == Some(id)
-        {
-            let mut t = crate::transcript::lock(&hub.envoy_turn);
-            if exited {
-                // The process died. The continuation is this same turn, so the spawn
-                // count stays until a real settle or the next prompt.
-                t.origin = None;
-            } else {
-                *t = Default::default();
-            }
+        // An exit keeps the origin and the count. The continuation replaces the origin;
+        // a resleeve brief is the owner's prompt and must not have to.
+        if clear_envoy_turn && Hub::envoy_id(&hub.view().state) == Some(id) {
+            *crate::transcript::lock(&hub.envoy_turn) = Default::default();
         }
         let note = Note {
             harness: matches!(entry, Entry::SessionInfo { .. }).then_some(harness),

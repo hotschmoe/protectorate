@@ -117,8 +117,9 @@ sends it. A fresh session does not get that prompt: if the dead incarnation neve
 the owner is warned instead. The prompt is sent as the party that opened that owner turn.
 An agent steer, or mail from a marked sleeve, replaces that party, which keeps D9 on the
 continued turn and reports a rejection to that party. A continuation does not reset the spawn
-count. An Envoy resleeve brief keeps the origin and the count, and a turn an agent started
-stays labeled `agent:<name>`. A second crash of the same turn does not send another, even
+count. An exit keeps that origin. A usage-limit or auth settle keeps the origin and the
+count, and the Envoy resleeve brief is sent as the owner, so it does not clear them. A second
+crash of the same turn does not send another, even
 after the ten-minute resume window, and a later owner message is a new turn with its own
 prompt. An owner
 interrupt, a guardrail interrupt, a desync during either of those, a planned stop, a restart
@@ -155,8 +156,9 @@ mail can start a turn is the 8-per-10-minutes limit above:
 - `sleeve rm`;
 - `job run`;
 - `sleeve spawn` past `d9_spawn_limit` spawns in that turn (default 3). A crash keeps
-  that count: the continuation is the same turn. An Envoy resleeve brief is that same turn:
-  it keeps the origin and does not start the count over.
+  the origin and that count: the exit does not clear them, and the continuation is the same
+  turn. A usage-limit or auth settle keeps them too. The resleeve brief is sent as the owner
+  and does not clear them.
 
 A node job with `--maintenance` from any sleeve, Envoy included, always waits for the owner. The
 waiting call fails after `d9_approval_timeout_secs` (default 900). Pending approvals live in
