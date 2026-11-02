@@ -20,6 +20,10 @@ use pt_update::{MAX_TRIAL_STARTS, Source, Store, Verdict};
 /// The exit status that asks the service manager for a restart on `releases/current`.
 pub const RESTART_CODE: i32 = 75;
 const PROGRAM: &str = "protectorate-node";
+/// The `--version` line of a binary that keeps the supervisor's start contract: it runs as
+/// `releases/current/protectorate-node serve`, exits [`RESTART_CODE`] to be restarted, and
+/// switches release pointers on Windows.
+pub const SUPERVISED: &str = "supervise: 1";
 
 pub const USAGE: &str = "  probation [--state-dir DIR]       run by the service before each start (from releases/previous):
                                     count a start of the release on trial, and switch back once
@@ -188,9 +192,21 @@ impl Releases {
                 &pt_update::node_picks(std::env::consts::OS, arch),
             )
             .map_err(fail)?;
-        store
+        let reports = store
             .check_binary(&rel.tag, PROGRAM, "--version")
             .map_err(fail)?;
+        // The Windows supervisor (`supervise`) restarts only a node that exits RESTART_CODE and
+        // switches pointers the Windows way; an older binary would strand the node there.
+        if cfg!(windows) && !reports.lines().any(|l| l.trim() == SUPERVISED) {
+            return Err((
+                ErrorCode::BadRequest,
+                format!(
+                    "{} predates the Windows service supervisor (its --version has no \
+                     '{SUPERVISED}'); a Windows node cannot run it",
+                    rel.tag
+                ),
+            ));
+        }
         if self.started.as_deref() == Some(rel.tag.as_str()) {
             return Ok(UpdateReply {
                 from: self.started(),

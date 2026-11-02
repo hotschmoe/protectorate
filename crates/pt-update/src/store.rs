@@ -289,10 +289,10 @@ impl Store {
         (version_name(&name) && vdir.parent()? == store).then_some(name)
     }
 
-    /// Runs `releases/<version>/<program>` (`.exe` on Windows) with `<arg>` and checks that its first line is
-    /// `<program> <version>`, as the installers do: a binary for the wrong machine or release
-    /// never becomes `current`.
-    pub fn check_binary(&self, version: &str, program: &str, arg: &str) -> Result<()> {
+    /// Runs `releases/<version>/<program>` (`.exe` on Windows) with `<arg>` and checks that its
+    /// first line is `<program> <version>`, as the installers do: a binary for the wrong machine
+    /// or release never becomes `current`. Returns its whole output.
+    pub fn check_binary(&self, version: &str, program: &str, arg: &str) -> Result<String> {
         const TIMEOUT: Duration = Duration::from_secs(30);
         #[cfg(debug_assertions)]
         let timeout = std::env::var("PT_TEST_CHECK_TIMEOUT_MS")
@@ -364,13 +364,8 @@ impl Store {
                 timeout.as_secs()
             )));
         }
-        let out = out.unwrap_or_default();
-        let line = String::from_utf8_lossy(&out)
-            .lines()
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_string();
+        let out = String::from_utf8_lossy(&out.unwrap_or_default()).into_owned();
+        let line = out.lines().next().unwrap_or("").trim().to_string();
         let want = format!("{program} {version}");
         match status {
             None => Err(health(format!(
@@ -382,7 +377,7 @@ impl Store {
                 "{} {arg} reports {line:?} ({st}), not {want:?}",
                 bin.display()
             ))),
-            Some(_) => Ok(()),
+            Some(_) => Ok(out),
         }
     }
 
@@ -507,20 +502,36 @@ impl Store {
         make_link(version, &new)
             .map_err(|e| Error::io(format!("creating {}", new.display()), e))?;
         sync_dir(&self.dir)?;
-        if fs::symlink_metadata(&dst).is_ok() {
+        let aside = fs::symlink_metadata(&dst).is_ok();
+        if aside {
             rename_retrying(&dst, &old)?;
             sync_dir(&self.dir)?;
             crash_point(&format!("{name}-aside"));
         }
-        rename_retrying(&new, &dst)?;
+        if let Err(e) = rename_retrying(&new, &dst) {
+            // Never leave the pointer missing while this process lives: put the old one back.
+            if aside && let Err(back) = rename_retrying(&old, &dst) {
+                return Err(e.context(format!("and putting {name} back failed ({back})")));
+            }
+            let _ = remove_link(&new);
+            return Err(e);
+        }
         sync_dir(&self.dir)?;
         crash_point(&format!("{name}-swapped"));
-        remove_link(&old)
+        // The switch is done; a leftover `.X-old` is removed by the next switch or open.
+        if let Err(e) = remove_link(&old) {
+            eprintln!("releases: {name} switched to {version}; {e}");
+        }
+        Ok(())
     }
 
     /// Finishes a pointer change that a crash interrupted (see [`Store::set_pointer_aside`]).
     fn repair(&self) -> Result<()> {
         let _l = self.lock()?;
+        self.repair_locked()
+    }
+
+    fn repair_locked(&self) -> Result<()> {
         for name in [CURRENT, PREVIOUS] {
             let dst = self.dir.join(name);
             let new = self.dir.join(format!(".{name}-new"));
@@ -880,6 +891,16 @@ impl Store {
         };
         if p.contacted_ms.is_some() {
             return Ok(Verdict::Confirmed);
+        }
+        // A switch left half done would read as "trial not current", that is idle, and end the
+        // trial's watch for good.
+        self.repair_locked()?;
+        if self.current()?.is_none() {
+            return Err(store_err(format!(
+                "{}: no current release while {} is on probation",
+                self.dir.display(),
+                p.version
+            )));
         }
         if self.open_probation()?.is_none() {
             return Ok(Verdict::Idle);
