@@ -128,6 +128,8 @@ class RealHub implements HubClient {
         return;
       case HubStreamMessageApproval(:final approval):
         _state = _copy(s, approvals: _upsert(s.approvals, approval, (x) => x.id == approval.id));
+      case HubStreamMessageHub(:final hub):
+        _state = _copy(s, hub: hub);
       case HubStreamMessageNode(:final node):
         _state = _copy(s, nodes: _upsert(s.nodes, node, (x) => x.id == node.id));
       case HubStreamMessageNodeRemoved(:final id):
@@ -155,6 +157,7 @@ class RealHub implements HubClient {
 
   static HubState _copy(
     HubState s, {
+    HubInfo? hub,
     List<Workspace>? workspaces,
     List<Sleeve>? sleeves,
     List<Approval>? approvals,
@@ -164,7 +167,7 @@ class RealHub implements HubClient {
     List<HubEvent>? events,
   }) => HubState(
     seq: s.seq,
-    hub: s.hub,
+    hub: hub ?? s.hub,
     workspaces: workspaces ?? s.workspaces,
     sleeves: sleeves ?? s.sleeves,
     approvals: approvals ?? s.approvals,

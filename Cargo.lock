@@ -177,6 +177,7 @@ dependencies = [
  "pt-http",
  "pt-journal",
  "pt-json",
+ "pt-node",
  "pt-quota",
  "pt-sandbox",
  "pt-sys",

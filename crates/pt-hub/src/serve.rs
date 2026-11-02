@@ -247,6 +247,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
     }
 
     crate::doctor::start(&hub, o.net);
+    crate::hardware::start(&hub);
     crate::harness_update::start(&hub);
     crate::fleet::start(&hub, o.fleet, o.net);
     crate::quota::start(&hub);

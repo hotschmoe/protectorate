@@ -18,6 +18,7 @@ mod doctor;
 mod exec;
 mod fleet;
 mod git;
+mod hardware;
 mod harness_update;
 mod history;
 mod home;
