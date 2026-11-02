@@ -266,13 +266,17 @@ impl Wire for ExitCause {
             }
             ExitCause::Killed => w.push(1),
             ExitCause::Oom => w.push(2),
+            ExitCause::Auth => w.push(3),
+            ExitCause::Quota => w.push(4),
         }
     }
     fn get(r: &mut Reader) -> Result<Self, DecodeError> {
-        Ok(match r.tag("exit cause", 2)? {
+        Ok(match r.tag("exit cause", 4)? {
             0 => ExitCause::Exit(i32::get(r)?),
             1 => ExitCause::Killed,
-            _ => ExitCause::Oom,
+            2 => ExitCause::Oom,
+            3 => ExitCause::Auth,
+            _ => ExitCause::Quota,
         })
     }
 }

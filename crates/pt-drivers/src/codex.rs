@@ -261,7 +261,7 @@ impl Codex {
             .to_owned();
         let result = &msg["result"];
         match rpc {
-            Rpc::Initialize if failed => out.error(
+            Rpc::Initialize if failed => out.refuse(
                 classify(&message, None),
                 format!("codex initialize: {message}"),
             ),
@@ -278,7 +278,7 @@ impl Codex {
                 self.open_thread(out);
             }
             Rpc::Models => self.check_effort(result, out),
-            Rpc::Open(method) if failed => out.error(
+            Rpc::Open(method) if failed => out.refuse(
                 classify(&message, None),
                 format!("codex {method}: {message}"),
             ),

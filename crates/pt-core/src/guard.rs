@@ -190,6 +190,11 @@ impl Core<'_> {
         if s.life != Life::Recovering || s.proc != Proc::Down {
             return;
         }
+        if let Cause::Guard(g @ (Guardrail::AuthFailed | Guardrail::QuotaExhausted)) = cause {
+            // Resuming into the same dead login or empty quota only fails again.
+            self.notify(Party::Owner, Some(sid), Notice::Tripped { guardrail: g });
+            return self.begin_resleeve(sid, cause, None);
+        }
         if s.guard.state == GuardState::Resuming && cause != Cause::HubRestart {
             // The resumed incarnation failed before Ready.
             return self.begin_resleeve(sid, cause, None);

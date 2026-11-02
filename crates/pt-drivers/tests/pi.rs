@@ -158,3 +158,37 @@ fn unknown_effort_falls_back() {
         Entry::SessionInfo { effort, .. } if effort.as_deref() != Some("bogus")
     )));
 }
+
+/// A line on stdout that is not JSON, as an npm wrapper or an MCP server prints, is counted and
+/// noticed, not a protocol error: the session still comes up and takes a turn.
+#[test]
+fn stray_stdout_line_is_a_notice() {
+    if !configured() {
+        return;
+    }
+    let Some(program) = program(Harness::Pi) else {
+        return skip(Harness::Pi, "binary not found");
+    };
+    let repo = temp_repo("pi-stray");
+    let mut s = spec(Harness::Pi, &program, &repo);
+    local(&mut s);
+    let mut noisy = std::process::Command::new("sh");
+    noisy.args(["-c", "echo 'npm warn stray line'; exec \"$0\" \"$@\""]);
+    s.prefix = Some(noisy);
+    let mut run = Run::start(s);
+    run.ready(Duration::from_secs(90)).expect("ready");
+    let turn = run.turn(READY, Duration::from_secs(240));
+    assert_eq!(turn.settled.as_ref().map(|s| s.0), Some(Stop::EndTurn));
+    let log = run.stop();
+    assert!(common::has(&log, |e| matches!(
+        e,
+        Entry::Notice { code: Some(c), text } if c == "stray_stdout" && text.contains("stray line")
+    )));
+    assert!(!common::has(&log, |e| matches!(
+        e,
+        Entry::Error {
+            class: pt_drivers::ErrorClass::Protocol,
+            ..
+        }
+    )));
+}

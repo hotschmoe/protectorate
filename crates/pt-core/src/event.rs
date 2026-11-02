@@ -90,7 +90,8 @@ pub enum Obs {
         end: TurnEnd,
     },
     CompactDone,
-    /// Oversize or unparseable frame, or session id mismatch (G14).
+    /// An oversize frame, or valid JSON that contradicts the protocol state: a session id
+    /// mismatch, a reply nobody asked for (G14).
     Desync {
         detail: String,
     },

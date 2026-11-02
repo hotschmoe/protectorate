@@ -926,3 +926,18 @@ Each entry: where, what was done, what right looks like.
   Codex is checked against its `model/list` catalog after the handshake. A resleeve to another
   harness starts on that harness's default effort without a notice of its own (the view shows
   `effort`). Right: read each CLI's model catalog if a model-specific refusal costs a sleeve.
+- **Rate limits are a failed turn, not a guardrail** (`pt-hub` `exec.rs`): a 429 or "overloaded"
+  that survives the harness's own retries ends the turn as an error, the sleeve stays and idles,
+  and the error entry is in the transcript; only quota (G1) and auth (G2) resleeve. The reset
+  times in Claude's `rate_limit_event` and Codex's `account/rateLimits/updated` are still
+  ignored. Right: read them to hold the queue until the reset instead of letting the next
+  message hit the limit again.
+- **Exit classification reads a stderr tail** (`pt-drivers` `session.rs`, `exec.rs`): a harness
+  that dies unasked is a G2 or G1 resleeve when `classify` calls its last words or a prior error
+  of the turn auth or quota, so a crash whose stderr merely mentions "credentials" resleeves
+  instead of resuming. Right: harness-specific exit codes or structured exit reasons if a false
+  positive costs a cache.
+- **A refused handshake is a kill, not a verdict** (`pt-drivers`): Codex, Grok and Pi end their
+  own process on an error reply to initialize, thread/session open or get_state, and the exit
+  takes the normal unasked-exit path (StartFailed, or G2/G1 from the reply's class). A handshake
+  timeout with no reply is still G5's 60 s.

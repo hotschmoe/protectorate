@@ -1,0 +1,19 @@
+#scenario a9d270243efb89bb
+# G2 and G1 at exit: a harness that dies on a dead login or an empty quota resleeves at once,
+# where a plain crash resumes first.
+spawn dead /w/a to=pi_local
+spawn broke /w/b to=pi_local
+spawn crashed /w/c to=pi_local
+run
+obs dead ready
+obs broke ready
+obs crashed ready
+exit dead auth
+exit broke quota
+exit crashed code=1
+expect dead life=Resleeving
+expect broke life=Resleeving
+expect crashed life=Launching guard=Resuming g=2
+run
+expect dead life=Resleeving guard=Launching g=2 harness=pilocal
+expect broke life=Resleeving guard=Launching g=2 harness=pilocal

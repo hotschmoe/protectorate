@@ -165,7 +165,7 @@ impl Pi {
         }
         match rpc {
             Rpc::State if !ok => {
-                out.error(classify(&error, None), format!("pi get_state: {error}"))
+                out.refuse(classify(&error, None), format!("pi get_state: {error}"))
             }
             Rpc::State => {
                 let Some(id) = opt_str(&data["sessionId"]) else {

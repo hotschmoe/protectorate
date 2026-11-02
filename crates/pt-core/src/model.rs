@@ -140,6 +140,10 @@ pub enum ExitCause {
     Exit(i32),
     Killed,
     Oom,
+    /// The harness died on a login it could not use (G2).
+    Auth,
+    /// The harness died on an exhausted quota (G1).
+    Quota,
 }
 
 /// How a headless turn ended, as the driver classified it.

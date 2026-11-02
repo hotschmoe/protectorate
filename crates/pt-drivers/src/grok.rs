@@ -154,7 +154,7 @@ impl Grok {
         );
         let result = &msg["result"];
         match rpc {
-            Rpc::Initialize if failed => out.error(
+            Rpc::Initialize if failed => out.refuse(
                 classify(&message, None),
                 format!("grok initialize: {message}"),
             ),
@@ -178,7 +178,7 @@ impl Grok {
                 };
                 self.call(method, params, Rpc::Open(method), out);
             }
-            Rpc::Open(method) if failed => out.error(
+            Rpc::Open(method) if failed => out.refuse(
                 classify(&message, None),
                 format!("grok {method}: {message}"),
             ),

@@ -444,6 +444,8 @@ impl Core<'_> {
                 let c = match (kill_cause, cause) {
                     (Some(c), _) => c,
                     (None, ExitCause::Oom) => Cause::Guard(Guardrail::Oom),
+                    (None, ExitCause::Auth) => Cause::Guard(Guardrail::AuthFailed),
+                    (None, ExitCause::Quota) => Cause::Guard(Guardrail::QuotaExhausted),
                     (None, _) if was == Activity::Booting => Cause::Guard(Guardrail::StartFailed),
                     (None, _) => Cause::Guard(Guardrail::Crash),
                 };

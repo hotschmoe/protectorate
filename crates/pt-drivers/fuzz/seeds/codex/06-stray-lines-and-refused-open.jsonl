@@ -1,0 +1,7 @@
+#
+npm warn deprecated something
+{"id":1,"result":{"userAgent":"x","codexHome":"/h","platformFamily":"unix","platformOs":"linux"}}
+[1,2]
+42
+{"id":2,"error":{"code":-32600,"message":"no rollout found for thread id 00000000-0000-4000-8000-000000000000"}}
+{"id":2,"result":{}}
