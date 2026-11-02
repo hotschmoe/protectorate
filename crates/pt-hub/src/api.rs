@@ -1099,11 +1099,7 @@ fn list_jobs(c: &Ctx<'_>, r: api::ListJobsRequest) -> Result<api::JobList> {
     let node = match &r.node_id {
         Some(n) => Some(match n.parse::<u64>() {
             Ok(id) => id,
-            Err(_) => find_node(&fleet(c.hub)?, n)?
-                .node
-                .id
-                .parse()
-                .map_err(internal)?,
+            Err(_) => resolve_node(&fleet(c.hub)?, n, false)?.0,
         }),
         None => None,
     };
