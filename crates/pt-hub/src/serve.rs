@@ -284,6 +284,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
             budget: None,
             disk_limit: None,
             d9: false,
+            by_envoy: false,
         }));
     }
 

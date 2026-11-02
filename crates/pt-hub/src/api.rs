@@ -15,7 +15,7 @@ use pt_json::{FromJson, ToJson, Value};
 
 use crate::approvals;
 use crate::command::{command, err, wait_for};
-use crate::envoy::envoy_id;
+use crate::envoy::{d9_origin, envoy_id};
 use crate::fleet::{Status as FleetStatus, Up};
 use crate::home::{now_ms, random_hex};
 use crate::hub::Hub;
@@ -780,6 +780,9 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         return Err(err(ErrorCode::Conflict, why));
     }
     let request_id = new_id("spawn:")?;
+    let by_envoy = matches!(c.who, Principal::Envoy(_));
+    // The gate reads the turn's spawn count, which the core moves when this spawn applies.
+    let one_at_a_time = by_envoy.then(|| lock(&hub.d9_spawn));
     // Before the gate: an approval wait can outlive the turn that made this spawn count.
     let d9 = marks_d9(hub, c.who);
     rule::gate(hub, c.who, Guarded::Spawn(&r.name))?;
@@ -818,8 +821,11 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         budget: r.budget,
         disk_limit: None,
         d9,
+        by_envoy,
     };
-    let id = match command(hub, EventKind::Spawn(spec)) {
+    let spawned = command(hub, EventKind::Spawn(spec));
+    drop(one_at_a_time);
+    let id = match spawned {
         Ok(Reply::Spawned(id)) => id,
         Ok(other) => {
             return Err(after_create(
@@ -875,7 +881,10 @@ fn new_request(c: &Ctx<'_>, agent: &str) -> Result<String> {
 
 /// Envoy, in a turn that already has D9 origin, marks the sleeve it spawns or sends to.
 fn marks_d9(hub: &Hub, who: &Principal) -> bool {
-    matches!(who, Principal::Envoy(_)) && lock(&hub.envoy_turn).origin.is_some()
+    match *who {
+        Principal::Envoy(envoy) => d9_origin(&hub.view().state, envoy).is_some(),
+        _ => false,
+    }
 }
 
 /// `reaches`, plus a sleeve mailing its parent or Envoy. Nothing else opens.

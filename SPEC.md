@@ -85,7 +85,8 @@ CLI on the hub machine (section 3.1).
         A crash keeps the origin and the spawn count; the exit does not clear them, and the
         continuation of that turn does not start the count over. A usage-limit or auth settle
         keeps them too. The brief of an Envoy resleeve is sent as the owner and does not clear
-        that origin or that count.
+        that origin or that count. Any other settle clears both. The core journals both, so a
+        hub restart keeps them.
 
 ## 3. Layers
 
@@ -225,8 +226,9 @@ crash, every incarnation goes to Recovering and resumes natively.
     branch children. Any other directory that already exists is left for `--path` to adopt.
     A name already in use, a name the core would refuse, or a harness with no headless mode,
     is refused before the directory
-    is created and before the D9 gate, so that refusal does not count. A spawn that reaches
-    the gate does. A refused spawn removes the directory only when no live claim overlaps it
+    is created and before the D9 gate, so that refusal does not count. An Envoy spawn counts
+    against its D9 turn once the core applies it; one the owner denies, or that times out at
+    the gate, does not. Envoy's spawns pass the gate one at a time. A refused spawn removes the directory only when no live claim overlaps it
     and it is still that
     empty commit; otherwise the directory stays and the error says so. A spawn the core does not
     answer, or whose reply is lost, keeps the directory without that check.

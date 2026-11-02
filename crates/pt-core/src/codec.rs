@@ -4,14 +4,15 @@
 //!
 //! Journals are never rewritten, so a tag keeps its layout forever: new variants and fields get
 //! new tags. `Obs::ApprovalRequested` is tag 2 without an ask and tag 11 with one.
-//! `EventKind::Spawn` is tag 0, tag 32 with an effort, and tag 38 when it marks D9. Tag 38 is
-//! the tag 0 body plus a flags byte: bit 0 then an effort string, bit 1 the mark. A later
-//! spawn field is another bit, not another tag. `EventKind::Send` is tag 1, or tag 39 when it
-//! marks D9, and tag 41 when it names a vendor agent: the tag 1 body, the mark, then the
-//! name. Tags 0, 1 and 32 decode and re-encode to the same bytes. Tags 33 to 37 are Start
-//! and Resleeve with an effort, a permanent artifact check, an artifact collection, and
-//! Continue. Older tags leave the mark unset. `EventKind::TargetChosen` is tag 22 with a target
-//! or none, and tag 40 when doctor refused Envoy's harness.
+//! `EventKind::Spawn` is tag 0, tag 32 with an effort, and tag 38 when it marks D9 or Envoy
+//! asked for it. Tag 38 is the tag 0 body plus a flags byte: bit 0 then an effort string, bit 1
+//! the mark, bit 2 Envoy's. A later spawn field is another bit, not another tag.
+//! `EventKind::Send` is tag 1, or tag 39 when it marks D9, and tag 41 when it names a vendor
+//! agent: the tag 1 body, the mark, then the name. Tags 0, 1 and 32 decode and re-encode to the
+//! same bytes. Tags 33 to 37 are Start and Resleeve with an effort, a permanent artifact check,
+//! an artifact collection, and Continue. Older tags leave the mark unset.
+//! `EventKind::TargetChosen` is tag 22 with a target or none, and tag 40 when doctor refused
+//! Envoy's harness.
 
 use crate::event::*;
 use crate::model::*;
@@ -366,6 +367,7 @@ impl Wire for SpawnSpec {
             budget: Wire::get(r)?,
             disk_limit: Wire::get(r)?,
             d9: false,
+            by_envoy: false,
         })
     }
 }
@@ -565,14 +567,21 @@ impl Wire for EventKind {
         use EventKind as E;
         match self {
             E::Spawn(spec) => {
-                // Bit 0: an effort string follows. Bit 1: this spawn marks D9. Tag 38 exists
-                // only with the mark set, so a tag 0 or 32 event re-encodes to itself.
-                if spec.d9 {
+                // Bit 0: an effort string follows. Bit 1: this spawn marks D9. Bit 2: Envoy
+                // asked for it. Tag 38 exists only with bit 1 or 2 set, so a tag 0 or 32 event
+                // re-encodes to itself.
+                if spec.d9 || spec.by_envoy {
                     w.push(38);
                     spec.put(w);
-                    let mut flags = 0x02;
+                    let mut flags = 0;
                     if spec.effort.is_some() {
                         flags |= 0x01;
+                    }
+                    if spec.d9 {
+                        flags |= 0x02;
+                    }
+                    if spec.by_envoy {
+                        flags |= 0x04;
                     }
                     w.push(flags);
                     if let Some(effort) = &spec.effort {
@@ -1025,7 +1034,7 @@ impl Wire for EventKind {
             38 => {
                 let mut spec: SpawnSpec = Wire::get(r)?;
                 let flags = r.u8()?;
-                if (flags & !0x03) != 0 || (flags & 0x02) == 0 {
+                if (flags & !0x07) != 0 || (flags & 0x06) == 0 {
                     return Err(DecodeError::UnknownTag {
                         what: "spawn flag",
                         tag: flags,
@@ -1034,7 +1043,8 @@ impl Wire for EventKind {
                 if flags & 0x01 != 0 {
                     spec.effort = Some(Wire::get(r)?);
                 }
-                spec.d9 = true;
+                spec.d9 = flags & 0x02 != 0;
+                spec.by_envoy = flags & 0x04 != 0;
                 E::Spawn(spec)
             }
             41 => E::Send {

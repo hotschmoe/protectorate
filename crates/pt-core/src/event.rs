@@ -26,6 +26,8 @@ pub struct SpawnSpec {
     pub disk_limit: Option<u64>,
     /// The spawning turn had D9 origin. The child is marked, and so are its children.
     pub d9: bool,
+    /// Envoy asked for it. It counts against the spawn limit of Envoy's D9 turn.
+    pub by_envoy: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

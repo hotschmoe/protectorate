@@ -155,10 +155,11 @@ mail can start a turn is the 8-per-10-minutes limit above:
 
 - `sleeve rm`;
 - `job run`;
-- `sleeve spawn` past `d9_spawn_limit` spawns in that turn (default 3). A crash keeps
+- `sleeve spawn` past `d9_spawn_limit` spawns in that turn (default 3). A spawn counts once
+  it is made, so a denied or timed-out one does not. A crash keeps
   the origin and that count: the exit does not clear them, and the continuation is the same
   turn. A usage-limit or auth settle keeps them too. The resleeve brief is sent as the owner
-  and does not clear them.
+  and does not clear them. Both are journaled, so a hub restart keeps them.
 
 A node job with `--maintenance` from any sleeve, Envoy included, always waits for the owner. The
 waiting call fails after `d9_approval_timeout_secs` (default 900). Pending approvals live in

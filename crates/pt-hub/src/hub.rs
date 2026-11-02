@@ -1,5 +1,5 @@
 //! What every thread shares: the published view, the core's input channel, the transcripts, the
-//! event bus, devices and Envoy's current turn origin (D9).
+//! event bus and devices.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,7 +13,6 @@ use pt_drivers::Entry;
 
 use crate::bus::Bus;
 use crate::devices::Devices;
-use crate::envoy::EnvoyTurn;
 use crate::fleet::FleetSlot;
 use crate::home::{Config, Home, Tokens, now_ms};
 use crate::jobs::JobStore;
@@ -75,7 +74,9 @@ pub struct Hub {
     pub config: Config,
     pub tokens: Tokens,
     pub devices: Devices,
-    pub envoy_turn: Mutex<EnvoyTurn>,
+    /// Held by one Envoy spawn from the D9 gate until the core answers it, so two concurrent
+    /// spawns cannot both pass the spawn limit on the same count.
+    pub d9_spawn: Mutex<()>,
     pub uid: u32,
     pub started_ms: u64,
     pub info: Mutex<pt_api::HubInfo>,
@@ -134,7 +135,7 @@ impl Hub {
             config,
             tokens,
             devices,
-            envoy_turn: Mutex::new(EnvoyTurn::default()),
+            d9_spawn: Mutex::new(()),
             uid,
             started_ms,
             info: Mutex::new(pt_api::HubInfo {

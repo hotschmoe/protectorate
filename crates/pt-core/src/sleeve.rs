@@ -113,6 +113,7 @@ impl Core<'_> {
                 turn_from: Party::Owner,
                 turn_agent: None,
                 auto_continue: None,
+                d9_turn: None,
                 queue: VecDeque::new(),
                 steer_slot: None,
                 messages: Default::default(),
@@ -136,6 +137,12 @@ impl Core<'_> {
         );
         if spec.d9 || spec.parent.is_some_and(|p| self.st.sleeves[&p].d9) {
             self.mark_d9(id);
+        }
+        if spec.by_envoy
+            && let Some(envoy) = self.st.sleeves.keys().copied().find(|&e| self.is_envoy(e))
+            && let Some(t) = &mut self.sl(envoy).d9_turn
+        {
+            t.spawns = t.spawns.saturating_add(1);
         }
         self.st.spawn_requests.insert(spec.request_id.clone(), id);
         let eff = self.new_effect(
@@ -994,6 +1001,7 @@ impl Core<'_> {
     fn steer(&mut self, sid: SleeveId, request_id: &str) {
         let m = &self.st.sleeves[&sid].messages[request_id];
         let (from, agent) = (m.from, m.agent.clone());
+        self.taint_d9(sid, from, agent.clone());
         if from == Party::Agent {
             let s = self.sl(sid);
             s.turn_from = Party::Agent;
@@ -1180,12 +1188,43 @@ impl Core<'_> {
         s.activity = Activity::Delivering { effect: eff };
         // A continuation belongs to the turn already begun. Any other prompt starts the next one
         // and supersedes a continuation that turn still owed.
-        if msg_kind == MsgKind::Prompt {
-            s.turn_seq += 1;
-            s.auto_continue = None;
-            s.turn_from = from;
-            s.turn_agent = agent;
+        match msg_kind {
+            MsgKind::Prompt => {
+                let d9 = self.d9_origin(sid, from, agent.clone());
+                let s = self.sl(sid);
+                s.turn_seq += 1;
+                s.auto_continue = None;
+                s.turn_from = from;
+                s.turn_agent = agent;
+                s.d9_turn = d9;
+            }
+            MsgKind::Continuation { .. } => self.taint_d9(sid, from, agent),
+            MsgKind::Brief => {}
         }
+    }
+
+    /// Envoy's turn has D9 origin when a vendor agent or a D9-marked sleeve gave it a prompt.
+    fn d9_origin(&self, sid: SleeveId, from: Party, agent: Option<String>) -> Option<D9Turn> {
+        let d9 = match from {
+            Party::Agent => true,
+            Party::Sleeve(x) => self.st.sleeve(x).is_some_and(|s| s.d9),
+            Party::Owner | Party::Envoy => false,
+        };
+        (d9 && self.is_envoy(sid)).then_some(D9Turn {
+            from,
+            agent,
+            spawns: 0,
+        })
+    }
+
+    /// A steer, or a continuation, from such a party replaces the origin and keeps the count.
+    fn taint_d9(&mut self, sid: SleeveId, from: Party, agent: Option<String>) {
+        let Some(mut t) = self.d9_origin(sid, from, agent) else {
+            return;
+        };
+        let s = self.sl(sid);
+        t.spawns = s.d9_turn.as_ref().map_or(0, |old| old.spawns);
+        s.d9_turn = Some(t);
     }
 
     /// Activity just became Idle: let a quiescing resleeve stop the incarnation, else deliver.
@@ -1437,6 +1476,11 @@ impl Core<'_> {
                 self.tool_withdrawn(sid, g, id);
             }
             Obs::TurnSettled { end } => {
+                // A usage limit or a rejected login resleeves, and the brief is sent as the
+                // owner, so the D9 origin and the spawn count must outlive it.
+                if !matches!(end, TurnEnd::UsageLimit | TurnEnd::AuthFailed) {
+                    self.sl(sid).d9_turn = None;
+                }
                 // Not evidence for an in-flight prompt: a settle with no turn begun is the
                 // previous turn's. It still retires a continuation owed for this owner turn,
                 // including one recorded after resume while this incarnation is already idle,

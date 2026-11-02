@@ -1,10 +1,11 @@
 //! D9 in code (SPEC 3.1): when Envoy's current turn was started by a vendor agent's message,
 //! or by mail from a D9-marked sleeve, the actions listed here wait for the owner's approval
-//! whatever Envoy decides. The origin is recorded per Envoy turn by the executor that writes
-//! the prompt (`EnvoyTurn`).
+//! whatever Envoy decides. The core journals that origin and the turn's spawn count
+//! (`Sleeve::d9_turn`), so a hub restart keeps both.
 //!
 //! The list: removing a sleeve, running a node job, and spawning more than
-//! `config.d9_spawn_limit` sleeves in one such turn. Pushes join it with the push method
+//! `config.d9_spawn_limit` sleeves in one such turn. A spawn counts once it applies, so a denied
+//! or timed-out one does not. Pushes join it with the push method
 //! (REVISIT). Outside such a turn nothing a sleeve does waits for the owner (SPEC 2, threat
 //! model).
 
@@ -16,9 +17,9 @@ use pt_drivers::{Entry, ToolKind};
 
 use crate::approvals;
 use crate::command::{command, err, wait_for};
+use crate::envoy::d9_origin;
 use crate::home::now_ms;
 use crate::hub::Hub;
-use crate::lock::lock;
 use crate::log::info;
 use crate::principal::Principal;
 use crate::transcript::Note;
@@ -39,27 +40,22 @@ pub fn gate(hub: &Hub, who: &Principal, action: Guarded<'_>) -> Result<Option<St
     let Principal::Envoy(envoy) = *who else {
         return Ok(None);
     };
-    let (origin, title) = {
-        let mut t = lock(&hub.envoy_turn);
-        let Some(origin) = t.origin.clone() else {
-            return Ok(None);
-        };
-        let title = match action {
-            Guarded::Remove(name) => format!("remove sleeve {name}"),
-            Guarded::RunJob(what) => format!("run node job {what}"),
-            Guarded::Spawn(name) => {
-                t.spawns += 1;
-                let limit = hub.config.d9_spawn_limit;
-                if t.spawns <= limit {
-                    return Ok(None);
-                }
-                format!(
-                    "spawn sleeve {name} ({} this turn, over the limit of {limit})",
-                    t.spawns
-                )
+    let view = hub.view();
+    let Some(origin) = d9_origin(&view.state, envoy) else {
+        return Ok(None);
+    };
+    let title = match action {
+        Guarded::Remove(name) => format!("remove sleeve {name}"),
+        Guarded::RunJob(what) => format!("run node job {what}"),
+        Guarded::Spawn(name) => {
+            let spawns = view.state.sleeve(envoy).and_then(|s| s.d9_turn.as_ref());
+            let n = u64::from(spawns.map_or(0, |t| t.spawns)) + 1;
+            let limit = hub.config.d9_spawn_limit;
+            if n <= limit {
+                return Ok(None);
             }
-        };
-        (origin, title)
+            format!("spawn sleeve {name} ({n} this turn, over the limit of {limit})")
+        }
     };
     let summary = format!(
         "Envoy asked for this in a turn started by {origin}. Code requires the owner's \

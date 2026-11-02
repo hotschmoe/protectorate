@@ -1757,7 +1757,12 @@ fn ask_remove(hub: &Hub, token: &str, envoy_id: &str) {
     assert_eq!(hub.sleeve("victim")["lifecycle"].as_str(), Some("running"));
 }
 
-fn envoy_on_fake(name: &str, script: &str, env: &[(&str, &str)]) -> (Hub, String, String) {
+fn envoy_on_fake(
+    name: &str,
+    script: &str,
+    extra: &[(&str, pt_json::Value)],
+    env: &[(&str, &str)],
+) -> (Hub, String, String) {
     let dir = unique(name);
     let home = dir.join("home");
     let fake = dir.join("claude");
@@ -1767,13 +1772,18 @@ fn envoy_on_fake(name: &str, script: &str, env: &[(&str, &str)]) -> (Hub, String
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
     write_script(&dir.join("systemd-run"), "exit 0");
-    let config = pt_json::obj! {
+    let mut config = pt_json::obj! {
         "envoy" => pt_json::obj! { "harness" => "claude" },
         "claude_program" => fake.to_str().unwrap(),
         "scopes" => false,
         "quota_poll_secs" => 0u64,
         "harness_update_hours" => 0u64,
     };
+    if let Some(m) = config.as_object_mut() {
+        for (k, v) in extra {
+            m.insert(*k, v.clone());
+        }
+    }
     std::fs::write(home.join("config.json"), config.to_string()).unwrap();
     let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
     let mut all = vec![("PATH", path.as_str())];
@@ -1823,8 +1833,12 @@ fn agent_quota_settle_still_asks_before_remove() {
         r#"result()
 "#,
     );
-    let (hub, envoy_id, token) =
-        envoy_on_fake("d9q", &script, &[("PT_TEST_FAULT", "usage_limit:envoy")]);
+    let (hub, envoy_id, token) = envoy_on_fake(
+        "d9q",
+        &script,
+        &[],
+        &[("PT_TEST_FAULT", "usage_limit:envoy")],
+    );
     let end = std::time::Instant::now() + Duration::from_secs(90);
     loop {
         let s = hub.sleeve("envoy");
@@ -1852,7 +1866,7 @@ else:
     os._exit(1)
 "#,
     );
-    let (hub, envoy_id, token) = envoy_on_fake("d9c", &script, &[]);
+    let (hub, envoy_id, token) = envoy_on_fake("d9c", &script, &[], &[]);
     let scratch = hub.home.join(format!("sleeves/{envoy_id}/scratch/target"));
     let end = std::time::Instant::now() + Duration::from_secs(120);
     loop {
@@ -1867,6 +1881,178 @@ else:
         );
         std::thread::sleep(Duration::from_millis(200));
     }
+    ask_remove(&hub, &token, &envoy_id);
+}
+
+/// A fake Claude for Envoy across hub restarts. A held prompt writes this incarnation's token to
+/// `<scratch>/<name>` and waits; an incarnation a killed hub left behind gives up after a minute.
+/// It ignores the end of its input for a while, so a stop takes the hub's whole grace period.
+fn claude_holding(first: &str) -> String {
+    format!(
+        r#"#!/usr/bin/env python3
+import json, os, sys, time
+if "--version" in sys.argv:
+    print("2.0.0 (Claude Code)")
+    raise SystemExit(0)
+scratch = os.environ.get("CARGO_TARGET_DIR", "/tmp")
+def text_of(msg):
+    content = (msg.get("message") or {{}}).get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(str(p.get("text", "")) for p in content if isinstance(p, dict))
+    return ""
+def result():
+    sys.stdout.write(json.dumps({{"type": "result", "subtype": "success", "is_error": False, "stop_reason": "end_turn"}}) + "\n")
+    sys.stdout.flush()
+def hold(name):
+    path = os.path.join(scratch, name)
+    with open(path + ".tmp", "w") as f:
+        f.write(os.environ.get("PROTECTORATE_TOKEN", ""))
+    os.rename(path + ".tmp", path)
+    time.sleep(60)
+    os._exit(0)
+for line in sys.stdin:
+    try:
+        msg = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if msg.get("type") != "user":
+        continue
+    sys.stdout.write(json.dumps({{"type": "user", "isReplay": True, "uuid": msg.get("uuid", ""), "message": msg.get("message", {{}})}}) + "\n")
+    sys.stdout.flush()
+    text = text_of(msg)
+    if "previous turn was interrupted" in text:
+        hold("continued")
+    elif "BRIEF.md" in text:
+        hold("brief")
+    else:
+        {first}
+time.sleep(30)
+"#
+    )
+}
+
+/// The token a held prompt of Envoy wrote, once it is there.
+fn held_token(hub: &Hub, envoy_id: &str, name: &str) -> String {
+    let path = hub
+        .home
+        .join(format!("sleeves/{envoy_id}/scratch/target/{name}"));
+    eventually(
+        &format!("Envoy to hold {name}"),
+        Duration::from_secs(120),
+        || {
+            std::fs::read_to_string(&path)
+                .ok()
+                .filter(|t| !t.is_empty())
+        },
+    )
+}
+
+/// D9 across a hub restart: the core journals the spawn count, so the continued agent turn does
+/// not get a second allowance.
+#[test]
+fn d9_spawn_limit_holds_across_a_hub_restart() {
+    let (mut hub, envoy_id, _) = envoy_on_fake(
+        "d9r",
+        &claude_holding(r#"hold("first")"#),
+        &[("d9_spawn_limit", pt_json::Value::from(1u64))],
+        &[],
+    );
+    let home = hub.home.clone();
+    let spawn = |token: &str, name: &str| {
+        let repo = temp_repo(&format!("d9r-{name}"));
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (home, token) = (home.clone(), token.to_string());
+        let args: Vec<String> = ["sleeve", "spawn", name, "--path", repo.to_str().unwrap()]
+            .iter()
+            .map(|s| s.to_string())
+            .chain(["--harness".into(), "claude".into()])
+            .collect();
+        std::thread::spawn(move || {
+            let out = std::process::Command::new(bin())
+                .arg("--home")
+                .arg(home)
+                .args(&args)
+                .env_remove("PROTECTORATE_SOCKET")
+                .env("PROTECTORATE_TOKEN", token)
+                .output()
+                .expect("run spawn");
+            let _ = tx.send(out);
+        });
+        rx
+    };
+    let token = held_token(&hub, &envoy_id, "first");
+    let first = spawn(&token, "b1")
+        .recv_timeout(Duration::from_secs(60))
+        .expect("spawn returns");
+    assert!(first.status.success(), "within the limit: {first:?}");
+
+    hub.restart();
+    let token = held_token(&hub, &envoy_id, "continued");
+    let second = spawn(&token, "b2");
+    let approval = eventually("the D9 approval", Duration::from_secs(20), || {
+        let v = hub.cli(&["--json", "approval", "list", "--pending"]).json();
+        v["approvals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| {
+                a["title"]
+                    .as_str()
+                    .is_some_and(|t| t.starts_with("spawn sleeve b2 (2 this turn"))
+            })
+            .cloned()
+    });
+    assert!(
+        approval["summary"]
+            .as_str()
+            .unwrap()
+            .contains("agent:grokbot"),
+        "{approval}"
+    );
+    hub.cli(&[
+        "approval",
+        "decide",
+        approval["id"].as_str().unwrap(),
+        "deny",
+    ])
+    .ok();
+    let out = second
+        .recv_timeout(Duration::from_secs(20))
+        .expect("spawn returns");
+    assert_eq!(out.status.code(), Some(4), "denied: {out:?}");
+    assert_eq!(
+        hub.sleeve("b2"),
+        pt_json::Value::Null,
+        "b2 was never spawned"
+    );
+}
+
+/// D9 across a hub restart during a resleeve: a usage-limit settle keeps the agent's origin, the
+/// hub restarts before the brief, and the brief turn, sent as the owner, still asks.
+#[test]
+fn d9_origin_survives_a_hub_restart_before_the_brief() {
+    let (mut hub, envoy_id, _) = envoy_on_fake(
+        "d9b",
+        &claude_holding("result()"),
+        &[
+            (
+                "envoy",
+                pt_json::obj! { "harness" => "claude", "model" => "first" },
+            ),
+            (
+                "resleeve_to",
+                pt_json::Value::Array(vec![pt_json::Value::from("claude")]),
+            ),
+        ],
+        &[("PT_TEST_FAULT", "usage_limit:envoy")],
+    );
+    eventually("Envoy to resleeve", Duration::from_secs(60), || {
+        (hub.sleeve("envoy")["lifecycle"].as_str() == Some("resleeving")).then_some(())
+    });
+    hub.restart();
+    let token = held_token(&hub, &envoy_id, "brief");
     ask_remove(&hub, &token, &envoy_id);
 }
 

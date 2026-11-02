@@ -77,6 +77,8 @@ pub struct Sleeve {
     /// A protocol desync while idle drops it; a resume then warns because the prompt was not sent.
     /// Only a journaled `Continue` allocates the prompt.
     pub auto_continue: Option<u64>,
+    /// Envoy only: the current turn has D9 origin (SPEC 2 principle 10).
+    pub d9_turn: Option<D9Turn>,
 
     /// Request ids of queued messages, FIFO.
     pub queue: VecDeque<String>,
@@ -122,6 +124,21 @@ impl Sleeve {
             && self.auto_continue.is_none()
             && !self.probing
     }
+}
+
+/// D9 on Envoy's current turn: a vendor agent or a D9-marked sleeve opened it, or steered it.
+/// A prompt that is not a continuation or a resleeve brief replaces it (`None` from anyone
+/// else). A continuation or a steer from such a party replaces the origin and keeps the count.
+/// The brief, a crash, the exit, and a usage-limit or auth settle keep both. Any other settle
+/// clears it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct D9Turn {
+    /// `Party::Agent`, or the marked `Party::Sleeve`.
+    pub from: Party,
+    /// The agent's name, when `from` is an agent.
+    pub agent: Option<String>,
+    /// Sleeves Envoy spawned in this turn, counted when the spawn applies.
+    pub spawns: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

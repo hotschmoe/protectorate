@@ -119,6 +119,7 @@ pub fn event(b: &mut Bytes) -> Event {
             disk_limit: opt(b, |b| b.u64()),
             effort: opt(b, |b| b.string()),
             d9: b.bool(),
+            by_envoy: b.bool(),
         }),
         1 => E::Send {
             to: s(b),

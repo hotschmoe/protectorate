@@ -58,7 +58,7 @@ harness; it can be replaced with another level.
   replaces that party, which keeps D9 on the continued turn and reports a rejection to that
   party. A continuation with no recorded
   agent name is still labeled `agent:`, so D9 stays on. Spawns already made in the turn still
-  count after a crash, and the exit does not clear the origin. A usage-limit or auth settle
+  count after a crash or a hub restart, and the exit does not clear the origin. A usage-limit or auth settle
   keeps the origin and the count. The resleeve brief is sent as the owner and does not clear
   them. A later
   owner message is a new turn and can be continued on its own.

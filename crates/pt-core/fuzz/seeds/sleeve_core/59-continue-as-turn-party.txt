@@ -1,5 +1,5 @@
-#scenario f7803ee0ffceced5
-# An agent-started turn is continued as that agent, with the name from its ga: request id.
+#scenario 678c49ba1302ba65
+# An agent-started turn is continued as that agent, with the name its message carries.
 # An owner-started turn that an agent steers is continued as that agent.
 spawn env /w/e
 run

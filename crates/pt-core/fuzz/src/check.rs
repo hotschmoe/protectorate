@@ -681,6 +681,11 @@ pub fn invariants(st: &State, sim: &Sim) {
                 assert!(s.d9, "a child of a D9-marked sleeve is unmarked");
             }
         }
+        assert!(
+            s.d9_turn.is_none() || (s.name == ENVOY_NAME && s.parent.is_none()),
+            "{:?} has a D9 turn and is not Envoy",
+            s.id
+        );
         if s.parent.is_none() {
             assert!(
                 st.live_children(s.id) <= MAX_CHILDREN,
