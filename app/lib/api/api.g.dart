@@ -2335,6 +2335,8 @@ final class HubInfo {
     required this.name,
     required this.version,
     required this.startedAt,
+    this.inventory,
+    this.sample,
   });
 
   factory HubInfo.fromJson(Object? json) {
@@ -2343,6 +2345,8 @@ final class HubInfo {
       name: _string(j['name'], 'HubInfo.name'),
       version: _string(j['version'], 'HubInfo.version'),
       startedAt: _time(j['started_at_ms'], 'HubInfo.started_at_ms'),
+      inventory: _opt(j['inventory'], Inventory.fromJson),
+      sample: _opt(j['sample'], Sample.fromJson),
     );
   }
 
@@ -2352,10 +2356,16 @@ final class HubInfo {
 
   final DateTime startedAt;
 
+  final Inventory? inventory;
+
+  final Sample? sample;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'version': version,
     'started_at_ms': startedAt.millisecondsSinceEpoch,
+    if (inventory case final v?) 'inventory': v.toJson(),
+    if (sample case final v?) 'sample': v.toJson(),
   };
 }
 
@@ -2464,6 +2474,7 @@ sealed class HubStreamMessage {
       'sleeve_removed' => HubStreamMessageSleeveRemoved._fromMap(j),
       'entry' => HubStreamMessageEntry._fromMap(j),
       'approval' => HubStreamMessageApproval._fromMap(j),
+      'hub' => HubStreamMessageHub._fromMap(j),
       'node' => HubStreamMessageNode._fromMap(j),
       'node_removed' => HubStreamMessageNodeRemoved._fromMap(j),
       'job' => HubStreamMessageJob._fromMap(j),
@@ -2615,6 +2626,28 @@ final class HubStreamMessageApproval extends HubStreamMessage {
     'type': 'approval',
     'seq': seq,
     'approval': approval.toJson(),
+  };
+}
+
+final class HubStreamMessageHub extends HubStreamMessage {
+  const HubStreamMessageHub({required this.seq, required this.hub});
+
+  factory HubStreamMessageHub._fromMap(Map<String, Object?> j) =>
+      HubStreamMessageHub(
+        seq: _int(j['seq'], 'HubStreamMessageHub.seq'),
+        hub: HubInfo.fromJson(j['hub']),
+      );
+
+  @override
+  final int seq;
+
+  final HubInfo hub;
+
+  @override
+  Map<String, Object?> toJson() => {
+    'type': 'hub',
+    'seq': seq,
+    'hub': hub.toJson(),
   };
 }
 
