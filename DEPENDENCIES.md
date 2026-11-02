@@ -102,8 +102,13 @@ desktop and Android, and the web build calls the browser's `fetch` and `WebSocke
 SDK's `dart:js_interop` instead of `package:web`. `make gen` and `make check-gen` format it with
 the SDK's `dart format`.
 
-Bundled asset, not a package: JetBrains Mono 2.304 Regular and Bold (`app/assets/fonts/`, SIL OFL
-1.1, licence file beside it), the one typeface of the UI (SPEC 9).
+Bundled assets, not packages (`app/assets/fonts/`, each under the SIL OFL 1.1 with its licence file
+beside it; SPEC 9):
+
+| Font | Version | Reason |
+|---|---|---|
+| Inter | 4.001 | the interface typeface; Regular, Medium and SemiBold are static instances (opsz 14) of InterVariable |
+| JetBrains Mono | 2.304 | code, tool transcripts, ids and output; Regular and Bold |
 
 ## System tools the product calls
 

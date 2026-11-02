@@ -1,12 +1,12 @@
 {
-    "name": "protectorate",
-    "short_name": "protectorate",
+    "name": "Protectorate",
+    "short_name": "Protectorate",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0e0c09",
-    "theme_color": "#0e0c09",
+    "background_color": "#111214",
+    "theme_color": "#111214",
     "description": "Protectorate client",
-    "orientation": "portrait-primary",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {
