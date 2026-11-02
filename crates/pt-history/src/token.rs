@@ -40,7 +40,7 @@ pub fn tokenize(text: &str, mut f: impl FnMut(Tok<'_>)) -> u32 {
     let mut pos = 0u32;
     let mut run = 0u32;
     let mut buf = String::new();
-    let mut parts: Vec<(usize, usize)> = Vec::new();
+    let mut parts = [(0, 0); MAX_HUMPS];
     let mut chars = text.char_indices().peekable();
     while let Some(&(s, c)) = chars.peek() {
         if !is_word(c) {
@@ -91,18 +91,14 @@ fn segment(
     run: u32,
     pos: &mut u32,
     buf: &mut String,
-    parts: &mut Vec<(usize, usize)>,
+    parts: &mut [(usize, usize); MAX_HUMPS],
     f: &mut impl FnMut(Tok<'_>),
 ) {
     let seg = &text[a..b];
-    humps(seg, parts);
-    if parts.len() > MAX_HUMPS {
-        parts.clear();
-        parts.push((0, seg.len()));
-    }
+    let count = humps(seg, parts);
     let first = *pos;
     let mut emitted = 0;
-    for &(ps, pe) in parts.iter() {
+    for &(ps, pe) in &parts[..count] {
         if pe - ps > MAX_PART {
             continue;
         }
@@ -118,7 +114,7 @@ fn segment(
         *pos += 1;
         emitted += 1;
     }
-    if parts.len() > 1 && emitted > 0 && seg.len() <= MAX_PART {
+    if count > 1 && emitted > 0 && seg.len() <= MAX_PART {
         lower(seg, buf);
         f(Tok {
             term: buf,
@@ -132,24 +128,32 @@ fn segment(
 }
 
 /// Splits a separator-free segment into camelCase parts (byte ranges within `seg`).
-fn humps(seg: &str, out: &mut Vec<(usize, usize)>) {
-    out.clear();
-    let cs: Vec<(usize, char)> = seg.char_indices().collect();
+fn humps(seg: &str, out: &mut [(usize, usize); MAX_HUMPS]) -> usize {
+    let mut chars = seg.char_indices().peekable();
+    let Some((_, mut prev)) = chars.next() else {
+        return 0;
+    };
     let mut start = 0;
-    for i in 1..cs.len() {
-        let (at, c) = cs[i];
-        let prev = cs[i - 1].1;
-        let next_lower = cs.get(i + 1).is_some_and(|(_, n)| n.is_lowercase());
+    let mut count = 0;
+    while let Some((at, c)) = chars.next() {
+        let next_lower = chars.peek().is_some_and(|(_, n)| n.is_lowercase());
         let boundary = c.is_uppercase()
             && (prev.is_lowercase()
                 || prev.is_ascii_digit()
                 || (prev.is_uppercase() && next_lower));
         if boundary {
-            out.push((start, at));
+            if count == MAX_HUMPS - 1 {
+                out[0] = (0, seg.len());
+                return 1;
+            }
+            out[count] = (start, at);
+            count += 1;
             start = at;
         }
+        prev = c;
     }
-    out.push((start, seg.len()));
+    out[count] = (start, seg.len());
+    count + 1
 }
 
 fn lower(s: &str, buf: &mut String) {
