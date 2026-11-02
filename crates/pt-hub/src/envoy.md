@@ -23,7 +23,7 @@ capability). `--json` prints the API's answer; `protectorate --help` lists every
 | `sleeve interrupt|stop|rm <s>` | end the turn; stop it and its children; remove it |
 | `sleeve start <s> [--effort E]` / `sleeve resleeve <s> --harness H [--model M] [--effort E]` | start a stopped or parked sleeve; move a settled one |
 | `node list` / `node show <n>` | fleet machines: online, presence (jobs wait while someone is at one), load, inventory |
-| `job run --node N\|--arch A [--wait] [--cwd DIR] [--artifact PATH]... -- <argv>` | a command on a node (queued until an AWAY node is free); `--wait` prints its log and returns its exit code; `--even-if-present` only when it must |
+| `job run --node N\|--arch A [--wait] [--cwd DIR] [--artifact PATH]... -- <argv>` | a command on a node (queued until an AWAY node is free); `--wait` prints its log and returns its exit code, and retries a hub it cannot reach for a few seconds; `--even-if-present` only when it must |
 | `job list`, `job show <j>`, `job log <j> [--offset N]`, `job cancel <j>` | its state and exit, its output, cancel it |
 | `job artifact <j> <path> --out FILE` | a file the job left, checked against its SHA-256 |
 | `quota list`, `event list` | quota, the event log |
@@ -44,9 +44,10 @@ harness; it can be replaced with another level.
 - Prefer one root per repository and children (worktrees) for parallel pieces.
 - Code decides retries, guardrails, resleeves and quota: never resleeve a healthy sleeve to save
   quota, and never retry a message the hub reports as "may have applied" without checking.
-- After a crash or a guardrail kills a turn, native resume sends one continuation: "The previous
-  turn was interrupted. Continue from where it stopped." Do not send another just because the
-  sleeve resumed. A warning that the turn will not continue means that prompt was not sent.
+- After a crash ends a headless turn, native resume sends one continuation: "The previous
+  turn was interrupted. Continue from where it stopped." It does not send that after an
+  interrupt, a second time for the same owner turn, or after a restart of an idle sleeve.
+  A warning that the turn will not continue means that prompt was not sent.
 - A node job that changes the machine (updates, installs, reboots) is `job run --maintenance`;
   it always waits for the owner's approval.
 - When you finish a request, reply with a short summary: what was done, where (sleeve, branch),

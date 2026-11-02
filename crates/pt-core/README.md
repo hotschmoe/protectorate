@@ -27,12 +27,13 @@ reads no clock, so `replay(journal) == live state`. The hub's core thread is its
 - `Launched` is the launch receipt (scope, pid), journaled as soon as spawn returns (12a item 2).
 - Answers to read-only intents: `ScopeProbed`, `TargetChosen`, `NodeChosen`, `JobStatus`
   (also the answer to a `Probe` of a node kind; `node` is the node that answered, and a report
-  from any node but the job's current one is dropped), `ArtifactsChecked`.
+  from any node but the job's current one is dropped), `ArtifactsChecked`, `ArtifactCollection`.
 - `Observed { sleeve, g, obs }` from drivers and pane screen rules; `Exited { sleeve, g }` once
   the scope is confirmed empty. A stale `g` is dropped.
 - `Continue { sleeve, text }` is not a command and has no reply. The hub journals it when the
-  core asks for one continuation prompt after a native resume. The prompt effect is allocated
-  only while applying this event.
+  core asks for one continuation prompt after a native resume of a headless turn a crash ended.
+  At most one per generation, and not after an interrupt or for a turn that prompt started. The
+  prompt effect is allocated only while applying this event.
 - `Tick`, `HubRecovered`.
 
 ## Approvals

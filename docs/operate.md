@@ -73,10 +73,11 @@ A sleeve is named by its id or its name.
 
 Guardrails in code interrupt, resume, resleeve or park a sleeve that fails (quota exhausted,
 crash, silent, looping and so on). A third resleeve within an hour parks it; `sleeve list` shows
-the park reason. After a native resume of a turn that a crash or a guardrail killed, the hub
-sends one short continuation prompt. A planned stop, a restart of an idle sleeve, and a manual
-resleeve do not; if that prompt cannot be sent, the event log says the turn will not continue
-on its own.
+the park reason. After a native resume of a headless turn that a crash ended, the hub sends one
+short continuation prompt, and not a second one for the turn that prompt started. An owner
+interrupt, a guardrail interrupt, a planned stop, a restart of an idle sleeve, and a manual
+resleeve do not. A restart while the resumed incarnation is still booting still sends it. If
+that prompt cannot be sent, the event log says the turn will not continue on its own.
 
 ## Approvals and D9
 
@@ -169,7 +170,11 @@ job artifact <job> <path> [--out FILE]
   node it has met, otherwise (`--arch`) the node does and the job fails there.
 - `--artifact PATH` (repeatable) names a file inside the job's directory (the `--cwd`), relative
   or absolute for the node; it is fetched when the job ends, and `job artifact` writes it to
-  `--out` or stdout after checking its sha256. A path outside that directory is refused.
+  `--out` or stdout after checking its sha256. A path outside that directory is refused. A
+  dropped connection while fetching saves what arrived and does not use up the three attempts;
+  the hub collects again when the node next reports the job.
+- `job run --wait` prints the log and exits with the job's code. A hub that cannot be reached is
+  retried for a few seconds; it then exits naming the job id.
 - `job log` lags a running job by up to 10 s.
 
 A job result is the node's claim: `job show` says which node reported it.
