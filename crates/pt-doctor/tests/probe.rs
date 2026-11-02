@@ -163,7 +163,10 @@ fn report_gates_harnesses() {
     let grok = harness(&r, "grok");
     assert_eq!(grok.binary.install, Install::Script);
     assert_eq!(grok.binary.error, "grok: cannot start");
-    assert_eq!(grok.credentials.found, ["env:XAI_API_KEY"]);
+    assert!(
+        grok.credentials.found.is_empty(),
+        "an API key in the hub env is not a login"
+    );
     assert!(!grok.eligible);
 
     let agy = harness(&r, "antigravity");
