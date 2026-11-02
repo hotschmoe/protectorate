@@ -165,8 +165,8 @@ impl Core<'_> {
         self.out.push(Intent::Reply(r));
     }
 
-    pub(crate) fn refuse(&mut self, code: Code, why: &'static str) {
-        self.reply(Reply::Refused(code, why));
+    pub(crate) fn refuse(&mut self, code: Code, why: impl Into<String>) {
+        self.reply(Reply::Refused(code, why.into()));
     }
 
     pub(crate) fn notify(&mut self, to: Party, sleeve: Option<SleeveId>, notice: Notice) {

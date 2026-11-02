@@ -176,7 +176,7 @@ pub enum Reply {
     Inboxed,
     /// The same request id was seen before with the same content.
     Duplicate,
-    Refused(Code, &'static str),
+    Refused(Code, String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
