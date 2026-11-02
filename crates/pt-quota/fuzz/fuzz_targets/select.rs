@@ -80,11 +80,23 @@ fuzz_target!(|data: &[u8]| {
         let first_fresh = quotas
             .iter()
             .find(|q| q.subscription == t.subscription && state(q) == State::Fresh);
-        assert!(
-            first_fresh.is_some(),
-            "picked a target with no fresh reading: {t:?}"
-        );
+        let Some(fresh) = first_fresh else {
+            panic!("picked a target with no fresh reading: {t:?}");
+        };
         assert!(t.score.is_finite() && t.score >= 0.0);
+        // SPEC 8. A fresh pick is spare: nothing under the minimum still blocks.
+        if metered(t.harness).is_some() {
+            let min = size.min_usable_pct();
+            assert!(
+                !still_enforcing(fresh, now, min, &t.model),
+                "a fresh exhausted row was picked: {t:?}"
+            );
+            match open_usable(fresh, now, &t.model, min) {
+                Some(usable) if usable + 1e-9 >= min => {}
+                Some(usable) => panic!("picked a row at {usable}% usable: {t:?}"),
+                None => panic!("picked a row with nothing usable: {t:?}"),
+            }
+        }
         if t.harness == Harness::PiLocal {
             assert_eq!(t.subscription, Subscription::Local);
             let without_local: Vec<Candidate> = allow
@@ -131,18 +143,25 @@ fuzz_target!(|data: &[u8]| {
         .collect();
     assert!(select_target(now, size, &allow, mode, &exclude, &unfresh, &health).is_none());
 
-    // The fallback may spend a stale row only when its last open windows still clear the
-    // minimum. `select_target` itself stays fresh-only, and the fallback agrees with it.
-    let fallback = select_with_fallback(now, size, &allow, &quotas);
-    match (&got, &fallback) {
+    // The hub drops excluded and ineligible harnesses, then passes that list
+    // (pt-hub/src/select.rs). `select_with_fallback` calls `select_target` with
+    // headless mode and none of those filters, so both calls must see `open`.
+    let open: Vec<Candidate> = allow
+        .iter()
+        .filter(|c| eligible(c.harness))
+        .cloned()
+        .collect();
+    let picked = select_target(now, size, &open, Mode::Headless, &[], &quotas, &[]);
+    let fallback = select_with_fallback(now, size, &open, &quotas);
+    match (&picked, &fallback) {
         (Some(t), Ok((idx, _))) => {
-            let c = &allow[*idx];
+            let c = &open[*idx];
             assert_eq!(t.harness, c.harness);
             assert_eq!(t.model, c.model);
         }
         (Some(t), Err(e)) => panic!("fallback dropped {t:?}: {e}"),
         (None, Ok((idx, reason))) => {
-            let c = &allow[*idx];
+            let c = &open[*idx];
             let h = c.harness;
             assert!(
                 matches!(
@@ -192,7 +211,7 @@ fuzz_target!(|data: &[u8]| {
         }
         (None, Err(_)) => {
             let min = size.min_usable_pct();
-            for c in &allow {
+            for c in &open {
                 // SPEC 8. Park only when no candidate is unknown, reset, or missing a row.
                 if unknown_or_reset(c, &quotas, now, min) {
                     panic!("parked while {c:?} could be spent with no spare");
