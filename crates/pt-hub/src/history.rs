@@ -26,6 +26,8 @@ use crate::log::{debug, info, warning};
 use crate::transcript::{Line, lock};
 
 const POLL: Duration = Duration::from_secs(1);
+/// Longest wait after a failed commit before the next catch-up.
+const COMMIT_BACKOFF_MAX: Duration = Duration::from_secs(30);
 
 /// Why a history read failed.
 #[derive(Debug)]
@@ -205,8 +207,9 @@ impl History {
     }
 
     /// Tails every source of `only` (or of every sleeve) to its end and commits. The brief calls
-    /// this before its pre-run search, so the outgoing session's last lines are in.
-    pub fn catch_up(&self, hub: &Hub, only: Option<SleeveId>) {
+    /// this before its pre-run search, so the outgoing session's last lines are in. True when
+    /// that commit failed.
+    pub fn catch_up(&self, hub: &Hub, only: Option<SleeveId>) -> bool {
         let mut p = lock(&self.passes);
         let view = hub.view();
         let mut changed = false;
@@ -215,12 +218,14 @@ impl History {
                 changed |= self.sleeve_pass(hub, &mut p, s);
             }
         }
+        let mut failed = false;
         if let Ok(ix) = &mut *lock(&self.ix)
             && (changed || ix.has_uncommitted())
         {
             match ix.commit() {
                 Ok(()) => p.commit_error = None,
                 Err(e) => {
+                    failed = true;
                     let e = e.to_string();
                     if p.commit_error.replace(e.clone()).as_ref() != Some(&e) {
                         warning!("history commit: {e}");
@@ -228,6 +233,7 @@ impl History {
                 }
             }
         }
+        failed
     }
 
     /// One sleeve: new `session_info` lines, a source per session, then the reads. Returns
@@ -277,7 +283,7 @@ impl History {
                 *choice = Choice::Transcript;
             }
         }
-        // This pass's discover may show that a native log moved. Follow the new path.
+        // This pass's discover may show that a native log moved.
         for seen in &track.seen {
             let Some(logs) = found.get(&seen.kind) else {
                 continue;
@@ -289,7 +295,9 @@ impl History {
             else {
                 continue;
             };
-            if path == found_path {
+            // A second file with the same session id is not a move. Follow the new
+            // path only once the old one is gone, so a copy does not drop the live log.
+            if path == found_path || path.exists() {
                 continue;
             }
             let old = path.clone();
@@ -415,11 +423,17 @@ pub fn start(hub: &Arc<Hub>) {
     let started = thread::Builder::new()
         .name("pt-history".into())
         .spawn(move || {
+            let mut pause = POLL;
             loop {
                 let Some(hub) = weak.upgrade() else { return };
-                hub.history.catch_up(&hub, None);
+                let failed = hub.history.catch_up(&hub, None);
                 drop(hub);
-                thread::sleep(POLL);
+                thread::sleep(pause);
+                pause = if failed {
+                    pause.saturating_mul(2).min(COMMIT_BACKOFF_MAX)
+                } else {
+                    POLL
+                };
             }
         });
     if let Err(e) = started {
