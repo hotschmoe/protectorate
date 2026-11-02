@@ -1,0 +1,39 @@
+#scenario 5b0e2eeab1dd165a
+# A sleeve may mail Envoy eight times in ten minutes. The ninth is refused.
+# Mail to its parent, a duplicate, the owner's mail and Envoy's own mail do not spend that budget.
+# A steer counts. After the window, one more lands. The counter is journaled: a crash does not reset it.
+spawn envoy /w/e harness=codex
+spawn root /w/a
+spawn leaf /wt/leaf parent=root
+run
+obs envoy ready
+obs root ready
+obs leaf ready
+send root p1 from=leaf
+send root p2 from=leaf
+send root p3 from=leaf
+send root p4 from=leaf
+send root p5 from=leaf
+send root p6 from=leaf
+send root p7 from=leaf
+send root p8 from=leaf
+expect root msg:p8=Queued
+send envoy m1 from=leaf
+send envoy m1 from=leaf
+send envoy s1 steer from=leaf
+send envoy m2 from=leaf
+send envoy m3 from=leaf
+send envoy m4 from=leaf
+send envoy m5 from=leaf
+send envoy m6 from=leaf
+send envoy m7 from=leaf
+send envoy owner1
+send envoy self1 from=envoy
+expect envoy activity=Delivering msg:m1=InFlight msg:s1=SteerHeld msg:m7=Queued msg:owner1=Queued msg:self1=Queued queue=8
+commit
+crash empty
+send envoy m9 from=leaf
+expect envoy msg:m9=
+tick 10m
+send envoy m10 from=leaf
+expect envoy msg:m10=Queued

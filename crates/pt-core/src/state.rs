@@ -83,6 +83,8 @@ pub struct Sleeve {
     pub interrupt_at: Millis,
     pub loop_hash: Option<u64>,
     pub loop_count: u32,
+    /// When this sleeve's mails to Envoy were accepted. The window drops the rest on the next one.
+    pub envoy_mails: Vec<Millis>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

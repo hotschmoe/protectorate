@@ -15,7 +15,9 @@ reads no clock, so `replay(journal) == live state`. The hub's core thread is its
 
 ## Events
 
-- Commands: `Spawn`, `Send` (queue or steer; mail is a `Send` from `Party::Sleeve`), `Interrupt`,
+- Commands: `Spawn`, `Send` (queue or steer; mail is a `Send` from `Party::Sleeve`. A sleeve may
+  land 8 of those on the live root named `envoy` per 10 minutes; the times are kept on the sender
+  and the next one is refused until the window moves), `Interrupt`,
   `Compact`, `RespondApproval`, `Stop`, `Remove`, `Start`, `Resleeve`, `Abandon`, `Viewed`,
   `CreateJob`, `CancelJob`, `AbandonJob`, `RequeueJob`, `RequestApproval` (a code rule asks the
   owner, D9). Each gets exactly one `Intent::Reply`.

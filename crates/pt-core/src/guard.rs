@@ -45,6 +45,10 @@ pub mod limits {
     pub const COOLDOWN: Millis = 10 * MINUTE;
     /// Resleeve targets tried before parking.
     pub const MAX_TARGETS: usize = 3;
+    /// Mails one sleeve may land on Envoy in `ENVOY_MAIL_WINDOW`. Each one can start a turn.
+    pub const ENVOY_MAIL_LIMIT: usize = 8;
+    /// Window for `ENVOY_MAIL_LIMIT`.
+    pub const ENVOY_MAIL_WINDOW: Millis = 10 * MINUTE;
 }
 
 use limits::*;

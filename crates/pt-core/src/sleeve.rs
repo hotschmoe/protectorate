@@ -95,6 +95,7 @@ impl Core<'_> {
                 interrupt_at: now,
                 loop_hash: None,
                 loop_count: 0,
+                envoy_mails: Vec::new(),
             },
         );
         self.st.spawn_requests.insert(spec.request_id.clone(), id);
@@ -757,6 +758,9 @@ impl Core<'_> {
             if mode == SendMode::Steer {
                 return self.refuse(Code::FailedPrecondition, "a pane cannot be steered");
             }
+            if !self.envoy_mail_ok(to, from) {
+                return;
+            }
             insert(self, MsgState::Queued);
             if self.frozen(to) {
                 self.sl(to).queue.push_back(request_id.to_string());
@@ -767,11 +771,17 @@ impl Core<'_> {
         }
         match mode {
             SendMode::Steer if steers && working => {
+                if !self.envoy_mail_ok(to, from) {
+                    return;
+                }
                 insert(self, MsgState::Queued);
                 self.steer(to, request_id);
                 self.reply(Reply::Steering);
             }
             SendMode::Steer if steers && delivering => {
+                if !self.envoy_mail_ok(to, from) {
+                    return;
+                }
                 insert(self, MsgState::SteerHeld);
                 self.sl(to).steer_slot = Some(request_id.to_string());
                 self.reply(Reply::Steering);
@@ -781,6 +791,9 @@ impl Core<'_> {
                 "cannot steer now; queue it instead",
             ),
             _ => {
+                if !self.envoy_mail_ok(to, from) {
+                    return;
+                }
                 insert(self, MsgState::Queued);
                 self.sl(to).queue.push_back(request_id.to_string());
                 self.deliver_next(to);
@@ -828,6 +841,40 @@ impl Core<'_> {
             .get_mut(request_id)
             .expect("message")
             .state = MsgState::InFlight(eff);
+    }
+
+    /// Accepts one mail from a sleeve to Envoy, or refuses it once this sleeve has landed
+    /// `ENVOY_MAIL_LIMIT` of them in `ENVOY_MAIL_WINDOW`. Other sends are untouched.
+    fn envoy_mail_ok(&mut self, to: SleeveId, from: Party) -> bool {
+        let Party::Sleeve(sender) = from else {
+            return true;
+        };
+        if sender == to || !self.is_envoy(to) {
+            return true;
+        }
+        let now = self.now;
+        let n = self.st.sleeves[&sender]
+            .envoy_mails
+            .iter()
+            .filter(|&&t| crate::guard::since(now, t) < ENVOY_MAIL_WINDOW)
+            .count();
+        if n >= ENVOY_MAIL_LIMIT {
+            self.refuse(
+                Code::FailedPrecondition,
+                "too many messages to Envoy from this sleeve; try again later",
+            );
+            return false;
+        }
+        let v = &mut self.sl(sender).envoy_mails;
+        v.retain(|&t| crate::guard::since(now, t) < ENVOY_MAIL_WINDOW);
+        v.push(now);
+        true
+    }
+
+    fn is_envoy(&self, id: SleeveId) -> bool {
+        self.st.sleeve(id).is_some_and(|s| {
+            s.name == crate::ENVOY_NAME && s.parent.is_none() && s.life != Life::Removed
+        })
     }
 
     /// A Send can go out as the next prompt now.
