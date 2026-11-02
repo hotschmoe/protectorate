@@ -59,8 +59,9 @@ impl Fault {
     }
 }
 
-/// D9: who started Envoy's current turn. `origin` is `agent:<name>` when an agent message was
-/// written into it (as its prompt or a steer), and stays so until the turn settles.
+/// D9: who started Envoy's current turn. `origin` is `agent:<name>` or `mail:<name>` when an
+/// agent message, or mail from a D9-marked sleeve, was written into it (as its prompt or a
+/// steer), and stays so until the turn settles.
 #[derive(Debug, Default)]
 pub struct EnvoyTurn {
     pub origin: Option<String>,

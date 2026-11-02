@@ -1,6 +1,7 @@
 //! D9 in code (SPEC 3.1): when Envoy's current turn was started by a vendor agent's message,
-//! the actions listed here wait for the owner's approval whatever Envoy decides. The origin is
-//! recorded per Envoy turn by the executor that writes the prompt (`EnvoyTurn`).
+//! or by mail from a D9-marked sleeve, the actions listed here wait for the owner's approval
+//! whatever Envoy decides. The origin is recorded per Envoy turn by the executor that writes
+//! the prompt (`EnvoyTurn`).
 //!
 //! The list: removing a sleeve, running a node job, and spawning more than
 //! `config.d9_spawn_limit` sleeves in one such turn. Pushes join it with the push method

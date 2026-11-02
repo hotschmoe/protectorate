@@ -411,7 +411,10 @@ fn build(hub: &Hub, view: &View, workdir: &Path, spec: &Spec<'_>, entries: &[Lin
         }
         None => b.push_str("This sleeve has no parent.\n"),
     }
-    b.push_str("Envoy's name is `envoy`. The hub marks the message as mail from this sleeve.\n\n");
+    b.push_str(
+        "Envoy's name is `envoy` (`$PROTECTORATE_ENVOY`). `$PROTECTORATE_MAIL` is the command. \
+         The hub marks the message as mail from this sleeve.\n\n",
+    );
 
     let mut queries: Vec<&str> = users.last().into_iter().copied().collect();
     if users.len() > 1 {

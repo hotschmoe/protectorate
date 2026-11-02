@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use pt_core::{
     Ask, Choice, EffectId, EffectKind, EffectState, EventKind, ExitCause, Gen, Harness, Intent,
-    Layout, Life, Obs, ProbeResult, Proc, Sleeve, SleeveId, Target, TurnEnd,
+    Layout, Life, Obs, Party, ProbeResult, Proc, Sleeve, SleeveId, Target, TurnEnd,
 };
 use pt_drivers::{Ack, AckKind, Decision, Entry, ErrorClass, Session, Stop};
 use pt_json::obj;
@@ -961,6 +961,12 @@ impl SleeveExec {
         {
             sb.env.push(("PROTECTORATE_PARENT".into(), name));
         }
+        sb.env
+            .push(("PROTECTORATE_ENVOY".into(), crate::hub::ENVOY.into()));
+        sb.env.push((
+            "PROTECTORATE_MAIL".into(),
+            "protectorate sleeve send <name> <text>".into(),
+        ));
         sb.env.extend(tools.env);
         sb.env.extend(logins.env);
         let prefix = sb.command().map_err(|e| e.to_string())?;
@@ -1073,7 +1079,7 @@ impl SleeveExec {
         }
         let from = Hub::from_label(&view.state, self.id, p.request_id);
         if Hub::envoy_id(&view.state) == Some(self.id) {
-            self.note_envoy_origin(&from, p.steer.is_some());
+            self.note_envoy_origin(view, p.request_id, &from, p.steer.is_some());
         }
         let sent = match p.steer {
             Some(turn) => session.steer(p.request_id, &from, p.text, turn),
@@ -1097,15 +1103,24 @@ impl SleeveExec {
     }
 
     /// D9: records who started Envoy's next turn before its prompt is written. A prompt starts
-    /// a new turn; a steer from an agent taints the running one.
-    fn note_envoy_origin(&self, from: &str, steer: bool) {
-        let agent = from.starts_with("agent:").then(|| from.to_string());
+    /// a new turn. A steer from an agent, or from a D9-marked sleeve, taints the running one.
+    /// Mail from an unmarked sleeve clears the origin.
+    fn note_envoy_origin(&self, view: &View, request_id: &str, from: &str, steer: bool) {
+        let marked = view
+            .state
+            .sleeve(self.id)
+            .and_then(|s| s.messages.get(request_id))
+            .is_some_and(|m| match m.from {
+                Party::Sleeve(id) => view.state.sleeve(id).is_some_and(|s| s.d9),
+                _ => false,
+            });
+        let origin = (from.starts_with("agent:") || marked).then(|| from.to_string());
         let mut t = crate::transcript::lock(&self.hub.envoy_turn);
         if !steer {
-            t.origin = agent;
+            t.origin = origin;
             t.spawns = 0;
-        } else if agent.is_some() {
-            t.origin = agent;
+        } else if origin.is_some() {
+            t.origin = origin;
         }
         debug!("envoy turn origin: {:?}", t.origin);
     }

@@ -2,7 +2,6 @@
 //! pt-api's table. Commands become core events whose replies come back after the journal fsync;
 //! reads use the published view.
 
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -477,7 +476,7 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         resleeve_to: targets(hub, &r.resleeve_to),
         budget: r.budget,
         disk_limit: None,
-        d9: false,
+        d9: marks_d9(hub, c.who),
     };
     let id = match command(hub, EventKind::Spawn(spec))? {
         Reply::Spawned(id) => id,
@@ -492,7 +491,7 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
                 from: c.who.party(),
                 text: prefix(&view.state, c.who, "", &text),
                 mode: SendMode::Queue,
-                d9: false,
+                d9: marks_d9(hub, c.who),
             },
         )?;
     }
@@ -521,6 +520,11 @@ fn new_request(c: &Ctx<'_>, agent: &str) -> Result<String> {
         Principal::Sleeve(x) => format!("mail:{}:{r}", x.0),
         _ => format!("owner:{r}"),
     })
+}
+
+/// Envoy, in a turn that already has D9 origin, marks the sleeve it spawns or sends to.
+fn marks_d9(hub: &Hub, who: &Principal) -> bool {
+    matches!(who, Principal::Envoy(_)) && lock(&hub.envoy_turn).origin.is_some()
 }
 
 /// `reaches`, plus a sleeve mailing its parent or Envoy. Nothing else opens.
@@ -558,7 +562,7 @@ fn send_message(c: &Ctx<'_>, r: api::SendMessageRequest) -> Result<api::Sent> {
                 api::Delivery::Queue => SendMode::Queue,
                 api::Delivery::Steer => SendMode::Steer,
             },
-            d9: false,
+            d9: marks_d9(c.hub, c.who),
         },
     )?;
     Ok(api::Sent { request_id })
@@ -1482,50 +1486,66 @@ fn reached(state: &State, id: SleeveId, until: api::WaitUntil) -> bool {
     }
 }
 
-/// Request ids of mail `id` has already landed on its parent or on Envoy.
-fn upward_from(state: &State, id: SleeveId) -> BTreeSet<String> {
-    let mut out = BTreeSet::new();
-    let Some(s) = state.sleeve(id) else {
-        return out;
+/// The newest message the waiter has already sent to `waited`, if any.
+fn report_watermark(state: &State, waited: SleeveId, waiter: Party) -> Option<u64> {
+    state.sleeve(waited).and_then(|s| {
+        s.messages
+            .values()
+            .filter(|m| m.from == waiter)
+            .map(|m| m.seq)
+            .max()
+    })
+}
+
+/// Upward mail from `waited` that is newer than the waiter's last message to it.
+/// A parent counts only mail in its own mailbox. Anyone else also counts mail to Envoy.
+fn upward_since(state: &State, waited: SleeveId, waiter: Party) -> usize {
+    let Some(s) = state.sleeve(waited) else {
+        return 0;
     };
+    let watermark = report_watermark(state, waited, waiter);
+    let parent_only = matches!(waiter, Party::Sleeve(me) if s.parent == Some(me));
     let mut dests = Vec::new();
     if let Some(p) = s.parent {
         dests.push(p);
     }
-    if let Some(e) = Hub::envoy_id(state)
+    if !parent_only
+        && let Some(e) = Hub::envoy_id(state)
         && !dests.contains(&e)
     {
         dests.push(e);
     }
+    let mut n = 0;
     for d in dests {
         let Some(dest) = state.sleeve(d) else {
             continue;
         };
-        for (rid, m) in &dest.messages {
-            if m.from == Party::Sleeve(id) {
-                out.insert(rid.clone());
-            }
-        }
+        n += dest
+            .messages
+            .values()
+            .filter(|m| m.from == Party::Sleeve(waited) && watermark.is_none_or(|w| m.seq > w))
+            .count();
     }
-    out
+    n
 }
 
 fn wait(c: &Ctx<'_>, r: api::WaitRequest) -> Result<api::WaitResult> {
-    let id = target_sleeve(c, &c.hub.view(), &r.sleeve_id)?;
     let deadline = Instant::now() + timeout(r.timeout_ms);
     if r.until == api::WaitUntil::Report {
-        // Snapshot first, then log, so a sender who waits for the log line is after the snapshot.
-        let seen = upward_from(&c.hub.view().state, id);
-        let name = c
-            .hub
-            .view()
-            .state
-            .sleeve(id)
-            .map(|s| s.name.clone())
-            .unwrap_or_default();
-        info!("wait: report from {name}");
+        let view = c.hub.view();
+        let resolved = find(&view.state, &r.sleeve_id).ok();
+        if r.sleeve_id == crate::hub::ENVOY
+            || resolved.is_some_and(|id| Hub::envoy_id(&view.state) == Some(id))
+        {
+            return Err(err(
+                ErrorCode::Conflict,
+                "Envoy does not send mail; wait for a sleeve",
+            ));
+        }
+        let id = target_sleeve(c, &view, &r.sleeve_id)?;
+        let waiter = c.who.party();
         let got = wait_for(c.hub, deadline, |v| {
-            if upward_from(&v.state, id).difference(&seen).next().is_some() {
+            if upward_since(&v.state, id, waiter) > 0 {
                 return Some(true);
             }
             let s = v.state.sleeve(id)?;
@@ -1536,6 +1556,7 @@ fn wait(c: &Ctx<'_>, r: api::WaitRequest) -> Result<api::WaitResult> {
             sleeve: sleeve_view(c.hub, id)?,
         });
     }
+    let id = target_sleeve(c, &c.hub.view(), &r.sleeve_id)?;
     let got = wait_for(c.hub, deadline, |v| {
         if reached(&v.state, id, r.until) {
             return Some(true);
