@@ -25,7 +25,7 @@ CARGO_VERSION := PROTECTORATE_BUILD_VERSION='$(VERSION)'
 -include .env.e2e
 export PT_E2E_PI_PROVIDER PT_E2E_PI_MODEL PT_RELEASE_WIN_HOST PT_RELEASE_WIN_DIR ZIG PT_RELEASE_REPO
 
-.PHONY: build release release-assets release-snapshot release-publish web test test-paid check check-deps check-gen check-version gen fmt app-check version
+.PHONY: build release release-assets release-snapshot release-publish web test test-paid check check-deps check-levels check-gen check-version gen fmt app-check version
 
 DART ?= dart
 FLUTTER ?= flutter
@@ -80,10 +80,14 @@ fmt:
 check:
 	cargo fmt --all -- --check
 	$(CARGO_VERSION) cargo clippy --locked --workspace --all-targets -- -D warnings
-	$(MAKE) test check-deps check-gen app-check check-version
+	$(MAKE) test check-deps check-levels check-gen app-check check-version
 
 check-deps:
 	sh scripts/check-deps.sh
+
+# Fails when a crate's modules use each other in a cycle or use an item of their crate root.
+check-levels:
+	cargo run --locked --quiet --bin pt-levels -- crates
 
 # Fails when a build path could take its version from anywhere but VERSION above.
 check-version:
