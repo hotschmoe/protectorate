@@ -35,8 +35,9 @@ reads no clock, so `replay(journal) == live state`. The hub's core thread is its
   At most one per owner turn, across generations, and not after an interrupt or for a turn that
   prompt started. The prompt is sent as Envoy, so a rejection is not reported as a message the
   owner sent. If it cannot be delivered, the debt is dropped and the owner is warned, and a crash
-  after the incarnation reached idle does not carry the debt. The prompt effect is allocated only
-  while applying this event.
+  after the incarnation reached idle does not carry the debt. A settle of that owner turn drops
+  the debt with no warning, including one recorded after resume while the incarnation is idle.
+  The prompt effect is allocated only while applying this event.
 - `Tick`, `HubRecovered`.
 
 ## Approvals

@@ -61,7 +61,8 @@ pub struct Sleeve {
     pub turn_seq: u64,
     /// The owner turn that still owes one continuation, if any. One per turn, across generations.
     /// Set when a native resume follows a headless turn a crash ended, unless that turn was itself
-    /// a continuation or an interrupt. Dropped at recovery once that incarnation is idle and armed.
+    /// a continuation or an interrupt. Dropped at recovery once that incarnation is idle and armed,
+    /// and when a settle of this owner turn is journaled, including while the incarnation is idle.
     /// Only a journaled `Continue` allocates the prompt.
     pub auto_continue: Option<u64>,
 

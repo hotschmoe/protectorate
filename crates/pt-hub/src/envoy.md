@@ -51,7 +51,9 @@ harness; it can be replaced with another level.
   as Envoy, so a rejection is not reported as a message the owner sent. A later owner message is
   a new turn and can be continued on its own.
   A continuation that cannot be delivered is dropped, and a crash after the incarnation reached
-  idle does not carry it into the next one. A warning means that prompt was not sent.
+  idle does not carry it into the next one. A settle of that turn drops it with no warning,
+  including one the journal already recorded while the sleeve was idle, so a later start does
+  not warn. A warning means that prompt was not sent.
 - A node job that changes the machine (updates, installs, reboots) is `job run --maintenance`;
   it always waits for the owner's approval.
 - When you finish a request, reply with a short summary: what was done, where (sleeve, branch),

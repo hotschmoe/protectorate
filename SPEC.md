@@ -333,7 +333,9 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   and armed is dropped, with `TurnNeedsPrompt`; a resume that is still booting keeps the debt.
   A `Continue` that cannot be delivered drops the debt and warns. A crash of an incarnation that
   already reached idle does not carry the debt. When the prompt cannot be sent, the owner and
-  the parent get `TurnNeedsPrompt`.
+  the parent get `TurnNeedsPrompt`. A settle of that same owner turn drops the debt with no
+  warning, including one recorded after resume while the incarnation is already idle, so a later
+  hub start does not send `TurnNeedsPrompt` for a turn the journal already settled.
 - **Testing:** each machine is a pure function with a fuzz target. The target checks invariants I1
   to I10 against a table-driven reference model and checks `replay(journal) == live`.
 

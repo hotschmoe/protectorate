@@ -1226,12 +1226,17 @@ impl Core<'_> {
             }
             Obs::TurnSettled { end } => {
                 // Not evidence for an in-flight prompt: a settle with no turn begun is the
-                // previous turn's, and is dropped below.
+                // previous turn's. It still retires a continuation owed for this owner turn,
+                // including one recorded after resume while this incarnation is already idle,
+                // so a later hub start does not warn about a turn the journal already settled.
                 let s = self.sl(sid);
                 if !matches!(
                     s.activity,
                     Activity::Working | Activity::Blocked { .. } | Activity::Interrupting
                 ) {
+                    if s.auto_continue == Some(s.turn_seq) {
+                        s.auto_continue = None;
+                    }
                     return;
                 }
                 s.activity = Activity::Idle { seen: false };

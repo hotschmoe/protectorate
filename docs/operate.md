@@ -79,7 +79,7 @@ sends it. The prompt is sent as Envoy, so a rejection is not reported as a messa
 sent. A second crash of the same turn does not send another, even after the ten-minute resume
 window, and a later owner message is a new turn with its own prompt. An owner
 interrupt, a guardrail interrupt, a desync during either of those, a planned stop, a restart of
-an idle sleeve, and a manual resleeve do not. A restart while the resumed incarnation is still booting still sends it. A crash of an incarnation that already reached idle does not carry it. If
+an idle sleeve, and a manual resleeve do not. A restart while the resumed incarnation is still booting still sends it. A crash of an incarnation that already reached idle does not carry it. A settle of that turn drops it with no warning, including one recorded after resume while the sleeve is idle, so a later start does not warn about a turn the journal already settled. If
 that prompt cannot be sent, the debt is dropped and the event log says the turn will not continue on its own.
 
 ## Approvals and D9
