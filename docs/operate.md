@@ -102,6 +102,8 @@ memory: a hub restart forgets them.
 node ls | node show <node>
 node add [REGISTRATION]
 node approve <auth_id> [--name NAME] [--fingerprint FP]
+node rename <node> <new-name>
+node rm <node> [--force]
 node update (<node>... | --all) [--version TAG] [--channel stable|dev] [--probation SECS] [--no-wait]
 ```
 
@@ -110,6 +112,25 @@ node update (<node>... | --all) [--version TAG] [--channel stable|dev] [--probat
 - **add** with no argument prints the join command for a new machine, the hub's control-key
   fingerprint and pending registrations; with the registration text that `join` printed, it
   records it. **approve** registers, tags and names the node. See [install.md](install.md).
+- **rename** renames the node in headscale (its tailnet name) and in the hub's enrollment record
+  (`tailnet/enrolled.json`). The name follows the `join --name` rules (1 to 63 lowercase letters,
+  digits and inner hyphens), may not be digits alone (that reads as an id) and may not be any
+  other machine's on the tailnet, the hub's own member included. The machine keeps the hostname
+  it joined with; only the hub's name for it changes. Jobs keep to the node's id, so a rename
+  moves no job.
+- **rm** deletes the node from headscale, which revokes its tailnet key, and drops its enrollment
+  record. Its machine cannot come back on the old key: to rejoin it runs `join` again and the
+  owner approves it. Queued jobs that could run only on that node are cancelled. An online node,
+  or one with jobs in flight (submitting, running, collecting, cancelling or lost), is refused
+  unless `--force`; run `protectorate-node uninstall` on a live machine first. Forced, its jobs
+  in flight are left to the lease: they go lost, then abandoned, and the node may still finish
+  them on its own. Its old jobs stay in `job ls` under its id.
+- A name freed by **rm** is free at once: removing a stale entry, then renaming its successor
+  into that name, is the way to tidy up after a machine was reinstalled and joined again.
+- Both write headscale first, then the record. If the record cannot be written after a rename,
+  the hub puts headscale's name back and says so (and raises an alarm event if that fails too).
+  If it cannot be dropped after a removal, the node is already gone from headscale and the
+  error says so; run `node rm` again to finish. Both are node events (`event list`).
 - **update**: see Updates below.
 
 The hub polls presence and the node list every `fleet.poll_secs` (15 s), samples every 60 s and
@@ -124,7 +145,8 @@ job ls [--node N] [--limit N] | job show|cancel <job> | job log <job> [--offset 
 job artifact <job> <path> [--out FILE]
 ```
 
-- `--node` names a node by id or name; `--arch` lets the hub pick an AWAY node of that arch (the
+- `--node` names a node by id or name, and the hub keeps its id: a later rename does not move
+  the job, and a name not on the tailnet is refused; `--arch` lets the hub pick an AWAY node of that arch (the
   least loaded one).
 - A node refuses to start a job while someone is present or presence is UNKNOWN.
   `--even-if-present` overrides that for one job.

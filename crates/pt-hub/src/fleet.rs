@@ -324,6 +324,20 @@ fn quiet(n: &api::Node) -> api::Node {
     n
 }
 
+/// The owner removed node `id` (`Poller::remove` announces nothing): off the stream now.
+pub fn removed(hub: &Hub, id: u64) {
+    let id = id.to_string();
+    lock(&hub.fleet.streamed).remove(&id);
+    hub.bus
+        .push(|seq| HubStreamMessage::NodeRemoved { seq, id });
+}
+
+/// The owner renamed a node (`Poller::rename` announces nothing): streamed under its new name.
+pub fn renamed(hub: &Hub, node: api::Node) {
+    lock(&hub.fleet.streamed).insert(node.id.clone(), quiet(&node));
+    hub.bus.push(|seq| HubStreamMessage::Node { seq, node });
+}
+
 /// One poller round: streamed when something besides the timestamps changed, and an event
 /// line when the node came up, went down or changed presence.
 fn published(hub: &Hub, e: FleetEvent) {

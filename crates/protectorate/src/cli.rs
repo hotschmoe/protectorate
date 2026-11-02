@@ -530,7 +530,10 @@ fn pending_line(p: &api::PendingNode) -> String {
 }
 
 fn node_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
-    match a.word(1, "a node command (ls, show, add, approve, update)")? {
+    match a.word(
+        1,
+        "a node command (ls, show, add, approve, rename, rm, update)",
+    )? {
         "update" => {
             let req = api::UpdateNodesRequest {
                 nodes: a.words.get(2..).unwrap_or(&[]).to_vec(),
@@ -626,6 +629,45 @@ fn node_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
             let v = c.call::<m::ApproveNode>(&req)?;
             o.show(&v, |n| {
                 println!("approved {} as node {}", n.name, n.node_id)
+            });
+        }
+        "rename" => {
+            let req = api::RenameNodeRequest {
+                node_id: a.word(2, "a node")?.to_string(),
+                name: a.word(3, "the new name")?.to_string(),
+            };
+            let v = c.call::<m::RenameNode>(&req)?;
+            o.show(&v, |n| {
+                println!("renamed node {} from {} to {}", n.node_id, n.from, n.to)
+            });
+        }
+        "rm" => {
+            let req = api::RemoveNodeRequest {
+                node_id: a.word(2, "a node")?.to_string(),
+                force: a.has("--force"),
+            };
+            let v = c.call::<m::RemoveNode>(&req)?;
+            o.show(&v, |n| {
+                if n.record_only {
+                    println!(
+                        "removed {} (node {}): headscale had already forgotten it; dropped its enrollment record",
+                        n.name, n.node_id
+                    );
+                } else {
+                    println!(
+                        "removed {} (node {}) from headscale; its tailnet key is revoked",
+                        n.name, n.node_id
+                    );
+                }
+                if !n.cancelled_jobs.is_empty() {
+                    println!("cancelled queued jobs {}", n.cancelled_jobs.join(", "));
+                }
+                if !n.orphaned_jobs.is_empty() {
+                    println!(
+                        "jobs {} were in flight; they go lost, then abandoned",
+                        n.orphaned_jobs.join(", ")
+                    );
+                }
             });
         }
         other => return Err(Fail::Usage(format!("unknown node command {other:?}"))),

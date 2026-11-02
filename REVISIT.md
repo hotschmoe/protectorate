@@ -874,3 +874,14 @@ Each entry: where, what was done, what right looks like.
 - **Release verification is not bound to an inode** (`pt-update`, store.rs): verified staged
   files can be replaced before the binary check or switch; agents on the owner's machines are
   trusted. Right: bind execution and switching to the verified inode if that threat model changes.
+- **Node removal races the scheduler** (`pt-hub` `remove_node`): a queued job the scheduler
+  hands to a node in the instant before `node rm --force` deletes it fails its submit, goes back
+  to Queued pinned to an id that no longer exists, and waits there until cancelled. Removal
+  cancels only the jobs that are Queued when it runs. Right: a core event that removes a node and
+  settles its pinned jobs in one step, or a scheduler that cancels jobs pinned to a node headscale
+  no longer lists.
+- **Enrollment record beside headscale, not one transaction** (`pt-fleet` `rename_node`,
+  `remove_node`): headscale is written first, then `enrolled.json`; a rename whose record write
+  fails is put back in headscale, a removal is finished by running it again. Nothing compares
+  the two on its own. Right: a doctor check that reports a record headscale does not list, or a
+  name that differs.

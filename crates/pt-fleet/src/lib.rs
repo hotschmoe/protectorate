@@ -22,7 +22,7 @@ use std::time::Duration;
 
 pub use child::ChildState;
 pub use client::NodeClient;
-pub use enroll::{Enrolled, PENDING_TTL_MS, Pending, Registration, valid_name};
+pub use enroll::{Enrolled, PENDING_TTL_MS, Pending, Registration, Removal, valid_name};
 pub use headscale::{Admin, HsNode, TAG_HUB, TAG_NODE, USER};
 pub use member::{Peer, Status};
 pub use poller::{FleetEvent, NodeView, PollConfig, Poller};
@@ -153,6 +153,9 @@ struct Inner {
     headscale: child::Supervisor,
     member: child::Supervisor,
     enroll: Mutex<()>,
+    /// Held from a headscale node list to the poller's update from it, and across a rename or
+    /// removal, so a stale list never undoes either.
+    nodes: Mutex<()>,
 }
 
 /// The running fleet layer. Cheap to clone; the children stop when the last clone is dropped.
@@ -220,6 +223,7 @@ impl Fleet {
                 headscale: hs,
                 member: m,
                 enroll: Mutex::new(()),
+                nodes: Mutex::new(()),
             }),
         };
         fleet.ensure_hub_tag().map_err(ctx)?;
@@ -328,6 +332,10 @@ impl Fleet {
 
     pub(crate) fn enroll_lock(&self) -> MutexGuard<'_, ()> {
         lock(&self.inner.enroll)
+    }
+
+    pub(crate) fn nodes_lock(&self) -> MutexGuard<'_, ()> {
+        lock(&self.inner.nodes)
     }
 }
 

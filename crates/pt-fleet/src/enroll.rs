@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use pt_api::EpochMs;
 use pt_json::{FromJson, ToJson, Value, record};
 
-use crate::headscale::{HsNode, TAG_NODE};
+use crate::headscale::{HsNode, TAG_HUB, TAG_NODE};
 use crate::{Error, Fleet, Result};
 
 /// headscale's registration cache lifetime (`registerCacheExpiration`).
@@ -41,6 +41,15 @@ record! {
         pub auth_id: String,
         pub approved_at_ms: u64,
     }
+}
+
+/// What `Fleet::remove_node` did.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Removal {
+    pub id: u64,
+    pub name: String,
+    /// Headscale had already forgotten the node; only its enrollment record was dropped.
+    pub record_only: bool,
 }
 
 impl Registration {
@@ -205,5 +214,105 @@ impl Fleet {
             .collect();
         write_list(&pending_path(self), &pending)?;
         Ok(node)
+    }
+
+    /// Renames node `id` in headscale, then in its enrollment record. When the record cannot be
+    /// written, headscale's name is put back; the error says if that failed too.
+    pub fn rename_node(&self, id: u64, to: &str) -> Result<HsNode> {
+        valid_name(to)?;
+        let ctx = |e: Error| e.context(format!("renaming node {id} to {to}"));
+        if to.bytes().all(|b| b.is_ascii_digit()) {
+            return Err(ctx(Error::new(
+                "a name of digits alone reads as a node id; add a letter",
+            )));
+        }
+        let _g = self.enroll_lock();
+        let admin = self.admin();
+        let nodes = admin.nodes().map_err(ctx)?;
+        let node = nodes
+            .iter()
+            .find(|n| n.id == id && n.has_tag(TAG_NODE))
+            .ok_or_else(|| ctx(Error::new(format!("headscale has no node {id}"))))?;
+        if node.name == to {
+            return Ok(node.clone());
+        }
+        if let Some(other) = nodes.iter().find(|n| n.id != id && n.name == to) {
+            return Err(ctx(Error::new(format!(
+                "a node named {to} already exists (headscale node {})",
+                other.id
+            ))));
+        }
+        let path = enrolled_path(self);
+        let mut enrolled: Vec<Enrolled> = read_list(&path).map_err(ctx)?;
+        let renamed = admin.rename(id, to).map_err(ctx)?;
+        if renamed.name != to {
+            return Err(ctx(Error::new(format!(
+                "headscale named it {:?} instead",
+                renamed.name
+            ))));
+        }
+        let mut changed = false;
+        for e in enrolled.iter_mut().filter(|e| e.id == id) {
+            e.name = to.to_string();
+            changed = true;
+        }
+        if !changed {
+            return Ok(renamed);
+        }
+        if let Err(e) = write_list(&path, &enrolled) {
+            return Err(ctx(match admin.rename(id, &node.name) {
+                Ok(_) => e.context(format!(
+                    "updating the enrollment record failed, so headscale's name is back to {}",
+                    node.name
+                )),
+                Err(back) => Error::new(format!(
+                    "headscale names it {to} but the enrollment record still says {}: {e}; \
+                     putting headscale's name back failed too: {back}",
+                    node.name
+                )),
+            }));
+        }
+        Ok(renamed)
+    }
+
+    /// Deletes node `id` from headscale, which revokes its key, then drops its enrollment record.
+    /// A node only the record still lists (an earlier removal cut short) loses the record.
+    pub fn remove_node(&self, id: u64) -> Result<Removal> {
+        let ctx = |e: Error| e.context(format!("removing node {id}"));
+        let _g = self.enroll_lock();
+        let admin = self.admin();
+        let path = enrolled_path(self);
+        let mut enrolled: Vec<Enrolled> = read_list(&path).map_err(ctx)?;
+        let listed = admin.nodes().map_err(ctx)?.into_iter().find(|n| n.id == id);
+        let recorded = enrolled.iter().find(|e| e.id == id).map(|e| e.name.clone());
+        let name = match (&listed, recorded) {
+            (Some(n), _) if n.has_tag(TAG_HUB) || !n.has_tag(TAG_NODE) => {
+                return Err(ctx(Error::new(format!(
+                    "headscale node {id} ({}) is not a fleet node",
+                    n.name
+                ))));
+            }
+            (Some(n), _) => n.name.clone(),
+            (None, Some(name)) => name,
+            (None, None) => return Err(ctx(Error::new(format!("no node {id}")))),
+        };
+        if listed.is_some() {
+            admin.delete(id).map_err(ctx)?;
+        }
+        let before = enrolled.len();
+        enrolled.retain(|e| e.id != id);
+        if enrolled.len() != before {
+            write_list(&path, &enrolled).map_err(|e| {
+                ctx(e.context(
+                    "headscale no longer has it, but dropping its enrollment record failed; \
+                     remove it again to finish",
+                ))
+            })?;
+        }
+        Ok(Removal {
+            id,
+            name,
+            record_only: listed.is_none(),
+        })
     }
 }

@@ -211,6 +211,8 @@ pub fn call(hub: &Hub, who: &Principal, name: &str, body: &Value) -> Result<Valu
         GetEnrollment => get_enrollment,
         AddNode => add_node,
         ApproveNode => approve_node,
+        RemoveNode => remove_node,
+        RenameNode => rename_node,
         RunJob => run_job,
         ListJobs => list_jobs,
         GetJob => get_job,
@@ -662,6 +664,34 @@ fn find_node(up: &Up, s: &str) -> Result<pt_fleet::NodeView> {
         .ok_or_else(|| err(ErrorCode::NotFound, format!("no node {s:?}")))
 }
 
+/// A fleet node by headscale id or name, as `(id, name)`: the poller's views, then headscale's
+/// list (the poller has not seen it yet), then with `records` the enrollment records (a removal
+/// cut short left one).
+fn resolve_node(up: &Up, s: &str, records: bool) -> Result<(u64, String)> {
+    if let Ok(v) = find_node(up, s) {
+        return Ok((v.node.id.parse().map_err(internal)?, v.node.name));
+    }
+    let listed = up.fleet.admin().nodes().map_err(internal)?;
+    if let Some(n) = listed
+        .into_iter()
+        .filter(|n| n.has_tag(pt_fleet::TAG_NODE))
+        .find(|n| n.id.to_string() == s || n.name == s)
+    {
+        return Ok((n.id, n.name));
+    }
+    if records
+        && let Some(e) = up
+            .fleet
+            .enrolled()
+            .map_err(internal)?
+            .into_iter()
+            .find(|e| e.id.to_string() == s || e.name == s)
+    {
+        return Ok((e.id, e.name));
+    }
+    Err(err(ErrorCode::NotFound, format!("no node {s:?}")))
+}
+
 fn get_node(c: &Ctx<'_>, r: api::NodeRef) -> Result<api::Node> {
     Ok(find_node(&fleet(c.hub)?, &r.node_id)?.node)
 }
@@ -768,6 +798,142 @@ fn approve_node(c: &Ctx<'_>, r: api::ApproveNodeRequest) -> Result<api::Approved
     })
 }
 
+/// A queued job that may run only on node `id`.
+fn pinned_to(j: &pt_core::Job, id: &str) -> bool {
+    j.state == pt_core::JobState::Queued
+        && JobRequest::of(&j.spec)
+            .is_some_and(|r| matches!(r.target, api::JobTarget::Node { node_id } if node_id == id))
+}
+
+fn remove_node(c: &Ctx<'_>, r: api::RemoveNodeRequest) -> Result<api::RemovedNode> {
+    let up = fleet(c.hub)?;
+    let (id, name) = resolve_node(&up, &r.node_id, true)?;
+    let key = id.to_string();
+    let viewed = up.poller.node(&key);
+    let view = c.hub.view();
+    let in_flight: Vec<String> = view
+        .state
+        .jobs
+        .values()
+        .filter(|j| {
+            j.node == Some(pt_core::NodeId(id))
+                && j.state != pt_core::JobState::Queued
+                && !crate::jobs::ended(j.state)
+        })
+        .map(|j| j.id.0.to_string())
+        .collect();
+    if !r.force {
+        if viewed.as_ref().is_some_and(|v| v.node.online) {
+            return Err(err(
+                ErrorCode::Conflict,
+                format!(
+                    "node {name} is online; run protectorate-node uninstall on it first, \
+                     or remove it with force"
+                ),
+            ));
+        }
+        if !in_flight.is_empty() {
+            return Err(err(
+                ErrorCode::Conflict,
+                format!(
+                    "node {name} has jobs {} in flight; cancel them and let them settle, \
+                     or remove it with force",
+                    in_flight.join(", ")
+                ),
+            ));
+        }
+    }
+    let removal = up.poller.remove(id);
+    if viewed.is_some() && up.poller.node(&key).is_none() {
+        crate::fleet::removed(c.hub, id);
+    }
+    let removal = removal.map_err(|e| {
+        let m = e.to_string();
+        if m.contains("enrollment record") {
+            c.hub.event(
+                api::EventKind::Node,
+                api::Level::Alarm,
+                &name,
+                "owner",
+                &format!("node {name}: {m}"),
+            );
+            err(ErrorCode::Internal, m)
+        } else {
+            fleet_err(e)
+        }
+    })?;
+    let mut cancelled = Vec::new();
+    for j in view.state.jobs.values().filter(|j| pinned_to(j, &key)) {
+        match command(c.hub, EventKind::CancelJob { job: j.id }) {
+            Ok(_) => cancelled.push(j.id.0.to_string()),
+            Err(e) => info!("node {name} removed; job {} not cancelled: {e}", j.id.0),
+        }
+    }
+    let mut text = format!("node {name} removed");
+    if !cancelled.is_empty() {
+        text.push_str(&format!("; cancelled queued jobs {}", cancelled.join(", ")));
+    }
+    if !in_flight.is_empty() {
+        text.push_str(&format!("; jobs {} were in flight", in_flight.join(", ")));
+    }
+    info!("{text} (headscale node {id})");
+    c.hub.event(
+        api::EventKind::Node,
+        api::Level::Info,
+        &name,
+        "owner",
+        &text,
+    );
+    Ok(api::RemovedNode {
+        node_id: key,
+        name: removal.name,
+        cancelled_jobs: cancelled,
+        orphaned_jobs: in_flight,
+        record_only: removal.record_only,
+    })
+}
+
+fn rename_node(c: &Ctx<'_>, r: api::RenameNodeRequest) -> Result<api::RenamedNode> {
+    let up = fleet(c.hub)?;
+    let (id, from) = resolve_node(&up, &r.node_id, false)?;
+    let n = up.poller.rename(id, &r.name).map_err(|e| {
+        let m = e.to_string();
+        if m.contains("failed too") {
+            c.hub.event(
+                api::EventKind::Node,
+                api::Level::Alarm,
+                &from,
+                "owner",
+                &format!("node {from}: {m}"),
+            );
+            err(ErrorCode::Internal, m)
+        } else if m.contains("enrollment record") {
+            err(ErrorCode::Internal, m)
+        } else {
+            fleet_err(e)
+        }
+    })?;
+    if n.name != from {
+        if let Some(v) = up.poller.node(&id.to_string()) {
+            crate::fleet::renamed(c.hub, v.node);
+        }
+        let text = format!("node {from} renamed {}", n.name);
+        info!("{text} (headscale node {id})");
+        c.hub.event(
+            api::EventKind::Node,
+            api::Level::Info,
+            &n.name,
+            "owner",
+            &text,
+        );
+    }
+    Ok(api::RenamedNode {
+        node_id: id.to_string(),
+        from,
+        to: n.name,
+    })
+}
+
 /// The job's requester as the caller may see it: the owner sees every job, a sleeve its own
 /// and its children's.
 fn job_visible(state: &State, who: &Principal, req: Option<&JobRequest>) -> bool {
@@ -821,19 +987,29 @@ fn run_job(c: &Ctx<'_>, r: api::RunJobRequest) -> Result<api::Job> {
     if timeout_secs == 0 || timeout_secs > pt_frame::msg::MAX_TIMEOUT_SECS {
         return Err(err(ErrorCode::Invalid, "timeout_secs is 1 s to 24 h"));
     }
-    let on = match &r.target {
-        api::JobTarget::Node { node_id } => format!("node {node_id}"),
-        api::JobTarget::Arch { arch } => format!("a node of arch {arch}"),
+    let up = fleet(c.hub)?;
+    // A node target is kept as its id: a later rename, or another node taking the name, does
+    // not move the job.
+    let (target, on) = match r.target {
+        api::JobTarget::Node { node_id } => {
+            let (id, name) = resolve_node(&up, &node_id, false)?;
+            if let Some(e) = up
+                .poller
+                .node(&id.to_string())
+                .and_then(|v| v.protocol_error())
+            {
+                return Err(err(ErrorCode::Unavailable, e.to_string()));
+            }
+            let node_id = id.to_string();
+            (api::JobTarget::Node { node_id }, format!("node {name}"))
+        }
+        api::JobTarget::Arch { arch } => {
+            let on = format!("a node of arch {arch}");
+            (api::JobTarget::Arch { arch }, on)
+        }
     };
     let what = format!("{} on {on}", r.argv.join(" "));
     let approval_id = rule::gate(c.hub, c.who, Guarded::RunJob(what))?;
-    let up = fleet(c.hub)?;
-    if let api::JobTarget::Node { node_id } = &r.target
-        && let Ok(node) = find_node(&up, node_id)
-        && let Some(e) = node.protocol_error()
-    {
-        return Err(err(ErrorCode::Unavailable, e.to_string()));
-    }
     let view = c.hub.view();
     let sleeve = match c.who {
         Principal::Envoy(x) | Principal::Sleeve(x) => Some(*x),
@@ -844,7 +1020,7 @@ fn run_job(c: &Ctx<'_>, r: api::RunJobRequest) -> Result<api::Job> {
         .map_or_else(|| "owner".to_string(), |s| s.name.clone());
     let req = JobRequest {
         argv: r.argv,
-        target: r.target,
+        target,
         cwd: r.cwd,
         artifacts: r.artifacts,
         on_present: r.on_present,

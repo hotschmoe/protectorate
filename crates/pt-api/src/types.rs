@@ -598,6 +598,7 @@ api_unions! {
 
     /// Where a job may run.
     pub enum JobTarget {
+        /// Asked for by headscale id or name; the hub keeps the id.
         Node = "node" {
             node_id: String,
         },

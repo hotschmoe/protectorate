@@ -289,6 +289,37 @@ api_records! {
         pub name: String,
     }
 
+    pub struct RemoveNodeRequest {
+        /// By headscale id or name.
+        pub node_id: String,
+        /// Remove it although it is online or has jobs in flight; those jobs go lost.
+        pub force: bool = false,
+    }
+
+    pub struct RemovedNode {
+        pub node_id: String,
+        pub name: String,
+        /// Queued jobs that could run only on this node, cancelled.
+        pub cancelled_jobs: Vec<String> = Vec::new(),
+        /// Jobs it had in flight (`force`), left to the lease: they go lost, then abandoned.
+        pub orphaned_jobs: Vec<String> = Vec::new(),
+        /// Headscale had already forgotten it; only the hub's enrollment record was left.
+        pub record_only: bool = false,
+    }
+
+    pub struct RenameNodeRequest {
+        /// By headscale id or name.
+        pub node_id: String,
+        /// A tailnet DNS label no other node has.
+        pub name: String,
+    }
+
+    pub struct RenamedNode {
+        pub node_id: String,
+        pub from: String,
+        pub to: String,
+    }
+
     pub struct GetJobLogRequest {
         pub job_id: String,
         /// A byte offset into the job's log.
@@ -643,6 +674,12 @@ api_methods! {
     AddNode(AddNodeRequest) -> PendingNode: Owner,
     /// Checks the control-key fingerprint, then registers, tags and names the node.
     ApproveNode(ApproveNodeRequest) -> ApprovedNode: Owner,
+    /// Deletes the node from headscale, which revokes its tailnet key, and drops its
+    /// enrollment record. Queued jobs pinned to it are cancelled. An online node, or one with
+    /// jobs in flight, needs `force`.
+    RemoveNode(RemoveNodeRequest) -> RemovedNode: Owner,
+    /// Renames the node in headscale and in its enrollment record; jobs follow its id.
+    RenameNode(RenameNodeRequest) -> RenamedNode: Owner,
     /// A maintenance job from a sleeve, or a job Envoy asks for in an agent's turn (D9), waits
     /// for the owner's approval.
     RunJob(RunJobRequest) -> Job: Sleeve,

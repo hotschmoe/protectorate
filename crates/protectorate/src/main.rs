@@ -70,6 +70,7 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   approval list [--pending] | approval decide <id> allow|allow-session|deny
   node ls | node show <node> | node add [REGISTRATION] | node approve <auth_id>
         [--name NAME] [--fingerprint FP]
+  node rename <node> <new-name> | node rm <node> [--force]
   node update (<node>... | --all) [--version TAG] [--channel stable|dev] [--probation SECS]
         [--no-wait]
   job run (--node ID | --arch ARCH) [--even-if-present] [--on-present idle|kill]
@@ -109,6 +110,7 @@ const SWITCHES: &[&str] = &[
     "--refresh",
     "--all",
     "--no-wait",
+    "--force",
 ];
 
 impl Args {
