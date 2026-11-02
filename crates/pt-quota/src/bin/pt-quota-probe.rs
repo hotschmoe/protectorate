@@ -24,8 +24,6 @@ fn main() -> ExitCode {
     let mut pi_model = String::new();
     let mut allow = None;
     let mut test_cache_ms = None;
-    let mut test_read_ms = None;
-    let mut test_late_ms = None;
     let (mut claude_url, mut codex_url, mut grok_url) = (None, None, None);
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {
@@ -42,20 +40,6 @@ fn main() -> ExitCode {
                 test_cache_ms = value.parse::<u64>().ok().filter(|ms| *ms > 0);
                 if test_cache_ms.is_none() {
                     eprintln!("pt-quota-probe: invalid test cache interval");
-                    return ExitCode::from(2);
-                }
-            }
-            "--test-read-ms" if cfg!(debug_assertions) => {
-                test_read_ms = value.parse::<u64>().ok().filter(|ms| *ms > 0);
-                if test_read_ms.is_none() {
-                    eprintln!("pt-quota-probe: invalid test read timeout");
-                    return ExitCode::from(2);
-                }
-            }
-            "--test-late-ms" if cfg!(debug_assertions) => {
-                test_late_ms = value.parse::<u64>().ok().filter(|ms| *ms > 0);
-                if test_late_ms.is_none() {
-                    eprintln!("pt-quota-probe: invalid test late wait");
                     return ExitCode::from(2);
                 }
             }
@@ -121,9 +105,6 @@ fn main() -> ExitCode {
         options.backoff_base = interval;
         options.stale_after = interval.saturating_mul(2);
     }
-    if let Some(ms) = test_read_ms {
-        options.read_timeout = std::time::Duration::from_millis(ms);
-    }
     let mut cache = Cache::new(readers, options);
     let now = pt_quota::now_ms();
     cache.refresh(now, false);
@@ -153,14 +134,6 @@ fn main() -> ExitCode {
                     pt_quota::select_with_fallback(now, TaskSize::Medium, candidates, &aged)
                 )
             );
-        }
-    }
-    if let Some(ms) = test_late_ms {
-        std::thread::sleep(std::time::Duration::from_millis(ms));
-        let late_now = pt_quota::now_ms();
-        cache.refresh(late_now, false);
-        for q in cache.quotas() {
-            println!("late {}", line(&q, late_now));
         }
     }
     if let Some(candidates) = allow {

@@ -43,7 +43,7 @@ struct Slot {
     last_attempt: Option<Instant>,
     failures: u32,
     last_err: Option<Error>,
-    pending: Option<mpsc::Receiver<crate::Result<Snapshot>>>,
+    pending: Option<mpsc::Receiver<(u64, crate::Result<Snapshot>)>>,
 }
 
 pub struct Cache {
@@ -78,9 +78,10 @@ impl Cache {
                             slot.pending = Some(pending);
                             continue;
                         }
-                        Ok(result) => {
-                            // A read that missed the previous deadline still replaces the row.
-                            slot.settle(now_ms, result);
+                        Ok((finished_ms, result)) => {
+                            // The read missed the previous deadline. Stamp it when it finished,
+                            // and do not count a second failure on top of the timeout.
+                            slot.settle(finished_ms, result, false);
                             continue;
                         }
                         Err(mpsc::TryRecvError::Disconnected) => {}
@@ -93,10 +94,13 @@ impl Cache {
                     let reader = slot.reader.clone();
                     let (tx, rx) = mpsc::channel();
                     std::thread::spawn(move || {
-                        let _ = tx.send(reader.read(now_ms, opts.read_timeout));
+                        let result = reader.read(now_ms, opts.read_timeout);
+                        let _ = tx.send((crate::now_ms(), result));
                     });
+                    // This refresh's clock is the stamp. A result that arrives after the
+                    // deadline is stamped later, when the read actually returned.
                     let result = match rx.recv_timeout(opts.read_timeout) {
-                        Ok(result) => result,
+                        Ok((_, result)) => result,
                         Err(mpsc::RecvTimeoutError::Timeout) => {
                             slot.pending = Some(rx);
                             Err(Error::Timeout)
@@ -106,7 +110,7 @@ impl Cache {
                             slot.reader.subscription()
                         ))),
                     };
-                    slot.settle(now_ms, result);
+                    slot.settle(now_ms, result, true);
                 });
             }
         });
@@ -123,17 +127,20 @@ impl Cache {
 }
 
 impl Slot {
-    fn settle(&mut self, now_ms: u64, result: crate::Result<Snapshot>) {
+    fn settle(&mut self, now_ms: u64, result: crate::Result<Snapshot>, count_failure: bool) {
         let now = Instant::now();
-        self.last_attempt = Some(now);
         match result {
             Ok(snap) => {
+                self.last_attempt = Some(now);
                 self.good = Some((snap, now_ms, now));
                 self.failures = 0;
                 self.last_err = None;
             }
             Err(e) => {
-                self.failures = self.failures.saturating_add(1);
+                if count_failure {
+                    self.last_attempt = Some(now);
+                    self.failures = self.failures.saturating_add(1);
+                }
                 self.last_err = Some(e);
             }
         }

@@ -460,9 +460,10 @@ the reading included one (Codex stores `limit_window_seconds`). The label stays 
 and can be coarser (`119` seconds is `1m`). A minute label is still a length when the reading
 did not name one.
 
-A read that finishes after its deadline is kept and published on the next refresh. Each request
-inside that read gets only the time still left, so a follow-up call cannot discard a body that
-already arrived.
+A read that finishes after its deadline is kept and published on the next refresh, stamped
+with the time the read finished. A late failure does not count again toward the backoff. Each
+request inside that read gets only the time still left, so a follow-up call cannot discard a
+body that already arrived.
 
 **Spare quota (PROBLEMS P6).** A code rule triggers: projected unused capacity at reset is above X%
 and no high-priority work is queued. When it fires, the next backlog item goes to that harness.
