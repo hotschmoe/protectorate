@@ -83,13 +83,13 @@ fn api_surface() {
         Some(&owner),
         &obj! { "sleeve_id" => "envoy", "until" => "report", "timeout_ms" => 10 }.to_string(),
     );
-    assert_eq!(s, 409, "wait report on Envoy: {v}");
-    assert_eq!(v["error"]["code"].as_str(), Some("conflict"));
+    assert_eq!(s, 400, "wait report on Envoy: {v}");
+    assert_eq!(v["error"]["code"].as_str(), Some("invalid"));
     assert!(
         v["error"]["message"]
             .as_str()
             .unwrap_or("")
-            .contains("Envoy does not send mail"),
+            .contains("Envoy never sends as a sleeve"),
         "{v}"
     );
     for method in ["GetJob", "GetJobLog", "CancelJob"] {

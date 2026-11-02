@@ -1074,6 +1074,32 @@ exec sleep 300"#,
         tail(&hub.log_text(), 40)
     );
     assert!(late.stdout.starts_with("reached"), "{}", late.stdout);
+    let seq = late
+        .stdout
+        .trim()
+        .rsplit_once("seq ")
+        .and_then(|(_, n)| n.split_whitespace().next())
+        .expect("the report seq");
+    let again = hub.cli_env(
+        &[],
+        &[
+            "sleeve",
+            "wait",
+            "leaf",
+            "--until",
+            "report",
+            "--after-seq",
+            seq,
+            "--timeout",
+            "2",
+        ],
+    );
+    assert!(
+        again.stdout.starts_with("not reached"),
+        "the same report released a second wait: {} {}",
+        again.stdout,
+        again.stderr
+    );
 
     let as_tree = [("PROTECTORATE_TOKEN", tree_token.as_str())];
     hub.cli_env(&as_tree, &["sleeve", "send", "leaf", "task from parent"])
@@ -1145,8 +1171,9 @@ exec sleep 300"#,
     );
 }
 
-/// A D9-origin turn that spawns a sleeve marks it. That sleeve's later mail starts an Envoy
-/// turn that cannot remove a sleeve until the owner decides. Mail from an unmarked sleeve does not.
+/// A D9-origin turn that spawns a sleeve marks it. Mail from that sleeve marks its parent, and
+/// the parent's later mail starts an Envoy turn that cannot remove a sleeve until the owner
+/// decides. Mail from an unmarked sleeve does not.
 #[test]
 fn marked_sleeve_mail_asks_before_remove() {
     let dir = unique("d9m");
@@ -1219,7 +1246,8 @@ for line in sys.stdin:
     spawn("victim", &temp_repo("d9m-v"));
     spawn("spare", &temp_repo("d9m-s"));
     spawn("plain", &temp_repo("d9m-p"));
-    for name in ["envoy", "victim", "spare", "plain"] {
+    spawn("relay", &temp_repo("d9m-r"));
+    for name in ["envoy", "victim", "spare", "plain", "relay"] {
         let end = std::time::Instant::now() + Duration::from_secs(90);
         loop {
             if hub.sleeve(name)["lifecycle"].as_str() == Some("running") {
@@ -1285,15 +1313,15 @@ for line in sys.stdin:
     )
     .ok();
     working();
-    let helper_repo = temp_repo("d9m-h");
+    assert_eq!(hub.sleeve("relay")["d9"].as_bool(), Some(false));
     hub.cli_env(
         &as_envoy,
         &[
             "sleeve",
             "spawn",
             "helper",
-            "--path",
-            helper_repo.to_str().unwrap(),
+            "--parent",
+            "relay",
             "--harness",
             "claude",
         ],
@@ -1314,11 +1342,26 @@ for line in sys.stdin:
         );
         std::thread::sleep(Duration::from_millis(200));
     }
+    assert_eq!(hub.sleeve("helper")["d9"].as_bool(), Some(true));
+    assert_eq!(hub.sleeve("relay")["d9"].as_bool(), Some(false));
     let helper_token = env_get(&sleeve_process_env(&socket, "helper"), "PROTECTORATE_TOKEN")
         .unwrap()
         .to_string();
     hub.cli_env(
         &[("PROTECTORATE_TOKEN", helper_token.as_str())],
+        &["sleeve", "send", "relay", "ask envoy to remove victim"],
+    )
+    .ok();
+    assert_eq!(
+        hub.sleeve("relay")["d9"].as_bool(),
+        Some(true),
+        "a marked child's mail marks the parent"
+    );
+    let relay_token = env_get(&sleeve_process_env(&socket, "relay"), "PROTECTORATE_TOKEN")
+        .unwrap()
+        .to_string();
+    hub.cli_env(
+        &[("PROTECTORATE_TOKEN", relay_token.as_str())],
         &["sleeve", "send", "envoy", "please remove victim"],
     )
     .ok();
@@ -1350,10 +1393,7 @@ for line in sys.stdin:
     assert_eq!(approval["kind"].as_str(), Some("action"));
     assert_eq!(approval["sleeve_id"].as_str(), Some(envoy_id.as_str()));
     assert!(
-        approval["summary"]
-            .as_str()
-            .unwrap()
-            .contains("mail:helper"),
+        approval["summary"].as_str().unwrap().contains("mail:relay"),
         "{approval}"
     );
     assert!(rx.try_recv().is_err(), "the removal waits for the owner");
