@@ -824,10 +824,13 @@ fn wait_job(c: &Client, mut job: api::Job) -> Result<(), Fail> {
             Err(e) => {
                 let since = unreachable.get_or_insert_with(Instant::now);
                 if since.elapsed() >= Duration::from_secs(60) {
-                    return Err(Fail::Other(format!(
+                    // Exit carries no message. 6 is the hub's code for giving up on the link.
+                    let msg = format!(
                         "job {}: cannot query the hub ({e}); it may be restarting; inspect with `protectorate job show {}`",
                         id.job_id, id.job_id
-                    )));
+                    );
+                    eprintln!("error: {msg}");
+                    return Err(Fail::Exit(6));
                 }
             }
         }
@@ -881,7 +884,14 @@ fn wait_job(c: &Client, mut job: api::Job) -> Result<(), Fail> {
     {
         return Err(Fail::Exit(code as u8));
     }
-    Err(Fail::Exit(1))
+    // The job has no process exit code. These are the hub's own results. A failed
+    // job's code is returned above, so a job that itself exits 3, 5, or 6 shares it.
+    let code = match job.state {
+        S::Interrupted => 3,
+        S::Lost => 5,
+        _ => 1,
+    };
+    Err(Fail::Exit(code))
 }
 
 /// Every slice of the artifact, checked against its SHA-256, to `--out` or stdout.
