@@ -399,6 +399,14 @@ impl Core<'_> {
             return;
         }
         let was = std::mem::replace(&mut s.activity, Activity::Ended);
+        let interrupted_turn = s.turn.is_some()
+            || matches!(
+                was,
+                Activity::Working
+                    | Activity::Blocked { .. }
+                    | Activity::Delivering { .. }
+                    | Activity::Interrupting
+            );
         let old = std::mem::replace(&mut s.proc, Proc::Down);
         let stop_requested = s.stop_at.is_some();
         let kill_cause = s.kill_cause.take();
@@ -456,6 +464,12 @@ impl Core<'_> {
                     (None, _) => Cause::Guard(Guardrail::Crash),
                 };
                 self.after_death(sid, c);
+                if interrupted_turn && self.st.sleeves[&sid].guard.state == GuardState::Resuming {
+                    self.notify(Party::Owner, Some(sid), Notice::TurnNeedsPrompt);
+                    if let Some(p) = parent {
+                        self.notify(Party::Sleeve(p), Some(sid), Notice::TurnNeedsPrompt);
+                    }
+                }
             }
             Life::Provisioning | Life::Parked(_) | Life::Stopped | Life::Removed => {}
         }

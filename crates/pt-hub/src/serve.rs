@@ -206,8 +206,9 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
     }
     if let Some(f) = &hub.fault {
         warning!(
-            "PT_TEST_FAULT is set: {}'s first turn reports a usage limit",
-            f.sleeve
+            "PT_TEST_FAULT is set: {}'s first turn reports {}",
+            f.sleeve,
+            f.kind
         );
     }
 

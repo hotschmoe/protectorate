@@ -213,6 +213,7 @@ pub enum Notice {
     Resumed {
         g: Gen,
     },
+    TurnNeedsPrompt,
     Resleeved {
         g: Gen,
     },

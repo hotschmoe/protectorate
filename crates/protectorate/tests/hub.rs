@@ -154,6 +154,11 @@ fn crash_mid_turn_recovers() {
     ])
     .ok();
     hub.wait("two-child", "idle", 120);
+    hub.send("two-child", LONG);
+    eventually("the child's turn to start", Duration::from_secs(60), || {
+        (hub.sleeve("two-child")["incarnation"]["activity"]["state"].as_str() == Some("working"))
+            .then_some(())
+    });
     let long = hub.send("two", LONG);
     eventually("the long turn to start", Duration::from_secs(60), || {
         let s = hub.sleeve("two");
@@ -203,6 +208,16 @@ fn crash_mid_turn_recovers() {
             .unwrap()
             .iter()
             .any(|e| e["text"].as_str() == Some("child two-child crashed")),
+        "{events}"
+    );
+    assert!(
+        events["events"].as_array().unwrap().iter().any(|e| {
+            e["source"].as_str() == Some("two-child")
+                && e["target"].as_str() == Some("two")
+                && e["text"]
+                    .as_str()
+                    .is_some_and(|t| t.contains("interrupted turn") && t.contains("send a prompt"))
+        }),
         "{events}"
     );
     let s = hub.sleeve("two");
@@ -261,6 +276,53 @@ fn crash_mid_turn_recovers() {
     assert!(
         after_crash.contains("READY"),
         "the resumed incarnation answers"
+    );
+}
+
+#[test]
+fn desync_resume_warns_parent() {
+    if !have_runtime() {
+        return;
+    }
+    let hub = Hub::start_with(
+        "desync",
+        "pi_local",
+        &[],
+        &[("PT_TEST_FAULT", "desync:g14-child")],
+    );
+    let repo = temp_repo("desync");
+    hub.spawn_pi("g14-parent", &repo);
+    hub.wait("g14-parent", "idle", 120);
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "g14-child",
+        "--parent",
+        "g14-parent",
+        "--harness",
+        "pi_local",
+    ])
+    .ok();
+    hub.wait("g14-child", "idle", 120);
+    hub.send("g14-child", READY);
+    eventually("native resume after G14", Duration::from_secs(180), || {
+        let s = hub.sleeve("g14-child");
+        (s["incarnation"]["g"].as_u64() == Some(2)
+            && s["incarnation"]["activity"]["state"].as_str() == Some("idle"))
+        .then_some(())
+    });
+    let events = hub.cli(&["--json", "event", "list"]).json();
+    assert!(
+        events["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["source"].as_str() == Some("g14-child")
+                && e["target"].as_str() == Some("g14-parent")
+                && e["text"]
+                    .as_str()
+                    .is_some_and(|t| t.contains("send a prompt"))),
+        "{events}"
     );
 }
 
