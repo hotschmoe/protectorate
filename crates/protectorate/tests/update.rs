@@ -1202,6 +1202,9 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
     );
     // sqlite removes a stray WAL when it opens the database, so write it again after that read.
     fs::write(dbdir.join("db.sqlite-wal"), "stale trial wal").unwrap();
+    // The unknown tag made that probation validate the missing snapshot. Put the
+    // readable segment back so this retry keeps it only because manual_rollback survives.
+    fs::write(&segment, &readable).unwrap();
     let repaired = fleet.join("snapshots/missing-journal");
     fs::create_dir_all(&repaired).unwrap();
     fs::write(repaired.join("segment-00000000000000000000"), &readable).unwrap();
@@ -1217,7 +1220,9 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         err.contains("nodes enrolled after this snapshot are lost"),
         "{err}"
     );
-    assert!(err.contains("events after the snapshot are lost"), "{err}");
+    assert!(err.contains("kept the journal"), "{err}");
+    assert!(!err.contains("events after the snapshot are lost"), "{err}");
+    assert_eq!(fs::read(&segment).unwrap(), readable);
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
     assert_eq!(pointer(&home, "previous").as_deref(), Some("v0.0.1"));
     let out = sql("select name from nodes order by name;");
@@ -1354,6 +1359,24 @@ fn implicit_hub_update_requires_higher_precedence() {
     );
     sup.running("v0.6.0", 1, 30);
     confirmed_after(&home, 0, "explicit downgrade confirmed");
+    // The accepted update already wrote a snapshot. A refusal must not add or remove one.
+    let snapshot_names = || {
+        let dir = home.join("update-snapshots");
+        let mut names = match fs::read_dir(&dir) {
+            Ok(entries) => entries
+                .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+                .collect::<Vec<_>>(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => panic!("reading {}: {e}", dir.display()),
+        };
+        names.sort();
+        names
+    };
+    let snapshots = snapshot_names();
+    assert!(
+        !snapshots.is_empty(),
+        "the accepted update left no snapshot"
+    );
     let unsupported = cli(&home, &["hub", "update", "--version", "v0.5.0"]);
     assert_ne!(unsupported.status, 0, "{}", unsupported.stdout);
     assert!(
@@ -1364,6 +1387,7 @@ fn implicit_hub_update_requires_higher_precedence() {
         unsupported.stderr
     );
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.6.0"));
+    assert_eq!(snapshot_names(), snapshots);
     let previous_bin = home.join("releases/v0.7.0-dev.3/protectorate");
     let legacy_previous = fs::read_to_string(&previous_bin)
         .unwrap()
@@ -1379,6 +1403,7 @@ fn implicit_hub_update_requires_higher_precedence() {
         unsupported.stderr
     );
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.6.0"));
+    assert_eq!(snapshot_names(), snapshots);
     drop(sup);
 }
 
