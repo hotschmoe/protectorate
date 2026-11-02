@@ -326,7 +326,6 @@ fn run(a: &Args) -> Result<(), Fail> {
                 option_env!("PROTECTORATE_BUILD_VERSION").unwrap_or("dev")
             );
             println!("{}", net_line());
-            println!("journal-event-tag: {}", pt_hub::journal_event_tag());
             println!("hub-rollback: 1");
             return Ok(());
         }

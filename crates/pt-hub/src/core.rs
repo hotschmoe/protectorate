@@ -13,7 +13,7 @@ use pt_journal::Journal;
 
 use crate::exec::Executors;
 use crate::home::now_ms;
-use crate::hub::{Hub, Input, View};
+use crate::hub::{Hub, Input, JournalSnapshot, View};
 use crate::log::{debug, error, info};
 use crate::transcript::Note;
 use crate::wire;
@@ -65,12 +65,11 @@ pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<I
             std::process::exit(70);
         }
         for (dir, reply) in snapshots {
-            let _ = reply.send(
-                journal
-                    .copy_for_update(&dir)
-                    .map(|()| now_ms())
-                    .map_err(|e| e.to_string()),
-            );
+            let copied = journal.copy_for_update(&dir).map(|()| JournalSnapshot {
+                at_ms: now_ms(),
+                next_sleeve: state.next_sleeve,
+            });
+            let _ = reply.send(copied.map_err(|e| e.to_string()));
         }
         batch_n += 1;
         let now = now_ms();

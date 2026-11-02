@@ -2337,6 +2337,7 @@ final class HubInfo {
     required this.startedAt,
     this.inventory,
     this.sample,
+    this.restoreError,
   });
 
   factory HubInfo.fromJson(Object? json) {
@@ -2347,6 +2348,10 @@ final class HubInfo {
       startedAt: _time(j['started_at_ms'], 'HubInfo.started_at_ms'),
       inventory: _opt(j['inventory'], Inventory.fromJson),
       sample: _opt(j['sample'], Sample.fromJson),
+      restoreError: _opt(
+        j['restore_error'],
+        (e0) => _string(e0, 'HubInfo.restore_error'),
+      ),
     );
   }
 
@@ -2360,12 +2365,16 @@ final class HubInfo {
 
   final Sample? sample;
 
+  /// Set when a rollback restore failed and the trial release was kept.
+  final String? restoreError;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'version': version,
     'started_at_ms': startedAt.millisecondsSinceEpoch,
     if (inventory case final v?) 'inventory': v.toJson(),
     if (sample case final v?) 'sample': v.toJson(),
+    if (restoreError case final v?) 'restore_error': v,
   };
 }
 

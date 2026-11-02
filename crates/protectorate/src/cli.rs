@@ -264,7 +264,10 @@ fn hub_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                     h.name,
                     h.version,
                     ago(h.started_at_ms)
-                )
+                );
+                if let Some(error) = &h.restore_error {
+                    println!("rollback restore failed: {error}");
+                }
             });
         }
         "state" => {

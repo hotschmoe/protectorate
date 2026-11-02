@@ -23,7 +23,7 @@ mod sums;
 mod version;
 
 pub use fetch::{Asset, Release, Source};
-pub use store::{Probation, Staged, Store, Switch, Verdict};
+pub use store::{Probation, RestoreError, Staged, Store, Switch, Verdict};
 pub use sums::Sums;
 pub use version::{Channel, Version};
 
@@ -48,6 +48,13 @@ pub enum ErrorKind {
     Store,
     /// A new release failed its health check (and was rolled back where possible).
     Health,
+    /// A snapshot restore failed before replacing a live file. The trial release can stay.
+    Restore,
+    /// A snapshot restore replaced a live file and did not finish. Prestart must exit and
+    /// run again; the trial must not serve the half-restored data.
+    RestorePartial,
+    /// The hub still holds the journal, so a restore must not start.
+    RestoreBusy,
 }
 
 #[derive(Debug, Clone)]

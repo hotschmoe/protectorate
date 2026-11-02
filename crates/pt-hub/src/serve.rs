@@ -94,8 +94,23 @@ pub enum Exit {
 
 /// `hub probation`, run by the unit before each start from `releases/previous`: counts the
 /// start of a release on trial and switches back after too many or once its window is over.
+/// The journal lock is taken before the release store when a restore is due, which is the
+/// order the running hub uses.
 pub fn probation_prestart(home: &Path) -> Result<String, String> {
+    probation_prestart_locked(home, false)
+}
+
+/// `held` means this process already holds the journal lock. A second exclusive flock fails.
+fn probation_prestart_locked(home: &Path, held: bool) -> Result<String, String> {
+    crate::update::finish_interrupted_journal_swap(home)?;
     let store = pt_update::Store::open(home).map_err(|e| e.to_string())?;
+    let _journal = if held {
+        None
+    } else if crate::update::rollback_due(&store)? {
+        crate::update::acquire_journal_lock(home)?
+    } else {
+        None
+    };
     Ok(
         match store
             .start_attempt_with_restore(pt_update::MAX_TRIAL_STARTS, |p| {
@@ -128,20 +143,11 @@ pub fn probation_prestart(home: &Path) -> Result<String, String> {
 }
 
 pub fn retry_probation_restore(home: &Path) -> Result<String, String> {
-    let path = home.join("journal/lock");
-    let lock = fs::OpenOptions::new()
-        .write(true)
-        .open(&path)
-        .map_err(|e| format!("opening {}: {e}", path.display()))?;
-    lock.try_lock().map_err(|e| {
-        format!(
-            "stop the hub before retrying rollback ({}: {e})",
-            path.display()
-        )
-    })?;
+    crate::update::ensure_headscale_stopped(home)?;
+    let _journal = crate::update::acquire_journal_lock(home)?;
     let store = pt_update::Store::open(home).map_err(|e| e.to_string())?;
     store.retry_restore().map_err(|e| e.to_string())?;
-    let result = probation_prestart(home)?;
+    let result = probation_prestart_locked(home, true)?;
     if let Some(error) = store
         .probation()
         .map_err(|e| e.to_string())?
@@ -234,6 +240,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
         .name("pt-stream".into())
         .spawn(move || writer_hub.bus.write(stream_log))
         .map_err(ctx("spawn stream writer"))?;
+    crate::update::announce_restore_failure(&hub);
     if let Some(t) = new_owner {
         eprintln!("owner token (shown once): {t}");
         eprintln!("envoy-only token: {}", hub.tokens.envoy_only());

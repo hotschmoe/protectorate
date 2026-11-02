@@ -222,6 +222,8 @@ api_records! {
         pub started_at_ms: EpochMs,
         pub inventory: Option<Inventory>,
         pub sample: Option<Sample>,
+        /// Set when a rollback restore failed and the trial release was kept.
+        pub restore_error: Option<String>,
     }
 
     /// One full snapshot. `GET /api/events` starts with it and then streams changes.

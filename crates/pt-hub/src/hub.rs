@@ -32,8 +32,14 @@ pub enum Input {
     },
     Snapshot {
         dir: PathBuf,
-        reply: Sender<Result<u64, String>>,
+        reply: Sender<Result<JournalSnapshot, String>>,
     },
+}
+
+/// A journal copied at a batch boundary, and the sleeve id the core would hand out next.
+pub struct JournalSnapshot {
+    pub at_ms: u64,
+    pub next_sleeve: u64,
 }
 
 /// The read-only snapshot published after each journaled batch.
@@ -145,6 +151,7 @@ impl Hub {
                 started_at_ms: pt_api::EpochMs(started_ms),
                 inventory: None,
                 sample: None,
+                restore_error: None,
             }),
             owner_home,
             fault: Fault::from_env(),
@@ -194,7 +201,7 @@ impl Hub {
         })
     }
 
-    pub fn snapshot_journal(&self, dir: PathBuf) -> Result<u64, String> {
+    pub fn snapshot_journal(&self, dir: PathBuf) -> Result<JournalSnapshot, String> {
         let (tx, rx) = mpsc::channel();
         self.input
             .send(Input::Snapshot { dir, reply: tx })

@@ -215,7 +215,7 @@ fn assert_no_leftovers(store: &Store) {
 }
 
 #[test]
-fn stage_switch_rollback_and_refusals() {
+fn stage_switch_and_refusals() {
     let fake = start(standard());
     let src = Source::new(&fake.url, "o/r").unwrap();
     assert_eq!(src.latest(Channel::Stable).unwrap().tag, "v1.1.0");
@@ -244,16 +244,6 @@ fn stage_switch_rollback_and_refusals() {
     assert_eq!(sw.from.as_deref(), Some("v1.0.0"));
     assert_eq!(current_node(&store), "node v1.1.0");
     assert_eq!(store.previous().unwrap().as_deref(), Some("v1.0.0"));
-
-    let back = store.rollback().unwrap();
-    assert_eq!(
-        (back.from.as_deref(), back.to.as_str()),
-        (Some("v1.1.0"), "v1.0.0")
-    );
-    assert_eq!(current_node(&store), "node v1.0.0");
-    assert_eq!(store.previous().unwrap().as_deref(), Some("v1.1.0"));
-    store.rollback().unwrap();
-    assert_eq!(current_node(&store), "node v1.1.0");
 
     let again = store
         .stage(&src, &src.release("v1.0.0").unwrap(), &picks())

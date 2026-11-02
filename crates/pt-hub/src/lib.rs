@@ -8,10 +8,6 @@
 
 #![forbid(unsafe_code)]
 
-pub fn journal_event_tag() -> u8 {
-    pt_core::codec::MAX_EVENT_TAG
-}
-
 mod api;
 mod approvals;
 mod brief;

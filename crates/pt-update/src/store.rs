@@ -62,12 +62,46 @@ record! {
         pub headscale_snapshot: Option<String>,
         pub journal_snapshot: Option<String>,
         pub journal_snapshot_ms: Option<u64>,
+        /// `next_sleeve` when the journal snapshot was taken. A restore that puts that
+        /// journal back moves `sleeves/<id>` for every id at or above this aside.
+        pub next_sleeve: Option<u64>,
         pub manual_rollback: bool = false,
         pub restore_failed: Option<String>,
         /// Starts counted by [`Store::start_attempt`].
         pub starts: u64 = 0,
         /// Why it was rolled back.
         pub reason: Option<String>,
+    }
+}
+
+/// Why [`Store::start_attempt_with_restore`]'s callback could not restore.
+#[derive(Debug)]
+pub enum RestoreError {
+    /// No live file was replaced.
+    Failed(String),
+    /// A live file was replaced and the restore did not finish.
+    Partial(String),
+    /// The hub still holds the journal.
+    Busy(String),
+}
+
+impl RestoreError {
+    pub fn failed(message: impl Into<String>) -> Self {
+        Self::Failed(message.into())
+    }
+
+    pub fn partial(message: impl Into<String>) -> Self {
+        Self::Partial(message.into())
+    }
+
+    pub fn busy(message: impl Into<String>) -> Self {
+        Self::Busy(message.into())
+    }
+
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Failed(m) | Self::Partial(m) | Self::Busy(m) => m,
+        }
     }
 }
 
@@ -713,40 +747,12 @@ impl Store {
         })
     }
 
-    /// Swaps `current` and `previous`, so a second rollback undoes the first.
-    pub fn rollback(&self) -> Result<Switch> {
-        let _l = self.lock()?;
-        self.refuse_open_trial()?;
-        self.rollback_locked()
-    }
-
-    fn rollback_locked(&self) -> Result<Switch> {
-        let prev = self
-            .previous()?
-            .ok_or_else(|| store_err(format!("{}: no previous release", self.dir.display())))?;
-        self.require_version_dir(&prev)?;
-        let cur = self.current()?;
-        // `current` first: a crash between the renames leaves both on the release that worked,
-        // never both on the one being left.
-        self.set_pointer(CURRENT, &prev)?;
-        sync_dir(&self.dir)?;
-        crash_point("rollback-current");
-        if let Some(c) = &cur {
-            self.set_pointer(PREVIOUS, c)?;
-        }
-        sync_dir(&self.dir)?;
-        Ok(Switch {
-            from: cur,
-            to: prev,
-        })
-    }
-
     /// Switches and records a probation that [`Store::check_probation`] turns into a rollback
     /// unless [`Store::confirm`] is called within `window`. The probation is written before
     /// the switch, under the same lock, so no crash leaves the new release current untried;
     /// one that names a release `current` does not is not open.
     pub fn switch_on_probation(&self, version: &str, window: Duration) -> Result<Switch> {
-        self.switch_on_probation_with_snapshots(version, window, None, None, None)
+        self.switch_on_probation_with_snapshots(version, window, None, None, None, None)
     }
 
     pub fn switch_on_probation_with_snapshots(
@@ -756,6 +762,7 @@ impl Store {
         headscale_snapshot: Option<String>,
         journal_snapshot: Option<String>,
         journal_snapshot_ms: Option<u64>,
+        next_sleeve: Option<u64>,
     ) -> Result<Switch> {
         self.require_version_dir(version)?;
         let _l = self.lock()?;
@@ -788,6 +795,7 @@ impl Store {
             headscale_snapshot,
             journal_snapshot,
             journal_snapshot_ms,
+            next_sleeve,
             manual_rollback: false,
             restore_failed: None,
             starts: 0,
@@ -835,7 +843,10 @@ impl Store {
         let Some(p) = self.probation()? else {
             return Ok(None);
         };
+        // A failed restore keeps `manual_rollback` for the retry, but the trial is not open:
+        // the release stays, and another update may proceed.
         let open = (p.contacted_ms.is_none() || p.manual_rollback)
+            && p.restore_failed.is_none()
             && p.rolled_back_ms.is_none()
             && self.current()?.as_deref() == Some(p.version.as_str());
         Ok(open.then_some(p))
@@ -884,25 +895,37 @@ impl Store {
     pub fn start_attempt_with_restore(
         &self,
         max_starts: u64,
-        mut restore: impl FnMut(&Probation) -> std::result::Result<(), String>,
+        mut restore: impl FnMut(&Probation) -> std::result::Result<(), RestoreError>,
     ) -> Result<Verdict> {
         let _l = self.lock()?;
         match self.judge(true, max_starts, &mut restore) {
-            Err(e) if e.message.starts_with("restoring before rollback:") => {
+            Err(e) if e.kind == ErrorKind::Restore => {
                 let mut p = self
                     .probation()?
                     .ok_or_else(|| store_err("probation disappeared"))?;
                 p.contacted_ms = Some(now_ms());
                 p.restore_failed = Some(e.message.clone());
                 p.reason = None;
-                p.manual_rollback = false;
                 self.write_probation(&p)?;
                 eprintln!(
-                    "update: {}; keeping the current release; repair the snapshot before retrying rollback",
+                    "update: {}; keeping the current release; repair the snapshot and run hub probation --retry-rollback",
                     e.message
                 );
                 Ok(Verdict::Confirmed)
             }
+            Err(e) if e.kind == ErrorKind::RestorePartial => {
+                let mut p = self
+                    .probation()?
+                    .ok_or_else(|| store_err("probation disappeared"))?;
+                p.restore_failed = Some(e.message.clone());
+                self.write_probation(&p)?;
+                eprintln!(
+                    "update: {}; rollback restore is incomplete and will continue at the next prestart",
+                    e.message
+                );
+                Err(e)
+            }
+            Err(e) if e.kind == ErrorKind::RestoreBusy => Err(e),
             other => other,
         }
     }
@@ -960,7 +983,6 @@ impl Store {
             return Err(store_err("no failed restore for the current release"));
         }
         p.contacted_ms = None;
-        p.manual_rollback = false;
         p.reason = Some("retrying failed snapshot restore".into());
         p.restore_failed = None;
         self.write_probation(&p)
@@ -990,13 +1012,16 @@ impl Store {
         &self,
         count: bool,
         max_starts: u64,
-        restore: &mut impl FnMut(&Probation) -> std::result::Result<(), String>,
+        restore: &mut impl FnMut(&Probation) -> std::result::Result<(), RestoreError>,
     ) -> Result<Verdict> {
         let Some(mut p) = self.probation()? else {
             return Ok(Verdict::Idle);
         };
         if p.rolled_back_ms.is_some() {
             return Ok(Verdict::Idle);
+        }
+        if p.restore_failed.is_some() && p.reason.is_none() {
+            return Ok(Verdict::Confirmed);
         }
         if p.contacted_ms.is_some() && !p.manual_rollback {
             return Ok(Verdict::Confirmed);
@@ -1059,7 +1084,7 @@ impl Store {
         &self,
         p: &mut Probation,
         reason: &str,
-        restore: &mut impl FnMut(&Probation) -> std::result::Result<(), String>,
+        restore: &mut impl FnMut(&Probation) -> std::result::Result<(), RestoreError>,
     ) -> Result<Switch> {
         if self.previous()?.as_deref() != Some(p.previous.as_str()) {
             return Err(store_err(format!(
@@ -1070,7 +1095,14 @@ impl Store {
             )));
         }
         self.require_version_dir(&p.previous)?;
-        restore(p).map_err(|e| store_err(format!("restoring before rollback: {e}")))?;
+        restore(p).map_err(|e| {
+            let kind = match &e {
+                RestoreError::Failed(_) => ErrorKind::Restore,
+                RestoreError::Partial(_) => ErrorKind::RestorePartial,
+                RestoreError::Busy(_) => ErrorKind::RestoreBusy,
+            };
+            Error::new(kind, e.message())
+        })?;
         p.reason = Some(reason.to_string());
         self.write_probation(p)?;
         self.set_pointer(CURRENT, &p.previous)?;
@@ -1100,9 +1132,11 @@ impl Store {
     }
 }
 
-fn no_snapshot(p: &Probation) -> std::result::Result<(), String> {
+fn no_snapshot(p: &Probation) -> std::result::Result<(), RestoreError> {
     if p.headscale_snapshot.is_some() || p.journal_snapshot.is_some() {
-        return Err("snapshot restore requires hub probation before start".into());
+        return Err(RestoreError::failed(
+            "snapshot restore requires hub probation before start",
+        ));
     }
     Ok(())
 }
