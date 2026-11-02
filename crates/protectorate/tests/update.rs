@@ -762,6 +762,137 @@ fn plant_sleeve(home: &Path, id: u64, worktree: bool) {
     .unwrap();
 }
 
+/// Runs `hub probation` with `home/journal` bind-mounted onto itself. The rename that
+/// swaps the journal then fails with EBUSY, after staging and quarantine, which only
+/// need the home directory to be writable. A mode bit cannot single out that rename.
+fn prestart_with_journal_mounted(home: &Path) -> std::process::Output {
+    Command::new("unshare")
+        .args(["-Ur", "-m", "--", "/bin/sh", "-c"])
+        .arg(
+            r#"/bin/mount --bind "$1/journal" "$1/journal" && exec "$1/releases/previous/protectorate" --home "$1" hub probation"#,
+        )
+        .arg("sh")
+        .arg(home)
+        .output()
+        .unwrap()
+}
+
+/// An automatic rollback (deadline passed, no reason yet) that quarantines a trial
+/// sleeve and then fails the journal swap must stay open. The next prestart retries
+/// it; it does not confirm the trial or serve the half-restored home.
+#[test]
+fn partial_automatic_rollback_does_not_keep_the_trial() {
+    let root = dir("partial-auto");
+    let home = root.join("h");
+    fs::create_dir_all(&home).unwrap();
+    let real = PathBuf::from(bin());
+    install(
+        &home,
+        "v0.0.2",
+        "protectorate",
+        &wrapper("protectorate", "version", "v0.0.2", &real, "", false),
+    );
+    fs::create_dir_all(home.join("releases/v0.0.1")).unwrap();
+    write_exec(
+        &home.join("releases/v0.0.1/protectorate"),
+        std::str::from_utf8(&wrapper(
+            "protectorate",
+            "version",
+            "v0.0.1",
+            &real,
+            "",
+            false,
+        ))
+        .unwrap(),
+    );
+    std::os::unix::fs::symlink("v0.0.1", home.join("releases/previous")).unwrap();
+    let (mut journal, _) = pt_journal::Journal::open(home.join("journal").as_path()).unwrap();
+    let event = pt_core::codec::encode(&pt_core::Event {
+        at: 1,
+        kind: pt_core::EventKind::Tick,
+    });
+    journal.append(&event).unwrap();
+    drop(journal);
+    let segment = home.join("journal/segment-00000000000000000000");
+    let snapshot = home.join("snapshots/journal");
+    fs::create_dir_all(&snapshot).unwrap();
+    fs::copy(&segment, snapshot.join("segment-00000000000000000000")).unwrap();
+    fs::write(home.join("journal/TRIAL"), b"trial journal\n").unwrap();
+    plant_sleeve(&home, 6, false);
+    plant_sleeve(&home, 7, false);
+    let record = obj! {
+        "version" => "v0.0.2",
+        "previous" => "v0.0.1",
+        "switched_ms" => 0u64,
+        "deadline_ms" => 1_000u64,
+        "next_sleeve" => 7u64,
+        "journal_snapshot_ms" => 1u64,
+        "journal_snapshot" => snapshot.display().to_string()
+    };
+    fs::write(home.join("releases/probation.json"), record.to_string()).unwrap();
+
+    let first = prestart_with_journal_mounted(&home);
+    let err = String::from_utf8_lossy(&first.stderr);
+    assert!(!first.status.success(), "{first:?}");
+    assert!(err.contains("incomplete"), "{err}");
+    assert!(
+        err.contains("moved trial sleeves at or above 7 to "),
+        "{err}"
+    );
+    assert!(!err.contains("keeping the current release"), "{err}");
+    assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
+    assert_eq!(pointer(&home, "previous").as_deref(), Some("v0.0.1"));
+    let p = probation(&home);
+    assert_eq!(
+        p["reason"].as_str(),
+        Some("not confirmed within 1 s"),
+        "{p}"
+    );
+    assert!(
+        p["restore_failed"].as_str().unwrap_or("").contains("busy"),
+        "{p}"
+    );
+    assert!(p["contacted_ms"].is_null(), "{p}");
+    assert!(p["rolled_back_ms"].is_null(), "{p}");
+    assert!(home.join("journal/TRIAL").is_file());
+    assert_eq!(
+        fs::read(&segment).unwrap(),
+        fs::read(snapshot.join("segment-00000000000000000000")).unwrap()
+    );
+    assert!(home.join("sleeves/6/transcript.jsonl").is_file());
+    assert!(!home.join("sleeves/7").exists());
+    let aside = fs::read_dir(home.join("update-aside"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .find(|path| path.join("sleeves/7/transcript.jsonl").is_file())
+        .expect("quarantine directory");
+    assert!(err.contains(&aside.display().to_string()), "{err}");
+    assert!(!fs::read_dir(&home).unwrap().any(|e| {
+        e.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".journal-aside-")
+    }));
+
+    let second = prestart_with_journal_mounted(&home);
+    let err = String::from_utf8_lossy(&second.stderr);
+    assert!(!second.status.success(), "{second:?}");
+    assert!(err.contains("incomplete"), "{err}");
+    assert!(!err.contains("keeping the current release"), "{err}");
+    assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
+    let p = probation(&home);
+    assert_eq!(
+        p["reason"].as_str(),
+        Some("not confirmed within 1 s"),
+        "{p}"
+    );
+    assert!(p["restore_failed"].as_str().is_some(), "{p}");
+    assert!(p["contacted_ms"].is_null(), "{p}");
+    assert!(home.join("journal/TRIAL").is_file());
+    assert!(aside.join("sleeves/7/transcript.jsonl").is_file());
+    assert!(home.join("sleeves/6/transcript.jsonl").is_file());
+}
+
 /// A hub killed at each step of a switch on probation, or of the rollback that ends one
 /// (`PT_TEST_CRASH_AT`, the store's crash knob), comes back on a release that worked with the
 /// way back intact: never on the new release with no trial, never with `previous` lost.
