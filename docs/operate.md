@@ -222,7 +222,8 @@ manifest update, and deletes those files only after that rename. It then rewrite
 whose dead bytes are at least its live bytes, with some docs still live, and deletes the old
 file after that rename. A rewrite failure leaves the dead-segment removal in place. Opening the index removes
 segment files the manifest does not name, warns when the manifest itself is missing, and
-warns and still opens when reclaim fails.
+warns and still opens when reclaim fails. A reclaim failure after a durable commit is the
+same warning, and the commit stands.
 
 ## Events
 

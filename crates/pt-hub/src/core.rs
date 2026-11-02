@@ -102,7 +102,6 @@ pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<I
         for s in removed {
             exec.release(s.id);
             hub.transcripts.close(s.id);
-            hub.history.uncap_sleeve(&s.id.0.to_string());
         }
     }
     info!("core stopped");

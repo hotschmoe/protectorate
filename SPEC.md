@@ -298,8 +298,9 @@ the same dispatch code. There are no external sources such as email, calendar or
     session, source, tool, paths, and a fixed header). An unsleeved source drops its own
     oldest docs once it is past the budget. A sleeved source does not: past a sleeve's
     budget, the oldest docs of that sleeve are dropped, whichever of its logs they came
-    from. Newest means ingest order. A rebuild ingests each sleeve's files oldest first,
-    by mtime, so an older log is not ranked above a newer session. A full sleeve does not
+    from. Newest means ingest order. A rebuild ingests each sleeve's log files oldest
+    first, by mtime, so an older log is not ranked above a newer session. The transcript
+    counts as the newest file. A full sleeve does not
     stop the others.
     `doctor` and `hub info` report `history capped: <sleeve id>` once eviction has dropped
     any of that sleeve's docs. The name stays while the sleeve is under the same budget.
@@ -312,7 +313,8 @@ the same dispatch code. There are no external sources such as email, calendar or
     dead-segment removal in place. A failed commit removes the segment files that attempt
     created, and the hub retries it with backoff. Opening an index removes segment files the
     manifest does not name, warns when it does that because the manifest is missing, and
-    warns and still opens when reclaim fails.
+    warns and still opens when reclaim fails. A reclaim failure after a durable commit is
+    the same warning, and the commit stands.
   - Measured on this hub (2026-11-01, release build): 1 GiB of the newest real logs ingested
     in 1.9 s (540 MB/s, 48 MB peak RSS) into an 11 MB index; queries take 0.05 to 0.7 ms.
   - Fallback: `rusqlite` with FTS5, if our index proves insufficient (REVISIT.md).

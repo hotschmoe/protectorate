@@ -143,11 +143,10 @@ struct Pending {
     draft: Draft,
 }
 
-/// One live doc in a sleeve's id order. `seg` is the segment index, or `None` while pending.
+/// One live doc in a sleeve's id order. A doc still in `pending` has not been committed.
 struct Loc {
     source: String,
     charge: u64,
-    seg: Option<usize>,
 }
 
 /// Live docs of one sleeve, oldest id first, plus their byte total.
@@ -446,7 +445,7 @@ impl Index {
         let mut kept: BTreeMap<String, u64> = BTreeMap::new();
         let mut by_source: BTreeMap<String, SourceDocs> = BTreeMap::new();
         let mut sleeves: BTreeMap<String, SleeveDocs> = BTreeMap::new();
-        for (si, s) in self.segs.iter().enumerate() {
+        for s in &self.segs {
             for m in s.docs.iter().filter(|m| self.live(m)) {
                 n += 1;
                 len += u64::from(m.len);
@@ -468,7 +467,6 @@ impl Index {
                         Loc {
                             source: src.to_owned(),
                             charge,
-                            seg: Some(si),
                         },
                     );
                 }
@@ -490,7 +488,6 @@ impl Index {
                     Loc {
                         source: p.source.clone(),
                         charge,
-                        seg: None,
                     },
                 );
             }
@@ -500,6 +497,20 @@ impl Index {
         self.kept = kept;
         self.by_source = by_source;
         self.sleeves = sleeves;
+    }
+
+    /// Live doc and token totals from the segments now on disk. The id maps stay as
+    /// ingest left them: a commit does not rebuild them.
+    fn recount_live(&mut self) {
+        let (mut n, mut len) = (0u64, 0u64);
+        for s in &self.segs {
+            for m in s.docs.iter().filter(|m| self.live(m)) {
+                n += 1;
+                len += u64::from(m.len);
+            }
+        }
+        self.live_docs = n;
+        self.live_len = len;
     }
 
     /// Reads `source` from its cursor to its current end (or `limit`) and queues the docs it
@@ -695,7 +706,7 @@ impl Index {
         } else {
             (first, first_loc)
         };
-        Some((id, loc.source.clone(), loc.seg.is_none()))
+        Some((id, loc.source.clone(), self.pending.contains_key(&id)))
     }
 
     /// Drops the oldest live doc of `stored` other than `keep`.
@@ -739,7 +750,6 @@ impl Index {
             Loc {
                 source: source.to_owned(),
                 charge,
-                seg: None,
             },
         );
     }
@@ -886,16 +896,17 @@ impl Index {
             self.write_manifest()?;
         }
         self.dirty = false;
-        // Pending docs are in a segment now. Rebuild before reclaim so a failed
-        // reclaim does not leave them indexed as pending, and again after so a
-        // reclaim that deleted dead segments and then failed still has live maps
-        // that match the segments that remain.
-        self.recount();
-        let reclaimed = self.reclaim();
-        self.recount();
-        reclaimed?;
-        self.merge()?;
-        self.recount();
+        // The manifest above is durable. A later reclaim failure must not look
+        // like a failed commit: the hub would retry work that is already stored.
+        if let Err(e) = self.reclaim() {
+            eprintln!(
+                "warning: history: reclaim failed in {}: {e}",
+                self.dir.display()
+            );
+        }
+        let merged = self.merge();
+        self.recount_live();
+        merged?;
         Ok(())
     }
 
@@ -1440,32 +1451,18 @@ impl Index {
     }
 
     fn mark_capped(&mut self, stored: &str, sleeve: Option<&str>) {
-        let mut changed = false;
         if let Some(sleeve) = sleeve {
             self.bind_source(stored, Some(sleeve));
-            let keys: Vec<String> = self
-                .members
-                .get(sleeve)
-                .map(|keys| keys.iter().cloned().collect())
-                .unwrap_or_default();
-            for key in keys {
-                if let Some(s) = self.sources.get_mut(&key)
-                    && !s.capped
-                {
-                    s.capped = true;
-                    changed = true;
-                }
-            }
             self.capped_ids.insert(sleeve.to_owned());
-        } else if let Some(s) = self.sources.get_mut(stored)
-            && !s.capped
-        {
-            s.capped = true;
-            changed = true;
         }
-        if changed {
-            self.dirty = true;
+        let Some(s) = self.sources.get_mut(stored) else {
+            return;
+        };
+        if s.capped {
+            return;
         }
+        s.capped = true;
+        self.dirty = true;
     }
 
     fn is_capped(&self, stored: &str, sleeve: Option<&str>) -> bool {
@@ -1475,8 +1472,8 @@ impl Index {
         }
     }
 
-    /// Keeps the capped flag once eviction has dropped a doc, and copies it onto every
-    /// source of that sleeve. A later ingest under the same budget does not clear it.
+    /// Keeps the capped flag once eviction has dropped a doc. The flag is stored on the
+    /// source that was ingested. A later ingest under the same budget does not clear it.
     fn settle_capped(&mut self, stored: &str, sleeve: Option<&str>, was: bool, got: &mut Ingested) {
         if !self.is_capped(stored, sleeve) {
             return;
