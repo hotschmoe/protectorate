@@ -444,12 +444,24 @@ Envoy picks which item; code decides when and where. Work on public repos lands 
 
 ## 9. UI
 
-Amber on dark, cleaner, closer to an IBM 3270/System/370 console than a mobile app:
+Clean amber on dark, professional, a desktop tool rather than a mobile app or a TUI (owner,
+2026-11-02: "cleaner but NOT a TUI ... we are using flutter so lets use it"). The model is a polished
+developer tool (Linear, Raycast, VS Code, Zed): calm, dense, keyboard friendly.
 
-- single-size monospace and 1 px rules;
-- no rounded cards, bezels, glow or seven-segment digits;
-- character meters;
-- a function-key legend and a `===>` command line.
+- Inter for the interface and JetBrains Mono for code, transcripts of tools, ids and output; a small
+  type scale (12, 13, 14, 16), sentence case, no all-caps console look and no box drawing;
+- graphite surfaces with hairline borders and restrained radii (6 for controls, 8 for cards); no
+  bezels, glow, gradients or seven-segment digits;
+- amber is the accent and the brand; every other colour carries a meaning (info links and selection,
+  ok healthy or active, warn waiting on you, alarm failed or unreachable);
+- thin bar meters with zone colours, status dots and pills;
+- a persistent sidebar (navigation, the workspaces/sleeves tree, hub status and quota at a glance),
+  F-keys bound to the screens, and a command palette (Esc or Ctrl+K) that takes the same commands as
+  the CLI;
+- hover, focus and pressed states and tooltips on everything clickable;
+- below 720 px a phone layout: a top bar, the sidebar as a drawer, the same screens.
+
+A light theme exists for daylight; dark is the default.
 
 Chat comes first (D38). The main screen is Envoy's chat, with a workspaces/sleeves tree beside it.
 Choosing a sleeve opens its chat log, built from the headless transcript, in the same simple pane
@@ -645,7 +657,7 @@ All decided. The owner's answers are recorded in `docs/sessions/2026-11-01-decis
 | D21 | Index the owner's own interactive CLI logs too, or hub-launched sessions only | hub-launched only |
 | D22 | Vectors off until keyword search falls short | yes |
 | D23 | Brief file `.protectorate/BRIEF.md`, LLM summary for planned resleeves only | yes |
-| D24 | `===>` command line and F-key legend in the app | yes |
+| D24 | `===>` command line and F-key legend in the app | yes; since 2026-11-02 a command palette (Esc, Ctrl+K) and F-keys shown in the sidebar (SPEC 9) |
 | D25 | macOS node and desktop only once a Mac exists | yes |
 | D26 | `history.read` scope | Envoy, plus a continued sleeve for its own run; wider is owner-only |
 | D27 | Source of the task-size class for dispatch | code (median of the last N), Envoy may nudge one class, code clamps |

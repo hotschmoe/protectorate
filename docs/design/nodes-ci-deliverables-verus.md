@@ -477,6 +477,9 @@ the end).
 
 ## 7. UI direction
 
+Superseded on 2026-11-02 by SPEC section 9: the owner wants a clean, professional desktop app, not a
+TUI. The rules and mockup below are kept as history.
+
 The current design doc [V docs/design.md] is already amber VFD, JetBrains
 Mono and an IBM-engineer brief, but it draws instruments: bezels with lit
 edges, glass windows, glow, arc gauges, DSEG7 digits, radius 10. The owner's

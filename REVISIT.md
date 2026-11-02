@@ -215,13 +215,14 @@ Each entry: where, what was done, what right looks like.
   prompt than the running one, are dropped. Right: ACP's own prompt id if it gains one.
 - **Linux desktop bundle is built but not released**: `flutter build linux --release` succeeds on
   the dev host (arm64) and was not run beyond that. Right: add the Linux bundle to the release.
-- **Chat text is plain monospace** (`app/lib/chat.dart`): no Markdown, code fences show as typed.
-  Right: our own small renderer for fences and lists if plain text reads badly.
+- **Chat Markdown is a small subset** (`app/lib/chat.dart`): fences (diffs coloured), headings,
+  lists, quotes, inline code, bold, italics and links; no tables, no syntax highlighting, links are
+  not clickable. Right: tables and clickable links when transcripts need them.
 - **App tables don't sort** (nodes report 7, rule 8: sort by clicking the header rule). Right: a
   sort key per column in the shared table rows.
 - **F-keys in the web build**: the browser may keep some keys (F12 always opens devtools; F5 and
-  F11 depend on the browser). Right: check per browser; the `===>` command line covers every
-  F-key screen meanwhile.
+  F11 depend on the browser). Right: check per browser; the sidebar and the command palette
+  (Esc, Ctrl+K) cover every F-key screen meanwhile.
 - **Journal retention** (pt-journal): every snapshot and segment is kept forever, because product
   code deletes nothing yet (RULE 1). Right: a retention rule (keep the last N snapshots and their
   segments, archive the rest into backups) once the owner approves deleting old segments. The
@@ -497,7 +498,7 @@ Each entry: where, what was done, what right looks like.
   stored as SHA-256 in `devices.json`; `last_seen` is written at most once a minute. Right: a
   per-address attempt limit if the hub is ever reachable beyond the owner's networks, and a QR
   code in the app for scan to join.
-- **TakeoverTerminal is a stub** (`pt-api`): it answers `unavailable`, and the app's TERMINAL
+- **TakeoverTerminal is a stub** (`pt-api`): it answers `unavailable`, and the app's Terminal
   view is a placeholder. Right: the PTY handoff of SPEC 3.3 and an xterm.dart view (build
   stage 6).
 - **Web events token in the URL** (`app/lib/api/transport_web.dart`): a browser cannot set
@@ -676,7 +677,8 @@ Each entry: where, what was done, what right looks like.
   use a killable helper process if network filesystems make this a practical problem.
 - **pi_durable shows as pi_local in the API** (`pt-hub`, wire.rs): the experiment has no API
   harness. Right: add one if it outlives the experiment.
-- **The web app embedded is about 17.7 MB** (`crates/protectorate/build.rs`): the release binary
+- **The web app embedded is about 17.7 MB** (`crates/protectorate/build.rs`; the bundled Inter fonts
+  added about 1 MB on 2026-11-02): the release binary
   is 19.4 MB with it and 1.7 MB without; with gzipped headscale and member too (25 MB) the
   release hub assets are 44.9 MB (arm64) and 47.8 MB (amd64). Debug symbols, the experimental CanvasKit and the skwasm
   renderers are left out; both CanvasKit variants stay (Chromium and the full one for other

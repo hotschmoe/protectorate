@@ -33,8 +33,11 @@ class RealHub implements HubClient {
 
   @override
   String get label => _connected
-      ? 'HUB $url'
-      : 'HUB $url OFFLINE${_lastError == null ? '' : ' ($_lastError)'}';
+      ? url
+      : '$url offline${_lastError == null ? '' : ' ($_lastError)'}';
+
+  @override
+  bool get connected => _connected;
 
   @override
   HubState get state => _state;

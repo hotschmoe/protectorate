@@ -92,7 +92,7 @@ class _AppState extends State<App> {
 
   @override
   Widget build(BuildContext context) {
-    final p = _dark ? Palette.amber : Palette.printer;
+    final p = _dark ? Palette.amber : Palette.paper;
     final st = _hub.state;
     final sleeve = _q['sleeve'];
     final node = _q['node'];

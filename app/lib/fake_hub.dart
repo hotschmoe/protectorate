@@ -56,7 +56,10 @@ class FakeHub implements HubClient {
   int _ago(Duration d) => _now - d.inMilliseconds;
 
   @override
-  String get label => 'FAKE HUB (scripted)';
+  String get label => 'Fake hub (scripted)';
+
+  @override
+  bool get connected => true;
 
   @override
   HubState get state => _state;

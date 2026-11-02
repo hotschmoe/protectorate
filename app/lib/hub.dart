@@ -9,6 +9,9 @@ abstract class HubClient {
   /// Where the client points and whether it is connected or a scripted stand-in.
   String get label;
 
+  /// False while a real hub is unreachable.
+  bool get connected;
+
   HubState get state;
   Stream<HubState> get states;
 
