@@ -845,6 +845,17 @@ Each entry: where, what was done, what right looks like.
   session indexed from the transcript whose log appears in a later run (a native resume of a
   session that had none) is indexed twice. Right: keep the choice per session in the index
   manifest.
+- **A parent reads a child's live transcript** (`pt-hub`, api.rs `get_transcript`): `reaches`
+  is the sleeve itself or a direct child, so a parent still receives the child's full
+  transcript. That is supervision of a running child, and it is separate from history search,
+  which a sleeve credential limits to its own sleeve id (D26). Right: keep it.
+- **Pi must report the session id from argv** (`pt-drivers`, pi.rs): `get_state`'s `sessionId`
+  has to equal the id the hub passed (`--session` on resume, `--session-id` on a new session).
+  A different id is a protocol error. That becomes `Desync`, which trips G14
+  (`ProtocolDesync`, a kill). The death then follows G3: at most two resumes in ten minutes,
+  then a forced resleeve, and a third automatic resleeve within an hour parks the sleeve
+  (`ParkReason::Flapping`). A Pi that mints a new id on resume takes that path. Right: keep
+  the equality check.
 - **Native logs are found by session id under the sleeve's home** (`pt-hub`, history.rs): the
   drivers report the session id, not the log path, so the hub walks the harness's log root in the
   sleeve's private home (`pt_history::discover`), each second while a live session has no log

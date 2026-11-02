@@ -282,7 +282,9 @@ the same dispatch code. There are no external sources such as email, calendar or
     session, time and role. Ingest tails each log by byte offset; small segments are merged.
     A source cursor is per sleeve, and a native session id selects a log only under that
     sleeve's home. A sleeve credential searches and reads only docs tagged with its own
-    sleeve id (D26). Envoy and the owner are unrestricted.
+    sleeve id (D26). Envoy and the owner are unrestricted. A parent still reads a child's
+    live transcript (`get_transcript`, through `reaches`): that is supervision of a running
+    child, separate from this history search.
     `history read` applies the caller's sleeve scope before it copies text, then stops at 200
     docs or 8 MiB of source text and says when the range was cut. The next page starts after
     the last doc id (`--after`). Tool paths are kept to the
