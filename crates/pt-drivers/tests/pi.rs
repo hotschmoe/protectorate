@@ -44,6 +44,9 @@ fn interrupt() {
 /// turn, so the session takes the next prompt; a steer for an ended turn is refused.
 #[test]
 fn handled_prompt() {
+    if !configured() {
+        return;
+    }
     let Some(program) = program(Harness::Pi) else {
         return skip(Harness::Pi, "binary not found");
     };
@@ -89,6 +92,9 @@ fn handled_prompt() {
 /// A steer names the running turn from its ack and lands in it.
 #[test]
 fn steer() {
+    if !configured() {
+        return;
+    }
     let Some(program) = program(Harness::Pi) else {
         return skip(Harness::Pi, "binary not found");
     };
