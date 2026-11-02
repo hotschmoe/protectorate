@@ -23,6 +23,8 @@ impl std::error::Error for Error {}
 
 type Result<T> = std::result::Result<T, Error>;
 
+const MASK_SIZE_BYTES: u64 = 1 << 20;
+
 fn err<T>(msg: String) -> Result<T> {
     Err(Error(msg))
 }
@@ -174,10 +176,22 @@ impl SandboxSpec {
             match m.kind {
                 Kind::Ro => a.extend(["--ro-bind".into(), p.clone(), p]),
                 Kind::Rw => a.extend(["--bind".into(), p.clone(), p]),
-                Kind::MaskDir => a.extend(["--tmpfs".into(), p]),
+                Kind::MaskDir => a.extend([
+                    "--size".into(),
+                    MASK_SIZE_BYTES.to_string(),
+                    "--tmpfs".into(),
+                    p,
+                ]),
                 Kind::MaskFile => a.extend(["--ro-bind".into(), "/dev/null".into(), p]),
                 Kind::Runtime => {
-                    a.extend(["--perms".into(), "0700".into(), "--tmpfs".into(), p]);
+                    a.extend([
+                        "--perms".into(),
+                        "0700".into(),
+                        "--size".into(),
+                        MASK_SIZE_BYTES.to_string(),
+                        "--tmpfs".into(),
+                        p,
+                    ]);
                 }
             }
         }

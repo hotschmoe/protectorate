@@ -97,6 +97,33 @@ fn disk_scratch_is_short_and_survives_incarnations() {
 }
 
 #[test]
+fn mask_and_runtime_tmpfs_have_small_limits() {
+    let base = fixture("mask-limits");
+    let mask = sub(&base, "masked");
+    let mut s = spec("mask-limits", &base);
+    s.scope = false;
+    s.masks.push(mask.clone());
+    let script = format!(
+        "for dir in '{}' \"$XDG_RUNTIME_DIR\"; do \
+         df -Pk \"$dir\" | tail -1; \
+         dd if=/dev/zero of=\"$dir/full\" bs=1048576 count=2 2>/dev/null \
+         && exit 1; done; true",
+        mask.display()
+    );
+    let out = sh(&s, &script);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = stdout(&out);
+    assert_eq!(text.lines().count(), 2, "{text}");
+    for line in text.lines() {
+        assert_eq!(line.split_whitespace().nth(1), Some("1024"), "{line}");
+    }
+}
+
+#[test]
 fn masks_hide_credentials_and_filesystem_is_read_only_outside_workspace() {
     let base = fixture("masks");
     let host_home = sub(&base, "owner-home");
