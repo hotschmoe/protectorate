@@ -191,9 +191,11 @@ a failed one, while one that was never read still may be. A candidate with no re
 (`unknown`: no login, an expired login, or not read yet) can still be selected. A failed
 reading (`error`) cannot; it parks the same way an exhausted
 window does. A window whose reset time has already passed still blocks while it is over that
-line, for ten minutes, and only when that reading was taken before the reset. After that the
-window counts as reset, and the fallback may spend that row for that reason. It is not a
-missing reading. A reset at or before the epoch is ignored and the percent still counts.
+line. Taken before the reset, the block lasts ten minutes after the reset. Taken with the
+reset already a few seconds behind, it lasts ten minutes after the reading. A stamp that was
+already long past, and a window once that grace has ended, count as reset, and the fallback
+may spend the row for that reason. It is not a missing reading. A reset at or before the
+epoch is ignored and the percent still counts.
 A model-scoped Claude window (the weekly Sonnet or Opus cap, shown as `wk <name>`) gates a
 resleeve only when that candidate's model name contains the name. A row that only reports
 other models' caps is not spent. The account windows always count. Pi with a vendor login and

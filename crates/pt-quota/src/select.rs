@@ -13,9 +13,7 @@ const UNKNOWN_RESET_HOURS: f64 = 168.0;
 /// Pace extrapolation needs at least this much of the window elapsed.
 const MIN_ELAPSED_FRACTION: f64 = 0.05;
 const HOUR_MS: f64 = 3_600_000.0;
-/// How long a passed reset still blocks. Matches the cache's default stale window: the vendor
-/// can keep enforcing the old counter briefly, and a row fetched before the reset is the one
-/// that still carries it. After this, the window counts as reset.
+/// How long a passed reset still blocks. Matches the cache's default stale window.
 const RESET_GRACE_MS: u64 = 600_000;
 
 /// A reset at or before the epoch is "no reset": the percent still counts.
@@ -194,9 +192,12 @@ fn score(q: &Quota, now_ms: u64, model: &str) -> Option<Scored> {
     best
 }
 
-/// A window whose reset has passed and whose remaining percent is under `min` still blocks,
-/// for `RESET_GRACE_MS` after the stamp, when this row was fetched before that reset.
+/// A window whose reset has passed and whose remaining percent is under `min` still blocks.
+/// Fetched before the reset, the block lasts `RESET_GRACE_MS` after the stamp. Fetched with
+/// the reset already behind, but by less than that grace, the block lasts `RESET_GRACE_MS`
+/// after the fetch. A stamp already long past at fetch time counts as reset.
 fn past_blocks(q: &Quota, now_ms: u64, min: f64, model: &str) -> bool {
+    let fetched = q.fetched_at_ms.0;
     q.windows.iter().any(|w| {
         if !gates(&w.label, model) {
             return false;
@@ -208,10 +209,15 @@ fn past_blocks(q: &Quota, now_ms: u64, min: f64, model: &str) -> bool {
             return false;
         };
         let remaining = (100.0 - used).clamp(0.0, 100.0);
-        reset <= now_ms
-            && remaining < min
-            && q.fetched_at_ms.0 < reset
-            && now_ms < reset.saturating_add(RESET_GRACE_MS)
+        if reset > now_ms || remaining >= min {
+            return false;
+        }
+        if fetched < reset {
+            now_ms < reset.saturating_add(RESET_GRACE_MS)
+        } else {
+            fetched < reset.saturating_add(RESET_GRACE_MS)
+                && now_ms < fetched.saturating_add(RESET_GRACE_MS)
+        }
     })
 }
 

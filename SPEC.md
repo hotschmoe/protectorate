@@ -449,10 +449,13 @@ the hub has not read yet (including just after a restart; readings are not journ
 failed reading may not. That is `error`: the body did not parse, the request failed, or the
 read timed out and left no earlier windows. It parks the
 same way an exhausted window does. A window whose reset time has passed still blocks while its
-remaining percent is under the task minimum, for ten minutes after that reset, and only when
-the row was fetched before the reset. After that the window counts as reset, and the
-fallback may spend the row because its windows have reset. That is not a missing reading. A
-reset at or before the epoch is no reset time, and the percent still counts. Model-scoped Claude windows (`wk <name>`) stay on the quota row
+remaining percent is under the task minimum. Fetched before the reset, that lasts ten minutes
+after the reset. Fetched with the reset already behind, but by less than those ten minutes, it
+lasts ten minutes after the fetch: a body that says the window is full and the reset was a few
+seconds ago is still that limit. A stamp already long past when the row was fetched counts as
+reset, and so does a window once the grace has ended. The fallback may then spend the row
+because its windows have reset. That is not a missing reading. A reset at or before the epoch
+is no reset time, and the percent still counts. Model-scoped Claude windows (`wk <name>`) stay on the quota row
 and gate a candidate only when its model name contains that name (`opus` gates
 `claude-opus-4-6`, and does not gate a Sonnet candidate). The account windows always gate
 (`5h`, `wk`), as does the single credit or rate-limit window of the other subscriptions. A

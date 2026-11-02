@@ -317,23 +317,35 @@ fn open_usable(q: &Quota, now_ms: u64, model: &str) -> Option<f64> {
     usable
 }
 
-/// SPEC 8: a passed reset blocks only inside the ten-minute grace, and only when the row was
-/// fetched before that reset. A stamp at or before the epoch is not a reset.
+/// SPEC 8. An exhausted window whose reset has passed still blocks when the row was fetched
+/// before that reset and now is within ten minutes after it, or when the reset was already
+/// behind at the fetch by less than ten minutes and now is within ten minutes after the
+/// fetch. A stamp at or before the epoch is not a reset. One already long past at fetch
+/// time counts as reset.
 fn still_enforcing(q: &Quota, now_ms: u64, min: f64, model: &str) -> bool {
-    const GRACE_MS: u64 = 600_000;
+    const TEN_MINUTES_MS: u64 = 10 * 60 * 1000;
     let fetched = q.fetched_at_ms.0;
     q.windows.iter().any(|w| {
         if !applies(&w.label, model) {
             return false;
         }
+        let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
+            return false;
+        };
+        if (100.0 - used).clamp(0.0, 100.0) >= min {
+            return false;
+        }
         let Some(stamp) = w.resets_at_ms.map(|r| r.0).filter(|t| *t > 0) else {
             return false;
         };
-        if stamp > now_ms || fetched >= stamp || now_ms >= stamp.saturating_add(GRACE_MS) {
+        if stamp > now_ms {
             return false;
         }
-        w.used_pct
-            .filter(|u| u.is_finite())
-            .is_some_and(|used| (100.0 - used).clamp(0.0, 100.0) < min)
+        if fetched < stamp {
+            now_ms < stamp.saturating_add(TEN_MINUTES_MS)
+        } else {
+            let behind = fetched.saturating_sub(stamp);
+            behind < TEN_MINUTES_MS && now_ms < fetched.saturating_add(TEN_MINUTES_MS)
+        }
     })
 }

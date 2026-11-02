@@ -578,22 +578,43 @@ fn stale_windows_still_gate_the_fallback() {
     );
 }
 
-/// A Codex `reset_at` of 0 is not a reset, so a full window still blocks. A stamp from 1970
-/// is long past the grace, so the window counts as reset and the row may be spent. A stamp
-/// that has passed with room left is the same.
+/// A Codex `reset_at` of 0 is not a reset, so a full window still blocks. A reset a few
+/// seconds behind the clock blocks on a fresh read, with no backdated cache. A stamp from
+/// 1970 was already long past at fetch time, so the window counts as reset. A stamp that
+/// has passed with room left is the same.
 #[test]
-fn a_passed_reset_still_blocks_an_exhausted_window() {
+fn a_reset_just_behind_blocks_and_an_ancient_one_counts_as_reset() {
     let home = scratch(&format!("passed-reset-{}", std::process::id()));
     write(
         &home.join(".codex/auth.json"),
         r#"{"tokens":{"access_token":"passed-codex"}}"#,
     );
     let home_s = home.to_str().unwrap();
-    let run = |body: &'static str| {
-        let (port, _) = serve(vec![("/wham/usage", body)]);
+    let run = |body: &str| {
+        let (port, _) = serve(vec![("/wham/usage", body.to_string())]);
         let base = format!("http://127.0.0.1:{port}");
         probe(&["--home", home_s, "--codex-url", &base, "--allow", "codex"])
     };
+    let now_s = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let behind = run(&format!(
+        r#"{{"plan_type":"plus","rate_limit":{{"primary_window":{{"used_percent":100,"limit_window_seconds":18000,"reset_at":{secs}}}}}}}"#,
+        secs = now_s.saturating_sub(5)
+    ));
+    let line = line_of(&behind, "codex");
+    assert_eq!(state_of(line), "fresh", "{behind}");
+    assert!(line.contains("reset passed"), "{line}");
+    assert!(
+        behind.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{behind}"
+    );
+    assert!(
+        !behind.contains("whose quota windows have reset"),
+        "{behind}"
+    );
+
     let zero = run(
         r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":100,"limit_window_seconds":18000,"reset_at":0}}}"#,
     );
