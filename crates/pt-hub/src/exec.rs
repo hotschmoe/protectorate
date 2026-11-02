@@ -787,7 +787,18 @@ impl SleeveExec {
             program = real;
         }
         sb.rw_paths.extend(logins.dirs);
-        sb.rw_paths.extend(tools.rw);
+        // A cache that is itself masked (another sleeve's claim) stays out, or no sleeve starts.
+        let masked: Vec<PathBuf> = sb
+            .masks
+            .iter()
+            .filter_map(|m| fs::canonicalize(m).ok())
+            .collect();
+        sb.rw_paths.extend(
+            tools
+                .rw
+                .into_iter()
+                .filter(|p| fs::canonicalize(p).is_ok_and(|c| !masked.contains(&c))),
+        );
         if s.layout == Layout::Worktree {
             let parent = s
                 .parent

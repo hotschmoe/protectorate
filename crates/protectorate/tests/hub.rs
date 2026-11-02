@@ -823,7 +823,7 @@ fn sandbox_reaches_only_its_own() {
     std::fs::create_dir_all(owner.join(".rustup")).unwrap();
     std::fs::write(
         owner.join(".gitconfig"),
-        "[user]\n\tname = Owner Name\n\temail = owner@example.test\n",
+        "[user]\n\tname = \"Owner \\\"Q\\\" Name\"\n\temail = owner@example.test\n",
     )
     .unwrap();
     let (repo, other) = (temp_repo("sbx"), temp_repo("sbx-other"));
@@ -935,7 +935,7 @@ exec '{real_pi}' "$@""#,
         "login_shell_cli=ok",
         "other_root=hidden",
         "commit=ok",
-        "committer=Owner Name <owner@example.test>",
+        "committer=Owner \"Q\" Name <owner@example.test>",
     ] {
         assert!(probe.lines().any(|l| l == want), "want {want}:\n{probe}");
     }
@@ -960,7 +960,7 @@ exec '{real_pi}' "$@""#,
     for want in [
         "other_root=hidden",
         "commit=ok",
-        "committer=Owner Name <owner@example.test>",
+        "committer=Owner \"Q\" Name <owner@example.test>",
     ] {
         assert!(
             kid_probe.lines().any(|l| l == want),

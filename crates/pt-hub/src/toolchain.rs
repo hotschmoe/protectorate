@@ -72,7 +72,12 @@ pub fn prepare(
     if cargo.is_dir() {
         t.env
             .push(("CARGO_HOME".into(), cargo.to_string_lossy().into_owned()));
-        t.rw.extend(existing_dirs([cargo.join("registry"), cargo.join("git")]));
+        for sub in ["registry", "git"] {
+            let dir = cargo.join(sub);
+            fs::create_dir_all(&dir)
+                .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", dir.display())))?;
+            t.rw.push(dir);
+        }
     }
 
     let gopath = owned("GOPATH", owner_home.join("go"));
@@ -103,8 +108,8 @@ pub fn prepare(
     Ok(t)
 }
 
-fn existing_dirs(dirs: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
-    dirs.into_iter().filter(|d| d.is_dir()).collect()
+fn quoted(v: &str) -> String {
+    v.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 /// The `bin/cache` of the Flutter SDK that `flutter` on `path` belongs to.
@@ -138,7 +143,7 @@ fn seed_gitconfig(home: &Path) -> io::Result<()> {
             .ok()
             .filter(|o| o.status.success())
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-            .filter(|v| !v.is_empty() && !v.contains(['\n', '"', '\\']))
+            .filter(|v| !v.is_empty() && !v.contains('\n'))
     };
     let (name, email) = (get("user.name"), get("user.email"));
     if name.is_none() && email.is_none() {
@@ -146,10 +151,10 @@ fn seed_gitconfig(home: &Path) -> io::Result<()> {
     }
     let mut text = String::from("[user]\n");
     if let Some(n) = name {
-        text.push_str(&format!("\tname = \"{n}\"\n"));
+        text.push_str(&format!("\tname = \"{}\"\n", quoted(&n)));
     }
     if let Some(e) = email {
-        text.push_str(&format!("\temail = \"{e}\"\n"));
+        text.push_str(&format!("\temail = \"{}\"\n", quoted(&e)));
     }
     seed(&path, &text)
 }
