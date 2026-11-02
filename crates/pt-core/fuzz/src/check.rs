@@ -469,6 +469,21 @@ fn unsent_messages(prev: &State, st: &State) {
                 continue;
             }
             let m = s.messages.get(r).map(|m| m.state);
+            // A stop, park, or resleeve drops an unsent continuation instead of sending it
+            // on the next start. It is Rejected, with no "may have applied" notice.
+            let dropped_continue = r.starts_with("continue:")
+                && matches!(m, Some(MsgState::Rejected))
+                && matches!(
+                    s.life,
+                    Life::Parked(_)
+                        | Life::Stopping { .. }
+                        | Life::Stopped
+                        | Life::Removed
+                        | Life::Resleeving
+                );
+            if dropped_continue {
+                continue;
+            }
             assert!(
                 matches!(
                     m,

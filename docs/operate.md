@@ -81,8 +81,10 @@ replaces that party, which keeps D9 on the continued turn and reports a rejectio
 party. A second crash of the same turn does not send another, even after the ten-minute
 resume window, and a later owner message is a new turn with its own prompt. An owner
 interrupt, a guardrail interrupt, a desync during either of those, a planned stop, a restart
-of an idle sleeve, and a manual resleeve do not. A restart while the resumed incarnation is
-still booting still sends it. A crash of an incarnation that already reached idle does not
+of an idle sleeve, and a manual resleeve do not. A stop, park, or resleeve also drops a
+continuation that is still queued, including one that never left the hub, and warns once.
+An idle crash that ends in a park or a resleeve drops a debt and does not warn. A restart
+while the resumed incarnation is still booting still sends it. A crash of an incarnation that already reached idle does not
 carry it. A settle of that turn drops it with no warning, including one recorded after
 resume while the sleeve is idle, so a later start does not warn about a turn the journal
 already settled. If that prompt cannot be sent, the debt is dropped and the event log says

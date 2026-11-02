@@ -36,8 +36,11 @@ reads no clock, so `replay(journal) == live state`. The hub's core thread is its
   prompt started. The prompt is sent as the party that opened that owner turn. An agent steer
   replaces that party, which keeps D9 on the continued turn and reports a rejection to that
   party. If it cannot be delivered, the debt is dropped and the owner is warned, and a crash
-  after the incarnation reached idle does not carry the debt. A settle of that owner turn drops
-  the debt with no warning, including one recorded after resume while the incarnation is idle.
+  after the incarnation reached idle does not carry the debt. A stop, park, or resleeve drops
+  a continuation still queued, including one fencing put back unsent, and warns once. An idle
+  crash that ends in a park or a resleeve drops a debt with no warning. A settle of that
+  owner turn drops the debt with no warning, including one recorded after resume while the
+  incarnation is idle.
   The prompt effect is allocated only while applying this event.
 - `Tick`, `HubRecovered`.
 

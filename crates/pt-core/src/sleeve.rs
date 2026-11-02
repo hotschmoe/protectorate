@@ -463,15 +463,22 @@ impl Core<'_> {
 
         let s = &self.st.sleeves[&sid];
         match s.life {
-            Life::Stopping { .. } => self.try_finalize(sid),
-            Life::Resleeving => match s.guard.state {
-                GuardState::Quiescing { .. } => self.capture(sid, !stop_requested),
-                GuardState::Briefing { .. } if brief_sent => {
-                    self.park(sid, ParkReason::BriefUnconfirmed)
+            Life::Stopping { .. } => {
+                // Fencing just put an unsent continuation back. Stop already dropped the debt.
+                self.drop_queued_continuation(sid);
+                self.try_finalize(sid);
+            }
+            Life::Resleeving => {
+                self.drop_queued_continuation(sid);
+                match self.st.sleeves[&sid].guard.state {
+                    GuardState::Quiescing { .. } => self.capture(sid, !stop_requested),
+                    GuardState::Briefing { .. } if brief_sent => {
+                        self.park(sid, ParkReason::BriefUnconfirmed)
+                    }
+                    GuardState::Launching | GuardState::Briefing { .. } => self.launch_failed(sid),
+                    _ => {}
                 }
-                GuardState::Launching | GuardState::Briefing { .. } => self.launch_failed(sid),
-                _ => {}
-            },
+            }
             Life::Launching | Life::Running | Life::Recovering => {
                 let parent = s.parent;
                 self.sl(sid).life = Life::Recovering;
@@ -494,7 +501,12 @@ impl Core<'_> {
                 };
                 // Read before after_death: a new incarnation clears the desync flag.
                 let was_desync = self.st.sleeves[&sid].desync_during_turn;
-                self.after_death(sid, c);
+                // An idle death that parks or resleeves drops a debt with no warning. A
+                // working turn still warns. `Unknown` without the desync flag is the same
+                // shape as an idle desync, which also must not grow a new warning here.
+                let idle_death = matches!(was, Activity::Idle { .. })
+                    || (was == Activity::Unknown && !was_desync);
+                self.after_death(sid, c, idle_death);
                 // Idle (and anything past boot) does not carry a continuation into the next
                 // incarnation. Booting still does. A working crash may set a fresh debt below.
                 let reached_idle = matches!(
@@ -536,7 +548,10 @@ impl Core<'_> {
                     self.needs_prompt(sid);
                 }
             }
-            Life::Provisioning | Life::Parked(_) | Life::Stopped | Life::Removed => {}
+            // Park already cleared the debt. The unsent continuation fencing just requeued
+            // is dropped here, once, with the owner warning.
+            Life::Parked(_) => self.drop_queued_continuation(sid),
+            Life::Provisioning | Life::Stopped | Life::Removed => {}
         }
     }
 
@@ -563,11 +578,14 @@ impl Core<'_> {
         }
         let s = self.sl(sid);
         s.life = Life::Stopping { remove };
-        s.auto_continue = None;
         s.guard.state = GuardState::Armed;
         s.guard.chosen = None;
         s.guard.tried.clear();
+        let dropped = self.discard_continuation(sid);
         self.stop_incarnation(sid);
+        if dropped {
+            self.needs_prompt(sid);
+        }
         for c in self.st.children(sid) {
             self.stop(c, remove);
         }
@@ -617,12 +635,18 @@ impl Core<'_> {
     }
 
     pub(crate) fn park(&mut self, sid: SleeveId, reason: ParkReason) {
+        self.park_quiet(sid, reason, false);
+    }
+
+    /// `quiet` is an idle death that parks: the debt goes, and nobody is told the turn
+    /// will not continue. A queued continuation is still dropped.
+    pub(crate) fn park_quiet(&mut self, sid: SleeveId, reason: ParkReason, quiet: bool) {
         let s = self.sl(sid);
         s.life = Life::Parked(reason);
-        s.auto_continue = None;
         s.guard.state = GuardState::Parked;
         s.guard.chosen = None;
         let parent = s.parent;
+        let dropped = self.discard_continuation(sid);
         self.stop_incarnation(sid);
         self.notify(Party::Owner, Some(sid), Notice::Parked { reason });
         if let Some(p) = parent {
@@ -631,6 +655,9 @@ impl Core<'_> {
                 Some(sid),
                 Notice::ChildParked { child: sid },
             );
+        }
+        if dropped && !quiet {
+            self.needs_prompt(sid);
         }
     }
 
@@ -1360,8 +1387,43 @@ impl Core<'_> {
             .map(|m| m.state)
     }
 
+    /// Drops the continuation debt and any `continue:` message still queued. An in-flight
+    /// unsent prompt is not queued yet; fencing puts it back, and the exit then drops it.
+    /// Rejected, not left queued: a later start must not send it. No `MessageRejected` —
+    /// the caller warns with `TurnNeedsPrompt` when something was actually dropped.
+    pub(crate) fn discard_continuation(&mut self, sid: SleeveId) -> bool {
+        let had = self.sl(sid).auto_continue.take().is_some();
+        had || self.reject_queued_continues(sid)
+    }
+
+    fn drop_queued_continuation(&mut self, sid: SleeveId) {
+        if self.reject_queued_continues(sid) {
+            self.needs_prompt(sid);
+        }
+    }
+
+    fn reject_queued_continues(&mut self, sid: SleeveId) -> bool {
+        let s = self.sl(sid);
+        let keys: Vec<String> = s
+            .queue
+            .iter()
+            .filter(|id| id.starts_with("continue:"))
+            .cloned()
+            .collect();
+        if keys.is_empty() {
+            return false;
+        }
+        s.queue.retain(|id| !id.starts_with("continue:"));
+        for id in keys {
+            if let Some(m) = s.messages.get_mut(&id) {
+                m.state = MsgState::Rejected;
+            }
+        }
+        true
+    }
+
     /// The owner, and the parent when there is one, hear that nobody continued the turn.
-    fn needs_prompt(&mut self, sid: SleeveId) {
+    pub(crate) fn needs_prompt(&mut self, sid: SleeveId) {
         let parent = self.st.sleeves[&sid].parent;
         self.notify(Party::Owner, Some(sid), Notice::TurnNeedsPrompt);
         if let Some(p) = parent {

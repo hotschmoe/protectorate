@@ -331,7 +331,10 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   party, which keeps D9 on the continued turn and reports a rejection to that party. The owner
   still hears when the prompt cannot be sent.
   It is not sent after a planned stop, a hub restart of an idle sleeve, or a manual resleeve (the
-  brief is that continuation). A debt still held when recovery finds that incarnation already idle
+  brief is that continuation). A stop, park, or resleeve also drops a continuation still queued,
+  including one fencing put back because it never left, and the owner and the parent get
+  `TurnNeedsPrompt`. An idle crash that ends in a park or a resleeve drops a debt with no warning.
+  A debt still held when recovery finds that incarnation already idle
   and armed is dropped, with `TurnNeedsPrompt`; a resume that is still booting keeps the debt.
   A `Continue` that cannot be delivered drops the debt and warns. A crash of an incarnation that
   already reached idle does not carry the debt. When the prompt cannot be sent, the owner and

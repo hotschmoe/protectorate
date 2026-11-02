@@ -1,0 +1,85 @@
+#scenario 9702d25852979846
+# A stop, a resleeve, or a park drops a continuation that never left the hub, and warns
+# once. A later start does not send it. A stop while the debt is held and the prompt is
+# not journaled yet does the same.
+spawn stopped /w/a
+run
+obs stopped ready
+send stopped m1
+run
+exit stopped
+run
+obs stopped ready
+step 1
+expect stopped activity=Delivering
+stop stopped
+exit stopped
+expect stopped life=Stopped msg:continue:0:1=Rejected
+expect-effect continue:0:1 state=Abandoned count=1
+expect-notice TurnNeedsPrompt count=1
+start stopped
+run
+obs stopped ready
+run
+expect stopped activity=Idle
+expect-effect continue:0:1 state=Abandoned count=1
+expect-notice TurnNeedsPrompt count=1
+spawn moved /w/b
+run
+obs moved ready
+send moved m1
+run
+exit moved
+run
+obs moved ready
+step 1
+expect moved activity=Delivering
+resleeve moved harness=pi_local
+exit moved
+expect moved life=Resleeving msg:continue:1:1=Rejected
+expect-effect continue:1:1 state=Abandoned count=1
+expect-notice TurnNeedsPrompt count=2
+run
+expect-effect continue:1:* count=1
+expect-notice TurnNeedsPrompt count=2
+spawn parked /w/c
+run
+obs parked ready
+send parked m1
+run
+exit parked oom
+run
+obs parked ready
+step 1
+expect parked activity=Delivering
+exit parked oom
+expect parked life=Parked msg:continue:2:1=Rejected
+expect-effect continue:2:1 state=Abandoned count=1
+expect-notice TurnNeedsPrompt count=3
+start parked
+run
+obs parked ready
+run
+expect parked activity=Idle
+expect-effect continue:2:1 state=Abandoned count=1
+expect-notice TurnNeedsPrompt count=3
+spawn held /w/d
+run
+obs held ready
+send held m1
+run
+exit held
+run
+stop held
+exit held
+expect held life=Stopped
+expect-effect continue:3:* count=0
+expect-notice TurnNeedsPrompt count=4
+start held
+run
+obs held ready
+run
+expect held activity=Idle
+expect-effect continue:3:* count=0
+expect-notice TurnNeedsPrompt count=4
+expect-notice MessageRejected count=0
