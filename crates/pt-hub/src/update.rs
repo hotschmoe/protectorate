@@ -817,9 +817,7 @@ fn quarantine_sleeves(home: &Path, next_sleeve: u64) -> Result<Option<PathBuf>, 
     }
     let mut left = Vec::new();
     for id in &ids {
-        if let Some(pair) = worktree_left(&sleeves.join(id.to_string()))
-            && !left.iter().any(|(_, gitdir)| gitdir == &pair.1)
-        {
+        if let Some(pair) = worktree_left(&sleeves.join(id.to_string())) {
             left.push(pair);
         }
     }
@@ -1234,93 +1232,114 @@ pub fn restore_snapshots(home: &Path, store: &Store, p: &Probation) -> Result<()
     Ok(())
 }
 
-/// Whether prestart will finish a journal swap or roll a release back. A busy journal
-/// lock then refuses the command. Otherwise the caller reports the probation state.
-pub fn restore_due(home: &Path) -> Result<bool, String> {
-    // A stage directory is removed or installed only under the journal lock. An aside
-    // beside a live journal is the preserved trial journal from a finished swap.
-    if !prefixed(home, ".journal-stage-")?.is_empty()
-        || (!home.join("journal").exists() && !prefixed(home, ".journal-aside-")?.is_empty())
-    {
-        return Ok(true);
-    }
-    let store = Store::open(home).map_err(|e| e.to_string())?;
-    if store.rollback_open().map_err(|e| e.to_string())? {
-        return Ok(true);
-    }
-    let Some(p) = store.probation().map_err(|e| e.to_string())? else {
-        return Ok(false);
+/// How far [`prepare_prestart`] got with the journal lock.
+pub enum Prestart {
+    /// This process may judge. The file is the journal lock when this process holds it.
+    Ready(Option<File>),
+    /// Another process holds the journal lock. Do not judge, restore, or count a start.
+    Busy,
+}
+
+/// Probation state for a caller that must not judge. Reads the record and `current`
+/// and does not take the release-store lock, so it cannot finish a switch or roll back.
+pub fn probation_report(home: &Path) -> Result<String, String> {
+    let path = home.join("releases/probation.json");
+    let bytes = match fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok("no release on trial".into());
+        }
+        Err(e) => return Err(format!("reading {}: {e}", path.display())),
     };
-    if p.rolled_back_ms.is_some()
-        || store.current().map_err(|e| e.to_string())?.as_deref() != Some(p.version.as_str())
-    {
-        return Ok(false);
+    let p: Probation =
+        pt_json::from_bytes(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    if p.rolled_back_ms.is_some() {
+        return Ok("no release on trial".into());
     }
     if p.restore_failed.is_some() && p.reason.is_none() {
-        return Ok(false);
+        return Ok("snapshot restore failed; keeping the current release".into());
     }
-    if p.reason.is_some() || p.manual_rollback {
-        return Ok(true);
+    if p.contacted_ms.is_some() && !p.manual_rollback {
+        return Ok("the release on trial was confirmed".into());
     }
-    if p.contacted_ms.is_some() {
-        return Ok(false);
+    let current = fs::read_link(home.join("releases/current"))
+        .ok()
+        .and_then(|target| target.to_str().map(str::to_string));
+    if current.as_deref() != Some(p.version.as_str()) {
+        return Ok("no release on trial".into());
     }
-    Ok(crate::home::now_ms() >= p.deadline_ms || p.starts >= pt_update::MAX_TRIAL_STARTS)
+    let now = crate::home::now_ms();
+    if p.reason.is_some() || now >= p.deadline_ms || p.starts >= pt_update::MAX_TRIAL_STARTS {
+        return Ok("on trial, rollback pending while the hub holds the journal".into());
+    }
+    let left = p.deadline_ms.saturating_sub(now) / 1000;
+    Ok(format!("on trial, {left} s left"))
 }
 
-/// Holds the journal lock across the caller's restore when one is due. The lock is
-/// taken before [`finish_interrupted_journal_swap`] whenever `journal/` exists, so a
-/// restarting prestart cannot delete a retry's staging directory. When nothing is due
-/// and the lock is busy, returns `None` and leaves the journal alone.
-pub fn prepare_prestart(home: &Path, held: bool) -> Result<Option<File>, String> {
-    let due = restore_due(home)?;
-    if held {
-        finish_interrupted_journal_swap(home)?;
-        return Ok(None);
-    }
-    if due && home.join("journal").exists() {
-        let lock = acquire_journal_lock(home)?;
-        finish_interrupted_journal_swap(home)?;
-        return Ok(lock);
-    }
-    if due {
-        finish_interrupted_journal_swap(home)?;
-        return if home.join("journal/lock").exists() {
-            acquire_journal_lock(home)
-        } else {
-            Ok(None)
-        };
-    }
-    if home.join("journal").exists() {
-        if let Ok(lock) = acquire_journal_lock(home) {
-            finish_interrupted_journal_swap(home)?;
-            drop(lock);
-        }
-        return Ok(None);
-    }
-    finish_interrupted_journal_swap(home)?;
-    Ok(None)
+enum JournalGate {
+    Held(File),
+    Missing,
+    Busy,
 }
 
-/// The journal lock, taken before the release-store lock. `None` when the journal has no lock
-/// file yet. Fails while another process holds it.
-pub fn acquire_journal_lock(home: &Path) -> Result<Option<File>, String> {
+fn take_journal_lock(home: &Path) -> Result<JournalGate, String> {
     let path = home.join("journal/lock");
     if !path.exists() {
-        return Ok(None);
+        return Ok(JournalGate::Missing);
     }
     let lock = OpenOptions::new()
         .read(true)
         .write(true)
         .open(&path)
         .map_err(|e| format!("opening {}: {e}", path.display()))?;
-    lock.try_lock().map_err(|e| {
-        format!(
+    match lock.try_lock() {
+        Ok(()) => Ok(JournalGate::Held(lock)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(JournalGate::Busy),
+        Err(std::fs::TryLockError::Error(e)) => Err(format!(
             "stop the hub before restoring a rollback ({}: {e})",
             path.display()
-        )
-    })?;
-    Ok(Some(lock))
+        )),
+    }
+}
+
+/// Takes the journal lock before [`finish_interrupted_journal_swap`] when `journal/`
+/// exists, and holds it for the caller's judge. A busy lock leaves the journal alone.
+/// `held` finishes under the caller's lock and does not lock again. A missing journal
+/// is finished first, then locked if `journal/lock` is there.
+pub fn prepare_prestart(home: &Path, held: bool) -> Result<Prestart, String> {
+    if held {
+        finish_interrupted_journal_swap(home)?;
+        return Ok(Prestart::Ready(None));
+    }
+    if !home.join("journal").exists() {
+        finish_interrupted_journal_swap(home)?;
+    }
+    match take_journal_lock(home)? {
+        JournalGate::Busy => Ok(Prestart::Busy),
+        JournalGate::Missing => {
+            if home.join("journal").exists() {
+                finish_interrupted_journal_swap(home)?;
+            }
+            Ok(Prestart::Ready(None))
+        }
+        JournalGate::Held(lock) => {
+            finish_interrupted_journal_swap(home)?;
+            Ok(Prestart::Ready(Some(lock)))
+        }
+    }
+}
+
+/// The journal lock, taken before the release-store lock. `None` when the journal has no lock
+/// file yet. Fails while another process holds it.
+pub fn acquire_journal_lock(home: &Path) -> Result<Option<File>, String> {
+    match take_journal_lock(home)? {
+        JournalGate::Held(lock) => Ok(Some(lock)),
+        JournalGate::Missing => Ok(None),
+        JournalGate::Busy => Err(format!(
+            "stop the hub before restoring a rollback ({}: lock acquisition failed because the operation would block)",
+            home.join("journal/lock").display()
+        )),
+    }
 }
 
 /// `--retry-rollback` refuses while headscale still has its database or socket open. The

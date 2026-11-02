@@ -208,7 +208,7 @@ pub fn worktree_add(
         } else {
             c.args(["-b", branch]).arg(path).arg(&commit);
         }
-        run(c, "worktree add").map_err(|e| refuse_leftover(&e))?;
+        run(c, "worktree add")?;
     }
     let tip = rev_parse(path, &["--verify", "-q", "HEAD^{commit}"])?;
     let index = path.join(rev_parse(path, &["--git-path", "index"])?);

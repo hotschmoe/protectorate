@@ -339,10 +339,12 @@ and run
 `<home>/releases/previous/protectorate --home <home> hub probation --retry-rollback`, then start
 the service. The retry keeps a manual rollback: it restores headscale, and restores the journal
 only when the previous release cannot read it. It refuses while the hub holds the journal or
-headscale still has the database or its socket open. `hub probation` with nothing to roll
-back prints the probation state and exits 0 while the hub is running. Prestart takes the
-journal lock before it finishes an interrupted journal swap, when the journal directory is
-present. If a restore fails after a live file was
+headscale still has the database or its socket open. While the hub holds the journal
+lock, `hub probation` prints the probation state and exits 0. It does not judge, restore,
+or count a start. Prestart takes the journal lock before it finishes an interrupted
+journal swap, when the journal directory is present, and before judging. A new trial is
+refused while `releases/rollback-open` exists. The marker applies while that probation
+names the current release. If a restore fails after a live file was
 replaced, prestart exits and the next prestart continues; it does not leave the trial serving
 half-restored data. `releases/rollback-open` records that open restore until the rollback
 finishes, so a later failure continues it too, including a manual rollback of a release that

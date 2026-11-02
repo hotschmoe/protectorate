@@ -394,11 +394,13 @@ straight from GitHub releases, on the stable or dev channel, as today.
     and the next prestart continues the restore. Prestart writes `releases/rollback-open`,
     synced, before that first change and removes it only when the rollback finishes. A later
     failure while that file remains continues the restore, including a manual rollback of a
-    release that was already confirmed. Prestart takes the journal lock before finishing an
-    interrupted journal swap, when the journal directory is present, and before restoring.
-    When no rollback is due it reports the probation state without that lock. `--retry-rollback`
-    refuses while the hub holds the journal or headscale still has the database or its
-    socket open. If the trial binary itself cannot start, service needs the repair: neither an
+    release that was already confirmed. The marker applies while that probation names the
+    current release. A new trial is refused while the marker exists. Prestart takes the
+    journal lock before finishing an interrupted journal swap, when the journal directory
+    is present, and before judging. While the hub holds that lock, `hub probation` prints
+    the probation state and exits 0. It does not judge, restore, or count a start.
+    `--retry-rollback` refuses while the hub holds the journal or headscale still has the
+    database or its socket open. If the trial binary itself cannot start, service needs the repair: neither an
     unreadable journal nor a failed binary can serve.
 - **Nodes, triggered by the hub:**
   - The hub sends `Update(version)` over its own connection. The node downloads the release from

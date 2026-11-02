@@ -761,6 +761,11 @@ impl Store {
         self.require_version_dir(version)?;
         let _l = self.lock()?;
         self.refuse_open_trial()?;
+        if self.rollback_open()? {
+            return Err(store_err(
+                "a rollback restore is still open; finish it before starting a trial",
+            ));
+        }
         let from = self.current()?.ok_or_else(|| {
             store_err("no current release to fall back to; use switch for a first install")
         })?;
@@ -900,7 +905,7 @@ impl Store {
                 // `releases/rollback-open` is written before any live file is replaced.
                 // A later failure, including one that replaces nothing this time, must
                 // not confirm the trial. A confirmed manual rollback still has contact.
-                let incomplete = self.rollback_open()? || e.kind == ErrorKind::RestorePartial;
+                let incomplete = self.open_rollback_for(&p)? || e.kind == ErrorKind::RestorePartial;
                 if incomplete {
                     p.restore_failed = Some(e.message.clone());
                     self.write_probation(&p)?;
@@ -979,7 +984,8 @@ impl Store {
         }
         // An open rollback marker means a live file was already replaced. Keep the
         // failure recorded so a retry that replaces nothing this time does not confirm.
-        let partial = self.rollback_open()? || (p.contacted_ms.is_none() && p.reason.is_some());
+        let partial =
+            self.open_rollback_for(&p)? || (p.contacted_ms.is_none() && p.reason.is_some());
         p.contacted_ms = None;
         p.reason = Some("retrying failed snapshot restore".into());
         if !partial {
@@ -1156,6 +1162,11 @@ impl Store {
             ));
         }
         sync_dir(&self.dir)
+    }
+
+    /// The marker belongs to the probation that still names `current`.
+    fn open_rollback_for(&self, p: &Probation) -> Result<bool> {
+        Ok(self.rollback_open()? && self.current()?.as_deref() == Some(p.version.as_str()))
     }
 
     pub fn rollback_open(&self) -> Result<bool> {
