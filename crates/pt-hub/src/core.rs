@@ -22,6 +22,13 @@ const MAX_BATCH: usize = 512;
 
 pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<Input>) {
     let mut exec = Executors::new(hub.clone());
+    exec.cleanup_removed(
+        state
+            .sleeves
+            .values()
+            .filter(|s| s.life == Life::Removed)
+            .map(|s| s.id),
+    );
     let mut batch_n = hub.view().batch;
     let mut since: BTreeMap<SleeveId, (ActivityState, u64)> = BTreeMap::new();
     while let Ok(first) = rx.recv() {
@@ -223,7 +230,11 @@ fn notice_text(view: &View, n: &Notice) -> (Kind, Level, String) {
         Notice::Tripped { guardrail } => (
             Kind::Guardrail,
             Level::Alarm,
-            format!("guardrail G{} tripped ({guardrail:?})", guardrail.number()),
+            if *guardrail == pt_core::Guardrail::Oom {
+                "guardrail G4 tripped: the memory limit killed a process".into()
+            } else {
+                format!("guardrail G{} tripped ({guardrail:?})", guardrail.number())
+            },
         ),
         Notice::Resumed { g } => (
             Kind::Sleeve,
@@ -242,6 +253,11 @@ fn notice_text(view: &View, n: &Notice) -> (Kind, Level, String) {
             Kind::Sleeve,
             Level::Warn,
             format!("child {} crashed", name(*child)),
+        ),
+        Notice::ChildOom { child } => (
+            Kind::Sleeve,
+            Level::Warn,
+            format!("child {} exited after a memory limit kill", name(*child)),
         ),
         Notice::ChildParked { child } => (
             Kind::Sleeve,

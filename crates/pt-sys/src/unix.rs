@@ -1,6 +1,6 @@
 use crate::PeerCred;
 use std::io;
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd};
 #[cfg(target_os = "linux")]
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::net::UnixStream;
@@ -17,6 +17,43 @@ fn cvt(rc: libc::c_int) -> io::Result<libc::c_int> {
     } else {
         Ok(rc)
     }
+}
+
+/// Waits for a priority change on a file, as used by cgroup event files.
+pub fn poll_priority(file: &impl AsFd, timeout: Duration) -> io::Result<bool> {
+    let mut pfd = libc::pollfd {
+        fd: file.as_fd().as_raw_fd(),
+        events: libc::POLLPRI,
+        revents: 0,
+    };
+    let ms = timeout.as_millis().min(i32::MAX as u128) as i32;
+    // SAFETY: pfd points to one valid pollfd and its borrowed descriptor stays open.
+    let rc = unsafe { libc::poll(&mut pfd, 1, ms) };
+    if rc < 0 {
+        let e = io::Error::last_os_error();
+        if e.kind() == io::ErrorKind::Interrupted {
+            return Ok(false);
+        }
+        return Err(e);
+    }
+    Ok(rc > 0)
+}
+
+#[cfg(target_os = "linux")]
+pub fn is_memory_filesystem(path: &Path) -> io::Result<bool> {
+    let name = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL"))?;
+    let mut stats = std::mem::MaybeUninit::<libc::statfs>::uninit();
+    // SAFETY: statfs is initialized by the kernel on success, and name is NUL-terminated.
+    cvt(unsafe { libc::statfs(name.as_ptr(), stats.as_mut_ptr()) })?;
+    // SAFETY: statfs succeeded and initialized stats.
+    let kind = unsafe { stats.assume_init() }.f_type as u32;
+    Ok(kind == 0x0102_1994 || kind == 0x8584_58f6)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn is_memory_filesystem(_path: &std::path::Path) -> io::Result<bool> {
+    Err(crate::unsupported("filesystem type"))
 }
 
 /// Sends a signal to a child process group.

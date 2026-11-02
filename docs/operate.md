@@ -276,6 +276,14 @@ A sleeve builds with your toolchains, from a private home and a cleared environm
 
 Not available: the systemd user bus (`systemd-run --user` in a test) and long unix socket paths.
 
+## Sleeve devices
+
+`config.json` `sleeve_devices` lists host device paths bound into every sleeve with
+`--dev-bind` when the path exists, for example
+`"sleeve_devices": ["/dev/aipu", "/dev/mali0"]`. A path that is not there is skipped and
+the hub log says it was not bound; the sleeve still starts. The list is empty by default,
+so a sleeve sees only the sandbox's own `/dev`. A change applies to the next launch.
+
 ## Updates and rollback
 
 **Harnesses** update natively, through each program's own command (`claude update`, `codex

@@ -178,11 +178,18 @@ crash, every incarnation goes to Recovering and resumes natively.
   agent):
   - user, mount, PID, IPC and UTS namespaces;
   - the host root bound read-only, with the workspace and a private home writable;
-  - a sized `/tmp`;
+  - a sized `/tmp`, with disk-backed per-sleeve build and temporary scratch under the hub home,
+    mounted at a short path and removed when the sleeve is removed; launch refuses scratch on
+    tmpfs or ramfs;
+  - host device nodes named in `sleeve_devices` (for example `/dev/aipu` and `/dev/mali0`)
+    bound with `--dev-bind` when the path exists; a missing path is skipped and logged, and
+    the sleeve still starts;
   - tmpfs masks over the hub's state, `~/.ssh` and the owner's own credentials; every
     harness's shared hub login (`<home>/logins/`) and the owner's cargo registry, Go and pub
     caches bound read-write;
-  - a systemd scope per incarnation with limits and `cgroup.kill`, plus the orphan reaper.
+  - a systemd scope per incarnation with limits, `OOMPolicy=continue` and `cgroup.kill`,
+    plus the orphan reaper. A child the kernel kills for memory does not stop the scope.
+    The guardrail requires a scope OOM kill and a launcher exit by SIGKILL or code 137.
 
   Cut from today's sandbox: the network namespace, the egress proxy, cache overlays, nested cgroup
   delegation and the pin-approval gate. Sleeves share the host network and the owner's download

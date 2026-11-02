@@ -438,7 +438,11 @@ impl Core<'_> {
                     self.notify(
                         Party::Sleeve(p),
                         Some(sid),
-                        Notice::ChildCrashed { child: sid },
+                        if cause == ExitCause::Oom && kill_cause.is_none() {
+                            Notice::ChildOom { child: sid }
+                        } else {
+                            Notice::ChildCrashed { child: sid }
+                        },
                     );
                 }
                 let c = match (kill_cause, cause) {

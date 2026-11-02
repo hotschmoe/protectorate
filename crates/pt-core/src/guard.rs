@@ -195,19 +195,27 @@ impl Core<'_> {
             self.notify(Party::Owner, Some(sid), Notice::Tripped { guardrail: g });
             return self.begin_resleeve(sid, cause, None);
         }
+        if cause == Cause::Guard(Guardrail::Oom) {
+            let repeated = recent(&mut s.guard.ooms, now, OOM_WINDOW) > 0;
+            self.notify(
+                Party::Owner,
+                Some(sid),
+                Notice::Tripped {
+                    guardrail: Guardrail::Oom,
+                },
+            );
+            if repeated {
+                return self.park(sid, ParkReason::Guard(Guardrail::Oom));
+            }
+            self.sl(sid).guard.ooms.push(now);
+        }
+        let s = self.sl(sid);
         if s.guard.state == GuardState::Resuming && cause != Cause::HubRestart {
             // The resumed incarnation failed before Ready.
             return self.begin_resleeve(sid, cause, None);
         }
-        match cause {
-            Cause::Guard(Guardrail::StartFailed) => return self.begin_resleeve(sid, cause, None),
-            Cause::Guard(Guardrail::Oom) => {
-                if recent(&mut s.guard.ooms, now, OOM_WINDOW) > 0 {
-                    return self.park(sid, ParkReason::Guard(Guardrail::Oom));
-                }
-                s.guard.ooms.push(now);
-            }
-            _ => {}
+        if cause == Cause::Guard(Guardrail::StartFailed) {
+            return self.begin_resleeve(sid, cause, None);
         }
         let s = self.sl(sid);
         if recent(&mut s.guard.resumes, now, RESUME_WINDOW) >= RESUME_LIMIT {

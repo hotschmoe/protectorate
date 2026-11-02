@@ -224,6 +224,9 @@ pub enum Notice {
     ChildCrashed {
         child: SleeveId,
     },
+    ChildOom {
+        child: SleeveId,
+    },
     ChildParked {
         child: SleeveId,
     },

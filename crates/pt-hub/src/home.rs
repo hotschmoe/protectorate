@@ -25,6 +25,9 @@ impl Home {
     pub fn sleeve_home(&self, id: SleeveId) -> PathBuf {
         self.sleeve_dir(id).join("home")
     }
+    pub fn sleeve_scratch(&self, id: SleeveId) -> PathBuf {
+        self.sleeve_dir(id).join("scratch")
+    }
     pub fn transcript(&self, id: SleeveId) -> PathBuf {
         self.sleeve_dir(id).join("transcript.jsonl")
     }
@@ -226,6 +229,9 @@ pt_json::record! {
         /// them, for toolchains the hub service does not see (Go, Flutter). `~/.cargo/bin` is
         /// always considered.
         pub sleeve_path: Vec<String> = Vec::new(),
+        /// Host device nodes bound into every sleeve (`--dev-bind`) when the path exists.
+        /// A missing path is skipped and logged. Empty: only the sandbox's own `/dev`.
+        pub sleeve_devices: Vec<String> = Vec::new(),
         /// Run each incarnation in a systemd user scope (limits and cgroup.kill).
         pub scopes: bool = true,
         /// D9: sleeves Envoy may spawn in one turn an agent message started before each further

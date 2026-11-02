@@ -388,8 +388,13 @@ Each entry: where, what was done, what right looks like.
   left Uncertain, because only Codex confirms an answer; the harness's `approval_decision` entry
   becomes `ApprovalResolved` for activity. Right: Acked on a confirmed decision (Codex) or the
   matching `tool_result`.
-- **No OOM exit cause**: `Exited` carries the exit code or Killed, so G4 never fires. Right: read
-  the scope's `memory.events` `oom_kill` before reporting the exit.
+- **OOM evidence can disappear with the scope** (`pt-hub`, exec.rs): an incarnation watches
+  `memory.events` for `oom_kill` while its scope exists, then checks it again at exit. A scope
+  collected before the watch attaches or before it can read an event leaves the cause unknown;
+  the hub logs that and uses the driver's exit cause rather than guessing OOM. A hub restart can
+  likewise lose evidence for an already-collected scope; a recovered scope without a driver has
+  no exit status. Right: preserve the scope counter until the hub records it.
+- **Exit 137 can be ambiguous**: a normal exit 137 after another scope process's OOM kill counts as OOM.
 - **A message sent during the post-restart probe is rejected** (pt-core `deliverable` ignores
   `Sleeve::probing`): a recovered Idle sleeve takes a `SendPrompt` before `ScopeProbed` answers,
   the executor holds no session for that g, and the Nack rejects the message (the sender is
@@ -472,8 +477,8 @@ Each entry: where, what was done, what right looks like.
   tail in memory, and a full read for older ranges and for `EnvoyWait`. Fast: an offset index.
 - **Activity `since_ms` restarts with the hub**: it is tracked in the core thread, not journaled.
 - **The stale unix socket is unlinked at start** (`pt-hub`, serve.rs): only when the path is a
-  socket and the journal lock is held (no other hub can own it). This is the one file product
-  code deletes; the owner may prefer a fresh socket name per start.
+  socket and the journal lock is held (no other hub can own it). The owner may prefer a fresh
+  socket name per start.
 - **Wait and EnvoyWait hold a connection thread** for up to an hour, out of 256. Fine for a few
   clients; right if Envoy fans out: wait on the event stream instead. The idle keep-alive is
   pt-http's 60 s (a request being answered is not idle), so up to 256 idle clients can still hold
@@ -909,10 +914,6 @@ Each entry: where, what was done, what right looks like.
 - **Sleeves have no systemd user bus** (`pt-sandbox`): the runtime dir is a private empty tmpfs on
   purpose, so a project test that needs `systemd-run --user` fails inside a sleeve. Right: decide
   whether a sleeve gets its own user manager or a scope-local one, if such tests matter.
-- **Deep target dirs overflow the unix socket path limit** (sleeves, e2e tests): a sleeve's
-  workspace plus a test's own socket under `target/` can pass `sun_path` (107 bytes), so sleeves
-  pick short dirs by hand. Right: a short per-sleeve `CARGO_TARGET_DIR` or a socket dir under
-  `/tmp`, once a second case shows which.
 - **Sleeve toolchain env is guessed from the owner's home** (`pt-hub` `toolchain.rs`): PATH tail,
   cache dirs and the Flutter SDK come from conventional locations, the hub's env and
   `sleeve_path`; a cargo `rustup` auto-install, `cargo install` and a second Flutter SDK are
