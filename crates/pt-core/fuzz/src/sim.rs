@@ -316,7 +316,7 @@ impl Sim {
                 self.apply(EventKind::ArtifactsChecked {
                     job,
                     attempt,
-                    ok: p.fetch % 2 == 0,
+                    result: if p.fetch % 2 == 0 { ArtifactCheck::Verified } else { ArtifactCheck::Retryable },
                 });
             }
             Intent::ReadLog { .. }

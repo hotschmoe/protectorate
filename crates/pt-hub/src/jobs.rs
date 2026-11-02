@@ -22,8 +22,8 @@ use std::time::{Duration, Instant};
 
 use pt_api::{self as api, EpochMs, HubStreamMessage};
 use pt_core::{
-    EffectKind, EffectState, EventKind, Intent, Job, JobId, JobReport, JobSpec, JobState, NodeId,
-    Reply,
+    ArtifactCheck, EffectKind, EffectState, EventKind, Intent, Job, JobId, JobReport, JobSpec,
+    JobState, NodeId, Reply,
 };
 use pt_fleet::NodeClient;
 use pt_frame::msg::{
@@ -1140,7 +1140,7 @@ impl NodeExec {
                 return self.submit(EventKind::ArtifactsChecked {
                     job,
                     attempt,
-                    ok: false,
+                    result: ArtifactCheck::Retryable,
                 });
             }
             Err(e) => return warning!("job {}: collecting the log: {}", job.0, e.text()),
@@ -1155,7 +1155,7 @@ impl NodeExec {
             .map(|r| r.artifacts.clone())
             .unwrap_or_default();
         let mut fetched = Vec::new();
-        let mut ok = true;
+        let mut result = ArtifactCheck::Verified;
         let token = self.token(view, job);
         for (n, path) in wanted.iter().enumerate() {
             let got = self.fetch_artifact(job, attempt, n, path, token.clone());
@@ -1170,20 +1170,33 @@ impl NodeExec {
                 Err(Fail::Io(e) | Fail::Reach(e)) => {
                     return warning!("job {}: fetching {path}: {e}", job.0);
                 }
+                Err(Fail::Node(r))
+                    if matches!(r.code, NodeCode::BadRequest | NodeCode::NotFound) =>
+                {
+                    warning!("job {}: artifact {path}: {}", job.0, Fail::Node(r).text());
+                    result = ArtifactCheck::Permanent;
+                    break;
+                }
                 Err(e) => {
                     warning!("job {}: artifact {path}: {}", job.0, e.text());
-                    ok = false;
+                    result = ArtifactCheck::Retryable;
                 }
             }
         }
         if !wanted.is_empty() {
             if let Err(e) = self.hub.jobs.save_fetched(job, attempt, fetched) {
                 warning!("job {}: {e}", job.0);
-                ok = false;
+                if result != ArtifactCheck::Permanent {
+                    result = ArtifactCheck::Retryable;
+                }
             }
             stream(&self.hub, job);
         }
-        self.submit(EventKind::ArtifactsChecked { job, attempt, ok });
+        self.submit(EventKind::ArtifactsChecked {
+            job,
+            attempt,
+            result,
+        });
     }
 
     /// The file from the node's `FetchArtifact`, in slices, checked against the size and

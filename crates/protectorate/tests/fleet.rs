@@ -710,10 +710,16 @@ fn hub_runs_the_fleet_and_node_jobs() {
         "{}",
         win.stderr
     );
-    // A missing artifact fails the job after its verify attempts.
+    // A permanent refusal is not retried.
     let missing = run_job(&hub, &["--cwd", cwd, "--artifact", "nope.txt"], &["true"]);
     let done = wait_job(&hub, &missing, &["succeeded", "failed"], 120);
     assert_eq!(done["state"].as_str(), Some("failed"), "{done}");
+    let log = fs::read_to_string(node_dir.join("serve.log")).unwrap_or_default();
+    assert_eq!(
+        log.matches("artifact \"nope.txt\" refused").count(),
+        1,
+        "{log}"
+    );
 
     // A 3 MB binary artifact in FetchArtifact slices, from the job's own directory (no --cwd).
     let big = run_job(
@@ -776,6 +782,12 @@ fn hub_runs_the_fleet_and_node_jobs() {
             node_log().contains(&format!("artifact {name:?} refused")),
             "{name}: {}",
             tail(&node_log(), 20)
+        );
+        assert_eq!(
+            node_log()
+                .matches(&format!("artifact {name:?} refused"))
+                .count(),
+            1
         );
     }
     assert!(

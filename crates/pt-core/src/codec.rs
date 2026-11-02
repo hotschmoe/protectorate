@@ -710,11 +710,21 @@ impl Wire for EventKind {
                 node.put(w);
                 report.put(w);
             }
-            E::ArtifactsChecked { job, attempt, ok } => {
-                w.push(25);
+            E::ArtifactsChecked {
+                job,
+                attempt,
+                result,
+            } => {
+                w.push(if *result == ArtifactCheck::Permanent {
+                    35
+                } else {
+                    25
+                });
                 job.put(w);
                 attempt.put(w);
-                ok.put(w);
+                if *result != ArtifactCheck::Permanent {
+                    (*result == ArtifactCheck::Verified).put(w);
+                }
             }
             E::Observed { sleeve, g, obs } => {
                 w.push(26);
@@ -750,7 +760,7 @@ impl Wire for EventKind {
 
     fn get(r: &mut Reader) -> Result<Self, DecodeError> {
         use EventKind as E;
-        Ok(match r.tag("event", 34)? {
+        Ok(match r.tag("event", 35)? {
             0 => E::Spawn(Wire::get(r)?),
             1 => E::Send {
                 to: Wire::get(r)?,
@@ -854,7 +864,11 @@ impl Wire for EventKind {
             25 => E::ArtifactsChecked {
                 job: Wire::get(r)?,
                 attempt: Wire::get(r)?,
-                ok: Wire::get(r)?,
+                result: if bool::get(r)? {
+                    ArtifactCheck::Verified
+                } else {
+                    ArtifactCheck::Retryable
+                },
             },
             26 => E::Observed {
                 sleeve: Wire::get(r)?,
@@ -887,10 +901,15 @@ impl Wire for EventKind {
                 target: Wire::get(r)?,
                 effort: Some(Wire::get(r)?),
             },
-            _ => E::Resleeve {
+            34 => E::Resleeve {
                 sleeve: Wire::get(r)?,
                 target: Wire::get(r)?,
                 effort: Some(Wire::get(r)?),
+            },
+            _ => E::ArtifactsChecked {
+                job: Wire::get(r)?,
+                attempt: Wire::get(r)?,
+                result: ArtifactCheck::Permanent,
             },
         })
     }

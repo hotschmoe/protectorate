@@ -223,7 +223,7 @@ pub fn event(b: &mut Bytes) -> Event {
         25 => E::ArtifactsChecked {
             job: j(b),
             attempt: a(b),
-            ok: b.bool(),
+            result: match b.below(3) { 0 => ArtifactCheck::Verified, 1 => ArtifactCheck::Retryable, _ => ArtifactCheck::Permanent },
         },
         26 => E::Observed {
             sleeve: s(b),

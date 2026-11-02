@@ -242,7 +242,7 @@ pub enum EventKind {
     ArtifactsChecked {
         job: JobId,
         attempt: u32,
-        ok: bool,
+        result: ArtifactCheck,
     },
 
     // Harness and scope observations, fenced by generation.
@@ -262,4 +262,11 @@ pub enum EventKind {
     Tick,
     /// The hub restarted and replayed the journal; issued once before any new input.
     HubRecovered,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArtifactCheck {
+    Verified,
+    Retryable,
+    Permanent,
 }

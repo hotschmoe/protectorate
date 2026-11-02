@@ -348,7 +348,12 @@ impl Core<'_> {
         });
     }
 
-    pub(crate) fn artifacts_checked(&mut self, id: JobId, attempt: u32, ok: bool) {
+    pub(crate) fn artifacts_checked(
+        &mut self,
+        id: JobId,
+        attempt: u32,
+        result: crate::ArtifactCheck,
+    ) {
         let Some(j) = self.st.jobs.get(&id) else {
             return;
         };
@@ -359,12 +364,14 @@ impl Core<'_> {
         self.job(id).seen_at = now;
         let j = &self.st.jobs[&id];
         let code = j.exit.unwrap_or(-1);
-        let done = if ok {
+        let done = if result == crate::ArtifactCheck::Verified {
             Some(if code == 0 {
                 JobState::Succeeded
             } else {
                 JobState::Failed(JobFailure::Exit(code))
             })
+        } else if result == crate::ArtifactCheck::Permanent {
+            Some(JobState::Failed(JobFailure::Artifact))
         } else {
             let j = self.job(id);
             j.verify_failures += 1;
