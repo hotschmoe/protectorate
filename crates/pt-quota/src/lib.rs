@@ -17,128 +17,20 @@ mod error;
 pub mod grok;
 pub mod http;
 pub mod local;
+mod login;
+mod reader;
 mod select;
+mod state;
 pub mod task_size;
 mod time;
 
-use std::time::Duration;
-
-use pt_api::{Quota, QuotaReading, QuotaWindow, Subscription};
-
 pub use cache::{Cache, Options};
 pub use error::{Error, Result};
+pub use reader::{Reader, Snapshot};
 pub use select::{
     Candidate, Health, Spare, Target, select_target, select_with_fallback, spare_quota,
     spare_trigger, window_length_ms,
 };
+pub use state::{State, state};
 pub use task_size::{TaskSize, Thresholds, derive, median_of_last};
 pub use time::{fmt_age, now_ms, parse_rfc3339};
-
-/// The four reading states of a quota.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum State {
-    Fresh,
-    Stale,
-    Unknown,
-    Error,
-}
-
-impl State {
-    pub fn word(self) -> &'static str {
-        match self {
-            State::Fresh => "fresh",
-            State::Stale => "stale",
-            State::Unknown => "unknown",
-            State::Error => "error",
-        }
-    }
-}
-
-pub fn state(q: &Quota) -> State {
-    match q.reading {
-        QuotaReading::Ok => State::Fresh,
-        QuotaReading::Stale => State::Stale,
-        QuotaReading::Unknown => State::Unknown,
-        QuotaReading::Error => State::Error,
-    }
-}
-
-/// What a reader found in one successful read.
-#[derive(Clone, Debug, Default)]
-pub struct Snapshot {
-    pub plan: String,
-    pub windows: Vec<QuotaWindow>,
-    pub note: String,
-}
-
-/// A read-only quota source for one subscription.
-pub trait Reader: Send + Sync {
-    fn subscription(&self) -> Subscription;
-    /// `now_ms` is the clock for expiry checks; `timeout` bounds the whole read.
-    fn read(&self, now_ms: u64, timeout: Duration) -> Result<Snapshot>;
-}
-
-/// The login-file home: `$HOME`, or an override.
-pub(crate) fn home_dir(over: Option<&std::path::Path>) -> Result<std::path::PathBuf> {
-    if let Some(p) = over {
-        return Ok(p.to_path_buf());
-    }
-    std::env::var_os("HOME")
-        .filter(|h| !h.is_empty())
-        .map(std::path::PathBuf::from)
-        .ok_or_else(|| Error::other("HOME is not set"))
-}
-
-pub(crate) fn read_login(path: &std::path::Path) -> Result<Vec<u8>> {
-    use std::io::Read;
-    use std::os::unix::fs::OpenOptionsExt;
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NONBLOCK)
-        .open(path)
-        .map_err(|e| match e.kind() {
-            std::io::ErrorKind::NotFound => Error::unavailable("not logged in (no login file)"),
-            _ => Error::other(format!("open login file: {e}")),
-        })?;
-    if !file
-        .metadata()
-        .map_err(|e| Error::other(format!("stat login file: {e}")))?
-        .is_file()
-    {
-        return Err(Error::other("login file is not a regular file"));
-    }
-    let mut buf = Vec::new();
-    file.take(1 << 20)
-        .read_to_end(&mut buf)
-        .map_err(|e| Error::other(format!("read login file: {e}")))?;
-    Ok(buf)
-}
-
-pub(crate) fn clamp_pct(p: f64) -> Option<f64> {
-    p.is_finite().then(|| p.max(0.0))
-}
-
-/// `300` -> `5h`, `10080` -> `wk`, `1440` -> `day`; other lengths are `Nd`, `Nh` or `Nm`.
-pub(crate) fn window_label(mins: i64) -> String {
-    match mins {
-        m if m <= 0 => "window".to_string(),
-        10080 => "wk".to_string(),
-        1440 => "day".to_string(),
-        m if m % 1440 == 0 => format!("{}d", m / 1440),
-        m if m % 60 == 0 => format!("{}h", m / 60),
-        m => format!("{m}m"),
-    }
-}
-
-pub(crate) fn window(
-    label: impl Into<String>,
-    used_pct: f64,
-    resets_at_ms: Option<u64>,
-) -> QuotaWindow {
-    QuotaWindow {
-        label: label.into(),
-        used_pct: clamp_pct(used_pct),
-        resets_at_ms: resets_at_ms.map(pt_api::EpochMs),
-        length_ms: None,
-    }
-}

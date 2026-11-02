@@ -5,7 +5,8 @@ use std::time::{Duration, Instant};
 
 use pt_api::{EpochMs, Quota, QuotaReading, Subscription};
 
-use crate::{Error, Reader, Snapshot, fmt_age};
+use crate::reader::{Reader, Snapshot};
+use crate::{Error, fmt_age};
 
 /// How long a reading stays fresh. A passed reset blocks for this long too.
 pub(crate) const STALE_AFTER: Duration = Duration::from_secs(600);

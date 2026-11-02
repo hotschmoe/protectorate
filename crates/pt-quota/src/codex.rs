@@ -8,9 +8,10 @@ use pt_api::Subscription;
 use pt_json::Value;
 
 use crate::http::{self, Get};
+use crate::login::{home_dir, read_login};
+use crate::reader::{Reader, Snapshot, window, window_label};
 use crate::time::secs_to_ms;
-use crate::{Error, Reader, Result, Snapshot, window, window_label};
-use crate::{home_dir, read_login};
+use crate::{Error, Result};
 
 const DEFAULT_BASE: &str = "https://chatgpt.com/backend-api";
 

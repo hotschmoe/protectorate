@@ -13,7 +13,9 @@ use pt_api::Subscription;
 use pt_json::Value;
 
 use crate::http::{self, Get};
-use crate::{Error, Reader, Result, Snapshot, home_dir, read_login};
+use crate::login::{home_dir, read_login};
+use crate::reader::{Reader, Snapshot};
+use crate::{Error, Result};
 
 #[derive(Clone, Debug, Default)]
 pub struct Local {

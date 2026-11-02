@@ -3,8 +3,8 @@
 
 use pt_api::{Harness, Mode, Quota, QuotaWindow, Subscription};
 
+use crate::state::{State, state};
 use crate::task_size::TaskSize;
-use crate::{State, state};
 
 /// The time to reset at which a window's weight halves.
 const URGENCY_HALF_HOURS: f64 = 48.0;
