@@ -63,7 +63,7 @@ A sleeve is named by its id or its name.
 - **send** queues a message, delivered at the next turn boundary; `--steer` sends it into the
   current turn instead. A sleeve credential may send to itself, its children, its parent, and
   Envoy (the sleeve named `envoy`), and to nothing else. From inside a sleeve the form is
-  `protectorate sleeve send <parent-or-envoy> <text>`. A new sleeve is told how:
+  `protectorate sleeve send <parent-or-envoy> <text>`. A new sleeve's first prompt names
   `$PROTECTORATE_PARENT` when it has one, `$PROTECTORATE_ENVOY` and `$PROTECTORATE_MAIL`.
   The hub marks it `[from sleeve <name>]` with a `mail:<id>:` request id, and delivers it through
   the same path as any other send. `envoy send` stays the vendor-agent command and refuses a
@@ -76,9 +76,12 @@ A sleeve is named by its id or its name.
   sleeve to another harness, with a continuation brief in `.protectorate/BRIEF.md`.
 - **transcript** prints the chat: messages, tool calls and results, approvals, turns.
 - **wait** blocks until the sleeve reaches a state (default `idle`, 600 s) and exits non-zero if
-  it does not. `--until report` returns when that sleeve has mailed since the waiter's most
-  recent message to it. The owner's wait counts mail to the parent or to Envoy. A parent's wait
-  counts only mail to that parent. A wait on Envoy is refused.
+  it does not. `--until report` returns when that sleeve has mailed since the cursor, and prints
+  that report's seq. `--after-seq N` counts only mail with a seq above N. Without it the cursor
+  is the waiter's newest message to the sleeve, so the same report releases a later wait again.
+  A waiter who has never messaged the sleeve counts all of its past upward mail. The owner's wait
+  counts mail to the parent or to Envoy. A parent's wait counts only mail to that parent. A wait
+  on Envoy is invalid, because Envoy never sends as a sleeve.
 - **takeover** (the terminal view) is not built; it answers `unavailable`.
 
 Guardrails in code interrupt, resume, resleeve or park a sleeve that fails (quota exhausted,
@@ -96,10 +99,11 @@ Approvals come from two places: a supervised harness asking to run a tool, and t
 app shows them too, inline in the chat.
 
 **D9.** While Envoy's current turn was started by a vendor agent's message, or by mail from a
-sleeve a D9-origin turn spawned or sent to (the mark is journaled and inherited by that sleeve's
-children), these calls by Envoy wait for the owner's approval, whatever Envoy decides. Mail from
-an unmarked sleeve does not start such a turn. The bound on how often mail can start a turn is
-the 8-per-10-minutes limit above:
+sleeve a D9-origin turn spawned or sent to (the mark is journaled, permanent for that sleeve id,
+and inherited by that sleeve's children; a send from a marked sleeve marks its recipient, and
+`sleeve show` reports the mark), these calls by Envoy wait for the owner's approval, whatever
+Envoy decides. Mail from an unmarked sleeve does not start such a turn. The bound on how often
+mail can start a turn is the 8-per-10-minutes limit above:
 
 - `sleeve rm`;
 - `job run`;

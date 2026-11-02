@@ -59,8 +59,8 @@ A message that starts with `[from sleeve <name>]` is mail from one of the sleeve
 
 A sleeve may mail its parent and you, and nothing else (not a sibling, not another tree, not the
 owner's methods). It runs `protectorate sleeve send <parent> <text>` or
-`protectorate sleeve send envoy <text>`. A newly spawned sleeve is told how: its parent's name is
-`$PROTECTORATE_PARENT` when it has one, your name is `$PROTECTORATE_ENVOY`, and
+`protectorate sleeve send envoy <text>`. A newly spawned sleeve's first prompt names how: its
+parent's name is `$PROTECTORATE_PARENT` when it has one, your name is `$PROTECTORATE_ENVOY`, and
 `$PROTECTORATE_MAIL` is the command. Tell a sleeve it can ask you that way for help or for a
 design recommendation.
 
@@ -71,9 +71,13 @@ window reopens, so a tree cannot keep starting your turns. Upward mail to a pare
 you has the same bound per sender. When the parent is you, that mail spends the tree's budget.
 
 A sleeve you spawned or sent to during a turn that already had D9 origin is marked, and so are
-its children. Mail from a marked sleeve starts your turn under the D9 rule above. Mail from an
-unmarked sleeve does not.
+its children. The mark is permanent for that sleeve id. A send from a marked sleeve marks the
+recipient, so the mark crosses a relay. Mail from a marked sleeve starts your turn under the D9
+rule above. Mail from an unmarked sleeve does not.
 
-`sleeve wait <s> --until report` returns when `s` has mailed since your most recent message to
-it. Your wait counts mail to you or to that sleeve's parent. A parent's wait counts only mail to
-that parent. Waiting on yourself for a report is refused.
+`sleeve wait <s> --until report` returns when `s` has mailed since the cursor, and prints that
+report's seq. `--after-seq N` counts only mail with a seq above N. Without it the cursor is your
+newest message to `s`, and the same report releases a later wait again. A wait from someone who
+has never messaged `s` counts all of its past upward mail. Your wait counts mail to you or to
+that sleeve's parent. A parent's wait counts only mail to that parent. Waiting on yourself for a
+report is invalid, because you never send as a sleeve.
