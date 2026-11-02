@@ -11,8 +11,9 @@ let fleet = Fleet::start(Config::lan_direct(dir, headscale_bin, member_bin, list
 `<hub home>/tailnet` or `--fleet-dir`) (config as JSON, IP-pinned DERP map with STUN
 off, `go/policy.hujson`, sqlite, Noise key, a relative unix socket), runs headscale inside bwrap
 (only that dir writable, nothing else of `dir` visible), waits for `/health`, makes the
-`fleet` user, enrolls the hub member once (`tag:hub`), then runs `member --mode hub`. Both
-children restart with backoff (1 s doubling to 30 s) and are health-checked every 5 s.
+`fleet` user, enrolls the hub member until it is tagged `tag:hub` (then `member/hub-enrolled`
+holds its node id), then runs `member --mode hub`. Both children restart with backoff (1 s
+doubling to 30 s) and are health-checked every 5 s.
 `Config` fields set production values: `server_url` (Traefik's https URL), `derp` (host, IPv4,
 port, `tls`), `trusted_proxies`. `shutdown()` stops member then headscale and returns once
 both exited; dropping the last `Fleet` clone also stops them.

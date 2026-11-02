@@ -8,7 +8,8 @@
 //! rename, the enrollment record failing to write after headscale changed (the rename is put
 //! back, the removal is finished by retrying it by id), a rename repeated after a crash
 //! repairing the record, the event log, a removed node that cannot come back on its old
-//! key, and everything surviving a hub restart, which reads headscale's own database again.
+//! key, and everything surviving a hub restart, which reads headscale's own database again and
+//! completes a hub member enrollment that stopped before its marker.
 //!
 //! Skips when the protectorate binary does not embed headscale and member, or when bwrap or
 //! protectorate-node is missing.
@@ -412,9 +413,15 @@ fn owner_removes_a_stale_node_and_renames_its_successor() {
         .collect();
     assert_eq!(ids, vec![new.clone()], "{}", tail(&hub.log_text(), 40));
 
-    // A restarted hub reads headscale's database again: one node, under its new name.
+    // A restarted hub reads headscale's database again: one node, under its new name. Its
+    // member's enrollment marker is gone, as after a first start cut short once the member was
+    // registered: the member reports itself registered, and the hub finds it and marks it.
+    let marker = tailnet.join("member").join("hub-enrolled");
+    let hub_id = fs::read_to_string(&marker).unwrap();
+    fs::remove_file(&marker).unwrap();
     hub.restart();
     let n = online(&hub, &new, true);
+    assert_eq!(fs::read_to_string(&marker).unwrap(), hub_id);
     assert_eq!(n["name"].as_str(), Some("e2e-old"));
     assert_eq!(nodes(&hub).len(), 1);
 
