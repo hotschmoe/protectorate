@@ -11,7 +11,7 @@
 //! ix.commit()?;                                  // ingested docs become searchable
 //! let hits = ix.search(&Query::all("journal torn tail"), &Filters::default(), 8)?;
 //! let pre = ix.search(&pt_history::brief_query(task), &filters, 3)?; // a brief's pre-run hits
-//! let turns = ix.read(&Selector::Turns { session, from: 3, to: 5 })?;
+//! let (turns, _more) = ix.read(&Selector::Turns { session, from: 3, to: 5 }, None, READ_DOCS)?;
 //! ```
 //!
 //! Directory layout:
@@ -38,7 +38,7 @@ use std::path::PathBuf;
 
 pub use discover::discover;
 pub use extract::{TEXT_MAX, TOOL_MAX, parse_time};
-pub use index::{Index, Ingested, Stats};
+pub use index::{Index, Ingested, READ_BYTES, READ_DOCS, Stats};
 pub use pt_drivers::Harness;
 
 pt_json::string_enum! {
@@ -259,6 +259,10 @@ pub fn fuzz_extract(data: &[u8]) -> usize {
                 _ => TEXT_MAX,
             };
             assert!(d.text.len() <= max, "doc text over its budget");
+            assert!(
+                d.files.iter().map(String::len).sum::<usize>() <= TOOL_MAX,
+                "doc paths over the tool budget"
+            );
             assert!(!d.text.is_empty() || !d.files.is_empty(), "empty doc");
             docs += 1;
         }

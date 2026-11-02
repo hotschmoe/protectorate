@@ -23,6 +23,10 @@ const FLUSH: usize = 96 << 20;
 const MAX_SEGMENTS: usize = 8;
 /// Merges never build a segment larger than this.
 const MAX_MERGE: u64 = 1 << 30;
+/// Docs one [`Index::read`] materializes. The hub's history read uses the same cap.
+pub const READ_DOCS: usize = 200;
+/// Source-text bytes one [`Index::read`] materializes before it reports more.
+pub const READ_BYTES: usize = 8 << 20;
 
 pt_json::record! {
     #[derive(Clone, Debug, Default)]
@@ -614,11 +618,7 @@ impl Index {
             role: m.role,
             time_ms: m.time_ms,
             tool: self.syms.name(m.tool).map(str::to_owned),
-            files: m
-                .files
-                .iter()
-                .filter_map(|f| self.syms.name(*f).map(str::to_owned))
-                .collect(),
+            files: extract::take_files(m.files.iter().filter_map(|f| self.syms.name(*f))),
             text: seg.text(m)?,
             path: PathBuf::from(path),
             offset: m.offset,
@@ -626,32 +626,72 @@ impl Index {
     }
 
     /// Committed docs: one by id, or a session's turn range in order.
-    pub fn read(&self, sel: &Selector) -> io::Result<Vec<Doc>> {
-        let mut out = Vec::new();
+    ///
+    /// `sleeves` is the scope applied before any text is copied: `None` is every sleeve,
+    /// `Some` is those ids only (an empty list matches nothing). The read stops at `limit`
+    /// docs and at [`READ_BYTES`] of source text. The bool is whether a later in-scope doc
+    /// was left out.
+    pub fn read(
+        &self,
+        sel: &Selector,
+        sleeves: Option<&[String]>,
+        limit: usize,
+    ) -> io::Result<(Vec<Doc>, bool)> {
+        let sleeve_syms: Vec<u32> = match sleeves {
+            None => Vec::new(),
+            Some(ids) => ids.iter().filter_map(|s| self.syms.get(s)).collect(),
+        };
+        if sleeves.is_some() && sleeve_syms.is_empty() {
+            return Ok((Vec::new(), false));
+        }
+        let allow =
+            |m: &Meta| self.live(m) && sleeves.is_none_or(|_| sleeve_syms.contains(&m.sleeve));
+        let limit = limit.min(READ_DOCS);
+        let mut picked: Vec<(&Seg, &Meta)> = Vec::new();
+        let mut bytes = 0usize;
+        let mut more = false;
         match sel {
             Selector::Doc(DocId(id)) => {
                 for s in &self.segs {
-                    if let Ok(i) = s.docs.binary_search_by_key(id, |m| m.id)
-                        && self.live(&s.docs[i])
-                    {
-                        out.push(self.doc(s, &s.docs[i])?);
+                    if let Ok(i) = s.docs.binary_search_by_key(id, |m| m.id) {
+                        let m = &s.docs[i];
+                        if allow(m) {
+                            picked.push((s, m));
+                            break;
+                        }
                     }
                 }
             }
             Selector::Turns { session, from, to } => {
                 let Some(sym) = self.syms.get(session) else {
-                    return Ok(out);
+                    return Ok((Vec::new(), false));
                 };
                 for s in &self.segs {
                     for m in &s.docs {
-                        if m.session == sym && (*from..=*to).contains(&m.turn) && self.live(m) {
-                            out.push(self.doc(s, m)?);
+                        if m.session != sym || !(*from..=*to).contains(&m.turn) || !allow(m) {
+                            continue;
                         }
+                        let w = m.text_len as usize;
+                        if picked.len() >= limit
+                            || (!picked.is_empty() && bytes.saturating_add(w) > READ_BYTES)
+                        {
+                            more = true;
+                            break;
+                        }
+                        bytes = bytes.saturating_add(w);
+                        picked.push((s, m));
+                    }
+                    if more {
+                        break;
                     }
                 }
             }
         }
-        Ok(out)
+        let mut out = Vec::with_capacity(picked.len());
+        for (s, m) in picked {
+            out.push(self.doc(s, m)?);
+        }
+        Ok((out, more))
     }
 
     /// The latest context fill seen for `session`, including uncommitted ingests.

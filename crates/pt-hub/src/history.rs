@@ -169,8 +169,13 @@ impl History {
         self.with(|ix| ix.search(q, f, limit))
     }
 
-    pub fn read(&self, sel: &Selector) -> Result<Vec<Doc>, Failure> {
-        self.with(|ix| ix.read(sel))
+    pub fn read(
+        &self,
+        sel: &Selector,
+        sleeves: Option<&[String]>,
+        limit: usize,
+    ) -> Result<(Vec<Doc>, bool), Failure> {
+        self.with(|ix| ix.read(sel, sleeves, limit))
     }
 
     pub fn docs(&self) -> u64 {

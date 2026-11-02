@@ -218,8 +218,8 @@ fn recall(ix: &Index, docs: u64) -> Result<(usize, usize), String> {
     let step = (docs / 20).max(1);
     let mut id = 0;
     while sampled < 20 && id < docs * 4 + 100 {
-        let got = ix
-            .read(&Selector::Doc(DocId(id)))
+        let (got, _) = ix
+            .read(&Selector::Doc(DocId(id)), None, 1)
             .map_err(|e| e.to_string())?;
         id += step;
         let Some(doc) = got.into_iter().next() else {

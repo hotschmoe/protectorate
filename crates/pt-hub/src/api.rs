@@ -1484,7 +1484,6 @@ fn wait(c: &Ctx<'_>, r: api::WaitRequest) -> Result<api::WaitResult> {
 
 const HISTORY_DEFAULT: u64 = 10;
 const HISTORY_MAX: u64 = 100;
-const HISTORY_READ_MAX: usize = 200;
 
 fn history_err(e: crate::history::Failure) -> ApiError {
     match e {
@@ -1659,23 +1658,17 @@ fn read_history(c: &Ctx<'_>, r: api::ReadHistoryRequest) -> Result<api::HistoryR
     };
     let view = c.hub.view();
     let st = &view.state;
-    let mut docs: Vec<pt_history::Doc> = c
+    // Scope and the doc cap run inside the index, before it copies text out.
+    let scope = history_sleeves(c, st, &[])?;
+    let (docs, more) = c
         .hub
         .history
-        .read(&sel)
-        .map_err(history_err)?
-        .into_iter()
-        .filter(|d| match doc_sleeve(d) {
-            Some(id) => reaches(st, c.who, id),
-            None => c.who.full(),
-        })
-        .collect();
+        .read(&sel, scope.as_deref(), pt_history::READ_DOCS)
+        .map_err(history_err)?;
     // Out of reach reads the same as absent.
     if docs.is_empty() {
         return Err(err(ErrorCode::NotFound, what));
     }
-    let more = docs.len() > HISTORY_READ_MAX;
-    docs.truncate(HISTORY_READ_MAX);
     Ok(api::HistoryRead {
         docs: docs
             .into_iter()

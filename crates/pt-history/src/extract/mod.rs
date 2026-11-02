@@ -130,7 +130,7 @@ impl State {
             session: self.session.clone(),
             harness: self.harness,
             tool: tool.map(|t| clip(t, 128).to_owned()),
-            files,
+            files: take_files(files.iter().map(String::as_str)),
             text: clip(text, max).to_owned(),
         }));
     }
@@ -293,6 +293,24 @@ const ARG_KEYS: &[&str] = &[
     "old_string",
     "prompt",
 ];
+
+/// Paths kept with a document: each clipped to [`TOOL_MAX`], and together no larger than that.
+pub(crate) fn take_files<'a>(files: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut used = 0usize;
+    for f in files {
+        let f = clip(f.trim(), TOOL_MAX);
+        if f.is_empty() {
+            continue;
+        }
+        if !out.is_empty() && used.saturating_add(f.len()) > TOOL_MAX {
+            break;
+        }
+        used = used.saturating_add(f.len());
+        out.push(f.to_owned());
+    }
+    out
+}
 
 /// A tool call as one line of text (name, paths, command or other salient arguments) and the
 /// paths it names. `input` is an object, or a string holding JSON (Codex, Grok) or raw text.
