@@ -5,144 +5,35 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use pt_api::{self as api, ApiError, ErrorCode, Method, Scope, method as m};
+use pt_api::{self as api, ApiError, ErrorCode, Method, method as m};
 use pt_core::{
-    Claim, Code, EventKind, Layout, Life, MsgState, Party, Reply, SendMode, SleeveId, SpawnSpec,
-    State, Target, name_ok, overlap_refusal, path_ok, path_within,
+    ApprovalState, Claim, EventKind, Layout, Life, MsgState, Party, Reply, SendMode, SleeveId,
+    Source, SpawnSpec, State, Target, name_ok, overlap_refusal, path_ok, path_within,
 };
 use pt_drivers::Entry;
 use pt_json::{FromJson, ToJson, Value};
 
+use crate::approvals;
+use crate::command::{command, err, wait_for};
 use crate::envoy::envoy_id;
 use crate::fleet::{Status as FleetStatus, Up};
 use crate::home::{now_ms, random_hex};
-use crate::hub::{CommandError, Hub};
+use crate::hub::Hub;
 use crate::jobs::JobRequest;
 use crate::lock::lock;
 use crate::log::info;
+use crate::principal::Principal;
 use crate::rule::{self, Guarded};
 use crate::snapshot;
+use crate::transcript::Note;
 use crate::view::View;
 use crate::wire;
 
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_WAIT: Duration = Duration::from_secs(3600);
 const TRANSCRIPT_DEFAULT: u64 = 2000;
 const TRANSCRIPT_MAX: u64 = 10_000;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Principal {
-    /// The owner token, or the hub's own user on the unix socket.
-    Owner,
-    /// A paired app's `pd1.` token: the owner's scope.
-    Device(String),
-    /// Envoy's capability: sleeve scope, reaching every sleeve.
-    Envoy(SleeveId),
-    /// A sleeve's `pc1.` capability: itself and its children. Mail also reaches its parent and Envoy.
-    Sleeve(SleeveId),
-    /// Vendor general agents: the Envoy methods only (D9).
-    EnvoyOnly,
-    /// No credential: public methods only.
-    Anonymous,
-}
-
-impl Principal {
-    pub fn scope(&self) -> Scope {
-        match self {
-            Principal::Owner | Principal::Device(_) => Scope::Owner,
-            Principal::Envoy(_) | Principal::Sleeve(_) => Scope::Sleeve,
-            Principal::EnvoyOnly => Scope::EnvoyOnly,
-            Principal::Anonymous => Scope::Public,
-        }
-    }
-
-    fn party(&self) -> Party {
-        match self {
-            Principal::Owner | Principal::Device(_) | Principal::Anonymous => Party::Owner,
-            Principal::Envoy(_) => Party::Envoy,
-            Principal::Sleeve(x) => Party::Sleeve(*x),
-            Principal::EnvoyOnly => Party::Agent,
-        }
-    }
-
-    /// Reaches every sleeve.
-    fn full(&self) -> bool {
-        matches!(
-            self,
-            Principal::Owner | Principal::Device(_) | Principal::Envoy(_)
-        )
-    }
-}
-
-pub fn sleeve_principal(state: &State, id: SleeveId) -> Principal {
-    if envoy_id(state) == Some(id) {
-        Principal::Envoy(id)
-    } else {
-        Principal::Sleeve(id)
-    }
-}
-
-pub fn from_token(hub: &Hub, view: &View, token: &str) -> Option<Principal> {
-    if hub.tokens.is_owner(token) {
-        return Some(Principal::Owner);
-    }
-    if let Some(id) = hub.devices.check(token) {
-        return Some(Principal::Device(id));
-    }
-    if token == hub.tokens.envoy_only() {
-        return Some(Principal::EnvoyOnly);
-    }
-    view.state
-        .sleeves
-        .values()
-        .filter(|s| s.life != Life::Removed)
-        .find(|s| hub.tokens.sleeve(s.id) == token)
-        .map(|s| sleeve_principal(&view.state, s.id))
-}
-
-/// The cgroup of `pid` from `/proc/<pid>/cgroup`, or `None` when it cannot be read (the
-/// process is gone, or never was).
-pub fn peer_cgroup(pid: i32) -> Option<String> {
-    if pid <= 0 {
-        return None;
-    }
-    std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()
-}
-
-pub enum CgroupSleeve {
-    /// In no sleeve scope of this hub.
-    None,
-    Live(Principal),
-    /// In the scope of a sleeve that is removed or unknown: refused.
-    Gone,
-}
-
-/// The sleeve whose scope a cgroup is. A process inside a sleeve is that sleeve whatever token
-/// it presents.
-pub fn cgroup_sleeve(hub: &Hub, view: &View, cgroup: &str) -> CgroupSleeve {
-    let needle = format!("/pt-{}-", hub.tokens.hub_tag);
-    let Some(at) = cgroup.find(&needle).map(|i| i + needle.len()) else {
-        return CgroupSleeve::None;
-    };
-    let digits: String = cgroup[at..]
-        .chars()
-        .take_while(char::is_ascii_digit)
-        .collect();
-    let Ok(n) = digits.parse() else {
-        return CgroupSleeve::Gone;
-    };
-    let id = SleeveId(n);
-    match view.state.sleeve(id) {
-        Some(s) if s.life != Life::Removed => CgroupSleeve::Live(sleeve_principal(&view.state, id)),
-        _ => CgroupSleeve::Gone,
-    }
-}
-
 type Result<T> = std::result::Result<T, ApiError>;
-
-pub fn err(code: ErrorCode, m: impl Into<String>) -> ApiError {
-    ApiError::new(code, m)
-}
 
 fn internal(e: impl std::fmt::Display) -> ApiError {
     err(ErrorCode::Internal, e.to_string())
@@ -279,22 +170,6 @@ fn target_sleeve(c: &Ctx<'_>, view: &View, s: &str) -> Result<SleeveId> {
         ));
     }
     Ok(id)
-}
-
-pub(crate) fn command(hub: &Hub, kind: EventKind) -> Result<Reply> {
-    let r = hub.command(kind, COMMAND_TIMEOUT).map_err(|e| match e {
-        CommandError::Timeout => err(ErrorCode::Timeout, "the core did not answer"),
-        CommandError::Down => err(ErrorCode::Unavailable, "the core is stopped"),
-    })?;
-    if let Reply::Refused(code, why) = r {
-        let code = match code {
-            Code::InvalidArgument => ErrorCode::Invalid,
-            Code::NotFound => ErrorCode::NotFound,
-            Code::AlreadyExists | Code::FailedPrecondition => ErrorCode::Conflict,
-        };
-        return Err(err(code, why));
-    }
-    Ok(r)
 }
 
 fn sleeve_view(hub: &Hub, id: SleeveId) -> Result<api::Sleeve> {
@@ -1095,14 +970,74 @@ fn list_approvals(c: &Ctx<'_>, r: api::ListApprovalsRequest) -> Result<api::Appr
             .state
             .approvals
             .values()
-            .filter(|a| !r.pending_only || a.state == pt_core::ApprovalState::Pending)
-            .map(crate::approvals::view)
+            .filter(|a| !r.pending_only || a.state == ApprovalState::Pending)
+            .map(approvals::view)
             .collect(),
     })
 }
 
 fn decide(c: &Ctx<'_>, r: api::DecideRequest) -> Result<api::Approval> {
-    crate::approvals::decide(c.hub, &r.approval_id, r.decision)
+    decide_approval(c.hub, &r.approval_id, r.decision)
+}
+
+/// The owner decides approval `id`. A tool decision reaches the incarnation that asked only
+/// while it is the sleeve's live one; the core records any other as fenced.
+fn decide_approval(hub: &Hub, id: &str, d: api::Decision) -> Result<api::Approval> {
+    let view = hub.view();
+    let a = view
+        .state
+        .approvals
+        .get(id)
+        .ok_or_else(|| err(ErrorCode::NotFound, format!("no approval {id}")))?;
+    if a.state != ApprovalState::Pending {
+        return Err(err(
+            ErrorCode::Conflict,
+            format!("approval {id} is already {}", approvals::state(a)),
+        ));
+    }
+    if a.source == Source::Action && d == api::Decision::AllowSession {
+        return Err(err(
+            ErrorCode::Invalid,
+            "an action approval is allow_once or deny",
+        ));
+    }
+    let allow = d != api::Decision::Deny;
+    let sleeve = a.sleeve;
+    command(
+        hub,
+        EventKind::RespondApproval {
+            sleeve,
+            approval: id.to_string(),
+            allow,
+            note: String::new(),
+        },
+    )?;
+    let view = hub.view();
+    let a = view
+        .state
+        .approvals
+        .get(id)
+        .ok_or_else(|| err(ErrorCode::Internal, format!("approval {id} vanished")))?;
+    if a.source == Source::Action && a.state == ApprovalState::Decided {
+        let g = view.state.sleeve(sleeve).map_or(0, |s| s.g.0);
+        hub.record(
+            sleeve,
+            g,
+            now_ms(),
+            Entry::ApprovalDecision {
+                id: id.to_string(),
+                decision: if allow {
+                    pt_drivers::Decision::AllowOnce
+                } else {
+                    pt_drivers::Decision::Deny
+                },
+                by: Some("owner".into()),
+                confirmed: true,
+            },
+            Note::default(),
+        );
+    }
+    Ok(approvals::view(a))
 }
 
 // ---- nodes and jobs ------------------------------------------------------------------------
@@ -1922,26 +1857,6 @@ fn envoy_wait(c: &Ctx<'_>, r: api::EnvoyWaitRequest) -> Result<api::EnvoyReply> 
 }
 
 // ---- wait ----------------------------------------------------------------------------------
-
-/// Re-evaluates `check` on every change until it answers or `deadline` passes. The bus position
-/// is read before the view, so a change between the two wakes the wait at once.
-pub(crate) fn wait_for<T>(
-    hub: &Hub,
-    deadline: Instant,
-    mut check: impl FnMut(&View) -> Option<T>,
-) -> Option<T> {
-    loop {
-        let pos = hub.bus.pos();
-        let view = hub.view();
-        if let Some(x) = check(&view) {
-            return Some(x);
-        }
-        if Instant::now() >= deadline {
-            return None;
-        }
-        hub.bus.wait_after(pos, deadline);
-    }
-}
 
 fn reached(state: &State, id: SleeveId, until: api::WaitUntil) -> bool {
     let Some(s) = state.sleeve(id) else {
