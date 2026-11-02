@@ -122,6 +122,9 @@ impl SandboxSpec {
             args.push("-p".into());
             args.push(format!("MemoryMax={}", self.limits.memory_max_bytes));
             args.extend(["-p".into(), "MemorySwapMax=0".into()]);
+            // The default stop policy SIGKILLs the whole scope after one child is OOM-killed,
+            // so a build dies with the harness and the guardrail cannot tell them apart.
+            args.extend(["-p".into(), "OOMPolicy=continue".into()]);
             args.push("-p".into());
             args.push(format!("CPUQuota={}%", self.limits.cpu_quota_percent));
             args.push("-p".into());

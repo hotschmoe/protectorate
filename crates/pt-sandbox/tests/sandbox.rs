@@ -263,6 +263,20 @@ fn scope_limits_and_kill_reaches_double_forked_tree() {
     let cg = pt_sandbox::scope_cgroup(&name).unwrap().expect("cgroup");
     let max = fs::read_to_string(cg.join("memory.max")).unwrap();
     assert_eq!(max.trim(), (300u64 << 20).to_string());
+    let policy = Command::new("systemctl")
+        .args(["--user", "show", "-p", "OOMPolicy", "--value", &name])
+        .output()
+        .unwrap();
+    assert!(
+        policy.status.success(),
+        "{}",
+        String::from_utf8_lossy(&policy.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&policy.stdout).trim(),
+        "continue",
+        "a child OOM must leave the scope running"
+    );
     let tasks = fs::read_to_string(cg.join("pids.max")).unwrap();
     assert_eq!(tasks.trim(), "100");
     let cpu = fs::read_to_string(cg.join("cpu.max")).unwrap();
