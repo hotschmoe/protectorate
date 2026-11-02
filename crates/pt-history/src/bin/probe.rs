@@ -4,7 +4,8 @@
 //! results are identical. Snippets that may hold a secret are withheld.
 //!
 //! ```text
-//! pt-history-probe --index DIR [--cap 1G] [--home DIR] [--runs 20] [--query Q]...
+//! pt-history-probe --index DIR [--cap 1G] [--budget 1G] [--sleeve ID] [--home DIR]
+//!     [--runs 20] [--query Q]...
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -12,7 +13,8 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use pt_history::{
-    DocId, Filters, Hit, Index, Query, Selector, Source, SourceKind, brief_query, discover,
+    DEFAULT_BUDGET, DocId, Filters, Hit, Index, Query, Selector, Source, SourceKind, brief_query,
+    discover,
 };
 
 const QUERIES: &[&str] = &[
@@ -27,13 +29,15 @@ const BRIEF_TASK: &str = "Fix torn-tail recovery in the pt-journal codec and run
 struct Args {
     index: PathBuf,
     cap: u64,
+    budget: u64,
     home: PathBuf,
     runs: usize,
     queries: Vec<String>,
+    sleeve: Option<String>,
 }
 
 fn usage() -> String {
-    "usage: pt-history-probe --index DIR [--cap BYTES[K|M|G]] [--home DIR] [--runs N] [--query Q]..."
+    "usage: pt-history-probe --index DIR [--cap BYTES[K|M|G]] [--budget BYTES[K|M|G]] [--sleeve ID] [--home DIR] [--runs N] [--query Q]..."
         .into()
 }
 
@@ -51,7 +55,9 @@ fn args() -> Result<Args, String> {
     let mut it = std::env::args().skip(1);
     let mut index = None;
     let mut cap = 1 << 30;
+    let mut budget = DEFAULT_BUDGET;
     let mut home = std::env::var_os("HOME").map(PathBuf::from);
+    let mut sleeve = None;
     let mut runs = 20;
     let mut queries = Vec::new();
     while let Some(a) = it.next() {
@@ -62,6 +68,8 @@ fn args() -> Result<Args, String> {
         match a.as_str() {
             "--index" => index = Some(PathBuf::from(val()?)),
             "--cap" => cap = size(&val()?).ok_or_else(usage)?,
+            "--budget" => budget = size(&val()?).ok_or_else(usage)?,
+            "--sleeve" => sleeve = Some(val()?),
             "--home" => home = Some(PathBuf::from(val()?)),
             "--runs" => runs = val()?.parse().map_err(|_| usage())?,
             "--query" => queries.push(val()?),
@@ -71,7 +79,9 @@ fn args() -> Result<Args, String> {
     Ok(Args {
         index: index.ok_or_else(usage)?,
         cap,
+        budget,
         home: home.ok_or("no --home and no HOME")?,
+        sleeve,
         runs: runs.max(1),
         queries: if queries.is_empty() {
             QUERIES.iter().map(|q| q.to_string()).collect()
@@ -142,14 +152,20 @@ struct Totals {
     overlong: u64,
 }
 
-fn build(dir: &Path, sources: &[Source], commit_each: bool) -> Result<(Index, Totals), String> {
+fn build(
+    dir: &Path,
+    sources: &[Source],
+    commit_each: bool,
+    budget: u64,
+    report_cap: bool,
+) -> Result<(Index, Totals), String> {
     if dir.join("manifest").exists() {
         return Err(format!(
             "{} already holds an index; use a fresh --index",
             dir.display()
         ));
     }
-    let mut ix = Index::open(dir).map_err(|e| e.to_string())?;
+    let mut ix = Index::open(dir, budget).map_err(|e| e.to_string())?;
     let mut t = Totals::default();
     for s in sources {
         let got = match ix.ingest(s) {
@@ -164,6 +180,14 @@ fn build(dir: &Path, sources: &[Source], commit_each: bool) -> Result<(Index, To
         t.overlong += u64::from(got.overlong);
         if commit_each {
             commit(&mut ix)?;
+        }
+        if report_cap {
+            let names = ix.capped_sleeves();
+            if names.is_empty() {
+                println!("capped: none");
+            } else {
+                println!("capped: {}", names.join(","));
+            }
         }
     }
     commit(&mut ix)?;
@@ -258,7 +282,13 @@ fn fingerprint(hits: &[Hit]) -> Vec<(u64, u64, String)> {
 
 fn run() -> Result<bool, String> {
     let a = args()?;
-    let sources = select(&a.home, a.cap)?;
+    let mut sources = select(&a.home, a.cap)?;
+    if let Some(sleeve) = &a.sleeve {
+        for s in &mut sources {
+            s.sleeve = Some(sleeve.clone());
+        }
+    }
+    let report_cap = a.sleeve.is_some();
     #[cfg(debug_assertions)]
     if let Some(marker) = std::env::var_os("PT_TEST_HISTORY_DISCOVERY_BARRIER") {
         let marker = PathBuf::from(marker);
@@ -289,7 +319,7 @@ fn run() -> Result<bool, String> {
     }
 
     let t0 = Instant::now();
-    let (ix, t) = build(&a.index.join("a"), &sources, false)?;
+    let (ix, t) = build(&a.index.join("a"), &sources, false, a.budget, report_cap)?;
     let took = t0.elapsed();
     println!(
         "ingest: {:.1} MB in {:.2} s = {:.1} MB/s; lines {}, unknown {}, docs {}, overlong {}",
@@ -313,7 +343,7 @@ fn run() -> Result<bool, String> {
     );
     drop(ix);
     let t0 = Instant::now();
-    let ix = Index::open(&a.index.join("a")).map_err(|e| e.to_string())?;
+    let ix = Index::open(&a.index.join("a"), a.budget).map_err(|e| e.to_string())?;
     println!("open: {:.1} ms", ms(t0.elapsed()));
 
     let filters = Filters::default();
@@ -383,7 +413,7 @@ fn run() -> Result<bool, String> {
     }
 
     let t0 = Instant::now();
-    let (rb, _) = build(&a.index.join("b"), &sources, true)?;
+    let (rb, _) = build(&a.index.join("b"), &sources, true, a.budget, report_cap)?;
     let rst = rb.stats();
     let mut same = rst.docs == st.docs && rst.sessions == st.sessions;
     let mut compared = 0;

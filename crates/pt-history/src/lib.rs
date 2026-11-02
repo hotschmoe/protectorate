@@ -6,7 +6,7 @@
 //! the hub passes the sessions it launched).
 //!
 //! ```text
-//! let mut ix = Index::open(dir)?;
+//! let mut ix = Index::open(dir, pt_history::DEFAULT_BUDGET)?;
 //! ix.ingest(&Source::new(SourceKind::Claude, path, session_id).sleeve("api"))?;
 //! ix.commit()?;                                  // ingested docs become searchable
 //! let hits = ix.search(&Query::all("journal torn tail"), &Filters::default(), 8)?;
@@ -38,7 +38,7 @@ use std::path::PathBuf;
 
 pub use discover::discover;
 pub use extract::{TEXT_MAX, TOOL_MAX, parse_time};
-pub use index::{Index, Ingested, READ_BYTES, READ_DOCS, Stats};
+pub use index::{DEFAULT_BUDGET, Index, Ingested, READ_BYTES, READ_DOCS, Stats};
 pub use pt_drivers::Harness;
 
 pt_json::string_enum! {

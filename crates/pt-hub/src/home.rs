@@ -212,6 +212,9 @@ pt_json::record! {
         /// The history index (SPEC 3.7). It is derived and holds log text, so keep it private
         /// and out of backups. Empty means `<home>/history`.
         pub history_dir: String = String::new(),
+        /// Live indexed bytes one sleeve may keep, and one log may keep. Each doc counts its
+        /// source text plus per-doc overhead. Read once, when the hub starts.
+        pub history_budget_bytes: u64 = 1 << 30,
         pub envoy: TargetConf = TargetConf {
             harness: "claude".to_string(),
             provider: String::new(),

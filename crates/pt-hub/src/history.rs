@@ -111,8 +111,8 @@ fn log_root(home: &Path, kind: SourceKind) -> PathBuf {
     }
 }
 
-fn open_index(dir: &Path) -> Result<Index, String> {
-    match Index::open(dir) {
+fn open_index(dir: &Path, budget: u64) -> Result<Index, String> {
+    match Index::open(dir, budget) {
         Ok(ix) => Ok(ix),
         Err(e)
             if matches!(
@@ -136,7 +136,7 @@ fn open_index(dir: &Path) -> Result<Index, String> {
             );
             fs::rename(dir, &aside)
                 .map_err(|e| format!("history: move {} aside: {e}", dir.display()))?;
-            Index::open(dir).map_err(|e| e.to_string())
+            Index::open(dir, budget).map_err(|e| e.to_string())
         }
     }
 }
@@ -144,8 +144,8 @@ fn open_index(dir: &Path) -> Result<Index, String> {
 impl History {
     /// Opens the index in `dir`, rebuilding a corrupt one. Never fails: without an index the
     /// history methods answer `unavailable` with the reason.
-    pub fn open(dir: &Path) -> History {
-        let ix = open_index(dir);
+    pub fn open(dir: &Path, budget: u64) -> History {
+        let ix = open_index(dir, budget);
         let capped = match &ix {
             Ok(ix) => {
                 let st = ix.stats();

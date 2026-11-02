@@ -24,13 +24,10 @@ const FLUSH: usize = 96 << 20;
 const MAX_SEGMENTS: usize = 8;
 /// Merges never build a segment larger than this.
 const MAX_MERGE: u64 = 1 << 30;
-/// Live indexed bytes one sleeve may keep: each doc's source text plus its per-doc
-/// overhead. Past this, the oldest docs of that sleeve are dropped, whichever of its
-/// sources they came from. Other sleeves keep ingesting.
-const MAX_INDEX: u64 = 1 << 30;
-/// Live indexed bytes one source may keep, on the same unit as [`MAX_INDEX`]. Past this,
-/// that source's own oldest docs are dropped and its later lines stay.
-const MAX_SOURCE: u64 = 1 << 30;
+/// Live indexed bytes one sleeve may keep, and one source may keep, when the caller
+/// does not pass another budget. Each doc counts its source text plus its per-doc
+/// overhead. The hub reads `history_budget_bytes` once at start and passes it here.
+pub const DEFAULT_BUDGET: u64 = 1 << 30;
 /// Docs one [`Index::read`] materializes. The hub's history read uses the same cap.
 pub const READ_DOCS: usize = 200;
 /// Source-text bytes one [`Index::read`] materializes before it reports more.
@@ -168,6 +165,8 @@ pub struct Stats {
 
 pub struct Index {
     dir: PathBuf,
+    /// Live indexed bytes one sleeve may keep, and one source may keep.
+    budget: u64,
     _lock: File,
     next_doc: u64,
     next_seg: u64,
@@ -219,10 +218,11 @@ fn source_path<'a>(source: &'a str, sleeve: Option<&str>) -> &'a str {
 }
 
 impl Index {
-    /// Opens or creates the index in `dir`. One writer at a time, enforced by a lock file.
-    /// A corrupt manifest or segment is an `InvalidData` error; the index is derived, so the
-    /// remedy is a rebuild into a fresh directory.
-    pub fn open(dir: &Path) -> io::Result<Index> {
+    /// Opens or creates the index in `dir`. `budget` is the live-byte cap for one sleeve
+    /// and for one source (the hub's `history_budget_bytes`). One writer at a time, enforced
+    /// by a lock file. A corrupt manifest or segment is an `InvalidData` error; the index is
+    /// derived, so the remedy is a rebuild into a fresh directory.
+    pub fn open(dir: &Path, budget: u64) -> io::Result<Index> {
         fs::create_dir_all(dir).map_err(|e| ctx(e, "create", dir.display()))?;
         let lock_path = dir.join("lock");
         let lock = OpenOptions::new()
@@ -242,6 +242,7 @@ impl Index {
         let m = read_manifest(&manifest_path)?;
         let mut ix = Index {
             dir: dir.to_owned(),
+            budget,
             _lock: lock,
             next_doc: m.next_doc,
             next_seg: m.next_seg,
@@ -528,7 +529,7 @@ impl Index {
     }
 
     fn at_cap(&self, stored: &str, sleeve_total: Option<u64>) -> bool {
-        self.kept_of(stored) >= MAX_SOURCE || sleeve_total.is_some_and(|n| n >= MAX_INDEX)
+        self.kept_of(stored) >= self.budget || sleeve_total.is_some_and(|n| n >= self.budget)
     }
 
     fn kept_of(&self, stored: &str) -> u64 {
@@ -561,16 +562,16 @@ impl Index {
         need: u64,
         shed: &mut Shed,
     ) -> bool {
-        if need > MAX_SOURCE || shed.total.is_some_and(|_| need > MAX_INDEX) {
+        if need > self.budget || shed.total.is_some_and(|_| need > self.budget) {
             return false;
         }
-        while self.kept_of(stored) > MAX_SOURCE {
+        while self.kept_of(stored) > self.budget {
             if !self.drop_oldest_except(stored, keep, &mut shed.aged, &mut shed.total) {
                 return false;
             }
         }
         if let Some(sleeve) = sleeve {
-            while shed.total.is_some_and(|n| n > MAX_INDEX) {
+            while shed.total.is_some_and(|n| n > self.budget) {
                 if !self.evict_oldest(sleeve, keep, &mut shed.sleeve, &mut shed.total) {
                     return false;
                 }
@@ -1229,7 +1230,7 @@ impl Index {
             }
         }
         seen.into_iter()
-            .filter(|sleeve| self.sleeve_kept(sleeve) >= MAX_INDEX)
+            .filter(|sleeve| self.sleeve_kept(sleeve) >= self.budget)
             .collect()
     }
 
