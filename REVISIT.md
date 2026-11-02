@@ -397,7 +397,10 @@ Each entry: where, what was done, what right looks like.
   collected before the watch attaches or before it can read an event leaves the cause unknown;
   the hub logs that and uses the driver's exit cause rather than guessing OOM. A hub restart can
   likewise lose evidence for an already-collected scope; a recovered scope without a driver has
-  no exit status. Right: preserve the scope counter until the hub records it.
+  no exit status. Right: preserve the scope counter until the hub records it. Under a full
+  parallel test run the watcher thread can be starved past the scope's removal (`OOM status
+  unknown: No such device`), so `repeated_scope_oom_parks_and_reports_the_memory_limit`
+  occasionally sees exit 137 instead of an OOM (2026-11-02).
 - **Exit 137 can be ambiguous**: a normal exit 137 after another scope process's OOM kill counts as OOM.
 - **A message sent during the post-restart probe is rejected** (pt-core `deliverable` ignores
   `Sleeve::probing`): a recovered Idle sleeve takes a `SendPrompt` before `ScopeProbed` answers,
