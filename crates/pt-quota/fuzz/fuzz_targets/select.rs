@@ -114,13 +114,23 @@ fuzz_target!(|data: &[u8]| {
             );
             if let Some(sub) = metered(*h)
                 && let Some(q) = quotas.iter().find(|q| q.subscription == sub)
-                && state(q) == State::Stale
-                && let Some(usable) = open_usable(q, now)
             {
-                assert!(
-                    usable + 1e-9 >= size.min_usable_pct(),
-                    "stale row at {usable}% usable was spent"
-                );
+                assert_ne!(state(q), State::Error, "a failed reading was spent");
+                if state(q) == State::Stale
+                    && let Some(usable) = open_usable(q, now)
+                {
+                    assert!(
+                        usable + 1e-9 >= size.min_usable_pct(),
+                        "stale row at {usable}% usable was spent"
+                    );
+                }
+            }
+            if *h == Harness::PiLocal
+                && let Some(q) = quotas
+                    .iter()
+                    .find(|q| q.subscription == Subscription::Local)
+            {
+                assert_ne!(state(q), State::Error, "a failed local reading was spent");
             }
         }
         (None, Err(_)) => {

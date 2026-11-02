@@ -158,10 +158,11 @@ enum Availability {
 /// row with no scored window.
 fn availability(now_ms: u64, size: TaskSize, harness: Harness, quotas: &[Quota]) -> Availability {
     if harness == Harness::PiLocal {
-        return if fresh_for(quotas, Subscription::Local).is_some() {
-            Availability::Available
-        } else {
-            Availability::Unknown
+        return match row(quotas, Subscription::Local).map(state) {
+            Some(State::Fresh) => Availability::Available,
+            // A failed read is not a missing login: do not spend it.
+            Some(State::Error) => Availability::Exhausted,
+            _ => Availability::Unknown,
         };
     }
     let Some((_, subscription)) = SUBSCRIBED.iter().find(|(h, _)| *h == harness) else {
@@ -170,7 +171,12 @@ fn availability(now_ms: u64, size: TaskSize, harness: Harness, quotas: &[Quota])
     let Some(q) = row(quotas, *subscription) else {
         return Availability::Unknown;
     };
-    if !matches!(state(q), State::Fresh | State::Stale) {
+    // `Unknown` is no login, the reader being off, or not read yet. `Error` is a read that
+    // failed (parse, HTTP, expiry, timeout) and left no windows to score.
+    if state(q) == State::Error {
+        return Availability::Exhausted;
+    }
+    if state(q) != State::Fresh && state(q) != State::Stale {
         return Availability::Unknown;
     }
     match score(q, now_ms) {

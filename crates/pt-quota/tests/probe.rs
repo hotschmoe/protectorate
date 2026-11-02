@@ -371,8 +371,9 @@ fn partial_responses_and_exhausted_selection() {
     ]);
     let mixed = format!("http://127.0.0.1:{mixed_port}");
     let out = run(args(&mixed));
+    assert_eq!(state_of(line_of(&out, "codex")), "error", "{out}");
     assert!(
-        out.contains("target Codex: first eligible in resleeve_to without a fresh quota reading"),
+        out.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
         "{out}"
     );
 
@@ -401,7 +402,7 @@ fn partial_responses_and_exhausted_selection() {
         assert!(line.contains(reason), "{line}");
     }
     assert!(
-        out.contains("target Claude: first eligible in resleeve_to without a fresh quota reading"),
+        out.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
         "{out}"
     );
 }

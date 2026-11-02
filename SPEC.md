@@ -441,6 +441,12 @@ windows like a fresh reading's: under the task's usable minimum the subscription
 and at or above it the fallback may still choose that harness, ahead of a candidate with no
 reading. `select_target` itself stays on fresh rows.
 
+A candidate with no reading may still be spent. That is `unknown`: no login file, the reader
+is not running, or the hub has not read yet (including just after a restart; readings are not
+journaled). A failed reading may not. That is `error`: the body did not parse, the request
+failed, the login is expired, or the read timed out and left no earlier windows. It parks the
+same way an exhausted window does.
+
 A read that finishes after its deadline is kept and published on the next refresh. Each request
 inside that read gets only the time still left, so a follow-up call cannot discard a body that
 already arrived.

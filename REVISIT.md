@@ -396,12 +396,13 @@ Each entry: where, what was done, what right looks like.
   told). Right: `deliverable` is false while `probing`, so the message waits in the queue.
 - **Resleeve selection is quota-weighted only among `resleeve_to`** (`pt-hub`, select.rs): the
   candidates that are headless, not excluded, installed and not `ineligible` in `doctor.json` go
-  to quota selection with task size Medium and no health list; when a reading is unavailable the
-  first unknown candidate in the owner's order can win, while known-exhausted candidates cannot.
-  A stale row is not unavailable: its last windows still block under the usable minimum, and a
-  stale row that still has spare can win ahead of an unknown candidate.
-  A new sleeve always names its harness (`SpawnSleeve.harness` is
-  required), so nothing else is chosen by quota, and G1 does not read quota yet. Right: the task
+  to quota selection with task size Medium and no health list. A candidate with no reading
+  (`unknown`: no login, reader off, or not read yet) can win, in the owner's order, after any
+  stale row that still has spare. A failed reading (`error`) cannot win, and neither can a row
+  whose windows are under the usable minimum. Readings are not journaled, so a restart spends
+  on `unknown` until the first refresh. A new sleeve always names its harness
+  (`SpawnSleeve.harness` is required), so nothing else is chosen by quota, and G1 does not read
+  quota yet. Right: the task
   size from the sleeve's history (D27), node and probe health, and an optional harness on spawn.
 - **FetchArtifact reads one file at a time and hashes it twice** (`pt-node` `read_artifact`,
   `pt-hub` `fetch_artifact`): the hub asks 4 MiB slices; at the end the node re-reads the whole

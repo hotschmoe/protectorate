@@ -186,7 +186,8 @@ or with no window at all, is reported as an error.
 Resleeve targets are weighted by fresh readings; known-exhausted candidates are skipped, and the
 sleeve parks if all eligible candidates are exhausted. A stale reading keeps its last windows:
 under the usable minimum it counts as exhausted, and with spare left the fallback may still
-choose it. When a reading is unavailable, an unknown candidate can still be selected. A local
+choose it. A candidate with no reading (`unknown`: no login, or not read yet) can still be
+selected. A failed reading (`error`) cannot; it parks the same way an exhausted window does. A local
 endpoint may use HTTPS or loopback HTTP; other HTTP
 endpoints are reported as misconfigured and are not contacted.
 
