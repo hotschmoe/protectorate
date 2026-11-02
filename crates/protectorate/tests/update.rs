@@ -89,8 +89,13 @@ fn wrapper(
     } else {
         ""
     };
+    let capability = if program == "protectorate" {
+        "echo 'journal-event-tag: 32'; echo 'hub-rollback: 1';"
+    } else {
+        ""
+    };
     format!(
-        "#!/bin/bash\nif [ \"$1\" = {check} ] && [ $# = 1 ]; then echo '{program} {tag}'; exit 0; fi\n{crash}exec -a \"$0\" '{}' \"$@\" {extra}\n",
+        "#!/bin/bash\nif [ \"$1\" = {check} ] && [ $# = 1 ]; then echo '{program} {tag}'; {capability} exit 0; fi\n{crash}exec -a \"$0\" '{}' \"$@\" {extra}\n",
         real.display()
     )
     .into_bytes()
@@ -504,12 +509,18 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
         events(&home)
     );
 
-    // Rollback swaps the pointers and restarts; updating again reuses the staged release.
+    // Rollback restarts; updating again reuses the staged release.
     let n = sup.starts().len();
+    let before_rollback = fs::read(home.join("journal/segment-00000000000000000000")).unwrap();
     let r = cli(&home, &["--json", "hub", "update", "--rollback"]).json();
     assert_eq!(r["target"].as_str(), Some("v0.0.1"), "{r}");
     sup.running("v0.0.1", n, 60);
     up("the hub back on v0.0.1");
+    assert!(
+        fs::read(home.join("journal/segment-00000000000000000000"))
+            .unwrap()
+            .starts_with(&before_rollback)
+    );
     let n = sup.starts().len();
     let again = cli(&home, &["--json", "hub", "update", "--version", "v0.0.2"]).json();
     assert!(
@@ -561,13 +572,125 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
     assert_ne!(v4[0].code, Some(0));
     up("the hub after the failed start");
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
+    assert_eq!(pointer(&home, "previous").as_deref(), Some("v0.0.1"));
     let not_from_releases = Command::new(bin())
         .args(["--home", &home_s, "hub", "probation"])
         .output()
         .unwrap();
     assert!(not_from_releases.status.success());
+    let n = sup.starts().len();
+    let rollback = cli(&home, &["--json", "hub", "update", "--rollback"]).json();
+    assert_eq!(rollback["target"].as_str(), Some("v0.0.1"), "{rollback}");
+    sup.running("v0.0.1", n, 60);
+    up("the hub after rolling back the earlier confirmed release");
     drop(busy);
     drop(sup);
+}
+
+#[test]
+fn hub_rollbacks_restore_a_journal_the_previous_binary_cannot_read() {
+    let real = PathBuf::from(bin());
+    let asset = format!("protectorate-linux-{}", arch());
+    let wrap = |tag: &str| wrapper("protectorate", "version", tag, &real, "", false);
+    let fake = serve_releases(vec![release("v0.0.2", vec![(asset, wrap("v0.0.2"))])]);
+    for manual in [false, true] {
+        let root = dir(if manual {
+            "journal-manual"
+        } else {
+            "journal-auto"
+        });
+        let home = root.join("h");
+        fs::create_dir_all(&home).unwrap();
+        let config = obj! {
+            "envoy" => obj! { "harness" => "claude" },
+            "claude_program" => "/nonexistent/program",
+            "quota_poll_secs" => 0u64,
+            "harness_update_hours" => 0u64,
+            "release_api" => fake.url.as_str(),
+            "release_repo" => "o/r",
+        };
+        fs::write(home.join("config.json"), config.to_string()).unwrap();
+        install(&home, "v0.0.1", "protectorate", &wrap("v0.0.1"));
+        let home_s = home.display().to_string();
+        let prestart = vec![
+            "--home".into(),
+            home_s.clone(),
+            "hub".into(),
+            "probation".into(),
+        ];
+        let serve = vec![
+            "--home".into(),
+            home_s.clone(),
+            "serve".into(),
+            "--listen".into(),
+            "off".into(),
+        ];
+        let sup = Supervisor::start(
+            &home,
+            "protectorate",
+            prestart.clone(),
+            serve.clone(),
+            Vec::new(),
+            Duration::from_millis(300),
+        );
+        eventually("initial hub", Duration::from_secs(60), || {
+            hub_started_ms(&home)
+        });
+        let n = sup.starts().len();
+        cli(&home, &["--json", "hub", "update", "--version", "v0.0.2"]).json();
+        sup.running("v0.0.2", n, 60);
+        confirmed_after(&home, 0, "trial confirmed");
+        if manual {
+            let r = cli(&home, &["--json", "hub", "update", "--rollback"]).json();
+            assert_eq!(r["target"].as_str(), Some("v0.0.1"), "{r}");
+        }
+        drop(sup);
+        if !manual {
+            let mut p = probation(&home);
+            let fields = p.as_object_mut().unwrap();
+            fields.insert("contacted_ms", Value::Null);
+            fields.insert("deadline_ms", 1u64);
+            fs::write(home.join("releases/probation.json"), p.to_string()).unwrap();
+        }
+        let (mut journal, _) = pt_journal::Journal::open(&home.join("journal")).unwrap();
+        let mut event = pt_core::codec::encode(&pt_core::Event {
+            at: 1,
+            kind: pt_core::EventKind::Tick,
+        });
+        event[9] = 33;
+        journal.append(&event).unwrap();
+        drop(journal);
+        let old = home.join("releases/previous/protectorate");
+        let refuses = Command::new(&old).args(&serve).output().unwrap();
+        assert!(!refuses.status.success(), "{refuses:?}");
+        assert!(
+            String::from_utf8_lossy(&refuses.stderr).contains("unknown event tag 33"),
+            "{refuses:?}"
+        );
+        let rollback = Command::new(&old).args(&prestart).output().unwrap();
+        assert!(rollback.status.success(), "{rollback:?}");
+        assert!(
+            String::from_utf8_lossy(&rollback.stderr)
+                .contains("events after the snapshot are lost"),
+            "{rollback:?}"
+        );
+        assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
+        let sup = Supervisor::start(
+            &home,
+            "protectorate",
+            prestart,
+            serve,
+            Vec::new(),
+            Duration::from_millis(300),
+        );
+        sup.running("v0.0.1", 0, 60);
+        eventually(
+            "old hub serves after rollback",
+            Duration::from_secs(60),
+            || hub_started_ms(&home),
+        );
+        drop(sup);
+    }
 }
 
 /// A hub killed at each step of a switch on probation, or of the rollback that ends one
@@ -656,6 +779,7 @@ fn release_switches_survive_a_crash_at_each_step() {
     // On trial with its window passed, the prestart dies after switching current back: both
     // pointers still name v0.0.1, the release that worked.
     fs::create_dir_all(home.join("releases/v0.0.2")).unwrap();
+    fs::create_dir_all(home.join("releases/v0.0.0")).unwrap();
     write_exec(
         &home.join("releases/v0.0.2/protectorate"),
         std::str::from_utf8(&wrap("v0.0.2")).unwrap(),
@@ -670,6 +794,7 @@ fn release_switches_survive_a_crash_at_each_step() {
     let trial = obj! {
         "version" => "v0.0.2",
         "previous" => "v0.0.1",
+        "earlier_previous" => "v0.0.0",
         "switched_ms" => 1u64,
         "deadline_ms" => 2u64,
     };
@@ -685,6 +810,7 @@ fn release_switches_survive_a_crash_at_each_step() {
     let after = cli(&home, &["hub", "probation"]);
     assert_eq!(after.status, 0, "{}", after.stderr);
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
+    assert_eq!(pointer(&home, "previous").as_deref(), Some("v0.0.0"));
 }
 
 #[test]
@@ -702,7 +828,7 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
     fs::create_dir_all(home.join("releases/v0.0.1")).unwrap();
     write_exec(
         &home.join("releases/v0.0.1/protectorate"),
-        std::str::from_utf8(&wrapper(
+        &String::from_utf8(wrapper(
             "protectorate",
             "version",
             "v0.0.1",
@@ -710,7 +836,8 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
             "",
             false,
         ))
-        .unwrap(),
+        .unwrap()
+        .replace("echo 'journal-event-tag: 32';", ""),
     );
     std::os::unix::fs::symlink("v0.0.1", home.join("releases/previous")).unwrap();
     let fleet = root.join("fleet");
@@ -738,7 +865,6 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
             .success()
     );
     fs::write(dbdir.join("db.sqlite-wal"), "stale trial wal").unwrap();
-    let trial = obj! { "version" => "v0.0.2", "previous" => "v0.0.1", "switched_ms" => 1u64, "deadline_ms" => 2u64, "headscale_snapshot" => snap.display().to_string() };
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -751,25 +877,92 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         .args(["hub", "probation"])
         .output()
         .unwrap();
-    assert!(!failed.status.success(), "{failed:?}");
+    assert!(failed.status.success(), "{failed:?}");
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
-    assert!(probation(&home)["reason"].as_str().is_some());
-    let start = Command::new(home.join("releases/current/protectorate"))
+    assert!(
+        String::from_utf8_lossy(&failed.stderr).contains("keeping the current release"),
+        "{failed:?}"
+    );
+    assert!(probation(&home)["reason"].is_null());
+    assert!(probation(&home)["contacted_ms"].as_u64().is_some());
+    let config = obj! {
+        "envoy" => obj! { "harness" => "claude" },
+        "claude_program" => "/nonexistent/program",
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+    };
+    fs::write(home.join("config.json"), config.to_string()).unwrap();
+    let home_s = home.display().to_string();
+    let sup = Supervisor::start(
+        &home,
+        "protectorate",
+        vec![
+            "--home".into(),
+            home_s.clone(),
+            "hub".into(),
+            "probation".into(),
+        ],
+        vec![
+            "--home".into(),
+            home_s,
+            "serve".into(),
+            "--listen".into(),
+            "off".into(),
+        ],
+        Vec::new(),
+        Duration::from_millis(300),
+    );
+    sup.running("v0.0.2", 0, 60);
+    eventually(
+        "trial hub serves after a failed restore",
+        Duration::from_secs(60),
+        || hub_started_ms(&home),
+    );
+    let online_retry = Command::new(home.join("releases/previous/protectorate"))
         .arg("--home")
         .arg(&home)
-        .args(["serve", "--listen", "off"])
+        .args(["hub", "probation", "--retry-rollback"])
         .output()
         .unwrap();
-    assert!(!start.status.success(), "{start:?}");
+    assert!(!online_retry.status.success(), "{online_retry:?}");
     assert!(
-        String::from_utf8_lossy(&start.stderr).contains("needs rollback"),
-        "{start:?}"
+        String::from_utf8_lossy(&online_retry.stderr).contains("stop the hub"),
+        "{online_retry:?}"
     );
-    fs::write(home.join("releases/probation.json"), trial.to_string()).unwrap();
-    let out = Command::new(home.join("releases/previous/protectorate"))
+    drop(sup);
+    let missing_journal = obj! { "version" => "v0.0.2", "previous" => "v0.0.1", "switched_ms" => 1u64, "deadline_ms" => 2u64, "contacted_ms" => now, "manual_rollback" => true, "reason" => "manual rollback requested", "headscale_snapshot" => snap.display().to_string(), "journal_snapshot" => fleet.join("snapshots/missing-journal").display().to_string() };
+    fs::write(
+        home.join("releases/probation.json"),
+        missing_journal.to_string(),
+    )
+    .unwrap();
+    let failed = Command::new(home.join("releases/previous/protectorate"))
         .arg("--home")
         .arg(&home)
         .args(["hub", "probation"])
+        .output()
+        .unwrap();
+    assert!(failed.status.success(), "{failed:?}");
+    assert!(
+        String::from_utf8_lossy(&failed.stderr).contains("keeping the current release"),
+        "{failed:?}"
+    );
+    assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
+    assert_eq!(
+        String::from_utf8_lossy(&sql("select name from nodes order by name;").stdout),
+        "before\nduring-trial\n"
+    );
+    let repaired = fleet.join("snapshots/missing-journal");
+    fs::create_dir_all(&repaired).unwrap();
+    fs::copy(
+        home.join("journal/segment-00000000000000000000"),
+        repaired.join("segment-00000000000000000000"),
+    )
+    .unwrap();
+    let out = Command::new(home.join("releases/previous/protectorate"))
+        .arg("--home")
+        .arg(&home)
+        .args(["hub", "probation", "--retry-rollback"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
@@ -788,13 +981,27 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
 fn implicit_hub_update_requires_higher_precedence() {
     let real = PathBuf::from(bin());
     let asset = format!("protectorate-linux-{}", arch());
-    let fake = serve_releases(vec![release(
-        "v0.6.0",
-        vec![(
-            asset,
-            wrapper("protectorate", "version", "v0.6.0", &real, "", false),
-        )],
-    )]);
+    let legacy = String::from_utf8(wrapper(
+        "protectorate",
+        "version",
+        "v0.5.0",
+        &real,
+        "",
+        false,
+    ))
+    .unwrap()
+    .replace("echo 'hub-rollback: 1';", "")
+    .into_bytes();
+    let fake = serve_releases(vec![
+        release(
+            "v0.6.0",
+            vec![(
+                asset.clone(),
+                wrapper("protectorate", "version", "v0.6.0", &real, "", false),
+            )],
+        ),
+        release("v0.5.0", vec![(asset, legacy)]),
+    ]);
     let home = dir("downgrade");
     let config = obj! { "envoy" => obj! { "harness" => "claude" }, "claude_program" => "/nonexistent/program", "quota_poll_secs" => 0u64, "harness_update_hours" => 0u64, "release_api" => fake.url.as_str(), "release_repo" => "o/r" };
     fs::write(home.join("config.json"), config.to_string()).unwrap();
@@ -842,6 +1049,31 @@ fn implicit_hub_update_requires_higher_precedence() {
     );
     sup.running("v0.6.0", 1, 30);
     confirmed_after(&home, 0, "explicit downgrade confirmed");
+    let unsupported = cli(&home, &["hub", "update", "--version", "v0.5.0"]);
+    assert_ne!(unsupported.status, 0, "{}", unsupported.stdout);
+    assert!(
+        unsupported
+            .stderr
+            .contains("does not support snapshot-aware hub rollback"),
+        "{}",
+        unsupported.stderr
+    );
+    assert_eq!(pointer(&home, "current").as_deref(), Some("v0.6.0"));
+    let previous_bin = home.join("releases/v0.7.0-dev.3/protectorate");
+    let legacy_previous = fs::read_to_string(&previous_bin)
+        .unwrap()
+        .replace("echo 'hub-rollback: 1';", "");
+    write_exec(&previous_bin, &legacy_previous);
+    let unsupported = cli(&home, &["hub", "update", "--rollback"]);
+    assert_ne!(unsupported.status, 0, "{}", unsupported.stdout);
+    assert!(
+        unsupported
+            .stderr
+            .contains("cannot run snapshot-aware probation"),
+        "{}",
+        unsupported.stderr
+    );
+    assert_eq!(pointer(&home, "current").as_deref(), Some("v0.6.0"));
     drop(sup);
 }
 
