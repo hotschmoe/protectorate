@@ -899,31 +899,38 @@ impl Store {
     ) -> Result<Verdict> {
         let _l = self.lock()?;
         match self.judge(true, max_starts, &mut restore) {
-            Err(e) if e.kind == ErrorKind::Restore => {
+            Err(e) if matches!(e.kind, ErrorKind::Restore | ErrorKind::RestorePartial) => {
                 let mut p = self
                     .probation()?
                     .ok_or_else(|| store_err("probation disappeared"))?;
-                p.contacted_ms = Some(now_ms());
-                p.restore_failed = Some(e.message.clone());
-                p.reason = None;
-                self.write_probation(&p)?;
-                eprintln!(
-                    "update: {}; keeping the current release; repair the snapshot and run hub probation --retry-rollback",
-                    e.message
-                );
-                Ok(Verdict::Confirmed)
-            }
-            Err(e) if e.kind == ErrorKind::RestorePartial => {
-                let mut p = self
-                    .probation()?
-                    .ok_or_else(|| store_err("probation disappeared"))?;
-                p.restore_failed = Some(e.message.clone());
-                self.write_probation(&p)?;
-                eprintln!(
-                    "update: {}; rollback restore is incomplete and will continue at the next prestart",
-                    e.message
-                );
-                Err(e)
+                // Contact is recorded only when nothing live was replaced. A partial
+                // restore leaves a reason and no contact; a later failure must not confirm.
+                let incomplete = e.kind == ErrorKind::RestorePartial
+                    || (p.restore_failed.is_some()
+                        && p.reason.is_some()
+                        && p.contacted_ms.is_none());
+                if incomplete {
+                    if p.reason.is_none() {
+                        p.reason = Some("rollback restore incomplete".into());
+                    }
+                    p.restore_failed = Some(e.message.clone());
+                    self.write_probation(&p)?;
+                    eprintln!(
+                        "update: {}; rollback restore is incomplete and will continue at the next prestart",
+                        e.message
+                    );
+                    Err(e)
+                } else {
+                    p.contacted_ms = Some(now_ms());
+                    p.restore_failed = Some(e.message.clone());
+                    p.reason = None;
+                    self.write_probation(&p)?;
+                    eprintln!(
+                        "update: {}; keeping the current release; repair the snapshot and run hub probation --retry-rollback",
+                        e.message
+                    );
+                    Ok(Verdict::Confirmed)
+                }
             }
             Err(e) if e.kind == ErrorKind::RestoreBusy => Err(e),
             other => other,
@@ -982,9 +989,14 @@ impl Store {
         {
             return Err(store_err("no failed restore for the current release"));
         }
+        // A partial restore has a reason and was never contacted. Keep the failure
+        // recorded so a retry that replaces nothing this time does not confirm.
+        let partial = p.contacted_ms.is_none() && p.reason.is_some();
         p.contacted_ms = None;
         p.reason = Some("retrying failed snapshot restore".into());
-        p.restore_failed = None;
+        if !partial {
+            p.restore_failed = None;
+        }
         self.write_probation(&p)
     }
 
@@ -1095,6 +1107,10 @@ impl Store {
             )));
         }
         self.require_version_dir(&p.previous)?;
+        // The reason is durable before any live file is replaced. A partial restore
+        // keeps it, so the next prestart retries instead of confirming the trial.
+        p.reason = Some(reason.to_string());
+        self.write_probation(p)?;
         restore(p).map_err(|e| {
             let kind = match &e {
                 RestoreError::Failed(_) => ErrorKind::Restore,
@@ -1103,7 +1119,7 @@ impl Store {
             };
             Error::new(kind, e.message())
         })?;
-        p.reason = Some(reason.to_string());
+        p.restore_failed = None;
         self.write_probation(p)?;
         self.set_pointer(CURRENT, &p.previous)?;
         sync_dir(&self.dir)?;
