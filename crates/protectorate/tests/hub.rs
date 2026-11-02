@@ -679,6 +679,157 @@ fn write_script(path: &std::path::Path, body: &str) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod script");
 }
 
+#[test]
+fn claude_steer_explains_queue_during_tool() {
+    if !on_path("bwrap") || !on_path("python3") || !on_path("git") {
+        return;
+    }
+    let dir = unique("claude-steer");
+    std::fs::create_dir_all(&dir).unwrap();
+    let fake = dir.join("claude");
+    write_script(&dir.join("systemd-run"), "exit 0");
+    let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
+    write_script(
+        &fake,
+        r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit; fi
+exec python3 -u -c '
+import json, os, sys, time
+with open(os.path.join(os.environ["HOME"], "test-token"), "w") as out:
+    out.write(os.environ["PROTECTORATE_TOKEN"])
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("type") != "user": continue
+    msg["isReplay"] = True
+    print(json.dumps(msg), flush=True)
+    print(json.dumps({"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"sleep 30"}}]}}), flush=True)
+    if "--resume" not in sys.argv:
+        while not os.path.exists("trigger"): time.sleep(0.05)
+        print(json.dumps({"type":"system","subtype":"init","session_id":"wrong-session"}), flush=True)
+' "$@""#,
+    );
+    let hub = Hub::start_config(
+        "claude-steer",
+        "claude",
+        &[
+            ("scopes", false.into()),
+            ("claude_program", fake.to_str().unwrap().into()),
+        ],
+        &[],
+        &[("PATH", &path)],
+    );
+    let login = hub.home.join("logins/.claude/.credentials.json");
+    std::fs::create_dir_all(login.parent().unwrap()).unwrap();
+    std::fs::write(login, "test").unwrap();
+    hub.cli(&["doctor", "--refresh"]).ok();
+    let repo = temp_repo("claude-steer");
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "parent",
+        "--path",
+        repo.to_str().unwrap(),
+        "--harness",
+        "claude",
+    ])
+    .ok();
+    hub.wait("parent", "idle", 60);
+    hub.cli(&["sleeve", "stop", "parent"]).ok();
+    hub.wait("parent", "ended", 60);
+    hub.cli(&["sleeve", "start", "parent", "--effort", "low"])
+        .ok();
+    hub.wait("parent", "idle", 60);
+    assert_eq!(
+        hub.sleeve("parent")["incarnation"]["effort"].as_str(),
+        Some("low")
+    );
+    hub.cli(&[
+        "sleeve",
+        "resleeve",
+        "parent",
+        "--harness",
+        "claude",
+        "--effort",
+        "high",
+    ])
+    .ok();
+    eventually("manual resleeve effort", Duration::from_secs(60), || {
+        let s = hub.sleeve("parent");
+        (s["lifecycle"].as_str() == Some("running")
+            && s["incarnation"]["g"].as_u64() == Some(3)
+            && s["incarnation"]["effort"].as_str() == Some("high"))
+        .then_some(())
+    });
+    let worker = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "worker",
+            "--parent",
+            "parent",
+            "--harness",
+            "claude",
+        ])
+        .json();
+    hub.wait("worker", "idle", 60);
+    let token_file = hub.home.join(format!(
+        "sleeves/{}/home/test-token",
+        worker["id"].as_str().unwrap()
+    ));
+    let token = eventually("the sleeve's capability", Duration::from_secs(30), || {
+        std::fs::read_to_string(&token_file)
+            .ok()
+            .filter(|s| !s.is_empty())
+    });
+    let scope = hub.cli_env(&[("PROTECTORATE_TOKEN", &token)], &["job", "ls"]);
+    let json_scope = hub
+        .cli_env(&[("PROTECTORATE_TOKEN", &token)], &["--json", "job", "ls"])
+        .json();
+    assert!(
+        scope
+            .stdout
+            .contains("Showing only this sleeve's and its children's jobs."),
+        "{} {json_scope}",
+        scope.stdout
+    );
+    assert_eq!(json_scope["scoped_to_caller"].as_bool(), Some(true));
+    hub.send("worker", "Run a tool.");
+    eventually("the tool call", Duration::from_secs(30), || {
+        (!of_type(&hub.transcript("worker"), "tool_call").is_empty()).then_some(())
+    });
+    let refusal = hub.cli(&["sleeve", "send", "worker", "Change direction", "--steer"]);
+    assert_ne!(refusal.status, 0);
+    assert!(
+        refusal.stderr.contains("cannot steer a running turn")
+            && refusal.stderr.contains("omit --steer to queue"),
+        "{}",
+        refusal.stderr
+    );
+    hub.cli(&["sleeve", "send", "worker", "Change direction"])
+        .ok();
+    assert_eq!(hub.sleeve("worker")["queued"].as_u64(), Some(1));
+    std::fs::write(
+        std::path::Path::new(worker["path"].as_str().unwrap()).join("trigger"),
+        "desync",
+    )
+    .unwrap();
+    eventually("G14 and the parent notice", Duration::from_secs(60), || {
+        let events = hub.cli(&["--json", "event", "list"]).json();
+        events["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| {
+                e["source"].as_str() == Some("worker")
+                    && e["target"].as_str() == Some("parent")
+                    && e["text"]
+                        .as_str()
+                        .is_some_and(|t| t.contains("send a prompt"))
+            })
+            .then_some(())
+    });
+}
+
 /// A sleeve controls its repo's config and `.gitattributes` (a child, the shared git dir): the
 /// hub's checkpoint, worktree add and brief facts must run none of its filters, hooks,
 /// fsmonitor or textconv. A child path through a symlink never reaches another worktree.
