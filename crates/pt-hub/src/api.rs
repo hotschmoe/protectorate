@@ -400,8 +400,17 @@ fn name_taken(st: &State, name: &str) -> bool {
         .any(|s| s.life != Life::Removed && s.name == name)
 }
 
+/// The core's spawn name rule. Checked before a new project is created.
+fn spawn_name_ok(name: &str) -> bool {
+    (1..=64).contains(&name.len())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))
+}
+
 /// The absolute directory a new project will occupy, or why it will not.
 fn resolve_new_project(hub: &Hub, given: &str) -> Result<String> {
+    let given = given.strip_suffix('/').unwrap_or(given);
     let configured = hub.config.projects_dir.as_str();
     if configured.is_empty() {
         return Err(err(
@@ -452,11 +461,7 @@ fn resolve_new_project(hub: &Hub, given: &str) -> Result<String> {
     // An absolute path may name the configured spelling when `projects_dir` is a symlink.
     // The claim is still the canonical directory.
     let full = if given.starts_with('/') {
-        if path_ok(configured)
-            && configured != root_s
-            && path_within(given, configured)
-            && given != configured
-        {
+        if configured != root_s && path_within(given, configured) && given != configured {
             format!("{root_s}{}", &given[configured.len()..])
         } else {
             given.to_string()
@@ -504,13 +509,7 @@ fn resolve_new_project(hub: &Hub, given: &str) -> Result<String> {
                 ));
             }
             Ok(_) if last => {
-                return Err(err(
-                    ErrorCode::Conflict,
-                    format!(
-                        "{} already exists; sleeve spawn --path adopts it",
-                        next.display()
-                    ),
-                ));
+                return Err(err(ErrorCode::Conflict, exists_reason(hub, &next)));
             }
             Ok(m) if m.is_dir() => cur = next,
             Ok(_) => {
@@ -542,16 +541,30 @@ fn resolve_new_project(hub: &Hub, given: &str) -> Result<String> {
     Err(err(ErrorCode::Invalid, "new_path names no directory"))
 }
 
+/// Why a path that is already on disk cannot be a new project.
+fn exists_reason(hub: &Hub, path: &Path) -> String {
+    let Some(text) = path.to_str() else {
+        return format!(
+            "{} already exists; sleeve spawn --path adopts it",
+            path.display()
+        );
+    };
+    if let Some(why) = overlap_claim(&hub.view().state, text) {
+        return why;
+    }
+    if path.join(".git").symlink_metadata().is_ok() && crate::git::head(path).is_none() {
+        return format!(
+            "{text} already exists and its repository has no commit; remove it and retry, or \
+             commit in it before sleeve spawn --path"
+        );
+    }
+    format!("{text} already exists; sleeve spawn --path adopts it")
+}
+
 fn create_project(hub: &Hub, path: &Path) -> Result<String> {
     if let Err(e) = std::fs::create_dir(path) {
         return Err(if e.kind() == std::io::ErrorKind::AlreadyExists {
-            err(
-                ErrorCode::Conflict,
-                format!(
-                    "{} already exists; sleeve spawn --path adopts it",
-                    path.display()
-                ),
-            )
+            err(ErrorCode::Conflict, exists_reason(hub, path))
         } else {
             err(
                 ErrorCode::Invalid,
@@ -559,6 +572,7 @@ fn create_project(hub: &Hub, path: &Path) -> Result<String> {
             )
         });
     }
+    info!("project: created {}", path.display());
     if let Err(why) = same_real_path(path) {
         return Err(err(
             ErrorCode::Invalid,
@@ -607,7 +621,11 @@ fn remove_failed_init(hub: &Hub, path: &Path) -> bool {
     if claimed(hub, path) {
         return false;
     }
-    std::fs::remove_dir_all(path).is_ok()
+    remove_project_dir(path).is_ok()
+}
+
+fn remove_project_dir(path: &Path) -> std::io::Result<()> {
+    std::fs::remove_dir_all(path).inspect(|_| info!("project: removed {}", path.display()))
 }
 
 fn plain_dir(path: &Path) -> bool {
@@ -643,7 +661,7 @@ fn settle_new_project(hub: &Hub, path: &str, commit: &str) -> Kept {
     if let Some(why) = overlap_claim(&hub.view().state, path) {
         return Kept::Still(why);
     }
-    match std::fs::remove_dir_all(p) {
+    match remove_project_dir(p) {
         Ok(()) => Kept::Gone,
         Err(e) => Kept::Still(e.to_string()),
     }
@@ -663,7 +681,7 @@ fn repo_still_ours(path: &Path, commit: &str) -> bool {
         }
         git = true;
     }
-    git && crate::git::head_commit(path).as_deref() == Some(commit)
+    git && crate::git::head(path).as_deref() == Some(commit)
 }
 
 fn with_kept(e: ApiError, path: &str, kept: Kept) -> ApiError {
@@ -753,6 +771,12 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
     if creating.is_some() && name_taken(st, &r.name) {
         return Err(err(ErrorCode::Conflict, "a sleeve has that name"));
     }
+    if creating.is_some() && !spawn_name_ok(&r.name) {
+        return Err(err(
+            ErrorCode::Invalid,
+            "name must be 1-64 of [A-Za-z0-9._-]",
+        ));
+    }
     let path = if let Some(given) = creating {
         resolve_new_project(hub, given)?
     } else {
@@ -795,6 +819,10 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         r.provider.as_deref().unwrap_or(""),
         r.model.as_deref().unwrap_or(""),
     );
+    let resleeve_to = targets(hub, &r.resleeve_to);
+    if creating.is_some() && (!target.valid() || resleeve_to.iter().any(|t| !t.valid())) {
+        return Err(err(ErrorCode::Invalid, "that harness has no headless mode"));
+    }
     if creating.is_some()
         && let Some(why) = overlap_claim(st, &path)
     {
@@ -833,7 +861,7 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         },
         target,
         effort: r.effort.filter(|e| !e.is_empty()),
-        resleeve_to: targets(hub, &r.resleeve_to),
+        resleeve_to,
         budget: r.budget,
         disk_limit: None,
     };

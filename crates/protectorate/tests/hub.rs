@@ -1146,6 +1146,14 @@ fn new_project_root() {
     std::fs::create_dir_all(&projects).unwrap();
     let projects = std::fs::canonicalize(&projects).unwrap();
     let proj = projects.to_str().unwrap();
+    let ident_dir = unique("git-ident");
+    std::fs::create_dir_all(&ident_dir).unwrap();
+    let ident = ident_dir.join("gitconfig");
+    std::fs::write(
+        &ident,
+        "[user]\n\tname = Project Owner\n\temail = project-owner@example.test\n",
+    )
+    .unwrap();
     let hub = Hub::start_config(
         "newproj",
         "claude",
@@ -1154,7 +1162,7 @@ fn new_project_root() {
             ("claude_program", program.into()),
         ],
         &[],
-        &[],
+        &[("GIT_CONFIG_GLOBAL", ident.to_str().unwrap())],
     );
     claude_ready(&hub);
     let both = hub.cli(&[
@@ -1215,10 +1223,9 @@ fn new_project_root() {
         git_out(&path, &["log", "-1", "--format=%s"]),
         "Initial commit"
     );
-    let (author_name, author_email) = owner_git();
     assert_eq!(
         git_out(&path, &["log", "-1", "--format=%an <%ae>"]),
-        format!("{author_name} <{author_email}>")
+        "Project Owner <project-owner@example.test>"
     );
     assert!(git_out(&path, &["ls-tree", "HEAD"]).is_empty());
 
@@ -1291,9 +1298,49 @@ fn new_project_root() {
         "claude",
     ]);
     assert!(
-        exists.stderr.contains("already exists"),
+        exists.stderr.contains("overlaps sleeve voice")
+            && exists.stderr.contains(path.to_str().unwrap()),
         "{}",
         exists.stderr
+    );
+
+    let unborn = projects.join("unborn");
+    std::fs::create_dir(&unborn).unwrap();
+    assert!(
+        std::process::Command::new("git")
+            .args(["init", "-q", "-b", "main"])
+            .current_dir(&unborn)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let hint = hub.cli(&[
+        "sleeve",
+        "spawn",
+        "unborn",
+        "--new-path",
+        "unborn",
+        "--harness",
+        "claude",
+    ]);
+    assert!(hint.stderr.contains("has no commit"), "{}", hint.stderr);
+    assert!(unborn.join(".git").is_dir());
+
+    let slashed = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "slashed",
+            "--new-path",
+            "slashed/",
+            "--harness",
+            "claude",
+        ])
+        .json();
+    assert_eq!(
+        slashed["path"].as_str(),
+        Some(projects.join("slashed").to_str().unwrap())
     );
 
     let nested = hub.cli(&[
@@ -1411,25 +1458,6 @@ fn new_project_root() {
         sneaky.stderr
     );
     assert!(!projects.join("sneak").exists());
-}
-
-/// The owner's git identity, with the same fallback the hub uses for a new project's commit.
-fn owner_git() -> (String, String) {
-    let get = |key: &str| {
-        let out = std::process::Command::new("git")
-            .args(["config", "--global", "--get", key])
-            .output()
-            .ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        (!v.is_empty() && !v.contains('\n')).then_some(v)
-    };
-    (
-        get("user.name").unwrap_or_else(|| "protectorate".into()),
-        get("user.email").unwrap_or_else(|| "protectorate@localhost".into()),
-    )
 }
 
 fn claude_ready(hub: &Hub) {

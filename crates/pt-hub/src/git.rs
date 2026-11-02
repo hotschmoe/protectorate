@@ -98,10 +98,6 @@ pub fn init_empty(dir: &Path, branch: &str, message: &str) -> Result<String, Str
     rev_parse(dir, &["HEAD"])
 }
 
-pub(crate) fn head_commit(dir: &Path) -> Option<String> {
-    head(dir)
-}
-
 fn branch_ok(branch: &str) -> bool {
     !branch.is_empty()
         && branch.len() <= 64
@@ -201,7 +197,7 @@ impl Shadow {
     }
 }
 
-fn head(repo: &Path) -> Option<String> {
+pub(crate) fn head(repo: &Path) -> Option<String> {
     rev_parse(repo, &["--verify", "-q", "HEAD^{commit}"])
         .ok()
         .filter(|h| !h.is_empty())

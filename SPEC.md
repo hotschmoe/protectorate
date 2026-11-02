@@ -180,10 +180,16 @@ crash, every incarnation goes to Recovering and resumes natively.
     `projects_dir` (`config.json`; empty, the default, turns this off, and `/` is refused): a
     relative path under that directory, or an absolute path inside it, including one written
     through the configured spelling when `projects_dir` is a symlink. No `.` or `..` component,
-    no symlink under it, and not inside the hub's home. A path the hub cannot see is refused
-    with `the hub cannot see DIR`. A directory that already exists is left for `--path` to adopt.
-    A name already in use is refused before anything is created. D9 still counts the spawn. A
-    refused spawn removes the directory only when no live claim overlaps it and it is still that
+    no symlink under it, and not inside the hub's home. A trailing slash is accepted. A path
+    the hub cannot see is refused with `the hub cannot see DIR`. A directory a live root holds
+    is refused with that sleeve's name. A repository with no commit is refused and told to
+    remove it or to commit before `--path`, because `--path` would adopt a root that cannot
+    branch children. Any other directory that already exists is left for `--path` to adopt.
+    A name already in use, a name the core would refuse, or a harness with no headless mode,
+    is refused before the directory
+    is created and before the D9 gate, so that refusal does not count. A spawn that reaches
+    the gate does. A refused spawn removes the directory only when no live claim overlaps it
+    and it is still that
     empty commit; otherwise the directory stays and the error says so. A spawn the core does not
     answer, or whose reply is lost, keeps the directory without that check.
   - Stopping or removing the root stops every child in the same step. A root crash, resume,
