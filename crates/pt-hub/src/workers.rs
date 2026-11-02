@@ -130,14 +130,18 @@ fn quota_readers(hub: &Hub) -> Vec<Box<dyn Reader>> {
 /// Publishes the unread rows at once, then refreshes in the background until the hub is gone.
 /// `quota_poll_secs` 0 never reads: every row stays `unknown`.
 pub fn start_quotas(hub: &Arc<Hub>) {
-    let mut opts = Options::default();
+    let opts = Options::default();
     #[cfg(debug_assertions)]
-    if let Some(ms) = std::env::var("PT_TEST_QUOTA_STALE_MS")
+    let opts = match std::env::var("PT_TEST_QUOTA_STALE_MS")
         .ok()
         .and_then(|s| s.parse().ok())
     {
-        opts.stale_after = Duration::from_millis(ms);
-    }
+        Some(ms) => Options {
+            stale_after: Duration::from_millis(ms),
+            ..opts
+        },
+        None => opts,
+    };
     let mut cache = Cache::new(quota_readers(hub), opts);
     hub.quotas
         .publish(&hub.bus, cache.quotas_with_age(), opts.stale_after);
