@@ -1067,14 +1067,14 @@ impl Core<'_> {
         let mut n = 0;
         let mut oldest = None;
         for &t in stamps {
-            if crate::guard::since(now, t) < ENVOY_MAIL_WINDOW {
+            if since(now, t) < ENVOY_MAIL_WINDOW {
                 n += 1;
                 oldest = Some(oldest.map_or(t, |o: Millis| o.min(t)));
             }
         }
         if n >= ENVOY_MAIL_LIMIT {
             let oldest = oldest.expect("a full window has a stamp");
-            let left = ENVOY_MAIL_WINDOW - crate::guard::since(now, oldest);
+            let left = ENVOY_MAIL_WINDOW - since(now, oldest);
             let secs = left.div_ceil(SECOND).max(1);
             let why = if envoy {
                 format!("too many messages to Envoy from this tree; the window reopens in {secs}s")
@@ -1091,7 +1091,7 @@ impl Core<'_> {
         } else {
             &mut self.sl(id).parent_mails
         };
-        v.retain(|&t| crate::guard::since(now, t) < ENVOY_MAIL_WINDOW);
+        v.retain(|&t| since(now, t) < ENVOY_MAIL_WINDOW);
         v.push(now);
         true
     }
@@ -1118,9 +1118,9 @@ impl Core<'_> {
     }
 
     fn is_envoy(&self, id: SleeveId) -> bool {
-        self.st.sleeve(id).is_some_and(|s| {
-            s.name == crate::ENVOY_NAME && s.parent.is_none() && s.life != Life::Removed
-        })
+        self.st
+            .sleeve(id)
+            .is_some_and(|s| s.name == ENVOY_NAME && s.parent.is_none() && s.life != Life::Removed)
     }
 
     /// A Send can go out as the next prompt now.

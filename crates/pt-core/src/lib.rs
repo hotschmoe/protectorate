@@ -15,6 +15,7 @@ mod approval;
 mod effect;
 mod guard;
 mod job;
+mod machine;
 mod sleeve;
 
 pub use approval::{ACTION_PREFIX, tool_approval_id};
@@ -23,6 +24,7 @@ pub use event::{
 };
 pub use guard::limits;
 pub use intent::{Class, Code, EffectKind, Intent, Notice, Reply};
+pub(crate) use machine::Core;
 pub use model::*;
 pub use sleeve::{name_ok, overlap_refusal};
 pub use state::*;
@@ -48,12 +50,6 @@ pub fn replay<'a>(events: impl IntoIterator<Item = &'a Event>) -> State {
         apply(&mut state, e);
     }
     state
-}
-
-pub(crate) struct Core<'a> {
-    pub st: &'a mut State,
-    pub out: Vec<Intent>,
-    pub now: Millis,
 }
 
 impl Core<'_> {
@@ -182,22 +178,5 @@ impl Core<'_> {
                 self.recover_approvals();
             }
         }
-    }
-
-    pub(crate) fn reply(&mut self, r: Reply) {
-        self.out.push(Intent::Reply(r));
-    }
-
-    pub(crate) fn refuse(&mut self, code: Code, why: impl Into<String>) {
-        self.reply(Reply::Refused(code, why.into()));
-    }
-
-    pub(crate) fn notify(&mut self, to: Party, sleeve: Option<SleeveId>, notice: Notice) {
-        self.out.push(Intent::Notify { to, sleeve, notice });
-    }
-
-    /// The sleeve, which callers have already checked exists.
-    pub(crate) fn sl(&mut self, id: SleeveId) -> &mut Sleeve {
-        self.st.sleeves.get_mut(&id).expect("sleeve exists")
     }
 }

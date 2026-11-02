@@ -4,7 +4,6 @@
 use crate::Core;
 use crate::effect::Report;
 use crate::event::{JobReport, JobSpec};
-use crate::guard::since;
 use crate::intent::{Code, EffectKind, Intent, Notice, Reply};
 use crate::model::*;
 use crate::state::*;

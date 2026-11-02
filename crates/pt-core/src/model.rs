@@ -7,6 +7,12 @@ pub const SECOND: Millis = 1_000;
 pub const MINUTE: Millis = 60 * SECOND;
 pub const HOUR: Millis = 60 * MINUTE;
 
+/// Time since `t`, which is never after `now`. Event times may come close to `Millis::MAX`, so
+/// every timeout compares elapsed time rather than adding to a stamp.
+pub(crate) fn since(now: Millis, t: Millis) -> Millis {
+    now.saturating_sub(t)
+}
+
 /// Name of the hub's Envoy sleeve. Mail from another sleeve to that live root is rate-limited.
 pub const ENVOY_NAME: &str = "envoy";
 

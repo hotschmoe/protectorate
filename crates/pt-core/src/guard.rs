@@ -76,12 +76,6 @@ pub fn action(g: Guardrail) -> Action {
     }
 }
 
-/// Time since `t`, which is never after `now`. Event times may come close to `Millis::MAX`, so
-/// every timeout compares elapsed time rather than adding to a stamp.
-pub(crate) fn since(now: Millis, t: Millis) -> Millis {
-    now.saturating_sub(t)
-}
-
 fn recent(v: &mut Vec<Millis>, now: Millis, window: Millis) -> usize {
     v.retain(|&t| since(now, t) < window);
     v.len()
