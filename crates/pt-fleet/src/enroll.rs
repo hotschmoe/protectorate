@@ -9,8 +9,10 @@ use std::path::{Path, PathBuf};
 use pt_api::EpochMs;
 use pt_json::{FromJson, ToJson, Value, record};
 
+use crate::error::{Error, Result};
+use crate::files::write_file;
+use crate::fleet::Fleet;
 use crate::headscale::{HsNode, TAG_HUB, TAG_NODE};
-use crate::{Error, Fleet, Result};
 
 /// headscale's registration cache lifetime (`registerCacheExpiration`).
 pub const PENDING_TTL_MS: u64 = 15 * 60 * 1000;
@@ -124,7 +126,7 @@ fn read_list<T: FromJson>(path: &Path) -> Result<Vec<T>> {
 }
 
 fn write_list<T: ToJson>(path: &Path, items: &[T]) -> Result<()> {
-    crate::write_file(
+    write_file(
         path,
         Value::Array(items.iter().map(ToJson::to_json).collect())
             .to_string()

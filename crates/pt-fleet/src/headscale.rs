@@ -11,7 +11,9 @@ use std::time::{Duration, Instant};
 
 use pt_json::{Map, Value, obj};
 
-use crate::{Config, Error, Result};
+use crate::config::Config;
+use crate::error::{Error, Result};
+use crate::files::{path_str, private_dir, write_file};
 
 pub const POLICY: &str = include_str!("../../../go/policy.hujson");
 /// The headscale user every enrolled machine is registered under before it is tagged.
@@ -44,7 +46,7 @@ impl Paths {
 /// Writes headscale.yaml (JSON, which YAML accepts), the DERP map and the policy. Rewritten on
 /// every start, so the config always follows `Config`.
 pub(crate) fn write_config(cfg: &Config, p: &Paths) -> Result<()> {
-    crate::private_dir(&p.dir)?;
+    private_dir(&p.dir)?;
     let d = |name: &str| p.dir.join(name).to_string_lossy().into_owned();
     let derp_path = d("derp.yaml");
     let policy_path = d("policy.hujson");
@@ -95,9 +97,9 @@ pub(crate) fn write_config(cfg: &Config, p: &Paths) -> Result<()> {
         derp.ipv4,
         derp.port
     );
-    crate::write_file(&p.config, config.to_string().as_bytes())?;
-    crate::write_file(Path::new(&derp_path), derp_map.as_bytes())?;
-    crate::write_file(Path::new(&policy_path), POLICY.as_bytes())
+    write_file(&p.config, config.to_string().as_bytes())?;
+    write_file(Path::new(&derp_path), derp_map.as_bytes())?;
+    write_file(Path::new(&policy_path), POLICY.as_bytes())
 }
 
 fn yaml_str(s: &str) -> String {
@@ -107,9 +109,9 @@ fn yaml_str(s: &str) -> String {
 /// headscale with `args`, inside bwrap: its own dir writable at the same path, the binary
 /// read-only, fresh /dev, /proc and /tmp, and nothing else of the host or the hub's home.
 pub(crate) fn command(cfg: &Config, p: &Paths, args: &[&str]) -> Result<Command> {
-    let dir = crate::path_str(&p.dir)?;
-    let bin = crate::path_str(&cfg.headscale)?;
-    let config = crate::path_str(&p.config)?;
+    let dir = path_str(&p.dir)?;
+    let bin = path_str(&cfg.headscale)?;
+    let config = path_str(&p.config)?;
     let mut cmd = Command::new(&cfg.bwrap);
     cmd.args([
         "--unshare-user",
@@ -398,7 +400,7 @@ pub(crate) fn copy_state(p: &Paths, dest_root: &Path, label: &str) -> Result<Pat
         })
         .collect();
     let dest = dest_root.join(format!("{}-{label}", pt_api::EpochMs::now().0));
-    crate::private_dir(dest_root)?;
+    private_dir(dest_root)?;
     fs::create_dir(&dest).map_err(|e| Error::new(format!("creating {}: {e}", dest.display())))?;
     let fill = (|| -> Result<()> {
         let mut copied = Map::new();
@@ -432,7 +434,7 @@ pub(crate) fn copy_state(p: &Paths, dest_root: &Path, label: &str) -> Result<Pat
         if !copied.contains_key("db.sqlite") {
             return Err(Error::new(format!("no database in {}", p.dir.display())));
         }
-        crate::write_file(
+        write_file(
             &dest.join("snapshot.json"),
             Value::Object(copied).to_string().as_bytes(),
         )?;

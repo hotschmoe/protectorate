@@ -12,8 +12,10 @@ use pt_api::{EpochMs, Node};
 use pt_frame::msg::HelloReply;
 
 use crate::client::NodeClient;
+use crate::enroll::Removal;
+use crate::fleet::Fleet;
 use crate::headscale::{HsNode, TAG_NODE};
-use crate::{Fleet, Removal, view};
+use crate::view;
 
 #[derive(Clone, Debug)]
 pub struct PollConfig {
@@ -58,9 +60,9 @@ pub struct NodeView {
 }
 
 impl NodeView {
-    pub fn protocol_error(&self) -> Option<crate::Error> {
+    pub fn protocol_error(&self) -> Option<crate::error::Error> {
         let node = self.hello.as_ref()?.protocol;
-        (node != pt_frame::msg::PROTOCOL).then_some(crate::Error::Protocol {
+        (node != pt_frame::msg::PROTOCOL).then_some(crate::error::Error::Protocol {
             node,
             hub: pt_frame::msg::PROTOCOL,
         })
@@ -121,7 +123,7 @@ impl Poller {
 
     /// `Fleet::rename_node`, then the node's view and link carry the new name at once. Nothing
     /// is published: the caller announces it.
-    pub fn rename(&self, id: u64, to: &str) -> crate::Result<HsNode> {
+    pub fn rename(&self, id: u64, to: &str) -> crate::error::Result<HsNode> {
         let s = &self.shared;
         let _g = s.fleet.nodes_lock();
         let node = s.fleet.rename_node(id, to)?;
@@ -138,7 +140,7 @@ impl Poller {
     /// headscale has deleted it, the view goes even when dropping the record failed. Nothing is
     /// published: the caller announces it when the second value says the poller dropped the
     /// node (it may have published the node during the removal).
-    pub fn remove(&self, id: u64) -> (crate::Result<Removal>, bool) {
+    pub fn remove(&self, id: u64) -> (crate::error::Result<Removal>, bool) {
         let s = &self.shared;
         let _g = s.fleet.nodes_lock();
         let removed = s.fleet.remove_node(id);
@@ -413,4 +415,16 @@ fn round(
         due.sample = now + s.cfg.sample_every;
     }
     Ok(())
+}
+
+impl Fleet {
+    /// Starts polling every `tag:node` machine; `publish` gets each update.
+    pub fn poll(
+        &self,
+        cfg: PollConfig,
+        publish: impl Fn(FleetEvent) + Send + Sync + 'static,
+    ) -> crate::error::Result<Poller> {
+        Poller::start(self.clone(), cfg, Arc::new(publish))
+            .map_err(|e| crate::error::Error::new(format!("starting the poller: {e}")))
+    }
 }

@@ -10,7 +10,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 
 const POLL: Duration = Duration::from_millis(250);
 const HEALTH_EVERY: Duration = Duration::from_secs(5);

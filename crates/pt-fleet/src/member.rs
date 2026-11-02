@@ -12,8 +12,10 @@ use std::time::{Duration, Instant};
 use pt_json::Value;
 
 use crate::client::DeadlineStream;
+use crate::config::Config;
+use crate::error::{Error, Result};
+use crate::files::{append_log, private_dir};
 use crate::headscale::{Admin, HsNode, TAG_HUB};
-use crate::{Config, Error, Result};
 
 const LINE_MAX: usize = 1024;
 const ENROLL_TIMEOUT: Duration = Duration::from_secs(60);
@@ -65,7 +67,7 @@ fn control_url(cfg: &Config) -> String {
 /// headscale's `/key`, then `auth register` and `tag:hub`.
 pub(crate) fn enroll(cfg: &Config, admin: &Admin, fingerprint: &str) -> Result<HsNode> {
     let dir = state_dir(cfg);
-    crate::private_dir(&dir)?;
+    private_dir(&dir)?;
     let mut cmd = base_command(cfg);
     cmd.args(["--mode", "hub", "--state-dir"])
         .arg(&dir)
@@ -78,9 +80,7 @@ pub(crate) fn enroll(cfg: &Config, admin: &Admin, fingerprint: &str) -> Result<H
         .arg("--print-registration")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::from(crate::append_log(
-            &cfg.dir.join("member-enroll.log"),
-        )?));
+        .stderr(Stdio::from(append_log(&cfg.dir.join("member-enroll.log"))?));
     let mut child = cmd.spawn().map_err(|e| {
         Error::new(format!(
             "starting {} for enrollment: {e}",

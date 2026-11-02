@@ -14,7 +14,7 @@ use pt_frame::msg::{
 use pt_frame::wire::{FrameReader, write_frame};
 use pt_json::FromJson;
 
-use crate::{Error, Result};
+use crate::error::{Error, Result};
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Bytes accepted per FetchLog or FetchArtifact beyond what was asked for, as slack for chunk
