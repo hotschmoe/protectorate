@@ -84,7 +84,7 @@ pub fn call(hub: &Hub, who: &Principal, name: &str, body: &Value) -> Result<Valu
             ),
         });
     }
-    crate::doctor::precheck(hub, name, body)?;
+    precheck(hub, name, body)?;
     let c = Ctx { hub, who };
     routes!(&c, name, body;
         GetState => get_state,
@@ -133,6 +133,46 @@ pub fn call(hub: &Hub, who: &Principal, name: &str, body: &Value) -> Result<Valu
         UpdateHub => update_hub,
         UpdateNodes => update_nodes,
     )
+}
+
+/// The API's gate: SpawnSleeve, StartSleeve and Resleeve onto an ineligible harness are refused
+/// before they reach the core. Bodies that do not parse are left to the handler.
+fn precheck(hub: &Hub, method: &str, body: &Value) -> Result<()> {
+    let harness = if method == m::SpawnSleeve::NAME {
+        api::SpawnSleeveRequest::from_json(body)
+            .ok()
+            .map(|r| wire::core_harness(r.harness))
+    } else if method == m::Resleeve::NAME {
+        api::ResleeveRequest::from_json(body)
+            .ok()
+            .map(|r| wire::core_harness(r.target))
+    } else if method == m::StartSleeve::NAME {
+        api::StartSleeveRequest::from_json(body)
+            .ok()
+            .and_then(|r| match r.target {
+                Some(t) => Some(wire::core_harness(t)),
+                None => {
+                    let view = hub.view();
+                    let st = &view.state;
+                    st.sleeves
+                        .values()
+                        .find(|s| {
+                            s.life != Life::Removed
+                                && (s.id.0.to_string() == r.sleeve_id || s.name == r.sleeve_id)
+                        })
+                        .map(|s| s.target.harness)
+                }
+            })
+    } else {
+        None
+    };
+    match harness {
+        Some(h) => hub
+            .doctor
+            .check(&hub.config, h)
+            .map_err(|why| ApiError::new(ErrorCode::Conflict, why)),
+        None => Ok(()),
+    }
 }
 
 // ---- access --------------------------------------------------------------------------------
@@ -2243,6 +2283,61 @@ fn revoke_device(c: &Ctx<'_>, r: api::DeviceRef) -> Result<api::Empty> {
 
 // ---- doctor and updates --------------------------------------------------------------------
 
+/// `GetDoctor`'s answer: the report compacted, with the hub's own harness update runs.
+fn doctor_report(hub: &Hub, r: Option<&pt_doctor::Report>) -> api::DoctorReport {
+    let Some(r) = r else {
+        return api::DoctorReport {
+            checked_at_ms: api::EpochMs(0),
+            os: std::env::consts::OS.into(),
+            arch: std::env::consts::ARCH.into(),
+            harnesses: Vec::new(),
+            gh_logged_in: false,
+            gh_account: String::new(),
+            sandbox_ok: false,
+            problems: vec!["doctor has not finished its first run".into()],
+        };
+    };
+    let runs = hub.harness_updates.last_runs();
+    api::DoctorReport {
+        checked_at_ms: api::EpochMs(r.checked_ms),
+        os: r.os.clone(),
+        arch: r.arch.clone(),
+        harnesses: r
+            .harnesses
+            .iter()
+            .map(|h| {
+                let last = runs.get(&h.binary.name);
+                api::DoctorHarness {
+                    name: h.name.clone(),
+                    present: h.binary.present,
+                    path: h.binary.path.clone(),
+                    version: h.binary.version.clone(),
+                    install: h.binary.install.as_str().into(),
+                    login: h.credentials.present,
+                    eligible: h.eligible,
+                    reasons: h.reasons.clone(),
+                    update: h.update.clone(),
+                    updated_at_ms: last.map(|l| api::EpochMs(l.at_ms)),
+                    update_note: last.map_or_else(String::new, |l| l.note.clone()),
+                }
+            })
+            .collect(),
+        gh_logged_in: r.gh.logged_in,
+        gh_account: r.gh.account.clone(),
+        sandbox_ok: r.sandbox.bwrap.present
+            && r.sandbox.bwrap.error.is_empty()
+            && r.sandbox.systemd_run_user,
+        problems: {
+            let mut problems = r.problems.clone();
+            let capped = hub.history.capped_sleeves();
+            if !capped.is_empty() {
+                problems.push(format!("history capped: {}", capped.join(", ")));
+            }
+            problems
+        },
+    }
+}
+
 fn get_doctor(c: &Ctx<'_>, r: api::GetDoctorRequest) -> Result<api::DoctorReport> {
     if matches!(c.who, Principal::Sleeve(_)) {
         return Err(err(
@@ -2251,16 +2346,19 @@ fn get_doctor(c: &Ctx<'_>, r: api::GetDoctorRequest) -> Result<api::DoctorReport
         ));
     }
     let report = if r.refresh {
-        Some(crate::doctor::run_now(c.hub))
+        Some(crate::workers::run_doctor(c.hub))
     } else {
         c.hub.doctor.report()
     };
-    Ok(crate::doctor::api_report(c.hub, report.as_deref()))
+    Ok(doctor_report(c.hub, report.as_deref()))
 }
 
 fn update_harnesses(c: &Ctx<'_>, r: api::UpdateHarnessesRequest) -> Result<api::HarnessUpdates> {
     Ok(api::HarnessUpdates {
-        programs: crate::harness_update::request(c.hub, &r.programs),
+        programs: c
+            .hub
+            .harness_updates
+            .request(&c.hub.doctor, || c.hub.view(), &r.programs),
     })
 }
 

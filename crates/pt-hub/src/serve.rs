@@ -287,9 +287,9 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
         }));
     }
 
-    crate::doctor::start(&hub, o.net);
+    crate::workers::start_doctor(&hub, o.net);
     crate::hardware::start(&hub);
-    crate::harness_update::start(&hub);
+    crate::workers::start_harness_updates(&hub);
     crate::workers::start_fleet(&hub, o.fleet, o.net);
     crate::workers::start_quotas(&hub);
     crate::workers::start_history(&hub);

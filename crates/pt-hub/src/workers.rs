@@ -1,20 +1,24 @@
-//! The background threads of the subsystems whose state the hub holds: the fleet start, quota
-//! reads and history ingest. Each holds the hub weakly and ends once it is gone; what one
-//! round does is the subsystem's own.
+//! The background threads of the subsystems whose state the hub holds: the fleet start, doctor,
+//! harness updates, quota reads and history ingest. Each holds the hub weakly and ends once it
+//! is gone; what one round does is the subsystem's own.
 
 use std::sync::{Arc, Weak};
 use std::thread;
 use std::time::Duration;
 
-use pt_core::Harness;
+use pt_api::{EventKind as Kind, Level};
+use pt_core::{EventKind, Harness, Life, ParkReason};
+use pt_doctor::Report;
 use pt_fleet::{Fleet, PollConfig};
 use pt_quota::{Cache, Options, Reader};
 
+use crate::envoy::{ENVOY, envoy_id};
 use crate::exec::program;
 use crate::fleet::{self, FleetFlags, Net, Up};
 use crate::hub::Hub;
 use crate::log::{info, warning};
 
+const DOCTOR_EVERY: Duration = Duration::from_secs(6 * 3600);
 /// How often the history ingest catches up.
 const HISTORY_POLL: Duration = Duration::from_secs(1);
 /// Longest wait after a failed history commit before the next catch-up.
@@ -181,5 +185,83 @@ pub fn start_history(hub: &Arc<Hub>) {
         });
     if let Err(e) = started {
         warning!("history: starting the ingest thread: {e}");
+    }
+}
+
+/// Loads the cached report, then runs the checks at once and every 6 h (or when asked).
+pub fn start_doctor(hub: &Arc<Hub>, net: Net) {
+    hub.doctor.load(&hub.home, net);
+    let weak = Arc::downgrade(hub);
+    let spawned = thread::Builder::new()
+        .name("pt-doctor".into())
+        .spawn(move || {
+            loop {
+                let Some(hub) = weak.upgrade() else { return };
+                run_doctor(&hub);
+                hub.doctor.wait_asked(DOCTOR_EVERY);
+            }
+        });
+    if let Err(e) = spawned {
+        warning!("doctor: starting its thread: {e}");
+    }
+}
+
+/// Runs doctor now, as its thread does.
+pub fn run_doctor(hub: &Hub) -> Arc<Report> {
+    hub.doctor
+        .run(&hub.home, &hub.owner_home, &hub.config, &hub.bus, |r| {
+            unpark_envoy(hub, r)
+        })
+}
+
+/// Envoy parked by the gate starts again once its harness is eligible.
+fn unpark_envoy(hub: &Hub, report: &Report) {
+    let view = hub.view();
+    let Some(id) = envoy_id(&view.state) else {
+        return;
+    };
+    let Some(s) = view.state.sleeve(id) else {
+        return;
+    };
+    if s.life != Life::Parked(ParkReason::NoTarget) || hub.doctor.gated(id).is_none() {
+        return;
+    }
+    let name = s.target.harness.as_str();
+    if !report.eligible(name) {
+        return;
+    }
+    hub.doctor.ungate(id);
+    hub.bus.event(
+        Kind::Sleeve,
+        Level::Info,
+        ENVOY,
+        "owner",
+        &format!("doctor: {name} is eligible again; starting Envoy"),
+    );
+    hub.submit(EventKind::Start {
+        sleeve: id,
+        target: None,
+        effort: None,
+    });
+}
+
+/// Starts the harness update thread. With `harness_update_hours` 0 it runs only what is asked
+/// for.
+pub fn start_harness_updates(hub: &Arc<Hub>) {
+    hub.harness_updates.load(&hub.home);
+    let every = Duration::from_secs(hub.config.harness_update_hours.saturating_mul(3600));
+    let weak = Arc::downgrade(hub);
+    let spawned = thread::Builder::new()
+        .name("pt-harness-update".into())
+        .spawn(move || {
+            loop {
+                let Some(hub) = weak.upgrade() else { return };
+                let u = &hub.harness_updates;
+                let nap = u.round(&hub.doctor, &hub.bus, &hub.home, || hub.view(), every);
+                u.nap(nap);
+            }
+        });
+    if let Err(e) = spawned {
+        warning!("harness update: starting its thread: {e}");
     }
 }

@@ -525,7 +525,7 @@ impl SleeveExec {
                 let hub = &self.hub;
                 let eligible = |t: &Target| {
                     program(hub, t.harness).is_some()
-                        && crate::doctor::check(hub, t.harness).is_ok()
+                        && hub.doctor.check(&hub.config, t.harness).is_ok()
                 };
                 let quotas = hub.quotas.list();
                 // Envoy whose own harness doctor refused parks rather than moving elsewhere.
@@ -817,7 +817,8 @@ impl SleeveExec {
         resume: Option<String>,
     ) -> Result<(), String> {
         let hub = self.hub.clone();
-        crate::doctor::gate_launch(&hub, s.id, &s.name, target.harness)?;
+        hub.doctor
+            .gate_launch(&hub.bus, s.id, &s.name, target.harness)?;
         let harness =
             driver_harness(target.harness).ok_or("that harness has no headless driver")?;
         let mut program = program(&hub, target.harness)
