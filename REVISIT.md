@@ -722,6 +722,12 @@ Each entry: where, what was done, what right looks like.
   `previous` are each synced before `current` changes. Trial rollback restores the snapshot,
   syncs `current` back to the confirmed release, then records the outcome; `previous` stays
   confirmed. Debug-only `PT_TEST_CRASH_AT` exercises selected crash points. Right: fine.
+- **Starting a just-written binary can fail with ETXTBSY** (`pt-update`, the node supervisor):
+  on Linux a file still open for writing anywhere, including a descriptor a concurrent fork
+  inherited for a moment before exec, cannot be executed. The update e2e hit it once under load
+  (`node_update_admission_lost_reply_and_confirmation`, "Text file busy" at spawn); three reruns
+  passed. A staged release is executed for its version check right after it is written. Right:
+  retry a start that fails with ETXTBSY a few times, briefly.
 - **Probation counts on wall-clock time and on the new binary's own watch** (`pt-update`): the
   units run `releases/previous/<bin> probation` before each start, which rolls back after
   `MAX_TRIAL_STARTS` (3) failed starts or a passed window, and the release on trial watches its
