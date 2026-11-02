@@ -6,6 +6,7 @@
 //! ```text
 //! pt-history-probe --index DIR [--cap 1G] [--budget 1G] [--sleeve ID] [--home DIR]
 //!     [--runs 20] [--query Q]...
+//! pt-history-probe --index DIR --read SESSION [--after DOC] [--budget BYTES]
 //! ```
 
 use std::path::{Path, PathBuf};
@@ -34,10 +35,12 @@ struct Args {
     runs: usize,
     queries: Vec<String>,
     sleeve: Option<String>,
+    read: Option<String>,
+    after: Option<u64>,
 }
 
 fn usage() -> String {
-    "usage: pt-history-probe --index DIR [--cap BYTES[K|M|G]] [--budget BYTES[K|M|G]] [--sleeve ID] [--home DIR] [--runs N] [--query Q]..."
+    "usage: pt-history-probe --index DIR [--cap BYTES[K|M|G]] [--budget BYTES[K|M|G]] [--sleeve ID] [--home DIR] [--runs N] [--query Q]...\n       pt-history-probe --index DIR --read SESSION [--after DOC] [--budget BYTES[K|M|G]]"
         .into()
 }
 
@@ -58,6 +61,8 @@ fn args() -> Result<Args, String> {
     let mut budget = DEFAULT_BUDGET;
     let mut home = std::env::var_os("HOME").map(PathBuf::from);
     let mut sleeve = None;
+    let mut read = None;
+    let mut after = None;
     let mut runs = 20;
     let mut queries = Vec::new();
     while let Some(a) = it.next() {
@@ -70,6 +75,8 @@ fn args() -> Result<Args, String> {
             "--cap" => cap = size(&val()?).ok_or_else(usage)?,
             "--budget" => budget = size(&val()?).ok_or_else(usage)?,
             "--sleeve" => sleeve = Some(val()?),
+            "--read" => read = Some(val()?),
+            "--after" => after = Some(val()?.parse().map_err(|_| usage())?),
             "--home" => home = Some(PathBuf::from(val()?)),
             "--runs" => runs = val()?.parse().map_err(|_| usage())?,
             "--query" => queries.push(val()?),
@@ -80,8 +87,13 @@ fn args() -> Result<Args, String> {
         index: index.ok_or_else(usage)?,
         cap,
         budget,
-        home: home.ok_or("no --home and no HOME")?,
+        home: match (&read, home) {
+            (Some(_), home) => home.unwrap_or_default(),
+            (None, home) => home.ok_or("no --home and no HOME")?,
+        },
         sleeve,
+        read,
+        after,
         runs: runs.max(1),
         queries: if queries.is_empty() {
             QUERIES.iter().map(|q| q.to_string()).collect()
@@ -280,8 +292,37 @@ fn fingerprint(hits: &[Hit]) -> Vec<(u64, u64, String)> {
         .collect()
 }
 
+/// One page of a session: `doc ID TURN` lines, then `more true` or `more false`.
+fn read_page(index: &Path, session: &str, after: Option<u64>, budget: u64) -> Result<(), String> {
+    let ix = Index::open(index, budget).map_err(|e| e.to_string())?;
+    let (docs, more) = ix
+        .read(
+            &Selector::Turns {
+                session: session.to_owned(),
+                from: 0,
+                to: u32::MAX,
+                after,
+            },
+            None,
+            pt_history::READ_DOCS,
+        )
+        .map_err(|e| e.to_string())?;
+    for d in &docs {
+        println!("doc {} {}", d.id.0, d.turn);
+    }
+    println!("more {more}");
+    Ok(())
+}
+
 fn run() -> Result<bool, String> {
     let a = args()?;
+    if a.after.is_some() && a.read.is_none() {
+        return Err(usage());
+    }
+    if let Some(session) = &a.read {
+        read_page(&a.index, session, a.after, a.budget)?;
+        return Ok(true);
+    }
     let mut sources = select(&a.home, a.cap)?;
     if let Some(sleeve) = &a.sleeve {
         for s in &mut sources {

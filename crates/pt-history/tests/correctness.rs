@@ -317,3 +317,62 @@ fn small_budget_keeps_the_newest_lines_across_two_sessions() {
         .collect();
     assert!(!live.is_empty(), "a live segment remains: {live:?}");
 }
+
+/// One page of `session` from the probe: doc ids, their turns, and whether another page remains.
+fn read_page(index: &Path, session: &str, after: Option<u64>) -> (Vec<u64>, Vec<u32>, bool) {
+    let mut cmd = Command::new(PROBE);
+    cmd.args(["--index", index.to_str().unwrap(), "--read", session]);
+    let after_text = after.map(|id| id.to_string());
+    if let Some(id) = &after_text {
+        cmd.args(["--after", id]);
+    }
+    let out = cmd.output().expect("run history probe");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(out.status.success(), "stdout: {stdout}\nstderr: {stderr}");
+    let mut ids = Vec::new();
+    let mut turns = Vec::new();
+    let mut more = None;
+    for line in stdout.lines() {
+        if let Some(rest) = line.strip_prefix("doc ") {
+            let mut parts = rest.split_whitespace();
+            ids.push(parts.next().unwrap().parse().unwrap());
+            turns.push(parts.next().unwrap().parse().unwrap());
+        } else if let Some(rest) = line.strip_prefix("more ") {
+            more = Some(rest == "true");
+        }
+    }
+    (ids, turns, more.expect("probe printed more"))
+}
+
+#[test]
+fn one_turn_pages_past_200_docs_with_after() {
+    let dir = scratch("page");
+    let home = dir.join("home");
+    let path = home.join(".claude/projects/project/page.jsonl");
+    let mut body = String::from("{\"type\":\"user\",\"message\":{\"content\":\"pageuser\"}}\n");
+    let tools = 250;
+    for i in 0..tools {
+        body.push_str(&format!(
+            "{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"tool_use\",\"name\":\"Read\",\"input\":{{\"file_path\":\"p{i}\"}}}}]}}}}\n"
+        ));
+    }
+    write(&path, &body);
+    let index = dir.join("index");
+    let out = run(&home, &index, &["pageuser"], None);
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("summary: files=1 docs=251"), "{stdout}");
+    let (first, turns, more) = read_page(&index.join("a"), "page", None);
+    assert_eq!(first.len(), 200, "{first:?}");
+    assert!(more);
+    assert!(turns.iter().all(|t| *t == 1), "{turns:?}");
+    let (second, turns2, more2) = read_page(&index.join("a"), "page", Some(*first.last().unwrap()));
+    assert!(!more2);
+    assert!(turns2.iter().all(|t| *t == 1), "{turns2:?}");
+    let mut all = first.clone();
+    all.extend(&second);
+    assert_eq!(all.len(), 251, "page lens {} {}", first.len(), second.len());
+    for pair in all.windows(2) {
+        assert_eq!(pair[1], pair[0] + 1, "gap or repeat at {pair:?}");
+    }
+}
