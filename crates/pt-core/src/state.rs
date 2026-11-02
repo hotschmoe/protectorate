@@ -56,6 +56,7 @@ pub struct Sleeve {
     pub activity: Activity,
     /// The native turn id bound by the current turn's prompt ack.
     pub turn: Option<String>,
+    pub desync_during_turn: bool,
 
     /// Request ids of queued messages, FIFO.
     pub queue: VecDeque<String>,
@@ -323,6 +324,8 @@ pub struct Job {
     pub offset: u64,
     pub exit: Option<i32>,
     pub verify_failures: u32,
+    pub artifact_refusals: Vec<crate::ArtifactRefusal>,
+    pub artifact_incomplete: Option<String>,
     /// Last answer from the node about this attempt.
     pub seen_at: Millis,
     pub state_at: Millis,

@@ -373,6 +373,19 @@ impl Wire for JobSpec {
     }
 }
 
+impl Wire for ArtifactRefusal {
+    fn put(&self, w: &mut Vec<u8>) {
+        self.path.put(w);
+        self.reason.put(w);
+    }
+    fn get(r: &mut Reader) -> Result<Self, DecodeError> {
+        Ok(Self {
+            path: Wire::get(r)?,
+            reason: Wire::get(r)?,
+        })
+    }
+}
+
 impl Wire for JobReport {
     fn put(&self, w: &mut Vec<u8>) {
         match self {
@@ -726,6 +739,18 @@ impl Wire for EventKind {
                     (*result == ArtifactCheck::Verified).put(w);
                 }
             }
+            E::ArtifactCollection {
+                job,
+                attempt,
+                refusals,
+                incomplete,
+            } => {
+                w.push(36);
+                job.put(w);
+                attempt.put(w);
+                refusals.put(w);
+                incomplete.put(w);
+            }
             E::Observed { sleeve, g, obs } => {
                 w.push(26);
                 sleeve.put(w);
@@ -760,7 +785,7 @@ impl Wire for EventKind {
 
     fn get(r: &mut Reader) -> Result<Self, DecodeError> {
         use EventKind as E;
-        Ok(match r.tag("event", 35)? {
+        Ok(match r.tag("event", 36)? {
             0 => E::Spawn(Wire::get(r)?),
             1 => E::Send {
                 to: Wire::get(r)?,
@@ -906,10 +931,16 @@ impl Wire for EventKind {
                 target: Wire::get(r)?,
                 effort: Some(Wire::get(r)?),
             },
-            _ => E::ArtifactsChecked {
+            35 => E::ArtifactsChecked {
                 job: Wire::get(r)?,
                 attempt: Wire::get(r)?,
                 result: ArtifactCheck::Permanent,
+            },
+            _ => E::ArtifactCollection {
+                job: Wire::get(r)?,
+                attempt: Wire::get(r)?,
+                refusals: Wire::get(r)?,
+                incomplete: Wire::get(r)?,
             },
         })
     }

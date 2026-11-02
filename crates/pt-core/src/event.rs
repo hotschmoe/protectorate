@@ -244,6 +244,12 @@ pub enum EventKind {
         attempt: u32,
         result: ArtifactCheck,
     },
+    ArtifactCollection {
+        job: JobId,
+        attempt: u32,
+        refusals: Vec<ArtifactRefusal>,
+        incomplete: Option<String>,
+    },
 
     // Harness and scope observations, fenced by generation.
     Observed {
@@ -269,4 +275,10 @@ pub enum ArtifactCheck {
     Verified,
     Retryable,
     Permanent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactRefusal {
+    pub path: String,
+    pub reason: String,
 }

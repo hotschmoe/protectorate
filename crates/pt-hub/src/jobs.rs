@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 
 use pt_api::{self as api, EpochMs, HubStreamMessage};
 use pt_core::{
-    ArtifactCheck, EffectKind, EffectState, EventKind, Intent, Job, JobId, JobReport, JobSpec,
+    ArtifactRefusal, EffectKind, EffectState, EventKind, Intent, Job, JobId, JobReport, JobSpec,
     JobState, NodeId, Reply,
 };
 use pt_fleet::NodeClient;
@@ -358,6 +358,17 @@ pub fn view(hub: &Hub, j: &Job) -> api::Job {
         error: match j.state {
             JobState::Failed(pt_core::JobFailure::NodeRemoved(n)) => {
                 Some(format!("node {} was removed", n.0))
+            }
+            JobState::Failed(pt_core::JobFailure::Artifact) => {
+                let mut issues: Vec<String> = j
+                    .artifact_refusals
+                    .iter()
+                    .map(|r| format!("artifact {}: {}", r.path, r.reason))
+                    .collect();
+                if let Some(e) = &j.artifact_incomplete {
+                    issues.push(format!("collection incomplete: {e}"));
+                }
+                (!issues.is_empty()).then(|| issues.join("; "))
             }
             _ => None,
         },
@@ -1133,14 +1144,21 @@ impl NodeExec {
     /// Exited: the rest of the log, then each artifact, then `ArtifactsChecked`. A connection
     /// failure reports nothing: the lease makes the job Lost and its next status collects again.
     fn collect(&mut self, view: &View, job: JobId, attempt: u32) {
+        let mut refusals = view
+            .state
+            .jobs
+            .get(&job)
+            .map(|j| j.artifact_refusals.clone())
+            .unwrap_or_default();
         match self.pull_log(view, job, attempt, None) {
             Ok(_) => {}
             Err(Fail::Check(e)) => {
                 warning!("job {}: the log: {e}", job.0);
-                return self.submit(EventKind::ArtifactsChecked {
+                return self.submit(EventKind::ArtifactCollection {
                     job,
                     attempt,
-                    result: ArtifactCheck::Retryable,
+                    refusals,
+                    incomplete: Some(format!("log: {e}")),
                 });
             }
             Err(e) => return warning!("job {}: collecting the log: {}", job.0, e.text()),
@@ -1154,10 +1172,13 @@ impl NodeExec {
             .as_ref()
             .map(|r| r.artifacts.clone())
             .unwrap_or_default();
-        let mut fetched = Vec::new();
-        let mut result = ArtifactCheck::Verified;
+        let mut fetched = self.hub.jobs.fetched(job, attempt);
+        let mut incomplete = None;
         let token = self.token(view, job);
         for (n, path) in wanted.iter().enumerate() {
+            if refusals.iter().any(|r| r.path == *path) || fetched.iter().any(|f| f.path == *path) {
+                continue;
+            }
             let got = self.fetch_artifact(job, attempt, n, path, token.clone());
             match got {
                 Ok(f) => {
@@ -1167,35 +1188,34 @@ impl NodeExec {
                     );
                     fetched.push(f);
                 }
-                Err(Fail::Io(e) | Fail::Reach(e)) => {
-                    return warning!("job {}: fetching {path}: {e}", job.0);
-                }
                 Err(Fail::Node(r))
                     if matches!(r.code, NodeCode::BadRequest | NodeCode::NotFound) =>
                 {
-                    warning!("job {}: artifact {path}: {}", job.0, Fail::Node(r).text());
-                    result = ArtifactCheck::Permanent;
-                    break;
+                    let reason = Fail::Node(r).text();
+                    warning!("job {}: artifact {path}: {reason}", job.0);
+                    refusals.push(ArtifactRefusal {
+                        path: path.clone(),
+                        reason,
+                    });
                 }
                 Err(e) => {
                     warning!("job {}: artifact {path}: {}", job.0, e.text());
-                    result = ArtifactCheck::Retryable;
+                    incomplete.get_or_insert_with(|| format!("artifact {path}: {}", e.text()));
                 }
             }
         }
         if !wanted.is_empty() {
             if let Err(e) = self.hub.jobs.save_fetched(job, attempt, fetched) {
                 warning!("job {}: {e}", job.0);
-                if result != ArtifactCheck::Permanent {
-                    result = ArtifactCheck::Retryable;
-                }
+                incomplete.get_or_insert_with(|| format!("saving artifact metadata: {e}"));
             }
             stream(&self.hub, job);
         }
-        self.submit(EventKind::ArtifactsChecked {
+        self.submit(EventKind::ArtifactCollection {
             job,
             attempt,
-            result,
+            refusals,
+            incomplete,
         });
     }
 

@@ -80,6 +80,7 @@ impl Core<'_> {
                 turned: false,
                 activity: Activity::Ended,
                 turn: None,
+                desync_during_turn: false,
                 queue: VecDeque::new(),
                 steer_slot: None,
                 messages: Default::default(),
@@ -236,6 +237,7 @@ impl Core<'_> {
         s.target = target.clone();
         s.receipt = None;
         s.turn = None;
+        s.desync_during_turn = false;
         s.activity = Activity::Booting;
         s.boot_at = now;
         s.progress_at = now;
@@ -392,20 +394,26 @@ impl Core<'_> {
     }
 
     pub(crate) fn exited(&mut self, sid: SleeveId, g: Gen, cause: ExitCause) {
-        let Some(s) = self.st.sleeves.get_mut(&sid) else {
+        let Some(s) = self.st.sleeves.get(&sid) else {
             return;
         };
         if s.g != g || s.proc == Proc::Down {
             return;
         }
+        let delivery_sent = matches!(s.activity, Activity::Delivering { effect } if self.effect_state(effect) != Some(EffectState::Intent));
+        let killed_by_recovery = s.kill_cause == Some(Cause::HubRestart)
+            && self.st.effects.values().any(|e| {
+                e.kind == EffectKind::KillScope { sleeve: sid, g }
+                    && e.state == EffectState::Confirmed
+            });
+        let s = self.st.sleeves.get_mut(&sid).expect("sleeve exists");
         let was = std::mem::replace(&mut s.activity, Activity::Ended);
         let interrupted_turn = s.turn.is_some()
+            || s.desync_during_turn
+            || delivery_sent
             || matches!(
                 was,
-                Activity::Working
-                    | Activity::Blocked { .. }
-                    | Activity::Delivering { .. }
-                    | Activity::Interrupting
+                Activity::Working | Activity::Blocked { .. } | Activity::Interrupting
             );
         let old = std::mem::replace(&mut s.proc, Proc::Down);
         let stop_requested = s.stop_at.is_some();
@@ -447,7 +455,7 @@ impl Core<'_> {
                 let parent = s.parent;
                 self.sl(sid).life = Life::Recovering;
                 if let Some(p) = parent
-                    && kill_cause != Some(Cause::HubRestart)
+                    && !killed_by_recovery
                 {
                     self.notify(
                         Party::Sleeve(p),
@@ -1203,7 +1211,14 @@ impl Core<'_> {
                 self.settled(sid);
             }
             Obs::Desync { .. } => {
-                self.sl(sid).activity = Activity::Unknown;
+                let s = &self.st.sleeves[&sid];
+                let active = matches!(
+                    s.activity,
+                    Activity::Working | Activity::Blocked { .. } | Activity::Interrupting
+                ) || matches!(s.activity, Activity::Delivering { effect } if self.effect_state(effect) != Some(EffectState::Intent));
+                let s = self.sl(sid);
+                s.desync_during_turn |= active;
+                s.activity = Activity::Unknown;
                 self.trip(sid, Guardrail::ProtocolDesync);
             }
             Obs::Screen(v) => self.screen(sid, *v),

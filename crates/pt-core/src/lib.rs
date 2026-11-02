@@ -18,7 +18,9 @@ mod job;
 mod sleeve;
 
 pub use approval::{ACTION_PREFIX, tool_approval_id};
-pub use event::{ArtifactCheck, Ask, Event, EventKind, JobReport, JobSpec, Obs, SpawnSpec};
+pub use event::{
+    ArtifactCheck, ArtifactRefusal, Ask, Event, EventKind, JobReport, JobSpec, Obs, SpawnSpec,
+};
 pub use guard::limits;
 pub use intent::{Class, Code, EffectKind, Intent, Notice, Reply};
 pub use model::*;
@@ -155,6 +157,12 @@ impl Core<'_> {
                 attempt,
                 result,
             } => self.artifacts_checked(*job, *attempt, *result),
+            E::ArtifactCollection {
+                job,
+                attempt,
+                refusals,
+                incomplete,
+            } => self.artifact_collection(*job, *attempt, refusals, incomplete.as_deref()),
 
             E::Observed { sleeve, g, obs } => self.observed(*sleeve, *g, obs),
             E::Exited { sleeve, g, cause } => self.exited(*sleeve, *g, *cause),

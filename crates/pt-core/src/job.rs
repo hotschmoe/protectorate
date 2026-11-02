@@ -136,6 +136,8 @@ impl Core<'_> {
                 offset: 0,
                 exit: None,
                 verify_failures: 0,
+                artifact_refusals: Vec::new(),
+                artifact_incomplete: None,
                 seen_at: now,
                 state_at: now,
                 needs_new_attempt: false,
@@ -388,6 +390,48 @@ impl Core<'_> {
         }
     }
 
+    pub(crate) fn artifact_collection(
+        &mut self,
+        id: JobId,
+        attempt: u32,
+        refusals: &[crate::ArtifactRefusal],
+        incomplete: Option<&str>,
+    ) {
+        let Some(j) = self.st.jobs.get(&id) else {
+            return;
+        };
+        if j.attempt != attempt || j.state != JobState::Collecting {
+            return;
+        }
+        let now = self.now;
+        let j = self.job(id);
+        j.seen_at = now;
+        j.artifact_refusals = refusals.to_vec();
+        j.artifact_incomplete = incomplete.map(str::to_owned);
+        if incomplete.is_some() {
+            j.verify_failures += 1;
+            if j.verify_failures < MAX_VERIFY {
+                return self.fetch(id);
+            }
+            self.set_job(id, JobState::Failed(JobFailure::Artifact));
+            self.notify(
+                Party::Owner,
+                None,
+                Notice::JobFinished { job: id, ok: false },
+            );
+        } else {
+            self.artifacts_checked(
+                id,
+                attempt,
+                if refusals.is_empty() {
+                    crate::ArtifactCheck::Verified
+                } else {
+                    crate::ArtifactCheck::Permanent
+                },
+            );
+        }
+    }
+
     pub(crate) fn cancel_job(&mut self, id: JobId) {
         let Some(j) = self.st.jobs.get(&id) else {
             return self.refuse(Code::NotFound, "no such job");
@@ -464,6 +508,8 @@ impl Core<'_> {
         j.offset = 0;
         j.exit = None;
         j.verify_failures = 0;
+        j.artifact_refusals.clear();
+        j.artifact_incomplete = None;
         j.needs_new_attempt = false;
         self.set_job(id, JobState::Queued);
         self.schedule(id);
