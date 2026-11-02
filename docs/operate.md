@@ -191,7 +191,8 @@ selected. A failed reading (`error`) cannot; it parks the same way an exhausted 
 window whose reset time has already passed still blocks while it is over that line; a reset at
 or before the epoch is ignored and the percent still counts. A model-scoped Claude window
 (the weekly Sonnet or Opus cap, shown as `wk <model>`) is displayed and does not by itself
-block a Claude resleeve. A local
+block a Claude resleeve. Pi with a vendor login and Antigravity have no meter and are never
+chosen. A local
 endpoint may use HTTPS or loopback HTTP; other HTTP
 endpoints are reported as misconfigured and are not contacted.
 

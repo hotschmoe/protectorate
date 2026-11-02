@@ -181,6 +181,8 @@ enum Availability {
     Exhausted,
     /// No row, a row that was never a reading, or a row with nothing left to score.
     Unknown,
+    /// No quota reader exists for this harness, so it is not a fallback.
+    Unmetered,
 }
 
 /// Whether a candidate has usable quota, insufficient quota, or no usable reading.
@@ -198,7 +200,9 @@ fn availability(now_ms: u64, size: TaskSize, harness: Harness, quotas: &[Quota])
         };
     }
     let Some((_, subscription)) = SUBSCRIBED.iter().find(|(h, _)| *h == harness) else {
-        return Availability::Unknown;
+        // PiVendor and Antigravity have no reader. Missing is not "unknown": spending
+        // them would use an API key with no window.
+        return Availability::Unmetered;
     };
     let Some(q) = row(quotas, *subscription) else {
         return Availability::Unknown;

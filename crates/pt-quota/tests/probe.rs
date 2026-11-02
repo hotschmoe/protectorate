@@ -759,3 +759,34 @@ fn a_model_scoped_window_does_not_exhaust_the_subscription() {
     );
     assert!(!only.contains("target none"), "{only}");
 }
+
+/// Pi with a vendor login has no quota reader. A missing reading is not "unknown", so the
+/// fallback does not spend it once the subscribed account is under the usable minimum.
+#[test]
+fn an_unmetered_harness_is_not_spent_when_its_reading_is_missing() {
+    let home = scratch(&format!("unmetered-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"unmetered-claude"}}"#,
+    );
+    let (port, _) = serve(vec![(
+        "/api/oauth/usage",
+        r#"{"five_hour":{"utilization":99,"resets_at":"2100-01-01T00:00:00Z"}}"#,
+    )]);
+    let base = format!("http://127.0.0.1:{port}");
+    let home_s = home.to_str().unwrap();
+    let out = probe(&[
+        "--home",
+        home_s,
+        "--claude-url",
+        &base,
+        "--allow",
+        "claude,pi_vendor",
+    ]);
+    assert_eq!(state_of(line_of(&out, "claude")), "fresh", "{out}");
+    assert!(
+        out.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{out}"
+    );
+    assert!(!out.contains("target PiVendor"), "{out}");
+}

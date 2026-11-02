@@ -112,6 +112,13 @@ fuzz_target!(|data: &[u8]| {
                 allow.contains(h),
                 "fallback picked a harness that was not a candidate"
             );
+            assert!(
+                matches!(
+                    h,
+                    Harness::Claude | Harness::Codex | Harness::Grok | Harness::PiLocal
+                ),
+                "unmetered harness was spent: {h:?}"
+            );
             if let Some(sub) = metered(*h)
                 && let Some(q) = quotas.iter().find(|q| q.subscription == sub)
             {

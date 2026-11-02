@@ -65,6 +65,8 @@ fn main() -> ExitCode {
                         "codex" => Harness::Codex,
                         "grok" => Harness::Grok,
                         "pi_local" => Harness::PiLocal,
+                        "pi_vendor" => Harness::PiVendor,
+                        "antigravity" => Harness::Antigravity,
                         _ => {
                             eprintln!("pt-quota-probe: unknown harness {name}");
                             return ExitCode::from(2);

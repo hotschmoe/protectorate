@@ -1,7 +1,7 @@
 //! The answer to the core's `SelectTarget` (SPEC 8): among the sleeve's ordered `resleeve_to`
 //! candidates that are headless, not excluded and eligible, `pt_quota::select_with_fallback`
 //! picks by fresh quota, then a stale row that still has spare, then a candidate with no
-//! reading. A failed reading is not spent.
+//! reading. A failed reading is not spent, and neither is a harness that has no meter.
 
 use pt_api as api;
 use pt_core::{Mode, Target};

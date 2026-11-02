@@ -712,7 +712,7 @@ Each entry: where, what was done, what right looks like.
   from real dispatch history once a workspace has any.
 - **`select_target` takes `now_ms`** (`pt-quota`): the pure function needs a clock for time to
   reset, so it is the first argument. Pi with a vendor login (`PiVendor`) and Antigravity are never
-  selected (no quota subscription behind them).
+  selected, including by the resleeve fallback (no quota subscription behind them).
 - **Quota fuzz runs wrote corpus into `fuzz/seeds`** (`pt-quota`): `cargo fuzz run <t> seeds/<t>`
   adds new inputs to the seed dir; only the hand-written seeds (named, not hex) are committed.
   Right: run with `corpus` as first dir and seeds as the second.
