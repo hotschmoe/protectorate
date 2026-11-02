@@ -12,10 +12,9 @@ fn target(b: &mut Bytes) -> Target {
         (Harness::Claude, Mode::Headless),
         (Harness::Codex, Mode::Headless),
         (Harness::PiLocal, Mode::Headless),
-        (Harness::PiDurable, Mode::Headless),
         (Harness::Antigravity, Mode::Pane),
         (Harness::Claude, Mode::Pane),
-    ][b.below(6) as usize];
+    ][b.below(5) as usize];
     Target {
         harness,
         mode,

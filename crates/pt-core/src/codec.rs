@@ -206,19 +206,40 @@ macro_rules! unit_enum {
         }
     };
 }
-unit_enum!(
-    Harness,
-    "harness",
-    [
-        Claude,
-        Codex,
-        Grok,
-        Antigravity,
-        PiVendor,
-        PiLocal,
-        PiDurable
-    ]
-);
+impl Wire for Harness {
+    fn put(&self, w: &mut Vec<u8>) {
+        w.push(match self {
+            Harness::Claude => 0,
+            Harness::Codex => 1,
+            Harness::Grok => 2,
+            Harness::Antigravity => 3,
+            Harness::PiVendor => 4,
+            Harness::PiLocal => 5,
+        });
+    }
+    fn get(r: &mut Reader) -> Result<Self, DecodeError> {
+        Ok(match r.u8()? {
+            0 => Harness::Claude,
+            1 => Harness::Codex,
+            2 => Harness::Grok,
+            3 => Harness::Antigravity,
+            4 => Harness::PiVendor,
+            5 => Harness::PiLocal,
+            6 => {
+                return Err(DecodeError::UnknownTag {
+                    what: "removed pi_durable harness",
+                    tag: 6,
+                });
+            }
+            tag => {
+                return Err(DecodeError::UnknownTag {
+                    what: "harness",
+                    tag,
+                });
+            }
+        })
+    }
+}
 unit_enum!(Mode, "mode", [Headless, Pane]);
 unit_enum!(Layout, "layout", [Root, Worktree, View]);
 unit_enum!(SendMode, "send mode", [Queue, Steer]);

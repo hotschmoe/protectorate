@@ -712,7 +712,7 @@ final class DoctorHarness {
     );
   }
 
-  /// The hub's name for it, `pi_durable` included.
+  /// The hub's name for the harness.
   final String name;
 
   final bool present;

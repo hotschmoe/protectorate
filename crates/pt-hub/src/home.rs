@@ -200,8 +200,8 @@ pt_json::record! {
         pub pi_vendor_provider: String = String::new(),
         pub pi_vendor_model: String = String::new(),
         /// The local OpenAI-compatible endpoint, as a provider in Pi's own models.json, and the
-        /// model to ask it for. While either is empty, doctor finds `pi_local` (and `pi_durable`,
-        /// which uses the same model) ineligible, so nothing spawns or resleeves onto it.
+        /// model to ask it for. While either is empty, doctor finds `pi_local` ineligible, so
+        /// nothing spawns or resleeves onto it.
         pub pi_local_provider: String = String::new(),
         pub pi_local_model: String = String::new(),
         /// The same endpoint's base URL (with or without `/v1`), read for its health as the

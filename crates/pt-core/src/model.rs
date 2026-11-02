@@ -64,26 +64,17 @@ pub enum Harness {
     Antigravity,
     PiVendor,
     PiLocal,
-    PiDurable,
 }
 
 impl Harness {
     /// The headless protocol can add input to a running turn (Codex `turn/steer`, Pi `steer`).
     pub fn steers(self) -> bool {
-        matches!(
-            self,
-            Harness::Codex | Harness::PiVendor | Harness::PiLocal | Harness::PiDurable
-        )
+        matches!(self, Harness::Codex | Harness::PiVendor | Harness::PiLocal)
     }
 
     /// Antigravity is pane-only (D13).
     pub fn has_headless(self) -> bool {
         self != Harness::Antigravity
-    }
-
-    /// A prompt to pi_durable is keyed by its request id, so it may be probed and retried.
-    pub fn keyed_prompts(self) -> bool {
-        self == Harness::PiDurable
     }
 }
 

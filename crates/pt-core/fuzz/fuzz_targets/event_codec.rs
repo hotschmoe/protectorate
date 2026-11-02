@@ -1,10 +1,19 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use pt_core::codec::{decode, encode};
+use pt_core::codec::{DecodeError, decode, encode};
 use pt_core_fuzz::{Bytes, gen_event};
 
 fuzz_target!(|data: &[u8]| {
+    const RETIRED_TAG: &[u8] = &[
+        1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 6,
+    ];
+    if data.starts_with(RETIRED_TAG) {
+        assert!(matches!(
+            decode(data),
+            Err(DecodeError::UnknownTag { what, tag: 6 }) if what.contains("removed")
+        ));
+    }
     // Arbitrary bytes: decode never panics, and what decodes is canonical.
     if let Ok(e) = decode(data) {
         assert_eq!(encode(&e), data, "decode accepted a non-canonical encoding");

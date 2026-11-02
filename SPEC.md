@@ -55,7 +55,7 @@ CLI on the hub machine (section 3.1).
    - every one is pinned exactly (`=x.y.z`, a Go tag plus go.sum, an exact pubspec version), and
      nothing updates without a hand-picked bump;
    - where a dependency is large or only partly needed, we fork it under our control and trim it;
-   - no Python or Node in the product (the pi_durable experiment is the one exception, D14);
+   - no Python or Node in the product;
    - the allowed list and its reasons live in `DEPENDENCIES.md`, and `make check` fails on a crate
      that is not listed.
 7. **LAN only.** `protectorate.hotschmoe.com` resolves and answers only on the LAN and over the
@@ -196,7 +196,6 @@ crash, every incarnation goes to Recovering and resumes natively.
 | Grok Build | headless `grok agent stdio` (ACP, with `--always-approve` when unsupervised), or pane |
 | Antigravity CLI | replaces Gemini CLI, which is dropped (D35). Pane only, until approvals work headless and plan policy is clear. A standalone binary is required; if it only ships through npm, it waits |
 | Pi, two sleeve kinds | headless `pi --mode rpc`, run as the standalone binary so the hub needs no Node. **`pi_vendor`** offers any login or API key Pi supports, from Pi's own provider catalog: xAI, OpenAI (ChatGPT sign-in), DeepSeek, Kimi/Moonshot, GLM (Z.ai), MiniMax, Qwen, OpenRouter and more. The sleeve picks provider and model. **`pi_local`** points at a local OpenAI-compatible endpoint. Anthropic through Pi bills as extra usage and is labelled so. Gemini and Antigravity logins are not offered (removed upstream, ban risk) |
-| Pi Durable | a time-boxed experiment: a ~500-line TypeScript bridge on `pi/durable` (Node >= 22.19), adopted only if it passes the kill tests in the sleeves report 1.7 |
 
 - **Default tools:** none beyond what each harness ships, plus our CLI mounted in the sandbox.
   Native tools are not replaced.
@@ -216,8 +215,7 @@ crash, every incarnation goes to Recovering and resumes natively.
   `pi update self`. A harness without one is updated by its official installer, re-run.
 - **Pi is a standalone binary, not an npm package** (D34), updated with `pi update self`. If that
   command can't update a standalone install, the hub fetches Pi's GitHub release itself, verifies the
-  checksum and stages it beside the old one. Pi Durable is the one path that needs Node, and Node is
-  accepted for it (D14).
+  checksum and stages it beside the old one.
 - **Codex** runs as its standalone release binary, not through the npm wrapper.
 
 ### 3.5 Nodes
@@ -504,7 +502,7 @@ Verus is phased (D28), so its cost is measured before it spreads:
 | `4f199cc^` (before the fleet removal) | Rust node inventory and sample collectors, Windows runner account |
 | `bc9b87a^` (Go tree) | lessons only: tailnet supervisor, DERP cert fix, disco ping on start, headscale backup gate |
 | `references/herdr` | screen manifests (Apache-2.0), debounce, badges, the wait semantics, fd handoff on update |
-| `references/agent` | uncertain-effect states, record before dispatch, steer vs queue, the pi_durable bridge shape |
+| `references/agent` | uncertain-effect states, record before dispatch, steer vs queue |
 | `references/mainplane` | continue-by-retrieval as the future compaction model; fixed member UDP port |
 | upstream | headscale v0.29.7, tailscale.com via headscale's go.mod |
 | `references/dsh-superagent-prototype`, `references/autoresearch`, `references/rea` | nothing for now: reading material only (owner, 2026-11-01) |
@@ -565,8 +563,8 @@ These rules override the design reports wherever the reports say otherwise. The 
     LAN and write the shared download caches. The scoped PAT is limited to the repos that sleeve
     needs. If hostile code is ever in scope, D12 must be revisited before that work runs.
 12. **Count runtime processes as well as deliverables.** A running hub is three processes: hub,
-    headscale and member. A node is two: agent and member. The pi_durable experiment adds Node and
-    a bridge. Any further runtime process needs an explicit decision.
+    headscale and member. A node is two: agent and member. Any further runtime process needs an
+    explicit decision.
 
 ## 12b. Corrections from adversarial review (Grok, 2026-11-01)
 
@@ -648,7 +646,6 @@ All decided. The owner's answers are recorded in `docs/sessions/2026-11-01-decis
 | D11 | Windows node as LocalSystem plus runner account | yes |
 | D12 | Cut the sandbox network namespace and egress proxy | yes |
 | D13 | Antigravity pane-only until headless approvals work | yes |
-| D14 | Node.js on the hub for the pi_durable experiment | yes |
 | D15 | Resleeve target: ordered list per sleeve, default `[pi_local]` | yes |
 | D16 | Guardrail thresholds as listed; no auto-revert on forbidden-path edits | yes |
 | D17 | Hub updates by re-exec in place, keeping sleeves alive | yes |
@@ -692,7 +689,7 @@ nothing has to stay compatible with it.
    inventory and presence.
 5. **Jobs:** node jobs, cross-arch CI, `doctor`.
 6. **Hardening:** the first Verus modules (journal codec, node frame codec), the stdio
-   `mcp --envoy`, terminal takeover, the remaining harnesses, and the pi_durable experiment.
+   `mcp --envoy`, terminal takeover and the remaining harnesses.
 
 ## 15. Implementation choices (2026-11-01)
 

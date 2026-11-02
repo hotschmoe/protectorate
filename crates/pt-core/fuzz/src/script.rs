@@ -90,7 +90,6 @@ fn harness(s: &str) -> Result<Harness, String> {
         "antigravity" => Harness::Antigravity,
         "pi_vendor" => Harness::PiVendor,
         "pi_local" => Harness::PiLocal,
-        "pi_durable" => Harness::PiDurable,
         _ => return Err(format!("unknown harness {s}")),
     })
 }

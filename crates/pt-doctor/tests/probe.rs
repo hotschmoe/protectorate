@@ -133,8 +133,7 @@ fn report_gates_harnesses() {
             "grok",
             "antigravity",
             "pi_vendor",
-            "pi_local",
-            "pi_durable"
+            "pi_local"
         ]
     );
     let claude = harness(&r, "claude");
@@ -187,19 +186,7 @@ fn report_gates_harnesses() {
     assert_eq!(harness(&r, "codex").update, [codex_path.as_str(), "update"]);
     assert!(pi.eligible);
     assert!(!harness(&r, "pi_local").eligible);
-    assert!(
-        harness(&r, "pi_durable")
-            .reasons
-            .iter()
-            .any(|x| x.contains("node")),
-        "{:?}",
-        harness(&r, "pi_durable").reasons
-    );
-
-    assert_eq!(
-        r.ineligible,
-        ["codex", "grok", "antigravity", "pi_local", "pi_durable"]
-    );
+    assert_eq!(r.ineligible, ["codex", "grok", "antigravity", "pi_local"]);
     assert!(r.eligible("claude") && r.eligible("pi_vendor"));
     assert!(!r.eligible("codex") && !r.eligible("gemini"));
 
@@ -229,7 +216,7 @@ fn report_gates_harnesses() {
     let cached = Report::load(&cache).unwrap();
     assert_eq!(cached, r);
     let raw = pt_json::parse(&fs::read_to_string(&cache).unwrap()).unwrap();
-    assert_eq!(raw["ineligible"].as_array().unwrap().len(), 5);
+    assert_eq!(raw["ineligible"].as_array().unwrap().len(), 4);
     assert_eq!(fs::read_to_string(&cache).unwrap().trim(), text.trim());
 
     // Without working scopes no harness is eligible.
