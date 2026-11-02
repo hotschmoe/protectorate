@@ -1021,7 +1021,9 @@ fn history_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                     }
                     println!("{}\n", d.text);
                 }
-                if v.more && let Some(last) = v.docs.last() {
+                if v.more
+                    && let Some(last) = v.docs.last()
+                {
                     println!("[more: read on with --after {}]", last.doc.doc_id);
                 }
             });
