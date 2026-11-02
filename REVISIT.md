@@ -425,7 +425,7 @@ Each entry: where, what was done, what right looks like.
   canonical-path check stands alone, so a directory swapped between check and open could lead
   outside. Right: a bounded archive when jobs return trees, and `GetFinalPathNameByHandleW` on
   Windows.
-- **A held (job, attempt) with another token fails the new job** (`pt-hub` jobs.rs `run_job`):
+- **A held (job, attempt) with another token fails the new job** (`pt-hub` job_exec.rs `run_job`):
   the node answers a submit of a (job, attempt) it holds with the job it holds; when that job's
   token is not the submit's, the hub ignores the status and reports the submit refused as
   invalid, so the job fails and the other submit's job stays on the node, unacknowledged. That
@@ -435,11 +435,11 @@ Each entry: where, what was done, what right looks like.
   runs in `work/<job>.<attempt>/`, removed with its tombstone on AckCollected; an agent killed
   between the `collected` line and the removal leaves it. Right: sweep `work/` against the
   journal at open.
-- **The scheduler picks the least-loaded eligible node** (`pt-hub`, jobs.rs `choose`): online,
+- **The scheduler picks the least-loaded eligible node** (`pt-hub`, job_exec.rs `choose`): online,
   hello seen, presence AWAY (unless `even_if_present`), not excluded, then lowest load1; retried
   every 2 s. No per-node concurrency limit beyond one hub call at a time per node, no fairness
   between requesters. Right: node slots from the inventory and a queue per requester.
-- **Hub job logs are refreshed only on the core's Tick** (`pt-hub`, jobs.rs): a running job's log
+- **Hub job logs are refreshed only on the core's Tick** (`pt-hub`, job_exec.rs): a running job's log
   is pulled when pt-core polls it (every 10 s Tick), so `job log` lags by up to a Tick. Right: a
   log follow RPC on the node that pushes appended bytes.
 - **A cancelled job can lose its final log tail** (`pt-core` jobs): cancellation can acknowledge

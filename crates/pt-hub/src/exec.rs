@@ -1,6 +1,6 @@
-//! Executors: one serial thread per sleeve, plus node jobs' (`jobs.rs`). Each re-checks its intent
-//! against the latest published view right before acting, reports `Dispatched` before the
-//! write, and feeds the outcome back to the core as an event.
+//! Executors: one serial thread per sleeve, plus node jobs' (`job_exec.rs`). Each re-checks its
+//! intent against the latest published view right before acting, reports `Dispatched` before
+//! the write, and feeds the outcome back to the core as an event.
 //!
 //! A live incarnation's pump is the one ordered stream for its sleeve: the executor hands it
 //! its reports, and the pump submits each only after every harness event it has received, so
