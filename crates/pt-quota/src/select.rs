@@ -23,11 +23,40 @@ fn reset_at(w: &QuotaWindow) -> Option<u64> {
     w.resets_at_ms.map(|r| r.0).filter(|t| *t > 0)
 }
 
-/// Account windows gate dispatch. Claude's model-scoped windows (`wk sonnet`, `wk opus`,
-/// `wk <name>`) stay on the row for the UI and do not.
-fn gates_dispatch(label: &str) -> bool {
-    let mut parts = label.split_whitespace();
-    !matches!((parts.next(), parts.next()), (Some("wk"), Some(_)))
+/// Account windows always gate. A Claude model cap (`wk <name>`) gates a candidate only when
+/// the candidate's model name contains that name.
+fn gates(label: &str, model: &str) -> bool {
+    let Some(scope) = label.strip_prefix("wk ") else {
+        return true;
+    };
+    if scope.is_empty() {
+        return true;
+    }
+    let scope = letters(scope);
+    let model = letters(model);
+    scope.len() >= 3 && model.contains(&scope)
+}
+
+fn letters(s: &str) -> String {
+    s.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
+}
+
+/// The row has finite usage windows, and none of them apply to `model`.
+fn other_scopes_only(q: &Quota, model: &str) -> bool {
+    let mut any = false;
+    for w in &q.windows {
+        if w.used_pct.filter(|u| u.is_finite()).is_none() {
+            continue;
+        }
+        any = true;
+        if gates(&w.label, model) {
+            return false;
+        }
+    }
+    any
 }
 
 /// The harnesses that draw on a metered subscription, in tie-break order.
@@ -45,9 +74,17 @@ pub struct Health {
     pub healthy: bool,
 }
 
+/// One ordered resleeve candidate. An empty `model` gates on the account windows only.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Candidate {
+    pub harness: Harness,
+    pub model: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Target {
     pub harness: Harness,
+    pub model: String,
     pub subscription: Subscription,
     /// Weighted unused quota at reset; 0 for the local fallback.
     pub score: f64,
@@ -108,7 +145,7 @@ fn projected_unused(w: &QuotaWindow, used: f64, fetched_ms: u64, now_ms: u64) ->
 }
 
 /// Scores a fresh quota by its windows that have not yet reset. `None` when nothing is usable.
-fn score(q: &Quota, now_ms: u64) -> Option<Scored> {
+fn score(q: &Quota, now_ms: u64, model: &str) -> Option<Scored> {
     struct Cand {
         label: String,
         remaining: f64,
@@ -117,7 +154,7 @@ fn score(q: &Quota, now_ms: u64) -> Option<Scored> {
     }
     let mut cands = Vec::new();
     for w in &q.windows {
-        if !gates_dispatch(&w.label) {
+        if !gates(&w.label, model) {
             continue;
         }
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
@@ -159,9 +196,9 @@ fn score(q: &Quota, now_ms: u64) -> Option<Scored> {
 
 /// A window whose reset has passed and whose remaining percent is under `min` still blocks,
 /// for `RESET_GRACE_MS` after the stamp, when this row was fetched before that reset.
-fn past_blocks(q: &Quota, now_ms: u64, min: f64) -> bool {
+fn past_blocks(q: &Quota, now_ms: u64, min: f64, model: &str) -> bool {
     q.windows.iter().any(|w| {
-        if !gates_dispatch(&w.label) {
+        if !gates(&w.label, model) {
             return false;
         }
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
@@ -202,7 +239,9 @@ enum Availability {
 /// A stale row keeps the windows of its last good read. Under the task minimum that is
 /// exhausted, the same as a fresh row; with spare it may still be chosen. Unknown is only a
 /// row with no scored window.
-fn availability(now_ms: u64, size: TaskSize, harness: Harness, quotas: &[Quota]) -> Availability {
+fn availability(now_ms: u64, size: TaskSize, cand: &Candidate, quotas: &[Quota]) -> Availability {
+    let harness = cand.harness;
+    let model = cand.model.as_str();
     if harness == Harness::PiLocal {
         return match row(quotas, Subscription::Local).map(state) {
             Some(State::Fresh) => Availability::Available,
@@ -219,18 +258,22 @@ fn availability(now_ms: u64, size: TaskSize, harness: Harness, quotas: &[Quota])
     let Some(q) = row(quotas, *subscription) else {
         return Availability::Unknown;
     };
-    // `Unknown` is no login, the reader being off, or not read yet. `Error` is a read that
-    // failed (parse, HTTP, expiry, timeout) and left no windows to score.
+    // `Unknown` is no login, an expired login, the reader being off, or not read yet. `Error`
+    // is a read that failed (parse, HTTP, timeout) and left no windows to score.
     if state(q) == State::Error {
         return Availability::Exhausted;
     }
     if state(q) != State::Fresh && state(q) != State::Stale {
         return Availability::Unknown;
     }
-    if past_blocks(q, now_ms, size.min_usable_pct()) {
+    // A row that only names other models' caps is not "no reading": spending it would ignore them.
+    if other_scopes_only(q, model) {
         return Availability::Exhausted;
     }
-    match score(q, now_ms) {
+    if past_blocks(q, now_ms, size.min_usable_pct(), model) {
+        return Availability::Exhausted;
+    }
+    match score(q, now_ms, model) {
         Some(s) if s.usable < size.min_usable_pct() => Availability::Exhausted,
         Some(_) => Availability::Available,
         None => Availability::Unknown,
@@ -245,29 +288,32 @@ fn availability(now_ms: u64, size: TaskSize, harness: Harness, quotas: &[Quota])
 pub fn select_with_fallback(
     now_ms: u64,
     size: TaskSize,
-    candidates: &[Harness],
+    candidates: &[Candidate],
     quotas: &[Quota],
-) -> Result<(Harness, String), &'static str> {
+) -> Result<(usize, String), &'static str> {
     if let Some(target) = select_target(now_ms, size, candidates, Mode::Headless, &[], quotas, &[])
+        && let Some(idx) = candidates
+            .iter()
+            .position(|c| c.harness == target.harness && c.model == target.model)
     {
-        return Ok((target.harness, target.reason));
+        return Ok((idx, target.reason));
     }
-    let avail = |harness| availability(now_ms, size, harness, quotas);
-    if let Some(&harness) = candidates
+    let avail = |cand: &Candidate| availability(now_ms, size, cand, quotas);
+    if let Some(idx) = candidates
         .iter()
-        .find(|&&harness| avail(harness) == Availability::Available)
+        .position(|cand| avail(cand) == Availability::Available)
     {
         return Ok((
-            harness,
+            idx,
             "first eligible in resleeve_to whose last reading still has spare quota".into(),
         ));
     }
-    if let Some(&harness) = candidates
+    if let Some(idx) = candidates
         .iter()
-        .find(|&&harness| avail(harness) == Availability::Unknown)
+        .position(|cand| avail(cand) == Availability::Unknown)
     {
         return Ok((
-            harness,
+            idx,
             "first eligible in resleeve_to without a fresh quota reading".into(),
         ));
     }
@@ -290,14 +336,14 @@ pub fn select_with_fallback(
 pub fn select_target(
     now_ms: u64,
     size: TaskSize,
-    allow: &[Harness],
+    allow: &[Candidate],
     mode: Mode,
     exclude: &[Harness],
     quotas: &[Quota],
     health: &[Health],
 ) -> Option<Target> {
     let usable = |h: Harness| {
-        allow.contains(&h)
+        allow.iter().any(|c| c.harness == h)
             && !exclude.contains(&h)
             && health.iter().all(|e| e.harness != h || e.healthy)
             && supports(h, mode)
@@ -310,35 +356,48 @@ pub fn select_target(
         let Some(q) = fresh_for(quotas, subscription) else {
             continue;
         };
-        if past_blocks(q, now_ms, size.min_usable_pct()) {
-            continue;
+        for cand in allow.iter().filter(|c| c.harness == harness) {
+            if past_blocks(q, now_ms, size.min_usable_pct(), &cand.model) {
+                continue;
+            }
+            if other_scopes_only(q, &cand.model) {
+                continue;
+            }
+            let Some(s) = score(q, now_ms, &cand.model) else {
+                continue;
+            };
+            if s.usable < size.min_usable_pct() || best.as_ref().is_some_and(|b| s.score <= b.score)
+            {
+                continue;
+            }
+            let reset = match s.hours {
+                Some(h) => format!("resets in {}", crate::fmt_age((h * HOUR_MS) as u64)),
+                None => "reset time unknown".to_string(),
+            };
+            best = Some(Target {
+                harness,
+                model: cand.model.clone(),
+                subscription,
+                score: s.score,
+                reason: format!(
+                    "{} window {reset}: ~{:.0}% expiring unused, {:.0}% usable now",
+                    s.window, s.expiring, s.usable
+                ),
+            });
         }
-        let Some(s) = score(q, now_ms) else {
-            continue;
-        };
-        if s.usable < size.min_usable_pct() || best.as_ref().is_some_and(|b| s.score <= b.score) {
-            continue;
-        }
-        let reset = match s.hours {
-            Some(h) => format!("resets in {}", crate::fmt_age((h * HOUR_MS) as u64)),
-            None => "reset time unknown".to_string(),
-        };
-        best = Some(Target {
-            harness,
-            subscription,
-            score: s.score,
-            reason: format!(
-                "{} window {reset}: ~{:.0}% expiring unused, {:.0}% usable now",
-                s.window, s.expiring, s.usable
-            ),
-        });
     }
     if best.is_some() {
         return best;
     }
     if usable(Harness::PiLocal) && fresh_for(quotas, Subscription::Local).is_some() {
+        let model = allow
+            .iter()
+            .find(|c| c.harness == Harness::PiLocal)
+            .map(|c| c.model.clone())
+            .unwrap_or_default();
         return Some(Target {
             harness: Harness::PiLocal,
+            model,
             subscription: Subscription::Local,
             score: 0.0,
             reason: "no subscription with fresh spare quota; local model is reachable".to_string(),
@@ -367,7 +426,7 @@ pub fn spare_quota(now_ms: u64, q: &Quota) -> Option<f64> {
     if state(q) != State::Fresh {
         return None;
     }
-    score(q, now_ms).map(|s| s.expiring)
+    score(q, now_ms, "").map(|s| s.expiring)
 }
 
 /// The spare-quota trigger (D29): every metered subscription whose projected unused quota at

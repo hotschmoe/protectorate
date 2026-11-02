@@ -186,14 +186,16 @@ or with no window at all, is reported as an error.
 Resleeve targets are weighted by fresh readings; known-exhausted candidates are skipped, and the
 sleeve parks if all eligible candidates are exhausted. A stale reading keeps its last windows:
 under the usable minimum it counts as exhausted, and with spare left the fallback may still
-choose it. A candidate with no reading (`unknown`: no login, or not read yet) can still be
-selected. A failed reading (`error`) cannot; it parks the same way an exhausted window does. A
-window whose reset time has already passed still blocks while it is over that line, for ten
-minutes, and only when that reading was taken before the reset. After that the window counts
-as reset. A reset at or before the epoch is ignored and the percent still counts. A model-scoped Claude window
-(the weekly Sonnet or Opus cap, shown as `wk <model>`) is displayed and does not by itself
-block a Claude resleeve. Pi with a vendor login and Antigravity have no meter and are never
-chosen. A Codex window keeps the length the vendor reported, which the dispatch weight uses.
+choose it. A candidate with no reading (`unknown`: no login, an expired login, or not read yet)
+can still be selected. A failed reading (`error`) cannot; it parks the same way an exhausted
+window does. A window whose reset time has already passed still blocks while it is over that
+line, for ten minutes, and only when that reading was taken before the reset. After that the
+window counts as reset. A reset at or before the epoch is ignored and the percent still counts.
+A model-scoped Claude window (the weekly Sonnet or Opus cap, shown as `wk <name>`) gates a
+resleeve only when that candidate's model name contains the name. A row that only reports
+other models' caps is not spent. The account windows always count. Pi with a vendor login and
+Antigravity have no meter and are never chosen. A Codex window keeps the length the vendor
+reported, which the dispatch weight uses.
 The label can be coarser (`119` seconds shows as `1m`). A local
 endpoint may use HTTPS or loopback HTTP; other HTTP
 endpoints are reported as misconfigured and are not contacted.

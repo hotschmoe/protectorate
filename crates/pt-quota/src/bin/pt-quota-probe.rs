@@ -1,7 +1,8 @@
 //! Prints the live quota reading of every subscription on this machine, never a secret.
 //!
 //! `pt-quota-probe [--home DIR] [--local URL] [--pi-provider NAME] [--claude-url URL]
-//! [--codex-url URL] [--grok-url URL]`
+//! [--codex-url URL] [--grok-url URL] [--allow claude:opus,pi_local]`
+//! `--allow` takes harness names, optional `:model` on each.
 //! One line per subscription: `<name> <fresh|stale|unknown|error> plan=<plan> [<window> <used>%
 //! resets <time>]... note=<note>`. `PT_LOCAL_URL` also configures the local endpoint; without
 //! one, the local reader uses the `baseUrl` of Pi provider `--pi-provider` (default
@@ -12,7 +13,8 @@ use std::process::ExitCode;
 
 use pt_api::{Harness, Mode, Quota};
 use pt_quota::{
-    Cache, Options, Reader, TaskSize, claude::Claude, codex::Codex, grok::Grok, local::Local,
+    Cache, Candidate, Options, Reader, TaskSize, claude::Claude, codex::Codex, grok::Grok,
+    local::Local,
 };
 
 fn main() -> ExitCode {
@@ -59,7 +61,11 @@ fn main() -> ExitCode {
             }
             "--allow" => {
                 let mut candidates = Vec::new();
-                for name in value.split(',') {
+                for spec in value.split(',') {
+                    if spec.is_empty() {
+                        continue;
+                    }
+                    let (name, model) = spec.split_once(':').unwrap_or((spec, ""));
                     let harness = match name {
                         "claude" => Harness::Claude,
                         "codex" => Harness::Codex,
@@ -72,7 +78,10 @@ fn main() -> ExitCode {
                             return ExitCode::from(2);
                         }
                     };
-                    candidates.push(harness);
+                    candidates.push(Candidate {
+                        harness,
+                        model: model.to_string(),
+                    });
                 }
                 allow = Some(candidates);
             }
@@ -137,10 +146,13 @@ fn main() -> ExitCode {
             println!("aged {}", line(q, now));
         }
         if let Some(candidates) = &allow {
-            match pt_quota::select_with_fallback(now, TaskSize::Medium, candidates, &aged) {
-                Ok((harness, reason)) => println!("aged target {harness:?}: {reason}"),
-                Err(reason) => println!("aged target none: {reason}"),
-            }
+            println!(
+                "aged {}",
+                target_line(
+                    candidates,
+                    pt_quota::select_with_fallback(now, TaskSize::Medium, candidates, &aged)
+                )
+            );
         }
     }
     if let Some(ms) = test_late_ms {
@@ -152,21 +164,29 @@ fn main() -> ExitCode {
         }
     }
     if let Some(candidates) = allow {
-        match pt_quota::select_with_fallback(now, TaskSize::Medium, &candidates, &quotas) {
-            Ok((harness, reason)) => println!("target {harness:?}: {reason}"),
-            Err(reason) => println!("target none: {reason}"),
-        }
+        println!(
+            "{}",
+            target_line(
+                &candidates,
+                pt_quota::select_with_fallback(now, TaskSize::Medium, &candidates, &quotas)
+            )
+        );
         return ExitCode::SUCCESS;
     }
+    let allow = [
+        Harness::Claude,
+        Harness::Codex,
+        Harness::Grok,
+        Harness::PiLocal,
+    ]
+    .map(|harness| Candidate {
+        harness,
+        model: String::new(),
+    });
     let target = pt_quota::select_target(
         now,
         TaskSize::Medium,
-        &[
-            Harness::Claude,
-            Harness::Codex,
-            Harness::Grok,
-            Harness::PiLocal,
-        ],
+        &allow,
         Mode::Headless,
         &[],
         &quotas,
@@ -177,6 +197,13 @@ fn main() -> ExitCode {
         None => println!("target none"),
     }
     ExitCode::SUCCESS
+}
+
+fn target_line(candidates: &[Candidate], picked: Result<(usize, String), &'static str>) -> String {
+    match picked {
+        Ok((idx, reason)) => format!("target {:?}: {reason}", candidates[idx].harness),
+        Err(reason) => format!("target none: {reason}"),
+    }
 }
 
 fn line(q: &Quota, now_ms: u64) -> String {

@@ -442,15 +442,19 @@ and at or above it the fallback may still choose that harness, ahead of a candid
 reading. `select_target` itself stays on fresh rows.
 
 A candidate with no reading may still be spent. That is `unknown`: no login file, the reader
-is not running, or the hub has not read yet (including just after a restart; readings are not
-journaled). A failed reading may not. That is `error`: the body did not parse, the request
-failed, the login is expired, or the read timed out and left no earlier windows. It parks the
+is not running, the login is expired (its CLI refreshes the token; the reader does not), or
+the hub has not read yet (including just after a restart; readings are not journaled). A
+failed reading may not. That is `error`: the body did not parse, the request failed, or the
+read timed out and left no earlier windows. It parks the
 same way an exhausted window does. A window whose reset time has passed still blocks while its
 remaining percent is under the task minimum, for ten minutes after that reset, and only when
 the row was fetched before the reset. After that the window counts as reset. A reset at or
-before the epoch is no reset time, and the percent still counts. Model-scoped Claude windows (`wk <model>`) stay on the quota row
-for display and do not gate dispatch; the account windows do (`5h`, `wk`), as does the single
-credit or rate-limit window of the other subscriptions. `pi_vendor` and Antigravity have no
+before the epoch is no reset time, and the percent still counts. Model-scoped Claude windows (`wk <name>`) stay on the quota row
+and gate a candidate only when its model name contains that name (`opus` gates
+`claude-opus-4-6`, and does not gate a Sonnet candidate). The account windows always gate
+(`5h`, `wk`), as does the single credit or rate-limit window of the other subscriptions. A
+row whose only windows are caps for other models is exhausted, not an unknown reading that
+may be spent. `pi_vendor` and Antigravity have no
 meter and are never chosen on this path. The pace projection uses a vendor window length when
 the reading included one (Codex stores `limit_window_seconds`). The label stays what is shown
 and can be coarser (`119` seconds is `1m`). A minute label is still a length when the reading

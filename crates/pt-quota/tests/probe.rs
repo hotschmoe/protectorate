@@ -144,8 +144,8 @@ fn serve_guarded<S: Into<String>>(
 }
 
 /// Fixture logins and a fake provider on a real socket: each reader reads its login file, sends
-/// the bearer token over curl, and parses the response; an expired login, a missing login and a
-/// dead endpoint are reported as error and unknown; no token is ever printed.
+/// the bearer token over curl, and parses the response; an expired login is unknown, a missing
+/// login is unknown, and a dead endpoint is an error; no token is ever printed.
 #[test]
 fn fixture_readers_over_real_curl() {
     let home = scratch("fixture-home");
@@ -241,7 +241,7 @@ fn fixture_readers_over_real_curl() {
     ]);
     println!("{out}");
     let claude = line_of(&out, "claude");
-    assert_eq!(state_of(claude), "error");
+    assert_eq!(state_of(claude), "unknown", "{claude}");
     assert!(claude.contains("expired"), "{claude}");
     assert_eq!(state_of(line_of(&out, "local")), "error");
     assert!(!out.contains("secret-token"));
@@ -811,6 +811,57 @@ fn a_model_scoped_window_does_not_exhaust_the_subscription() {
         "{only}"
     );
     assert!(!only.contains("target none"), "{only}");
+}
+
+/// The Opus weekly cap gates a Claude candidate whose model is Opus, and does not gate Sonnet.
+/// A row that only has that cap is not spent as if it had no reading.
+#[test]
+fn a_model_cap_gates_the_candidate_that_runs_that_model() {
+    let home = scratch(&format!("model-cap-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"model-cap-claude"}}"#,
+    );
+    let (port, _) = serve(vec![(
+        "/api/oauth/usage",
+        r#"{"five_hour":{"utilization":0,"resets_at":"2100-01-01T00:00:00Z"},"seven_day_opus":{"utilization":100,"resets_at":"2100-01-08T00:00:00Z"}}"#,
+    )]);
+    let base = format!("http://127.0.0.1:{port}");
+    let home_s = home.to_str().unwrap();
+    let run = |allow: &str| probe(&["--home", home_s, "--claude-url", &base, "--allow", allow]);
+    let opus = run("claude:claude-opus-4-6");
+    assert!(
+        opus.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{opus}"
+    );
+    assert!(!opus.contains("target Claude:"), "{opus}");
+    let line = line_of(&opus, "claude");
+    assert!(line.contains("opus") && line.contains("100%"), "{line}");
+
+    let sonnet = run("claude:sonnet");
+    assert!(
+        sonnet.contains("target Claude:") && sonnet.contains("5h"),
+        "{sonnet}"
+    );
+
+    let (port, _) = serve(vec![(
+        "/api/oauth/usage",
+        r#"{"seven_day_opus":{"utilization":100,"resets_at":"2100-01-08T00:00:00Z"}}"#,
+    )]);
+    let base = format!("http://127.0.0.1:{port}");
+    let only = probe(&[
+        "--home",
+        home_s,
+        "--claude-url",
+        &base,
+        "--allow",
+        "claude:sonnet",
+    ]);
+    assert!(
+        only.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{only}"
+    );
+    assert!(!only.contains("without a fresh quota reading"), "{only}");
 }
 
 /// Pi with a vendor login has no quota reader. A missing reading is not "unknown", so the

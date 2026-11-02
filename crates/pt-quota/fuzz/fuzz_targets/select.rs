@@ -3,7 +3,7 @@
 use libfuzzer_sys::fuzz_target;
 use pt_api::{Harness, Mode, Quota, Subscription};
 use pt_quota::{
-    Health, State, TaskSize, Thresholds, derive, select_target, select_with_fallback,
+    Candidate, Health, State, TaskSize, Thresholds, derive, select_target, select_with_fallback,
     spare_trigger, state,
 };
 use pt_quota_fuzz::{Bytes, HARNESSES, quota};
@@ -22,8 +22,15 @@ fuzz_target!(|data: &[u8]| {
             .map(|(_, h)| *h)
             .collect()
     };
-    let allow = pick(&mut b);
+    let allow_h = pick(&mut b);
     let exclude = pick(&mut b);
+    let allow: Vec<Candidate> = allow_h
+        .iter()
+        .map(|harness| Candidate {
+            harness: *harness,
+            model: ["", "opus", "sonnet", "claude-opus-4-6"][b.below(4)].to_string(),
+        })
+        .collect();
     let mut health = Vec::new();
     for h in HARNESSES {
         if b.bool() {
@@ -36,7 +43,7 @@ fuzz_target!(|data: &[u8]| {
     let quotas: Vec<_> = (0..b.below(8)).map(|_| quota(&mut b, now)).collect();
 
     let eligible = |h: Harness| {
-        allow.contains(&h)
+        allow.iter().any(|c| c.harness == h)
             && !exclude.contains(&h)
             && health.iter().all(|e| e.harness != h || e.healthy)
     };
@@ -57,10 +64,10 @@ fuzz_target!(|data: &[u8]| {
         assert!(t.score.is_finite() && t.score >= 0.0);
         if t.harness == Harness::PiLocal {
             assert_eq!(t.subscription, Subscription::Local);
-            let without_local: Vec<Harness> = allow
+            let without_local: Vec<Candidate> = allow
                 .iter()
-                .copied()
-                .filter(|h| *h != Harness::PiLocal)
+                .filter(|c| c.harness != Harness::PiLocal)
+                .cloned()
                 .collect();
             assert!(
                 select_target(now, size, &without_local, mode, &exclude, &quotas, &health)
@@ -83,10 +90,10 @@ fuzz_target!(|data: &[u8]| {
         }
     } else {
         // Nothing eligible: no allowed, healthy harness has a fresh quota for its subscription.
-        let without_local: Vec<Harness> = allow
+        let without_local: Vec<Candidate> = allow
             .iter()
-            .copied()
-            .filter(|h| *h != Harness::PiLocal)
+            .filter(|c| c.harness != Harness::PiLocal)
+            .cloned()
             .collect();
         assert!(
             select_target(now, size, &without_local, mode, &exclude, &quotas, &health).is_none()
@@ -105,13 +112,15 @@ fuzz_target!(|data: &[u8]| {
     // minimum. `select_target` itself stays fresh-only, and the fallback agrees with it.
     let fallback = select_with_fallback(now, size, &allow, &quotas);
     match (&got, &fallback) {
-        (Some(t), Ok((h, _))) => assert_eq!(t.harness, *h),
+        (Some(t), Ok((idx, _))) => {
+            let c = &allow[*idx];
+            assert_eq!(t.harness, c.harness);
+            assert_eq!(t.model, c.model);
+        }
         (Some(t), Err(e)) => panic!("fallback dropped {t:?}: {e}"),
-        (None, Ok((h, _))) => {
-            assert!(
-                allow.contains(h),
-                "fallback picked a harness that was not a candidate"
-            );
+        (None, Ok((idx, _))) => {
+            let c = &allow[*idx];
+            let h = c.harness;
             assert!(
                 matches!(
                     h,
@@ -119,18 +128,22 @@ fuzz_target!(|data: &[u8]| {
                 ),
                 "unmetered harness was spent: {h:?}"
             );
-            if let Some(sub) = metered(*h)
+            if let Some(sub) = metered(h)
                 && let Some(q) = quotas.iter().find(|q| q.subscription == sub)
             {
                 assert_ne!(state(q), State::Error, "a failed reading was spent");
+                assert!(
+                    !only_other_scopes(q, &c.model),
+                    "a row with only other models' caps was spent"
+                );
                 if matches!(state(q), State::Fresh | State::Stale) {
                     assert!(
-                        !still_enforcing(q, now, size.min_usable_pct()),
+                        !still_enforcing(q, now, size.min_usable_pct(), &c.model),
                         "a passed exhausted window was spent"
                     );
                 }
                 if state(q) == State::Stale
-                    && let Some(usable) = open_usable(q, now)
+                    && let Some(usable) = open_usable(q, now, &c.model)
                 {
                     assert!(
                         usable + 1e-9 >= size.min_usable_pct(),
@@ -138,7 +151,7 @@ fuzz_target!(|data: &[u8]| {
                     );
                 }
             }
-            if *h == Harness::PiLocal
+            if h == Harness::PiLocal
                 && let Some(q) = quotas
                     .iter()
                     .find(|q| q.subscription == Subscription::Local)
@@ -147,12 +160,12 @@ fuzz_target!(|data: &[u8]| {
             }
         }
         (None, Err(_)) => {
-            for h in &allow {
-                if let Some(sub) = metered(*h)
+            for c in &allow {
+                if let Some(sub) = metered(c.harness)
                     && let Some(q) = quotas.iter().find(|q| q.subscription == sub)
                     && state(q) == State::Stale
-                    && !still_enforcing(q, now, size.min_usable_pct())
-                    && let Some(usable) = open_usable(q, now)
+                    && !still_enforcing(q, now, size.min_usable_pct(), &c.model)
+                    && let Some(usable) = open_usable(q, now, &c.model)
                     && usable + 1e-9 >= size.min_usable_pct()
                 {
                     panic!("stale row at {usable}% usable was parked");
@@ -202,9 +215,34 @@ fuzz_target!(|data: &[u8]| {
     }
 });
 
-fn gates_dispatch(label: &str) -> bool {
-    let mut parts = label.split_whitespace();
-    !matches!((parts.next(), parts.next()), (Some("wk"), Some(_)))
+/// SPEC 8. Account windows (`5h`, bare `wk`, and the other subscriptions' one window) always
+/// apply. `wk <name>` applies only when the model name contains `<name>`.
+fn applies(label: &str, model: &str) -> bool {
+    let Some(name) = label.strip_prefix("wk ") else {
+        return true;
+    };
+    let fold = |s: &str| -> String {
+        s.chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .flat_map(|c| c.to_lowercase())
+            .collect()
+    };
+    let name = fold(name);
+    !name.is_empty() && name.len() >= 3 && fold(model).contains(&name)
+}
+
+fn only_other_scopes(q: &Quota, model: &str) -> bool {
+    let mut saw = false;
+    for w in &q.windows {
+        if w.used_pct.filter(|u| u.is_finite()).is_none() {
+            continue;
+        }
+        saw = true;
+        if applies(&w.label, model) {
+            return false;
+        }
+    }
+    saw
 }
 
 fn metered(h: Harness) -> Option<Subscription> {
@@ -217,10 +255,10 @@ fn metered(h: Harness) -> Option<Subscription> {
 }
 
 /// Tightest remaining percent of windows that have not reset. `None` when nothing scores.
-fn open_usable(q: &Quota, now_ms: u64) -> Option<f64> {
+fn open_usable(q: &Quota, now_ms: u64, model: &str) -> Option<f64> {
     let mut usable = None;
     for w in &q.windows {
-        if !gates_dispatch(&w.label) {
+        if !applies(&w.label, model) {
             continue;
         }
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
@@ -242,18 +280,17 @@ fn open_usable(q: &Quota, now_ms: u64) -> Option<f64> {
 
 /// SPEC 8: a passed reset blocks only inside the ten-minute grace, and only when the row was
 /// fetched before that reset. A stamp at or before the epoch is not a reset.
-fn still_enforcing(q: &Quota, now_ms: u64, min: f64) -> bool {
+fn still_enforcing(q: &Quota, now_ms: u64, min: f64, model: &str) -> bool {
     const GRACE_MS: u64 = 600_000;
     let fetched = q.fetched_at_ms.0;
     q.windows.iter().any(|w| {
+        if !applies(&w.label, model) {
+            return false;
+        }
         let Some(stamp) = w.resets_at_ms.map(|r| r.0).filter(|t| *t > 0) else {
             return false;
         };
         if stamp > now_ms || fetched >= stamp || now_ms >= stamp.saturating_add(GRACE_MS) {
-            return false;
-        }
-        // Account windows only. `wk <model>` is a model cap and is not an account block.
-        if w.label.split_once(' ').is_some_and(|(head, _)| head == "wk") {
             return false;
         }
         w.used_pct

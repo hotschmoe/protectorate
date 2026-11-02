@@ -154,7 +154,10 @@ impl Slot {
         let subscription = self.reader.subscription();
         let Some((snap, fetched, instant)) = &self.good else {
             let (reading, note) = match &self.last_err {
+                // Expired is not a failed window: the harness CLI refreshes the login, and it
+                // can only do that if a sleeve is allowed to launch.
                 Some(Error::Unavailable(d)) => (QuotaReading::Unknown, d.to_string()),
+                Some(Error::Expired) => (QuotaReading::Unknown, Error::Expired.to_string()),
                 Some(e) => (QuotaReading::Error, e.to_string()),
                 None => (QuotaReading::Unknown, "not read yet".to_string()),
             };
