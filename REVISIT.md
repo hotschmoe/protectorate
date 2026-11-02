@@ -837,8 +837,11 @@ Each entry: where, what was done, what right looks like.
   is in both its native log and the transcript; the native log wins once found, the transcript
   covers a session that ended without one, and the transcript waits at a live session's
   `session_info` until its log appears. The choice is per sleeve, and the cursor is per sleeve
-  plus path, so one sleeve's session id does not select another's log. A pass opens a native
-  log only when that sleeve's own discover returned it. Decisions are not persisted, so a
+  plus path, so one sleeve's session id does not select another's log. Discover walks a
+  harness's log root only while one of that sleeve's sessions is still undecided. A session
+  already chosen as native is left out of the transcript even when that pass did not see the
+  file, and a discover that returns a different path replaces the old one and drops its docs.
+  Decisions are not persisted, so a
   session indexed from the transcript whose log appears in a later run (a native resume of a
   session that had none) is indexed twice. Right: keep the choice per session in the index
   manifest.

@@ -243,13 +243,6 @@ impl History {
         let home = hub.home.sleeve_home(s.id);
         let mut found: HashMap<SourceKind, HashMap<String, PathBuf>> = HashMap::new();
         for seen in &track.seen {
-            let logs = found.entry(seen.kind).or_insert_with(|| {
-                pt_history::discover(seen.kind, &log_root(&home, seen.kind))
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|src| (src.session, src.path))
-                    .collect()
-            });
             let choice = p
                 .choices
                 .entry((s.id, seen.native_id.clone()))
@@ -257,6 +250,14 @@ impl History {
             if *choice != Choice::Undecided {
                 continue;
             }
+            // Walk a log root only while some session of that harness is still undecided.
+            let logs = found.entry(seen.kind).or_insert_with(|| {
+                pt_history::discover(seen.kind, &log_root(&home, seen.kind))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|src| (src.session, src.path))
+                    .collect()
+            });
             // One source per session: a headless session is in both its native log and the
             // transcript. The native log wins when the hub can find it: it is the harness's own
             // record (compaction summaries, per-call context usage, lines written while the hub
@@ -267,6 +268,27 @@ impl History {
             } else if open.as_deref() != Some(seen.native_id.as_str()) {
                 *choice = Choice::Transcript;
             }
+        }
+        // This pass's discover may show that a native log moved. Follow the new path.
+        for seen in &track.seen {
+            let Some(logs) = found.get(&seen.kind) else {
+                continue;
+            };
+            let Some(found_path) = logs.get(&seen.native_id) else {
+                continue;
+            };
+            let Some(Choice::Native(path)) = p.choices.get_mut(&(s.id, seen.native_id.clone()))
+            else {
+                continue;
+            };
+            if path == found_path {
+                continue;
+            }
+            let old = path.clone();
+            if let Ok(ix) = &mut *lock(&self.ix) {
+                ix.forget(seen.kind, &old, Some(&sleeve));
+            }
+            *path = found_path.clone();
         }
         {
             let mut harnesses = lock(&self.harnesses);
@@ -281,12 +303,9 @@ impl History {
         let mut hold = None;
         for seen in &track.seen {
             match &p.choices[&(s.id, seen.native_id.clone())] {
-                // Only a path this pass's discover returned from this sleeve's own log root.
-                Choice::Native(path)
-                    if found
-                        .get(&seen.kind)
-                        .is_some_and(|logs| logs.get(&seen.native_id) == Some(path)) =>
-                {
+                // Always skip the transcript for a native choice, including when this pass
+                // did not see the file. A missed discover must not index the session twice.
+                Choice::Native(path) => {
                     if !skip.contains(&seen.native_id) {
                         skip.push(seen.native_id.clone());
                         sources.push(
@@ -295,7 +314,6 @@ impl History {
                         );
                     }
                 }
-                Choice::Native(_) => {}
                 Choice::Undecided => {
                     hold.get_or_insert(seen.offset);
                 }

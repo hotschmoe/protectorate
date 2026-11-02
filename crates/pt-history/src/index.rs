@@ -334,6 +334,20 @@ impl Index {
         self.drops.insert(source, below);
     }
 
+    /// Drops every doc from `path` and forgets its cursor. A renamed native log calls this
+    /// on the path it is leaving.
+    pub fn forget(&mut self, kind: SourceKind, path: &Path, sleeve: Option<&str>) {
+        let Some(path) = path.to_str() else {
+            return;
+        };
+        let stored = source_key(kind, path);
+        self.drop_source(stored.clone(), self.next_doc);
+        self.discard_pending(&stored);
+        self.kept.insert(stored, 0);
+        self.sources.remove(&cursor_key(kind, path, sleeve));
+        self.dirty = true;
+    }
+
     pub(crate) fn live(&self, m: &Meta) -> bool {
         self.dead.get(&m.source).is_none_or(|&below| m.id >= below)
     }
