@@ -162,7 +162,7 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
 }
 
 fn obs(b: &mut Bytes) -> Obs {
-    match b.below(14) {
+    match b.below(16) {
         0 | 1 => Obs::Ready {
             session: "sess".into(),
         },
@@ -209,9 +209,11 @@ fn obs(b: &mut Bytes) -> Obs {
         12 => Obs::Disk {
             bytes: b.below(2) << 30,
         },
-        _ => Obs::ForbiddenPath {
+        13 => Obs::ForbiddenPath {
             path: ".github/workflows/x".into(),
         },
+        14 => Obs::TurnBegan,
+        _ => Obs::ForeignTurnSettled { end: TurnEnd::Done },
     }
 }
 

@@ -1,0 +1,19 @@
+#scenario e0d2813312a0ab1f
+# A prompt echo may arrive while a foreign run is still at the front of the stream.
+spawn envoy /w/e
+run
+obs envoy ready
+policy prompt=none
+send envoy m1 from=agent:duet
+run
+obs envoy began
+ack m1
+expect envoy activity=Working msg:m1=Delivered turn_seq=0 d9turn=none
+obs envoy progress
+obs envoy foreign-settled
+expect envoy activity=Working msg:m1=Delivered turn_seq=1 d9turn=Agent/0
+spawn kid /w/k by-envoy
+run
+expect envoy d9turn=Agent/1
+obs envoy settled
+expect envoy activity=Idle d9turn=none

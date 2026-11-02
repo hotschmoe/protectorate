@@ -93,6 +93,11 @@ pub enum Obs {
     TurnSettled {
         end: TurnEnd,
     },
+    /// A turn started by the harness, independently of a delivered prompt.
+    TurnBegan,
+    ForeignTurnSettled {
+        end: TurnEnd,
+    },
     CompactDone,
     /// An oversize frame, or valid JSON that contradicts the protocol state: a session id
     /// mismatch, a reply nobody asked for (G14).
@@ -198,6 +203,11 @@ pub enum EventKind {
         effect: EffectId,
         attempt: u32,
         reason: String,
+    },
+    /// The executor refused a prompt or steer before writing any bytes.
+    Unwritten {
+        effect: EffectId,
+        attempt: u32,
     },
     /// Ack timeout or channel lost.
     Lost {

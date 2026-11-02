@@ -1,0 +1,16 @@
+#scenario 043f5d9d0113a475
+# A self-started turn is not a new owner turn to auto-continue after a crash.
+spawn root /w/a
+run
+obs root ready
+send root m1
+run
+obs root settled
+obs root began
+exit root
+run
+obs root ready
+run
+expect root activity=Idle turn_seq=1 auto_continue=none
+expect-effect continue:* count=0
+expect-notice TurnNeedsPrompt count=0

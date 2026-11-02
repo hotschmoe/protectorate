@@ -1,0 +1,18 @@
+#scenario bea75d30eaf7e866
+# If the retry is fenced before dispatch, it is still one owner turn when it reaches the next
+# incarnation. The fence-only historical path retains its original replay behavior.
+spawn envoy /w/e
+run
+obs envoy ready
+policy prompt=busy
+send envoy m1 from=agent:duet
+run
+expect envoy turn_seq=0 msg:m1=Queued d9turn=none
+tick 10s
+expect envoy turn_seq=1 msg:m1=InFlight d9turn=Agent/0
+exit envoy
+run
+obs envoy ready
+policy prompt=ack
+run
+expect envoy turn_seq=1 msg:m1=Delivered d9turn=Agent/0

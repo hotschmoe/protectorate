@@ -2,6 +2,7 @@
 //! of pt-api's table. Commands become core events whose replies come back after the journal
 //! fsync; reads use the published view.
 
+use std::collections::{HashSet, VecDeque};
 use std::ops::ControlFlow;
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -1766,6 +1767,7 @@ fn agent_transcript(
             .is_some_and(|m| m.from == Party::Agent)
     };
     let mut agent = false;
+    let mut turns: VecDeque<Option<String>> = VecDeque::new();
     let mut entries = Vec::new();
     let mut more = false;
     hub.transcripts
@@ -1776,11 +1778,35 @@ fn agent_transcript(
                     ..
                 } => false,
                 Entry::UserMessage { request_id, .. } => {
-                    agent = from_agent(request_id);
-                    agent
+                    let ours = from_agent(request_id);
+                    if turns.is_empty() {
+                        agent = ours;
+                    }
+                    ours
+                }
+                Entry::TurnStarted { request_id, .. } => {
+                    turns.push_back(request_id.clone());
+                    agent = turns
+                        .front()
+                        .and_then(Option::as_deref)
+                        .is_some_and(from_agent);
+                    false
                 }
                 Entry::AssistantText { .. } => agent,
-                Entry::TurnSettled { .. } => std::mem::replace(&mut agent, false),
+                Entry::TurnSettled { .. } => {
+                    let keep = agent;
+                    turns.pop_front();
+                    agent = turns
+                        .front()
+                        .and_then(Option::as_deref)
+                        .is_some_and(from_agent);
+                    keep
+                }
+                Entry::Exited { .. } => {
+                    turns.clear();
+                    agent = false;
+                    false
+                }
                 _ => false,
             };
             if !keep || l.seq < from {
@@ -1810,36 +1836,73 @@ fn get_envoy_token(c: &Ctx<'_>, _: api::Empty) -> Result<api::EnvoyToken> {
 /// The assistant text of the turn that answered `request_id`, with the last seq read, once that
 /// turn settled (or, with `idle`, whatever it said before the sleeve went idle).
 fn answer(hub: &Hub, id: SleeveId, request_id: &str, idle: bool) -> Option<(String, u64)> {
-    // The lines after the message, newest first.
-    let mut after = Vec::new();
-    let mut start = None;
+    let mut turns: VecDeque<Option<String>> = VecDeque::new();
+    let mut requests = HashSet::from([request_id.to_string()]);
+    let mut seen = false;
+    let mut legacy = false;
+    let mut seq = 0;
+    let mut text = Vec::new();
+    let mut result = None;
     hub.transcripts
-        .rscan(id, |e| {
-            if matches!(&e.entry, Entry::UserMessage { request_id: r, .. } if r == request_id) {
-                start = Some(e.seq);
-                return ControlFlow::Break(());
+        .scan(id, |e| {
+            match &e.entry {
+                Entry::UserMessage { request_id: r, .. } if r == request_id => {
+                    seen = true;
+                    seq = e.seq;
+                    legacy = turns.is_empty();
+                }
+                Entry::UserMessage {
+                    request_id: r,
+                    kind: PromptKind::Continuation,
+                    ..
+                } if seen => {
+                    requests.insert(r.clone());
+                    legacy = turns.is_empty();
+                }
+                Entry::UserMessage { .. } if seen => return ControlFlow::Break(()),
+                Entry::TurnStarted { request_id: r, .. } => {
+                    turns.push_back(r.clone());
+                    if seen {
+                        legacy = false;
+                        if turns
+                            .front()
+                            .and_then(Option::as_deref)
+                            .is_none_or(|r| !requests.contains(r))
+                        {
+                            text.clear();
+                        }
+                    }
+                }
+                Entry::AssistantText { text: t, .. } if seen => {
+                    let ours = turns
+                        .front()
+                        .and_then(Option::as_deref)
+                        .is_some_and(|r| requests.contains(r));
+                    if ours || (turns.is_empty() && legacy) {
+                        text.push(t.clone());
+                    }
+                }
+                Entry::TurnSettled { .. } => {
+                    let ours = turns
+                        .front()
+                        .and_then(Option::as_deref)
+                        .is_some_and(|r| requests.contains(r));
+                    if seen && (ours || (turns.is_empty() && legacy)) {
+                        result = Some((text.join("\n"), e.seq));
+                        return ControlFlow::Break(());
+                    }
+                    turns.pop_front();
+                }
+                Entry::Exited { .. } => turns.clear(),
+                _ => {}
             }
-            after.push(e);
+            if seen {
+                seq = e.seq;
+            }
             ControlFlow::Continue(())
         })
         .ok()?;
-    let mut seq = start?;
-    let mut text = Vec::new();
-    for e in after.iter().rev() {
-        match &e.entry {
-            Entry::AssistantText { text: t, .. } => text.push(t.clone()),
-            Entry::TurnSettled { .. } => return Some((text.join("\n"), e.seq)),
-            // The hub's continuation of this turn. The reply after it is still this answer.
-            Entry::UserMessage {
-                kind: PromptKind::Continuation,
-                ..
-            } => {}
-            Entry::UserMessage { .. } => break,
-            _ => {}
-        }
-        seq = e.seq;
-    }
-    idle.then(|| (text.join("\n"), seq))
+    result.or_else(|| (seen && idle).then(|| (text.join("\n"), seq)))
 }
 
 /// The latest message from `party` to Envoy: queued, then being sent, then in the transcript.

@@ -1018,3 +1018,10 @@ Each entry: where, what was done, what right looks like.
   that gap, or a symlink swapped in under `projects_dir`, can remove a live root. SPEC 2
   principle 10 treats our own agents as trusted, so this is left. Right: delete through a
   directory fd opened before the check, and hold the path against spawn until the delete ends.
+- **Fence-only prompt requeue repeats turn accounting** (pt-core `return_unsent`): an ordinary
+  prompt fenced before its first write is queued again, but its first dequeue already advanced
+  the owner turn and replaced its continuation debt and D9 origin. The retry can advance and
+  replace them again. An `Unwritten` retry, including a later fence of that retry, restores the
+  accounting; a fence without that new event retains its historical behavior so existing
+  journals replay unchanged. Right: journal a new pre-fence event that restores the accounting
+  before returning such a prompt to the queue.

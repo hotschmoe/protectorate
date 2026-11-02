@@ -1,0 +1,29 @@
+#scenario 5c8bb08d877aec65
+# Busy returns an unwritten prompt to the queue. Ticks while a foreign turn runs do not retry;
+# after its settle the next tick sends the same message as one owner turn.
+spawn envoy /w/e
+run
+obs envoy ready
+policy prompt=busy
+send envoy m1 from=agent:grokbot
+run
+expect envoy activity=Idle msg:m1=Queued queue=1 turn_seq=0 d9turn=none
+expect-effect m1 state=Abandoned count=1
+expect-notice MessageRejected count=0
+obs envoy began
+tick 10s
+run
+expect envoy activity=Working msg:m1=Queued queue=1 turn_seq=0
+expect-effect m1 count=1
+obs envoy foreign-settled
+expect envoy activity=Idle msg:m1=Queued queue=1 turn_seq=0
+policy prompt=ack
+tick 10s
+run
+expect envoy activity=Working msg:m1=Delivered queue=0 turn_seq=1 d9turn=Agent/0
+expect-effect m1 state=Confirmed count=2
+spawn kid /w/k by-envoy
+run
+expect envoy d9turn=Agent/1
+obs envoy settled
+expect envoy turn_seq=1 d9turn=none

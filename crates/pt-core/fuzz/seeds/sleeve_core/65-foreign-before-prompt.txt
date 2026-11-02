@@ -1,0 +1,23 @@
+#scenario f413a9a92946a5da
+# A written prompt is queued behind a foreign turn. Its output and result do not confirm or
+# settle the prompt, nor consume its owner-turn accounting or Envoy's D9 origin.
+spawn envoy /w/e
+run
+obs envoy ready
+policy prompt=none
+send envoy m1 from=agent:duet
+run
+expect envoy activity=Delivering msg:m1=InFlight turn_seq=1 d9turn=Agent/0
+obs envoy began
+expect envoy activity=Working msg:m1=InFlight turn_seq=0 d9turn=none
+obs envoy progress
+expect-effect m1 state=Sent
+obs envoy foreign-settled
+expect envoy activity=Delivering msg:m1=InFlight turn_seq=1 d9turn=Agent/0
+ack m1
+expect envoy activity=Working msg:m1=Delivered turn_seq=1 d9turn=Agent/0
+spawn kid /w/k by-envoy
+run
+expect envoy d9turn=Agent/1
+obs envoy settled
+expect envoy activity=Idle turn_seq=1 d9turn=none

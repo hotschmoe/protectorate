@@ -19,7 +19,7 @@ use crate::model::*;
 
 pub const FORMAT: u8 = 1;
 /// Highest event tag this binary reads. Any incompatible encoding must get a new event tag.
-pub const MAX_EVENT_TAG: u8 = 41;
+pub const MAX_EVENT_TAG: u8 = 42;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -490,6 +490,11 @@ impl Wire for Obs {
                 w.push(4);
                 end.put(w);
             }
+            Obs::TurnBegan => w.push(12),
+            Obs::ForeignTurnSettled { end } => {
+                w.push(13);
+                end.put(w);
+            }
             Obs::CompactDone => w.push(5),
             Obs::Desync { detail } => {
                 w.push(6);
@@ -514,7 +519,7 @@ impl Wire for Obs {
         }
     }
     fn get(r: &mut Reader) -> Result<Self, DecodeError> {
-        Ok(match r.tag("observation", 11)? {
+        Ok(match r.tag("observation", 13)? {
             0 => Obs::Ready {
                 session: Wire::get(r)?,
             },
@@ -541,10 +546,12 @@ impl Wire for Obs {
             10 => Obs::ForbiddenPath {
                 path: Wire::get(r)?,
             },
-            _ => Obs::ApprovalRequested {
+            11 => Obs::ApprovalRequested {
                 id: Wire::get(r)?,
                 ask: Some(Wire::get(r)?),
             },
+            12 => Obs::TurnBegan,
+            _ => Obs::ForeignTurnSettled { end: Wire::get(r)? },
         })
     }
 }
@@ -721,6 +728,11 @@ impl Wire for EventKind {
                 effect.put(w);
                 attempt.put(w);
                 reason.put(w);
+            }
+            E::Unwritten { effect, attempt } => {
+                w.push(42);
+                effect.put(w);
+                attempt.put(w);
             }
             E::Lost { effect, attempt } => {
                 w.push(18);
@@ -1060,6 +1072,10 @@ impl Wire for EventKind {
                 sleeve: Wire::get(r)?,
                 g: Wire::get(r)?,
                 chosen: Chosen::Ineligible(Wire::get(r)?),
+            },
+            42 => E::Unwritten {
+                effect: Wire::get(r)?,
+                attempt: Wire::get(r)?,
             },
             _ => return Err(DecodeError::UnknownTag { what: "event", tag }),
         })

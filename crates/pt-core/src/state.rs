@@ -1,7 +1,7 @@
 //! The orchestration state owned by the core thread. Everything is plain data, compared whole by
 //! the replay check.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::event::{Ask, JobSpec};
 use crate::intent::{Class, EffectKind};
@@ -79,6 +79,14 @@ pub struct Sleeve {
     pub auto_continue: Option<u64>,
     /// Envoy only: the current turn has D9 origin (SPEC 2 principle 10).
     pub d9_turn: Option<D9Turn>,
+    /// A harness-initiated turn may run in front of an in-flight prompt.
+    pub foreign: Option<ForeignTurn>,
+    /// The prompt's owner-turn accounting, reversible until it is known to have run.
+    pub delivery: Option<Delivery>,
+    /// Wait for a timer tick before retrying a write the driver refused as busy.
+    pub retry_unwritten: bool,
+    /// Prompts returned by an Unwritten report, until they finally leave the queue.
+    pub unwritten_prompts: BTreeSet<String>,
 
     /// Request ids of queued messages, FIFO.
     pub queue: VecDeque<String>,
@@ -112,6 +120,23 @@ pub struct Sleeve {
     pub parent_mails: Vec<Millis>,
     /// A D9-origin turn spawned this sleeve or sent to it, or its parent is marked. Envoy is never marked.
     pub d9: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ForeignTurn {
+    pub previous: Activity,
+    pub native: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Delivery {
+    pub effect: EffectId,
+    pub applied: bool,
+    pub turn_seq: u64,
+    pub auto_continue: Option<u64>,
+    pub turn_from: Party,
+    pub turn_agent: Option<String>,
+    pub d9_turn: Option<D9Turn>,
 }
 
 impl Sleeve {

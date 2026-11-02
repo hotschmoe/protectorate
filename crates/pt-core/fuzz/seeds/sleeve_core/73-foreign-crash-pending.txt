@@ -1,0 +1,16 @@
+#scenario 4d14a41852ec0089
+# A written prompt waiting behind a foreign turn remains an owner turn if the process crashes.
+spawn root /w/a
+run
+obs root ready
+policy prompt=none
+send root m1
+run
+obs root began
+expect root turn_seq=0 msg:m1=InFlight
+exit root
+run
+obs root ready
+policy prompt=ack
+run
+expect root activity=Working turn_seq=1 msg:continue:0:1=Delivered

@@ -1,0 +1,21 @@
+#scenario 85ab662f32defc5e
+# A steer whose native turn has ended is never written. It becomes the next prompt even when
+# the original turn's settle arrives before the unwritten report.
+spawn envoy /w/e harness=codex
+run
+obs envoy ready
+send envoy m1
+run
+expect envoy activity=Working turn_seq=1
+send envoy m2 steer from=agent:duet
+obs envoy settled
+policy prompt=busy
+run
+expect envoy activity=Idle msg:m2=Queued queue=1 turn_seq=1
+expect-effect m2 state=Abandoned count=1
+expect-notice MessageRejected count=0
+policy prompt=ack
+tick 10s
+run
+expect envoy activity=Working msg:m2=Delivered queue=0 turn_seq=2 d9turn=Agent/0
+expect-effect m2 state=Confirmed count=2
