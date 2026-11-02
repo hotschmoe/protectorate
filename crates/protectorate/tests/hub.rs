@@ -3106,16 +3106,25 @@ fn transcript_pages_skip_torn_and_corrupt_lines() {
         (s["lifecycle"].as_str() == Some("parked")).then(|| s["id"].as_str().unwrap().to_string())
     });
     let agent = hub.printed("envoy-only token: ");
+    // The hub knows an agent's message by its sender, so the fixture answers a real one.
+    let rid = hub
+        .cli_env(
+            &[("PROTECTORATE_TOKEN", agent.as_str())],
+            &["--json", "envoy", "send", "q"],
+        )
+        .json()["request_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     hub.stop();
     let path = hub.home.join(format!("sleeves/{id}/transcript.jsonl"));
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let (asked, answered, settled) = (5990u64, 5991u64, 5992u64);
     let line = |seq: u64| {
         let entry = match seq {
-            s if s == asked => {
-                r#"{"type":"user_message","request_id":"ga:grokbot-1","from":"owner","text":"q"}"#
-                    .to_string()
-            }
+            s if s == asked => format!(
+                r#"{{"type":"user_message","request_id":"{rid}","from":"agent","text":"q"}}"#
+            ),
             s if s == answered => {
                 r#"{"type":"assistant_text","id":"a","text":"agent answer","final":true}"#
                     .to_string()
