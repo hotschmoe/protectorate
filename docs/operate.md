@@ -207,7 +207,9 @@ and failed commits are retried. Below each configured root, discovery and reopen
 symbolic links and non-regular files. Tool paths in the index are clipped to 512 bytes.
 Each sleeve, and each log, may keep 1 GiB of source text. Past that the index keeps the
 newest lines of that log and `hub info` and `doctor` report `history capped`; other sleeves
-are unaffected. Opening the index removes segment files the manifest does not name.
+are unaffected. A commit removes a segment whose docs are all dead and rewrites one that is at least half
+dead, then deletes the old files. Opening the index removes segment files the manifest does
+not name.
 
 ## Events
 

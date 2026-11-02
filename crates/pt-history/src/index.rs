@@ -261,6 +261,7 @@ impl Index {
             ix.segs.push(seg);
         }
         ix.sweep_segments()?;
+        ix.reclaim()?;
         ix.recount();
         Ok(ix)
     }
@@ -737,6 +738,7 @@ impl Index {
             self.write_manifest()?;
         }
         self.dirty = false;
+        self.reclaim()?;
         self.recount();
         self.merge()?;
         self.recount();
@@ -788,6 +790,118 @@ impl Index {
         let json = m.to_json().to_string();
         let text = format!("{MANIFEST_MAGIC} {:08x}\n{json}", crc32c(json.as_bytes()));
         write_atomic(&self.dir, &self.dir.join(MANIFEST), text.as_bytes())
+    }
+
+    /// Removes a segment whose docs are all dead, and rewrites one that is at least half
+    /// dead, in one manifest commit. New segment files are written first. The old files
+    /// are removed only after that manifest is durable. A crash before the rename keeps
+    /// the previous manifest; the unreferenced files are swept on the next open.
+    fn reclaim(&mut self) -> io::Result<()> {
+        let mut plan: Vec<(usize, bool)> = Vec::new();
+        for (i, s) in self.segs.iter().enumerate() {
+            let n = s.docs.len();
+            let dead = s.docs.iter().filter(|m| !self.live(m)).count();
+            if n == 0 || dead == n {
+                plan.push((i, false));
+            } else if dead >= n - dead {
+                plan.push((i, true));
+            }
+        }
+        if plan.is_empty() {
+            return Ok(());
+        }
+        let mut fresh = std::collections::BTreeMap::new();
+        for &(i, rewrite) in &plan {
+            if rewrite {
+                fresh.insert(i, self.write_live_segment(i)?);
+            }
+        }
+        // High indexes first, so a removal does not shift one that is still planned.
+        enum Undo {
+            Insert(usize, Seg),
+            Put(usize, Seg),
+        }
+        let mut undo = Vec::new();
+        for (i, rewrite) in plan.into_iter().rev() {
+            if rewrite {
+                let neu = fresh.remove(&i).expect("rewritten segment");
+                let old = std::mem::replace(&mut self.segs[i], neu);
+                undo.push(Undo::Put(i, old));
+            } else {
+                undo.push(Undo::Insert(i, self.segs.remove(i)));
+            }
+        }
+        if let Err(e) = self.write_manifest() {
+            for u in undo.into_iter().rev() {
+                match u {
+                    Undo::Insert(i, seg) => self.segs.insert(i, seg),
+                    Undo::Put(i, seg) => self.segs[i] = seg,
+                }
+            }
+            return Err(e);
+        }
+        for u in undo {
+            let seg = match u {
+                Undo::Insert(_, seg) | Undo::Put(_, seg) => seg,
+            };
+            let p = self.dir.join(&seg.name);
+            match fs::remove_file(&p) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(ctx(e, "remove dead", p.display())),
+            }
+        }
+        Ok(())
+    }
+
+    /// Writes a new segment containing the live docs of `index`, in their original order.
+    fn write_live_segment(&mut self, index: usize) -> io::Result<Seg> {
+        let seg = &self.segs[index];
+        let mut owned: Vec<(Meta, String)> = Vec::new();
+        for m in &seg.docs {
+            if self.live(m) {
+                owned.push((m.clone(), seg.text(m)?));
+            }
+        }
+        let files: Vec<Vec<String>> = owned
+            .iter()
+            .map(|(m, _)| {
+                m.files
+                    .iter()
+                    .filter_map(|f| self.syms.name(*f).map(str::to_owned))
+                    .collect()
+            })
+            .collect();
+        let bytes = {
+            let docs: Vec<DocIn<'_>> = owned
+                .iter()
+                .zip(&files)
+                .map(|((m, t), f)| DocIn {
+                    id: m.id,
+                    time_ms: m.time_ms,
+                    offset: m.offset,
+                    turn: m.turn,
+                    role: m.role,
+                    harness: m.harness,
+                    session: self.syms.name(m.session).unwrap_or_default(),
+                    sleeve: self.syms.name(m.sleeve),
+                    source: self.syms.name(m.source).unwrap_or_default(),
+                    tool: self.syms.name(m.tool),
+                    files: f,
+                    text: t,
+                })
+                .collect();
+            segment::encode(&docs)
+        };
+        let name = format!("seg-{:08}", self.next_seg);
+        self.next_seg = self
+            .next_seg
+            .checked_add(1)
+            .ok_or_else(|| invalid(self.dir.display(), "segment ids exhausted"))?;
+        let path = self.dir.join(&name);
+        write_atomic(&self.dir, &path, &bytes)?;
+        let file = File::open(&path).map_err(|e| ctx(e, "open", path.display()))?;
+        self.adopt(&name, file, &bytes)
     }
 
     /// While there are too many segments, merges the adjacent pair with the fewest docs

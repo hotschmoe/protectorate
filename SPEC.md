@@ -291,7 +291,9 @@ the same dispatch code. There are no external sources such as email, calendar or
     same budget as tool text (512 bytes). Each sleeve has its own budget of 1 GiB of source
     text, and so does each source. Past that, the source drops its oldest docs and keeps the
     newest lines; a sleeve that is full does not stop the others. `doctor` and `hub info`
-    report `history capped`. Opening an index removes segment files the manifest does not name.
+    report `history capped`. A commit removes a segment whose docs are all dead, and rewrites
+    one that is at least half dead, in that same manifest update; the old files go after the
+    rename. Opening an index removes segment files the manifest does not name.
   - Measured on this hub (2026-11-01, release build): 1 GiB of the newest real logs ingested
     in 1.9 s (540 MB/s, 48 MB peak RSS) into an 11 MB index; queries take 0.05 to 0.7 ms.
   - Fallback: `rusqlite` with FTS5, if our index proves insufficient (REVISIT.md).
