@@ -161,6 +161,22 @@ impl Runner {
             .ok_or_else(|| format!("no effect {key}"))
     }
 
+    fn sleeve(&self, id: SleeveId) -> Result<&Sleeve, String> {
+        self.sim
+            .st
+            .sleeves
+            .get(&id)
+            .ok_or_else(|| format!("no sleeve {}", id.0))
+    }
+
+    fn job(&self, id: JobId) -> Result<&Job, String> {
+        self.sim
+            .st
+            .jobs
+            .get(&id)
+            .ok_or_else(|| format!("no job {}", id.0))
+    }
+
     fn line(&mut self, line: &str) -> Result<(), String> {
         let words: Vec<&str> = line.split_whitespace().collect();
         let kv = |k: &str| {
@@ -283,7 +299,7 @@ impl Runner {
                 let sleeve = self.id(arg(1)?)?;
                 let g = match kv("g") {
                     Some(n) => Gen(num(n)?),
-                    None => self.sim.st.sleeves[&sleeve].g,
+                    None => self.sleeve(sleeve)?.g,
                 };
                 let what = arg(2)?;
                 let (w, v) = what.split_once('=').unwrap_or((what, ""));
@@ -336,7 +352,7 @@ impl Runner {
             }
             "exit" => {
                 let sleeve = self.id(arg(1)?)?;
-                let g = self.sim.st.sleeves[&sleeve].g;
+                let g = self.sleeve(sleeve)?.g;
                 let cause = if flag("oom") {
                     ExitCause::Oom
                 } else if flag("auth") {
@@ -418,17 +434,20 @@ impl Runner {
             }
             "job-exit" => {
                 let job = JobId(num(arg(1)?)?);
-                let j = &self.sim.st.jobs[&job];
+                let (attempt, node) = {
+                    let j = self.job(job)?;
+                    (j.attempt, j.node.ok_or("job has no node")?)
+                };
                 self.sim.apply(E::JobStatus {
                     job,
-                    attempt: j.attempt,
-                    node: j.node.ok_or("job has no node")?,
+                    attempt,
+                    node,
                     report: JobReport::Exited { code: 0 },
                 });
             }
             "artifact-result" => {
                 let job = JobId(num(arg(1)?)?);
-                let attempt = self.sim.st.jobs[&job].attempt;
+                let attempt = self.job(job)?.attempt;
                 let refusals = kv("refused")
                     .map(|p| {
                         vec![ArtifactRefusal {
@@ -509,7 +528,7 @@ impl Runner {
                 }
             }
             "expect-job" if self.checked => {
-                let j = &self.sim.st.jobs[&JobId(num(arg(1)?)?)];
+                let j = self.job(JobId(num(arg(1)?)?))?;
                 let want = kv("state").ok_or("missing state")?;
                 if variant(&j.state) != want {
                     return Err(format!("job state is {:?}, expected {want}", j.state));
@@ -531,7 +550,7 @@ impl Runner {
         }
         let g = match g {
             Some(n) => Gen(num(n)?),
-            None => self.sim.st.sleeves[&sleeve].g,
+            None => self.sleeve(sleeve)?.g,
         };
         Ok(tool_approval_id(sleeve, g, id))
     }
@@ -557,7 +576,15 @@ impl Runner {
                 "by" => a.decision.map(|d| variant(&d.by)).unwrap_or_default(),
                 "orphan" => a.orphan.map(|o| variant(&o)).unwrap_or("none".into()),
                 "response" => match a.decision.and_then(|d| d.response) {
-                    Some(e) => variant(&self.sim.st.effects[&e].state),
+                    Some(e) => variant(
+                        &self
+                            .sim
+                            .st
+                            .effects
+                            .get(&e)
+                            .ok_or(format!("no effect {}", e.0))?
+                            .state,
+                    ),
                     None => "none".into(),
                 },
                 _ => return Err(format!("bad key {k}")),
@@ -571,7 +598,7 @@ impl Runner {
 
     fn expect(&self, words: &[&str]) -> Result<(), String> {
         let name = words.get(1).ok_or("missing sleeve")?;
-        let s = &self.sim.st.sleeves[&self.id(name)?];
+        let s = self.sleeve(self.id(name)?)?;
         for w in &words[2..] {
             let (k, v) = w.split_once('=').ok_or(format!("bad expectation {w}"))?;
             let got = match k {
@@ -588,13 +615,13 @@ impl Runner {
                         .messages
                         .get(id)
                         .map(|m| variant(&m.state))
-                        .unwrap_or_default(),
+                        .ok_or_else(|| format!("no message {id}"))?,
                     None => match k.strip_prefix("from:") {
                         Some(id) => s
                             .messages
                             .get(id)
                             .map(|m| variant(&m.from))
-                            .unwrap_or_default(),
+                            .ok_or_else(|| format!("no message {id}"))?,
                         None => return Err(format!("bad key {k}")),
                     },
                 },
