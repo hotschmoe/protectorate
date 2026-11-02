@@ -675,8 +675,6 @@ Each entry: where, what was done, what right looks like.
   deadline and cached rows age monotonically, but an OS-blocked file read cannot be cancelled;
   the cache allows at most one such worker per reader and retries only after it returns. Right:
   use a killable helper process if network filesystems make this a practical problem.
-- **pi_durable shows as pi_local in the API** (`pt-hub`, wire.rs): the experiment has no API
-  harness. Right: add one if it outlives the experiment.
 - **The web app embedded is about 17.7 MB** (`crates/protectorate/build.rs`; the bundled Inter fonts
   added about 1 MB on 2026-11-02): the release binary
   is 19.4 MB with it and 1.7 MB without; with gzipped headscale and member too (25 MB) the
@@ -877,7 +875,7 @@ Each entry: where, what was done, what right looks like.
   pt-quota, pt-history and pt-update have had none, and none of the fixes has been re-reviewed.
   Right: review each before it is trusted with more than the owner's own machines.
 - **`pi_local` is unconfigured by default** (`pt-hub`, home.rs, doctor.rs): `pi_local_provider`
-  and `pi_local_model` default to empty, and doctor marks `pi_local` and `pi_durable` ineligible
+  and `pi_local_model` default to empty, and doctor marks `pi_local` ineligible
   until both are set, so the default `resleeve_to` (`["pi_local"]`) parks a sleeve that must
   resleeve. Right: offer the configured local model when there is one, or ask for it at setup.
 - **Verus phase 1 boundaries** (`pt-journal`, `pt-frame`): the journal frame, CRC logic and pure
@@ -946,3 +944,5 @@ Each entry: where, what was done, what right looks like.
   own process on an error reply to initialize, thread/session open or get_state, and the exit
   takes the normal unasked-exit path (StartFailed, or G2/G1 from the reply's class). A handshake
   timeout with no reply is still G5's 60 s.
+- **pi_durable removed**: removed on 2026-11-02 before it was built. The owner wants to revisit
+  it later; the design is in the git history.

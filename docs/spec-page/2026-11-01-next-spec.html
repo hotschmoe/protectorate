@@ -346,7 +346,6 @@ html { scroll-behavior: smooth; }
         <tr><td class="id">Antigravity</td><td>pane only</td><td>n/a</td><td>n/a</td><td>headless approvals do not work; plan policy unclear</td></tr>
         <tr><td class="id">pi_vendor</td><td><code>pi --mode rpc</code></td><td><code>disposition</code></td><td><code>steer</code></td><td>any login or API key in Pi's catalog: xAI, OpenAI, DeepSeek, Kimi, GLM, MiniMax, Qwen, OpenRouter. Anthropic is labelled as extra usage. Bun build, so no Node</td></tr>
         <tr><td class="id">pi_local</td><td><code>pi --mode rpc</code></td><td><code>disposition</code></td><td><code>steer</code></td><td>a local OpenAI-compatible endpoint; the default resleeve target</td></tr>
-        <tr><td class="id">Pi Durable</td><td>our ~500-line TS bridge</td><td><code>submission(requestId)</code></td><td>yes</td><td>time-boxed experiment, adopted only if it survives kill tests</td></tr>
       </tbody>
     </table>
   </div>
@@ -663,7 +662,7 @@ html { scroll-behavior: smooth; }
 
 <section id="decide" aria-labelledby="h-decide">
   <h2 id="h-decide">Decisions for you<span class="line"></span><span class="st">31 OPEN</span></h2>
-  <p class="say">Each decision has a recommendation. The ones that change the most are D1, D10, D12 and D14. The reviews changed D9 and D20 and added D26 and D27.</p>
+  <p class="say">Each decision has a recommendation. The ones that change the most are D1, D10 and D12. The reviews changed D9 and D20 and added D26 and D27.</p>
   <div class="scroll">
     <table>
       <thead><tr><th>#</th><th>Decision</th><th>Recommendation</th></tr></thead>
@@ -681,7 +680,6 @@ html { scroll-behavior: smooth; }
         <tr><td class="id">D11</td><td>Windows node as LocalSystem plus a runner account</td><td><span class="chip c-yes">yes</span></td></tr>
         <tr><td class="id">D12</td><td>Cut the sandbox network namespace and egress proxy</td><td><span class="chip c-yes">yes</span></td></tr>
         <tr><td class="id">D13</td><td>Antigravity pane-only until headless approvals work</td><td><span class="chip c-yes">yes</span></td></tr>
-        <tr><td class="id">D14</td><td>Node.js on the hub for the pi_durable experiment</td><td><span class="chip c-yes">yes</span> time-boxed</td></tr>
         <tr><td class="id">D15</td><td>Resleeve target as an ordered list per sleeve, default <code>[pi_local]</code></td><td><span class="chip c-yes">yes</span></td></tr>
         <tr><td class="id">D16</td><td>Guardrail thresholds as listed; no auto-revert on forbidden-path edits</td><td><span class="chip c-yes">yes</span></td></tr>
         <tr><td class="id">D17</td><td>Hub updates re-exec in place, keeping sleeves alive</td><td><span class="chip c-yes">yes</span></td></tr>
@@ -713,7 +711,7 @@ html { scroll-behavior: smooth; }
     <li><span><b class="mono">Resleeve.</b> Guardrails, the history index, the continuation brief, <code>pi_local</code>, and forced resleeve end to end.</span></li>
     <li><span><b class="mono">Network.</b> The <code>go/</code> module, embedded headscale and member, Traefik routes, scan to join, inventory and presence.</span></li>
     <li><span><b class="mono">Jobs.</b> Node jobs, cross-arch CI, <code>doctor</code>.</span></li>
-    <li><span><b class="mono">Hardening.</b> The first Verus modules, remote MCP with agent tokens, the remaining harnesses, and the pi_durable experiment.</span></li>
+    <li><span><b class="mono">Hardening.</b> The first Verus modules, remote MCP with agent tokens and the remaining harnesses.</span></li>
   </ol>
 </section>
 

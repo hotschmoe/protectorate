@@ -99,7 +99,7 @@ C4. **D10:** the Linux node runs as a system service, which costs one sudo at in
 
 C5. **D12:** drop the sandbox's network namespace and egress proxy. Rec: yes. The sandbox stops sleeves stepping on each other; it is not a security boundary against a hostile agent. Revisit before hostile code is ever in scope.
 
-C6. **D14:** Node.js on the hub for a time-boxed pi_durable experiment. Rec: yes, time-boxed. If pi_durable fails its kill tests, Node goes away with it, unless D35 keeps Node anyway.
+C6. An experiment was removed on 2026-11-02; its design and this decision remain in git history.
 
 C7. **D19:** an exemption from Verus rule 6, so the sandbox and presence crates may use `unsafe` for FFI without Verus proofs. Rec: yes. These are OS calls Verus cannot reason about; each sits in a small private helper.
 
@@ -145,9 +145,9 @@ Rec: yes.
 
 D3n. **D34: Pi runs as its standalone binary, not the npm package, and the hub keeps it current.** The hub checks Pi's GitHub releases every 6 hours, verifies the checksum and stages the new version beside the old one. If Pi's own updater handles the binary install, we use that instead. Rec: yes. To confirm in stage 3: that Pi publishes standalone binaries for linux-arm64 (ms-r1) and checksums with them.
 
-D4n. **D35: Gemini CLI ships through npm, so it is the one harness that brings Node onto the hub.** Rec: accept Node for Gemini only if you actually use Gemini. Otherwise drop Gemini CLI until it ships a standalone binary. Antigravity stays pane-only either way. With Gemini dropped, Node would arrive only with the pi_durable experiment (D14).
+D4n. **D35: Gemini CLI ships through npm, so it is the one harness that brings Node onto the hub.** Rec: accept Node for Gemini only if you actually use Gemini. Otherwise drop Gemini CLI until it ships a standalone binary. Antigravity stays pane-only either way.
 
-## Owner's answers (verbatim, 2026-11-01)
+## Owner's answers (2026-11-01; removed experiment omitted)
 
 > A1: we are not currently using protectorate at all, you can uninstall and remove it even if you want so dont worry about keeping dev-hotschmoe clean. Its unused
 >
@@ -177,8 +177,6 @@ D4n. **D35: Gemini CLI ships through npm, so it is the one harness that brings N
 > D3n: every 24 hours is fine to check, better if pi can update itself via ```{harness} update``` hopefully works on all harnesses?
 >
 > D4n: use the antigravity cli (i think gemini was deprecated, hopefully antigravity has a binary we can install and not rely on node)
->
-> Node for now is fine with pi_durable
 >
 > Overall we want to keep dependencies to minimum, supply chain attacks are INCREASING at a fast rate, which is why i usually stay away from python and node in important products (quick temporary scripts are fine). And i like zig which has large std and usually small dependencies. Rust usually favors importing a bazillion crates but we dont want to do that, even cargo and crates have had supply chain attacks. If we 100% need a dependency, its almost better to either pin a release (so no updates unless we hand pick them) or fork the dependency ourselves and keep it under our control (and bonus we can trim up forked depednancies)
 >
