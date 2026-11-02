@@ -4,7 +4,9 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::Receiver;
+use std::time::{Duration, Instant};
 
 use pt_api::EventKind as Kind;
 use pt_api::{ActivityState, HubStreamMessage, Level};
@@ -14,12 +16,18 @@ use pt_journal::Journal;
 use crate::exec::Executors;
 use crate::home::now_ms;
 use crate::hub::{Hub, Input, JournalSnapshot};
-use crate::log::{debug, error, info};
+use crate::log::{debug, error, info, warning};
 use crate::transcript::Note;
 use crate::view::View;
 use crate::wire;
 
 const MAX_BATCH: usize = 512;
+/// A batch is normally an apply, one fsync and a view clone: a few ms. At a quarter second the
+/// owner's commands, which wait for their batch, lag visibly.
+const SLOW_BATCH: Duration = Duration::from_millis(250);
+/// About 20 full batches behind: no burst of ticks, reports and commands comes near it.
+const DEEP_QUEUE: u64 = 10_000;
+const WARN_EVERY: Duration = Duration::from_secs(60);
 
 pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<Input>) {
     let mut exec = Executors::new(hub.clone());
@@ -32,7 +40,9 @@ pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<I
     );
     let mut batch_n = hub.view().batch;
     let mut since: BTreeMap<SleeveId, (ActivityState, u64)> = BTreeMap::new();
+    let mut warned: Option<Instant> = None;
     while let Ok(first) = rx.recv() {
+        let start = Instant::now();
         let mut inputs = vec![first];
         while inputs.len() < MAX_BATCH {
             match rx.try_recv() {
@@ -40,6 +50,8 @@ pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<I
                 Err(_) => break,
             }
         }
+        let taken = inputs.len();
+        let depth = hub.input_depth.fetch_sub(taken as u64, Ordering::Relaxed);
         // The first batch announces everything recent: a message the crash kept from the stream
         // log would otherwise leave a resuming client behind the replayed state.
         let before = if batch_n == 0 {
@@ -122,6 +134,16 @@ pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<I
         for s in removed {
             exec.release(s.id);
             hub.transcripts.close(s.id);
+        }
+        let took = start.elapsed();
+        if (took > SLOW_BATCH || depth > DEEP_QUEUE)
+            && warned.is_none_or(|w| w.elapsed() >= WARN_EVERY)
+        {
+            warned = Some(Instant::now());
+            warning!(
+                "core: a batch of {taken} took {} ms, with {depth} inputs queued as it began",
+                took.as_millis()
+            );
         }
     }
     info!("core stopped");

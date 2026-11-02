@@ -211,12 +211,6 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
         .map_err(|e| format!("open stream log {}: {e}", home.stream().display()))?;
 
     let (tx, rx) = mpsc::channel::<Input>();
-    // HubRecovered is the first input, before any listener or timer can add one (README step 5).
-    tx.send(Input::Event {
-        kind: EventKind::HubRecovered,
-        reply: None,
-    })
-    .map_err(|_| "core channel closed")?;
     let envoy_missing = envoy_id(&state).is_none();
     let view = View {
         state: state.clone(),
@@ -234,6 +228,8 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
         view,
         bus,
     ));
+    // HubRecovered is the first input, before any listener or timer can add one (README step 5).
+    hub.submit(EventKind::HubRecovered);
     let writer_hub = hub.clone();
     thread::Builder::new()
         .name("pt-stream".into())
