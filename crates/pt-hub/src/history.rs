@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -81,6 +82,8 @@ struct Passes {
 
 pub struct History {
     ix: Mutex<Result<Index, String>>,
+    /// Set from the index when a source is capped. Readers take no index lock.
+    capped: AtomicBool,
     /// The sleeve kind each native session ran as (the drivers say only `pi`).
     harnesses: Mutex<HashMap<String, ApiHarness>>,
     passes: Mutex<Passes>,
@@ -140,7 +143,7 @@ impl History {
     /// history methods answer `unavailable` with the reason.
     pub fn open(dir: &Path) -> History {
         let ix = open_index(dir);
-        match &ix {
+        let capped = match &ix {
             Ok(ix) => {
                 let st = ix.stats();
                 info!(
@@ -149,11 +152,16 @@ impl History {
                     st.sessions,
                     dir.display()
                 );
+                ix.capped()
             }
-            Err(e) => warning!("history is off: {e}"),
-        }
+            Err(e) => {
+                warning!("history is off: {e}");
+                false
+            }
+        };
         History {
             ix: Mutex::new(ix),
+            capped: AtomicBool::new(capped),
             harnesses: Mutex::new(HashMap::new()),
             passes: Mutex::new(Passes::default()),
         }
@@ -183,9 +191,9 @@ impl History {
         self.with(|ix| Ok(ix.docs())).unwrap_or(0)
     }
 
-    /// A sleeve's history is at its text budget.
+    /// A sleeve's history is at its text budget. This does not take the index lock.
     pub fn capped(&self) -> bool {
-        self.with(|ix| Ok(ix.capped())).unwrap_or(false)
+        self.capped.load(Ordering::Relaxed)
     }
 
     pub fn context_usage(&self, session: &str) -> Option<ContextUsage> {
@@ -335,6 +343,7 @@ impl History {
                     p.errors.remove(&src.path);
                     changed |= g.bytes > 0 || g.reset || g.capped;
                     if g.capped {
+                        self.capped.store(true, Ordering::Relaxed);
                         warning!("history capped: {}", src.path.display());
                     }
                 }
