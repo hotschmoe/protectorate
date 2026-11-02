@@ -411,3 +411,53 @@ fn one_turn_pages_past_200_docs_with_after() {
         assert_eq!(pair[1], pair[0] + 1, "gap or repeat at {pair:?}");
     }
 }
+
+#[test]
+fn pages_skip_earlier_segments_and_other_sessions() {
+    let dir = scratch("page-segments");
+    let home = dir.join("home");
+    let root = home.join(".claude/projects");
+    write(
+        &root.join("a/shared.jsonl"),
+        &claude_user("sharedmarker").repeat(145),
+    );
+    write(
+        &root.join("b/other.jsonl"),
+        &claude_user("othermarker").repeat(25),
+    );
+    write(
+        &root.join("c/shared.jsonl"),
+        &claude_user("sharedmarker").repeat(130),
+    );
+    let index = dir.join("index");
+    let out = run(&home, &index, &["sharedmarker"], None);
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(
+        stdout.contains("rebuild: identical") && stdout.contains("3 segments"),
+        "{stdout}"
+    );
+
+    for name in ["a", "b"] {
+        let index = index.join(name);
+        let (first, _, more) = read_page(&index, "shared", None);
+        assert_eq!(first.len(), 200);
+        assert!(more);
+        let (second, _, more) = read_page(&index, "shared", first.last().copied());
+        assert!(!more);
+        let all: Vec<u64> = first.into_iter().chain(second).collect();
+        let expected: Vec<u64> = (0..145).chain(170..300).collect();
+        assert_eq!(all, expected);
+
+        for after in [144, 155, 169] {
+            let (docs, _, more) = read_page(&index, "shared", Some(after));
+            assert_eq!(docs, (170..300).collect::<Vec<_>>());
+            assert!(!more);
+        }
+        let (docs, _, more) = read_page(&index, "shared", Some(298));
+        assert_eq!(docs, [299]);
+        assert!(!more);
+        let (docs, _, more) = read_page(&index, "shared", Some(u64::MAX));
+        assert!(docs.is_empty());
+        assert!(!more);
+    }
+}

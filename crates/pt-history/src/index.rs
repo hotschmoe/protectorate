@@ -139,14 +139,14 @@ impl Seg {
 struct Pending {
     id: u64,
     offset: u64,
-    source: String,
+    source: u32,
     sleeve: Option<String>,
     draft: Draft,
 }
 
 /// One live doc in a sleeve's id order. A doc still in `pending` has not been committed.
 struct Loc {
-    source: String,
+    source: u32,
     charge: u64,
 }
 
@@ -161,6 +161,18 @@ struct SleeveDocs {
 #[derive(Default)]
 struct SourceDocs {
     by_id: BTreeMap<u64, u64>,
+}
+
+fn update_or_insert<V: Default>(
+    map: &mut BTreeMap<String, V>,
+    key: &str,
+    update: impl FnOnce(&mut V),
+) {
+    if let Some(value) = map.get_mut(key) {
+        update(value);
+    } else {
+        update(map.entry(key.to_owned()).or_default());
+    }
 }
 
 /// What one [`Index::ingest`] call read.
@@ -454,43 +466,45 @@ impl Index {
                     continue;
                 };
                 let charge = self.doc_charge(m);
-                *kept.entry(src.to_owned()).or_default() += charge;
-                by_source
-                    .entry(src.to_owned())
-                    .or_default()
-                    .by_id
-                    .insert(m.id, charge);
+                update_or_insert(&mut kept, src, |total| *total += charge);
+                update_or_insert(&mut by_source, src, |docs| {
+                    docs.by_id.insert(m.id, charge);
+                });
                 if let Some(sleeve) = self.syms.name(m.sleeve) {
-                    let slot = sleeves.entry(sleeve.to_owned()).or_default();
-                    slot.total = slot.total.saturating_add(charge);
-                    slot.by_id.insert(
-                        m.id,
-                        Loc {
-                            source: src.to_owned(),
-                            charge,
-                        },
-                    );
+                    update_or_insert(&mut sleeves, sleeve, |slot| {
+                        slot.total = slot.total.saturating_add(charge);
+                        slot.by_id.insert(
+                            m.id,
+                            Loc {
+                                source: m.source,
+                                charge,
+                            },
+                        );
+                    });
                 }
             }
         }
         for (&id, p) in &self.pending {
-            let charge = queued_bytes(&p.draft, &p.source, p.sleeve.as_deref()) as u64;
-            *kept.entry(p.source.clone()).or_default() += charge;
-            by_source
-                .entry(p.source.clone())
-                .or_default()
-                .by_id
-                .insert(id, charge);
+            let source = self
+                .syms
+                .name(p.source)
+                .expect("pending source is interned");
+            let charge = queued_bytes(&p.draft, source, p.sleeve.as_deref()) as u64;
+            update_or_insert(&mut kept, source, |total| *total += charge);
+            update_or_insert(&mut by_source, source, |docs| {
+                docs.by_id.insert(id, charge);
+            });
             if let Some(sleeve) = &p.sleeve {
-                let slot = sleeves.entry(sleeve.clone()).or_default();
-                slot.total = slot.total.saturating_add(charge);
-                slot.by_id.insert(
-                    id,
-                    Loc {
-                        source: p.source.clone(),
-                        charge,
-                    },
-                );
+                update_or_insert(&mut sleeves, sleeve, |slot| {
+                    slot.total = slot.total.saturating_add(charge);
+                    slot.by_id.insert(
+                        id,
+                        Loc {
+                            source: p.source,
+                            charge,
+                        },
+                    );
+                });
             }
         }
         self.live_docs = n;
@@ -557,6 +571,7 @@ impl Index {
         let was_capped = rec.capped;
         self.sources.insert(key.clone(), rec.clone());
         self.bind_source(&key, source.sleeve.as_deref());
+        let source_sym = self.syms.intern(&stored);
         let mut dropped = false;
         let end = source.limit.unwrap_or(opened.len).min(opened.len);
         loop {
@@ -591,26 +606,30 @@ impl Index {
                 self.note_usage(u);
             }
             for (offset, draft) in queued {
-                let u = self
-                    .usage
-                    .entry(draft.session.clone())
-                    .or_insert_with(|| ContextUsage {
-                        session: draft.session.clone(),
-                        harness: draft.harness,
-                        ..ContextUsage::default()
-                    });
-                u.turns = u.turns.max(draft.turn);
+                if let Some(u) = self.usage.get_mut(&draft.session) {
+                    u.turns = u.turns.max(draft.turn);
+                } else {
+                    self.usage.insert(
+                        draft.session.clone(),
+                        ContextUsage {
+                            session: draft.session.clone(),
+                            harness: draft.harness,
+                            turns: draft.turn,
+                            ..ContextUsage::default()
+                        },
+                    );
+                }
                 let id = self.next_doc;
                 let bytes = queued_bytes(&draft, &stored, source.sleeve.as_deref());
                 let charge = bytes as u64;
                 self.pending_bytes = self.pending_bytes.saturating_add(bytes);
-                self.add_live(id, &stored, charge, source.sleeve.as_deref());
+                self.add_live(id, &stored, source_sym, charge, source.sleeve.as_deref());
                 self.pending.insert(
                     id,
                     Pending {
                         id,
                         offset,
-                        source: stored.clone(),
+                        source: source_sym,
                         sleeve: source.sleeve.clone(),
                         draft,
                     },
@@ -693,12 +712,17 @@ impl Index {
         if pending {
             self.remove_pending(id)
         } else {
+            let source = self
+                .syms
+                .name(source)
+                .expect("live source is interned")
+                .to_owned();
             self.drop_source(source, id.saturating_add(1));
             true
         }
     }
 
-    fn oldest_in_sleeve(&self, sleeve: &str, keep: u64) -> Option<(u64, String, bool)> {
+    fn oldest_in_sleeve(&self, sleeve: &str, keep: u64) -> Option<(u64, u32, bool)> {
         let slot = self.sleeves.get(sleeve)?;
         let mut it = slot.by_id.iter();
         let (&first, first_loc) = it.next()?;
@@ -707,7 +731,7 @@ impl Index {
         } else {
             (first, first_loc)
         };
-        Some((id, loc.source.clone(), self.pending.contains_key(&id)))
+        Some((id, loc.source, self.pending.contains_key(&id)))
     }
 
     /// Drops the oldest live doc of `stored` other than `keep`.
@@ -734,25 +758,24 @@ impl Index {
         }
     }
 
-    fn add_live(&mut self, id: u64, source: &str, charge: u64, sleeve: Option<&str>) {
-        self.by_source
-            .entry(source.to_owned())
-            .or_default()
-            .by_id
-            .insert(id, charge);
-        *self.kept.entry(source.to_owned()).or_default() += charge;
+    fn add_live(&mut self, id: u64, source: &str, sym: u32, charge: u64, sleeve: Option<&str>) {
+        update_or_insert(&mut self.by_source, source, |docs| {
+            docs.by_id.insert(id, charge);
+        });
+        update_or_insert(&mut self.kept, source, |total| *total += charge);
         let Some(sleeve) = sleeve else {
             return;
         };
-        let slot = self.sleeves.entry(sleeve.to_owned()).or_default();
-        slot.total = slot.total.saturating_add(charge);
-        slot.by_id.insert(
-            id,
-            Loc {
-                source: source.to_owned(),
-                charge,
-            },
-        );
+        update_or_insert(&mut self.sleeves, sleeve, |slot| {
+            slot.total = slot.total.saturating_add(charge);
+            slot.by_id.insert(
+                id,
+                Loc {
+                    source: sym,
+                    charge,
+                },
+            );
+        });
     }
 
     fn unlink(&mut self, id: u64, source: &str, charge: u64, sleeve: Option<&str>) {
@@ -785,9 +808,14 @@ impl Index {
         let Some(p) = self.pending.remove(&id) else {
             return false;
         };
-        let bytes = queued_bytes(&p.draft, &p.source, p.sleeve.as_deref());
+        let source = self
+            .syms
+            .name(p.source)
+            .expect("pending source is interned")
+            .to_owned();
+        let bytes = queued_bytes(&p.draft, &source, p.sleeve.as_deref());
         self.pending_bytes = self.pending_bytes.saturating_sub(bytes);
-        self.unlink(id, &p.source, bytes as u64, p.sleeve.as_deref());
+        self.unlink(id, &source, bytes as u64, p.sleeve.as_deref());
         true
     }
 
@@ -871,13 +899,17 @@ impl Index {
                     harness: p.draft.harness,
                     session: &p.draft.session,
                     sleeve: p.sleeve.as_deref(),
-                    source: &p.source,
+                    source: self
+                        .syms
+                        .name(p.source)
+                        .expect("pending source is interned"),
                     tool: p.draft.tool.as_deref(),
                     files: &p.draft.files,
                     text: &p.draft.text,
                 })
                 .collect();
-            let seg = match inject_failure("segment").and_then(|()| self.write_segment(&docs)) {
+            let bytes = inject_failure("segment").map(|()| segment::encode(&docs));
+            let seg = match bytes.and_then(|bytes| self.write_new_segment(&bytes)) {
                 Ok(seg) => seg,
                 Err(e) => {
                     self.pending = pending;
@@ -913,10 +945,6 @@ impl Index {
 
     pub fn has_uncommitted(&self) -> bool {
         self.dirty
-    }
-
-    fn write_segment(&mut self, docs: &[DocIn<'_>]) -> io::Result<Seg> {
-        self.write_new_segment(&segment::encode(docs))
     }
 
     /// Writes `bytes` as the next segment. On failure the file is removed and the segment
@@ -1263,12 +1291,9 @@ impl Index {
                     return Ok((Vec::new(), false));
                 };
                 for s in &self.segs {
-                    for m in &s.docs {
-                        if m.session != sym
-                            || !(*from..=*to).contains(&m.turn)
-                            || after.is_some_and(|id| m.id <= id)
-                            || !allow(m)
-                        {
+                    let start = after.map_or(0, |id| s.docs.partition_point(|m| m.id <= id));
+                    for m in &s.docs[start..] {
+                        if m.session != sym || !(*from..=*to).contains(&m.turn) || !allow(m) {
                             continue;
                         }
                         let w = m.text_len as usize;
