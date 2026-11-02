@@ -627,9 +627,10 @@ fn hub_runs_the_fleet_and_node_jobs() {
 
     // A job that leaves an artifact in its directory.
     let cwd = work.to_str().unwrap();
+    let abs = format!("{cwd}/out.bin");
     let art = run_job(
         &hub,
-        &["--cwd", cwd, "--artifact", "out.bin"],
+        &["--cwd", cwd, "--artifact", "out.bin", "--artifact", &abs],
         &[
             "sh",
             "-c",
@@ -661,7 +662,27 @@ fn hub_runs_the_fleet_and_node_jobs() {
     ])
     .ok();
     assert_eq!(fs::read(&got).unwrap(), expected);
+    // An absolute path inside the job's directory names the same file.
+    assert_eq!(done["artifacts"][1]["path"].as_str(), Some(abs.as_str()));
+    assert_eq!(done["artifacts"][1]["sha256"], a["sha256"], "{done}");
     assert!(log_text(&hub, &art, 0).contains("wrote"));
+    // The hub judges a cwd by the node's OS: this node is not Windows.
+    let win = hub.cli(&[
+        "job",
+        "run",
+        "--node",
+        "e2e-hubfleet",
+        "--cwd",
+        r"C:\dev\x",
+        "--",
+        "true",
+    ]);
+    assert_ne!(win.status, 0, "{}", win.stdout);
+    assert!(
+        win.stderr.contains("absolute path on node"),
+        "{}",
+        win.stderr
+    );
     // A missing artifact fails the job after its verify attempts.
     let missing = run_job(&hub, &["--cwd", cwd, "--artifact", "nope.txt"], &["true"]);
     let done = wait_job(&hub, &missing, &["succeeded", "failed"], 120);
