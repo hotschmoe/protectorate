@@ -18,6 +18,8 @@ extension type _History._(JSObject _) implements JSObject {
 
 const _prefix = 'protectorate.';
 
+Future<void> initSettings() async {}
+
 /// Storage can be off (private windows, blocked site data); the app then forgets on reload.
 String? loadSetting(String key) {
   try {

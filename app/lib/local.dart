@@ -1,6 +1,7 @@
 // What the app keeps on the device, per platform: the browser's localStorage and location on
-// web; in memory elsewhere (REVISIT: a settings file through dart:io).
+// web; a settings.json in the app's config directory elsewhere (loaded by initSettings).
 //
+//   Future<void> initSettings()                   // before runApp; web has nothing to load
 //   String? loadSetting(String key)
 //   void saveSetting(String key, String? value)   // null removes it
 //   String? pageOrigin()                          // the page's http(s) origin on web, else null

@@ -213,11 +213,6 @@ Each entry: where, what was done, what right looks like.
   `_x.ai/queue/changed` (`runningPromptId`) and the prompt reply name Grok's prompt id, an
   x.ai extension outside ACP. Notices naming one of the last 16 ended prompts, or another
   prompt than the running one, are dropped. Right: ACP's own prompt id if it gains one.
-- **App settings live in memory on desktop and Android** (`app/lib/local_io.dart`): the web build
-  keeps hub URL, device token and device id in `localStorage` (`local_web.dart`), but the
-  `dart:io` side forgets them on restart, so a phone pairs again each launch. Theme is not kept
-  anywhere. Right: a small file in the app support directory through `dart:io`, without
-  path_provider or shared_preferences.
 - **Linux desktop bundle is built but not released**: `flutter build linux --release` succeeds on
   the dev host (arm64) and was not run beyond that. Right: add the Linux bundle to the release.
 - **Chat text is plain monospace** (`app/lib/chat.dart`): no Markdown, code fences show as typed.

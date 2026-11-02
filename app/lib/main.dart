@@ -13,7 +13,9 @@ import 'scope.dart';
 import 'shell.dart';
 import 'theme.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await initSettings();
   LicenseRegistry.addLicense(() async* {
     final ofl = await rootBundle.loadString('assets/fonts/OFL.txt');
     yield LicenseEntryWithLineBreaks(const ['JetBrains Mono'], ofl);
@@ -34,7 +36,7 @@ class App extends StatefulWidget {
 
 class _AppState extends State<App> {
   final Map<String, String> _q = Uri.base.queryParameters;
-  late bool _dark = _q['theme'] != 'light';
+  late bool _dark = (_q['theme'] ?? loadSetting('theme')) != 'light';
   late String _url = _q['hub'] == 'fake'
       ? ''
       : (_q['hub'] ?? loadSetting('hub_url') ?? pageOrigin() ?? '');
@@ -111,7 +113,10 @@ class _AppState extends State<App> {
         key: ObjectKey(_hub),
         hub: _hub,
         dark: _dark,
-        setDark: (v) => setState(() => _dark = v),
+        setDark: (v) {
+          saveSetting('theme', v ? 'dark' : 'light');
+          setState(() => _dark = v);
+        },
         hubUrl: _url,
         hubToken: _token,
         connect: _connect,
