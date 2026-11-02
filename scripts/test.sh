@@ -1,7 +1,10 @@
 #!/bin/sh
 # The workspace's test binaries side by side instead of one after another, each from its
-# package's dir as `cargo test` runs it, slowest first by the last run's times. A failing
-# binary's output is printed; every log stays in <target>/test-logs.
+# package's dir as `cargo test` runs it, slowest first by the last run's times. The binaries
+# whose tests take turns on the local model (their source calls have_runtime or reads
+# PT_E2E_PI_*) run one at a time in a lane of their own: one endpoint serves them all, and
+# side by side their turns time out. A failing binary's output is printed; every log stays in
+# <target>/test-logs.
 #
 #   sh scripts/test.sh            PT_TEST_JOBS (default half the cores) binaries at once
 set -eu
@@ -30,8 +33,19 @@ while read -r manifest kind exe; do
     echo "${t:-999999} $key $manifest $exe"
 done <"$logs/list" | sort -rn | cut -d' ' -f2- >"$logs/order"
 
+: >"$logs/model"
+: >"$logs/rest"
+while read -r key manifest exe; do
+    src=$(dirname "$manifest")/tests/$(basename "$exe" | sed 's/-[0-9a-f]*$//').rs
+    if [ -f "$src" ] && grep -qE 'have_runtime\(|PT_E2E_PI_' "$src"; then
+        echo "$key $manifest $exe" >>"$logs/model"
+    else
+        echo "$key $manifest $exe" >>"$logs/rest"
+    fi
+done <"$logs/order"
+
 # shellcheck disable=SC2016
-xargs -P "$jobs" -L 1 sh -c '
+run='
     logs=$0 key=$1 manifest=$2 exe=$3
     log=$logs/$(echo "$key" | tr / .).log
     start=$(date +%s)
@@ -40,7 +54,11 @@ xargs -P "$jobs" -L 1 sh -c '
     else
         echo "$key" >>"$logs/failed"
     fi
-' "$logs" <"$logs/order"
+'
+xargs -L 1 sh -c "$run" "$logs" <"$logs/model" &
+lane=$!
+xargs -P "$(( jobs > 2 ? jobs - 1 : 1 ))" -L 1 sh -c "$run" "$logs" <"$logs/rest"
+wait "$lane"
 mv "$logs/times.new" "$times"
 
 total=$(wc -l <"$logs/order")
