@@ -96,7 +96,7 @@ impl Releases {
                 let store = store.clone();
                 thread::spawn(move || watch(store));
             }
-            Ok(Verdict::Idle | Verdict::Confirmed) => {}
+            Ok(Verdict::Idle | Verdict::Confirmed | Verdict::Kept { .. }) => {}
             Err(e) => eprintln!("protectorate-node: probation: {e}"),
         }
         r
@@ -260,7 +260,7 @@ fn watch(store: Store) {
                 sw.from.as_deref().unwrap_or("-"),
                 sw.to
             )),
-            Ok(Verdict::Idle | Verdict::Confirmed) => return,
+            Ok(Verdict::Idle | Verdict::Confirmed | Verdict::Kept { .. }) => return,
             Err(e) => eprintln!("protectorate-node: probation: {e}"),
         }
     }
@@ -286,7 +286,7 @@ pub fn probation(args: &[String]) -> Result<(), String> {
         .start_attempt(MAX_TRIAL_STARTS)
         .map_err(|e| e.to_string())?
     {
-        Verdict::Idle | Verdict::Confirmed => {}
+        Verdict::Idle | Verdict::Confirmed | Verdict::Kept { .. } => {}
         Verdict::Waiting { remaining } => println!(
             "release on probation, {} s left for the hub to make contact",
             remaining.as_secs()

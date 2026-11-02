@@ -27,7 +27,7 @@ mod version;
 pub use error::{Error, ErrorKind, Result};
 pub use fetch::{Asset, Release, Source};
 pub use pick::Pick;
-pub use store::{Probation, RestoreError, Staged, Store, Switch, Verdict};
+pub use store::{Phase, Probation, RestoreError, Staged, Store, Switch, Verdict, phase};
 pub use sums::Sums;
 pub use version::{Channel, Version};
 

@@ -89,6 +89,72 @@ impl RestoreError {
     }
 }
 
+/// Where a probation record stands, from [`phase`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Phase {
+    /// Nothing to do: the trial ended, or `current` names another release.
+    Idle,
+    /// `current` names the release the trial started from: a crash came before the switch, or
+    /// after a rollback moved `current` back and before it finished.
+    NotSwitched,
+    /// On trial, not confirmed and not asked to roll back.
+    Trial { deadline_ms: u64, starts: u64 },
+    /// The release stays.
+    Confirmed,
+    /// A rollback is asked for and has replaced no live file yet.
+    RollbackDue { reason: String, manual: bool },
+    /// A rollback restore replaced live files and did not finish. Nothing may serve this home
+    /// before a prestart finishes the rollback.
+    RestoreIncomplete { error: Option<String> },
+    /// A rollback restore failed before it replaced anything; the release stays until
+    /// `hub probation --retry-rollback`.
+    Kept { error: String },
+}
+
+/// The trial's phase, from its record, the release `current` names and whether
+/// `releases/rollback-open` exists. The phase is never stored: the old and the new release both
+/// rewrite the whole record and drop keys they do not know.
+pub fn phase(p: &Probation, current: Option<&str>, marker: bool) -> Phase {
+    if p.rolled_back_ms.is_some() {
+        return Phase::Idle;
+    }
+    if current != Some(p.version.as_str()) {
+        // A confirmed record whose `current` moved back by other means is no trial to undo.
+        let back = current == Some(p.previous.as_str())
+            && p.restore_failed.is_none()
+            && (p.reason.is_some() || p.contacted_ms.is_none());
+        return if back {
+            Phase::NotSwitched
+        } else {
+            Phase::Idle
+        };
+    }
+    // The marker is written before a restore replaces any live file and cleared when the
+    // rollback finishes, so with `current` still on the trial it means a restore is half done.
+    match (&p.restore_failed, &p.reason) {
+        (error, _) if marker => Phase::RestoreIncomplete {
+            error: error.clone(),
+        },
+        (Some(error), Some(_)) => Phase::RestoreIncomplete {
+            error: Some(error.clone()),
+        },
+        (Some(error), None) => Phase::Kept {
+            error: error.clone(),
+        },
+        (None, Some(reason)) if p.manual_rollback || p.contacted_ms.is_none() => {
+            Phase::RollbackDue {
+                reason: reason.clone(),
+                manual: p.manual_rollback,
+            }
+        }
+        (None, _) if p.contacted_ms.is_some() => Phase::Confirmed,
+        (None, _) => Phase::Trial {
+            deadline_ms: p.deadline_ms,
+            starts: p.starts,
+        },
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict {
     /// No update on trial.
@@ -97,6 +163,9 @@ pub enum Verdict {
     Waiting { remaining: Duration },
     /// The hub made contact; the update stays.
     Confirmed,
+    /// The rollback restore failed before it replaced anything, so the release on trial stays;
+    /// `hub probation --retry-rollback` tries again.
+    Kept { error: String },
     /// The window passed without confirmation, or the release kept failing, and `current` went
     /// back. The caller exits so the service manager restarts the previous binary.
     RolledBack(Switch),
@@ -765,10 +834,7 @@ impl Store {
                 to: version.to_string(),
             });
         }
-        if let Some(p) = self
-            .probation()?
-            .filter(|p| p.version == from && p.contacted_ms.is_some() && p.rolled_back_ms.is_none())
-        {
+        if let Some((p, Phase::Confirmed | Phase::Kept { .. })) = self.probation_phase()? {
             self.write_record(CONFIRMED, &p)?;
         }
         let now = now_ms();
@@ -797,6 +863,16 @@ impl Store {
 
     pub fn probation(&self) -> Result<Option<Probation>> {
         self.read_record(PROBATION)
+    }
+
+    /// The probation record with its [`phase`]; `current` and the marker are read without the
+    /// store lock.
+    pub fn probation_phase(&self) -> Result<Option<(Probation, Phase)>> {
+        let Some(p) = self.probation()? else {
+            return Ok(None);
+        };
+        let phase = phase(&p, self.current()?.as_deref(), self.rollback_open()?);
+        Ok(Some((p, phase)))
     }
 
     fn read_record(&self, name: &str) -> Result<Option<Probation>> {
@@ -828,21 +904,13 @@ impl Store {
         sync_dir(&self.dir)
     }
 
-    fn open_probation(&self) -> Result<Option<Probation>> {
-        let Some(p) = self.probation()? else {
-            return Ok(None);
-        };
-        // A failed restore keeps `manual_rollback` for the retry, but the trial is not open:
-        // the release stays, and another update may proceed.
-        let open = (p.contacted_ms.is_none() || p.manual_rollback)
-            && p.restore_failed.is_none()
-            && p.rolled_back_ms.is_none()
-            && self.current()?.as_deref() == Some(p.version.as_str());
-        Ok(open.then_some(p))
-    }
-
+    /// A kept release (a failed restore) does not hold up another update.
     fn refuse_open_trial(&self) -> Result<()> {
-        if let Some(p) = self.open_probation()? {
+        if let Some((
+            p,
+            Phase::Trial { .. } | Phase::RollbackDue { .. } | Phase::RestoreIncomplete { .. },
+        )) = self.probation_phase()?
+        {
             return Err(store_err(format!(
                 "release {} is still on probation; wait for confirmation or rollback",
                 p.version
@@ -855,11 +923,11 @@ impl Store {
     /// that passed for one release never confirms another switched in since.
     pub fn confirm(&self, version: &str) -> Result<bool> {
         let _l = self.lock()?;
-        let Some(mut p) = self.open_probation()?.filter(|p| p.version == version) else {
+        let Some((mut p, Phase::Trial { deadline_ms, .. })) = self.probation_phase()? else {
             return Ok(false);
         };
         let now = now_ms();
-        if now >= p.deadline_ms || p.reason.is_some() {
+        if p.version != version || now >= deadline_ms {
             return Ok(false);
         }
         p.contacted_ms = Some(now);
@@ -889,15 +957,13 @@ impl Store {
         let _l = self.lock()?;
         match self.judge(true, max_starts, &mut restore) {
             Err(e) if matches!(e.kind, ErrorKind::Restore | ErrorKind::RestorePartial) => {
-                let mut p = self
-                    .probation()?
+                let (mut p, phase) = self
+                    .probation_phase()?
                     .ok_or_else(|| store_err("probation disappeared"))?;
-                // `releases/rollback-open` is written before any live file is replaced.
-                // A later failure, including one that replaces nothing this time, must
-                // not confirm the trial. Validation returns Partial when the marker is
-                // already there, so this still sees it. A confirmed manual rollback
-                // still has contact.
-                let incomplete = self.open_rollback_for(&p)? || e.kind == ErrorKind::RestorePartial;
+                // A restore that replaced live files before, this time or in an earlier
+                // attempt, must not keep the trial, even when this attempt replaced nothing.
+                let incomplete = e.kind == ErrorKind::RestorePartial
+                    || matches!(phase, Phase::RestoreIncomplete { .. });
                 if incomplete {
                     p.restore_failed = Some(e.message.clone());
                     self.write_probation(&p)?;
@@ -915,7 +981,7 @@ impl Store {
                         "update: {}; keeping the current release; repair the snapshot and run hub probation --retry-rollback",
                         e.message
                     );
-                    Ok(Verdict::Confirmed)
+                    Ok(Verdict::Kept { error: e.message })
                 }
             }
             other => other,
@@ -926,10 +992,17 @@ impl Store {
         let _l = self.lock()?;
         let current = self.current()?;
         let previous = self.previous()?;
+        let marker = self.rollback_open()?;
+        // An incomplete restore is finished by the prestart, never restarted from here.
         let matches = |p: &Probation| {
-            current.as_deref() == Some(p.version.as_str())
-                && previous.as_deref() == Some(p.previous.as_str())
-                && p.rolled_back_ms.is_none()
+            previous.as_deref() == Some(p.previous.as_str())
+                && matches!(
+                    phase(p, current.as_deref(), marker),
+                    Phase::Trial { .. }
+                        | Phase::Confirmed
+                        | Phase::RollbackDue { .. }
+                        | Phase::Kept { .. }
+                )
         };
         let mut p = match self.probation()?.filter(matches) {
             Some(p) => p,
@@ -938,11 +1011,7 @@ impl Store {
                 .filter(matches)
                 .ok_or_else(|| store_err("no snapshot for this rollback"))?,
         };
-        if current.as_deref() != Some(p.version.as_str())
-            || previous.as_deref() != Some(p.previous.as_str())
-            || p.rolled_back_ms.is_some()
-            || p.journal_snapshot.is_none()
-        {
+        if p.journal_snapshot.is_none() {
             return Err(store_err(
                 "no matching journal snapshot for this rollback; keep the current release",
             ));
@@ -965,19 +1034,19 @@ impl Store {
 
     pub fn retry_restore(&self) -> Result<()> {
         let _l = self.lock()?;
-        let mut p = self
-            .probation()?
+        let (mut p, phase) = self
+            .probation_phase()?
             .ok_or_else(|| store_err("no failed restore to retry"))?;
-        if p.restore_failed.is_none()
-            || self.current()?.as_deref() != Some(p.version.as_str())
-            || self.previous()?.as_deref() != Some(p.previous.as_str())
-        {
+        // An incomplete restore keeps its failure recorded, so a retry that replaces nothing
+        // this time does not keep the trial.
+        let partial = match phase {
+            Phase::RestoreIncomplete { .. } => true,
+            Phase::Kept { .. } => false,
+            _ => return Err(store_err("no failed restore for the current release")),
+        };
+        if self.previous()?.as_deref() != Some(p.previous.as_str()) {
             return Err(store_err("no failed restore for the current release"));
         }
-        // An open rollback marker means a live file was already replaced. Keep the
-        // failure recorded so a retry that replaces nothing this time does not confirm.
-        let partial =
-            self.open_rollback_for(&p)? || (p.contacted_ms.is_none() && p.reason.is_some());
         p.contacted_ms = None;
         p.reason = Some("retrying failed snapshot restore".into());
         if !partial {
@@ -988,7 +1057,9 @@ impl Store {
 
     pub fn request_rollback(&self, reason: &str) -> Result<bool> {
         let _l = self.lock()?;
-        let Some(mut p) = self.open_probation()? else {
+        let Some((mut p, Phase::Trial { .. } | Phase::RollbackDue { .. })) =
+            self.probation_phase()?
+        else {
             return Ok(false);
         };
         p.reason = Some(reason.to_string());
@@ -999,7 +1070,9 @@ impl Store {
     /// Rolls a release on trial back now, for `reason` (it failed its own health check).
     pub fn fail_probation(&self, reason: &str) -> Result<Option<Switch>> {
         let _l = self.lock()?;
-        let Some(mut p) = self.open_probation()? else {
+        let Some((mut p, Phase::Trial { .. } | Phase::RollbackDue { .. })) =
+            self.probation_phase()?
+        else {
             return Ok(None);
         };
         self.roll_back_trial(&mut p, reason, &mut no_snapshot)
@@ -1012,68 +1085,57 @@ impl Store {
         max_starts: u64,
         restore: &mut impl FnMut(&Probation) -> std::result::Result<(), RestoreError>,
     ) -> Result<Verdict> {
-        let Some(mut p) = self.probation()? else {
-            return Ok(Verdict::Idle);
-        };
-        if p.rolled_back_ms.is_some() {
-            return Ok(Verdict::Idle);
-        }
-        if p.restore_failed.is_some() && p.reason.is_none() {
-            return Ok(Verdict::Confirmed);
-        }
-        if p.contacted_ms.is_some() && !p.manual_rollback {
-            return Ok(Verdict::Confirmed);
-        }
         // A switch left half done would read as "trial not current", that is idle, and end the
         // trial's watch for good.
         self.repair_locked()?;
+        let Some((mut p, phase)) = self.probation_phase()? else {
+            return Ok(Verdict::Idle);
+        };
         if self.current()?.is_none() {
             return Err(store_err(format!(
-                "{}: no current release while {} is on probation",
+                "{}: no current release while probation.json names {}",
                 self.dir.display(),
                 p.version
             )));
         }
-        if self.current()?.as_deref() == Some(p.previous.as_str()) {
-            if p.reason.is_some() {
+        let why = match phase {
+            Phase::Idle => return Ok(Verdict::Idle),
+            Phase::Confirmed => return Ok(Verdict::Confirmed),
+            Phase::Kept { error } => return Ok(Verdict::Kept { error }),
+            // Puts `previous` back as well when the crash came after it moved, and ends the
+            // record so this runs once.
+            Phase::NotSwitched => {
                 self.finish_trial_rollback(&mut p)?;
-            } else if self.previous()?.as_deref() == Some(p.previous.as_str())
-                && let Some(earlier) = &p.earlier_previous
-                && self.require_version_dir(earlier).is_ok()
-            {
-                self.set_pointer(PREVIOUS, earlier)?;
-                sync_dir(&self.dir)?;
+                return Ok(Verdict::Idle);
             }
-            return Ok(Verdict::Idle);
-        }
-        if self.current()?.as_deref() != Some(p.version.as_str()) || p.rolled_back_ms.is_some() {
-            return Ok(Verdict::Idle);
-        }
-        if let Some(reason) = p.reason.clone() {
-            return self
-                .roll_back_trial(&mut p, &reason, restore)
-                .map(Verdict::RolledBack);
-        }
-        let now = now_ms();
-        if count {
-            p.starts += 1;
-            if p.starts > max_starts {
-                let why = format!("{} starts without passing its check", p.starts - 1);
-                return self
-                    .roll_back_trial(&mut p, &why, restore)
-                    .map(Verdict::RolledBack);
+            Phase::RollbackDue { reason, .. } => reason,
+            Phase::RestoreIncomplete { .. } => p
+                .reason
+                .clone()
+                .unwrap_or_else(|| "finishing an interrupted rollback restore".into()),
+            Phase::Trial { deadline_ms, .. } => {
+                let now = now_ms();
+                if count {
+                    p.starts += 1;
+                    if p.starts > max_starts {
+                        let why = format!("{} starts without passing its check", p.starts - 1);
+                        return self
+                            .roll_back_trial(&mut p, &why, restore)
+                            .map(Verdict::RolledBack);
+                    }
+                    self.write_probation(&p)?;
+                }
+                if now < deadline_ms {
+                    return Ok(Verdict::Waiting {
+                        remaining: Duration::from_millis(deadline_ms - now),
+                    });
+                }
+                format!(
+                    "not confirmed within {} s",
+                    deadline_ms.saturating_sub(p.switched_ms) / 1000
+                )
             }
-            self.write_probation(&p)?;
-        }
-        if now < p.deadline_ms {
-            return Ok(Verdict::Waiting {
-                remaining: Duration::from_millis(p.deadline_ms - now),
-            });
-        }
-        let why = format!(
-            "not confirmed within {} s",
-            p.deadline_ms.saturating_sub(p.switched_ms) / 1000
-        );
+        };
         self.roll_back_trial(&mut p, &why, restore)
             .map(Verdict::RolledBack)
     }
@@ -1154,11 +1216,6 @@ impl Store {
             ));
         }
         sync_dir(&self.dir)
-    }
-
-    /// The marker belongs to the probation that still names `current`.
-    fn open_rollback_for(&self, p: &Probation) -> Result<bool> {
-        Ok(self.rollback_open()? && self.current()?.as_deref() == Some(p.version.as_str()))
     }
 
     pub fn rollback_open(&self) -> Result<bool> {

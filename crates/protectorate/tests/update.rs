@@ -1106,6 +1106,83 @@ fn partial_manual_rollback_does_not_keep_the_trial() {
     assert!(probation(&home)["rolled_back_ms"].as_u64().is_some());
 }
 
+/// A manual rollback of a confirmed release that replaced live files and did not finish leaves
+/// contact recorded. A direct `serve` of that release, with no prestart before it, must refuse
+/// the half-restored home and leave the rollback to the next prestart.
+#[test]
+fn serve_refuses_an_incomplete_manual_rollback() {
+    let root = dir("half-restored");
+    let home = root.join("h");
+    fs::create_dir_all(&home).unwrap();
+    let config = obj! {
+        "envoy" => obj! { "harness" => "claude" },
+        "claude_program" => "/nonexistent/program",
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+    };
+    fs::write(home.join("config.json"), config.to_string()).unwrap();
+    let real = PathBuf::from(bin());
+    let wrap = |tag: &str| wrapper("protectorate", "version", tag, &real, "", false);
+    install(&home, "v0.0.2", "protectorate", &wrap("v0.0.2"));
+    fs::create_dir_all(home.join("releases/v0.0.1")).unwrap();
+    write_exec(
+        &home.join("releases/v0.0.1/protectorate"),
+        std::str::from_utf8(&wrap("v0.0.1")).unwrap(),
+    );
+    std::os::unix::fs::symlink("v0.0.1", home.join("releases/previous")).unwrap();
+    let record = obj! {
+        "version" => "v0.0.2",
+        "previous" => "v0.0.1",
+        "switched_ms" => 0u64,
+        "deadline_ms" => 1_000_000_000_000u64,
+        "contacted_ms" => 5u64,
+        "manual_rollback" => true,
+        "reason" => "manual rollback requested",
+        "restore_failed" => "renaming the journal: busy",
+        "next_sleeve" => 7u64,
+        "journal_snapshot_ms" => 1u64,
+        "journal_snapshot" => home.join("snapshots/journal").display().to_string()
+    };
+    let record = record.to_string();
+    fs::write(home.join("releases/probation.json"), &record).unwrap();
+    let marker = home.join("releases/rollback-open");
+    fs::write(&marker, b"open\n").unwrap();
+
+    let mut serve = unbusy(|| {
+        Command::new(home.join("releases/current/protectorate"))
+            .arg("--home")
+            .arg(&home)
+            .args(["serve", "--listen", "off"])
+            .env_remove("PROTECTORATE_TOKEN")
+            .env_remove("PROTECTORATE_SOCKET")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+    });
+    let exited = (0..300).any(|_| {
+        let done = serve.try_wait().unwrap().is_some();
+        if !done {
+            thread::sleep(Duration::from_millis(100));
+        }
+        done
+    });
+    if !exited {
+        let _ = serve.kill();
+    }
+    let out = serve.wait_with_output().unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(exited, "serve started on a half-restored home\n{err}");
+    assert!(!out.status.success(), "{out:?}");
+    assert!(err.contains("incomplete"), "{err}");
+    assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
+    assert!(marker.is_file());
+    assert_eq!(
+        fs::read_to_string(home.join("releases/probation.json")).unwrap(),
+        record
+    );
+}
+
 /// A hub killed at each step of a switch on probation, or of the rollback that ends one
 /// (`PT_TEST_CRASH_AT`, the store's crash knob), comes back on a release that worked with the
 /// way back intact: never on the new release with no trial, never with `previous` lost.

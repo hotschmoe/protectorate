@@ -27,8 +27,8 @@ use std::time::{Duration, Instant};
 use pt_api::{self as api, ApiError, ErrorCode, EventKind as Kind, Level};
 use pt_frame::msg;
 use pt_update::{
-    Channel, HUB_HEALTH_WINDOW, NODE_CONTACT_WINDOW, Probation, Release, RestoreError, Source,
-    Store, Version,
+    Channel, HUB_HEALTH_WINDOW, NODE_CONTACT_WINDOW, Phase, Probation, Release, RestoreError,
+    Source, Store, Version,
 };
 
 use crate::home::Home;
@@ -370,24 +370,43 @@ pub fn update_hub(hub: &Hub, r: api::UpdateHubRequest) -> Result<api::HubUpdate,
     Ok(answer)
 }
 
-/// At start: a release on trial whose window has passed goes back now. Returns the version on
-/// trial when this process is it.
-pub fn probation_at_start(home: &Home) -> Result<Option<String>, String> {
+/// The release on trial, as this process started it.
+pub struct Trial {
+    pub version: String,
+    pub deadline_ms: u64,
+}
+
+/// At start: refuses a home a rollback restore left half done, and a release on trial that is
+/// due to go back. Returns the trial when this process is the release on trial.
+pub fn probation_at_start(home: &Home) -> Result<Option<Trial>, String> {
     let store = Store::open(&home.root).map_err(|e| e.to_string())?;
-    let started = store.running_release();
-    let trial = store.probation().map_err(|e| e.to_string())?.filter(|p| {
-        Some(&p.version) == started.as_ref()
-            && p.contacted_ms.is_none()
-            && p.rolled_back_ms.is_none()
-    });
-    let Some(p) = trial else { return Ok(None) };
-    if p.reason.is_some() || crate::home::now_ms() >= p.deadline_ms {
-        return Err(format!(
+    let Some((p, phase)) = store.probation_phase().map_err(|e| e.to_string())? else {
+        return Ok(None);
+    };
+    let started = store.running_release().as_deref() == Some(p.version.as_str());
+    let due = || {
+        Err(format!(
             "release {} needs rollback by hub probation before startup",
             p.version
-        ));
+        ))
+    };
+    match phase {
+        Phase::RestoreIncomplete { .. } => Err(format!(
+            "the rollback restore of release {} is incomplete; hub probation must finish it before startup",
+            p.version
+        )),
+        Phase::RollbackDue { .. } if started => due(),
+        Phase::Trial { deadline_ms, .. } if started => {
+            if crate::home::now_ms() >= deadline_ms {
+                return due();
+            }
+            Ok(Some(Trial {
+                version: p.version.clone(),
+                deadline_ms,
+            }))
+        }
+        _ => Ok(None),
     }
-    Ok(started)
 }
 
 /// A start that failed while on trial requests an offline rollback at the next prestart.
@@ -1259,27 +1278,28 @@ pub fn probation_report(home: &Path) -> Result<String, String> {
     };
     let p: Probation =
         pt_json::from_bytes(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
-    if p.rolled_back_ms.is_some() {
-        return Ok("no release on trial".into());
-    }
-    if p.restore_failed.is_some() && p.reason.is_none() {
-        return Ok("snapshot restore failed; keeping the current release".into());
-    }
-    if p.contacted_ms.is_some() && !p.manual_rollback {
-        return Ok("the release on trial was confirmed".into());
-    }
     let current = fs::read_link(home.join("releases/current"))
         .ok()
         .and_then(|target| target.to_str().map(str::to_string));
-    if current.as_deref() != Some(p.version.as_str()) {
-        return Ok("no release on trial".into());
-    }
-    let now = crate::home::now_ms();
-    if p.reason.is_some() || now >= p.deadline_ms || p.starts >= pt_update::MAX_TRIAL_STARTS {
-        return Ok("on trial, rollback pending while the hub holds the journal".into());
-    }
-    let left = p.deadline_ms.saturating_sub(now) / 1000;
-    Ok(format!("on trial, {left} s left"))
+    let marker = fs::symlink_metadata(home.join("releases/rollback-open")).is_ok();
+    let pending = "on trial, rollback pending while the hub holds the journal";
+    Ok(match pt_update::phase(&p, current.as_deref(), marker) {
+        Phase::Idle | Phase::NotSwitched => "no release on trial".into(),
+        Phase::Confirmed => "the release on trial was confirmed".into(),
+        Phase::Kept { .. } => "snapshot restore failed; keeping the current release".into(),
+        Phase::RollbackDue { .. } | Phase::RestoreIncomplete { .. } => pending.into(),
+        Phase::Trial {
+            deadline_ms,
+            starts,
+        } => {
+            let now = crate::home::now_ms();
+            if now >= deadline_ms || starts >= pt_update::MAX_TRIAL_STARTS {
+                pending.into()
+            } else {
+                format!("on trial, {} s left", (deadline_ms - now) / 1000)
+            }
+        }
+    })
 }
 
 enum JournalGate {
@@ -1416,16 +1436,9 @@ pub fn announce_restore_failure(hub: &crate::hub::Hub) {
     let Ok(store) = Store::open(&hub.home.root) else {
         return;
     };
-    let Ok(Some(p)) = store.probation() else {
+    let Ok(Some((_, Phase::Kept { error: msg }))) = store.probation_phase() else {
         return;
     };
-    let Some(msg) = p.restore_failed else { return };
-    let Ok(Some(current)) = store.current() else {
-        return;
-    };
-    if current != p.version {
-        return;
-    }
     lock(&hub.info).restore_error = Some(msg.clone());
     hub.bus.event(
         Kind::Hub,
@@ -1460,16 +1473,13 @@ fn healthy(hub: &Hub) -> Result<(), String> {
 
 /// The new hub's health check, on its own thread: keep the release once it passes, else switch
 /// back and restart when the window ends.
-pub fn watch_probation(hub: &Arc<Hub>, version: String) {
+pub fn watch_probation(hub: &Arc<Hub>, trial: Trial) {
     let weak = Arc::downgrade(hub);
+    let Trial {
+        version,
+        deadline_ms: deadline,
+    } = trial;
     thread::spawn(move || {
-        let deadline = {
-            let Some(hub) = weak.upgrade() else { return };
-            Store::open(&hub.home.root)
-                .ok()
-                .and_then(|s| s.probation().ok().flatten())
-                .map_or(0, |p| p.deadline_ms)
-        };
         loop {
             let Some(hub) = weak.upgrade() else { return };
             let last = match healthy(&hub) {
