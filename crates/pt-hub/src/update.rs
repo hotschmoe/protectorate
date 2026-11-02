@@ -1096,6 +1096,19 @@ fn commit_headscale(dest: &Path) -> Result<(), RestoreError> {
 }
 
 pub fn restore_snapshots(home: &Path, store: &Store, p: &Probation) -> Result<(), RestoreError> {
+    // Validation and staging return before this attempt would write the marker.
+    // A marker left by an earlier attempt means a live file was already replaced,
+    // so that failure is partial and must not keep the trial.
+    let open = store
+        .rollback_open()
+        .map_err(|e| RestoreError::failed(e.to_string()))?;
+    match restore_snapshot_files(home, store, p) {
+        Err(RestoreError::Failed(message)) if open => Err(RestoreError::partial(message)),
+        other => other,
+    }
+}
+
+fn restore_snapshot_files(home: &Path, store: &Store, p: &Probation) -> Result<(), RestoreError> {
     if p.journal_snapshot.is_none() && p.headscale_snapshot.is_none() {
         return Ok(());
     }

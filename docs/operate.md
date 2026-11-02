@@ -347,8 +347,8 @@ refused while `releases/rollback-open` exists. The marker applies while that pro
 names the current release. If a restore fails after a live file was
 replaced, prestart exits and the next prestart continues; it does not leave the trial serving
 half-restored data. `releases/rollback-open` records that open restore until the rollback
-finishes, so a later failure continues it too, including a manual rollback of a release that
-was already confirmed. If the trial
+finishes, so a later failure continues it too, including a validation failure that replaces
+nothing this time and a manual rollback of a release that was already confirmed. If the trial
 binary cannot start, the hub stays unavailable until the snapshot is repaired; do not point the old
 binary at an unreadable journal. The first update from a binary predating journal snapshots is not
 protected by this mechanism, because that binary takes the snapshot and runs prestart.

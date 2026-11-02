@@ -904,7 +904,9 @@ impl Store {
                     .ok_or_else(|| store_err("probation disappeared"))?;
                 // `releases/rollback-open` is written before any live file is replaced.
                 // A later failure, including one that replaces nothing this time, must
-                // not confirm the trial. A confirmed manual rollback still has contact.
+                // not confirm the trial. Validation returns Partial when the marker is
+                // already there, so this still sees it. A confirmed manual rollback
+                // still has contact.
                 let incomplete = self.open_rollback_for(&p)? || e.kind == ErrorKind::RestorePartial;
                 if incomplete {
                     p.restore_failed = Some(e.message.clone());
