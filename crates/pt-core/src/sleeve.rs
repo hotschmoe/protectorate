@@ -20,9 +20,14 @@ fn name_ok(name: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
 }
 
-/// The outermost root or writable claim that overlaps `path`.
-fn overlapping<'a>(sleeves: impl Iterator<Item = &'a Sleeve>, path: &str) -> Option<&'a Sleeve> {
-    sleeves
+/// Refusal for the outermost root or writable claim that overlaps `path`. `kind` is
+/// `directory` or `worktree`. The caller drops removed sleeves.
+pub fn overlap_refusal<'a>(
+    sleeves: impl Iterator<Item = &'a Sleeve>,
+    path: &str,
+    kind: &str,
+) -> Option<String> {
+    let hit = sleeves
         .filter(|s| (s.claim.writable || s.parent.is_none()) && paths_overlap(&s.claim.path, path))
         .min_by(|a, b| {
             (a.claim.path.len(), a.claim.path.as_str(), a.name.as_str()).cmp(&(
@@ -30,11 +35,11 @@ fn overlapping<'a>(sleeves: impl Iterator<Item = &'a Sleeve>, path: &str) -> Opt
                 b.claim.path.as_str(),
                 b.name.as_str(),
             ))
-        })
-}
-
-fn overlap_why(kind: &str, s: &Sleeve) -> String {
-    format!("the {kind} overlaps sleeve {} ({})", s.name, s.claim.path)
+        })?;
+    Some(format!(
+        "the {kind} overlaps sleeve {} ({})",
+        hit.name, hit.claim.path
+    ))
 }
 
 impl Guard {
@@ -147,13 +152,12 @@ impl Core<'_> {
             return no(AlreadyExists, "a sleeve has that name");
         }
         let path = &spec.claim.path;
-        let clash = overlapping(others(), path);
         let Some(pid) = spec.parent else {
             if spec.layout != Layout::Root || !spec.claim.writable {
                 return no(InvalidArgument, "a root has a writable Root claim");
             }
-            if let Some(s) = clash {
-                return Err((AlreadyExists, overlap_why("directory", s)));
+            if let Some(why) = overlap_refusal(others(), path, "directory") {
+                return Err((AlreadyExists, why));
             }
             return Ok(());
         };
@@ -175,8 +179,8 @@ impl Core<'_> {
                 if !spec.claim.writable {
                     return no(InvalidArgument, "a worktree claim is writable");
                 }
-                if let Some(s) = clash {
-                    return Err((AlreadyExists, overlap_why("worktree", s)));
+                if let Some(why) = overlap_refusal(others(), path, "worktree") {
+                    return Err((AlreadyExists, why));
                 }
             }
             Layout::View => {
