@@ -59,7 +59,9 @@ impl Fault {
 }
 
 /// D9: who started Envoy's current turn. `origin` is `agent:<name>` when an agent message was
-/// written into it (as its prompt or a steer), and stays so until the turn settles.
+/// written into it (as its prompt or a steer), and stays so until the turn settles. A crash
+/// clears the origin and keeps `spawns`; the continuation restores the origin without zeroing
+/// the count.
 #[derive(Debug, Default)]
 pub struct EnvoyTurn {
     pub origin: Option<String>,
@@ -273,7 +275,8 @@ impl Hub {
                     .sleeve(to)
                     .and_then(|s| s.turn_agent.clone())
                     .map(|name| format!("agent:{name}"))
-                    .unwrap_or_else(|| "agent".into()),
+                    // No recorded name still carries the prefix, so D9 fails closed.
+                    .unwrap_or_else(|| "agent:".into()),
                 None => "agent".into(),
             },
             Some(Party::Sleeve(x)) => state

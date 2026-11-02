@@ -50,8 +50,9 @@ harness; it can be replaced with another level.
   across a later resume. It does not send that after an interrupt, a desync during one, a second
   time for the same owner turn, or after a restart of an idle sleeve. The continuation is sent
   as the party that opened that owner turn. An agent steer replaces that party, which keeps D9
-  on the continued turn and reports a rejection to that party. A later owner message is a new
-  turn and can be continued on its own.
+  on the continued turn and reports a rejection to that party. A continuation with no recorded
+  agent name is still labeled `agent:`, so D9 stays on. Spawns already made in the turn still
+  count after a crash. A later owner message is a new turn and can be continued on its own.
   A continuation that cannot be delivered is dropped, and a crash after the incarnation reached
   idle does not carry it into the next one. A stop, park, or resleeve drops one that is still
   queued and warns once. An idle crash that ends in a park or a resleeve drops a debt and

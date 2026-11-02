@@ -193,6 +193,10 @@ Each entry: where, what was done, what right looks like.
   closes stdin, waits, then `Child::kill`; descendants (MCP servers, shells) are the hub's
   systemd scope to reap (`KillScope`). The exit waiter polls `try_wait` every 50 ms. Right:
   wire the scope kill into shutdown once pt-sandbox lands, and a pidfd wait instead of polling.
+- **Codex resume settle is unverified** (`pt-drivers`, codex.rs): settling on `thread/resume`
+  is unverified, and the driver turns any unseen `turn/completed` into a settle
+  (`on_turn_completed`, around lines 611-680), which would drop every continuation silently.
+  Right: one real Codex resume after a mid-turn kill.
 - **No driver-side handshake timeout** (`pt-drivers`): a Codex or Grok handshake that never
   replies leaves the session without `session_info`; the hub's G5 (Booting 60 s) covers it.
   Explicit compaction is not exposed either (native only, SPEC 3.7). Right: `compact()` per

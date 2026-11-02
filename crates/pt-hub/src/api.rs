@@ -1428,7 +1428,11 @@ fn envoy_wait(c: &Ctx<'_>, r: api::EnvoyWaitRequest) -> Result<api::EnvoyReply> 
                 format!("message {request_id} may or may not have reached Envoy"),
             ))),
             MsgState::Delivered => {
-                let idle = matches!(s.activity, pt_core::Activity::Idle { .. });
+                // Published before this batch's intents run, so a crash can show Idle
+                // and Delivered while the continuation is still owed or only queued.
+                let owed =
+                    s.auto_continue.is_some() || s.queue.iter().any(|r| r.starts_with("continue:"));
+                let idle = matches!(s.activity, pt_core::Activity::Idle { .. }) && !owed;
                 answer(hub, id, &request_id, idle).map(Ok)
             }
             _ => None,

@@ -32,7 +32,7 @@ Give them the envoy-only token, which can send to Envoy and read its replies and
 
 - through their shell tool: `PROTECTORATE_TOKEN=<envoy-only token> protectorate envoy send --as
   <agent> ...`, then `envoy wait`. That wait includes the reply from a continuation
-  of the same turn;
+  of the same turn, and it stays open while that continuation is still owed or queued;
 - through MCP: `protectorate mcp --envoy [--token-file PATH] [--as NAME]`, a stdio server with
   the tools `envoy_send`, `envoy_wait` and `envoy_read`. The token comes from `--token-file` or
   `PROTECTORATE_TOKEN`; the agent's name from `--as` or the client's own name.
@@ -111,7 +111,8 @@ wait for the owner's approval, whatever Envoy decides:
 
 - `sleeve rm`;
 - `job run`;
-- `sleeve spawn` past `d9_spawn_limit` spawns in that turn (default 3).
+- `sleeve spawn` past `d9_spawn_limit` spawns in that turn (default 3). A crash keeps
+  that count: the continuation is the same turn.
 
 A node job with `--maintenance` from any sleeve, Envoy included, always waits for the owner. The
 waiting call fails after `d9_approval_timeout_secs` (default 900). Pending approvals live in

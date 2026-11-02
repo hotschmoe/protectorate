@@ -80,7 +80,8 @@ CLI on the hub machine (section 3.1).
       - credentials and keys (`~/.ssh`, other harnesses' logins, hub tokens, headscale keys)
         stay masked from sleeves;
       - D9 still applies: in a turn a vendor agent started, Envoy's removals, mass spawns and
-        node jobs wait for the owner. This is the one remaining approval.
+        node jobs wait for the owner. This is the one remaining approval. A crash keeps the
+        spawn count; the continuation of that turn does not start it over.
 
 ## 3. Layers
 
@@ -330,7 +331,8 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   The hub journals a `Continue` event and the effect is allocated only when that
   event is applied, so a journal recorded before the event existed replays to the same effects.
   The prompt is sent as the party that opened that owner turn. An agent steer replaces that
-  party, which keeps D9 on the continued turn and reports a rejection to that party. The owner
+  party, which keeps D9 on the continued turn and reports a rejection to that party. An agent
+  continuation with no recorded name is labeled `agent:`, so D9 still applies. The owner
   still hears when the prompt cannot be sent.
   It is not sent after a planned stop, a hub restart of an idle sleeve, or a manual resleeve (the
   brief is that continuation). A stop, park, or resleeve also drops a continuation still queued,
