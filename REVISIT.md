@@ -193,6 +193,10 @@ Each entry: where, what was done, what right looks like.
   closes stdin, waits, then `Child::kill`; descendants (MCP servers, shells) are the hub's
   systemd scope to reap (`KillScope`). The exit waiter polls `try_wait` every 50 ms. Right:
   wire the scope kill into shutdown once pt-sandbox lands, and a pidfd wait instead of polling.
+- **Codex resume settle is unverified** (`pt-drivers`, codex.rs): settling on `thread/resume`
+  is unverified, and the driver turns any unseen `turn/completed` into a settle
+  (`on_turn_completed`, around lines 611-680), which would drop every continuation silently.
+  Right: one real Codex resume after a mid-turn kill.
 - **No driver-side handshake timeout** (`pt-drivers`): a Codex or Grok handshake that never
   replies leaves the session without `session_info`; the hub's G5 (Booting 60 s) covers it.
   Explicit compaction is not exposed either (native only, SPEC 3.7). Right: `compact()` per
@@ -434,10 +438,19 @@ Each entry: where, what was done, what right looks like.
 - **Hub job logs are refreshed only on the core's Tick** (`pt-hub`, jobs.rs): a running job's log
   is pulled when pt-core polls it (every 10 s Tick), so `job log` lags by up to a Tick. Right: a
   log follow RPC on the node that pushes appended bytes.
+- **A cancelled job can lose its final log tail** (`pt-core` jobs): cancellation can acknowledge
+  collection before the hub fetches the final output, and the node then removes its copy.
+  `job run --wait` exposes the gap. Right: collect the final log before AckCollected.
 - **Hub job metadata outside the journal** (`pt-hub`, jobs.rs `JobStore`): the request record
   rides in the core's `JobSpec.command` (its digest is the spec's), but artifact results live in
   `<home>/jobs/<job>/<attempt>/artifacts.json` and the per-job view cache in memory. Right: fine
   while the core owns state; journal artifact results if `job show` must survive a lost home.
+- **Incomplete artifact collection retains the node tombstone** (`pt-core` jobs): after three
+  failed collection attempts the hub fails the job without acknowledging it, preserving the
+  node's files, but has no command to retry collection of that failed attempt. A dropped
+  connection is not one of those attempts: the hub saves what it fetched and collects again on
+  the next status. Right: an explicit collection retry that keeps the original attempt and never
+  re-runs the job.
 - **Fleet poll interval is one knob** (`pt-hub`, `fleet.poll_secs`, default 15): presence and the
   node list share it. Right: split them if presence must react faster than listings.
 - **Embedded binaries are never pruned** (`pt-embed`): the hub unpacks headscale and member to
@@ -523,6 +536,9 @@ Each entry: where, what was done, what right looks like.
   value would not. Right: send such fields as strings if one ever appears.
 - **Job log as lossy text** (`pt-api`, `JobLog`): log bytes go out as UTF-8 with invalid
   sequences replaced, so a binary log is not exact. Right: base64 bytes if exact logs matter.
+- **A UTF-8 character split between job log pages is corrupted** (`protectorate` job wait): each
+  page is independently decoded with replacement, so a character across the 1 MiB boundary is
+  printed as two replacement characters. Right: page bytes and decode incrementally.
 - **check-gen needs the Dart SDK** (`Makefile`): `pt-apigen`'s output is formatted with
   `dart format`, so `make check` needs `dart` on PATH (or `DART=`). Right: fine while the app is
   built on the same host; emit formatter-stable Dart directly if CI ever lacks Flutter.
@@ -663,6 +679,9 @@ Each entry: where, what was done, what right looks like.
   whichever is more, plus hub events by the same rule. Entry messages repeat transcript JSON,
   so the file is larger than it needs to be. Right: store transcript references, or move the
   stream into journal snapshots once pt-journal has retention.
+- **An interrupted-turn notice can be lost across a crash** (`pt-core` sleeve): if the hub crashes
+  after journaling `Exited` but before executing its `Notify` intents, recovery does not recreate
+  that notice. Right: journal notification delivery or re-derive it on recovery.
 - **The first batch after a restart re-announces recent state** (`pt-hub`, core.rs): sleeves,
   and jobs and approvals pending or changed in the 10 minutes before the journal's last event,
   because a crash between the journal's fsync and the stream log's could lose their messages.
@@ -969,9 +988,10 @@ Each entry: where, what was done, what right looks like.
   API-key login per harness in `<home>/logins/` if API billing is wanted for a sleeve.
 - **Effort is checked by a fixed list for Claude, Grok and Pi** (`pt-drivers` `vet_effort`): each
   CLI's documented levels are compiled in; a model that accepts fewer is the CLI's to refuse.
-  Codex is checked against its `model/list` catalog after the handshake. A resleeve to another
-  harness starts on that harness's default effort without a notice of its own (the view shows
-  `effort`). Right: read each CLI's model catalog if a model-specific refusal costs a sleeve.
+  Codex is checked against its `model/list` catalog after the handshake. An automatic resleeve
+  to another harness starts on that harness's default effort without a notice of its own (the
+  view shows `effort`); a manual start or resleeve may set it. Right: read each CLI's model
+  catalog if a model-specific refusal costs a sleeve.
 - **Rate limits are a failed turn, not a guardrail** (`pt-hub` `exec.rs`): a 429 or "overloaded"
   that survives the harness's own retries ends the turn as an error, the sleeve stays and idles,
   and the error entry is in the transcript; only quota (G1) and auth (G2) resleeve. The reset

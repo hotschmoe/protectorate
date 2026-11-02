@@ -171,6 +171,7 @@ api_records! {
         pub target: Option<Harness>,
         pub model: Option<String>,
         pub provider: Option<String>,
+        pub effort: Option<String>,
     }
 
     pub struct ResleeveRequest {
@@ -178,6 +179,7 @@ api_records! {
         pub target: Harness,
         pub model: Option<String>,
         pub provider: Option<String>,
+        pub effort: Option<String>,
     }
 
     pub struct ListApprovalsRequest {
@@ -230,6 +232,8 @@ api_records! {
 
     pub struct JobList {
         pub jobs: Vec<Job> = Vec::new(),
+        /// Only the caller's and its children's jobs are visible.
+        pub scoped_to_caller: bool,
     }
 
     pub struct GetJobArtifactRequest {

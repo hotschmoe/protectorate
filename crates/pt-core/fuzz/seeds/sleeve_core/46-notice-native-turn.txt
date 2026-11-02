@@ -1,0 +1,17 @@
+#scenario 20367612278b57e8
+# An acknowledged turn with a native id continues once after resume, and not at the exit itself.
+spawn root /w/a harness=codex
+run
+obs root ready
+send root m1
+run
+expect root activity=Working
+exit root
+expect-notice TurnNeedsPrompt count=0
+expect-effect continue:* count=0
+run
+obs root ready
+run
+expect root activity=Working
+expect-notice TurnNeedsPrompt count=0
+expect-effect continue:0:1 state=Confirmed count=1

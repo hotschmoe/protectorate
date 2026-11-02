@@ -14,6 +14,126 @@ use common::*;
 use pt_api::{METHODS, Scope};
 use pt_json::{Value, obj};
 
+#[test]
+fn job_wait_reports_lost_cancelled_and_hub_restart() {
+    use std::io::Read;
+    use std::os::unix::net::UnixListener;
+
+    for state in ["lost", "cancelled", "offline", "log-offline"] {
+        let path = std::env::temp_dir().join(format!(
+            "pt-wait-{}-{}.sock",
+            std::process::id(),
+            free_port()
+        ));
+        let listener = UnixListener::bind(&path).unwrap();
+        let (release, blocked) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            for step in 0..3 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let mut length = 0;
+                loop {
+                    line.clear();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some((k, v)) = line.split_once(':')
+                        && k.eq_ignore_ascii_case("content-length")
+                    {
+                        length = v.trim().parse::<usize>().unwrap();
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                if step == 1 {
+                    blocked.recv_timeout(Duration::from_secs(10)).unwrap();
+                    if state == "offline" {
+                        return;
+                    }
+                }
+                if step == 2 && state == "log-offline" {
+                    return;
+                }
+                let response = if step == 2 {
+                    format!(
+                        r#"{{"job_id":"42","offset":0,"next_offset":0,"text":"","eof":{}}}"#,
+                        state != "lost"
+                    )
+                } else {
+                    let status = if step == 0 {
+                        "queued"
+                    } else if state == "log-offline" {
+                        "cancelled"
+                    } else {
+                        state
+                    };
+                    format!(
+                        r#"{{"id":"42","target":{{"type":"node","node_id":"1"}},"argv":["true"],"state":"{status}","requested_by":"owner","queued_at_ms":1,"exit_code":23}}"#
+                    )
+                };
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
+                    response.len()
+                )
+                .unwrap();
+                if step == 1 && state == "offline" {
+                    return;
+                }
+            }
+        });
+        let mut cli = Command::new(bin())
+            .arg("--socket")
+            .arg(&path)
+            .args(["job", "run", "--node", "1", "--wait", "--", "true"])
+            .env_remove("PROTECTORATE_TOKEN")
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let (lines, output) = mpsc::channel();
+        let stderr = cli.stderr.take().unwrap();
+        let reader = std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines() {
+                lines.send(line.unwrap()).unwrap();
+            }
+        });
+        let first = output
+            .recv_timeout(Duration::from_secs(10))
+            .expect("job id before waiting for status");
+        assert!(
+            first.contains("job 42") && first.contains("waiting"),
+            "{first}"
+        );
+        release.send(()).unwrap();
+        let status = cli.wait().unwrap();
+        reader.join().unwrap();
+        server.join().unwrap();
+        let rest = output.try_iter().collect::<Vec<_>>().join("\n");
+        assert!(!status.success(), "{state}: {rest}");
+        if state == "offline" {
+            assert!(
+                rest.contains("job 42") && rest.contains("hub") && rest.contains("job show 42"),
+                "{rest}"
+            );
+        } else if state == "log-offline" {
+            assert!(
+                rest.contains("job 42: cancelled") && rest.contains("cannot read the log"),
+                "{rest}"
+            );
+        } else {
+            assert!(rest.contains(&format!("job 42: {state}")), "{rest}");
+            assert!(
+                !rest.contains("exit 23"),
+                "a stale exit code must not replace {state}: {rest}"
+            );
+        }
+    }
+}
+
 fn get(port: u16, path: &str, headers: &[(&str, &str)]) -> pt_http::ClientResponse {
     pt_http::Client::tcp(SocketAddr::from(([127, 0, 0, 1], port)))
         .request("GET", path, headers, b"")
@@ -93,6 +213,7 @@ fn api_surface() {
     }
     let (s, jobs) = post(port, "ListJobs", Some(&owner), "{}");
     assert_eq!((s, jobs["jobs"].as_array().map(<[_]>::len)), (200, Some(0)));
+    assert_eq!(jobs["scoped_to_caller"].as_bool(), Some(false));
     let (s, nodes) = post(port, "ListNodes", Some(&owner), "{}");
     assert_eq!(
         (s, nodes["nodes"].as_array().map(<[_]>::len)),
@@ -183,6 +304,21 @@ fn api_surface() {
     }
     drop(s1);
     pair(port, &owner, "tablet");
+    let all = hub
+        .cli(&["--json", "event", "list", "--limit", "100"])
+        .json();
+    let events = all["events"].as_array().unwrap();
+    assert!(events.len() >= 2, "{all}");
+    let newest = hub.cli(&["--json", "event", "list", "--limit", "2"]).json();
+    assert_eq!(
+        newest["events"].as_array().unwrap(),
+        &events[events.len() - 2..]
+    );
+    let from = events[0]["seq"].as_u64().unwrap().to_string();
+    let first = hub
+        .cli(&["--json", "event", "list", "--from", &from, "--limit", "2"])
+        .json();
+    assert_eq!(first["events"].as_array().unwrap(), &events[..2]);
     let mut s2 = ws(port, &format!("{auth}&from_seq={}", last + 1), &[]).unwrap();
     let first = next(&mut s2);
     assert_ne!(
@@ -464,6 +600,90 @@ fn d9_agent_turns_need_owner_approval() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("owner approved action:"));
     hub.wait("victim", "ended", 60);
     hub.cli(&["sleeve", "interrupt", "envoy"]).ok();
+}
+
+/// D9 after a mid-turn crash: an agent-started Envoy turn is continued as that agent, so a
+/// removal during the continued turn still waits for the owner.
+#[test]
+fn d9_continuation_after_crash_still_asks() {
+    if !have_runtime() {
+        return;
+    }
+    let mut hub = Hub::start("d9-continue");
+    hub.wait("envoy", "idle", 120);
+    let envoy_id = hub.sleeve("envoy")["id"].as_str().unwrap().to_string();
+    let agent = hub.printed("envoy-only token: ");
+    let victim_repo = temp_repo("d9c-victim");
+    hub.spawn_pi("victim", &victim_repo);
+
+    let long = "Write the numbers from 1 to 1500 as words, one per line, with no other text.";
+    hub.cli_env(
+        &[("PROTECTORATE_TOKEN", agent.as_str())],
+        &["envoy", "send", "--as", "grokbot", long],
+    )
+    .ok();
+    eventually(
+        "Envoy working on the agent's message",
+        Duration::from_secs(90),
+        || {
+            let s = hub.sleeve("envoy");
+            (s["incarnation"]["activity"]["state"].as_str() == Some("working")).then_some(())
+        },
+    );
+    hub.restart();
+    eventually("the continued turn", Duration::from_secs(180), || {
+        let s = hub.sleeve("envoy");
+        (s["incarnation"]["activity"]["state"].as_str() == Some("working")).then_some(())
+    });
+    let g = hub.sleeve("envoy")["incarnation"]["g"].as_u64().unwrap();
+    assert!(g >= 2, "resumed as a later generation, got g{g}");
+    let token = hub.sleeve_token(&envoy_id, g);
+    let (tx, rx) = mpsc::channel();
+    let home = hub.home.clone();
+    std::thread::spawn(move || {
+        let out = Command::new(bin())
+            .arg("--home")
+            .arg(home)
+            .args(["sleeve", "rm", "victim"])
+            .env("PROTECTORATE_TOKEN", token)
+            .output()
+            .expect("run protectorate");
+        let _ = tx.send(out);
+    });
+    let a = eventually("the D9 approval", Duration::from_secs(20), || {
+        let v = hub.cli(&["--json", "approval", "list", "--pending"]).json();
+        v["approvals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| {
+                a["title"]
+                    .as_str()
+                    .is_some_and(|t| t.starts_with("remove sleeve victim"))
+            })
+            .cloned()
+    });
+    assert!(
+        a["summary"].as_str().unwrap().contains("agent:grokbot"),
+        "{a}"
+    );
+    assert!(rx.try_recv().is_err(), "the removal waits for the owner");
+    let entries = hub.transcript("envoy");
+    assert!(
+        of_type(&entries, "user_message").iter().any(|e| {
+            e["entry"]["text"].as_str()
+                == Some("The previous turn was interrupted. Continue from where it stopped.")
+                && e["entry"]["from"].as_str() == Some("agent:grokbot")
+        }),
+        "the continuation is attributed to the agent: {entries:?}"
+    );
+    let id = a["id"].as_str().unwrap().to_string();
+    hub.cli(&["approval", "decide", &id, "deny"]).ok();
+    let out = rx
+        .recv_timeout(Duration::from_secs(20))
+        .expect("rm returns");
+    assert_eq!(out.status.code(), Some(4), "denied: {out:?}");
+    assert_eq!(hub.sleeve("victim")["lifecycle"].as_str(), Some("running"));
 }
 
 struct Mcp {

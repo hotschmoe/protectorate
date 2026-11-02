@@ -1010,16 +1010,42 @@ fn optional_target(
 }
 
 fn start(c: &Ctx<'_>, r: api::StartSleeveRequest) -> Result<api::Accepted> {
-    let id = target_sleeve(c, &c.hub.view(), &r.sleeve_id)?;
-    let target = optional_target(c.hub, r.target, r.provider, r.model);
-    command(c.hub, EventKind::Start { sleeve: id, target })?;
+    let view = c.hub.view();
+    let id = target_sleeve(c, &view, &r.sleeve_id)?;
+    let target = if r.target.is_none() && (r.provider.is_some() || r.model.is_some()) {
+        let mut target = view.state.sleeves[&id].target.clone();
+        if let Some(provider) = r.provider {
+            target.provider = provider;
+        }
+        if let Some(model) = r.model {
+            target.model = model;
+        }
+        Some(target)
+    } else {
+        optional_target(c.hub, r.target, r.provider, r.model)
+    };
+    command(
+        c.hub,
+        EventKind::Start {
+            sleeve: id,
+            target,
+            effort: r.effort.filter(|e| !e.is_empty()),
+        },
+    )?;
     Ok(api::Accepted { approval_id: None })
 }
 
 fn resleeve(c: &Ctx<'_>, r: api::ResleeveRequest) -> Result<api::Accepted> {
     let id = target_sleeve(c, &c.hub.view(), &r.sleeve_id)?;
     let target = optional_target(c.hub, Some(r.target), r.provider, r.model);
-    command(c.hub, EventKind::Resleeve { sleeve: id, target })?;
+    command(
+        c.hub,
+        EventKind::Resleeve {
+            sleeve: id,
+            target,
+            effort: r.effort.filter(|e| !e.is_empty()),
+        },
+    )?;
     Ok(api::Accepted { approval_id: None })
 }
 
@@ -1545,7 +1571,10 @@ fn list_jobs(c: &Ctx<'_>, r: api::ListJobsRequest) -> Result<api::JobList> {
         .map(|j| crate::jobs::view(c.hub, j))
         .collect();
     jobs.reverse();
-    Ok(api::JobList { jobs })
+    Ok(api::JobList {
+        jobs,
+        scoped_to_caller: matches!(c.who, Principal::Sleeve(_)),
+    })
 }
 
 fn get_job(c: &Ctx<'_>, r: api::JobRef) -> Result<api::Job> {
@@ -1697,8 +1726,9 @@ fn not_for_sleeves() -> ApiError {
 }
 
 /// What vendor agents see of Envoy's transcript: each `ga:` message, then the assistant text
-/// and settle of the turn it started, until another sender's message. No tool calls, no
-/// reasoning, nothing the owner or a sleeve said.
+/// and settle of the turn it started, until another sender's message. A `continue:` prompt is
+/// the same turn, so the answer after a crash stays visible. No tool calls, no reasoning,
+/// nothing the owner or a sleeve said.
 fn agent_transcript(
     hub: &Hub,
     id: SleeveId,
@@ -1711,6 +1741,7 @@ fn agent_transcript(
     let mut agent = false;
     let mut shown = lines.iter().filter(|l| {
         let keep = match &l.entry {
+            Entry::UserMessage { request_id, .. } if request_id.starts_with("continue:") => false,
             Entry::UserMessage { request_id, .. } => {
                 agent = request_id.starts_with("ga:");
                 agent
@@ -1753,6 +1784,8 @@ fn answer(hub: &Hub, id: SleeveId, request_id: &str, idle: bool) -> Option<(Stri
         match &e.entry {
             Entry::AssistantText { text: t, .. } => text.push(t.clone()),
             Entry::TurnSettled { .. } => return Some((text.join("\n"), e.seq)),
+            // The hub's continuation of this turn. The reply after it is still this answer.
+            Entry::UserMessage { request_id: r, .. } if r.starts_with("continue:") => {}
             Entry::UserMessage { .. } => break,
             _ => {}
         }
@@ -1824,7 +1857,11 @@ fn envoy_wait(c: &Ctx<'_>, r: api::EnvoyWaitRequest) -> Result<api::EnvoyReply> 
                 format!("message {request_id} may or may not have reached Envoy"),
             ))),
             MsgState::Delivered => {
-                let idle = matches!(s.activity, pt_core::Activity::Idle { .. });
+                // Published before this batch's intents run, so a crash can show Idle
+                // and Delivered while the continuation is still owed or only queued.
+                let owed =
+                    s.auto_continue.is_some() || s.queue.iter().any(|r| r.starts_with("continue:"));
+                let idle = matches!(s.activity, pt_core::Activity::Idle { .. }) && !owed;
                 answer(hub, id, &request_id, idle).map(Ok)
             }
             _ => None,

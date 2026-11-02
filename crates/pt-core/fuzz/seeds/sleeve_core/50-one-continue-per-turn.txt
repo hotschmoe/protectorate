@@ -1,0 +1,22 @@
+#scenario dcceb8e640831666
+# A turn started by a continuation prompt is not continued again. The owner is warned once.
+spawn root /w/a
+run
+obs root ready
+send root m1
+run
+expect root activity=Working
+exit root
+run
+obs root ready
+run
+expect root activity=Working
+expect-effect continue:0:1 state=Confirmed count=1
+expect-notice TurnNeedsPrompt count=0
+exit root
+run
+obs root ready
+run
+expect root activity=Idle
+expect-effect continue:* count=1
+expect-notice TurnNeedsPrompt count=1

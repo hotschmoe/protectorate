@@ -196,6 +196,7 @@ fn unpark_envoy(hub: &Hub, report: &Report) {
     hub.submit(EventKind::Start {
         sleeve: id,
         target: None,
+        effort: None,
     });
 }
 

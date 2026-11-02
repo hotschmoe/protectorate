@@ -81,7 +81,8 @@ CLI on the hub machine (section 3.1).
       - credentials and keys (`~/.ssh`, other harnesses' logins, hub tokens, headscale keys)
         stay masked from sleeves;
       - D9 still applies: in a turn a vendor agent started, Envoy's removals, mass spawns and
-        node jobs wait for the owner. This is the one remaining approval.
+        node jobs wait for the owner. This is the one remaining approval. A crash keeps the
+        spawn count; the continuation of that turn does not start it over.
 
 ## 3. Layers
 
@@ -381,6 +382,36 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   `[pi_local]`). A third resleeve within an hour parks the sleeve. When that trip is an auth
   failure, the park reason names the login that was rejected (`flapping (<harness> login rejected)`).
   Any other flap stays `flapping`. The hourly limit itself is unchanged.
+- **Auto-continue:** after a native resume of a headless turn that a crash ended, the core sends
+  one short continuation prompt, keyed to that owner turn. A relaunch that is a fresh session,
+  because that incarnation never acked a prompt, does not continue: the owner and the parent
+  get `TurnNeedsPrompt`. A turn gets at most one, across
+  generations: a second crash of the same turn does not send another, including after the resume
+  window, and an unsent continuation keeps its key when a later generation sends it. A later
+  owner message is a new turn and can be continued once. A turn the continuation itself started
+  is not continued again; the owner and the parent get `TurnNeedsPrompt`. An owner interrupt, or
+  a guardrail that interrupts (silent, loop, turn wallclock), is not continued and gets no
+  warning, including when a protocol desync kills the sleeve during that interrupt.
+  The hub journals a `Continue` event and the effect is allocated only when that
+  event is applied, so a journal recorded before the event existed replays to the same effects.
+  The prompt is sent as the party that opened that owner turn. An agent steer replaces that
+  party, which keeps D9 on the continued turn and reports a rejection to that party. An agent
+  continuation with no recorded name is labeled `agent:`, so D9 still applies. The owner
+  still hears when the prompt cannot be sent.
+  It is not sent after a planned stop, a hub restart of an idle sleeve, or a manual resleeve (the
+  brief is that continuation). A stop, park, or resleeve also drops a continuation still queued,
+  including one fencing put back because it never left, and the owner and the parent get
+  `TurnNeedsPrompt`. An idle crash that ends in a park or a resleeve drops a debt with no warning.
+  A debt still held when recovery finds that incarnation already idle
+  and armed is dropped with no warning: it reached Ready and nothing was sent after that.
+  A resume that is still booting keeps the debt.
+  A `Continue` that cannot be delivered drops the debt and warns. A crash of an incarnation that
+  already reached idle does not carry the debt. A protocol desync while that incarnation is idle
+  drops the debt the same way, and the owner is warned when the resume does not replace it. A
+  desync during boot keeps a debt. When the prompt cannot be sent, the owner and
+  the parent get `TurnNeedsPrompt`. A settle of that same owner turn drops the debt with no
+  warning, including one recorded after resume while the incarnation is already idle, so a later
+  hub start does not send `TurnNeedsPrompt` for a turn the journal already settled.
 - **Testing:** each machine is a pure function with a fuzz target. The target checks invariants I1
   to I10 against a table-driven reference model and checks `replay(journal) == live`.
 
@@ -690,7 +721,10 @@ These rules override the design reports wherever the reports say otherwise. The 
    "unknown job" answer counts as never-seen only when the node's journal epoch matches the one in
    the hub's submit record. Otherwise the job is Uncertain and needs an explicit new attempt.
 6. **Cancelling has a timeout.** If no status arrives within the 5 min lease, Cancelling moves to
-   Lost, and a later status reconciles it. No state may wait forever on a node.
+   Lost, and a later status reconciles it. No state may wait forever on a node. A collection is
+   abandoned 24 hours after the job is first lost, even when the node keeps reporting and
+   collection starts again, and a failed local save fails that collection. The owner is told
+   the job is lost once per episode, not again when that collection loses the link.
 7. **Every non-terminal state has a recovery action.** Probing re-probes. Collecting re-fetches
    from its recorded offset. Cancelling re-sends the cancel. Provisioning waits for its completion
    barrier and then records or removes the worktree. Stop during Provisioning waits for that

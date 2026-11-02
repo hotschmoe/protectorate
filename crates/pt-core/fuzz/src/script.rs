@@ -8,9 +8,10 @@
 //!
 //! ```text
 //! spawn NAME PATH [parent=NAME] [view] [harness=H] [pane] [budget=N] [disk=N] [effort=E] [to=H,H]
-//! send NAME ID [steer] [from=NAME]
+//! send NAME ID [steer] [from=NAME|from=agent:NAME]
+//! continue NAME                    a second journaled continuation; the first is sent by the core
 //! stop|remove|interrupt|compact|viewed NAME
-//! start|resleeve NAME [harness=H]
+//! start|resleeve NAME [harness=H] [effort=E]
 //! approve NAME ID allow|deny [g=N]  ID: the harness's id, or action:N   abandon KEY
 //! ask NAME [timeout=DURATION]       a code rule asks the owner (D9)
 //! obs NAME WHAT [g=N] [noask]       WHAT: ready progress[=H] approval=ID resolved=ID
@@ -23,7 +24,7 @@
 //! run | step [N] | commit         step N executes the Nth released intent (from 0)
 //! crash [empty] [down=DURATION]     the hub dies at the last commit and restarts DURATION later
 //! job ID | cancel-job N | requeue-job N | abandon-job N
-//! expect NAME life=.. g=N activity=.. guard=.. harness=.. queue=N msg:ID=.. [park=REST]
+//! expect NAME life=.. g=N activity=.. guard=.. harness=.. queue=N agent=NAME|none msg:ID=.. from:ID=Party [park=REST]
 //!   `park=` is the rest of the line, the hub's park string (`flapping (claude login rejected)`).
 //! expect-effect KEY state=.. attempt=N count=N
 //! expect-job N state=..           expect-none NAME
@@ -190,6 +191,22 @@ impl Runner {
             .ok_or_else(|| format!("no effect {key}"))
     }
 
+    fn sleeve(&self, id: SleeveId) -> Result<&Sleeve, String> {
+        self.sim
+            .st
+            .sleeves
+            .get(&id)
+            .ok_or_else(|| format!("no sleeve {}", id.0))
+    }
+
+    fn job(&self, id: JobId) -> Result<&Job, String> {
+        self.sim
+            .st
+            .jobs
+            .get(&id)
+            .ok_or_else(|| format!("no job {}", id.0))
+    }
+
     fn line(&mut self, line: &str) -> Result<(), String> {
         let words: Vec<&str> = line.split_whitespace().collect();
         let kv = |k: &str| {
@@ -236,6 +253,7 @@ impl Runner {
             "send" => {
                 let to = self.id(arg(1)?)?;
                 let from = match kv("from") {
+                    Some(n) if n.starts_with("agent:") => Party::Agent,
                     Some(n) => Party::Sleeve(self.id(n)?),
                     None => Party::Owner,
                 };
@@ -264,8 +282,16 @@ impl Runner {
                     "interrupt" => E::Interrupt { sleeve },
                     "compact" => E::Compact { sleeve },
                     "viewed" => E::Viewed { sleeve },
-                    "start" => E::Start { sleeve, target: t },
-                    _ => E::Resleeve { sleeve, target: t },
+                    "start" => E::Start {
+                        sleeve,
+                        target: t,
+                        effort: kv("effort").map(str::to_string),
+                    },
+                    _ => E::Resleeve {
+                        sleeve,
+                        target: t,
+                        effort: kv("effort").map(str::to_string),
+                    },
                 });
             }
             "approve" => {
@@ -303,7 +329,7 @@ impl Runner {
                 let sleeve = self.id(arg(1)?)?;
                 let g = match kv("g") {
                     Some(n) => Gen(num(n)?),
-                    None => self.sim.st.sleeves[&sleeve].g,
+                    None => self.sleeve(sleeve)?.g,
                 };
                 let what = arg(2)?;
                 let (w, v) = what.split_once('=').unwrap_or((what, ""));
@@ -356,7 +382,7 @@ impl Runner {
             }
             "exit" => {
                 let sleeve = self.id(arg(1)?)?;
-                let g = self.sim.st.sleeves[&sleeve].g;
+                let g = self.sleeve(sleeve)?.g;
                 let cause = if flag("oom") {
                     ExitCause::Oom
                 } else if flag("auth") {
@@ -387,7 +413,9 @@ impl Runner {
                     let p = &mut self.policy;
                     match k {
                         "start" => p.start = pick(&["ok", "fail", "lostreceipt", "lost"])?,
-                        "prompt" => p.prompt = pick(&["ack", "nack", "lost", "none"])?,
+                        "prompt" => {
+                            p.prompt = pick(&["ack", "nack", "lost", "none", "ack-no-turn"])?
+                        }
                         "stop" => p.stop = pick(&["exit", "linger"])?,
                         "other" => p.other = pick(&["ack", "nack", "lost"])?,
                         "probe" => p.probe = pick(&["applied", "notapplied", "unknowable"])?,
@@ -397,6 +425,14 @@ impl Runner {
                         _ => return Err(format!("bad policy key {k}")),
                     }
                 }
+            }
+            "continue" => {
+                let sleeve = self.id(arg(1)?)?;
+                self.sim.apply(E::Continue {
+                    sleeve,
+                    text: "The previous turn was interrupted. Continue from where it stopped."
+                        .into(),
+                });
             }
             "run" => self.sim.run(&self.policy),
             "step" => {
@@ -426,6 +462,37 @@ impl Runner {
                     },
                 });
             }
+            "job-exit" => {
+                let job = JobId(num(arg(1)?)?);
+                let (attempt, node) = {
+                    let j = self.job(job)?;
+                    (j.attempt, j.node.ok_or("job has no node")?)
+                };
+                self.sim.apply(E::JobStatus {
+                    job,
+                    attempt,
+                    node,
+                    report: JobReport::Exited { code: 0 },
+                });
+            }
+            "artifact-result" => {
+                let job = JobId(num(arg(1)?)?);
+                let attempt = self.job(job)?.attempt;
+                let refusals = kv("refused")
+                    .map(|p| {
+                        vec![ArtifactRefusal {
+                            path: p.into(),
+                            reason: "not found".into(),
+                        }]
+                    })
+                    .unwrap_or_default();
+                self.sim.apply(E::ArtifactCollection {
+                    job,
+                    attempt,
+                    refusals,
+                    incomplete: flag("incomplete").then(|| "fetch failed".into()),
+                });
+            }
             "cancel-job" | "requeue-job" | "abandon-job" => {
                 let job = JobId(num(arg(1)?)?);
                 self.sim.apply(match words[0] {
@@ -444,11 +511,40 @@ impl Runner {
                 self.expect(&words)?;
                 if let Some(want) = park {
                     let name = words.get(1).copied().ok_or("missing sleeve")?;
-                    let s = &self.sim.st.sleeves[&self.id(name)?];
+                    let s = self.sleeve(self.id(name)?)?;
                     let got = park_text(&s.life);
                     if got != want {
                         return Err(format!("{name}: park is {got}, expected {want}"));
                     }
+                }
+            }
+            "expect-notice" if self.checked => {
+                let want = num(kv("count").ok_or("missing count")?)? as usize;
+                let got = self
+                    .sim
+                    .notices
+                    .iter()
+                    .filter(|n| variant(n) == arg(1).unwrap_or(""))
+                    .count();
+                if got != want {
+                    return Err(format!("notice {} count {got}, expected {want}", arg(1)?));
+                }
+            }
+            "expect-reply" if self.checked => {
+                let got = self
+                    .sim
+                    .last
+                    .iter()
+                    .find_map(|i| {
+                        if let Intent::Reply(r) = i {
+                            Some(variant(r))
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_default();
+                if got != arg(1)? {
+                    return Err(format!("reply {got}, expected {}", arg(1)?));
                 }
             }
             "expect-effect" if self.checked => {
@@ -478,14 +574,15 @@ impl Runner {
                 }
             }
             "expect-job" if self.checked => {
-                let j = &self.sim.st.jobs[&JobId(num(arg(1)?)?)];
+                let j = self.job(JobId(num(arg(1)?)?))?;
                 let want = kv("state").ok_or("missing state")?;
                 if variant(&j.state) != want {
                     return Err(format!("job state is {:?}, expected {want}", j.state));
                 }
             }
             "expect-approval" if self.checked => self.expect_approval(&words)?,
-            "expect" | "expect-effect" | "expect-job" | "expect-none" | "expect-approval" => {}
+            "expect" | "expect-effect" | "expect-job" | "expect-none" | "expect-approval"
+            | "expect-notice" | "expect-reply" => {}
             w => return Err(format!("unknown command {w}")),
         }
         Ok(())
@@ -499,7 +596,7 @@ impl Runner {
         }
         let g = match g {
             Some(n) => Gen(num(n)?),
-            None => self.sim.st.sleeves[&sleeve].g,
+            None => self.sleeve(sleeve)?.g,
         };
         Ok(tool_approval_id(sleeve, g, id))
     }
@@ -525,7 +622,15 @@ impl Runner {
                 "by" => a.decision.map(|d| variant(&d.by)).unwrap_or_default(),
                 "orphan" => a.orphan.map(|o| variant(&o)).unwrap_or("none".into()),
                 "response" => match a.decision.and_then(|d| d.response) {
-                    Some(e) => variant(&self.sim.st.effects[&e].state),
+                    Some(e) => variant(
+                        &self
+                            .sim
+                            .st
+                            .effects
+                            .get(&e)
+                            .ok_or(format!("no effect {}", e.0))?
+                            .state,
+                    ),
                     None => "none".into(),
                 },
                 _ => return Err(format!("bad key {k}")),
@@ -539,7 +644,7 @@ impl Runner {
 
     fn expect(&self, words: &[&str]) -> Result<(), String> {
         let name = words.get(1).ok_or("missing sleeve")?;
-        let s = &self.sim.st.sleeves[&self.id(name)?];
+        let s = self.sleeve(self.id(name)?)?;
         for w in &words[2..] {
             let (k, v) = w.split_once('=').ok_or(format!("bad expectation {w}"))?;
             let got = match k {
@@ -549,13 +654,22 @@ impl Runner {
                 "guard" => variant(&s.guard.state),
                 "harness" => format!("{:?}", s.target.harness).to_lowercase(),
                 "queue" => s.queue.len().to_string(),
+                "effort" => s.effort.clone().unwrap_or("none".into()),
+                "agent" => s.turn_agent.clone().unwrap_or_else(|| "none".into()),
                 _ => match k.strip_prefix("msg:") {
                     Some(id) => s
                         .messages
                         .get(id)
                         .map(|m| variant(&m.state))
-                        .unwrap_or_default(),
-                    None => return Err(format!("bad key {k}")),
+                        .ok_or_else(|| format!("no message {id}"))?,
+                    None => match k.strip_prefix("from:") {
+                        Some(id) => s
+                            .messages
+                            .get(id)
+                            .map(|m| variant(&m.from))
+                            .ok_or_else(|| format!("no message {id}"))?,
+                        None => return Err(format!("bad key {k}")),
+                    },
                 },
             };
             if got != v {

@@ -11,7 +11,7 @@ use crate::model::*;
 
 pub const FORMAT: u8 = 1;
 /// Highest event tag this binary reads. Any incompatible encoding must get a new event tag.
-pub const MAX_EVENT_TAG: u8 = 32;
+pub const MAX_EVENT_TAG: u8 = 37;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -396,6 +396,19 @@ impl Wire for JobSpec {
     }
 }
 
+impl Wire for ArtifactRefusal {
+    fn put(&self, w: &mut Vec<u8>) {
+        self.path.put(w);
+        self.reason.put(w);
+    }
+    fn get(r: &mut Reader) -> Result<Self, DecodeError> {
+        Ok(Self {
+            path: Wire::get(r)?,
+            reason: Wire::get(r)?,
+        })
+    }
+}
+
 impl Wire for JobReport {
     fn put(&self, w: &mut Vec<u8>) {
         match self {
@@ -596,15 +609,29 @@ impl Wire for EventKind {
                 w.push(6);
                 sleeve.put(w);
             }
-            E::Start { sleeve, target } => {
-                w.push(7);
+            E::Start {
+                sleeve,
+                target,
+                effort,
+            } => {
+                w.push(if effort.is_some() { 33 } else { 7 });
                 sleeve.put(w);
                 target.put(w);
+                if let Some(effort) = effort {
+                    effort.put(w);
+                }
             }
-            E::Resleeve { sleeve, target } => {
-                w.push(8);
+            E::Resleeve {
+                sleeve,
+                target,
+                effort,
+            } => {
+                w.push(if effort.is_some() { 34 } else { 8 });
                 sleeve.put(w);
                 target.put(w);
+                if let Some(effort) = effort {
+                    effort.put(w);
+                }
             }
             E::Abandon { effect } => {
                 w.push(9);
@@ -719,11 +746,33 @@ impl Wire for EventKind {
                 node.put(w);
                 report.put(w);
             }
-            E::ArtifactsChecked { job, attempt, ok } => {
-                w.push(25);
+            E::ArtifactsChecked {
+                job,
+                attempt,
+                result,
+            } => {
+                w.push(if *result == ArtifactCheck::Permanent {
+                    35
+                } else {
+                    25
+                });
                 job.put(w);
                 attempt.put(w);
-                ok.put(w);
+                if *result != ArtifactCheck::Permanent {
+                    (*result == ArtifactCheck::Verified).put(w);
+                }
+            }
+            E::ArtifactCollection {
+                job,
+                attempt,
+                refusals,
+                incomplete,
+            } => {
+                w.push(36);
+                job.put(w);
+                attempt.put(w);
+                refusals.put(w);
+                incomplete.put(w);
             }
             E::Observed { sleeve, g, obs } => {
                 w.push(26);
@@ -753,6 +802,11 @@ impl Wire for EventKind {
                 sleeve.put(w);
                 ask.put(w);
                 timeout.put(w);
+            }
+            E::Continue { sleeve, text } => {
+                w.push(37);
+                sleeve.put(w);
+                text.put(w);
             }
         }
     }
@@ -789,10 +843,12 @@ impl Wire for EventKind {
             7 => E::Start {
                 sleeve: Wire::get(r)?,
                 target: Wire::get(r)?,
+                effort: None,
             },
             8 => E::Resleeve {
                 sleeve: Wire::get(r)?,
                 target: Wire::get(r)?,
+                effort: None,
             },
             9 => E::Abandon {
                 effect: Wire::get(r)?,
@@ -861,7 +917,11 @@ impl Wire for EventKind {
             25 => E::ArtifactsChecked {
                 job: Wire::get(r)?,
                 attempt: Wire::get(r)?,
-                ok: Wire::get(r)?,
+                result: if bool::get(r)? {
+                    ArtifactCheck::Verified
+                } else {
+                    ArtifactCheck::Retryable
+                },
             },
             26 => E::Observed {
                 sleeve: Wire::get(r)?,
@@ -884,11 +944,37 @@ impl Wire for EventKind {
                 job: Wire::get(r)?,
                 node: Wire::get(r)?,
             },
-            _ => {
+            32 => {
                 let mut spec: SpawnSpec = Wire::get(r)?;
                 spec.effort = Some(Wire::get(r)?);
                 E::Spawn(spec)
             }
+            33 => E::Start {
+                sleeve: Wire::get(r)?,
+                target: Wire::get(r)?,
+                effort: Some(Wire::get(r)?),
+            },
+            34 => E::Resleeve {
+                sleeve: Wire::get(r)?,
+                target: Wire::get(r)?,
+                effort: Some(Wire::get(r)?),
+            },
+            35 => E::ArtifactsChecked {
+                job: Wire::get(r)?,
+                attempt: Wire::get(r)?,
+                result: ArtifactCheck::Permanent,
+            },
+            36 => E::ArtifactCollection {
+                job: Wire::get(r)?,
+                attempt: Wire::get(r)?,
+                refusals: Wire::get(r)?,
+                incomplete: Wire::get(r)?,
+            },
+            37 => E::Continue {
+                sleeve: Wire::get(r)?,
+                text: Wire::get(r)?,
+            },
+            tag => return Err(DecodeError::UnknownTag { what: "event", tag }),
         })
     }
 }

@@ -3238,7 +3238,7 @@ final class JobArtifactData {
 }
 
 final class JobList {
-  const JobList({this.jobs = const <Job>[]});
+  const JobList({this.jobs = const <Job>[], required this.scopedToCaller});
 
   factory JobList.fromJson(Object? json) {
     final j = _object(json, 'JobList');
@@ -3248,13 +3248,18 @@ final class JobList {
         const <Job>[],
         (e0) => _list(e0, 'JobList.jobs', Job.fromJson),
       ),
+      scopedToCaller: _bool(j['scoped_to_caller'], 'JobList.scoped_to_caller'),
     );
   }
 
   final List<Job> jobs;
 
+  /// Only the caller's and its children's jobs are visible.
+  final bool scopedToCaller;
+
   Map<String, Object?> toJson() => {
     'jobs': [for (final e0 in jobs) e0.toJson()],
+    'scoped_to_caller': scopedToCaller,
   };
 }
 
@@ -4274,6 +4279,7 @@ final class ResleeveRequest {
     required this.target,
     this.model,
     this.provider,
+    this.effort,
   });
 
   factory ResleeveRequest.fromJson(Object? json) {
@@ -4286,6 +4292,7 @@ final class ResleeveRequest {
         j['provider'],
         (e0) => _string(e0, 'ResleeveRequest.provider'),
       ),
+      effort: _opt(j['effort'], (e0) => _string(e0, 'ResleeveRequest.effort')),
     );
   }
 
@@ -4297,11 +4304,14 @@ final class ResleeveRequest {
 
   final String? provider;
 
+  final String? effort;
+
   Map<String, Object?> toJson() => {
     'sleeve_id': sleeveId,
     'target': target.toJson(),
     if (model case final v?) 'model': v,
     if (provider case final v?) 'provider': v,
+    if (effort case final v?) 'effort': v,
   };
 }
 
@@ -4844,6 +4854,7 @@ final class StartSleeveRequest {
     this.target,
     this.model,
     this.provider,
+    this.effort,
   });
 
   factory StartSleeveRequest.fromJson(Object? json) {
@@ -4856,6 +4867,10 @@ final class StartSleeveRequest {
         j['provider'],
         (e0) => _string(e0, 'StartSleeveRequest.provider'),
       ),
+      effort: _opt(
+        j['effort'],
+        (e0) => _string(e0, 'StartSleeveRequest.effort'),
+      ),
     );
   }
 
@@ -4867,11 +4882,14 @@ final class StartSleeveRequest {
 
   final String? provider;
 
+  final String? effort;
+
   Map<String, Object?> toJson() => {
     'sleeve_id': sleeveId,
     if (target case final v?) 'target': v.toJson(),
     if (model case final v?) 'model': v,
     if (provider case final v?) 'provider': v,
+    if (effort case final v?) 'effort': v,
   };
 }
 

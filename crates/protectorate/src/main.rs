@@ -60,11 +60,11 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
                                     the sleeves' shared login, on this terminal, without the API
   sleeve list | sleeve show <sleeve>
   sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
-        [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
+        [--provider P] [--model M] [--effort E] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
   sleeve send <sleeve> <text...> [--steer]
   sleeve interrupt|stop|rm|takeover <sleeve>
-  sleeve start <sleeve> [--harness H] [--provider P] [--model M]
-  sleeve resleeve <sleeve> --harness H [--provider P] [--model M]
+  sleeve start <sleeve> [--harness H] [--provider P] [--model M] [--effort E]
+  sleeve resleeve <sleeve> --harness H [--provider P] [--model M] [--effort E]
   sleeve transcript <sleeve> [--from SEQ] [--limit N]
   sleeve wait <sleeve> [--until idle|done|blocked|parked|ended] [--timeout SECS]
   approval list [--pending] | approval decide <id> allow|allow-session|deny
@@ -74,7 +74,7 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   node update (<node>... | --all) [--version TAG] [--channel stable|dev] [--probation SECS]
         [--no-wait]
   job run (--node ID | --arch ARCH) [--even-if-present] [--on-present idle|kill]
-        [--maintenance] [--timeout SECS] [--cwd DIR] [--artifact PATH]... -- <argv...>
+        [--maintenance] [--wait] [--timeout SECS] [--cwd DIR] [--artifact PATH]... -- <argv...>
   job ls [--node N] [--limit N] | job show|cancel <job> | job log <job> [--offset N] [--limit N]
   job artifact <job> <path> [--out FILE]
   quota list
@@ -88,7 +88,10 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   device list | device add <name> | device pair <code> | device revoke <id>
   mcp --envoy [--token-file PATH] [--as NAME]
 
-Harnesses: claude, codex, grok, pi_vendor, pi_local. --json prints the API's answer.";
+Harnesses: claude, codex, grok, pi_vendor, pi_local. --json prints the API's answer.
+
+job run --wait exits with the job's code, or 3 interrupted, 5 lost, and 6 when the
+hub stays unreachable for about 60 seconds.";
 
 pub struct Args {
     pub words: Vec<String>,
@@ -111,6 +114,7 @@ const SWITCHES: &[&str] = &[
     "--refresh",
     "--all",
     "--no-wait",
+    "--wait",
     "--force",
 ];
 
@@ -200,6 +204,17 @@ pub enum Fail {
     Usage(String),
     Api(ApiError),
     Other(String),
+    Exit(u8),
+}
+
+impl std::fmt::Display for Fail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Usage(e) | Self::Other(e) => f.write_str(e),
+            Self::Api(e) => write!(f, "{e}"),
+            Self::Exit(code) => write!(f, "exit {code}"),
+        }
+    }
 }
 
 impl From<String> for Fail {
@@ -428,5 +443,6 @@ fn main() -> ExitCode {
             eprintln!("error: {e}");
             ExitCode::from(1)
         }
+        Err(Fail::Exit(code)) => ExitCode::from(code),
     }
 }

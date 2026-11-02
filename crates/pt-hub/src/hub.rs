@@ -50,8 +50,7 @@ pub struct View {
     pub since: BTreeMap<SleeveId, Millis>,
 }
 
-/// The test-only knob (`PT_TEST_FAULT=usage_limit:<sleeve name>`): the named sleeve's first
-/// settled turn is reported as hitting its usage limit, which trips G1 and forces a resleeve.
+/// The test-only knob reports a usage limit at the first turn's settle.
 pub struct Fault {
     pub sleeve: String,
     pub fired: AtomicBool,
@@ -60,9 +59,9 @@ pub struct Fault {
 impl Fault {
     pub fn from_env() -> Option<Fault> {
         let v = std::env::var("PT_TEST_FAULT").ok()?;
-        let sleeve = v.strip_prefix("usage_limit:")?.to_string();
+        let sleeve = v.strip_prefix("usage_limit:")?;
         Some(Fault {
-            sleeve,
+            sleeve: sleeve.to_string(),
             fired: AtomicBool::new(false),
         })
     }
@@ -73,7 +72,9 @@ impl Fault {
 }
 
 /// D9: who started Envoy's current turn. `origin` is `agent:<name>` when an agent message was
-/// written into it (as its prompt or a steer), and stays so until the turn settles.
+/// written into it (as its prompt or a steer), and stays so until the turn settles. A crash
+/// clears the origin and keeps `spawns`; the continuation restores the origin without zeroing
+/// the count.
 #[derive(Debug, Default)]
 pub struct EnvoyTurn {
     pub origin: Option<String>,
@@ -306,6 +307,12 @@ impl Hub {
             Some(Party::Envoy) => "envoy".into(),
             Some(Party::Agent) => match request_id.strip_prefix("ga:") {
                 Some(rest) => format!("agent:{}", rest.split(':').next().unwrap_or("")),
+                None if request_id.starts_with("continue:") => state
+                    .sleeve(to)
+                    .and_then(|s| s.turn_agent.clone())
+                    .map(|name| format!("agent:{name}"))
+                    // No recorded name still carries the prefix, so D9 fails closed.
+                    .unwrap_or_else(|| "agent:".into()),
                 None => "agent".into(),
             },
             Some(Party::Sleeve(x)) => state

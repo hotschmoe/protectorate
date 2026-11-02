@@ -56,6 +56,25 @@ pub struct Sleeve {
     pub activity: Activity,
     /// The native turn id bound by the current turn's prompt ack.
     pub turn: Option<String>,
+    /// A protocol desync arrived during this turn, so the kill still counts as interrupting it.
+    pub desync_during_turn: bool,
+    /// A protocol desync killed this incarnation from Idle. That is not a turn to continue.
+    pub desync_while_idle: bool,
+    /// Owner turns begun here. Incremented when a prompt other than a continuation is dequeued.
+    pub turn_seq: u64,
+    /// Who opened the current owner turn. An agent steer replaces it. A continuation is sent
+    /// as this party, so D9 sees the same origin the turn had.
+    pub turn_from: Party,
+    /// The agent name on that message's `ga:<name>:` request id, when `turn_from` is an agent.
+    pub turn_agent: Option<String>,
+    /// The owner turn that still owes one continuation, if any. One per turn, across generations.
+    /// Set when a native resume follows a headless turn a crash ended, unless that turn was itself
+    /// a continuation or an interrupt. Dropped with no warning at recovery once that incarnation
+    /// is idle and armed (it reached Ready and nothing was sent after that), and when a settle
+    /// of this owner turn is journaled, including while the incarnation is idle.
+    /// A protocol desync while idle drops it; a resume then warns because the prompt was not sent.
+    /// Only a journaled `Continue` allocates the prompt.
+    pub auto_continue: Option<u64>,
 
     /// Request ids of queued messages, FIFO.
     pub queue: VecDeque<String>,
@@ -182,6 +201,7 @@ pub struct Guard {
     pub forced: bool,
     /// A target named by a manual resleeve, used instead of `select_target`.
     pub chosen: Option<Target>,
+    pub chosen_effort: Option<String>,
     /// The generation the last resleeve landed on; the brief lists Fenced records from here on.
     pub since_gen: Gen,
 }
@@ -322,9 +342,14 @@ pub struct Job {
     pub offset: u64,
     pub exit: Option<i32>,
     pub verify_failures: u32,
+    pub artifact_refusals: Vec<crate::ArtifactRefusal>,
+    pub artifact_incomplete: Option<String>,
     /// Last answer from the node about this attempt.
     pub seen_at: Millis,
     pub state_at: Millis,
+    /// First time this attempt entered Lost. A later Collecting retry does not move it.
+    /// Cleared once the job leaves Lost and Collecting.
+    pub lost_at: Option<Millis>,
     /// The node did not know the job and its epoch changed: only an explicit requeue continues.
     pub needs_new_attempt: bool,
 }

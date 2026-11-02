@@ -253,6 +253,11 @@ fn notice_text(view: &View, n: &Notice) -> (Kind, Level, String) {
             Level::Info,
             format!("resumed natively as g{}", g.0),
         ),
+        Notice::TurnNeedsPrompt => (
+            Kind::Sleeve,
+            Level::Warn,
+            "the interrupted turn will not continue automatically after native resume; check its progress and send a prompt if needed".into(),
+        ),
         Notice::Resleeved { g } => (Kind::Sleeve, Level::Warn, format!("resleeved as g{}", g.0)),
         Notice::Parked { reason } => (
             Kind::Sleeve,

@@ -12,6 +12,20 @@ use crate::state::*;
 const BRIEF_PROMPT: &str = "Continue from .protectorate/BRIEF.md: read it first, then carry on \
                             with the task it describes.";
 
+/// Sent once, after a native resume of a headless turn a crash ended. Not after an interrupt,
+/// and not for a turn this prompt itself started.
+const CONTINUE_PROMPT: &str = "The previous turn was interrupted. Continue from where it stopped.";
+
+/// The agent name `Hub::from_label` reads from a `ga:<name>:` request id. Empty when the id
+/// has the prefix and no name; absent when the sender is not an agent or the id has no prefix.
+fn agent_name(from: Party, request_id: &str) -> Option<String> {
+    if from != Party::Agent {
+        return None;
+    }
+    let rest = request_id.strip_prefix("ga:")?;
+    Some(rest.split(':').next().unwrap_or("").to_string())
+}
+
 /// A sleeve name: 1-64 bytes of `[A-Za-z0-9._-]`.
 pub fn name_ok(name: &str) -> bool {
     !name.is_empty()
@@ -55,6 +69,7 @@ impl Guard {
             cause: None,
             forced: false,
             chosen: None,
+            chosen_effort: None,
             since_gen: Gen(0),
         }
     }
@@ -102,6 +117,12 @@ impl Core<'_> {
                 turned: false,
                 activity: Activity::Ended,
                 turn: None,
+                desync_during_turn: false,
+                desync_while_idle: false,
+                turn_seq: 0,
+                turn_from: Party::Owner,
+                turn_agent: None,
+                auto_continue: None,
                 queue: VecDeque::new(),
                 steer_slot: None,
                 messages: Default::default(),
@@ -245,9 +266,14 @@ impl Core<'_> {
         if s.target.harness != target.harness {
             s.effort = None;
         }
+        if let Some(effort) = s.guard.chosen_effort.take() {
+            s.effort = Some(effort);
+        }
         s.target = target.clone();
         s.receipt = None;
         s.turn = None;
+        s.desync_during_turn = false;
+        s.desync_while_idle = false;
         s.activity = Activity::Booting;
         s.boot_at = now;
         s.progress_at = now;
@@ -404,13 +430,30 @@ impl Core<'_> {
     }
 
     pub(crate) fn exited(&mut self, sid: SleeveId, g: Gen, cause: ExitCause) {
-        let Some(s) = self.st.sleeves.get_mut(&sid) else {
+        let Some(s) = self.st.sleeves.get(&sid) else {
             return;
         };
         if s.g != g || s.proc == Proc::Down {
             return;
         }
+        let delivery_sent = matches!(s.activity, Activity::Delivering { effect } if self.effect_state(effect) != Some(EffectState::Intent));
+        // The ack can lose the race with Exited: the watcher reports the scope empty before
+        // KillScope is confirmed. A guardrail kill is not HubRestart, so the parent still hears.
+        let killed_by_recovery = s.kill_cause == Some(Cause::HubRestart)
+            && self
+                .st
+                .effects
+                .values()
+                .any(|e| e.kind == EffectKind::KillScope { sleeve: sid, g });
+        let s = self.st.sleeves.get_mut(&sid).expect("sleeve exists");
         let was = std::mem::replace(&mut s.activity, Activity::Ended);
+        // An interrupt is the owner or a guardrail stopping the turn. `turn` stays set, so it
+        // must not count on its own: resuming would continue the turn they stopped.
+        let interrupted_turn = was != Activity::Interrupting
+            && (s.turn.is_some()
+                || s.desync_during_turn
+                || delivery_sent
+                || matches!(was, Activity::Working | Activity::Blocked { .. }));
         let old = std::mem::replace(&mut s.proc, Proc::Down);
         let stop_requested = s.stop_at.is_some();
         let kill_cause = s.kill_cause.take();
@@ -438,19 +481,28 @@ impl Core<'_> {
 
         let s = &self.st.sleeves[&sid];
         match s.life {
-            Life::Stopping { .. } => self.try_finalize(sid),
-            Life::Resleeving => match s.guard.state {
-                GuardState::Quiescing { .. } => self.capture(sid, !stop_requested),
-                GuardState::Briefing { .. } if brief_sent => {
-                    self.park(sid, ParkReason::BriefUnconfirmed)
+            Life::Stopping { .. } => {
+                // Fencing just put an unsent continuation back. Stop already dropped the debt.
+                self.drop_queued_continuation(sid);
+                self.try_finalize(sid);
+            }
+            Life::Resleeving => {
+                self.drop_queued_continuation(sid);
+                match self.st.sleeves[&sid].guard.state {
+                    GuardState::Quiescing { .. } => self.capture(sid, !stop_requested),
+                    GuardState::Briefing { .. } if brief_sent => {
+                        self.park(sid, ParkReason::BriefUnconfirmed)
+                    }
+                    GuardState::Launching | GuardState::Briefing { .. } => self.launch_failed(sid),
+                    _ => {}
                 }
-                GuardState::Launching | GuardState::Briefing { .. } => self.launch_failed(sid),
-                _ => {}
-            },
+            }
             Life::Launching | Life::Running | Life::Recovering => {
                 let parent = s.parent;
                 self.sl(sid).life = Life::Recovering;
-                if let Some(p) = parent {
+                if let Some(p) = parent
+                    && !killed_by_recovery
+                {
                     self.notify(
                         Party::Sleeve(p),
                         Some(sid),
@@ -469,9 +521,66 @@ impl Core<'_> {
                     (None, _) if was == Activity::Booting => Cause::Guard(Guardrail::StartFailed),
                     (None, _) => Cause::Guard(Guardrail::Crash),
                 };
-                self.after_death(sid, c);
+                // Read before after_death: a new incarnation clears both desync flags.
+                let was_desync = self.st.sleeves[&sid].desync_during_turn;
+                let desync_while_idle = self.st.sleeves[&sid].desync_while_idle;
+                // An idle death that parks or resleeves drops a debt with no warning. A
+                // working turn still warns. Unknown without a mid-turn desync is that idle
+                // death, including a desync that started while idle.
+                let idle_death = matches!(was, Activity::Idle { .. })
+                    || (was == Activity::Unknown && !was_desync);
+                self.after_death(sid, c, idle_death);
+                // Idle (and anything past boot) does not carry a continuation into the next
+                // incarnation. Booting still does. A working crash may set a fresh debt below.
+                // Unknown from an idle desync drops the debt; it does not count as interrupted,
+                // so the resume below does not set a fresh one.
+                let reached_idle = matches!(
+                    was,
+                    Activity::Idle { .. }
+                        | Activity::Delivering { .. }
+                        | Activity::Working
+                        | Activity::Blocked { .. }
+                        | Activity::Interrupting
+                        | Activity::Compacting
+                ) || (was == Activity::Unknown
+                    && (was_desync || desync_while_idle));
+                let had = self.st.sleeves[&sid].auto_continue;
+                if reached_idle && had.is_some() {
+                    self.sl(sid).auto_continue = None;
+                }
+                let s = &self.st.sleeves[&sid];
+                let resuming = interrupted_turn && s.guard.state == GuardState::Resuming;
+                let headless = s.target.mode == Mode::Headless;
+                let seq = s.turn_seq;
+                if resuming {
+                    // One continuation per owner turn, whichever generation sends it.
+                    // A fresh session has no history of the turn: the dead incarnation never
+                    // acked a prompt, so `StartIncarnation` carried no resume id.
+                    let state = (seq > 0).then(|| self.continue_state(sid, seq)).flatten();
+                    let native = self.native_resume(sid);
+                    match (headless, native, state) {
+                        (true, true, None) if seq > 0 => self.sl(sid).auto_continue = Some(seq),
+                        (true, true, Some(MsgState::Queued)) => {
+                            // Fencing put the unsent prompt back. The next generation sends it.
+                        }
+                        _ => self.needs_prompt(sid),
+                    }
+                }
+                // Warn only for a debt this crash did not replace. An interrupt already ended
+                // the turn, and a working crash warns from the match above when it must.
+                if reached_idle
+                    && had.is_some()
+                    && self.st.sleeves[&sid].auto_continue.is_none()
+                    && was != Activity::Interrupting
+                    && !interrupted_turn
+                {
+                    self.needs_prompt(sid);
+                }
             }
-            Life::Provisioning | Life::Parked(_) | Life::Stopped | Life::Removed => {}
+            // Park already cleared the debt. The unsent continuation fencing just requeued
+            // is dropped here, once, with the owner warning.
+            Life::Parked(_) => self.drop_queued_continuation(sid),
+            Life::Provisioning | Life::Stopped | Life::Removed => {}
         }
     }
 
@@ -501,7 +610,11 @@ impl Core<'_> {
         s.guard.state = GuardState::Armed;
         s.guard.chosen = None;
         s.guard.tried.clear();
+        let dropped = self.discard_continuation(sid);
         self.stop_incarnation(sid);
+        if dropped {
+            self.needs_prompt(sid);
+        }
         for c in self.st.children(sid) {
             self.stop(c, remove);
         }
@@ -551,11 +664,18 @@ impl Core<'_> {
     }
 
     pub(crate) fn park(&mut self, sid: SleeveId, reason: ParkReason) {
+        self.park_quiet(sid, reason, false);
+    }
+
+    /// `quiet` is an idle death that parks: the debt goes, and nobody is told the turn
+    /// will not continue. A queued continuation is still dropped.
+    pub(crate) fn park_quiet(&mut self, sid: SleeveId, reason: ParkReason, quiet: bool) {
         let s = self.sl(sid);
         s.life = Life::Parked(reason);
         s.guard.state = GuardState::Parked;
         s.guard.chosen = None;
         let parent = s.parent;
+        let dropped = self.discard_continuation(sid);
         self.stop_incarnation(sid);
         self.notify(Party::Owner, Some(sid), Notice::Parked { reason });
         if let Some(p) = parent {
@@ -565,11 +685,25 @@ impl Core<'_> {
                 Notice::ChildParked { child: sid },
             );
         }
+        if dropped && !quiet {
+            self.needs_prompt(sid);
+        }
     }
 
     pub(crate) fn recover_sleeves(&mut self) {
         let ids: Vec<SleeveId> = self.st.sleeves.keys().copied().collect();
         for sid in ids {
+            let s = self.sl(sid);
+            // Idle means this incarnation reached Ready. A debt still held means no prompt
+            // was sent after that, so the continuation is dropped with no warning. Keeping
+            // it would send the prompt on a later start, long after the turn. A resume that
+            // is still booting keeps the debt.
+            if s.auto_continue.is_some()
+                && matches!(s.activity, Activity::Idle { .. })
+                && s.guard.state == GuardState::Armed
+            {
+                s.auto_continue = None;
+            }
             let s = self.sl(sid);
             if s.proc == Proc::Up {
                 s.probing = true;
@@ -599,7 +733,12 @@ impl Core<'_> {
         }
     }
 
-    pub(crate) fn start_cmd(&mut self, sid: SleeveId, target: Option<&Target>) {
+    pub(crate) fn start_cmd(
+        &mut self,
+        sid: SleeveId,
+        target: Option<&Target>,
+        effort: Option<&str>,
+    ) {
         if !self.existing(sid) {
             return;
         }
@@ -635,6 +774,7 @@ impl Core<'_> {
         g.state = GuardState::Armed;
         g.tried.clear();
         g.chosen = None;
+        g.chosen_effort = effort.map(str::to_owned);
         g.cause = None;
         self.start_incarnation(sid, target, true);
         self.reply(Reply::Accepted);
@@ -792,9 +932,13 @@ impl Core<'_> {
                 self.sl(to).steer_slot = Some(request_id.to_string());
                 self.reply(Reply::Steering);
             }
+            SendMode::Steer if !s.target.harness.steers() && !(self.deliverable(to) && queue_empty) => self.refuse(
+                Code::FailedPrecondition,
+                "this harness cannot steer a running turn; omit --steer to queue the message for its next turn",
+            ),
             SendMode::Steer if !(self.deliverable(to) && queue_empty) => self.refuse(
                 Code::FailedPrecondition,
-                "cannot steer now; queue it instead",
+                "the sleeve has no steerable turn ready; omit --steer to queue the message for its next turn",
             ),
             _ => {
                 insert(self, MsgState::Queued);
@@ -830,6 +974,12 @@ impl Core<'_> {
     }
 
     fn steer(&mut self, sid: SleeveId, request_id: &str) {
+        let from = self.st.sleeves[&sid].messages[request_id].from;
+        if let Some(name) = agent_name(from, request_id) {
+            let s = self.sl(sid);
+            s.turn_from = Party::Agent;
+            s.turn_agent = Some(name);
+        }
         let s = &self.st.sleeves[&sid];
         let kind = EffectKind::Steer {
             sleeve: sid,
@@ -899,6 +1049,15 @@ impl Core<'_> {
         let s = self.sl(sid);
         s.messages.get_mut(&r).expect("queued message").state = MsgState::InFlight(eff);
         s.activity = Activity::Delivering { effect: eff };
+        // A continuation belongs to the turn already begun. Any other prompt starts the next one
+        // and supersedes a continuation that turn still owed.
+        if !r.starts_with("continue:") {
+            let from = s.messages[&r].from;
+            s.turn_seq += 1;
+            s.auto_continue = None;
+            s.turn_from = from;
+            s.turn_agent = agent_name(from, &r);
+        }
     }
 
     /// Activity just became Idle: let a quiescing resleeve stop the incarnation, else deliver.
@@ -954,6 +1113,7 @@ impl Core<'_> {
             return self.on_brief_prompt(sid, id, native);
         }
         let request_id = self.st.effects[&id].key.clone();
+        let continued = request_id.starts_with("continue:");
         let state = self.effect_state(id).expect("effect exists");
         if let Some(m) = self.sl(sid).messages.get_mut(&request_id)
             && m.state == MsgState::InFlight(id)
@@ -977,6 +1137,9 @@ impl Core<'_> {
             if let Some(n) = notice {
                 self.notify(from, Some(sid), n);
             }
+        }
+        if continued && matches!(state, EffectState::Rejected | EffectState::Failed) {
+            self.needs_prompt(sid);
         }
         // Activity follows the effect's resolution (12a item 3), message or not.
         if self.st.sleeves[&sid].activity != (Activity::Delivering { effect: id }) {
@@ -1141,16 +1304,24 @@ impl Core<'_> {
             }
             Obs::TurnSettled { end } => {
                 // Not evidence for an in-flight prompt: a settle with no turn begun is the
-                // previous turn's, and is dropped below.
+                // previous turn's. It still retires a continuation owed for this owner turn,
+                // including one recorded after resume while this incarnation is already idle,
+                // so a later hub start does not warn about a turn the journal already settled.
                 let s = self.sl(sid);
                 if !matches!(
                     s.activity,
                     Activity::Working | Activity::Blocked { .. } | Activity::Interrupting
                 ) {
+                    if s.auto_continue == Some(s.turn_seq) {
+                        s.auto_continue = None;
+                    }
                     return;
                 }
                 s.activity = Activity::Idle { seen: false };
                 s.turn = None;
+                if s.auto_continue == Some(s.turn_seq) {
+                    s.auto_continue = None;
+                }
                 // Whatever the harness still asked in this turn went away with it.
                 self.withdraw_tool_approvals(sid, g);
                 let s = self.sl(sid);
@@ -1193,7 +1364,27 @@ impl Core<'_> {
                 self.settled(sid);
             }
             Obs::Desync { .. } => {
-                self.sl(sid).activity = Activity::Unknown;
+                let s = &self.st.sleeves[&sid];
+                // An interrupt already stopped this turn. Counting it as active would set
+                // desync_during_turn, the kill would leave activity Unknown, and resume
+                // would continue the turn the owner stopped. `turn` is cleared for the
+                // same reason: it stays set across the interrupt.
+                let interrupting = s.activity == Activity::Interrupting;
+                let idle = matches!(s.activity, Activity::Idle { .. });
+                let active = !interrupting
+                    && (matches!(s.activity, Activity::Working | Activity::Blocked { .. })
+                        || matches!(s.activity, Activity::Delivering { effect } if self.effect_state(effect) != Some(EffectState::Intent)));
+                let s = self.sl(sid);
+                s.desync_during_turn |= active;
+                // Separate from the mid-turn flag: resume must not treat this as interrupted
+                // and set a fresh debt. The exit drops the one already held.
+                if idle {
+                    s.desync_while_idle = true;
+                }
+                if interrupting {
+                    s.turn = None;
+                }
+                s.activity = Activity::Unknown;
                 self.trip(sid, Guardrail::ProtocolDesync);
             }
             Obs::Screen(v) => self.screen(sid, *v),
@@ -1220,6 +1411,154 @@ impl Core<'_> {
         }
     }
 
+    /// The generation `after_death` just started is a native resume of the session
+    /// whose turn was acked. A fresh session leaves `resume` empty.
+    fn native_resume(&self, sid: SleeveId) -> bool {
+        let g = self.st.sleeves[&sid].g;
+        self.st.effects.values().any(|e| {
+            matches!(
+                &e.kind,
+                EffectKind::StartIncarnation {
+                    sleeve,
+                    g: eg,
+                    resume,
+                    ..
+                } if *sleeve == sid && *eg == g && resume.is_some()
+            )
+        })
+    }
+
+    fn continue_key(sid: SleeveId, seq: u64) -> String {
+        format!("continue:{}:{}", sid.0, seq)
+    }
+
+    /// The continuation already issued for this owner turn, if any.
+    fn continue_state(&self, sid: SleeveId, seq: u64) -> Option<MsgState> {
+        self.st.sleeves[&sid]
+            .messages
+            .get(&Self::continue_key(sid, seq))
+            .map(|m| m.state)
+    }
+
+    /// Drops the continuation debt and any `continue:` message still queued. An in-flight
+    /// unsent prompt is not queued yet; fencing puts it back, and the exit then drops it.
+    /// Rejected, not left queued: a later start must not send it. No `MessageRejected` —
+    /// the caller warns with `TurnNeedsPrompt` when something was actually dropped.
+    pub(crate) fn discard_continuation(&mut self, sid: SleeveId) -> bool {
+        let had = self.sl(sid).auto_continue.take().is_some();
+        had || self.reject_queued_continues(sid)
+    }
+
+    fn drop_queued_continuation(&mut self, sid: SleeveId) {
+        if self.reject_queued_continues(sid) {
+            self.needs_prompt(sid);
+        }
+    }
+
+    fn reject_queued_continues(&mut self, sid: SleeveId) -> bool {
+        let s = self.sl(sid);
+        let keys: Vec<String> = s
+            .queue
+            .iter()
+            .filter(|id| id.starts_with("continue:"))
+            .cloned()
+            .collect();
+        if keys.is_empty() {
+            return false;
+        }
+        s.queue.retain(|id| !id.starts_with("continue:"));
+        for id in keys {
+            if let Some(m) = s.messages.get_mut(&id) {
+                m.state = MsgState::Rejected;
+            }
+        }
+        true
+    }
+
+    /// The owner, and the parent when there is one, hear that nobody continued the turn.
+    pub(crate) fn needs_prompt(&mut self, sid: SleeveId) {
+        let parent = self.st.sleeves[&sid].parent;
+        self.notify(Party::Owner, Some(sid), Notice::TurnNeedsPrompt);
+        if let Some(p) = parent {
+            self.notify(Party::Sleeve(p), Some(sid), Notice::TurnNeedsPrompt);
+        }
+    }
+
+    /// After the resumed incarnation is ready: ask the hub to journal `Continue` when a prompt
+    /// can still go out. Allocates nothing; the effect belongs to that later event.
+    fn offer_auto_continue(&mut self, sid: SleeveId) {
+        let s = &self.st.sleeves[&sid];
+        if s.auto_continue != Some(s.turn_seq) {
+            return;
+        }
+        if !s.queue.is_empty() || matches!(s.activity, Activity::Delivering { .. }) {
+            self.sl(sid).auto_continue = None;
+            return;
+        }
+        if self.deliverable(sid) {
+            self.out.push(Intent::AutoContinue {
+                sleeve: sid,
+                text: CONTINUE_PROMPT.to_string(),
+            });
+            return;
+        }
+        let s = &self.st.sleeves[&sid];
+        if self.frozen(sid) || s.target.mode != Mode::Headless || !s.life.live() {
+            self.sl(sid).auto_continue = None;
+            self.needs_prompt(sid);
+        }
+    }
+
+    /// Applies a journaled `Continue`. One prompt for the owed owner turn. If it cannot be
+    /// delivered, the debt is dropped and, unless the sleeve is being torn down, the owner is
+    /// warned. A journal without this event allocates nothing.
+    pub(crate) fn continue_turn(&mut self, sid: SleeveId, text: &str) {
+        let Some(s) = self.st.sleeves.get(&sid) else {
+            return;
+        };
+        let Some(seq) = s.auto_continue else {
+            return;
+        };
+        if seq != s.turn_seq || text.is_empty() {
+            return;
+        }
+        let from = s.turn_from;
+        let key = Self::continue_key(sid, seq);
+        if s.messages.contains_key(&key)
+            || !s.queue.is_empty()
+            || matches!(s.activity, Activity::Delivering { .. })
+        {
+            self.sl(sid).auto_continue = None;
+            return;
+        }
+        if !self.deliverable(sid) {
+            let s = &self.st.sleeves[&sid];
+            // Compacting, probing, or booting can race the prompt. Keeping the debt would send
+            // it the next time this incarnation is idle, which may be long after the turn.
+            let abandoned = !s.life.live() || matches!(s.life, Life::Parked(_) | Life::Resleeving);
+            self.sl(sid).auto_continue = None;
+            if !abandoned {
+                self.needs_prompt(sid);
+            }
+            return;
+        }
+        self.sl(sid).messages.insert(
+            key.clone(),
+            Message {
+                // The party that opened this owner turn (an agent steer replaces it), so the
+                // continued turn keeps that origin and a rejection is reported to that party.
+                // A rejected continuation still warns the owner.
+                from,
+                text: text.to_string(),
+                mode: SendMode::Queue,
+                state: MsgState::Queued,
+            },
+        );
+        self.sl(sid).queue.push_back(key);
+        self.sl(sid).auto_continue = None;
+        self.deliver_next(sid);
+    }
+
     fn ready(&mut self, sid: SleeveId, session: &str) {
         let s = self.sl(sid);
         if s.activity != Activity::Booting {
@@ -1239,6 +1578,7 @@ impl Core<'_> {
                     self.notify(Party::Owner, Some(sid), Notice::Resumed { g });
                 }
                 self.settled(sid);
+                self.offer_auto_continue(sid);
             }
             (Life::Resleeving, GuardState::Launching) => {
                 let g = s.g;

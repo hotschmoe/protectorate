@@ -31,7 +31,8 @@ envoy token                                # the envoy-only token
 Give them the envoy-only token, which can send to Envoy and read its replies and nothing else:
 
 - through their shell tool: `PROTECTORATE_TOKEN=<envoy-only token> protectorate envoy send --as
-  <agent> ...`, then `envoy wait`;
+  <agent> ...`, then `envoy wait`. That wait includes the reply from a continuation
+  of the same turn, and it stays open while that continuation is still owed or queued;
 - through MCP: `protectorate mcp --envoy [--token-file PATH] [--as NAME]`, a stdio server with
   the tools `envoy_send`, `envoy_wait` and `envoy_read`. The token comes from `--token-file` or
   `PROTECTORATE_TOKEN`; the agent's name from `--as` or the client's own name.
@@ -95,7 +96,27 @@ Guardrails in code interrupt, resume, resleeve or park a sleeve that fails (quot
 crash, silent, looping and so on). A third resleeve within an hour parks it; `sleeve list` shows
 the park reason. When that trip is a rejected login, the reason names that login
 (`flapping (claude login rejected)` and the same for the other harnesses). Any other flap stays
-`flapping`.
+`flapping`. After a native resume of a headless turn that a crash ended, the hub sends one
+short continuation prompt for that owner turn, including when a later generation is the one that
+sends it. A fresh session does not get that prompt: if the dead incarnation never acked one,
+the owner is warned instead. The prompt is sent as the party that opened that owner turn.
+An agent steer replaces that party, which keeps D9 on the continued turn and reports a rejection
+to that
+party. A second crash of the same turn does not send another, even after the ten-minute
+resume window, and a later owner message is a new turn with its own prompt. An owner
+interrupt, a guardrail interrupt, a desync during either of those, a planned stop, a restart
+of an idle sleeve, and a manual resleeve do not. A stop, park, or resleeve also drops a
+continuation that is still queued, including one that never left the hub, and warns once.
+An idle crash that ends in a park or a resleeve drops a debt and does not warn. A restart
+while the resumed incarnation is still booting still sends it. A hub restart that finds
+that incarnation already idle drops the debt with no warning: it reached Ready and
+nothing was sent after that. A crash of an incarnation that already reached idle does not
+carry it. A protocol desync while it is idle drops the debt, and the owner is warned when
+the resume does not replace it. A desync during boot keeps a debt. A settle of that turn
+drops it with no warning, including one recorded after
+resume while the sleeve is idle, so a later start does not warn about a turn the journal
+already settled. If that prompt cannot be sent, the debt is dropped and the event log says
+the turn will not continue on its own.
 
 ## Approvals and D9
 
@@ -112,7 +133,8 @@ wait for the owner's approval, whatever Envoy decides:
 
 - `sleeve rm`;
 - `job run`;
-- `sleeve spawn` past `d9_spawn_limit` spawns in that turn (default 3).
+- `sleeve spawn` past `d9_spawn_limit` spawns in that turn (default 3). A crash keeps
+  that count: the continuation is the same turn.
 
 A node job with `--maintenance` from any sleeve, Envoy included, always waits for the owner. The
 waiting call fails after `d9_approval_timeout_secs` (default 900). Pending approvals live in
@@ -188,7 +210,19 @@ job artifact <job> <path> [--out FILE]
   node it has met, otherwise (`--arch`) the node does and the job fails there.
 - `--artifact PATH` (repeatable) names a file inside the job's directory (the `--cwd`), relative
   or absolute for the node; it is fetched when the job ends, and `job artifact` writes it to
-  `--out` or stdout after checking its sha256. A path outside that directory is refused.
+  `--out` or stdout after checking its sha256. A path outside that directory is refused. A
+  dropped connection while fetching saves what arrived and does not use up the three attempts;
+  the hub collects again when the node next reports the job. A local save failure is submitted
+  as an incomplete collection and fails the job through those three attempts. The job is
+  abandoned 24 hours after it is first lost, including when collection keeps restarting.
+  The owner hears about that loss once; a later drop in the same episode does not alarm again.
+- `job run --wait` prints the log and exits with the job's code. A hub that cannot be reached is
+  retried for about 60 seconds, including across a restart or `hub update`, and the same retry
+  covers the log read after the job ends. It then exits 6, naming the job id. A refusal is not
+  retried. When the job has no process exit code, the hub's own result is 3 for
+  interrupted, 5 for lost, and 1 for cancelled, abandoned, or failed without a code. A failed
+  job still returns its own code, so a job that itself exits 3, 5, or 6 shares that number; the
+  message names which one it was.
 - `job log` lags a running job by up to 10 s.
 
 A job result is the node's claim: `job show` says which node reported it.

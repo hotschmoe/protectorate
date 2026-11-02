@@ -61,6 +61,33 @@ fn sleeve_lifecycle() {
     hub.cli(&["sleeve", "stop", "one"]).ok();
     hub.wait("one", "ended", 60);
     assert!(scope_pids(&scope).is_empty(), "{scope} is gone after stop");
+    hub.cli(&["sleeve", "start", "one", "--effort", "low"]).ok();
+    hub.wait("one", "idle", 120);
+    assert_eq!(
+        hub.sleeve("one")["incarnation"]["effort"].as_str(),
+        Some("low")
+    );
+    hub.cli(&[
+        "sleeve",
+        "resleeve",
+        "one",
+        "--harness",
+        "pi_local",
+        "--effort",
+        "high",
+    ])
+    .ok();
+    eventually(
+        "manual resleeve with effort",
+        Duration::from_secs(240),
+        || {
+            let s = hub.sleeve("one");
+            (s["lifecycle"].as_str() == Some("running")
+                && s["incarnation"]["g"].as_u64().is_some_and(|g| g >= 3)
+                && s["incarnation"]["effort"].as_str() == Some("high"))
+            .then_some(())
+        },
+    );
     // Removed, the sleeve keeps nothing open in the hub: its executor ends, its transcript
     // closes.
     hub.cli(&["sleeve", "rm", "one"]).ok();
@@ -106,8 +133,8 @@ fn sleeve_lifecycle() {
 }
 
 /// kill -9 of the hub mid-turn: on restart the journal replays, HubRecovered probes the scope,
-/// the sleeve resumes natively as g2, the transcript continues, and the prompt that was in
-/// flight is never delivered twice.
+/// the sleeve resumes natively as g2, the transcript continues, the interrupted turn gets one
+/// continuation prompt, and the prompt that was in flight is never delivered twice.
 #[test]
 fn crash_mid_turn_recovers() {
     if !have_runtime() {
@@ -117,17 +144,40 @@ fn crash_mid_turn_recovers() {
     let repo = temp_repo("crash");
     let s = hub.spawn_pi("two", &repo);
     let id = s["id"].as_str().unwrap().to_string();
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "two-child",
+        "--parent",
+        "two",
+        "--harness",
+        "pi_local",
+    ])
+    .ok();
+    hub.wait("two-child", "idle", 120);
+    let child_id = hub.sleeve("two-child")["id"].as_str().unwrap().to_string();
+    hub.send("two-child", LONG);
+    eventually("the child's turn to start", Duration::from_secs(60), || {
+        (hub.sleeve("two-child")["incarnation"]["activity"]["state"].as_str() == Some("working"))
+            .then_some(())
+    });
     let long = hub.send("two", LONG);
     eventually("the long turn to start", Duration::from_secs(60), || {
         let s = hub.sleeve("two");
         (s["incarnation"]["activity"]["state"].as_str() == Some("working")).then_some(())
     });
+    hub.cli(&["sleeve", "send", "two", "Keep working.", "--steer"])
+        .ok();
     std::thread::sleep(Duration::from_secs(1));
     hub.kill9();
     eventually(
         "the sandbox to die with its hub",
         Duration::from_secs(20),
-        || scope_pids(&hub.scope(&id, 1)).is_empty().then_some(()),
+        || {
+            (scope_pids(&hub.scope(&id, 1)).is_empty()
+                && scope_pids(&hub.scope(&child_id, 1)).is_empty())
+            .then_some(())
+        },
     );
     // A systemd-run the dead hub started that never registered its scope: recovery kills it
     // before probing, or it would register g1 after the probe found g1 empty.
@@ -156,6 +206,36 @@ fn crash_mid_turn_recovers() {
         "the journal is replayed"
     );
     hub.wait("two", "idle", 180);
+    hub.wait("two-child", "idle", 180);
+    let events = hub.cli(&["--json", "event", "list"]).json();
+    assert!(
+        events["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["text"].as_str() == Some("child two-child crashed")),
+        "{events}"
+    );
+    assert!(
+        events["events"].as_array().unwrap().iter().all(|e| {
+            e["text"]
+                .as_str()
+                .is_none_or(|t| !t.contains("will not continue automatically"))
+        }),
+        "the continuation prompt replaces the warning: {events}"
+    );
+    let child_entries = hub.transcript("two-child");
+    let continuations = of_type(&child_entries, "user_message")
+        .iter()
+        .filter(|e| {
+            e["entry"]["text"].as_str()
+                == Some("The previous turn was interrupted. Continue from where it stopped.")
+        })
+        .count();
+    assert_eq!(
+        continuations, 1,
+        "the child got one continuation prompt: {child_entries:?}"
+    );
     let s = hub.sleeve("two");
     assert_eq!(s["lifecycle"].as_str(), Some("running"));
     let g = s["incarnation"]["g"].as_u64().unwrap();
@@ -569,6 +649,172 @@ fn write_script(path: &std::path::Path, body: &str) {
 }
 
 #[test]
+fn claude_steer_explains_queue_during_tool() {
+    if !on_path("bwrap") || !on_path("python3") || !on_path("git") {
+        return;
+    }
+    let dir = unique("claude-steer");
+    std::fs::create_dir_all(&dir).unwrap();
+    let fake = dir.join("claude");
+    write_script(&dir.join("systemd-run"), "exit 0");
+    let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
+    write_script(
+        &fake,
+        r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit; fi
+exec python3 -u -c '
+import json, os, sys, time
+with open(os.path.join(os.environ["HOME"], "test-token"), "w") as out:
+    out.write(os.environ["PROTECTORATE_TOKEN"])
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("type") != "user": continue
+    msg["isReplay"] = True
+    print(json.dumps(msg), flush=True)
+    print(json.dumps({"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"sleep 30"}}]}}), flush=True)
+    if "--resume" not in sys.argv:
+        while not os.path.exists("trigger"): time.sleep(0.05)
+        print(json.dumps({"type":"system","subtype":"init","session_id":"wrong-session"}), flush=True)
+' "$@""#,
+    );
+    let hub = Hub::start_config(
+        "claude-steer",
+        "claude",
+        &[
+            ("scopes", false.into()),
+            ("claude_program", fake.to_str().unwrap().into()),
+        ],
+        &[],
+        &[("PATH", &path)],
+    );
+    let login = hub.home.join("logins/.claude/.credentials.json");
+    std::fs::create_dir_all(login.parent().unwrap()).unwrap();
+    std::fs::write(login, "test").unwrap();
+    hub.cli(&["doctor", "--refresh"]).ok();
+    let repo = temp_repo("claude-steer");
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "parent",
+        "--path",
+        repo.to_str().unwrap(),
+        "--harness",
+        "claude",
+    ])
+    .ok();
+    hub.wait("parent", "idle", 60);
+    hub.cli(&["sleeve", "stop", "parent"]).ok();
+    hub.wait("parent", "ended", 60);
+    hub.cli(&["sleeve", "start", "parent", "--effort", "low"])
+        .ok();
+    hub.wait("parent", "idle", 60);
+    assert_eq!(
+        hub.sleeve("parent")["incarnation"]["effort"].as_str(),
+        Some("low")
+    );
+    hub.cli(&[
+        "sleeve",
+        "resleeve",
+        "parent",
+        "--harness",
+        "claude",
+        "--effort",
+        "high",
+    ])
+    .ok();
+    eventually("manual resleeve effort", Duration::from_secs(60), || {
+        let s = hub.sleeve("parent");
+        (s["lifecycle"].as_str() == Some("running")
+            && s["incarnation"]["g"].as_u64() == Some(3)
+            && s["incarnation"]["effort"].as_str() == Some("high"))
+        .then_some(())
+    });
+    let worker = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "worker",
+            "--parent",
+            "parent",
+            "--harness",
+            "claude",
+        ])
+        .json();
+    hub.wait("worker", "idle", 60);
+    let token_file = hub.home.join(format!(
+        "sleeves/{}/home/test-token",
+        worker["id"].as_str().unwrap()
+    ));
+    let token = eventually("the sleeve's capability", Duration::from_secs(30), || {
+        std::fs::read_to_string(&token_file)
+            .ok()
+            .filter(|s| !s.is_empty())
+    });
+    let scope = hub.cli_env(&[("PROTECTORATE_TOKEN", &token)], &["job", "ls"]);
+    let json_scope = hub
+        .cli_env(&[("PROTECTORATE_TOKEN", &token)], &["--json", "job", "ls"])
+        .json();
+    assert!(
+        scope
+            .stdout
+            .contains("Showing only this sleeve's and its children's jobs."),
+        "{} {json_scope}",
+        scope.stdout
+    );
+    assert_eq!(json_scope["scoped_to_caller"].as_bool(), Some(true));
+    hub.send("worker", "Run a tool.");
+    eventually("the tool call", Duration::from_secs(30), || {
+        (!of_type(&hub.transcript("worker"), "tool_call").is_empty()).then_some(())
+    });
+    let refusal = hub.cli(&["sleeve", "send", "worker", "Change direction", "--steer"]);
+    assert_ne!(refusal.status, 0);
+    assert!(
+        refusal.stderr.contains("cannot steer a running turn")
+            && refusal.stderr.contains("omit --steer to queue"),
+        "{}",
+        refusal.stderr
+    );
+    hub.cli(&["sleeve", "send", "worker", "Change direction"])
+        .ok();
+    assert_eq!(hub.sleeve("worker")["queued"].as_u64(), Some(1));
+    std::fs::write(
+        std::path::Path::new(worker["path"].as_str().unwrap()).join("trigger"),
+        "desync",
+    )
+    .unwrap();
+    eventually(
+        "the queued message to continue the resumed turn",
+        Duration::from_secs(60),
+        || {
+            of_type(&hub.transcript("worker"), "user_message")
+                .iter()
+                .any(|e| {
+                    e["g"].as_u64() == Some(2)
+                        && e["entry"]["text"].as_str() == Some("Change direction")
+                })
+                .then_some(())
+        },
+    );
+    let entries = hub.transcript("worker");
+    assert!(
+        of_type(&entries, "user_message").iter().all(|e| {
+            e["entry"]["text"].as_str()
+                != Some("The previous turn was interrupted. Continue from where it stopped.")
+        }),
+        "a queued message is the continuation: {entries:?}"
+    );
+    let events = hub.cli(&["--json", "event", "list"]).json();
+    assert!(
+        events["events"].as_array().unwrap().iter().all(|e| {
+            e["text"]
+                .as_str()
+                .is_none_or(|t| !t.contains("will not continue automatically"))
+        }),
+        "a queued message continues the turn, so there is no warning: {events}"
+    );
+}
+
+#[test]
 fn scratch_survives_a_restart_and_is_removed_with_the_sleeve() {
     let dir = unique("scratch");
     let home = dir.join("home");
@@ -936,7 +1182,6 @@ while True: a.append(bytearray(4*1024*1024))'"#,
             .then_some(())
     });
 }
-
 /// A sleeve controls its repo's config and `.gitattributes` (a child, the shared git dir): the
 /// hub's checkpoint, worktree add and brief facts must run none of its filters, hooks,
 /// fsmonitor or textconv. A child path through a symlink never reaches another worktree.
@@ -1241,6 +1486,7 @@ exit 1"#,
     [ -S "$run/api.sock" ] && echo owner_socket=visible || echo owner_socket=hidden
     env -u PROTECTORATE_TOKEN protectorate --json sleeve list >/dev/null 2>&1 && echo tokenless=ok || echo tokenless=refused
     protectorate --json sleeve list >/dev/null 2>&1 && echo token=ok || echo token=refused
+    protectorate job ls | head -1
     touch "$run/bin/probe" 2>/dev/null && echo bin=writable || echo bin=readonly
     touch "$run/sleeves/probe" 2>/dev/null && echo sleeves=writable || echo sleeves=readonly
     [ -e "$HOME/.claude/.credentials.json" ] && echo claude_login=visible || echo claude_login=hidden
@@ -1320,6 +1566,7 @@ exec '{real_pi}' "$@""#,
         "login_shell_cli=ok",
         "target=/tmp/pt/target tmp=/tmp/pt/tmp",
         "other_root=hidden",
+        "Showing only this sleeve's and its children's jobs.",
         "commit=ok",
         "committer=Owner \"Q\" Name <owner@example.test>",
     ] {

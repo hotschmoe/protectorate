@@ -1,0 +1,105 @@
+#scenario 462d8f67c853c15e
+# One continuation after a native resume of an interrupted turn. A second journaled Continue
+# does nothing, and a crash of the continued turn warns instead of sending another. None
+# after a planned stop, a hub restart of an idle sleeve, or a manual resleeve. A pane warns
+# instead. A rejected prompt warns once. A restart before the prompt is journaled keeps the
+# debt, and the later generation sends it.
+spawn root /w/a
+run
+obs root ready
+send root m1
+run
+expect root activity=Working
+exit root
+run
+obs root ready
+run
+expect root activity=Working
+expect-notice TurnNeedsPrompt count=0
+expect-effect continue:0:1 state=Confirmed count=1
+expect root msg:continue:0:1=Delivered
+continue root
+expect-effect continue:* count=1
+exit root
+run
+obs root ready
+run
+expect root activity=Idle
+expect-effect continue:* count=1
+expect-effect continue:0:2 count=0
+expect-notice TurnNeedsPrompt count=1
+stop root
+run
+expect root life=Stopped
+spawn owed /w/owed
+run
+obs owed ready
+send owed m1
+run
+expect owed activity=Working
+exit owed
+run
+crash
+run
+obs owed ready
+run
+expect owed activity=Working
+expect-effect continue:1:1 state=Confirmed count=1
+expect-effect continue:1:2 count=0
+stop owed
+run
+expect owed life=Stopped
+spawn idle /w/b
+run
+obs idle ready
+run
+crash empty
+run
+obs idle ready
+run
+expect-notice TurnNeedsPrompt count=1
+expect-effect continue:2:* count=0
+spawn stopme /w/c
+run
+obs stopme ready
+send stopme m1
+run
+expect stopme activity=Working
+stop stopme
+run
+expect stopme life=Stopped
+expect-effect continue:3:* count=0
+spawn move /w/d
+run
+obs move ready
+send move m1
+run
+expect move activity=Working
+resleeve move harness=pi_local
+expect move life=Resleeving guard=Quiescing
+expect-effect continue:4:* count=0
+spawn pane1 /w/e pane
+run
+obs pane1 ready
+obs pane1 screen=working
+exit pane1
+expect-notice TurnNeedsPrompt count=2
+run
+obs pane1 ready
+run
+expect-effect continue:5:* count=0
+expect-notice TurnNeedsPrompt count=2
+spawn nack /w/f
+run
+obs nack ready
+send nack m1
+run
+expect nack activity=Working
+policy prompt=nack
+exit nack
+run
+obs nack ready
+run
+expect nack activity=Idle msg:continue:6:1=Rejected
+expect-effect continue:6:1 state=Rejected count=1
+expect-notice TurnNeedsPrompt count=3

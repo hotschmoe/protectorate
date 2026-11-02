@@ -18,7 +18,9 @@ mod job;
 mod sleeve;
 
 pub use approval::{ACTION_PREFIX, tool_approval_id};
-pub use event::{Ask, Event, EventKind, JobReport, JobSpec, Obs, SpawnSpec};
+pub use event::{
+    ArtifactCheck, ArtifactRefusal, Ask, Event, EventKind, JobReport, JobSpec, Obs, SpawnSpec,
+};
 pub use guard::limits;
 pub use intent::{Class, Code, EffectKind, Intent, Notice, Reply};
 pub use model::*;
@@ -81,8 +83,16 @@ impl Core<'_> {
             } => self.request_action(*sleeve, ask, *timeout),
             E::Stop { sleeve } => self.stop_cmd(*sleeve, false),
             E::Remove { sleeve } => self.stop_cmd(*sleeve, true),
-            E::Start { sleeve, target } => self.start_cmd(*sleeve, target.as_ref()),
-            E::Resleeve { sleeve, target } => self.resleeve_cmd(*sleeve, target.as_ref()),
+            E::Start {
+                sleeve,
+                target,
+                effort,
+            } => self.start_cmd(*sleeve, target.as_ref(), effort.as_deref()),
+            E::Resleeve {
+                sleeve,
+                target,
+                effort,
+            } => self.resleeve_cmd(*sleeve, target.as_ref(), effort.as_deref()),
             E::Abandon { effect } => self.abandon_cmd(*effect),
             E::Viewed { sleeve } => self.viewed_cmd(*sleeve),
             E::CreateJob { request_id, spec } => self.create_job(request_id, spec),
@@ -143,7 +153,17 @@ impl Core<'_> {
                 node,
                 report,
             } => self.job_status(*job, *attempt, *node, report),
-            E::ArtifactsChecked { job, attempt, ok } => self.artifacts_checked(*job, *attempt, *ok),
+            E::ArtifactsChecked {
+                job,
+                attempt,
+                result,
+            } => self.artifacts_checked(*job, *attempt, *result),
+            E::ArtifactCollection {
+                job,
+                attempt,
+                refusals,
+                incomplete,
+            } => self.artifact_collection(*job, *attempt, refusals, incomplete.as_deref()),
 
             E::Observed { sleeve, g, obs } => self.observed(*sleeve, *g, obs),
             E::Exited { sleeve, g, cause } => self.exited(*sleeve, *g, *cause),
@@ -153,6 +173,7 @@ impl Core<'_> {
                 self.tick_jobs();
                 self.tick_approvals();
             }
+            E::Continue { sleeve, text } => self.continue_turn(*sleeve, text),
             E::HubRecovered => {
                 self.recover_effects();
                 self.recover_sleeves();

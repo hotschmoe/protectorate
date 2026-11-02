@@ -1,0 +1,32 @@
+#scenario f7803ee0ffceced5
+# An agent-started turn is continued as that agent, with the name from its ga: request id.
+# An owner-started turn that an agent steers is continued as that agent.
+spawn env /w/e
+run
+obs env ready
+send env ga:grokbot:m1 from=agent:grokbot
+run
+expect env activity=Working agent=grokbot
+exit env
+run
+obs env ready
+run
+expect env activity=Working agent=grokbot
+expect env msg:continue:0:1=Delivered from:continue:0:1=Agent
+expect-notice TurnNeedsPrompt count=0
+spawn steered /w/s harness=pi_local
+run
+obs steered ready
+send steered m-owner
+run
+expect steered activity=Working agent=none
+send steered ga:duet:s1 steer from=agent:duet
+run
+expect steered activity=Working agent=duet
+exit steered
+run
+obs steered ready
+run
+expect steered activity=Working agent=duet
+expect steered msg:continue:1:1=Delivered from:continue:1:1=Agent
+expect-notice TurnNeedsPrompt count=0

@@ -105,6 +105,7 @@ fn fail_text(e: Fail) -> String {
     match e {
         Fail::Api(e) => e.to_string(),
         Fail::Usage(s) | Fail::Other(s) => s,
+        Fail::Exit(code) => format!("job exited with code {code}"),
     }
 }
 

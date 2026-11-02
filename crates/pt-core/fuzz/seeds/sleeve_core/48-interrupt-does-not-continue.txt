@@ -1,0 +1,33 @@
+#scenario 108cc45514dc99c2
+# An owner interrupt that G13 kills is not continued, and neither is a guardrail
+# interrupt whose harness then exits.
+spawn root /w/a
+run
+obs root ready
+send root m1
+run
+expect root activity=Working
+interrupt root
+expect root activity=Interrupting
+tick 31s
+run
+obs root ready
+run
+expect root activity=Idle
+expect-effect continue:* count=0
+expect-notice TurnNeedsPrompt count=0
+spawn loop /w/b
+run
+obs loop ready
+send loop m1
+run
+expect loop activity=Working
+tick 16m
+expect loop activity=Interrupting
+exit loop
+run
+obs loop ready
+run
+expect loop activity=Idle
+expect-effect continue:1:* count=0
+expect-notice TurnNeedsPrompt count=0

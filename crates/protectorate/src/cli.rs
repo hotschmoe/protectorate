@@ -1,7 +1,7 @@
 //! `protectorate <noun> <verb>`: one hub API method per command, a table or a line for people,
 //! the API's own JSON under `--json`.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use pt_api::{self as api, EpochMs, method as m};
 use pt_json::ToJson;
@@ -421,6 +421,7 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 target: a.flag("--harness").map(harness).transpose()?,
                 model: a.flag("--model").map(str::to_string),
                 provider: a.flag("--provider").map(str::to_string),
+                effort: a.flag("--effort").map(str::to_string),
             };
             let v = c.call::<m::StartSleeve>(&req)?;
             o.show(&v, |v| accepted(v, "starting"));
@@ -434,6 +435,7 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 )?,
                 model: a.flag("--model").map(str::to_string),
                 provider: a.flag("--provider").map(str::to_string),
+                effort: a.flag("--effort").map(str::to_string),
             };
             let v = c.call::<m::Resleeve>(&req)?;
             o.show(&v, |v| accepted(v, "resleeving"));
@@ -733,6 +735,11 @@ fn job_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
     };
     match a.word(1, "a job command (run, ls, show, log, artifact, cancel)")? {
         "run" => {
+            if a.has("--wait") && o.json {
+                return Err(Fail::Usage(
+                    "job run --wait prints the log and cannot be combined with --json".into(),
+                ));
+            }
             let target = match (a.flag("--node"), a.flag("--arch")) {
                 (Some(n), None) => api::JobTarget::Node {
                     node_id: n.to_string(),
@@ -753,7 +760,11 @@ fn job_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 timeout_secs: a.num("--timeout")?,
             };
             let v = c.call_for::<m::RunJob>(&req, APPROVAL_WAIT)?;
-            o.show(&v, |j| println!("{}", job_line(j)));
+            if a.has("--wait") {
+                wait_job(c, v)?;
+            } else {
+                o.show(&v, |j| println!("{}", job_line(j)));
+            }
         }
         "ls" | "list" => {
             let req = api::ListJobsRequest {
@@ -761,7 +772,12 @@ fn job_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 limit: a.num("--limit")?,
             };
             let v = c.call::<m::ListJobs>(&req)?;
-            o.show(&v, |v| job_rows(&v.jobs));
+            o.show(&v, |v| {
+                if v.scoped_to_caller {
+                    println!("Showing only this sleeve's and its children's jobs.");
+                }
+                job_rows(&v.jobs);
+            });
         }
         "show" => {
             let v = c.call::<m::GetJob>(&job(a)?)?;
@@ -800,6 +816,120 @@ fn job_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
         other => return Err(Fail::Usage(format!("unknown job command {other:?}"))),
     }
     Ok(())
+}
+
+fn wait_job(c: &Client, mut job: api::Job) -> Result<(), Fail> {
+    use api::JobState as S;
+    let id = api::JobRef {
+        job_id: job.id.clone(),
+    };
+    eprintln!("job {}: waiting", job.id);
+    let mut unreachable: Option<Instant> = None;
+    while !matches!(
+        job.state,
+        S::Succeeded | S::Failed | S::Interrupted | S::Cancelled | S::Abandoned | S::Lost
+    ) {
+        std::thread::sleep(Duration::from_millis(500));
+        match c.call::<m::GetJob>(&id) {
+            Ok(next) => {
+                unreachable = None;
+                job = next;
+            }
+            // The hub answered. Retrying a refusal does not reach a restarting hub.
+            Err(Fail::Api(e)) => {
+                return Err(Fail::Other(format!(
+                    "job {}: cannot query the hub ({e}); inspect with `protectorate job show {}`",
+                    id.job_id, id.job_id
+                )));
+            }
+            Err(e) => {
+                let since = unreachable.get_or_insert_with(Instant::now);
+                if since.elapsed() >= Duration::from_secs(60) {
+                    // Exit carries no message. 6 is the hub's code for giving up on the link.
+                    let msg = format!(
+                        "job {}: cannot query the hub ({e}); it may be restarting; inspect with `protectorate job show {}`",
+                        id.job_id, id.job_id
+                    );
+                    eprintln!("error: {msg}");
+                    return Err(Fail::Exit(6));
+                }
+            }
+        }
+    }
+    let exit = if matches!(job.state, S::Succeeded | S::Failed) {
+        job.exit_code
+            .map_or(String::new(), |code| format!(" (exit {code})"))
+    } else {
+        String::new()
+    };
+    let detail = job
+        .error
+        .as_ref()
+        .map_or(String::new(), |e| format!(": {e}"));
+    eprintln!("job {}: {}{exit}{detail}", job.id, job.state);
+    if job.state == S::Lost {
+        eprintln!("inspect later with `protectorate job show {}`", job.id);
+    }
+    let mut offset = 0;
+    // Same window as the status poll above. A refusal is the hub's answer, so it is not retried.
+    let mut unreachable: Option<Instant> = None;
+    loop {
+        match c.call::<m::GetJobLog>(&api::GetJobLogRequest {
+            job_id: job.id.clone(),
+            offset,
+            limit: Some(1 << 20),
+        }) {
+            Ok(log) => {
+                unreachable = None;
+                print!("{}", log.text);
+                if log.eof || (job.state == S::Lost && log.next_offset <= offset) {
+                    break;
+                }
+                if log.next_offset <= offset {
+                    return Err(Fail::Other(format!(
+                        "job {}: log stopped at {offset}",
+                        job.id
+                    )));
+                }
+                offset = log.next_offset;
+            }
+            Err(Fail::Api(e)) => {
+                return Err(Fail::Other(format!(
+                    "job {}: cannot read the log ({e}); inspect with `protectorate job log {}`",
+                    id.job_id, id.job_id
+                )));
+            }
+            Err(e) => {
+                let since = unreachable.get_or_insert_with(Instant::now);
+                if since.elapsed() >= Duration::from_secs(60) {
+                    let msg = format!(
+                        "job {}: cannot read the log ({e}); it may be restarting; inspect with `protectorate job log {}`",
+                        id.job_id, id.job_id
+                    );
+                    eprintln!("error: {msg}");
+                    return Err(Fail::Exit(6));
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        }
+    }
+    if job.state == S::Succeeded {
+        return Ok(());
+    }
+    if let Some(code) = job
+        .exit_code
+        .filter(|code| job.state == S::Failed && (1..=255).contains(code))
+    {
+        return Err(Fail::Exit(code as u8));
+    }
+    // The job has no process exit code. These are the hub's own results. A failed
+    // job's code is returned above, so a job that itself exits 3, 5, or 6 shares it.
+    let code = match job.state {
+        S::Interrupted => 3,
+        S::Lost => 5,
+        _ => 1,
+    };
+    Err(Fail::Exit(code))
 }
 
 /// Every slice of the artifact, checked against its SHA-256, to `--out` or stdout.

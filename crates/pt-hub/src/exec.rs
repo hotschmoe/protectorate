@@ -67,7 +67,8 @@ fn intent_sleeve(i: &Intent) -> Option<SleeveId> {
         Intent::Execute { kind, .. } | Intent::Probe { kind, .. } => kind.sleeve(),
         Intent::ProbeScope { sleeve, .. }
         | Intent::SelectTarget { sleeve, .. }
-        | Intent::Checkpoint { sleeve, .. } => Some(*sleeve),
+        | Intent::Checkpoint { sleeve, .. }
+        | Intent::AutoContinue { sleeve, .. } => Some(*sleeve),
         _ => None,
     }
 }
@@ -602,6 +603,9 @@ impl SleeveExec {
                     self.checkpoint(s, g);
                 }
             }
+            Intent::AutoContinue { sleeve, text } => {
+                self.submit(EventKind::Continue { sleeve, text });
+            }
             other => debug!("sleeve {}: ignored {other:?}", self.id.0),
         }
     }
@@ -1066,7 +1070,7 @@ impl SleeveExec {
         }
         let from = Hub::from_label(&view.state, self.id, p.request_id);
         if Hub::envoy_id(&view.state) == Some(self.id) {
-            self.note_envoy_origin(&from, p.steer.is_some());
+            self.note_envoy_origin(&from, p.steer.is_some(), p.request_id);
         }
         let sent = match p.steer {
             Some(turn) => session.steer(p.request_id, &from, p.text, turn),
@@ -1090,13 +1094,16 @@ impl SleeveExec {
     }
 
     /// D9: records who started Envoy's next turn before its prompt is written. A prompt starts
-    /// a new turn; a steer from an agent taints the running one.
-    fn note_envoy_origin(&self, from: &str, steer: bool) {
+    /// a new turn; a steer from an agent taints the running one. A continuation keeps the
+    /// spawn count already used in the turn it resumes.
+    fn note_envoy_origin(&self, from: &str, steer: bool, request_id: &str) {
         let agent = from.starts_with("agent:").then(|| from.to_string());
         let mut t = crate::transcript::lock(&self.hub.envoy_turn);
         if !steer {
             t.origin = agent;
-            t.spawns = 0;
+            if !request_id.starts_with("continue:") {
+                t.spawns = 0;
+            }
         } else if agent.is_some() {
             t.origin = agent;
         }
@@ -1503,9 +1510,17 @@ impl Pump {
             Entry::UserMessage { .. } | Entry::PromptAck { .. } | Entry::Notice { .. } => {}
         }
         let exited = matches!(entry, Entry::Exited { .. });
-        let settles = exited || matches!(entry, Entry::TurnSettled { .. });
-        if settles && Hub::envoy_id(&hub.view().state) == Some(id) {
-            *crate::transcript::lock(&hub.envoy_turn) = Default::default();
+        if (exited || matches!(entry, Entry::TurnSettled { .. }))
+            && Hub::envoy_id(&hub.view().state) == Some(id)
+        {
+            let mut t = crate::transcript::lock(&hub.envoy_turn);
+            if exited {
+                // The process died. The continuation is this same turn, so the spawn
+                // count stays until a real settle or the next prompt.
+                t.origin = None;
+            } else {
+                *t = Default::default();
+            }
         }
         let note = Note {
             harness: matches!(entry, Entry::SessionInfo { .. }).then_some(harness),
