@@ -64,8 +64,10 @@ release-snapshot:
 release-publish:
 	VERSION='$(VERSION)' bash scripts/release.sh publish
 
+# The workspace's e2e tests, then every committed fuzz seed through its real fuzz targets.
 test:
 	$(CARGO_VERSION) cargo test --locked --workspace
+	$(CARGO_VERSION) sh scripts/replay-seeds.sh
 
 # Also runs the Claude, Codex and Grok e2e tests, which spend a few small turns of quota.
 test-paid:
