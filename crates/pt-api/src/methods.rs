@@ -498,6 +498,8 @@ api_records! {
         pub from_turn: u64 = 0,
         /// Absent: the session's last turn.
         pub to_turn: Option<u64>,
+        /// Skip this doc and every earlier one. A turn longer than one page continues from here.
+        pub after_doc: Option<u64>,
     }
 
     pub struct HistoryText {
@@ -507,7 +509,7 @@ api_records! {
 
     pub struct HistoryRead {
         pub docs: Vec<HistoryText> = Vec::new(),
-        /// The hub cut the range short; read on from the last doc's turn.
+        /// The hub cut the range short. Pass the last doc's id as `after_doc` to read the next page.
         pub more: bool = false,
     }
 

@@ -2198,7 +2198,7 @@ final class HistoryRead {
 
   final List<HistoryText> docs;
 
-  /// The hub cut the range short; read on from the last doc's turn.
+  /// The hub cut the range short. Pass the last doc's id as `after_doc` to read the next page.
   final bool more;
 
   Map<String, Object?> toJson() => {
@@ -4042,6 +4042,7 @@ final class ReadHistoryRequest {
     this.session,
     this.fromTurn = 0,
     this.toTurn,
+    this.afterDoc,
   });
 
   factory ReadHistoryRequest.fromJson(Object? json) {
@@ -4061,6 +4062,10 @@ final class ReadHistoryRequest {
         j['to_turn'],
         (e0) => _int(e0, 'ReadHistoryRequest.to_turn'),
       ),
+      afterDoc: _opt(
+        j['after_doc'],
+        (e0) => _int(e0, 'ReadHistoryRequest.after_doc'),
+      ),
     );
   }
 
@@ -4073,11 +4078,15 @@ final class ReadHistoryRequest {
   /// Absent: the session's last turn.
   final int? toTurn;
 
+  /// Skip this doc and every earlier one. A turn longer than one page continues from here.
+  final int? afterDoc;
+
   Map<String, Object?> toJson() => {
     if (docId case final v?) 'doc_id': v,
     if (session case final v?) 'session': v,
     'from_turn': fromTurn,
     if (toTurn case final v?) 'to_turn': v,
+    if (afterDoc case final v?) 'after_doc': v,
   };
 }
 

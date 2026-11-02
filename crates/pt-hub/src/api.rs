@@ -1659,6 +1659,7 @@ fn read_history(c: &Ctx<'_>, r: api::ReadHistoryRequest) -> Result<api::HistoryR
                 from: turn(r.from_turn),
                 to: r.to_turn.map_or(u32::MAX, turn),
                 session: session.clone(),
+                after: r.after_doc,
             },
             format!("no history of session {session} in that turn range"),
         ),

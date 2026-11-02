@@ -11,7 +11,7 @@
 //! ix.commit()?;                                  // ingested docs become searchable
 //! let hits = ix.search(&Query::all("journal torn tail"), &Filters::default(), 8)?;
 //! let pre = ix.search(&pt_history::brief_query(task), &filters, 3)?; // a brief's pre-run hits
-//! let (turns, _more) = ix.read(&Selector::Turns { session, from: 3, to: 5 }, None, READ_DOCS)?;
+//! let (turns, _more) = ix.read(&Selector::Turns { session, from: 3, to: 5, after: None }, None, READ_DOCS)?;
 //! ```
 //!
 //! Directory layout:
@@ -213,11 +213,13 @@ pub struct Hit {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Selector {
     Doc(DocId),
-    /// Docs of `session` whose turn is in `from..=to`, in order.
+    /// Docs of `session` whose turn is in `from..=to`, in order. `after` skips that doc id
+    /// and every earlier one, so a turn with more docs than one page can continue.
     Turns {
         session: String,
         from: u32,
         to: u32,
+        after: Option<u64>,
     },
 }
 

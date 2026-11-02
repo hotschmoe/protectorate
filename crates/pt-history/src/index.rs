@@ -926,13 +926,22 @@ impl Index {
                     }
                 }
             }
-            Selector::Turns { session, from, to } => {
+            Selector::Turns {
+                session,
+                from,
+                to,
+                after,
+            } => {
                 let Some(sym) = self.syms.get(session) else {
                     return Ok((Vec::new(), false));
                 };
                 for s in &self.segs {
                     for m in &s.docs {
-                        if m.session != sym || !(*from..=*to).contains(&m.turn) || !allow(m) {
+                        if m.session != sym
+                            || !(*from..=*to).contains(&m.turn)
+                            || after.is_some_and(|id| m.id <= id)
+                            || !allow(m)
+                        {
                             continue;
                         }
                         let w = m.text_len as usize;

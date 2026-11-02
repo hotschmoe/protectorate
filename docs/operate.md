@@ -194,13 +194,14 @@ endpoints are reported as misconfigured and are not contacted.
 history search <query...> [--mode all|any|phrase] [--sleeve S]... [--harness H]
       [--session ID] [--role user|assistant|tool-call|tool-error|compaction]...
       [--since 7d|MS] [--until 7d|MS] [--limit N]
-history read --doc ID | history read <session> [--from TURN] [--to TURN]
+history read --doc ID | history read <session> [--from TURN] [--to TURN] [--after DOC]
 ```
 
 A keyword index over the native session logs of the sessions the hub launched, plus the hub's own
 transcripts. `--since` and `--until` take `7d`, `3h`, `30m`, `90s` or epoch milliseconds. The
 owner can search everything; Envoy too; a sleeve only its own runs. `history read` returns at
-most 200 docs, or 8 MiB of their text, and reports when the range continues. The index is
+most 200 docs, or 8 MiB of their text. When the range continues, `--after` is the last doc id
+and the next page starts after it. The index is
 derived and rebuilt in the background if it fails to open. Catch-up commits bounded batches,
 and failed commits are retried. Below each configured root, discovery and reopening ignore
 symbolic links and non-regular files. Tool paths in the index are clipped to 512 bytes.

@@ -284,7 +284,8 @@ the same dispatch code. There are no external sources such as email, calendar or
     sleeve's home. A sleeve credential searches and reads only docs tagged with its own
     sleeve id (D26). Envoy and the owner are unrestricted.
     `history read` applies the caller's sleeve scope before it copies text, then stops at 200
-    docs or 8 MiB of source text and says when the range was cut. Tool paths are kept to the
+    docs or 8 MiB of source text and says when the range was cut. The next page starts after
+    the last doc id (`--after`). Tool paths are kept to the
     same budget as tool text (512 bytes). Each sleeve has its own budget of 1 GiB of source
     text, and so does each source. Past that, the source drops its oldest docs and keeps the
     newest lines; a sleeve that is full does not stop the others. `doctor` and `hub info`
