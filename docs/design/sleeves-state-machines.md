@@ -1,7 +1,7 @@
 # Sleeves, harnesses, panes and the state machines
 
 Design investigation for the `next` rewrite, 2026-11-01. It covers the sleeve tree, light isolation,
-the harness interfaces (including Pi), panes and PTYs, the split between code and
+the harness interfaces (including Pi and pi_durable), panes and PTYs, the split between code and
 Envoy, guardrails and resleeve, and five state machines. History/continuation and nodes/Verus have
 their own reports beside this one (`history-continuation.md`, `nodes-ci-deliverables-verus.md`); this
 report uses their interfaces rather than repeating them.
@@ -186,9 +186,30 @@ Three findings in today's drivers, all fixed by this design:
   - Today tmux terminal sleeves survive hub restarts while chat sleeves die with the hub (PDEATHSIG,
     then `recover_chat_sleeves` [V `chat.rs:1009-1027`]). Without P8, pane sleeves would regress (D10).
 
-### 1.7 Pi
+### 1.7 Pi and pi_durable
 
-The `pi` CLI in rpc mode is an ordinary headless harness. Profiles:
+The harness was removed on 2026-11-02; this section is kept for the owner's revisit, and SPEC.md is current.
+
+**What pi_durable is** [V, under `pi/durable`]. An Experimental library with no `bin`
+(`README.md:3`). It commits before display: streamed partials at most every 100 ms
+(`src/harness/generation.ts:446-483`), and a tool-intent checkpoint before `execute()`
+(`src/harness/tool.ts:166-176`). After a restart:
+- a cut stream is resent from the same messages (`generation.ts:422-431`);
+- a cut tool reruns only if its stored and current `replay` are both `safe`, otherwise the model
+  receives "interrupted and may have partially run" (`tool.ts:178-196`); calls that never started are
+  `abandoned` (`:200-206`); the built-in read/write/edit/bash tools default to `unsafe`
+  (`types.ts:303-304`).
+
+A resubmitted `requestId` returns the existing submission (`README.md:120-126`), and a task interrupted
+5 times is parked (`:206`). It also has fork, child conversations, a task graph, handoff and compaction
+(`:529-714`). Storage is SQLite through `node:sqlite`, WAL, `synchronous=NORMAL`, so power loss can drop
+the newest commit (`:750-755`); one process per store (`:774`); "not exactly-once execution"
+(`types.ts:271-272`). The `pi` CLI does not use it: its modes are text, json and rpc
+(`coding-agent/src/cli/args.ts:11`), and plain pi emits events before an un-fsynced `appendFileSync`,
+so a crash loses the in-flight message (`coding-agent/src/core/agent-session.ts:1144-1166`). Runtime:
+Node >= 22.19; a Bun-compiled `pi` with side files exists (`scripts/build-binaries.sh:40-80`).
+
+**Tier 1 (now): the `pi` CLI in rpc mode as an ordinary headless harness.** Profiles:
 
 | Profile | Login | Status |
 |---|---|---|
@@ -201,6 +222,27 @@ The `pi` CLI in rpc mode is an ordinary headless harness. Profiles:
 Ship the Bun-compiled pi so the hub needs no Node. Today this hub runs pi through a private Node
 install (`~/.local/bin/pi` sets PATH to `pi-omp-setup/node/bin`) [V]. Verify that the side files
 load inside the sandbox.
+
+**Tier 2 (time-boxed experiment): a `pi_durable` harness.** Our own small TypeScript bridge on
+durable's `Harness`, following jessfraz/agent: `node bridge.js <state>`
+[V `agent/src/runtime.rs:131-139`], JSONL frames with a protocol version
+[V `agent/src/protocol.rs:14`], each frame validated against schemas generated from our proto
+[V `agent/runtime/src/protocol.ts:1-40`], and `synchronous=FULL` as agent sets it
+[V `agent/runtime/src/bridge.ts:103-108`]. Auth is pi's `auth.json` through
+`createModels({credentials})`, so a PI_GROK sleeve uses the same login. Because the harness is ours,
+hands-off does not apply, but it does make Node a hub dependency (D6).
+
+**"rust + pi_durable":** the Rust hub is the single writer of orchestration state, and the durable
+process is the authority for its conversations. The boundary is the effect id: hub `effect_id` =
+durable `requestId`. That makes `SendPrompt` Keyed instead of Unsafe (2.c): the probe is
+`submission(requestId)` and a retry is safe. A crash mid-turn resumes the turn, and a cut tool reaches
+the model as `interrupted`. It does not give exactly-once tools, cross-harness continuation (the
+history report's job) or multi-process access.
+
+**Acceptance test.** SIGKILL the bridge mid-stream, mid-bash, and after bash but before its commit,
+and compare with `pi --mode rpc` under the same kills. durable's own recovery tests only `close()` and
+reopen [V `durable/test/harness-*-recovery.test.ts`]. Adopt it only if all three resume correctly and
+the bridge stays around 500 lines [I].
 
 ### 1.8 Code decides, Envoy decides
 
@@ -417,6 +459,7 @@ Each record holds `effect_id` (the client `request_id`, or `<kind>:<sleeve>:<gen
 |---|---|---|
 | StartIncarnation(g) | Keyed (scope name) | the scope `pt-<sleeve>-g<g>` has tasks: Applied; absent: NotApplied |
 | SendPrompt or Steer to a vendor CLI | Unsafe | harness ack (1.5); otherwise native state (Pi `get_entries since`; Codex thread state [I]); a dead incarnation means Fenced |
+| SendPrompt to pi_durable | Keyed | `submission(requestId)` |
 | RespondApproval(id) | Unsafe, probeable | still pending: NotApplied; gone: Applied |
 | Interrupt, StopIncarnation, KillScope | Idempotent | settled, or scope gone |
 | Provision (worktree add) | Idempotent with check | `git worktree list` shows the path on the expected branch |
@@ -699,7 +742,7 @@ Requirements on the history side:
 | The hub typing into TUIs (herdr `agent.prompt` [V `herdr/src/app/api/agents.rs:249-266`]) | Breaks hands-off and is timing-fragile |
 | Auto-resending uncertain prompts | Tools could run twice |
 | Silently downgrading steer to queue | The caller must know which happened |
-| Everything through Pi | P5: Anthropic bills extra usage and Antigravity bans |
+| Everything through Pi or pi_durable | P5: Anthropic bills extra usage and Antigravity bans |
 | herdr's fallback to Idle when no rule matches | False DONE badges |
 
 ---
@@ -712,6 +755,8 @@ Requirements on the history side:
    first update. The 15 s ack timeout must be set per harness.
 3. **Worktree children share the common `.git`** and can rewrite the parent's refs by accident.
    Accepted under light isolation; root checkpoints are the backstop.
+4. **pi_durable is experimental:** the API may churn, it adds Node, and upstream recovery tests never
+   SIGKILL.
 5. **Antigravity account risk** if headless orchestration turns out to be prohibited on consumer plans.
 6. **The execve handoff is unproven here.** It interacts with systemd and the update trial marker
    (`pr/ARCHITECTURE.md:236` onward), and without PDEATHSIG crash cleanup relies on EOF, hangup and the
@@ -738,6 +783,7 @@ Requirements on the history side:
 | D3 | Download caches (cargo, go mod, pub, npm) | Owner's caches, read-write, shared by all sleeves | Private per sleeve |
 | D4 | Network | Cut the netns and egress proxy; share the host network | Keep both |
 | D5 | Antigravity | Pane only until Google confirms consumer-plan orchestration | Headless with `--dangerously-skip-permissions`; unsupported |
+| D6 | pi_durable | Node >= 22.19 on the hub for one time-boxed harness, gated by the SIGKILL test | `pi` CLI only |
 | D7 | Sandbox FFI vs Verus rule 6 | Exempt the module (`deny(unsafe_op_in_unsafe_fn)`, documented blocks, grep gate), as the nodes report also proposes | `rustix` dependency |
 | D8 | Resleeve policy | Per-sleeve ordered `resleeve_to` list allowing `auto`, default `[pi_local]` | `[pi_local]` fixed for every sleeve |
 | D9 | Guardrail thresholds (2.d defaults); G11 auto-revert | Defaults as listed; G11 parks and keeps the diff | Auto-revert to the pre-turn checkpoint |

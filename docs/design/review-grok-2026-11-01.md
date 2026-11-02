@@ -170,6 +170,7 @@ Unsure whether they meant a pool; the text says “executors” and “group com
 - **Gemini is a first-class harness** (`SPEC.md` §3.4) **with no history reader** (history §4.3 “gemini later”). Auto-resleeve of Gemini ships a brief with no log facts. Extractor first, or exclude from `resleeve_to`.
 - **`doctor` still checks `sandbox.tmux` and `egress.<host>`** (nodes §4) after both were cut. Rewrite the table.
 - **Mail/approvals have no machine.** SPEC §3.3 lists mail delivery/re-delivery; §4 has five machines. Duplicate/dropped mail across crash is untested. Add a 2.c kind or a sixth machine.
+- **pi_durable adds Node ≥ 22.19** (sleeves §1.7, D14) against “fewest binaries” and “rust+pi_durable.” Keep the SIGKILL gate; Bun pi stays default.
 
 ---
 
