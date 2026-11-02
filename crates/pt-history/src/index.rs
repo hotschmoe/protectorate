@@ -62,11 +62,9 @@ pt_json::record! {
         sleeve: Option<String>,
         cursor: Cursor,
         state: State,
-        /// Oldest docs were dropped, or this source was refused, because its sleeve or it
-        /// reached its text budget. `doctor` and `hub info` report that.
+        /// This source's sleeve (or the source, when it has no sleeve) is at its text budget.
+        /// Cleared once it is back under the budget. `doctor` and `hub info` name those sleeves.
         capped: bool = false,
-        /// File length at which a capped source last made no progress. Zero when it is not stalled.
-        stall_len: u64 = 0,
     }
 
     #[derive(Clone, Debug)]
@@ -239,7 +237,9 @@ impl Index {
                 format!("history {}: index is open elsewhere ({e})", dir.display()),
             )
         })?;
-        let m = read_manifest(&dir.join(MANIFEST))?;
+        let manifest_path = dir.join(MANIFEST);
+        let missing_manifest = !manifest_path.is_file();
+        let m = read_manifest(&manifest_path)?;
         let mut ix = Index {
             dir: dir.to_owned(),
             _lock: lock,
@@ -272,18 +272,26 @@ impl Index {
             let seg = ix.load(&r.file)?;
             ix.segs.push(seg);
         }
-        ix.sweep_segments()?;
+        let removed = ix.sweep_segments()?;
+        if missing_manifest && removed > 0 {
+            eprintln!(
+                "warning: history: no manifest in {}; removed {removed} segment file(s)",
+                dir.display()
+            );
+        }
         ix.reclaim()?;
         ix.recount();
         Ok(ix)
     }
 
     /// A crash after a segment is written, or before a merged segment is removed, leaves
-    /// `seg-*` files the manifest does not name. They are not part of the index.
-    fn sweep_segments(&self) -> io::Result<()> {
+    /// `seg-*` files the manifest does not name. They are not part of the index. The count
+    /// is how many were removed; the caller warns when that happens with no manifest.
+    fn sweep_segments(&self) -> io::Result<usize> {
         let keep: std::collections::HashSet<&str> =
             self.segs.iter().map(|s| s.name.as_str()).collect();
         let rd = fs::read_dir(&self.dir).map_err(|e| ctx(e, "read", self.dir.display()))?;
+        let mut removed = 0usize;
         for ent in rd {
             let ent = ent.map_err(|e| ctx(e, "read", self.dir.display()))?;
             let name = ent.file_name();
@@ -301,8 +309,9 @@ impl Index {
                 continue;
             }
             fs::remove_file(&path).map_err(|e| ctx(e, "remove", path.display()))?;
+            removed += 1;
         }
-        Ok(())
+        Ok(removed)
     }
 
     fn load(&mut self, name: &str) -> io::Result<Seg> {
@@ -407,7 +416,6 @@ impl Index {
                 cursor: Cursor::default(),
                 state: fresh_state(source),
                 capped: false,
-                stall_len: 0,
             });
         rec.sleeve = source.sleeve.clone();
         let mut opened = tail::open(&source.path, &rec.cursor)?;
@@ -422,7 +430,6 @@ impl Index {
             rec.state = fresh_state(source);
             rec.cursor = opened.start.clone();
             rec.capped = false;
-            rec.stall_len = 0;
             self.dirty = true;
         }
         if source.kind == SourceKind::Grok && rec.state.time_ms == 0 {
@@ -436,9 +443,6 @@ impl Index {
             sleeve: None,
             total: source.sleeve.as_deref().map(|s| self.sleeve_kept(s)),
         };
-        if rec.stall_len > 0 && opened.len <= rec.stall_len && self.at_cap(&stored, shed.total) {
-            return Ok(got);
-        }
         let end = source.limit.unwrap_or(opened.len).min(opened.len);
         loop {
             let start = opened.start.offset;
@@ -497,29 +501,14 @@ impl Index {
                     draft,
                 });
                 self.next_doc += 1;
-                let mine_before = self.kept_of(&stored).saturating_sub(charge);
-                let sleeve_before = shed.total.map(|n| n.saturating_sub(charge));
-                if self.fit(&stored, source.sleeve.as_deref(), id, charge, &mut shed) {
-                    let shed_some = self.kept_of(&stored) < mine_before.saturating_add(charge)
-                        || sleeve_before.is_some_and(|before| {
-                            shed.total
-                                .is_some_and(|n| n < before.saturating_add(charge))
-                        });
-                    if shed_some {
-                        note_capped(&mut rec, &mut got, was_capped);
-                    }
-                } else {
+                if !self.fit(&stored, source.sleeve.as_deref(), id, charge, &mut shed) {
                     self.undo_pending(id, &stored, charge, bytes, &mut shed.total);
                     got.docs = got.docs.saturating_sub(1);
-                    note_capped(&mut rec, &mut got, was_capped);
                 }
             }
             rec.cursor = tail.cursor;
             rec.state = state;
-            if tail.bytes > 0 {
-                rec.stall_len = 0;
-            }
-            self.dirty |= tail.bytes > 0 || got.capped;
+            self.dirty |= tail.bytes > 0;
             self.sources.insert(key.clone(), rec.clone());
             if self.pending_bytes >= flush_limit() {
                 self.commit()?;
@@ -529,21 +518,12 @@ impl Index {
                     shed.total = Some(self.sleeve_kept(s));
                 }
             }
-            if opened.start.offset == start
-                && opened.len > start
-                && self.at_cap(&stored, shed.total)
-            {
-                rec.stall_len = opened.len;
-                note_capped(&mut rec, &mut got, was_capped);
-                self.dirty = true;
-                self.sources.insert(key, rec);
-                return Ok(got);
-            }
             if opened.start.offset >= end || opened.start.offset == start {
                 break;
             }
         }
         self.sources.insert(key, rec);
+        self.settle_capped(&stored, source.sleeve.as_deref(), was_capped, &mut got);
         Ok(got)
     }
 
@@ -813,10 +793,14 @@ impl Index {
     }
 
     /// Writes pending docs as a new segment, then the manifest (cursors, drops, usage) that
-    /// makes it live, then merges small segments. A crash before the manifest rename leaves
-    /// the previous state, and the sources are read again from their old cursors. A failed
-    /// attempt removes the segment files it created.
+    /// makes it live, then merges small segments. An unchanged index does not rewrite the
+    /// manifest. A crash before the manifest rename leaves the previous state, and the
+    /// sources are read again from their old cursors. A failed attempt removes the segment
+    /// files it created.
     pub fn commit(&mut self) -> io::Result<()> {
+        if self.pending.is_empty() && !self.dirty {
+            return Ok(());
+        }
         if !self.pending.is_empty() {
             let pending = std::mem::take(&mut self.pending);
             let docs: Vec<DocIn<'_>> = pending
@@ -1235,10 +1219,44 @@ impl Index {
         self.live_docs
     }
 
-    /// A source has hit its own text budget or its sleeve's, and is keeping its newest lines
-    /// or waiting.
-    pub fn capped(&self) -> bool {
-        self.sources.values().any(|s| s.capped)
+    /// Sleeve ids whose live indexed bytes are at the sleeve budget. Empty when every sleeve
+    /// is under it. Readers of the hub copy this set out so `doctor` does not take the index lock.
+    pub fn capped_sleeves(&self) -> Vec<String> {
+        let mut seen = std::collections::BTreeSet::new();
+        for s in self.sources.values() {
+            if let Some(sleeve) = &s.sleeve {
+                seen.insert(sleeve.clone());
+            }
+        }
+        seen.into_iter()
+            .filter(|sleeve| self.sleeve_kept(sleeve) >= MAX_INDEX)
+            .collect()
+    }
+
+    /// Records whether `stored` ended this ingest at its budget, and the same for every
+    /// source of its sleeve. A sleeve back under the budget loses the flag.
+    fn settle_capped(&mut self, stored: &str, sleeve: Option<&str>, was: bool, got: &mut Ingested) {
+        let over = self.at_cap(stored, sleeve.map(|s| self.sleeve_kept(s)));
+        if over && !was {
+            got.capped = true;
+        }
+        let mut changed = false;
+        if let Some(sleeve) = sleeve {
+            for s in self.sources.values_mut() {
+                if s.sleeve.as_deref() == Some(sleeve) && s.capped != over {
+                    s.capped = over;
+                    changed = true;
+                }
+            }
+        } else if let Some(s) = self.sources.get_mut(stored)
+            && s.capped != over
+        {
+            s.capped = over;
+            changed = true;
+        }
+        if changed {
+            self.dirty = true;
+        }
     }
 
     pub fn stats(&self) -> Stats {
@@ -1308,11 +1326,6 @@ struct Shed {
     aged: Option<(Vec<(u64, u64)>, usize)>,
     sleeve: Option<SleeveWalk>,
     total: Option<u64>,
-}
-
-fn note_capped(rec: &mut SourceRec, got: &mut Ingested, was_capped: bool) {
-    rec.capped = true;
-    got.capped = !was_capped;
 }
 
 fn sub_charge(total: &mut Option<u64>, n: u64) {

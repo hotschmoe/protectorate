@@ -265,8 +265,8 @@ fn hub_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                     h.version,
                     ago(h.started_at_ms)
                 );
-                if h.history_capped {
-                    println!("history capped");
+                if !h.history_capped.is_empty() {
+                    println!("history capped: {}", h.history_capped.join(", "));
                 }
             });
         }

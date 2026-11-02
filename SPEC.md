@@ -296,12 +296,14 @@ the same dispatch code. There are no external sources such as email, calendar or
     drops its oldest docs.
     Past a sleeve's budget, the oldest docs of that sleeve are dropped, whichever of its logs
     they came from, and the newest lines stay. A full sleeve does not stop the others.
-    `doctor` and `hub info`
-    report `history capped`. A commit removes a segment whose docs are all dead, and rewrites
-    one that is at least half dead, in that same manifest update; the old files go after the
-    rename. A failed commit removes the segment files that attempt created, and the hub
-    retries it with backoff. Opening an index removes segment files the manifest does
-    not name.
+    `doctor` and `hub info` report `history capped: <sleeve id>` for each sleeve at its
+    budget. The set is filled when the index opens, and a sleeve leaves it once that sleeve
+    is back under the budget. A commit writes the manifest when the index changed, removes a
+    segment whose docs are all dead, and rewrites one that is at least half dead, in that
+    same manifest update; the old files go after the rename. A failed commit removes the
+    segment files that attempt created, and the hub retries it with backoff. Opening an index
+    removes segment files the manifest does not name, and warns when it does that because
+    the manifest is missing.
   - Measured on this hub (2026-11-01, release build): 1 GiB of the newest real logs ingested
     in 1.9 s (540 MB/s, 48 MB peak RSS) into an 11 MB index; queries take 0.05 to 0.7 ms.
   - Fallback: `rusqlite` with FTS5, if our index proves insufficient (REVISIT.md).

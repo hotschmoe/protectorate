@@ -219,7 +219,9 @@ fn open_sweeps_unreferenced_segments() {
     fs::write(a.join("sidecar"), b"leave").unwrap();
     let out = run(&home, &index, &["sweepmarker"], None);
     let stdout = String::from_utf8(out.stdout).unwrap();
+    let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(stdout.contains("query \"sweepmarker\": top 1"), "{stdout}");
+    assert!(stderr.contains("warning: history: no manifest"), "{stderr}");
     assert!(!a.join("seg-00000099").exists());
     assert!(!a.join("seg-00000001.tmp").exists());
     assert_eq!(fs::read(a.join("sidecar")).unwrap(), b"leave");

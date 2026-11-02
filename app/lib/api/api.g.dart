@@ -2337,7 +2337,7 @@ final class HubInfo {
     required this.startedAt,
     this.inventory,
     this.sample,
-    this.historyCapped = false,
+    this.historyCapped = const <String>[],
   });
 
   factory HubInfo.fromJson(Object? json) {
@@ -2350,8 +2350,12 @@ final class HubInfo {
       sample: _opt(j['sample'], Sample.fromJson),
       historyCapped: _or(
         j['history_capped'],
-        false,
-        (e0) => _bool(e0, 'HubInfo.history_capped'),
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'HubInfo.history_capped',
+          (e1) => _string(e1, 'HubInfo.history_capped[]'),
+        ),
       ),
     );
   }
@@ -2366,9 +2370,10 @@ final class HubInfo {
 
   final Sample? sample;
 
-  /// A sleeve's history is at its text budget: that sleeve keeps its newest lines, and
-  /// `doctor` reports `history capped`.
-  final bool historyCapped;
+  /// Sleeve ids whose history is at its text budget. Empty when every sleeve is under it.
+  /// `doctor` and `hub info` list these ids, and drop one when that sleeve is back under
+  /// the budget.
+  final List<String> historyCapped;
 
   Map<String, Object?> toJson() => {
     'name': name,

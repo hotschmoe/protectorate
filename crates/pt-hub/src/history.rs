@@ -6,11 +6,10 @@
 //! The index is derived. A missing directory is built from the sources; a corrupt one is moved
 //! aside (never deleted) and rebuilt the same way, so the hub always starts.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -84,8 +83,10 @@ struct Passes {
 
 pub struct History {
     ix: Mutex<Result<Index, String>>,
-    /// Set from the index when a source is capped. Readers take no index lock.
-    capped: AtomicBool,
+    /// Sleeve ids at the history budget. Copied out of the index at open and after each
+    /// catch-up, so a reader does not take the index lock. A sleeve leaves the set once it
+    /// is back under the budget.
+    capped: Mutex<BTreeSet<String>>,
     /// The sleeve kind each native session ran as (the drivers say only `pi`).
     harnesses: Mutex<HashMap<String, ApiHarness>>,
     passes: Mutex<Passes>,
@@ -154,16 +155,16 @@ impl History {
                     st.sessions,
                     dir.display()
                 );
-                ix.capped()
+                ix.capped_sleeves().into_iter().collect()
             }
             Err(e) => {
                 warning!("history is off: {e}");
-                false
+                BTreeSet::new()
             }
         };
         History {
             ix: Mutex::new(ix),
-            capped: AtomicBool::new(capped),
+            capped: Mutex::new(capped),
             harnesses: Mutex::new(HashMap::new()),
             passes: Mutex::new(Passes::default()),
         }
@@ -193,9 +194,10 @@ impl History {
         self.with(|ix| Ok(ix.docs())).unwrap_or(0)
     }
 
-    /// A sleeve's history is at its text budget. This does not take the index lock.
-    pub fn capped(&self) -> bool {
-        self.capped.load(Ordering::Relaxed)
+    /// Sleeve ids at the history budget, in order. This does not take the index lock.
+    /// The set is filled when the index opens, before the first `doctor` run.
+    pub fn capped_sleeves(&self) -> Vec<String> {
+        lock(&self.capped).iter().cloned().collect()
     }
 
     pub fn context_usage(&self, session: &str) -> Option<ContextUsage> {
@@ -233,7 +235,21 @@ impl History {
                 }
             }
         }
+        if let Ok(ix) = &*lock(&self.ix) {
+            self.sync_capped(&ix.capped_sleeves());
+        }
         failed
+    }
+
+    /// Replaces the named set with `now`. A sleeve that was not named warns once.
+    fn sync_capped(&self, now: &[String]) {
+        let mut set = lock(&self.capped);
+        for id in now {
+            if set.insert(id.clone()) {
+                warning!("history capped: {id}");
+            }
+        }
+        set.retain(|id| now.iter().any(|n| n == id));
     }
 
     /// One sleeve: new `session_info` lines, a source per session, then the reads. Returns
@@ -350,10 +366,6 @@ impl History {
                 Ok(g) => {
                     p.errors.remove(&src.path);
                     changed |= g.bytes > 0 || g.reset || g.capped;
-                    if g.capped {
-                        self.capped.store(true, Ordering::Relaxed);
-                        warning!("history capped: {}", src.path.display());
-                    }
                 }
                 Err(e) => {
                     let e = e.to_string();

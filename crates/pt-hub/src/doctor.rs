@@ -396,8 +396,9 @@ pub fn api_report(hub: &Hub, r: Option<&Report>) -> api::DoctorReport {
             && r.sandbox.systemd_run_user,
         problems: {
             let mut problems = r.problems.clone();
-            if hub.history.capped() {
-                problems.push("history capped".into());
+            let capped = hub.history.capped_sleeves();
+            if !capped.is_empty() {
+                problems.push(format!("history capped: {}", capped.join(", ")));
             }
             problems
         },

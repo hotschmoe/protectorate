@@ -225,7 +225,7 @@ pub fn workspace(s: &Sleeve) -> api::Workspace {
 
 pub fn hub_info(hub: &Hub) -> api::HubInfo {
     let mut info = crate::transcript::lock(&hub.info).clone();
-    info.history_capped = hub.history.capped();
+    info.history_capped = hub.history.capped_sleeves();
     info
 }
 
