@@ -10,7 +10,7 @@
 //! current attempt's is ignored, and cancels, acks and fetches carry it so the node refuses them
 //! for any other submit. Artifacts come back through the node's `FetchArtifact`.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -152,6 +152,7 @@ impl JobExec {
             epoch: String::new(),
             pending_status: None,
             follow: Vec::new(),
+            inbox: VecDeque::new(),
         };
         match thread::Builder::new()
             .name(format!("pt-node-{}", node.0))
@@ -339,6 +340,33 @@ struct NodeExec {
     pending_status: Option<(JobId, u32, JobReply)>,
     /// Jobs just submitted here, with their next poll and the delay after it.
     follow: Vec<(JobId, u32, Instant, Duration)>,
+    /// Intents taken from the channel, not yet handled.
+    inbox: VecDeque<Intent>,
+}
+
+/// Whether `later` is the same observation of the same attempt as the queued `queued`.
+fn same_observation(queued: &Intent, later: &Intent) -> bool {
+    match (queued, later) {
+        (
+            Intent::PollJob { job, attempt, .. },
+            Intent::PollJob {
+                job: j, attempt: a, ..
+            },
+        )
+        | (
+            Intent::ReadLog { job, attempt, .. },
+            Intent::ReadLog {
+                job: j, attempt: a, ..
+            },
+        )
+        | (
+            Intent::FetchArtifacts { job, attempt, .. },
+            Intent::FetchArtifacts {
+                job: j, attempt: a, ..
+            },
+        ) => job == j && attempt == a,
+        _ => false,
+    }
 }
 
 fn report(reply: &JobReply) -> JobReport {
@@ -366,17 +394,40 @@ fn report(reply: &JobReply) -> JobReport {
 impl NodeExec {
     fn run(mut self, rx: Receiver<Intent>) {
         loop {
-            let next = self.follow.iter().map(|f| f.2).min();
-            let got = match next {
-                Some(at) => rx.recv_timeout(at.saturating_duration_since(Instant::now())),
-                None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
-            };
-            match got {
-                Ok(intent) => self.handle(intent),
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => return,
+            if self.inbox.is_empty() {
+                let next = self.follow.iter().map(|f| f.2).min();
+                let got = match next {
+                    Some(at) => rx.recv_timeout(at.saturating_duration_since(Instant::now())),
+                    None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+                };
+                match got {
+                    Ok(intent) => self.enqueue(intent),
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => return,
+                }
+            }
+            while let Ok(intent) = rx.try_recv() {
+                self.enqueue(intent);
+            }
+            if let Some(intent) = self.inbox.pop_front() {
+                self.handle(intent);
             }
             self.follow_up();
+        }
+    }
+
+    /// Queues an intent. A poll, log read or artifact fetch of an attempt that is already
+    /// queued absorbs the later one, and a log read keeps the longer length: every Tick polls
+    /// a node that is down, and each poll waits out a dial, so they would pile up ahead of the
+    /// effects. Effects stay in order and are never folded (SPEC principle 5).
+    fn enqueue(&mut self, intent: Intent) {
+        let Some(queued) = self.inbox.iter_mut().find(|q| same_observation(q, &intent)) else {
+            return self.inbox.push_back(intent);
+        };
+        if let (Intent::ReadLog { upto, .. }, Intent::ReadLog { upto: later, .. }) =
+            (queued, &intent)
+        {
+            *upto = (*upto).max(*later);
         }
     }
 
