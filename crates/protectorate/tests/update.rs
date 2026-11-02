@@ -55,6 +55,20 @@ fn dir(name: &str) -> PathBuf {
     d
 }
 
+/// Retries a start that fails with ETXTBSY: Linux refuses to run a file open for writing, and a
+/// fork on another test thread holds a just-written release's descriptor until it execs.
+fn unbusy<T>(mut start: impl FnMut() -> std::io::Result<T>) -> T {
+    for _ in 0..50 {
+        match start() {
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                thread::sleep(Duration::from_millis(20))
+            }
+            r => return r.unwrap(),
+        }
+    }
+    start().unwrap()
+}
+
 fn write_exec(path: &Path, text: &str) {
     fs::write(path, text).unwrap();
     fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
@@ -237,7 +251,7 @@ impl Supervisor {
             while !stop.load(Ordering::SeqCst) {
                 let previous = root.join("releases/previous").join(program);
                 if previous.exists() {
-                    let out = Command::new(&previous).args(&prestart).output().unwrap();
+                    let out = unbusy(|| Command::new(&previous).args(&prestart).output());
                     append(
                         &log,
                         &format!(
@@ -266,7 +280,7 @@ impl Supervisor {
                 for (k, v) in &env {
                     cmd.env(k, v);
                 }
-                let c = cmd.spawn().unwrap();
+                let c = unbusy(|| cmd.spawn());
                 let i = {
                     let mut st = starts.lock().unwrap();
                     st.push(Start {

@@ -728,8 +728,11 @@ Each entry: where, what was done, what right looks like.
   on Linux a file still open for writing anywhere, including a descriptor a concurrent fork
   inherited for a moment before exec, cannot be executed. The update e2e hit it once under load
   (`node_update_admission_lost_reply_and_confirmation`, "Text file busy" at spawn); three reruns
-  passed. A staged release is executed for its version check right after it is written. Right:
-  retry a start that fails with ETXTBSY a few times, briefly.
+  passed. A staged release is executed for its version check right after it is written. The
+  update e2e's systemd stand-in now retries a busy start (`unbusy`), since its own test threads
+  fork while others write wrappers; `release_switches_survive_a_crash_at_each_step` failed that
+  way twice on 2026-11-02. Right: retry a start that fails with ETXTBSY a few times, briefly, in
+  pt-update's version check and the node supervisor too.
 - **Probation counts on wall-clock time and on the new binary's own watch** (`pt-update`): the
   units run `releases/previous/<bin> probation` before each start, which rolls back after
   `MAX_TRIAL_STARTS` (3) failed starts or a passed window, and the release on trial watches its
