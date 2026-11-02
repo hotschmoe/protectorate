@@ -664,9 +664,9 @@ fn a_read_that_finishes_after_the_deadline_is_kept() {
     );
 }
 
-/// A Codex `reset_at` of 0 is not a reset, so a full window still blocks. A stamp that has
-/// already passed blocks while the percent is over the line, and does not when the window
-/// still had room.
+/// A Codex `reset_at` of 0 is not a reset, so a full window still blocks. A stamp from 1970
+/// is long past the grace, so the window counts as reset and the row may be spent. A stamp
+/// that has passed with room left is the same.
 #[test]
 fn a_passed_reset_still_blocks_an_exhausted_window() {
     let home = scratch(&format!("passed-reset-{}", std::process::id()));
@@ -700,7 +700,8 @@ fn a_passed_reset_still_blocks_an_exhausted_window() {
     let line = line_of(&passed, "codex");
     assert!(line.contains("reset passed"), "{line}");
     assert!(
-        passed.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        passed
+            .contains("target Codex: first eligible in resleeve_to without a fresh quota reading"),
         "{passed}"
     );
 
@@ -710,6 +711,54 @@ fn a_passed_reset_still_blocks_an_exhausted_window() {
     assert!(
         room.contains("target Codex: first eligible in resleeve_to without a fresh quota reading"),
         "{room}"
+    );
+}
+
+/// A stale row fetched before the reset still blocks inside the ten-minute grace, and counts
+/// as reset once that grace has passed.
+#[test]
+#[cfg(debug_assertions)]
+fn a_passed_reset_blocks_only_inside_the_grace() {
+    let home = scratch(&format!("reset-grace-{}", std::process::id()));
+    write(
+        &home.join(".codex/auth.json"),
+        r#"{"tokens":{"access_token":"grace-codex"}}"#,
+    );
+    let now_s = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let home_s = home.to_str().unwrap();
+    let run = |reset_at: u64| {
+        let body = format!(
+            r#"{{"plan_type":"plus","rate_limit":{{"primary_window":{{"used_percent":100,"limit_window_seconds":18000,"reset_at":{reset_at}}}}}}}"#
+        );
+        let (port, _) = serve(vec![("/wham/usage", body)]);
+        let base = format!("http://127.0.0.1:{port}");
+        probe(&[
+            "--home",
+            home_s,
+            "--codex-url",
+            &base,
+            "--allow",
+            "codex",
+            "--test-cache-ms",
+            "150",
+        ])
+    };
+    let inside = run(now_s.saturating_sub(120));
+    assert!(
+        inside.contains(
+            "aged target none: all eligible resleeve targets have insufficient fresh quota"
+        ),
+        "{inside}"
+    );
+    let outside = run(now_s.saturating_sub(30 * 60));
+    assert!(
+        outside.contains(
+            "aged target Codex: first eligible in resleeve_to without a fresh quota reading"
+        ),
+        "{outside}"
     );
 }
 

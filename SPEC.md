@@ -446,8 +446,9 @@ is not running, or the hub has not read yet (including just after a restart; rea
 journaled). A failed reading may not. That is `error`: the body did not parse, the request
 failed, the login is expired, or the read timed out and left no earlier windows. It parks the
 same way an exhausted window does. A window whose reset time has passed still blocks while its
-remaining percent is under the task minimum. A reset at or before the epoch is no reset time,
-and the percent still counts. Model-scoped Claude windows (`wk <model>`) stay on the quota row
+remaining percent is under the task minimum, for ten minutes after that reset, and only when
+the row was fetched before the reset. After that the window counts as reset. A reset at or
+before the epoch is no reset time, and the percent still counts. Model-scoped Claude windows (`wk <model>`) stay on the quota row
 for display and do not gate dispatch; the account windows do (`5h`, `wk`), as does the single
 credit or rate-limit window of the other subscriptions. `pi_vendor` and Antigravity have no
 meter and are never chosen on this path. The pace projection uses a vendor window length when

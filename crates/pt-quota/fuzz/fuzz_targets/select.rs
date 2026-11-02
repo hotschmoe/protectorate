@@ -125,7 +125,7 @@ fuzz_target!(|data: &[u8]| {
                 assert_ne!(state(q), State::Error, "a failed reading was spent");
                 if matches!(state(q), State::Fresh | State::Stale) {
                     assert!(
-                        !past_blocks(q, now, size.min_usable_pct()),
+                        !still_enforcing(q, now, size.min_usable_pct()),
                         "a passed exhausted window was spent"
                     );
                 }
@@ -151,7 +151,7 @@ fuzz_target!(|data: &[u8]| {
                 if let Some(sub) = metered(*h)
                     && let Some(q) = quotas.iter().find(|q| q.subscription == sub)
                     && state(q) == State::Stale
-                    && !past_blocks(q, now, size.min_usable_pct())
+                    && !still_enforcing(q, now, size.min_usable_pct())
                     && let Some(usable) = open_usable(q, now)
                     && usable + 1e-9 >= size.min_usable_pct()
                 {
@@ -240,17 +240,24 @@ fn open_usable(q: &Quota, now_ms: u64) -> Option<f64> {
     usable
 }
 
-fn past_blocks(q: &Quota, now_ms: u64, min: f64) -> bool {
+/// SPEC 8: a passed reset blocks only inside the ten-minute grace, and only when the row was
+/// fetched before that reset. A stamp at or before the epoch is not a reset.
+fn still_enforcing(q: &Quota, now_ms: u64, min: f64) -> bool {
+    const GRACE_MS: u64 = 600_000;
+    let fetched = q.fetched_at_ms.0;
     q.windows.iter().any(|w| {
-        if !gates_dispatch(&w.label) {
+        let Some(stamp) = w.resets_at_ms.map(|r| r.0).filter(|t| *t > 0) else {
+            return false;
+        };
+        if stamp > now_ms || fetched >= stamp || now_ms >= stamp.saturating_add(GRACE_MS) {
             return false;
         }
-        let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
+        // Account windows only. `wk <model>` is a model cap and is not an account block.
+        if w.label.split_once(' ').is_some_and(|(head, _)| head == "wk") {
             return false;
-        };
-        let Some(reset) = w.resets_at_ms.map(|r| r.0).filter(|t| *t > 0) else {
-            return false;
-        };
-        reset <= now_ms && (100.0 - used).clamp(0.0, 100.0) < min
+        }
+        w.used_pct
+            .filter(|u| u.is_finite())
+            .is_some_and(|used| (100.0 - used).clamp(0.0, 100.0) < min)
     })
 }
