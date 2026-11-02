@@ -19,7 +19,7 @@ fn job_wait_reports_lost_cancelled_and_hub_restart() {
     use std::io::Read;
     use std::os::unix::net::UnixListener;
 
-    for state in ["lost", "cancelled", "offline"] {
+    for state in ["lost", "cancelled", "offline", "log-offline"] {
         let path = std::env::temp_dir().join(format!(
             "pt-wait-{}-{}.sock",
             std::process::id(),
@@ -54,13 +54,22 @@ fn job_wait_reports_lost_cancelled_and_hub_restart() {
                         return;
                     }
                 }
+                if step == 2 && state == "log-offline" {
+                    return;
+                }
                 let response = if step == 2 {
                     format!(
                         r#"{{"job_id":"42","offset":0,"next_offset":0,"text":"","eof":{}}}"#,
                         state != "lost"
                     )
                 } else {
-                    let status = if step == 0 { "queued" } else { state };
+                    let status = if step == 0 {
+                        "queued"
+                    } else if state == "log-offline" {
+                        "cancelled"
+                    } else {
+                        state
+                    };
                     format!(
                         r#"{{"id":"42","target":{{"type":"node","node_id":"1"}},"argv":["true"],"state":"{status}","requested_by":"owner","queued_at_ms":1,"exit_code":23}}"#
                     )
@@ -108,6 +117,11 @@ fn job_wait_reports_lost_cancelled_and_hub_restart() {
         if state == "offline" {
             assert!(
                 rest.contains("job 42") && rest.contains("hub") && rest.contains("job show 42"),
+                "{rest}"
+            );
+        } else if state == "log-offline" {
+            assert!(
+                rest.contains("job 42: cancelled") && rest.contains("cannot read the log"),
                 "{rest}"
             );
         } else {

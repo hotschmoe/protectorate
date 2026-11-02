@@ -812,6 +812,20 @@ fn wait_job(c: &Client, mut job: api::Job) -> Result<(), Fail> {
             "job {}: cannot query the hub ({e}); it may be restarting; inspect with `protectorate job show {}`", id.job_id, id.job_id
         )))?;
     }
+    let exit = if matches!(job.state, S::Succeeded | S::Failed) {
+        job.exit_code
+            .map_or(String::new(), |code| format!(" (exit {code})"))
+    } else {
+        String::new()
+    };
+    let detail = job
+        .error
+        .as_ref()
+        .map_or(String::new(), |e| format!(": {e}"));
+    eprintln!("job {}: {}{exit}{detail}", job.id, job.state);
+    if job.state == S::Lost {
+        eprintln!("inspect later with `protectorate job show {}`", job.id);
+    }
     let mut offset = 0;
     loop {
         let log = c
@@ -837,20 +851,6 @@ fn wait_job(c: &Client, mut job: api::Job) -> Result<(), Fail> {
             )));
         }
         offset = log.next_offset;
-    }
-    let exit = if matches!(job.state, S::Succeeded | S::Failed) {
-        job.exit_code
-            .map_or(String::new(), |code| format!(" (exit {code})"))
-    } else {
-        String::new()
-    };
-    let detail = job
-        .error
-        .as_ref()
-        .map_or(String::new(), |e| format!(": {e}"));
-    eprintln!("job {}: {}{exit}{detail}", job.id, job.state);
-    if job.state == S::Lost {
-        eprintln!("inspect later with `protectorate job show {}`", job.id);
     }
     if job.state == S::Succeeded {
         return Ok(());
