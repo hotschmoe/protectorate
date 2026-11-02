@@ -43,6 +43,8 @@ pt_json::record! {
         sources: Vec<SourceRec> = Vec::new(),
         drops: Vec<DropRec> = Vec::new(),
         usage: Vec<ContextUsage> = Vec::new(),
+        /// Budget last committed. 0 is a manifest from before this field.
+        budget: u64 = 0,
     }
 
     #[derive(Clone, Debug)]
@@ -59,8 +61,9 @@ pt_json::record! {
         sleeve: Option<String>,
         cursor: Cursor,
         state: State,
-        /// This source's sleeve (or the source, when it has no sleeve) is at its text budget.
-        /// Cleared once it is back under the budget. `doctor` and `hub info` name those sleeves.
+        /// Eviction has dropped a doc from this source's sleeve (or from the source, when
+        /// it has no sleeve). It stays set under the same budget. A later open clears it
+        /// when the total is under a raised budget. `doctor` and `hub info` name the sleeves.
         capped: bool = false,
     }
 
@@ -240,6 +243,7 @@ impl Index {
         let manifest_path = dir.join(MANIFEST);
         let missing_manifest = !manifest_path.is_file();
         let m = read_manifest(&manifest_path)?;
+        let stored_budget = m.budget;
         let mut ix = Index {
             dir: dir.to_owned(),
             budget,
@@ -282,6 +286,7 @@ impl Index {
         }
         ix.reclaim()?;
         ix.recount();
+        ix.release_if_budget_raised(stored_budget);
         Ok(ix)
     }
 
@@ -443,6 +448,7 @@ impl Index {
             aged: None,
             sleeve: None,
             total: source.sleeve.as_deref().map(|s| self.sleeve_kept(s)),
+            dropped: false,
         };
         let end = source.limit.unwrap_or(opened.len).min(opened.len);
         loop {
@@ -506,6 +512,10 @@ impl Index {
                     self.undo_pending(id, &stored, charge, bytes, &mut shed.total);
                     got.docs = got.docs.saturating_sub(1);
                 }
+                if shed.dropped && !rec.capped {
+                    rec.capped = true;
+                    self.mark_capped(&stored, source.sleeve.as_deref());
+                }
             }
             rec.cursor = tail.cursor;
             rec.state = state;
@@ -526,10 +536,6 @@ impl Index {
         self.sources.insert(key, rec);
         self.settle_capped(&stored, source.sleeve.as_deref(), was_capped, &mut got);
         Ok(got)
-    }
-
-    fn at_cap(&self, stored: &str, sleeve_total: Option<u64>) -> bool {
-        self.kept_of(stored) >= self.budget || sleeve_total.is_some_and(|n| n >= self.budget)
     }
 
     fn kept_of(&self, stored: &str) -> u64 {
@@ -569,12 +575,14 @@ impl Index {
             if !self.drop_oldest_except(stored, keep, &mut shed.aged, &mut shed.total) {
                 return false;
             }
+            shed.dropped = true;
         }
         if let Some(sleeve) = sleeve {
             while shed.total.is_some_and(|n| n > self.budget) {
                 if !self.evict_oldest(sleeve, keep, &mut shed.sleeve, &mut shed.total) {
                     return false;
                 }
+                shed.dropped = true;
             }
         }
         true
@@ -919,6 +927,7 @@ impl Index {
                 })
                 .collect(),
             usage: self.usage.values().cloned().collect(),
+            budget: self.budget,
         };
         let json = m.to_json().to_string();
         let text = format!("{MANIFEST_MAGIC} {:08x}\n{json}", crc32c(json.as_bytes()));
@@ -1220,44 +1229,112 @@ impl Index {
         self.live_docs
     }
 
-    /// Sleeve ids whose live indexed bytes are at the sleeve budget. Empty when every sleeve
-    /// is under it. Readers of the hub copy this set out so `doctor` does not take the index lock.
+    /// Sleeve ids eviction has dropped a doc from. The name stays while the sleeve is under
+    /// the same budget. It leaves when that sleeve's sources are gone, or when a later open
+    /// finds the total under a raised budget. Readers of the hub copy this set out so
+    /// `doctor` does not take the index lock.
     pub fn capped_sleeves(&self) -> Vec<String> {
         let mut seen = std::collections::BTreeSet::new();
         for s in self.sources.values() {
-            if let Some(sleeve) = &s.sleeve {
+            if s.capped
+                && let Some(sleeve) = &s.sleeve
+            {
                 seen.insert(sleeve.clone());
             }
         }
-        seen.into_iter()
-            .filter(|sleeve| self.sleeve_kept(sleeve) >= self.budget)
-            .collect()
+        seen.into_iter().collect()
     }
 
-    /// Records whether `stored` ended this ingest at its budget, and the same for every
-    /// source of its sleeve. A sleeve back under the budget loses the flag.
-    fn settle_capped(&mut self, stored: &str, sleeve: Option<&str>, was: bool, got: &mut Ingested) {
-        let over = self.at_cap(stored, sleeve.map(|s| self.sleeve_kept(s)));
-        if over && !was {
-            got.capped = true;
+    /// A manifest with no recorded budget counts as not-yet-raised: flags clear only where
+    /// the live total is already under the budget being opened. The same or a lower budget
+    /// keeps a flag that eviction set.
+    fn release_if_budget_raised(&mut self, stored: u64) {
+        if stored != 0 && self.budget <= stored {
+            return;
         }
+        let budget = self.budget;
+        let mut sleeves = std::collections::BTreeSet::new();
+        let mut unsleeved = Vec::new();
+        for (key, s) in &self.sources {
+            if !s.capped {
+                continue;
+            }
+            if let Some(sleeve) = &s.sleeve {
+                sleeves.insert(sleeve.clone());
+            } else {
+                unsleeved.push(key.clone());
+            }
+        }
+        let clear_sleeves: Vec<String> = sleeves
+            .into_iter()
+            .filter(|sleeve| self.sleeve_kept(sleeve) < budget)
+            .collect();
+        let clear_sources: Vec<String> = unsleeved
+            .into_iter()
+            .filter(|key| self.kept_of(key) < budget)
+            .collect();
+        let mut changed = false;
+        for sleeve in &clear_sleeves {
+            for s in self.sources.values_mut() {
+                if s.sleeve.as_deref() == Some(sleeve.as_str()) && s.capped {
+                    s.capped = false;
+                    changed = true;
+                }
+            }
+        }
+        for key in &clear_sources {
+            if let Some(s) = self.sources.get_mut(key)
+                && s.capped
+            {
+                s.capped = false;
+                changed = true;
+            }
+        }
+        if changed {
+            self.dirty = true;
+        }
+    }
+
+    fn mark_capped(&mut self, stored: &str, sleeve: Option<&str>) {
         let mut changed = false;
         if let Some(sleeve) = sleeve {
             for s in self.sources.values_mut() {
-                if s.sleeve.as_deref() == Some(sleeve) && s.capped != over {
-                    s.capped = over;
+                if s.sleeve.as_deref() == Some(sleeve) && !s.capped {
+                    s.capped = true;
                     changed = true;
                 }
             }
         } else if let Some(s) = self.sources.get_mut(stored)
-            && s.capped != over
+            && !s.capped
         {
-            s.capped = over;
+            s.capped = true;
             changed = true;
         }
         if changed {
             self.dirty = true;
         }
+    }
+
+    fn is_capped(&self, stored: &str, sleeve: Option<&str>) -> bool {
+        match sleeve {
+            Some(sleeve) => self
+                .sources
+                .values()
+                .any(|s| s.sleeve.as_deref() == Some(sleeve) && s.capped),
+            None => self.sources.get(stored).is_some_and(|s| s.capped),
+        }
+    }
+
+    /// Keeps the capped flag once eviction has dropped a doc, and copies it onto every
+    /// source of that sleeve. A later ingest under the same budget does not clear it.
+    fn settle_capped(&mut self, stored: &str, sleeve: Option<&str>, was: bool, got: &mut Ingested) {
+        if !self.is_capped(stored, sleeve) {
+            return;
+        }
+        if !was {
+            got.capped = true;
+        }
+        self.mark_capped(stored, sleeve);
     }
 
     pub fn stats(&self) -> Stats {
@@ -1327,6 +1404,8 @@ struct Shed {
     aged: Option<(Vec<(u64, u64)>, usize)>,
     sleeve: Option<SleeveWalk>,
     total: Option<u64>,
+    /// This call dropped a doc to stay inside the budget.
+    dropped: bool,
 }
 
 fn sub_charge(total: &mut Option<u64>, n: u64) {

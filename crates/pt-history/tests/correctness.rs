@@ -251,12 +251,16 @@ fn small_budget_keeps_the_newest_lines_across_two_sessions() {
     let old_text = format!("{} oldsessiondoc", "x".repeat(4000));
     let new_text = "newsessiondoc";
     let tail_text = "tailsessiondoc";
-    let budget = doc_charge(&old_text, "a-old", &old_path, sleeve);
-    let later = doc_charge(new_text, "b-new", &new_path, sleeve)
-        + doc_charge(tail_text, "c-tail", &tail_path, sleeve);
+    let old_charge = doc_charge(&old_text, "a-old", &old_path, sleeve);
+    let new_charge = doc_charge(new_text, "b-new", &new_path, sleeve);
+    let tail_charge = doc_charge(tail_text, "c-tail", &tail_path, sleeve);
+    // One byte over the old doc, so the second doc has to evict and the name does not
+    // depend on a charge that lands exactly on the budget.
+    let budget = old_charge + 1;
+    assert!(new_charge > 1, "the second doc has to push the sleeve over");
     assert!(
-        later < budget,
-        "the two newest docs have to fit under the old one"
+        new_charge + tail_charge < budget,
+        "the two newest docs have to fit once the old one is gone"
     );
     write(&old_path, &claude_user(&old_text));
     write(&new_path, &claude_user(new_text));
@@ -299,10 +303,21 @@ fn small_budget_keeps_the_newest_lines_across_two_sessions() {
         stdout.contains("query \"tailsessiondoc\": top 1"),
         "{stdout}"
     );
+    let caps: Vec<&str> = stdout
+        .lines()
+        .filter(|l| l.starts_with("capped:"))
+        .collect();
     let named = format!("capped: {sleeve}");
-    let at = stdout.find(&named).unwrap_or_else(|| panic!("{stdout}"));
-    assert!(
-        stdout[at + named.len()..].contains("capped: none"),
+    assert_eq!(
+        caps,
+        vec![
+            "capped: none",
+            named.as_str(),
+            named.as_str(),
+            "capped: none",
+            named.as_str(),
+            named.as_str(),
+        ],
         "{stdout}"
     );
     let b = index.join("b");

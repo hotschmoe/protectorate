@@ -210,9 +210,10 @@ symbolic links and non-regular files. Tool paths in the index are clipped to 512
 log, may keep that many bytes. That counts each doc's source text plus a
 per-doc overhead, so a flood of tiny docs stays inside the budget. Past a sleeve's budget the index
 keeps the newest lines across that sleeve's logs; past a log's own budget it keeps that
-log's newest lines. `hub info` and `doctor` report `history capped: <sleeve id>` for each
-sleeve at its budget. That list is already there when the index opens, and a sleeve drops off
-it once the sleeve is back under the budget. Other sleeves are unaffected. A commit writes the
+log's newest lines. `hub info` and `doctor` report `history capped: <sleeve id>` once eviction has dropped
+any of that sleeve's docs. The name stays while the sleeve is under the same budget, including
+across a restart. It leaves when that sleeve's sources are gone, or when a later start finds
+the total under a raised budget. Other sleeves are unaffected. A commit writes the
 manifest when the index changed. It removes a segment whose docs are all dead and rewrites one
 that is at least half dead, then deletes the old files. Opening the index removes segment files
 the manifest does not name, and warns when the manifest itself is missing.

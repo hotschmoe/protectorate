@@ -834,7 +834,9 @@ Each entry: where, what was done, what right looks like.
   source's budget, that source's oldest docs go.
   Past a sleeve's budget, the oldest docs of that sleeve go, from any of its logs, so a new
   session still gets indexed. `doctor` / `hub info` name each capped sleeve (`history capped: <id>`)
-  and clear it once that sleeve is back under its budget. A sleeve at its
+  once eviction has dropped any of its docs. The name stays under the same budget and leaves
+  when that sleeve's sources are gone, or when a later start finds the total under a raised
+  budget. A sleeve at its
   budget does not stop the others. There is no cap across all sleeves. The measured ratio is
   1 GiB of logs to 11 MB of index.
   Right: raise the caps if a real log needs more of the index.

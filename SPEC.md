@@ -297,9 +297,10 @@ the same dispatch code. There are no external sources such as email, calendar or
     drops its oldest docs.
     Past a sleeve's budget, the oldest docs of that sleeve are dropped, whichever of its logs
     they came from, and the newest lines stay. A full sleeve does not stop the others.
-    `doctor` and `hub info` report `history capped: <sleeve id>` for each sleeve at its
-    budget. The set is filled when the index opens, and a sleeve leaves it once that sleeve
-    is back under the budget. A commit writes the manifest when the index changed, removes a
+    `doctor` and `hub info` report `history capped: <sleeve id>` once eviction has dropped
+    any of that sleeve's docs. The name stays while the sleeve is under the same budget.
+    It leaves when that sleeve's sources are gone, or when a later start finds the total
+    under a raised budget. The set is filled when the index opens. A commit writes the manifest when the index changed, removes a
     segment whose docs are all dead, and rewrites one that is at least half dead, in that
     same manifest update; the old files go after the rename. A failed commit removes the
     segment files that attempt created, and the hub retries it with backoff. Opening an index
