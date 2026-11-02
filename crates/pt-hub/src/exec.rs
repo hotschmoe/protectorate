@@ -890,6 +890,17 @@ impl SleeveExec {
         }
         let mut sb =
             pt_sandbox::SandboxSpec::new(&hub.scope_sleeve(s.id), g.0, work.clone(), home, scratch);
+        for raw in &hub.config.sleeve_devices {
+            let path = PathBuf::from(raw);
+            if !path.is_absolute() {
+                return Err(format!("sleeve device {raw} is not an absolute path"));
+            }
+            if path.exists() {
+                sb.devices.push(path);
+            } else {
+                info!("sleeve {}: device {raw} is missing; not bound", s.name);
+            }
+        }
         sb.scope = hub.config.scopes;
         sb.masks = pt_sandbox::default_masks(&hub.owner_home);
         sb.masks.push(hub.home.root.clone());

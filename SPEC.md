@@ -181,6 +181,9 @@ crash, every incarnation goes to Recovering and resumes natively.
   - a sized `/tmp`, with disk-backed per-sleeve build and temporary scratch under the hub home,
     mounted at a short path and removed when the sleeve is removed; launch refuses scratch on
     tmpfs or ramfs;
+  - host device nodes named in `sleeve_devices` (for example `/dev/aipu` and `/dev/mali0`)
+    bound with `--dev-bind` when the path exists; a missing path is skipped and logged, and
+    the sleeve still starts;
   - tmpfs masks over the hub's state, `~/.ssh` and the owner's own credentials; every
     harness's shared hub login (`<home>/logins/`) and the owner's cargo registry, Go and pub
     caches bound read-write;

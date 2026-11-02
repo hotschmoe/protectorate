@@ -60,6 +60,8 @@ pub struct SandboxSpec {
     /// masked state dir) is still reachable. The host's runtime dir is always replaced by a
     /// private empty one.
     pub masks: Vec<PathBuf>,
+    /// Host device nodes bound at the same path when they exist. Missing paths are skipped.
+    pub devices: Vec<PathBuf>,
     /// Host variables copied in when set (the allowlist).
     pub env_allow: Vec<String>,
     /// Set after the allowlist, so these win.
@@ -92,6 +94,7 @@ impl SandboxSpec {
             git_dirs: Vec::new(),
             tmp_size_bytes: 1 << 30,
             masks: Vec::new(),
+            devices: Vec::new(),
             env_allow: default_env_allow(),
             env: Vec::new(),
             bwrap: PathBuf::from("bwrap"),
@@ -197,6 +200,14 @@ impl SandboxSpec {
                     ]);
                 }
             }
+        }
+        // After the fresh /dev and any mask, so a listed node stays visible.
+        for dev in &self.devices {
+            let p = path_arg(dev)?;
+            if !dev.exists() {
+                continue;
+            }
+            a.extend(["--dev-bind".into(), p.clone(), p]);
         }
 
         a.extend(["--chdir".into(), path_arg(&self.workspace)?]);

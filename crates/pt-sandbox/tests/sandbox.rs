@@ -96,6 +96,27 @@ fn disk_scratch_is_short_and_survives_incarnations() {
     assert!(sh(&b, "test ! -e $TMPDIR/file").status.success());
 }
 
+/// A configured node is bound over a mask. A path that is not on the host is left out
+/// and the sandbox still starts.
+#[test]
+fn configured_devices_are_bound_and_missing_ones_are_skipped() {
+    let base = fixture("devices");
+    let hidden = sub(&base, "hidden");
+    let node = hidden.join("node");
+    fs::write(&node, "NPU").unwrap();
+    let mut s = spec("devices", &base);
+    s.scope = false;
+    s.masks.push(hidden.clone());
+    s.devices = vec![node.clone(), hidden.join("absent")];
+    let out = sh(&s, &format!("cat {}", node.display()));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(stdout(&out), "NPU");
+}
+
 #[test]
 fn mask_and_runtime_tmpfs_have_small_limits() {
     let base = fixture("mask-limits");

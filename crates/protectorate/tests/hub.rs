@@ -667,6 +667,73 @@ exec sleep 300"#,
 }
 
 #[test]
+fn sleeve_devices_are_bound_and_missing_ones_are_logged() {
+    let dir = unique("devices");
+    let home = dir.join("home");
+    let fake = dir.join("claude");
+    std::fs::create_dir_all(&home).unwrap();
+    let node = home.join("devnode");
+    std::fs::write(&node, "NPU").unwrap();
+    let node = std::fs::canonicalize(&node).unwrap();
+    let missing = home.join("no-such-device");
+    std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
+    std::fs::write(home.join("logins/.claude/.credentials.json"), "{}").unwrap();
+    write_script(
+        &fake,
+        &format!(
+            r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi
+cat '{}' > "$CARGO_TARGET_DIR/saw"
+exec sleep 300"#,
+            node.display()
+        ),
+    );
+    write_script(&dir.join("systemd-run"), "exit 0");
+    let config = pt_json::obj! {
+        "envoy" => pt_json::obj! { "harness" => "claude" },
+        "claude_program" => fake.to_str().unwrap(),
+        "scopes" => false,
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+        "sleeve_devices" => vec![
+            pt_json::Value::from(node.to_str().unwrap()),
+            pt_json::Value::from(missing.to_str().unwrap()),
+        ],
+    };
+    std::fs::write(home.join("config.json"), config.to_string()).unwrap();
+    let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
+    let hub = Hub::open(home, &[], &[("PATH", &path)]);
+    let repo = temp_repo("devices");
+    let s = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "devices",
+            "--path",
+            repo.to_str().unwrap(),
+            "--harness",
+            "claude",
+        ])
+        .json();
+    let id = s["id"].as_str().unwrap();
+    let scratch = hub.home.join(format!("sleeves/{id}/scratch"));
+    let saw = eventually(
+        "the bound device to be readable",
+        Duration::from_secs(60),
+        || std::fs::read_to_string(scratch.join("target/saw")).ok(),
+    );
+    assert_eq!(saw.trim(), "NPU");
+    assert!(
+        hub.log_text().contains(&format!(
+            "device {} is missing; not bound",
+            missing.display()
+        )),
+        "{}",
+        tail(&hub.log_text(), 40)
+    );
+}
+
+#[test]
 fn child_oom_then_harness_exit_does_not_trip_g4() {
     let bus = std::process::Command::new("systemctl")
         .args(["--user", "show-environment"])
