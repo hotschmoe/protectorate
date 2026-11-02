@@ -575,7 +575,8 @@ These rules override the design reports wherever the reports say otherwise. The 
 6. **Cancelling has a timeout.** If no status arrives within the 5 min lease, Cancelling moves to
    Lost, and a later status reconciles it. No state may wait forever on a node. A collection is
    abandoned 24 hours after the job is first lost, even when the node keeps reporting and
-   collection starts again, and a failed local save fails that collection.
+   collection starts again, and a failed local save fails that collection. The owner is told
+   the job is lost once per episode, not again when that collection loses the link.
 7. **Every non-terminal state has a recovery action.** Probing re-probes. Collecting re-fetches
    from its recorded offset. Cancelling re-sends the cancel. Provisioning waits for its completion
    barrier and then records or removes the worktree. Stop during Provisioning waits for that

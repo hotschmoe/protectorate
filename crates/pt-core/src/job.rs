@@ -48,13 +48,17 @@ impl Core<'_> {
         j.state_at = now;
     }
 
-    /// Enters Lost once and tells the owner. A job already Lost keeps its first-loss stamp.
+    /// Enters Lost and tells the owner once per episode. Collecting is the same episode:
+    /// bouncing back into Lost keeps the first-loss stamp and does not alarm again.
     fn lose(&mut self, id: JobId) {
         if self.st.jobs[&id].state == JobState::Lost {
             return;
         }
+        let again = self.st.jobs[&id].lost_at.is_some();
         self.set_job(id, JobState::Lost);
-        self.notify(Party::Owner, None, Notice::JobLost { job: id });
+        if !again {
+            self.notify(Party::Owner, None, Notice::JobLost { job: id });
+        }
     }
 
     fn poll(&mut self, id: JobId) {

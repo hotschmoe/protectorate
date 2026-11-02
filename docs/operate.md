@@ -190,6 +190,7 @@ job artifact <job> <path> [--out FILE]
   the hub collects again when the node next reports the job. A local save failure is submitted
   as an incomplete collection and fails the job through those three attempts. The job is
   abandoned 24 hours after it is first lost, including when collection keeps restarting.
+  The owner hears about that loss once; a later drop in the same episode does not alarm again.
 - `job run --wait` prints the log and exits with the job's code. A hub that cannot be reached is
   retried for about 60 seconds, including across a restart or `hub update`; it then exits 6,
   naming the job id. When the job has no process exit code, the hub's own result is 3 for
