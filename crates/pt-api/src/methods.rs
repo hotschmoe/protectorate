@@ -579,7 +579,7 @@ api_records! {
         pub channel: Option<ReleaseChannel>,
         /// A release tag, in place of the channel's newest.
         pub version: Option<String>,
-        /// Swap `releases/current` and `releases/previous`, then restart.
+        /// Restore the required snapshots and restart on `releases/previous`.
         pub rollback: bool = false,
     }
 

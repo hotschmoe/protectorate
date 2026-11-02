@@ -2,7 +2,7 @@
 //! pt-api's table. Commands become core events whose replies come back after the journal fsync;
 //! reads use the published view.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use pt_api::{self as api, ApiError, ErrorCode, Method, Scope, method as m};
@@ -711,6 +711,13 @@ fn targets(hub: &Hub, list: &[api::Harness]) -> Vec<Target> {
         .collect()
 }
 
+fn worktree_taken(root: &str, path: &Path) -> Result<bool> {
+    if root.is_empty() {
+        return Ok(false);
+    }
+    crate::git::worktree_registered(Path::new(root), path).map_err(|e| err(ErrorCode::Invalid, e))
+}
+
 fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
     let hub = c.hub;
     let view = hub.view();
@@ -778,29 +785,59 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
             }
             (Layout::Root, p) => canonical(p)?,
             (Layout::Worktree, "") => {
-                let dir: PathBuf = hub.home.worktrees().join(format!(
-                    "{}-{}",
-                    r.name,
-                    random_hex(6).map_err(internal)?
-                ));
-                dir.to_string_lossy().into_owned()
-            }
-            // A new worktree's path need not exist yet; when it does, it is claimed by its real
-            // path, and a symlink there is refused (it could name another sleeve's worktree).
-            (Layout::Worktree, p) => match std::fs::symlink_metadata(p) {
-                Ok(m) if m.file_type().is_symlink() => {
-                    return Err(err(ErrorCode::Invalid, format!("path {p} is a symlink")));
-                }
-                Ok(_) => canonical(p)?,
-                Err(_) => {
-                    let p = Path::new(p);
-                    let dir = p.parent().and_then(|d| d.to_str()).unwrap_or("/");
-                    match p.file_name().and_then(|f| f.to_str()) {
-                        Some(file) if file != ".." => format!("{}/{file}", canonical(dir)?),
-                        _ => return Err(err(ErrorCode::Invalid, "path names no directory")),
+                let root = parent_path.as_deref().unwrap_or("");
+                let mut chosen = None;
+                for _ in 0..8 {
+                    let dir = hub.home.worktrees().join(format!(
+                        "{}-{}",
+                        r.name,
+                        random_hex(6).map_err(internal)?
+                    ));
+                    match dir.symlink_metadata() {
+                        Ok(_) => continue,
+                        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                            return Err(err(ErrorCode::Invalid, format!("{}: {e}", dir.display())));
+                        }
+                        Err(_) => {}
                     }
+                    if worktree_taken(root, &dir)? {
+                        continue;
+                    }
+                    chosen = Some(dir.to_string_lossy().into_owned());
+                    break;
                 }
-            },
+                chosen.ok_or_else(|| err(ErrorCode::Invalid, "no free worktree path"))?
+            }
+            // A path that already exists is a leftover checkout or the owner's own tree.
+            // Adopting it would reset that worktree. A symlink could name another sleeve's.
+            (Layout::Worktree, p) => {
+                let path = match std::fs::symlink_metadata(p) {
+                    Ok(m) if m.file_type().is_symlink() => {
+                        return Err(err(ErrorCode::Invalid, format!("path {p} is a symlink")));
+                    }
+                    Ok(_) => {
+                        return Err(err(ErrorCode::Invalid, format!("path {p} already exists")));
+                    }
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                        return Err(err(ErrorCode::Invalid, format!("path {p}: {e}")));
+                    }
+                    Err(_) => {
+                        let p = Path::new(p);
+                        let dir = p.parent().and_then(|d| d.to_str()).unwrap_or("/");
+                        match p.file_name().and_then(|f| f.to_str()) {
+                            Some(file) if file != ".." => format!("{}/{file}", canonical(dir)?),
+                            _ => return Err(err(ErrorCode::Invalid, "path names no directory")),
+                        }
+                    }
+                };
+                if worktree_taken(parent_path.as_deref().unwrap_or(""), Path::new(&path))? {
+                    return Err(err(
+                        ErrorCode::Invalid,
+                        format!("path {path} is already a worktree"),
+                    ));
+                }
+                path
+            }
             (Layout::View, "") => parent_path.unwrap_or_default(),
             (Layout::View, p) => canonical(p)?,
         }

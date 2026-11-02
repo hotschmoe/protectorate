@@ -2338,6 +2338,7 @@ final class HubInfo {
     this.inventory,
     this.sample,
     this.historyCapped = const <String>[],
+    this.restoreError,
   });
 
   factory HubInfo.fromJson(Object? json) {
@@ -2357,6 +2358,10 @@ final class HubInfo {
           (e1) => _string(e1, 'HubInfo.history_capped[]'),
         ),
       ),
+      restoreError: _opt(
+        j['restore_error'],
+        (e0) => _string(e0, 'HubInfo.restore_error'),
+      ),
     );
   }
 
@@ -2375,6 +2380,9 @@ final class HubInfo {
   /// the budget.
   final List<String> historyCapped;
 
+  /// Set when a rollback restore failed and the trial release was kept.
+  final String? restoreError;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'version': version,
@@ -2382,6 +2390,7 @@ final class HubInfo {
     if (inventory case final v?) 'inventory': v.toJson(),
     if (sample case final v?) 'sample': v.toJson(),
     'history_capped': historyCapped,
+    if (restoreError case final v?) 'restore_error': v,
   };
 }
 
@@ -5085,7 +5094,7 @@ final class UpdateHubRequest {
   /// A release tag, in place of the channel's newest.
   final String? version;
 
-  /// Swap `releases/current` and `releases/previous`, then restart.
+  /// Restore the required snapshots and restart on `releases/previous`.
   final bool rollback;
 
   Map<String, Object?> toJson() => {

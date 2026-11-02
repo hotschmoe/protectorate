@@ -301,8 +301,10 @@ impl Fleet {
         i.headscale.resume();
         let healthy = i.headscale.wait_healthy(READY);
         let dir = copied.map_err(|e| e.context("snapshotting headscale"))?;
-        healthy
-            .map_err(|e| e.context(format!("headscale after the snapshot to {}", dir.display())))?;
+        if let Err(e) = healthy {
+            let _ = fs::remove_dir_all(&dir);
+            return Err(e.context(format!("headscale after the snapshot to {}", dir.display())));
+        }
         Ok(dir)
     }
 

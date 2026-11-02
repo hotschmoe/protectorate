@@ -226,6 +226,8 @@ api_records! {
         /// `doctor` and `hub info` list these ids, and drop one when that sleeve is back under
         /// the budget.
         pub history_capped: Vec<String> = Vec::new(),
+        /// Set when a rollback restore failed and the trial release was kept.
+        pub restore_error: Option<String>,
     }
 
     /// One full snapshot. `GET /api/events` starts with it and then streams changes.

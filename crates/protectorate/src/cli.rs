@@ -268,6 +268,9 @@ fn hub_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 if !h.history_capped.is_empty() {
                     println!("history capped: {}", h.history_capped.join(", "));
                 }
+                if let Some(error) = &h.restore_error {
+                    println!("rollback restore failed: {error}");
+                }
             });
         }
         "state" => {

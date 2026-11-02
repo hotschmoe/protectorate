@@ -429,10 +429,46 @@ straight from GitHub releases, on the stable or dev channel, as today.
 - **Hub:**
   - `protectorate hub update [--version]`, or the app's UPDATE key, downloads the release and stages it
     in `releases/<version>/`.
-  - Headscale's database is snapshotted first, because its migrations are one-way.
+  - Before switching, the hub snapshots the journal at a durable batch boundary and then, if the
+    fleet is running, headscale's database. The journal snapshot is the earlier of the two: a
+    node that enrolls between them is in the restored headscale database and absent from the
+    restored journal. Headscale's migrations are one-way. The probation record stores
+    `next_sleeve` from that journal snapshot.
   - The hub re-execs in place (D17), so sleeves keep running. The previous release stays on disk.
-  - If the new hub fails its health check within 2 minutes, a supervisor wrapper switches the
-    `current` pointer back and restarts it.
+  - If the new hub fails its health check within 2 minutes, prestart (the previous release)
+    restores the snapshots before switching `current` back. The whole journal directory is
+    replaced. Journal events after the journal snapshot and headscale changes after its snapshot
+    are lost. Sleeve directories with an id at or above the recorded `next_sleeve` move to
+    `<home>/update-aside/<time>-<pid>/` and are not deleted. Worktree checkouts and gitdirs
+    stay; prestart lists a sleeve that recorded `worktree.path` and stops those sleeves'
+    scopes. Remove a leftover checkout and run `git worktree prune` in the root repository.
+    Until then the checkout holds `pt/<name>`, so a new worktree for that name is refused.
+    The branch survives, and a new sleeve with the same name starts from those commits once
+    the checkout is gone. A new worktree does not adopt a path that already exists.
+  - Manual `hub update --rollback` runs the restore offline before switching. It always restores
+    headscale when there is a snapshot. It keeps the journal when the previous release can decode
+    every intact frame; a torn final frame is ignored, the same way the journal opens. Otherwise
+    it restores the journal snapshot and loses events after that snapshot. There is no separate
+    event-tag declaration: the previous binary's codec is the decision, and prestart must be that
+    binary. A rollback without a matching journal or required headscale snapshot is refused. A
+    new update and a manual rollback both require snapshot-aware rollback in the target release,
+    which runs prestart.
+  - A restore that fails before any live file is replaced keeps the trial release. The next start
+    shows the error on `hub info` and raises an alarm. Repair the snapshot, stop the hub, and
+    retry with `hub probation --retry-rollback`. That retry keeps a manual rollback request.
+    A restore that fails after a live file was replaced does not keep the trial: prestart exits
+    and the next prestart continues the restore. Prestart writes `releases/rollback-open`,
+    synced, before that first change and removes it only when the rollback finishes. A later
+    failure while that file remains continues the restore, including a validation failure
+    that replaces nothing this time and a manual rollback of a release that was already
+    confirmed. The marker applies while that probation names the current release. A new
+    trial is refused while the marker exists. Prestart takes the journal lock before
+    finishing an interrupted journal swap, when the journal directory
+    is present, and before judging. While the hub holds that lock, `hub probation` prints
+    the probation state and exits 0. It does not judge, restore, or count a start.
+    `--retry-rollback` refuses while the hub holds the journal or headscale still has the
+    database or its socket open. If the trial binary itself cannot start, service needs the repair: neither an
+    unreadable journal nor a failed binary can serve.
 - **Nodes, triggered by the hub:**
   - The hub sends `Update(version)` over its own connection. The node downloads the release from
     GitHub itself: outbound to GitHub, not to the hub.

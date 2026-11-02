@@ -399,9 +399,8 @@ pub fn default_masks(host_home: &Path) -> Vec<PathBuf> {
     .collect()
 }
 
-/// `pt-<sleeve>-g<generation>.scope` with every character outside `[A-Za-z0-9_-]` replaced.
-pub fn scope_name(sleeve: &str, generation: u64) -> String {
-    let clean: String = sleeve
+fn clean_scope(sleeve: &str) -> String {
+    sleeve
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
@@ -410,8 +409,57 @@ pub fn scope_name(sleeve: &str, generation: u64) -> String {
                 '_'
             }
         })
-        .collect();
-    format!("pt-{clean}-g{generation}.scope")
+        .collect()
+}
+
+/// `pt-<sleeve>-g<generation>.scope` with every character outside `[A-Za-z0-9_-]` replaced.
+pub fn scope_name(sleeve: &str, generation: u64) -> String {
+    format!("pt-{}-g{generation}.scope", clean_scope(sleeve))
+}
+
+/// Sleeve id in `pt-<tag>-<id>-g<generation>.scope` for this hub's `tag`.
+/// A job scope (`pt-<tag>-j<id>-gN.scope`) is not a sleeve.
+pub fn scope_sleeve_id(tag: &str, unit: &str) -> Option<u64> {
+    let rest = unit.strip_prefix("pt-")?.strip_suffix(".scope")?;
+    let (body, generation) = rest.rsplit_once("-g")?;
+    if generation.is_empty() || !generation.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let id = body.strip_prefix(&format!("{}-", clean_scope(tag)))?;
+    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    id.parse().ok()
+}
+
+/// Whether this user has a systemd bus. Scopes cannot exist without one.
+pub fn user_bus_ready() -> bool {
+    runtime_dir().join("bus").exists()
+}
+
+/// Loaded and inactive user scopes. The unit name is the first field.
+pub fn list_scope_units() -> Result<Vec<String>> {
+    let out = systemctl(&[
+        "list-units",
+        "--type=scope",
+        "--all",
+        "--no-legend",
+        "--plain",
+        "--no-pager",
+    ])?;
+    if !out.status.success() {
+        return err(format!(
+            "systemctl list-units: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let name = line.split_whitespace().next()?;
+            name.ends_with(".scope").then(|| name.to_string())
+        })
+        .collect())
 }
 
 /// The git dirs a worktree `workspace` of the repository at `repo` needs: its private gitdir and
