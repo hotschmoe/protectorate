@@ -157,6 +157,7 @@ fuzz_target!(|data: &[u8]| {
                     .find(|q| q.subscription == Subscription::Local)
             {
                 assert_ne!(state(q), State::Error, "a failed local reading was spent");
+                assert_ne!(state(q), State::Stale, "a stale local reading was spent");
             }
         }
         (None, Err(_)) => {

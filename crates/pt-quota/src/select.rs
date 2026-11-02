@@ -243,10 +243,11 @@ fn availability(now_ms: u64, size: TaskSize, cand: &Candidate, quotas: &[Quota])
     let harness = cand.harness;
     let model = cand.model.as_str();
     if harness == Harness::PiLocal {
+        // No percent windows. A fresh answer may be spent. A stale or failed one may not:
+        // the endpoint worked and then stopped. Never read stays unknown.
         return match row(quotas, Subscription::Local).map(state) {
             Some(State::Fresh) => Availability::Available,
-            // A failed read is not a missing login: do not spend it.
-            Some(State::Error) => Availability::Exhausted,
+            Some(State::Error | State::Stale) => Availability::Exhausted,
             _ => Availability::Unknown,
         };
     }

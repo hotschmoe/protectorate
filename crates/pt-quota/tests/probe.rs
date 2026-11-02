@@ -676,6 +676,39 @@ fn a_passed_reset_blocks_only_inside_the_grace() {
     );
 }
 
+/// A local endpoint that answered, then went stale, is not spent. It has no percent windows
+/// to fall back on.
+#[test]
+#[cfg(debug_assertions)]
+fn a_stale_local_reading_is_not_spent() {
+    let home = scratch(&format!("stale-local-{}", std::process::id()));
+    let (port, _) = serve(vec![("/v1/models", r#"{"data":[{"id":"local-model"}]}"#)]);
+    let base = format!("http://127.0.0.1:{port}");
+    let out = probe(&[
+        "--home",
+        home.to_str().unwrap(),
+        "--local",
+        &base,
+        "--allow",
+        "pi_local",
+        "--test-cache-ms",
+        "150",
+    ]);
+    assert!(
+        out.contains("local fresh") && out.contains("local-model"),
+        "{out}"
+    );
+    assert!(out.contains("target PiLocal:"), "{out}");
+    assert!(out.contains("aged local stale"), "{out}");
+    assert!(
+        out.contains(
+            "aged target none: all eligible resleeve targets have insufficient fresh quota"
+        ),
+        "{out}"
+    );
+    assert!(!out.contains("without a fresh quota reading"), "{out}");
+}
+
 /// A weekly Sonnet cap is shown on the row and does not exhaust Claude when the account
 /// window still has room. The local model is not chosen ahead of that account window.
 #[test]

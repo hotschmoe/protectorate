@@ -439,7 +439,9 @@ class, and code clamps it (D27).
 A stale reading keeps the windows of its last good fetch. The resleeve fallback treats those
 windows like a fresh reading's: under the task's usable minimum the subscription is exhausted,
 and at or above it the fallback may still choose that harness, ahead of a candidate with no
-reading. `select_target` itself stays on fresh rows.
+reading. `select_target` itself stays on fresh rows. The local endpoint has no percent
+windows. A fresh reading may be chosen; a stale or failed one may not. A local row that was
+never read may still be spent.
 
 A candidate with no reading may still be spent. That is `unknown`: no login file, the reader
 is not running, the login is expired (its CLI refreshes the token; the reader does not), or

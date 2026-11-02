@@ -186,8 +186,9 @@ or with no window at all, is reported as an error.
 Resleeve targets are weighted by fresh readings; known-exhausted candidates are skipped, and the
 sleeve parks if all eligible candidates are exhausted. A stale reading keeps its last windows:
 under the usable minimum it counts as exhausted, and with spare left the fallback may still
-choose it. A candidate with no reading (`unknown`: no login, an expired login, or not read yet)
-can still be selected. A failed reading (`error`) cannot; it parks the same way an exhausted
+choose it. The local endpoint has no such windows: a stale reading is not spent, the same as
+a failed one, while one that was never read still may be. A candidate with no reading
+(`unknown`: no login, an expired login, or not read yet) can still be selected. A failed reading (`error`) cannot; it parks the same way an exhausted
 window does. A window whose reset time has already passed still blocks while it is over that
 line, for ten minutes, and only when that reading was taken before the reset. After that the
 window counts as reset. A reset at or before the epoch is ignored and the percent still counts.
