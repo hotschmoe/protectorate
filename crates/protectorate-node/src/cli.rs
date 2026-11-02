@@ -1,3 +1,4 @@
+use crate::flags::number;
 use pt_json::ToJson;
 use pt_node::presence::Config;
 use pt_node::{Detector, Sampler, inventory};
@@ -123,12 +124,6 @@ impl Opts {
             ..Config::default()
         }
     }
-}
-
-pub(crate) fn number(flag: &str, v: Option<&String>) -> Result<u64, String> {
-    let v = v.ok_or_else(|| format!("{flag} needs a value"))?;
-    v.parse()
-        .map_err(|_| format!("{flag}: '{v}' is not a number"))
 }
 
 fn watch(o: Opts) -> Result<(), String> {

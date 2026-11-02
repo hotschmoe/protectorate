@@ -130,7 +130,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
         "Joined. Wrote {}.\nNext: protectorate-node install-service (as root or an elevated administrator), or\n  protectorate-node serve --state-dir {} --listen-tcp {}",
         member::config_path(&state).display(),
         state.display(),
-        crate::service::LISTEN
+        member::LISTEN
     );
     Ok(())
 }

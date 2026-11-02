@@ -9,6 +9,10 @@ use std::time::{Duration, Instant};
 
 use pt_json::record;
 
+/// Where member forwards the hub's connections (tailnet port 7475) to `serve` without a unix
+/// socket: the Windows service, and `join`'s hint for a foreground run.
+pub const LISTEN: &str = "127.0.0.1:7476";
+
 const BACKOFF_MIN: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(60);
 const STABLE_RUN: Duration = Duration::from_secs(60);

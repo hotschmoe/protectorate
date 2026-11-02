@@ -11,13 +11,18 @@
 //! made by `join`, so it is not in the manifest and stays.
 
 use std::fs;
-use std::path::{Path, PathBuf};
-
-use pt_json::{FromJson, ToJson, record};
+#[cfg(not(windows))]
+use std::path::Path;
+use std::path::PathBuf;
 
 use crate::join::{is_root, system_state};
 #[cfg(not(windows))]
+use crate::manifest::{Entry, Manifest, save};
+use crate::manifest::{Opts, load, manifest_path};
+#[cfg(not(windows))]
 use crate::member;
+#[cfg(not(windows))]
+use crate::update::into_releases;
 
 pub const USAGE: &str = "  install-service [--state-dir DIR]
                                     after join, as root or an elevated administrator: install
@@ -28,36 +33,8 @@ pub const USAGE: &str = "  install-service [--state-dir DIR]
 
 #[cfg(not(windows))]
 const UNIT: &str = "protectorate-node.service";
-/// The Windows service name.
-#[cfg(windows)]
-pub const SERVICE: &str = "protectorate-node";
-/// Where member forwards the hub's connections (tailnet port 7475) to `serve` without a unix
-/// socket: the Windows service, and `join`'s hint for a foreground run.
-pub const LISTEN: &str = "127.0.0.1:7476";
 #[cfg(not(windows))]
 const UNIT_PATH: &str = "/etc/systemd/system/protectorate-node.service";
-const MANIFEST: &str = "install-manifest.json";
-
-record! {
-    #[derive(Debug, Clone, PartialEq)]
-    pub(crate) struct Entry {
-        pub(crate) path: String,
-        /// `file`, `dir` (removed only when empty) or, on Windows, `service`.
-        pub(crate) kind: String,
-    }
-
-    #[derive(Debug, Clone, PartialEq)]
-    pub(crate) struct Manifest {
-        /// The systemd unit or Windows service.
-        pub(crate) unit: String,
-        pub(crate) entries: Vec<Entry> = Vec::new(),
-    }
-}
-
-pub(crate) struct Opts {
-    pub(crate) state: PathBuf,
-}
-
 fn opts(args: &[String]) -> Result<Opts, String> {
     let mut o = Opts {
         state: system_state()?,
@@ -77,21 +54,6 @@ fn opts(args: &[String]) -> Result<Opts, String> {
         ));
     }
     Ok(o)
-}
-
-pub(crate) fn manifest_path(state: &Path) -> PathBuf {
-    state.join(MANIFEST)
-}
-
-pub(crate) fn save(state: &Path, m: &Manifest) -> Result<(), String> {
-    let path = manifest_path(state);
-    // Windows flushes only a handle opened for writing.
-    fs::File::create(&path)
-        .and_then(|mut f| {
-            std::io::Write::write_all(&mut f, format!("{}\n", m.to_json()).as_bytes())?;
-            f.sync_all()
-        })
-        .map_err(|e| format!("writing {}: {e}", path.display()))
 }
 
 #[cfg(not(windows))]
@@ -192,45 +154,6 @@ WantedBy=multi-user.target
     Ok(())
 }
 
-/// The service runs `<state>/releases/current/protectorate-node`, the path updates switch. This
-/// binary is copied in as release `pt_version::VERSION` unless it runs from there already. The
-/// releases are state: uninstall keeps them.
-pub(crate) fn into_releases(state: &Path) -> Result<String, String> {
-    let store = pt_update::Store::open(state).map_err(|e| e.to_string())?;
-    let version = match store.running_release() {
-        Some(v) => v,
-        None => {
-            let v = pt_version::VERSION.to_string();
-            let exe = std::env::current_exe().map_err(|e| format!("finding this binary: {e}"))?;
-            let dir = store.version_dir(&v);
-            let bin = dir.join(format!("protectorate-node{}", std::env::consts::EXE_SUFFIX));
-            if dir.exists() {
-                let same = fs::read(&exe)
-                    .ok()
-                    .is_some_and(|a| fs::read(&bin).ok() == Some(a));
-                if !same {
-                    return Err(format!(
-                        "{} exists and is not this binary; not overwriting it",
-                        dir.display()
-                    ));
-                }
-            } else {
-                fs::create_dir(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
-                fs::copy(&exe, &bin)
-                    .map_err(|e| format!("copying {} to {}: {e}", exe.display(), bin.display()))?;
-                set_mode(&bin, 0o755)?;
-            }
-            v
-        }
-    };
-    store
-        .check_binary(&version, "protectorate-node", "--version")
-        .map_err(|e| e.to_string())?;
-    store.switch(&version).map_err(|e| e.to_string())?;
-    store.ensure_previous().map_err(|e| e.to_string())?;
-    Ok(version)
-}
-
 pub fn uninstall(args: &[String]) -> Result<(), String> {
     let o = opts(args)?;
     if cfg!(unix) && !is_root() {
@@ -284,12 +207,6 @@ pub fn uninstall(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn load(path: &Path) -> Result<Manifest, String> {
-    let text = fs::read_to_string(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
-    let v = pt_json::parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
-    Manifest::from_json(&v).map_err(|e| format!("{}: {e}", path.display()))
-}
-
 /// Windows keeps a just-stopped service's executables locked for a moment.
 fn remove_retrying(mut f: impl FnMut() -> std::io::Result<()>) -> std::io::Result<()> {
     let mut tries = if cfg!(windows) { 20 } else { 1 };
@@ -309,16 +226,4 @@ fn remove_retrying(mut f: impl FnMut() -> std::io::Result<()>) -> std::io::Resul
             r => return r,
         }
     }
-}
-
-#[cfg(unix)]
-fn set_mode(p: &Path, mode: u32) -> Result<(), String> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(p, fs::Permissions::from_mode(mode))
-        .map_err(|e| format!("chmod {}: {e}", p.display()))
-}
-
-#[cfg(not(unix))]
-fn set_mode(_p: &Path, _mode: u32) -> Result<(), String> {
-    Ok(())
 }

@@ -58,7 +58,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     }
     let mut full = vec!["--state-dir".to_string(), state.display().to_string()];
     full.extend(serve.iter().cloned());
-    crate::serve::check(&full).map_err(|e| format!("supervise: {e}"))?;
+    crate::flags::check(&full).map_err(|e| format!("supervise: {e}"))?;
     let plan = Plan { state, serve: full };
     if service {
         return as_service(plan);
@@ -112,12 +112,12 @@ fn as_service(plan: Plan) -> Result<(), String> {
     let log = open()?;
     eprintln!(
         "protectorate-node: service {} supervisor {} starting (pid {})",
-        crate::service::SERVICE,
+        crate::manifest::SERVICE,
         pt_version::VERSION,
         std::process::id()
     );
     let result = pt_node::windows::run_service(
-        crate::service::SERVICE,
+        crate::manifest::SERVICE,
         Box::new(move |ready| {
             ready();
             supervise(&plan, Some(&log), None)

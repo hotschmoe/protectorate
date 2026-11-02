@@ -1,5 +1,7 @@
 mod cli;
+mod flags;
 mod join;
+mod manifest;
 mod member;
 mod rpc;
 mod serve;

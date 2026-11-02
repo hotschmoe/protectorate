@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use crate::member;
-use crate::service::{Entry, LISTEN, Manifest, Opts, SERVICE, manifest_path, save};
+use crate::manifest::{Entry, Manifest, Opts, SERVICE, manifest_path, save};
+use crate::member::{self, LISTEN};
+use crate::update::into_releases;
 
 const STOPPED: u32 = 1;
 const RUNNING: u32 = 4;
@@ -43,7 +44,7 @@ pub fn install(o: &Opts) -> Result<(), String> {
     }
     let state_dir = quotable(&o.state)?;
     restrict(&o.state)?;
-    let version = crate::service::into_releases(&o.state)?;
+    let version = into_releases(&o.state)?;
 
     // Each item goes into the manifest as soon as it exists, so a failed install can be undone.
     let mut m = Manifest {

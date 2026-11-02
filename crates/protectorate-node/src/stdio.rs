@@ -7,7 +7,7 @@
 //! resident leaves after `--idle-exit` seconds (default 300) with no job and no connection.
 //! stdout carries frames only; the session logs to stderr, the resident to `DIR/agent.log`.
 
-use crate::serve::Flags;
+use crate::flags::Flags;
 
 #[cfg(unix)]
 pub fn run(f: &Flags) -> Result<(), String> {
