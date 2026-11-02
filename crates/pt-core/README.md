@@ -32,6 +32,7 @@ reads no clock, so `replay(journal) == live state`. The hub's core thread is its
   the scope is confirmed empty. A stale `g` is dropped.
 - `Continue { sleeve, text }` is not a command and has no reply. The hub journals it when the
   core asks for one continuation prompt after a native resume of a headless turn a crash ended.
+  A fresh session is not continued: if that incarnation never acked a prompt, the owner is warned.
   At most one per owner turn, across generations, and not after an interrupt or for a turn that
   prompt started. The prompt is sent as the party that opened that owner turn. An agent steer
   replaces that party, which keeps D9 on the continued turn and reports a rejection to that

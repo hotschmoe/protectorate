@@ -528,10 +528,13 @@ impl Core<'_> {
                 let seq = s.turn_seq;
                 if resuming {
                     // One continuation per owner turn, whichever generation sends it.
+                    // A fresh session has no history of the turn: the dead incarnation never
+                    // acked a prompt, so `StartIncarnation` carried no resume id.
                     let state = (seq > 0).then(|| self.continue_state(sid, seq)).flatten();
-                    match (headless, state) {
-                        (true, None) if seq > 0 => self.sl(sid).auto_continue = Some(seq),
-                        (true, Some(MsgState::Queued)) => {
+                    let native = self.native_resume(sid);
+                    match (headless, native, state) {
+                        (true, true, None) if seq > 0 => self.sl(sid).auto_continue = Some(seq),
+                        (true, true, Some(MsgState::Queued)) => {
                             // Fencing put the unsent prompt back. The next generation sends it.
                         }
                         _ => self.needs_prompt(sid),
@@ -1374,6 +1377,23 @@ impl Core<'_> {
         {
             self.evidence(effect);
         }
+    }
+
+    /// The generation `after_death` just started is a native resume of the session
+    /// whose turn was acked. A fresh session leaves `resume` empty.
+    fn native_resume(&self, sid: SleeveId) -> bool {
+        let g = self.st.sleeves[&sid].g;
+        self.st.effects.values().any(|e| {
+            matches!(
+                &e.kind,
+                EffectKind::StartIncarnation {
+                    sleeve,
+                    g: eg,
+                    resume,
+                    ..
+                } if *sleeve == sid && *eg == g && resume.is_some()
+            )
+        })
     }
 
     fn continue_key(sid: SleeveId, seq: u64) -> String {

@@ -76,8 +76,10 @@ Guardrails in code interrupt, resume, resleeve or park a sleeve that fails (quot
 crash, silent, looping and so on). A third resleeve within an hour parks it; `sleeve list` shows
 the park reason. After a native resume of a headless turn that a crash ended, the hub sends one
 short continuation prompt for that owner turn, including when a later generation is the one that
-sends it. The prompt is sent as the party that opened that owner turn. An agent steer
-replaces that party, which keeps D9 on the continued turn and reports a rejection to that
+sends it. A fresh session does not get that prompt: if the dead incarnation never acked one,
+the owner is warned instead. The prompt is sent as the party that opened that owner turn.
+An agent steer replaces that party, which keeps D9 on the continued turn and reports a rejection
+to that
 party. A second crash of the same turn does not send another, even after the ten-minute
 resume window, and a later owner message is a new turn with its own prompt. An owner
 interrupt, a guardrail interrupt, a desync during either of those, a planned stop, a restart

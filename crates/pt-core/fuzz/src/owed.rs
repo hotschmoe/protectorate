@@ -257,7 +257,10 @@ fn on_exit(
     if resumes && interrupted {
         let seq = s.turn_seq;
         let state = continue_state(s, seq);
-        if s.target.mode == Mode::Headless && state.is_none() && seq > 0 {
+        // Same test as `start_incarnation`: a resume id is kept only after a turn was
+        // acked (`turned`) and the session is known. A fresh session is not continued.
+        let native = s.turned && s.session.is_some();
+        if s.target.mode == Mode::Headless && state.is_none() && seq > 0 && native {
             owed.insert(sid, seq);
         }
     }

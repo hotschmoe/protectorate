@@ -318,7 +318,9 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   resleeves go to headless mode, walking the sleeve's ordered `resleeve_to` list (default
   `[pi_local]`). A third resleeve within an hour parks the sleeve.
 - **Auto-continue:** after a native resume of a headless turn that a crash ended, the core sends
-  one short continuation prompt, keyed to that owner turn. A turn gets at most one, across
+  one short continuation prompt, keyed to that owner turn. A relaunch that is a fresh session,
+  because that incarnation never acked a prompt, does not continue: the owner and the parent
+  get `TurnNeedsPrompt`. A turn gets at most one, across
   generations: a second crash of the same turn does not send another, including after the resume
   window, and an unsent continuation keeps its key when a later generation sends it. A later
   owner message is a new turn and can be continued once. A turn the continuation itself started

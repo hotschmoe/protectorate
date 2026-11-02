@@ -45,7 +45,8 @@ harness; it can be replaced with another level.
 - Code decides retries, guardrails, resleeves and quota: never resleeve a healthy sleeve to save
   quota, and never retry a message the hub reports as "may have applied" without checking.
 - After a crash ends a headless turn, native resume sends one continuation: "The previous
-  turn was interrupted. Continue from where it stopped." That is once per owner turn, including
+  turn was interrupted. Continue from where it stopped." A fresh session does not: if that
+  incarnation never acked a prompt, you are warned instead. That is once per owner turn, including
   across a later resume. It does not send that after an interrupt, a desync during one, a second
   time for the same owner turn, or after a restart of an idle sleeve. The continuation is sent
   as the party that opened that owner turn. An agent steer replaces that party, which keeps D9
