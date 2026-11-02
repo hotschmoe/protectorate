@@ -433,6 +433,10 @@ Each entry: where, what was done, what right looks like.
   rides in the core's `JobSpec.command` (its digest is the spec's), but artifact results live in
   `<home>/jobs/<job>/<attempt>/artifacts.json` and the per-job view cache in memory. Right: fine
   while the core owns state; journal artifact results if `job show` must survive a lost home.
+- **Incomplete artifact collection retains the node tombstone** (`pt-core` jobs): after three
+  failed collection attempts the hub fails the job without acknowledging it, preserving the
+  node's files, but has no command to retry collection of that failed attempt. Right: an explicit
+  collection retry that keeps the original attempt and never re-runs the job.
 - **Fleet poll interval is one knob** (`pt-hub`, `fleet.poll_secs`, default 15): presence and the
   node list share it. Right: split them if presence must react faster than listings.
 - **Embedded binaries are never pruned** (`pt-embed`): the hub unpacks headscale and member to
