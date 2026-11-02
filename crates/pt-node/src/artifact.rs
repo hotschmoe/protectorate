@@ -1,5 +1,6 @@
-//! Opening a job's artifact: a relative path without `..` naming a regular file that resolves,
-//! symlinks and all, to a path inside the job's directory. The check is made on the canonical path, the open refuses a symlink in its
+//! Opening a job's artifact: a path without `..`, relative to the job's directory or absolute on
+//! this node's OS, naming a regular file that resolves, symlinks and all, to a path inside the
+//! job's directory. The check is made on the canonical path, the open refuses a symlink in its
 //! last component, and on Linux the opened file's own path (`/proc/self/fd`) is checked again,
 //! so a directory swapped in between cannot lead the read outside.
 
@@ -32,16 +33,20 @@ pub(crate) fn open(dir: &Path, rel: &str) -> Result<File, JobError> {
             msg::MAX_PATH
         )));
     }
-    let lexical = Path::new(rel)
-        .components()
-        .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+    let path = Path::new(rel);
+    let lexical = path.components().all(|c| match c {
+        Component::Normal(_) | Component::CurDir => true,
+        Component::Prefix(_) | Component::RootDir => path.is_absolute(),
+        Component::ParentDir => false,
+    });
     if !lexical {
         return Err(bad(format!(
-            "artifact {rel:?} is outside the job's directory: give a relative path without .."
+            "artifact {rel:?} is outside the job's directory: give a path inside it, relative or \
+             absolute for this node, without .."
         )));
     }
     let root = resolve(dir, "the job's directory")?;
-    let real = resolve(&root.join(rel), "artifact")?;
+    let real = resolve(&root.join(path), "artifact")?;
     if !real.starts_with(&root) {
         return Err(bad(format!(
             "artifact {rel:?} resolves to {}, outside the job's directory {}",

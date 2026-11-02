@@ -972,14 +972,49 @@ fn job_view(hub: &Hub, id: pt_core::JobId) -> Result<api::Job> {
         .ok_or_else(|| err(ErrorCode::NotFound, format!("job {} is gone", id.0)))
 }
 
+/// A cwd is judged by the target node's OS. For `--arch` the node is not chosen yet, and a node
+/// that has not answered Hello has no known OS: the node checks then, and the job fails there.
+fn check_cwd(c: &Ctx<'_>, target: &api::JobTarget, cwd: &str) -> Result<()> {
+    let api::JobTarget::Node { node_id } = target else {
+        return Ok(());
+    };
+    let os = fleet(c.hub)
+        .ok()
+        .and_then(|up| find_node(&up, node_id).ok())
+        .and_then(|n| n.hello)
+        .map(|h| h.os);
+    let (ok, shape) = match os.as_deref() {
+        Some("windows") => (
+            windows_absolute(cwd),
+            r"a drive path like C:\dir or C:/dir, or a UNC path",
+        ),
+        Some(_) => (cwd.starts_with('/'), "a path starting with /"),
+        None => return Ok(()),
+    };
+    if ok {
+        return Ok(());
+    }
+    Err(err(
+        ErrorCode::Invalid,
+        format!(
+            "cwd must be an absolute path on node {node_id} ({}): {shape}",
+            os.unwrap_or_default()
+        ),
+    ))
+}
+
+fn windows_absolute(p: &str) -> bool {
+    let b = p.as_bytes();
+    (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/'))
+        || p.starts_with("\\\\")
+}
+
 fn run_job(c: &Ctx<'_>, r: api::RunJobRequest) -> Result<api::Job> {
     if r.argv.is_empty() {
         return Err(err(ErrorCode::Invalid, "argv is required"));
     }
-    if let Some(d) = &r.cwd
-        && !d.starts_with('/')
-    {
-        return Err(err(ErrorCode::Invalid, "cwd must be an absolute path"));
+    if let Some(d) = &r.cwd {
+        check_cwd(c, &r.target, d)?;
     }
     let timeout_secs = r
         .timeout_secs

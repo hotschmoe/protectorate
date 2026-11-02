@@ -153,9 +153,12 @@ job artifact <job> <path> [--out FILE]
 - If someone arrives mid-job, the job drops to idle priority and keeps running; `--on-present
   kill` kills it instead.
 - `--timeout` defaults to 1 hour; a log is capped at 64 MiB. A job never re-runs by itself.
-- Without `--cwd` a job runs in its own directory on the node. `--artifact PATH` (repeatable)
-  names a file inside that directory to fetch when the job ends; `job artifact` writes it to
-  `--out` or stdout after checking its sha256.
+- Without `--cwd` a job runs in its own directory on the node. `--cwd` is an absolute path in
+  the node's OS (`/srv/x`, `C:\dev\x` or `C:/dev/x`); the hub checks it when `--node` names a
+  node it has met, otherwise (`--arch`) the node does and the job fails there.
+- `--artifact PATH` (repeatable) names a file inside the job's directory (the `--cwd`), relative
+  or absolute for the node; it is fetched when the job ends, and `job artifact` writes it to
+  `--out` or stdout after checking its sha256. A path outside that directory is refused.
 - `job log` lags a running job by up to 10 s.
 
 A job result is the node's claim: `job show` says which node reported it.
