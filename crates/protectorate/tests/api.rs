@@ -71,16 +71,27 @@ fn api_surface() {
         ),
         ("GetNode", obj! { "node_id" => "n1" }),
         ("GetEnrollment", obj! {}),
-        (
-            "Wait",
-            obj! { "sleeve_id" => "envoy", "until" => "report", "timeout_ms" => 10 },
-        ),
     ];
     for (method, body) in unbuilt {
         let (s, v) = post(port, method, Some(&owner), &body.to_string());
         assert_eq!(s, 503, "{method}: {v}");
         assert_eq!(v["error"]["code"].as_str(), Some("unavailable"));
     }
+    let (s, v) = post(
+        port,
+        "Wait",
+        Some(&owner),
+        &obj! { "sleeve_id" => "envoy", "until" => "report", "timeout_ms" => 10 }.to_string(),
+    );
+    assert_eq!(s, 409, "wait report on Envoy: {v}");
+    assert_eq!(v["error"]["code"].as_str(), Some("conflict"));
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("Envoy does not send mail"),
+        "{v}"
+    );
     for method in ["GetJob", "GetJobLog", "CancelJob"] {
         let (s, v) = post(
             port,
