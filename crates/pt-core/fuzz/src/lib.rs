@@ -1,6 +1,7 @@
 //! Shared harness for the pt-core fuzz targets: a simulated hub (journal, group commit, executors,
 //! crashes) around `pt_core::apply`, a simulated world (which incarnations are alive), the
-//! invariant checks I1-I10 with table-driven reference transitions, and a scenario script runner
+//! invariant checks I1-I10 and the auto-continue rule with table-driven reference transitions,
+//! and a scenario script runner
 //! for the committed seeds.
 
 #![forbid(unsafe_code)]

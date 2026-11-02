@@ -31,7 +31,7 @@ fn sleeve(sim: &Sim, b: &mut Bytes) -> SleeveId {
 fn command(sim: &mut Sim, b: &mut Bytes) {
     use EventKind as E;
     let s = sleeve(sim, b);
-    let kind = match b.below(18) {
+    let kind = match b.below(19) {
         0 | 1 => {
             let parent = if b.below(3) == 0 {
                 None
@@ -143,6 +143,10 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
         16 => E::JobNodeRemoved {
             job: JobId(b.below(sim.st.next_job + 1)),
             node: NodeId(1 + b.below(3)),
+        },
+        17 => E::Continue {
+            sleeve: s,
+            text: "The previous turn was interrupted. Continue from where it stopped.".into(),
         },
         _ => E::AbandonJob {
             job: JobId(b.below(sim.st.next_job + 1)),

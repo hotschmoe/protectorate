@@ -1,4 +1,5 @@
-//! Invariants I1-I10 and the table-driven reference transitions, checked after every apply.
+//! Invariants I1-I10, the auto-continue rule, and the table-driven reference transitions,
+//! checked after every apply.
 //!
 //! The reference tables are the edges of the design doc's lifecycle and effect diagrams (with the
 //! SPEC 12a/12b corrections). One apply may take several documented edges (a crash that resumes at
@@ -339,7 +340,69 @@ pub fn step(prev: &State, st: &State, sim: &Sim) {
     }
     unsent_messages(prev, st);
     approval_steps(prev, st);
+    continue_prompts(prev, st, sim);
     invariants(st, sim);
+}
+
+/// At most one `continue:<sleeve>:<g>` prompt per generation, and only when the previous state
+/// owed it: a headless turn the previous generation was still running, not a stop or a resleeve.
+fn continue_prompts(prev: &State, st: &State, sim: &Sim) {
+    for s in st.sleeves.values() {
+        let mut gens = BTreeSet::new();
+        for e in st.effects.values() {
+            let EffectKind::SendPrompt {
+                sleeve,
+                g,
+                request_id,
+                ..
+            } = &e.kind
+            else {
+                continue;
+            };
+            if *sleeve != s.id || !request_id.starts_with("continue:") {
+                continue;
+            }
+            assert_eq!(
+                request_id,
+                &format!("continue:{}:{}", s.id.0, g.0),
+                "continue effect {} has a mismatched key",
+                e.key
+            );
+            assert!(
+                gens.insert(*g),
+                "two continue effects for {:?} g{}",
+                s.id,
+                g.0
+            );
+            if prev.effects.contains_key(&e.id) {
+                continue;
+            }
+            let ps = &prev.sleeves[&s.id];
+            assert_eq!(
+                ps.auto_continue,
+                Some(*g),
+                "continue for {:?} g{} without a debt from an interrupted turn",
+                s.id,
+                g.0
+            );
+            assert_eq!(ps.target.mode, Mode::Headless);
+            assert_eq!(
+                ps.life,
+                Life::Running,
+                "continue for {:?} g{} while {:?}",
+                s.id,
+                g.0,
+                ps.life
+            );
+            assert!(
+                g.0 >= 2 && !sim.alive.contains(&(s.id, Gen(g.0 - 1))),
+                "continue for {:?} g{} but generation {} did not die",
+                s.id,
+                g.0,
+                g.0 - 1
+            );
+        }
+    }
 }
 
 /// A message whose prompt or steer record ended while still Intent (never dispatched) is back
