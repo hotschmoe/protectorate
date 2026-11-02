@@ -568,6 +568,194 @@ fn write_script(path: &std::path::Path, body: &str) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod script");
 }
 
+#[test]
+fn scratch_survives_a_restart_and_is_removed_with_the_sleeve() {
+    let dir = unique("scratch");
+    let home = dir.join("home");
+    let fake = dir.join("claude");
+    std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
+    std::fs::write(home.join("logins/.claude/.credentials.json"), "{}").unwrap();
+    write_script(
+        &fake,
+        r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi
+if [ -f "$CARGO_TARGET_DIR/probe" ]; then echo kept > "$TMPDIR/seen"; fi
+echo build > "$CARGO_TARGET_DIR/probe"
+echo temp > "$TMPDIR/probe"
+exec sleep 300"#,
+    );
+    // Scopes are off in this test; satisfy the doctor's user-scope probe in a sleeve with no bus.
+    write_script(&dir.join("systemd-run"), "exit 0");
+    let config = pt_json::obj! {
+        "envoy" => pt_json::obj! { "harness" => "claude" },
+        "claude_program" => fake.to_str().unwrap(),
+        "scopes" => false,
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+    };
+    std::fs::write(home.join("config.json"), config.to_string()).unwrap();
+    let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
+    let mut hub = Hub::open(home, &[], &[("PATH", &path)]);
+    let repo = temp_repo("scratch");
+    let s = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "scratch",
+            "--path",
+            repo.to_str().unwrap(),
+            "--harness",
+            "claude",
+        ])
+        .json();
+    let id = s["id"].as_str().unwrap();
+    let scratch = hub.home.join(format!("sleeves/{id}/scratch"));
+    eventually("the scratch writes", Duration::from_secs(60), || {
+        scratch.join("tmp/probe").exists().then_some(())
+    });
+    assert_eq!(
+        std::fs::read_to_string(scratch.join("target/probe"))
+            .unwrap()
+            .trim(),
+        "build"
+    );
+    hub.cli(&["sleeve", "stop", "scratch"]).ok();
+    hub.wait("scratch", "ended", 60);
+    hub.cli(&["sleeve", "start", "scratch"]).ok();
+    eventually(
+        "the next incarnation to reuse scratch",
+        Duration::from_secs(60),
+        || scratch.join("tmp/seen").exists().then_some(()),
+    );
+    hub.cli(&["sleeve", "rm", "scratch"]).ok();
+    eventually(
+        "removed sleeve scratch to be deleted",
+        Duration::from_secs(60),
+        || (!scratch.exists()).then_some(()),
+    );
+    hub.kill9();
+    std::fs::create_dir_all(&scratch).unwrap();
+    std::fs::write(scratch.join("left-after-crash"), "scratch").unwrap();
+    hub.restart();
+    eventually(
+        "scratch cleanup to be retried after a hub crash",
+        Duration::from_secs(20),
+        || (!scratch.exists()).then_some(()),
+    );
+    let fs = std::process::Command::new("stat")
+        .args(["-f", "-c", "%t", "/tmp"])
+        .output()
+        .unwrap();
+    if String::from_utf8_lossy(&fs.stdout).trim() == "1021994" {
+        let memory_home =
+            std::path::PathBuf::from(format!("/tmp/pt-scratch-test-{}/home", std::process::id()));
+        std::fs::create_dir_all(memory_home.join("logins/.claude")).unwrap();
+        std::fs::write(memory_home.join("logins/.claude/.credentials.json"), "{}").unwrap();
+        std::fs::write(memory_home.join("config.json"), config.to_string()).unwrap();
+        let memory_hub = Hub::open(memory_home, &[], &[("PATH", &path)]);
+        eventually(
+            "the tmpfs hub home to be refused",
+            Duration::from_secs(60),
+            || {
+                memory_hub
+                    .log_text()
+                    .contains("is on a memory filesystem")
+                    .then_some(())
+            },
+        );
+    }
+}
+
+#[test]
+fn repeated_scope_oom_parks_and_reports_the_memory_limit() {
+    let bus = std::process::Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .output();
+    if !bus.is_ok_and(|o| o.status.success()) {
+        eprintln!("SKIP: no systemd user bus for scope OOM test");
+        return;
+    }
+    let dir = unique("oom");
+    let home = dir.join("home");
+    let fake = dir.join("claude");
+    std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
+    std::fs::write(home.join("logins/.claude/.credentials.json"), "{}").unwrap();
+    write_script(
+        &fake,
+        r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi
+g=1
+if [ -f "$HOME/g" ]; then g=$(($(cat "$HOME/g") + 1)); fi
+echo "$g" > "$HOME/g"
+touch "$CARGO_TARGET_DIR/ready$g"
+while [ ! -e "$TMPDIR/go$g" ]; do sleep 0.1; done
+exec python3 -c 'a=[]
+while True: a.append(bytearray(4*1024*1024))'"#,
+    );
+    let config = pt_json::obj! {
+        "envoy" => pt_json::obj! { "harness" => "claude" },
+        "claude_program" => fake.to_str().unwrap(),
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+    };
+    std::fs::write(home.join("config.json"), config.to_string()).unwrap();
+    let hub = Hub::open(home, &[], &[]);
+    let repo = temp_repo("oom");
+    let s = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "oom",
+            "--path",
+            repo.to_str().unwrap(),
+            "--harness",
+            "claude",
+        ])
+        .json();
+    let id = s["id"].as_str().unwrap();
+    let scratch = hub.home.join(format!("sleeves/{id}/scratch"));
+    for g in 1..=2 {
+        eventually("the test harness to start", Duration::from_secs(60), || {
+            scratch
+                .join(format!("target/ready{g}"))
+                .exists()
+                .then_some(())
+        });
+        let scope = hub.scope(id, g);
+        let status = std::process::Command::new("systemctl")
+            .args([
+                "--user",
+                "set-property",
+                "--runtime",
+                &scope,
+                "MemoryMax=96M",
+            ])
+            .status()
+            .unwrap();
+        assert!(status.success(), "set memory limit on {scope}");
+        std::thread::sleep(Duration::from_secs(1));
+        std::fs::write(scratch.join(format!("tmp/go{g}")), "go").unwrap();
+    }
+    eventually(
+        "the second OOM to park the sleeve",
+        Duration::from_secs(60),
+        || (hub.sleeve("oom")["lifecycle"].as_str() == Some("parked")).then_some(()),
+    );
+    eventually("both OOM notices", Duration::from_secs(10), || {
+        let entries = hub.transcript("oom");
+        let notices = of_type(&entries, "notice")
+            .iter()
+            .filter_map(|e| e["entry"]["text"].as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        (notices
+            .matches("guardrail G4 tripped: the memory limit")
+            .count()
+            == 2)
+            .then_some(())
+    });
+}
+
 /// A sleeve controls its repo's config and `.gitattributes` (a child, the shared git dir): the
 /// hub's checkpoint, worktree add and brief facts must run none of its filters, hooks,
 /// fsmonitor or textconv. A child path through a symlink never reaches another worktree.
