@@ -202,3 +202,26 @@ fn commit_retries_preserve_documents_and_cursors() {
         assert!(stdout.contains("rebuild=identical"), "{stdout}");
     }
 }
+
+#[test]
+fn open_sweeps_unreferenced_segments() {
+    let dir = scratch("sweep");
+    let home = dir.join("home");
+    write(
+        &home.join(".claude/projects/project/session.jsonl"),
+        "{\"type\":\"user\",\"message\":{\"content\":\"sweepmarker\"}}\n",
+    );
+    let index = dir.join("index");
+    let a = index.join("a");
+    fs::create_dir_all(&a).unwrap();
+    fs::write(a.join("seg-00000099"), b"orphan").unwrap();
+    fs::write(a.join("seg-00000001.tmp"), b"partial").unwrap();
+    fs::write(a.join("sidecar"), b"leave").unwrap();
+    let out = run(&home, &index, &["sweepmarker"], None);
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("query \"sweepmarker\": top 1"), "{stdout}");
+    assert!(!a.join("seg-00000099").exists());
+    assert!(!a.join("seg-00000001.tmp").exists());
+    assert_eq!(fs::read(a.join("sidecar")).unwrap(), b"leave");
+    assert!(a.join("manifest").is_file());
+}

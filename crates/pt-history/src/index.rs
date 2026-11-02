@@ -23,6 +23,10 @@ const FLUSH: usize = 96 << 20;
 const MAX_SEGMENTS: usize = 8;
 /// Merges never build a segment larger than this.
 const MAX_MERGE: u64 = 1 << 30;
+/// Segment bytes at which ingest stops. A later open of a fresh directory rebuilds from the logs.
+const MAX_INDEX: u64 = 1 << 30;
+/// File bytes one source contributes. The cursor stays, and further bytes of that file are not read.
+const MAX_SOURCE: u64 = 1 << 30;
 /// Docs one [`Index::read`] materializes. The hub's history read uses the same cap.
 pub const READ_DOCS: usize = 200;
 /// Source-text bytes one [`Index::read`] materializes before it reports more.
@@ -244,8 +248,40 @@ impl Index {
             let seg = ix.load(&r.file)?;
             ix.segs.push(seg);
         }
+        ix.sweep_segments()?;
         ix.recount();
         Ok(ix)
+    }
+
+    /// A crash after a segment is written, or before a merged segment is removed, leaves
+    /// `seg-*` files the manifest does not name. They are not part of the index.
+    fn sweep_segments(&self) -> io::Result<()> {
+        let keep: std::collections::HashSet<&str> =
+            self.segs.iter().map(|s| s.name.as_str()).collect();
+        let rd = fs::read_dir(&self.dir).map_err(|e| ctx(e, "read", self.dir.display()))?;
+        for ent in rd {
+            let ent = ent.map_err(|e| ctx(e, "read", self.dir.display()))?;
+            let name = ent.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            if !name.starts_with("seg-") || keep.contains(name) {
+                continue;
+            }
+            let path = ent.path();
+            let ft = ent
+                .file_type()
+                .map_err(|e| ctx(e, "stat", path.display()))?;
+            if !ft.is_file() {
+                continue;
+            }
+            fs::remove_file(&path).map_err(|e| ctx(e, "remove", path.display()))?;
+        }
+        Ok(())
+    }
+
+    fn index_bytes(&self) -> u64 {
+        self.segs.iter().map(|s| s.bytes).sum()
     }
 
     fn load(&mut self, name: &str) -> io::Result<Seg> {
@@ -336,13 +372,34 @@ impl Index {
         if opened.reset {
             self.drop_source(stored.clone(), self.next_doc);
             rec.state = fresh_state(source);
+            rec.cursor = opened.start.clone();
             self.dirty = true;
         }
         if source.kind == SourceKind::Grok && rec.state.time_ms == 0 {
             rec.state.time_ms = grok_start(&source.path).unwrap_or(0);
         }
-        let end = source.limit.unwrap_or(opened.len).min(opened.len);
+        // Caps come after the reset check: a replaced file still drops its old docs, and
+        // catch_up commits that drop when this call then refuses to read.
+        if opened.start.offset >= MAX_SOURCE && opened.len > MAX_SOURCE {
+            self.sources.insert(key, rec);
+            return Err(io::Error::other(format!(
+                "history {}: source is past its {MAX_SOURCE} byte cap",
+                source.path.display()
+            )));
+        }
+        let end = source
+            .limit
+            .unwrap_or(opened.len)
+            .min(opened.len)
+            .min(MAX_SOURCE);
         loop {
+            if opened.start.offset < end && self.index_bytes() >= MAX_INDEX {
+                self.sources.insert(key, rec);
+                return Err(io::Error::other(format!(
+                    "history {}: index is at its {MAX_INDEX} byte cap",
+                    self.dir.display()
+                )));
+            }
             let start = opened.start.offset;
             let limit = start.saturating_add(tail::WINDOW as u64).min(end);
             let mut items = Vec::new();

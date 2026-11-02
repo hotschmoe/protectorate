@@ -828,10 +828,10 @@ Each entry: where, what was done, what right looks like.
   search needs a subagent's work.
 - **Merges re-tokenize stored text** (`pt-history`, index.rs): merging two segments decodes their
   texts and builds a new one from scratch. Fast: a k-way merge of postings, if merge time shows up.
-- **Leftover segments after a crash or failed commit** (`pt-history`, index.rs): a failure after a
-  segment is written, or a crash before obsolete merged segments are removed, can leave
-  unreferenced `seg-*` files.
-  Right: sweep unreferenced segment files at open.
+- **Bytes past the history caps stay unread** (`pt-history`, index.rs): ingest stops once segments
+  reach 1 GiB, or one source has given 1 GiB. A later open of a fresh directory rebuilds from the
+  logs. The measured ratio is 1 GiB of logs to 11 MB of index. Right: raise the caps if a real
+  log needs more of the index.
 - **One source per session, decided per hub run** (`pt-hub`, history.rs): a headless session
   is in both its native log and the transcript; the native log wins once found, the transcript
   covers a session that ended without one, and the transcript waits at a live session's

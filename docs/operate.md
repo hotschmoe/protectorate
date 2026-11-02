@@ -204,6 +204,8 @@ most 200 docs, or 8 MiB of their text, and reports when the range continues. The
 derived and rebuilt in the background if it fails to open. Catch-up commits bounded batches,
 and failed commits are retried. Below each configured root, discovery and reopening ignore
 symbolic links and non-regular files. Tool paths in the index are clipped to 512 bytes.
+Ingest stops at 1 GiB of segments or 1 GiB from one log; bytes past that stay unread until the
+index is rebuilt. Opening the index removes segment files the manifest does not name.
 
 ## Events
 
