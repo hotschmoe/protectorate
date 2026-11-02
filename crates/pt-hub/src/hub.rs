@@ -2,7 +2,7 @@
 //! event bus and devices.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -95,6 +95,8 @@ pub struct Hub {
     /// Where `serve` waits; an update sends `Stop::Restart` here.
     pub stop: Mutex<Option<Sender<Stop>>>,
     input: Sender<Input>,
+    /// Inputs sent to the core and not yet taken into a batch.
+    pub(crate) input_depth: AtomicU64,
     view: Mutex<Arc<View>>,
 }
 
@@ -160,6 +162,7 @@ impl Hub {
             update_lock: Mutex::new(()),
             stop: Mutex::new(None),
             input,
+            input_depth: AtomicU64::new(0),
             view: Mutex::new(Arc::new(view)),
         }
     }
@@ -172,9 +175,17 @@ impl Hub {
         *lock(&self.view) = v;
     }
 
+    /// Counted before the send, so the core's count of what it took never passes it.
+    fn send(&self, input: Input) -> Result<(), ()> {
+        self.input_depth.fetch_add(1, Ordering::Relaxed);
+        self.input.send(input).map_err(|_| {
+            self.input_depth.fetch_sub(1, Ordering::Relaxed);
+        })
+    }
+
     /// Feeds an event to the core without waiting for its effect.
     pub fn submit(&self, kind: EventKind) {
-        if self.input.send(Input::Event { kind, reply: None }).is_err() {
+        if self.send(Input::Event { kind, reply: None }).is_err() {
             debug!("core is gone; dropped an event");
         }
     }
@@ -207,12 +218,11 @@ impl Hub {
     /// command is journaled.
     pub fn command(&self, kind: EventKind, timeout: Duration) -> Result<Reply, CommandError> {
         let (tx, rx) = mpsc::channel();
-        self.input
-            .send(Input::Event {
-                kind,
-                reply: Some(tx),
-            })
-            .map_err(|_| CommandError::Down)?;
+        self.send(Input::Event {
+            kind,
+            reply: Some(tx),
+        })
+        .map_err(|_| CommandError::Down)?;
         rx.recv_timeout(timeout).map_err(|e| match e {
             mpsc::RecvTimeoutError::Timeout => CommandError::Timeout,
             mpsc::RecvTimeoutError::Disconnected => CommandError::Down,
@@ -221,8 +231,7 @@ impl Hub {
 
     pub fn snapshot_journal(&self, dir: PathBuf) -> Result<JournalSnapshot, String> {
         let (tx, rx) = mpsc::channel();
-        self.input
-            .send(Input::Snapshot { dir, reply: tx })
+        self.send(Input::Snapshot { dir, reply: tx })
             .map_err(|_| "core is down".to_string())?;
         rx.recv()
             .map_err(|_| "core stopped while snapshotting the journal".to_string())?

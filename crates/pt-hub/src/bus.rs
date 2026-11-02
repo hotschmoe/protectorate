@@ -364,15 +364,18 @@ impl Bus {
     pub fn since(&self, after: u64, wait: Duration) -> Since {
         self.wait_after(after, Instant::now() + wait);
         let r = lock(&self.ring);
-        if r.items.front().is_some_and(|i| i.pos > after + 1) {
+        let Some(front) = r.items.front().map(|i| i.pos) else {
+            return Since::Items(Vec::new());
+        };
+        if front > after + 1 {
             return Since::Gap;
         }
-        Since::Items(
-            r.items
-                .iter()
-                .filter(|i| i.pos > after && i.pos <= r.durable)
-                .cloned()
-                .collect(),
-        )
+        // Positions are contiguous, so a position's index is its distance from the front.
+        let start = (after + 1 - front) as usize;
+        let end = ((r.durable + 1).saturating_sub(front) as usize).min(r.items.len());
+        if start >= end {
+            return Since::Items(Vec::new());
+        }
+        Since::Items(r.items.range(start..end).cloned().collect())
     }
 }

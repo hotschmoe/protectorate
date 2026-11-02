@@ -1,11 +1,14 @@
 //! Per-sleeve transcript: an append-only JSONL file of the drivers' normalized entries with a
-//! monotonic seq and the hub's turn number, plus an in-memory tail. Streaming text deltas never
-//! reach the file; the final block does. `wire::chat_entry` turns a line into the API's entry.
+//! monotonic seq and the hub's turn number. Streaming text deltas never reach the file; the
+//! final block does. `wire::chat_entry` turns a line into the API's entry. Reads run on the file
+//! outside every lock, up to the length it had when they started: the latest entries from the
+//! end back, older ones from the start.
 
 use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::path::PathBuf;
+use std::ops::ControlFlow;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use pt_api::{Harness, Level};
@@ -16,7 +19,8 @@ use pt_json::ToJson;
 use crate::home::Home;
 use crate::lock::lock;
 
-const TAIL: usize = 4096;
+/// What a backward read takes from the file at a time, more when one line is longer.
+const CHUNK: u64 = 64 * 1024;
 
 pt_json::record! {
     /// One stored entry. `harness` is set on `session_info` (the drivers say only `pi`), `level`
@@ -84,32 +88,79 @@ impl Stats {
 
 pub struct Store {
     path: PathBuf,
-    file: File,
+    /// None once the sleeve is removed: a late entry opens the file for its one write.
+    file: Option<File>,
     next_seq: u64,
     turn: u64,
-    tail: VecDeque<Line>,
     pub stats: Stats,
 }
 
-fn ctx(path: &std::path::Path) -> impl Fn(io::Error) -> io::Error + '_ {
+fn ctx(path: &Path) -> impl Fn(io::Error) -> io::Error + '_ {
     move |e| io::Error::new(e.kind(), format!("transcript {}: {e}", path.display()))
 }
 
-/// Every entry in the file, skipping a torn or corrupt line (a crash mid-write).
-fn read_all(path: &std::path::Path) -> io::Result<Vec<Line>> {
-    let f = match File::open(path) {
+/// Each entry in the first `len` bytes of the file, in order, until `f` breaks. A torn or
+/// corrupt line (a crash mid-write) is skipped.
+fn scan(path: &Path, len: u64, mut f: impl FnMut(Line) -> ControlFlow<()>) -> io::Result<()> {
+    let file = match File::open(path) {
         Ok(f) => f,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(ctx(path)(e)),
     };
-    let mut out = Vec::new();
-    for line in BufReader::new(f).split(b'\n') {
-        let line = line.map_err(ctx(path))?;
-        if let Ok(e) = pt_json::from_bytes::<Line>(&line) {
-            out.push(e);
+    let mut r = BufReader::new(file.take(len));
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        if r.read_until(b'\n', &mut line).map_err(ctx(path))? == 0 {
+            return Ok(());
+        }
+        if line.last() == Some(&b'\n') {
+            line.pop();
+        }
+        if let Ok(e) = pt_json::from_bytes::<Line>(&line)
+            && f(e).is_break()
+        {
+            return Ok(());
         }
     }
-    Ok(out)
+}
+
+/// Each entry in the first `len` bytes of the file, from the last to the first, until `f`
+/// breaks. It skips the lines `scan` skips.
+fn rscan(path: &Path, len: u64, mut f: impl FnMut(Line) -> ControlFlow<()>) -> io::Result<()> {
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(ctx(path)(e)),
+    };
+    // The bytes from `pos` up to the end of the lines not read yet; the first line in it is
+    // whole only at `pos` 0.
+    let mut pos = len;
+    let mut buf = Vec::new();
+    loop {
+        if let Some(i) = buf.iter().rposition(|b| *b == b'\n') {
+            if let Ok(e) = pt_json::from_bytes::<Line>(&buf[i + 1..])
+                && f(e).is_break()
+            {
+                return Ok(());
+            }
+            buf.truncate(i);
+            continue;
+        }
+        if pos == 0 {
+            if let Ok(e) = pt_json::from_bytes::<Line>(&buf) {
+                let _ = f(e);
+            }
+            return Ok(());
+        }
+        let n = CHUNK.max(buf.len() as u64).min(pos);
+        pos -= n;
+        let mut chunk = vec![0; n as usize];
+        file.seek(SeekFrom::Start(pos)).map_err(ctx(path))?;
+        file.read_exact(&mut chunk).map_err(ctx(path))?;
+        chunk.extend_from_slice(&buf);
+        buf = chunk;
+    }
 }
 
 impl Store {
@@ -117,14 +168,14 @@ impl Store {
         if let Some(dir) = path.parent() {
             fs::create_dir_all(dir).map_err(ctx(&path))?;
         }
-        let all = read_all(&path)?;
         let mut stats = Stats::default();
-        for e in &all {
-            stats.fold(e);
-        }
-        let next_seq = all.last().map_or(1, |e| e.seq + 1);
-        let turn = all.last().map_or(0, |e| e.turn);
-        let tail: VecDeque<Line> = all.into_iter().rev().take(TAIL).rev().collect();
+        let (mut next_seq, mut turn) = (1, 0);
+        scan(&path, u64::MAX, |e| {
+            stats.fold(&e);
+            next_seq = e.seq + 1;
+            turn = e.turn;
+            ControlFlow::Continue(())
+        })?;
         let mut file = OpenOptions::new()
             .create(true)
             .read(true)
@@ -143,10 +194,9 @@ impl Store {
         }
         Ok(Store {
             path,
-            file,
+            file: Some(file),
             next_seq,
             turn,
-            tail,
             stats,
         })
     }
@@ -176,50 +226,29 @@ impl Store {
         };
         let mut line = e.to_json().to_string();
         line.push('\n');
-        self.file
-            .write_all(line.as_bytes())
-            .map_err(ctx(&self.path))?;
+        match &mut self.file {
+            Some(f) => f.write_all(line.as_bytes()),
+            None => OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)
+                .and_then(|mut f| f.write_all(line.as_bytes())),
+        }
+        .map_err(ctx(&self.path))?;
         self.next_seq += 1;
         self.turn = e.turn;
         self.stats.fold(&e);
-        if self.tail.len() == TAIL {
-            self.tail.pop_front();
-        }
-        self.tail.push_back(e.clone());
         Ok(e)
     }
 
-    /// Entries with seq greater than `after`, at most `limit`.
-    pub fn after(&self, after: u64, limit: usize) -> io::Result<Vec<Line>> {
-        let in_tail = self.tail.front().is_none_or(|f| f.seq <= after + 1);
-        if in_tail {
-            return Ok(self
-                .tail
-                .iter()
-                .filter(|e| e.seq > after)
-                .take(limit)
-                .cloned()
-                .collect());
+    /// The file's length: every line before it was written whole by an append under this lock,
+    /// or is a crash's torn line that reads skip.
+    fn len(&self) -> io::Result<u64> {
+        match fs::metadata(&self.path) {
+            Ok(m) => Ok(m.len()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(0),
+            Err(e) => Err(ctx(&self.path)(e)),
         }
-        Ok(read_all(&self.path)?
-            .into_iter()
-            .filter(|e| e.seq > after)
-            .take(limit)
-            .collect())
-    }
-
-    /// The last `n` entries.
-    pub fn last(&self, n: usize) -> io::Result<Vec<Line>> {
-        let after = self.next_seq.saturating_sub(n as u64 + 1);
-        self.after(after, n)
-    }
-
-    /// The whole transcript, for the continuation brief.
-    pub fn all(&self) -> io::Result<Vec<Line>> {
-        if self.tail.front().is_none_or(|f| f.seq == 1) {
-            return Ok(self.tail.iter().cloned().collect());
-        }
-        read_all(&self.path)
     }
 }
 
@@ -237,23 +266,108 @@ impl Transcripts {
     }
 
     pub fn get(&self, id: SleeveId) -> io::Result<Arc<Mutex<Store>>> {
-        let mut map = lock(&self.map);
-        if let Some(s) = map.get(&id) {
+        if let Some(s) = lock(&self.map).get(&id) {
             return Ok(s.clone());
         }
+        // Opening reads the whole file, so not under the map lock. The loser of a racing open
+        // is dropped unused; its only write was a newline, and reads skip an empty line.
         let s = Arc::new(Mutex::new(Store::open(self.home.transcript(id))?));
-        map.insert(id, s.clone());
-        Ok(s)
+        Ok(lock(&self.map).entry(id).or_insert(s).clone())
     }
 
-    /// Drops a removed sleeve's open transcript; a later read opens it again.
+    /// Closes a removed sleeve's file. The store stays, so an entry its ending pump still
+    /// records takes the next seq: a store opened again would count seqs from the file while
+    /// the old one was still appending.
     pub fn close(&self, id: SleeveId) {
-        lock(&self.map).remove(&id);
+        let Some(store) = lock(&self.map).get(&id).cloned() else {
+            return;
+        };
+        lock(&store).file = None;
     }
 
     pub fn stats(&self, id: SleeveId) -> Stats {
         self.get(id)
             .map(|s| lock(&s).stats.clone())
             .unwrap_or_default()
+    }
+
+    /// Entries with seq greater than `after`, at most `limit`, oldest first.
+    pub fn after(&self, id: SleeveId, after: u64, limit: usize) -> io::Result<Vec<Line>> {
+        self.page(id, |_| after, limit)
+    }
+
+    /// The last `n` entries, oldest first.
+    pub fn last(&self, id: SleeveId, n: usize) -> io::Result<Vec<Line>> {
+        self.page(id, |next_seq| next_seq.saturating_sub(n as u64 + 1), n)
+    }
+
+    /// The whole transcript.
+    pub fn all(&self, id: SleeveId) -> io::Result<Vec<Line>> {
+        let mut out = Vec::new();
+        self.scan(id, |e| {
+            out.push(e);
+            ControlFlow::Continue(())
+        })?;
+        Ok(out)
+    }
+
+    /// Each entry from the first, until `f` breaks.
+    pub fn scan(&self, id: SleeveId, f: impl FnMut(Line) -> ControlFlow<()>) -> io::Result<()> {
+        let (path, len, _) = self.cut(id)?;
+        scan(&path, len, f)
+    }
+
+    /// Each entry from the last back, until `f` breaks.
+    pub fn rscan(&self, id: SleeveId, f: impl FnMut(Line) -> ControlFlow<()>) -> io::Result<()> {
+        let (path, len, _) = self.cut(id)?;
+        rscan(&path, len, f)
+    }
+
+    /// The file, its length and the next seq: what a read outside the store lock may see.
+    fn cut(&self, id: SleeveId) -> io::Result<(PathBuf, u64, u64)> {
+        let store = self.get(id)?;
+        let s = lock(&store);
+        Ok((s.path.clone(), s.len()?, s.next_seq))
+    }
+
+    /// Entries with seq greater than what `after` makes of the next seq, at most `limit`.
+    /// Seqs ascend through the file, so a page in its newer half is read from the end back down
+    /// to `after`, keeping the oldest `limit`, and an older one from the start up to `limit`.
+    fn page(
+        &self,
+        id: SleeveId,
+        after: impl FnOnce(u64) -> u64,
+        limit: usize,
+    ) -> io::Result<Vec<Line>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let (path, len, next_seq) = self.cut(id)?;
+        let after = after(next_seq);
+        let mut out = VecDeque::new();
+        if after.saturating_mul(2) >= next_seq {
+            rscan(&path, len, |e| {
+                if e.seq <= after {
+                    return ControlFlow::Break(());
+                }
+                if out.len() == limit {
+                    out.pop_back();
+                }
+                out.push_front(e);
+                ControlFlow::Continue(())
+            })?;
+        } else {
+            scan(&path, len, |e| {
+                if e.seq > after {
+                    out.push_back(e);
+                }
+                if out.len() == limit {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            })?;
+        }
+        Ok(out.into())
     }
 }

@@ -3083,3 +3083,120 @@ fn serve_pid(home: &std::path::Path) -> u32 {
         })
         .expect("the hub's serve process")
 }
+
+/// A transcript longer than any page, with a crash's torn line mid-file, a corrupt line and a
+/// torn last line: pages from the start, the middle and the end skip exactly the broken lines,
+/// and the next entry would start on a line of its own. A vendor agent reads only the turn it
+/// started.
+#[test]
+fn transcript_pages_skip_torn_and_corrupt_lines() {
+    // No model: Envoy parks before the stop, so the hub adds nothing to its transcript.
+    let mut hub = Hub::start_config(
+        "tpages",
+        "pi_local",
+        &[
+            ("scopes", pt_json::Value::from(false)),
+            ("pi_local_provider", pt_json::Value::from("")),
+        ],
+        &[],
+        &[],
+    );
+    let id = eventually("envoy parked", Duration::from_secs(60), || {
+        let s = hub.sleeve("envoy");
+        (s["lifecycle"].as_str() == Some("parked")).then(|| s["id"].as_str().unwrap().to_string())
+    });
+    let agent = hub.printed("envoy-only token: ");
+    hub.stop();
+    let path = hub.home.join(format!("sleeves/{id}/transcript.jsonl"));
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let (asked, answered, settled) = (5990u64, 5991u64, 5992u64);
+    let line = |seq: u64| {
+        let entry = match seq {
+            s if s == asked => {
+                r#"{"type":"user_message","request_id":"ga:grokbot-1","from":"owner","text":"q"}"#
+                    .to_string()
+            }
+            s if s == answered => {
+                r#"{"type":"assistant_text","id":"a","text":"agent answer","final":true}"#
+                    .to_string()
+            }
+            s if s == settled => {
+                r#"{"type":"turn_settled","stop":"end_turn","usage":{}}"#.to_string()
+            }
+            _ => format!(
+                r#"{{"type":"user_message","request_id":"fixture-{seq}","from":"owner","text":"line {seq}"}}"#
+            ),
+        };
+        format!(r#"{{"seq":{seq},"g":1,"time_ms":{seq},"entry":{entry}}}"#)
+    };
+    let n = 6000u64;
+    let (torn, corrupt) = (1234u64, 5500u64);
+    let mut text = String::new();
+    for seq in 1..=n {
+        let l = line(seq);
+        match seq {
+            s if s == torn => text.push_str(&l[..l.len() / 2]),
+            s if s == corrupt => text.push_str("{\"seq\":5500,"),
+            _ => text.push_str(&l),
+        }
+        text.push('\n');
+    }
+    let last = line(n + 1);
+    text.push_str(&last[..last.len() / 2]);
+    std::fs::write(&path, text).unwrap();
+    hub.restart();
+
+    let page = |args: &[&str]| {
+        let mut all = vec!["--json", "sleeve", "transcript", "envoy"];
+        all.extend_from_slice(args);
+        let v = hub.cli(&all).json();
+        let seqs: Vec<u64> = v["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["seq"].as_u64().unwrap())
+            .collect();
+        (seqs, v["more"].as_bool().unwrap_or(false))
+    };
+    let want: Vec<u64> = (1..=n).filter(|s| *s != torn && *s != corrupt).collect();
+    let (every, _) = page(&["--limit", "10000"]);
+    assert_eq!(every, want, "every whole line");
+    assert_eq!(
+        std::fs::read(&path).unwrap().last(),
+        Some(&b'\n'),
+        "opening the transcript ended the torn last line"
+    );
+    let (latest, more) = page(&["--limit", "2000"]);
+    assert!(!more);
+    assert_eq!(latest[..], every[every.len() - 1999..], "the latest page");
+    assert_eq!(
+        page(&["--from", "1", "--limit", "5"]),
+        (vec![1, 2, 3, 4, 5], true),
+        "the first page"
+    );
+    assert_eq!(
+        page(&["--from", "1231", "--limit", "5"]),
+        (vec![1231, 1232, 1233, 1235, 1236], true),
+        "a page across the torn line"
+    );
+    assert_eq!(
+        page(&["--from", "5498", "--limit", "3"]),
+        (vec![5498, 5499, 5501], true),
+        "a page across the corrupt line"
+    );
+
+    let v = hub
+        .cli_env(
+            &[("PROTECTORATE_TOKEN", agent.as_str())],
+            &["--json", "envoy", "read", "--limit", "2"],
+        )
+        .json();
+    let seqs: Vec<u64> = v["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["seq"].as_u64().unwrap())
+        .collect();
+    assert_eq!(seqs, [asked, answered], "{v}");
+    assert_eq!(v["more"].as_bool(), Some(true), "{v}");
+}

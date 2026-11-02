@@ -6,11 +6,12 @@
 //! systemd-run) that the harness argv is appended to.
 //!
 //! ```text
-//! let (session, events) = pt_drivers::spawn(spec)?;
+//! let (tx, events) = mpsc::channel::<Event>();   // or any type that is From<Event>
+//! let session = pt_drivers::spawn(spec, tx)?;
 //! // wait for Entry::SessionInfo, then:
 //! session.send_user("req-1", "owner", PromptKind::Prompt, "hello")?;
 //! match session.wait_ack("req-1", timeout) { Ack::Confirmed { .. } => .., .. }
-//! for event in events { .. }                    // ends after Entry::Exited
+//! for event in events { .. }                    // Entry::Exited is the last
 //! ```
 //!
 //! Ordering: `Entry::UserMessage` for a request enters the stream once its line is written

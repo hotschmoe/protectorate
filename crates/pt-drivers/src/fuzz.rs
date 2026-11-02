@@ -78,7 +78,7 @@ pub fn fuzz_feed(harness: Harness, input: &[u8]) -> usize {
                 check.sent.insert(req, verb == "steer");
             }
         } else {
-            session::handle_line(proto.as_mut(), &mut out, harness, line);
+            session::handle_line(proto.as_mut(), &mut out, harness, session::parse_line(line));
         }
         for event in out.events.drain(..) {
             let text = pt_json::ToJson::to_json(&event).to_string();

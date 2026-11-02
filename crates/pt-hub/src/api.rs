@@ -2,6 +2,7 @@
 //! of pt-api's table. Commands become core events whose replies come back after the journal
 //! fsync; reads use the published view.
 
+use std::ops::ControlFlow;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -256,18 +257,17 @@ fn transcript(
     limit: Option<u64>,
 ) -> Result<api::Transcript> {
     let limit = limit.unwrap_or(TRANSCRIPT_DEFAULT).clamp(1, TRANSCRIPT_MAX) as usize;
-    let store = hub.transcripts.get(id).map_err(internal)?;
-    let store = lock(&store);
     let (lines, more) = match from {
         Some(f) => {
-            let mut l = store
-                .after(f.saturating_sub(1), limit + 1)
+            let mut l = hub
+                .transcripts
+                .after(id, f.saturating_sub(1), limit + 1)
                 .map_err(internal)?;
             let more = l.len() > limit;
             l.truncate(limit);
             (l, more)
         }
-        None => (store.last(limit).map_err(internal)?, false),
+        None => (hub.transcripts.last(id, limit).map_err(internal)?, false),
     };
     Ok(api::Transcript {
         sleeve_id: id.0.to_string(),
@@ -1758,8 +1758,6 @@ fn agent_transcript(
     limit: Option<u64>,
 ) -> Result<api::Transcript> {
     let limit = limit.unwrap_or(TRANSCRIPT_DEFAULT).clamp(1, TRANSCRIPT_MAX) as usize;
-    let store = hub.transcripts.get(id).map_err(internal)?;
-    let lines = lock(&store).all().map_err(internal)?;
     let view = hub.view();
     let from_agent = |r: &str| {
         view.state
@@ -1768,31 +1766,38 @@ fn agent_transcript(
             .is_some_and(|m| m.from == Party::Agent)
     };
     let mut agent = false;
-    let mut shown = lines.iter().filter(|l| {
-        let keep = match &l.entry {
-            Entry::UserMessage {
-                kind: PromptKind::Continuation,
-                ..
-            } => false,
-            Entry::UserMessage { request_id, .. } => {
-                agent = from_agent(request_id);
-                agent
+    let mut entries = Vec::new();
+    let mut more = false;
+    hub.transcripts
+        .scan(id, |l| {
+            let keep = match &l.entry {
+                Entry::UserMessage {
+                    kind: PromptKind::Continuation,
+                    ..
+                } => false,
+                Entry::UserMessage { request_id, .. } => {
+                    agent = from_agent(request_id);
+                    agent
+                }
+                Entry::AssistantText { .. } => agent,
+                Entry::TurnSettled { .. } => std::mem::replace(&mut agent, false),
+                _ => false,
+            };
+            if !keep || l.seq < from {
+                return ControlFlow::Continue(());
             }
-            Entry::AssistantText { .. } => agent,
-            Entry::TurnSettled { .. } => std::mem::replace(&mut agent, false),
-            _ => false,
-        };
-        keep && l.seq >= from
-    });
-    let entries: Vec<_> = shown
-        .by_ref()
-        .take(limit)
-        .map(|l| wire::chat_entry(id, l, false))
-        .collect();
+            if entries.len() == limit {
+                more = true;
+                return ControlFlow::Break(());
+            }
+            entries.push(wire::chat_entry(id, &l, false));
+            ControlFlow::Continue(())
+        })
+        .map_err(internal)?;
     Ok(api::Transcript {
         sleeve_id: id.0.to_string(),
         entries,
-        more: shown.next().is_some(),
+        more,
     })
 }
 
@@ -1805,14 +1810,22 @@ fn get_envoy_token(c: &Ctx<'_>, _: api::Empty) -> Result<api::EnvoyToken> {
 /// The assistant text of the turn that answered `request_id`, with the last seq read, once that
 /// turn settled (or, with `idle`, whatever it said before the sleeve went idle).
 fn answer(hub: &Hub, id: SleeveId, request_id: &str, idle: bool) -> Option<(String, u64)> {
-    let store = hub.transcripts.get(id).ok()?;
-    let lines = lock(&store).all().ok()?;
-    let start = lines.iter().rposition(
-        |e| matches!(&e.entry, Entry::UserMessage { request_id: r, .. } if r == request_id),
-    )?;
+    // The lines after the message, newest first.
+    let mut after = Vec::new();
+    let mut start = None;
+    hub.transcripts
+        .rscan(id, |e| {
+            if matches!(&e.entry, Entry::UserMessage { request_id: r, .. } if r == request_id) {
+                start = Some(e.seq);
+                return ControlFlow::Break(());
+            }
+            after.push(e);
+            ControlFlow::Continue(())
+        })
+        .ok()?;
+    let mut seq = start?;
     let mut text = Vec::new();
-    let mut seq = lines[start].seq;
-    for e in &lines[start + 1..] {
+    for e in after.iter().rev() {
         match &e.entry {
             Entry::AssistantText { text: t, .. } => text.push(t.clone()),
             Entry::TurnSettled { .. } => return Some((text.join("\n"), e.seq)),
@@ -1845,12 +1858,16 @@ fn latest_from(hub: &Hub, view: &View, id: SleeveId, party: Party) -> Result<Str
     if let Some((r, _)) = sending {
         return Ok(r.clone());
     }
-    let store = hub.transcripts.get(id).map_err(internal)?;
-    let lines = lock(&store).all().map_err(internal)?;
-    let from_log = lines.iter().rev().find_map(|e| match &e.entry {
-        Entry::UserMessage { request_id, .. } if mine(request_id) => Some(request_id.clone()),
-        _ => None,
-    });
+    let mut from_log = None;
+    hub.transcripts
+        .rscan(id, |e| match e.entry {
+            Entry::UserMessage { request_id, .. } if mine(&request_id) => {
+                from_log = Some(request_id);
+                ControlFlow::Break(())
+            }
+            _ => ControlFlow::Continue(()),
+        })
+        .map_err(internal)?;
     from_log.ok_or_else(|| err(ErrorCode::NotFound, "no message from you to wait for"))
 }
 

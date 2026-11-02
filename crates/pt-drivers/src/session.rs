@@ -52,7 +52,7 @@ struct Shared {
 struct Core {
     proto: Box<dyn Protocol>,
     out: Out,
-    events: Sender<Event>,
+    events: Box<dyn Fn(Event) + Send>,
     stdin: Option<Sender<Queued>>,
     /// Bytes handed to the writer and not yet written.
     queued: usize,
@@ -125,7 +125,7 @@ impl Core {
                 Entry::SessionInfo { native_id, .. } => self.native_id = Some(native_id.clone()),
                 _ => {}
             }
-            let _ = self.events.send(event);
+            (self.events)(event);
         }
         ok && !self.out.refused
     }
@@ -142,8 +142,12 @@ impl Shared {
     }
 }
 
-/// Starts the harness. Events arrive on the receiver until `Entry::Exited`, which is last.
-pub fn spawn(mut spec: SpawnSpec) -> Result<(Session, Receiver<Event>), DriverError> {
+/// Starts the harness. Events arrive on `events`, wrapped in the caller's own message type,
+/// until `Entry::Exited`, which is last.
+pub fn spawn<E: From<Event> + Send + 'static>(
+    mut spec: SpawnSpec,
+    events: Sender<E>,
+) -> Result<Session, DriverError> {
     let effort_note = vet_effort(&mut spec);
     let (args, mut proto) = plan(&spec, &mut crate::emit::new_uuid)?;
     let mut cmd = match spec.prefix.take() {
@@ -181,7 +185,6 @@ pub fn spawn(mut spec: SpawnSpec) -> Result<(Session, Receiver<Event>), DriverEr
         });
     };
 
-    let (events_tx, events_rx) = mpsc::channel();
     let (stdin_tx, stdin_rx) = mpsc::channel::<Queued>();
     let mut out = Out::new(spec.g);
     if let Some(note) = effort_note {
@@ -192,7 +195,9 @@ pub fn spawn(mut spec: SpawnSpec) -> Result<(Session, Receiver<Event>), DriverEr
         core: Mutex::new(Core {
             proto,
             out,
-            events: events_tx,
+            events: Box::new(move |e| {
+                let _ = events.send(E::from(e));
+            }),
             stdin: Some(stdin_tx),
             queued: 0,
             acks: HashMap::new(),
@@ -234,14 +239,11 @@ pub fn spawn(mut spec: SpawnSpec) -> Result<(Session, Receiver<Event>), DriverEr
         .spawn(move || wait_exit(&waiter, &stdout_done_rx))
         .map_err(fail)?;
 
-    Ok((
-        Session {
-            shared,
-            harness,
-            pid,
-        },
-        events_rx,
-    ))
+    Ok(Session {
+        shared,
+        harness,
+        pid,
+    })
 }
 
 /// A thread failed to start after the child did: kill and reap the child, and close the
@@ -341,6 +343,8 @@ fn read_stdout(shared: &Shared, harness: Harness, stdout: impl Read) {
     let mut buf = Vec::new();
     loop {
         let line = read_line(&mut reader, &mut buf, MAX_LINE);
+        // Parsed before the lock: a multi-MB tool result must not hold up `send_user`.
+        let record = matches!(line, Ok(Line::Data)).then(|| parse_line(&buf));
         let mut core = lock(&shared.core);
         match line {
             Ok(Line::Eof) | Err(_) => break,
@@ -350,7 +354,12 @@ fn read_stdout(shared: &Shared, harness: Harness, stdout: impl Read) {
             ),
             Ok(Line::Data) => {
                 let core = &mut *core;
-                handle_line(core.proto.as_mut(), &mut core.out, harness, &buf);
+                handle_line(
+                    core.proto.as_mut(),
+                    &mut core.out,
+                    harness,
+                    record.flatten(),
+                );
             }
         }
         shared.release(&mut core);
@@ -359,15 +368,29 @@ fn read_stdout(shared: &Shared, harness: Harness, stdout: impl Read) {
     }
 }
 
-/// One stdout record: parsed and mapped, or counted as stray output.
-pub(crate) fn handle_line(proto: &mut dyn Protocol, out: &mut Out, harness: Harness, line: &[u8]) {
+/// One stdout record parsed: none for a blank line, else a JSON object or the stray line.
+pub(crate) fn parse_line(line: &[u8]) -> Option<Result<pt_json::Value, String>> {
     let line = line.strip_suffix(b"\r").unwrap_or(line);
     if line.iter().all(u8::is_ascii_whitespace) {
-        return;
+        return None;
     }
-    match pt_json::parse_bytes(line) {
-        Ok(msg) if msg.as_object().is_some() => proto.on_message(msg, out),
-        _ => out.stray_line(harness.as_str(), &String::from_utf8_lossy(line)),
+    Some(match pt_json::parse_bytes(line) {
+        Ok(msg) if msg.as_object().is_some() => Ok(msg),
+        _ => Err(String::from_utf8_lossy(line).into_owned()),
+    })
+}
+
+/// One parsed stdout record: mapped, or counted as stray output.
+pub(crate) fn handle_line(
+    proto: &mut dyn Protocol,
+    out: &mut Out,
+    harness: Harness,
+    record: Option<Result<pt_json::Value, String>>,
+) {
+    match record {
+        None => {}
+        Some(Ok(msg)) => proto.on_message(msg, out),
+        Some(Err(line)) => out.stray_line(harness.as_str(), &line),
     }
 }
 
