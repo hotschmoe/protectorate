@@ -141,7 +141,7 @@ pub fn run_now(hub: &Hub) -> Arc<Report> {
 fn announce(hub: &Hub, before: Option<&Report>, now: &Report) {
     let old: &[String] = before.map_or(&[], |b| &b.problems);
     for p in now.problems.iter().filter(|p| !old.contains(p)) {
-        hub.event(
+        hub.bus.event(
             Kind::Hub,
             Level::Warn,
             "doctor",
@@ -150,7 +150,7 @@ fn announce(hub: &Hub, before: Option<&Report>, now: &Report) {
         );
     }
     for p in old.iter().filter(|p| !now.problems.contains(p)) {
-        hub.event(
+        hub.bus.event(
             Kind::Hub,
             Level::Info,
             "doctor",
@@ -186,7 +186,7 @@ fn unpark_envoy(hub: &Hub, report: &Report) {
         return;
     }
     lock(&hub.doctor.gated).remove(&id);
-    hub.event(
+    hub.bus.event(
         Kind::Sleeve,
         Level::Info,
         ENVOY,
@@ -298,7 +298,7 @@ pub fn gate_launch(hub: &Hub, id: SleeveId, name: &str, h: Harness) -> Result<()
             } else {
                 "it resleeves to an eligible harness or parks"
             };
-            hub.event(
+            hub.bus.event(
                 Kind::Sleeve,
                 Level::Alarm,
                 name,

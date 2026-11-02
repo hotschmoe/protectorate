@@ -461,7 +461,7 @@ impl JobExec {
             }
             Err(e) => {
                 error!("node {}: spawn executor: {e}", node.0);
-                crate::exec::refuse(&self.hub, intent, &format!("spawn executor: {e}"));
+                self.hub.refuse(intent, &format!("spawn executor: {e}"));
             }
         }
     }

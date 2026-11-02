@@ -7,8 +7,8 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use pt_api::{EpochMs, EventKind as ApiEventKind, HubEvent, HubStreamMessage, Level};
-use pt_core::{EventKind, Gen, Party, Reply, SleeveId, State};
+use pt_api::HubStreamMessage;
+use pt_core::{EventKind, Gen, Intent, Party, ProbeResult, Reply, SleeveId, State};
 use pt_drivers::Entry;
 
 use crate::bus::Bus;
@@ -77,6 +77,13 @@ pub struct EnvoyTurn {
     pub spawns: u64,
 }
 
+/// Why `serve` returns.
+pub enum Stop {
+    Signal(i32),
+    /// Exit for the service manager to start `releases/current`.
+    Restart(String),
+}
+
 pub struct Hub {
     pub home: Home,
     pub config: Config,
@@ -99,7 +106,7 @@ pub struct Hub {
     /// Hub and node updates, one at a time.
     pub update_lock: Mutex<()>,
     /// Where `serve` waits; an update sends `Stop::Restart` here.
-    pub stop: Mutex<Option<Sender<crate::update::Stop>>>,
+    pub stop: Mutex<Option<Sender<Stop>>>,
     input: Sender<Input>,
     view: Mutex<Arc<View>>,
 }
@@ -182,6 +189,30 @@ impl Hub {
     pub fn submit(&self, kind: EventKind) {
         if self.input.send(Input::Event { kind, reply: None }).is_err() {
             debug!("core is gone; dropped an event");
+        }
+    }
+
+    /// Answers an intent no executor will run: an effect is refused, a probe cannot tell.
+    pub fn refuse(&self, intent: Intent, why: &str) {
+        match intent {
+            Intent::Execute {
+                effect, attempt, ..
+            } => {
+                self.submit(EventKind::Dispatched { effect, attempt });
+                self.submit(EventKind::Nacked {
+                    effect,
+                    attempt,
+                    reason: why.to_string(),
+                });
+            }
+            Intent::Probe {
+                effect, attempt, ..
+            } => self.submit(EventKind::Probed {
+                effect,
+                attempt,
+                result: ProbeResult::Unknowable,
+            }),
+            other => debug!("dropped {other:?}: {why}"),
         }
     }
 
@@ -269,24 +300,6 @@ impl Hub {
             seq,
             sleeve_id: id.0.to_string(),
             entry,
-        });
-    }
-
-    /// Streams a line of the mail and events log.
-    pub fn event(&self, kind: ApiEventKind, level: Level, source: &str, target: &str, text: &str) {
-        let at = EpochMs(now_ms());
-        self.bus.push(|seq| HubStreamMessage::Event {
-            seq,
-            event: HubEvent {
-                seq,
-                at_ms: at,
-                kind,
-                source: source.to_string(),
-                target: Some(target.to_string()),
-                text: text.to_string(),
-                read: false,
-                level,
-            },
         });
     }
 

@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-use pt_api::{HubEvent, HubStreamMessage};
+use pt_api::{EpochMs, EventKind, HubEvent, HubStreamMessage, Level};
 use pt_json::{FromJson, ToJson};
 
 use crate::home::now_ms;
@@ -225,6 +225,24 @@ impl Bus {
         drop(r);
         self.work.notify_one();
         seq
+    }
+
+    /// Streams a line of the mail and events log.
+    pub fn event(&self, kind: EventKind, level: Level, source: &str, target: &str, text: &str) {
+        let at = EpochMs(now_ms());
+        self.push(|seq| HubStreamMessage::Event {
+            seq,
+            event: HubEvent {
+                seq,
+                at_ms: at,
+                kind,
+                source: source.to_string(),
+                target: Some(target.to_string()),
+                text: text.to_string(),
+                read: false,
+                level,
+            },
+        });
     }
 
     /// Queues a streaming delta under the last kept seq; it is not logged or replayed.

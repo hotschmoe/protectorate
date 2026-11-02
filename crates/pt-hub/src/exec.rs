@@ -98,7 +98,7 @@ impl Executors {
             .sleeve(id)
             .is_none_or(|s| s.life == Life::Removed)
         {
-            return refuse(&self.hub, intent, "the sleeve is removed");
+            return self.hub.refuse(intent, "the sleeve is removed");
         }
         let (tx, rx) = mpsc::channel();
         let exec = SleeveExec {
@@ -116,7 +116,7 @@ impl Executors {
             }
             Err(e) => {
                 error!("sleeve {}: spawn executor: {e}", id.0);
-                refuse(&self.hub, intent, &format!("spawn executor: {e}"));
+                self.hub.refuse(intent, &format!("spawn executor: {e}"));
             }
         }
     }
@@ -151,30 +151,6 @@ fn cleanup_scratch(path: &Path) {
         && e.kind() != io::ErrorKind::NotFound
     {
         warning!("remove sleeve scratch {}: {e}", path.display());
-    }
-}
-
-/// Answers an intent no executor will run: an effect is refused, a probe cannot tell.
-pub(crate) fn refuse(hub: &Hub, intent: Intent, why: &str) {
-    match intent {
-        Intent::Execute {
-            effect, attempt, ..
-        } => {
-            hub.submit(EventKind::Dispatched { effect, attempt });
-            hub.submit(EventKind::Nacked {
-                effect,
-                attempt,
-                reason: why.to_string(),
-            });
-        }
-        Intent::Probe {
-            effect, attempt, ..
-        } => hub.submit(EventKind::Probed {
-            effect,
-            attempt,
-            result: ProbeResult::Unknowable,
-        }),
-        other => debug!("dropped {other:?}: {why}"),
     }
 }
 

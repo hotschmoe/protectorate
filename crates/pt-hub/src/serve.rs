@@ -22,9 +22,8 @@ use crate::devices::Devices;
 use crate::fleet::{FleetFlags, Net};
 use crate::home::{Config, Home, Tokens, random_hex, write_private};
 use crate::http::{Listener, Web, handler};
-use crate::hub::{ENVOY, Hub, Input};
+use crate::hub::{ENVOY, Hub, Input, Stop};
 use crate::log::{info, warning};
-use crate::update::Stop;
 use crate::view::View;
 use crate::wire;
 

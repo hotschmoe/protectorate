@@ -143,7 +143,8 @@ fn run(hub: &Hub, p: &Program) {
         (false, _) => format!("{}: {shown} failed: {why}; now {to}", p.name),
     };
     let level = if ok { Level::Info } else { Level::Warn };
-    hub.event(Kind::Hub, level, "harness-update", "owner", &note);
+    hub.bus
+        .event(Kind::Hub, level, "harness-update", "owner", &note);
     info!("harness update: {note}");
     let r = Run {
         at_ms: now_ms(),

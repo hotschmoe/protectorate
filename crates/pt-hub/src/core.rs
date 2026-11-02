@@ -320,7 +320,7 @@ fn notify(hub: &Hub, view: &View, to: Party, sleeve: Option<SleeveId>, n: &Notic
         .and_then(|id| view.state.sleeve(id))
         .map_or_else(|| "hub".to_string(), |s| s.name.clone());
     info!("notice for {target} from {source}: {text}");
-    hub.event(kind, level, &source, &target, &text);
+    hub.bus.event(kind, level, &source, &target, &text);
     let at = now_ms();
     // Notices addressed to a parent about its child stay on the stream only.
     if let Some(id) = sleeve

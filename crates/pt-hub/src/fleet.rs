@@ -359,9 +359,9 @@ fn published(hub: &Hub, e: FleetEvent) {
                 } else {
                     (Level::Warn, format!("node {} is offline", n.name))
                 };
-                hub.event(Kind::Node, level, &n.name, "owner", &text);
+                hub.bus.event(Kind::Node, level, &n.name, "owner", &text);
             } else if was.is_some_and(|b| b.presence.state != n.presence.state) {
-                hub.event(
+                hub.bus.event(
                     Kind::Node,
                     Level::Info,
                     &n.name,
@@ -376,7 +376,7 @@ fn published(hub: &Hub, e: FleetEvent) {
                 .map_or_else(|| id.clone(), |n| n.name);
             hub.bus
                 .push(|seq| HubStreamMessage::NodeRemoved { seq, id });
-            hub.event(
+            hub.bus.event(
                 Kind::Node,
                 Level::Warn,
                 &name,

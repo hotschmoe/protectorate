@@ -1232,7 +1232,7 @@ fn add_node(c: &Ctx<'_>, r: api::AddNodeRequest) -> Result<api::PendingNode> {
         .find(|p| p.registration.auth_id == reg.auth_id)
         .ok_or_else(|| err(ErrorCode::Internal, "the registration was not recorded"))?;
     let shown = pending_node(&p, &fp);
-    c.hub.event(
+    c.hub.bus.event(
         api::EventKind::Node,
         api::Level::Info,
         &reg.name,
@@ -1282,7 +1282,7 @@ fn approve_node(c: &Ctx<'_>, r: api::ApproveNodeRequest) -> Result<api::Approved
         .approve(&r.auth_id, &name, &fingerprint)
         .map_err(fleet_err)?;
     info!("node {} approved as headscale node {}", n.name, n.id);
-    c.hub.event(
+    c.hub.bus.event(
         api::EventKind::Node,
         api::Level::Info,
         &n.name,
@@ -1347,7 +1347,7 @@ fn remove_node(c: &Ctx<'_>, r: api::RemoveNodeRequest) -> Result<api::RemovedNod
     let removal = removal.map_err(|e| {
         let m = e.to_string();
         if m.contains("enrollment record") {
-            c.hub.event(
+            c.hub.bus.event(
                 api::EventKind::Node,
                 api::Level::Alarm,
                 &name,
@@ -1384,7 +1384,7 @@ fn remove_node(c: &Ctx<'_>, r: api::RemoveNodeRequest) -> Result<api::RemovedNod
         text.push_str(&format!("; jobs {} were in flight", in_flight.join(", ")));
     }
     info!("{text} (headscale node {id})");
-    c.hub.event(
+    c.hub.bus.event(
         api::EventKind::Node,
         api::Level::Info,
         &name,
@@ -1406,7 +1406,7 @@ fn rename_node(c: &Ctx<'_>, r: api::RenameNodeRequest) -> Result<api::RenamedNod
     let n = up.poller.rename(id, &r.name).map_err(|e| {
         let m = e.to_string();
         if m.contains("failed too") {
-            c.hub.event(
+            c.hub.bus.event(
                 api::EventKind::Node,
                 api::Level::Alarm,
                 &from,
@@ -1426,7 +1426,7 @@ fn rename_node(c: &Ctx<'_>, r: api::RenameNodeRequest) -> Result<api::RenamedNod
         }
         let text = format!("node {from} renamed {}", n.name);
         info!("{text} (headscale node {id})");
-        c.hub.event(
+        c.hub.bus.event(
             api::EventKind::Node,
             api::Level::Info,
             &n.name,
@@ -2294,7 +2294,7 @@ fn add_device(c: &Ctx<'_>, r: api::AddDeviceRequest) -> Result<api::PairingCode>
 fn pair_device(c: &Ctx<'_>, r: api::PairDeviceRequest) -> Result<api::PairedDevice> {
     match c.hub.devices.pair(&r.code).map_err(internal)? {
         Some((device, token)) => {
-            c.hub.event(
+            c.hub.bus.event(
                 api::EventKind::Hub,
                 api::Level::Info,
                 "hub",
