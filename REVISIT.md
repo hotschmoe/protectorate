@@ -426,6 +426,9 @@ Each entry: where, what was done, what right looks like.
 - **Hub job logs are refreshed only on the core's Tick** (`pt-hub`, jobs.rs): a running job's log
   is pulled when pt-core polls it (every 10 s Tick), so `job log` lags by up to a Tick. Right: a
   log follow RPC on the node that pushes appended bytes.
+- **A cancelled job can lose its final log tail** (`pt-core` jobs): cancellation can acknowledge
+  collection before the hub fetches the final output, and the node then removes its copy.
+  `job run --wait` exposes the gap. Right: collect the final log before AckCollected.
 - **Hub job metadata outside the journal** (`pt-hub`, jobs.rs `JobStore`): the request record
   rides in the core's `JobSpec.command` (its digest is the spec's), but artifact results live in
   `<home>/jobs/<job>/<attempt>/artifacts.json` and the per-job view cache in memory. Right: fine
@@ -515,6 +518,9 @@ Each entry: where, what was done, what right looks like.
   value would not. Right: send such fields as strings if one ever appears.
 - **Job log as lossy text** (`pt-api`, `JobLog`): log bytes go out as UTF-8 with invalid
   sequences replaced, so a binary log is not exact. Right: base64 bytes if exact logs matter.
+- **A UTF-8 character split between job log pages is corrupted** (`protectorate` job wait): each
+  page is independently decoded with replacement, so a character across the 1 MiB boundary is
+  printed as two replacement characters. Right: page bytes and decode incrementally.
 - **check-gen needs the Dart SDK** (`Makefile`): `pt-apigen`'s output is formatted with
   `dart format`, so `make check` needs `dart` on PATH (or `DART=`). Right: fine while the app is
   built on the same host; emit formatter-stable Dart directly if CI ever lacks Flutter.
@@ -655,6 +661,9 @@ Each entry: where, what was done, what right looks like.
   whichever is more, plus hub events by the same rule. Entry messages repeat transcript JSON,
   so the file is larger than it needs to be. Right: store transcript references, or move the
   stream into journal snapshots once pt-journal has retention.
+- **An interrupted-turn notice can be lost across a crash** (`pt-core` sleeve): if the hub crashes
+  after journaling `Exited` but before executing its `Notify` intents, recovery does not recreate
+  that notice. Right: journal notification delivery or re-derive it on recovery.
 - **The first batch after a restart re-announces recent state** (`pt-hub`, core.rs): sleeves,
   and jobs and approvals pending or changed in the 10 minutes before the journal's last event,
   because a crash between the journal's fsync and the stream log's could lose their messages.
