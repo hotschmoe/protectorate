@@ -847,6 +847,260 @@ exit 2"#,
     assert_ne!(hub.sleeve("oom")["lifecycle"].as_str(), Some("parked"));
 }
 
+/// The environment of the sandboxed process for `name`: `PROTECTORATE_SLEEVE` and its token.
+fn sleeve_process_env(name: &str) -> Vec<(String, String)> {
+    for ent in std::fs::read_dir("/proc").unwrap().flatten() {
+        let pid = ent.file_name();
+        let pid = pid.to_string_lossy();
+        if !pid.bytes().all(|b| b.is_ascii_digit()) {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(format!("/proc/{pid}/environ")) else {
+            continue;
+        };
+        let vars: Vec<(String, String)> = bytes
+            .split(|b| *b == 0)
+            .filter_map(|kv| {
+                let kv = std::str::from_utf8(kv).ok()?;
+                let (k, v) = kv.split_once('=')?;
+                Some((k.to_string(), v.to_string()))
+            })
+            .collect();
+        if vars
+            .iter()
+            .any(|(k, v)| k == "PROTECTORATE_SLEEVE" && v == name)
+            && vars.iter().any(|(k, _)| k == "PROTECTORATE_TOKEN")
+        {
+            return vars;
+        }
+    }
+    panic!("no process for sleeve {name} carries PROTECTORATE_TOKEN");
+}
+
+fn env_get<'a>(vars: &'a [(String, String)], key: &str) -> Option<&'a str> {
+    vars.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+}
+
+/// A sleeve mails its parent and Envoy, and nothing else. `wait --until report` sees only mail
+/// sent after the wait starts. The ninth mail to Envoy inside the window is refused.
+#[test]
+fn upward_mail() {
+    let dir = unique("up");
+    let home = dir.join("home");
+    let fake = dir.join("claude");
+    std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
+    std::fs::write(home.join("logins/.claude/.credentials.json"), "{}").unwrap();
+    write_script(
+        &fake,
+        r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi
+while IFS= read -r line; do printf '%s\n' "$line" >> "$CARGO_TARGET_DIR/in"; done
+exec sleep 300"#,
+    );
+    write_script(&dir.join("systemd-run"), "exit 0");
+    let config = pt_json::obj! {
+        "envoy" => pt_json::obj! { "harness" => "claude" },
+        "claude_program" => fake.to_str().unwrap(),
+        "scopes" => false,
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+    };
+    std::fs::write(home.join("config.json"), config.to_string()).unwrap();
+    let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
+    let hub = Hub::open(home, &[], &[("PATH", &path)]);
+    let repo = temp_repo("up");
+    let other_repo = temp_repo("up-other");
+    let spawn = |args: &[&str]| hub.cli(args).json()["id"].as_str().unwrap().to_string();
+    let tree = spawn(&[
+        "--json",
+        "sleeve",
+        "spawn",
+        "tree",
+        "--path",
+        repo.to_str().unwrap(),
+        "--harness",
+        "claude",
+    ]);
+    let leaf = spawn(&[
+        "--json",
+        "sleeve",
+        "spawn",
+        "leaf",
+        "--parent",
+        "tree",
+        "--harness",
+        "claude",
+    ]);
+    let _sib = spawn(&[
+        "--json",
+        "sleeve",
+        "spawn",
+        "sib",
+        "--parent",
+        "tree",
+        "--harness",
+        "claude",
+    ]);
+    let _other = spawn(&[
+        "--json",
+        "sleeve",
+        "spawn",
+        "other",
+        "--path",
+        other_repo.to_str().unwrap(),
+        "--harness",
+        "claude",
+    ]);
+    for name in ["envoy", "tree", "leaf", "sib", "other"] {
+        let end = std::time::Instant::now() + Duration::from_secs(90);
+        loop {
+            if hub.sleeve(name)["lifecycle"].as_str() == Some("running") {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < end,
+                "{name} did not start: {}\n{}",
+                hub.sleeve(name),
+                tail(&hub.log_text(), 80)
+            );
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+
+    let leaf_env = sleeve_process_env("leaf");
+    let token = env_get(&leaf_env, "PROTECTORATE_TOKEN")
+        .unwrap()
+        .to_string();
+    assert!(token.starts_with("pc1."), "{token}");
+    assert_eq!(env_get(&leaf_env, "PROTECTORATE_PARENT"), Some("tree"));
+    let tree_env = sleeve_process_env("tree");
+    assert_eq!(env_get(&tree_env, "PROTECTORATE_PARENT"), None);
+    let as_leaf = [("PROTECTORATE_TOKEN", token.as_str())];
+
+    let names: Vec<String> = hub.cli_env(&as_leaf, &["--json", "sleeve", "list"]).json()["sleeves"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|s| s["name"].as_str().map(str::to_string))
+        .collect();
+    assert_eq!(
+        names,
+        ["leaf"],
+        "a sleeve lists only itself and its children: {names:?}"
+    );
+
+    let denied = |args: &[&str]| {
+        let r = hub.cli_env(&as_leaf, args);
+        assert_eq!(r.status, 4, "{args:?}: {} {}", r.stdout, r.stderr);
+    };
+    denied(&["sleeve", "send", "sib", "no"]);
+    denied(&["sleeve", "send", "other", "no"]);
+    denied(&["envoy", "send", "no"]);
+    denied(&["sleeve", "transcript", "tree"]);
+    denied(&["sleeve", "stop", "tree"]);
+    denied(&["approval", "list"]);
+
+    let sent = |to: &str, text: &str| -> String {
+        let v = hub
+            .cli_env(&as_leaf, &["--json", "sleeve", "send", to, text])
+            .json();
+        let id = v["request_id"].as_str().unwrap().to_string();
+        assert!(id.starts_with(&format!("mail:{leaf}:")), "request id {id}");
+        id
+    };
+    sent("tree", "already mailed the parent");
+    sent("leaf", "to myself");
+
+    let home_for_wait = hub.home.clone();
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let done2 = done.clone();
+    let waiter = std::thread::spawn(move || {
+        // The suite itself may be a sleeve. Its socket and token must not steer this wait.
+        let out = std::process::Command::new(bin())
+            .arg("--home")
+            .arg(&home_for_wait)
+            .args([
+                "sleeve",
+                "wait",
+                "leaf",
+                "--until",
+                "report",
+                "--timeout",
+                "45",
+            ])
+            .env_remove("PROTECTORATE_TOKEN")
+            .env_remove("PROTECTORATE_SOCKET")
+            .output()
+            .expect("run wait");
+        done2.store(true, std::sync::atomic::Ordering::SeqCst);
+        out
+    });
+    eventually(
+        "the report wait to be logged",
+        Duration::from_secs(20),
+        || {
+            hub.log_text()
+                .contains("wait: report from leaf")
+                .then_some(())
+        },
+    );
+    std::thread::sleep(Duration::from_millis(400));
+    assert!(
+        !done.load(std::sync::atomic::Ordering::SeqCst),
+        "mail from before the wait released it"
+    );
+    sent("leaf", "still not upward");
+    std::thread::sleep(Duration::from_millis(400));
+    assert!(
+        !done.load(std::sync::atomic::Ordering::SeqCst),
+        "mail to itself released the report wait"
+    );
+    sent("envoy", "need a design recommendation");
+    let out = waiter.join().expect("wait thread");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "wait: {stdout} {stderr}\n{}",
+        tail(&hub.log_text(), 40)
+    );
+    assert!(
+        stdout.starts_with("reached"),
+        "wait output: {stdout} {stderr}"
+    );
+
+    let envoy_id = hub.sleeve("envoy")["id"].as_str().unwrap().to_string();
+    for (id, marker) in [
+        (&tree, "already mailed the parent"),
+        (&envoy_id, "need a design recommendation"),
+    ] {
+        let saw = eventually(
+            "the marked prompt to be written",
+            Duration::from_secs(30),
+            || {
+                std::fs::read_to_string(hub.home.join(format!("sleeves/{id}/scratch/target/in")))
+                    .ok()
+            },
+        );
+        assert!(
+            saw.contains("[from sleeve leaf]") && saw.contains(marker),
+            "prompt for {id}: {saw}"
+        );
+    }
+
+    for n in 2..=8 {
+        sent("envoy", &format!("follow up {n}"));
+    }
+    let ninth = hub.cli_env(&as_leaf, &["sleeve", "send", "envoy", "one too many"]);
+    assert_eq!(ninth.status, 1, "{} {}", ninth.stdout, ninth.stderr);
+    assert!(
+        ninth.stderr.contains("too many messages to Envoy"),
+        "{}",
+        ninth.stderr
+    );
+    sent("tree", "the parent is not capped");
+}
+
 #[test]
 fn repeated_scope_oom_parks_and_reports_the_memory_limit() {
     let bus = std::process::Command::new("systemctl")

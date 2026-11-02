@@ -2,6 +2,7 @@
 //! pt-api's table. Commands become core events whose replies come back after the journal fsync;
 //! reads use the published view.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -35,7 +36,7 @@ pub enum Principal {
     Device(String),
     /// Envoy's capability: sleeve scope, reaching every sleeve.
     Envoy(SleeveId),
-    /// A sleeve's `pc1.` capability: itself and its children.
+    /// A sleeve's `pc1.` capability: itself and its children. Mail also reaches its parent and Envoy.
     Sleeve(SleeveId),
     /// Vendor general agents: the Envoy methods only (D9).
     EnvoyOnly,
@@ -520,9 +521,26 @@ fn new_request(c: &Ctx<'_>, agent: &str) -> Result<String> {
     })
 }
 
+/// `reaches`, plus a sleeve mailing its parent or Envoy. Nothing else opens.
+fn may_mail(state: &State, who: &Principal, id: SleeveId) -> bool {
+    if reaches(state, who, id) {
+        return true;
+    }
+    let Principal::Sleeve(me) = *who else {
+        return false;
+    };
+    Hub::envoy_id(state) == Some(id) || state.sleeve(me).and_then(|s| s.parent) == Some(id)
+}
+
 fn send_message(c: &Ctx<'_>, r: api::SendMessageRequest) -> Result<api::Sent> {
     let view = c.hub.view();
-    let id = target_sleeve(c, &view, &r.sleeve_id)?;
+    let id = find(&view.state, &r.sleeve_id)?;
+    if !may_mail(&view.state, c.who, id) {
+        return Err(err(
+            ErrorCode::Forbidden,
+            "that sleeve is outside this capability",
+        ));
+    }
     if r.text.is_empty() {
         return Err(err(ErrorCode::Invalid, "text is required"));
     }
@@ -1216,7 +1234,7 @@ fn envoy_send(c: &Ctx<'_>, r: api::EnvoySendRequest) -> Result<api::Sent> {
     if matches!(c.who, Principal::Sleeve(_) | Principal::Envoy(_)) {
         return Err(err(
             ErrorCode::Forbidden,
-            "sleeves reach Envoy through their parent, not EnvoySend",
+            "sleeves mail Envoy with sleeve send, not EnvoySend",
         ));
     }
     let view = c.hub.view();
@@ -1263,7 +1281,7 @@ fn envoy_read(c: &Ctx<'_>, r: api::EnvoyReadRequest) -> Result<api::Transcript> 
 fn not_for_sleeves() -> ApiError {
     err(
         ErrorCode::Forbidden,
-        "sleeves reach Envoy through their parent, not the Envoy methods",
+        "sleeves mail Envoy with sleeve send, not the Envoy methods",
     )
 }
 
@@ -1460,12 +1478,60 @@ fn reached(state: &State, id: SleeveId, until: api::WaitUntil) -> bool {
     }
 }
 
-fn wait(c: &Ctx<'_>, r: api::WaitRequest) -> Result<api::WaitResult> {
-    if r.until == api::WaitUntil::Report {
-        return Err(unavailable("waiting for a report (sleeve mail upward)"));
+/// Request ids of mail `id` has already landed on its parent or on Envoy.
+fn upward_from(state: &State, id: SleeveId) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let Some(s) = state.sleeve(id) else {
+        return out;
+    };
+    let mut dests = Vec::new();
+    if let Some(p) = s.parent {
+        dests.push(p);
     }
+    if let Some(e) = Hub::envoy_id(state)
+        && !dests.contains(&e)
+    {
+        dests.push(e);
+    }
+    for d in dests {
+        let Some(dest) = state.sleeve(d) else {
+            continue;
+        };
+        for (rid, m) in &dest.messages {
+            if m.from == Party::Sleeve(id) {
+                out.insert(rid.clone());
+            }
+        }
+    }
+    out
+}
+
+fn wait(c: &Ctx<'_>, r: api::WaitRequest) -> Result<api::WaitResult> {
     let id = target_sleeve(c, &c.hub.view(), &r.sleeve_id)?;
     let deadline = Instant::now() + timeout(r.timeout_ms);
+    if r.until == api::WaitUntil::Report {
+        // Snapshot first, then log, so a sender who waits for the log line is after the snapshot.
+        let seen = upward_from(&c.hub.view().state, id);
+        let name = c
+            .hub
+            .view()
+            .state
+            .sleeve(id)
+            .map(|s| s.name.clone())
+            .unwrap_or_default();
+        info!("wait: report from {name}");
+        let got = wait_for(c.hub, deadline, |v| {
+            if upward_from(&v.state, id).difference(&seen).next().is_some() {
+                return Some(true);
+            }
+            let s = v.state.sleeve(id)?;
+            matches!(s.life, Life::Stopped | Life::Removed | Life::Parked(_)).then_some(false)
+        });
+        return Ok(api::WaitResult {
+            reached: got == Some(true),
+            sleeve: sleeve_view(c.hub, id)?,
+        });
+    }
     let got = wait_for(c.hub, deadline, |v| {
         if reached(&v.state, id, r.until) {
             return Some(true);

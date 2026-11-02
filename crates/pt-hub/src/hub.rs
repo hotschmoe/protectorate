@@ -21,7 +21,7 @@ use crate::log::{debug, warning};
 use crate::transcript::{Line, Note, Transcripts, lock};
 use crate::wire;
 
-pub const ENVOY: &str = "envoy";
+pub const ENVOY: &str = pt_core::ENVOY_NAME;
 
 /// One input to the core thread. Commands carry the channel their `Intent::Reply` goes to.
 pub struct Input {

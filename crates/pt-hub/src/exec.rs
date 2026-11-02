@@ -954,6 +954,13 @@ impl SleeveExec {
             ("PROTECTORATE_SLEEVE".into(), s.name.clone()),
             ("PATH".into(), tools.path),
         ];
+        if let Some(name) = s
+            .parent
+            .and_then(|p| view.state.sleeve(p))
+            .map(|p| p.name.clone())
+        {
+            sb.env.push(("PROTECTORATE_PARENT".into(), name));
+        }
         sb.env.extend(tools.env);
         sb.env.extend(logins.env);
         let prefix = sb.command().map_err(|e| e.to_string())?;
