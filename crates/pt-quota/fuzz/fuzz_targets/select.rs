@@ -143,6 +143,32 @@ fuzz_target!(|data: &[u8]| {
         assert!(
             select_target(now, size, &without_local, mode, &exclude, &quotas, &health).is_none()
         );
+        // SPEC 8. A model cap never blocks a candidate with no model. An empty pick means no
+        // fresh metered candidate still had spare.
+        let min = size.min_usable_pct();
+        for c in &allow {
+            if !eligible(c.harness) {
+                continue;
+            }
+            let Some(sub) = metered(c.harness) else {
+                continue;
+            };
+            // The first row for the subscription, as `fresh_for` reads it.
+            let Some(q) = quotas.iter().find(|q| q.subscription == sub) else {
+                continue;
+            };
+            if state(q) != State::Fresh {
+                continue;
+            }
+            if still_enforcing(q, now, min, &c.model) || only_other_scopes(q, &c.model) {
+                continue;
+            }
+            if let Some(usable) = open_usable(q, now, &c.model, min)
+                && usable + 1e-9 >= min
+            {
+                panic!("fresh spare was not picked: {c:?} at {usable}%");
+            }
+        }
     }
 
     // Stale, unknown and error readings alone never produce a pick.
@@ -240,9 +266,10 @@ fuzz_target!(|data: &[u8]| {
                 {
                     panic!("stale row at {usable}% usable was parked");
                 }
+                // `tightest_cap_for` reads whatever windows the row has. Production never
+                // attaches windows to an Error row; the generator can, and the park names them.
                 if let Some(sub) = metered(c.harness)
                     && let Some(q) = quotas.iter().find(|q| q.subscription == sub)
-                    && matches!(state(q), State::Fresh | State::Stale)
                     && let Some(found) = limiting_cap(q, &c.model, min, now)
                     && cap.as_ref().is_none_or(|(have, _)| found.0 < *have)
                 {

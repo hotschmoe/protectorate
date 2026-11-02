@@ -1,0 +1,37 @@
+#scenario 91a798be94cda84d
+# Three rejected logins within the hour park and name that login. A quota flap stays plain.
+spawn login /w/a harness=claude to=pi_local,claude
+spawn quota /w/b harness=claude to=pi_local,claude
+run
+obs login ready
+obs quota ready
+expect login life=Running harness=claude
+expect quota life=Running harness=claude
+exit login auth
+expect login life=Resleeving
+run
+obs login ready
+run
+expect login life=Running harness=pilocal
+exit login auth
+expect login life=Resleeving
+run
+obs login ready
+run
+expect login life=Running harness=claude
+exit login auth
+expect login life=Parked park=flapping (claude login rejected)
+exit quota quota
+expect quota life=Resleeving
+run
+obs quota ready
+run
+expect quota life=Running harness=pilocal
+exit quota quota
+expect quota life=Resleeving
+run
+obs quota ready
+run
+expect quota life=Running harness=claude
+exit quota quota
+expect quota life=Parked park=flapping

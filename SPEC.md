@@ -473,9 +473,9 @@ and gate a candidate of the same family (opus, sonnet, haiku), ignoring case and
 (`Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus). `opusplan`
 counts as both Opus and Sonnet, so that model is gated by either cap, and a cap whose name
 contains `opusplan` gates either model. A candidate with no model, and a candidate whose
-model is `default`, are not blocked by a model cap. A cap under the usable minimum only ranks
-that candidate below an otherwise equal one that is not under it. When that candidate is
-chosen or parked, the reason names the tightest such cap as `; <label> under the minimum`.
+model is `default`, are not blocked by a model cap. On the fresh pick, a cap under the usable
+minimum only ranks that candidate below an otherwise equal one that is not under it. When that
+candidate is chosen or parked, the reason names the tightest such cap as `; <label> under the minimum`.
 A scope that is not one of those families still gates when its name is at least three letters
 and the model name contains it. The account windows always gate
 (`5h`, `wk`), as does the single credit or rate-limit window of the other subscriptions. A
