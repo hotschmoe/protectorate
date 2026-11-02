@@ -577,9 +577,9 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
         .args(["--home", &home_s, "hub", "probation"])
         .output()
         .unwrap();
+    assert!(not_from_releases.status.success(), "{not_from_releases:?}");
     assert!(
-        !not_from_releases.status.success()
-            && String::from_utf8_lossy(&not_from_releases.stderr).contains("stop the hub"),
+        String::from_utf8_lossy(&not_from_releases.stdout).contains("no release on trial"),
         "{not_from_releases:?}"
     );
     let n = sup.starts().len();
@@ -678,6 +678,16 @@ fn hub_rollbacks_restore_a_journal_the_previous_binary_cannot_read() {
         let lower = next - 1;
         plant_sleeve(&home, lower, false);
         plant_sleeve(&home, next, true);
+        plant_sleeve(&home, next + 1, false);
+        let owner = home.join("claims").join((next + 1).to_string());
+        let owner_gitdir = home.join("repo/.git/worktrees/owner");
+        fs::create_dir_all(&owner_gitdir).unwrap();
+        fs::write(owner_gitdir.join("gitdir"), "owner\n").unwrap();
+        fs::write(
+            owner.join(".git"),
+            format!("gitdir: {}\n", owner_gitdir.display()),
+        )
+        .unwrap();
         fs::write(
             home.join("journal/segment-00000000000000000001"),
             b"segment with no snapshot",
@@ -703,6 +713,10 @@ fn hub_rollbacks_restore_a_journal_the_previous_binary_cannot_read() {
                 checkout.display(),
                 gitdir.display()
             )),
+            "{err}"
+        );
+        assert!(
+            !err.contains(&format!("left worktree {}", owner.display())),
             "{err}"
         );
         let aside = fs::read_dir(home.join("update-aside"))
@@ -760,6 +774,11 @@ fn plant_sleeve(home: &Path, id: u64, worktree: bool) {
             format!("gitdir: {}\n", gitdir.display()),
         )
         .unwrap();
+        fs::write(
+            sleeve.join("worktree.path"),
+            claim.as_os_str().as_encoded_bytes(),
+        )
+        .unwrap();
     }
     fs::write(
         sleeve.join("provisioned"),
@@ -771,6 +790,17 @@ fn plant_sleeve(home: &Path, id: u64, worktree: bool) {
 /// Runs `hub probation` with `home/journal` bind-mounted onto itself. The rename that
 /// swaps the journal then fails with EBUSY, after staging and quarantine, which only
 /// need the home directory to be writable. A mode bit cannot single out that rename.
+fn can_mount_journal() -> bool {
+    let ok = Command::new("unshare")
+        .args(["-Ur", "-m", "--", "/bin/true"])
+        .status()
+        .is_ok_and(|status| status.success());
+    if !ok {
+        eprintln!("SKIP: unshare -Ur -m is not available");
+    }
+    ok
+}
+
 fn prestart_with_journal_mounted(home: &Path) -> std::process::Output {
     Command::new("unshare")
         .args(["-Ur", "-m", "--", "/bin/sh", "-c"])
@@ -788,6 +818,9 @@ fn prestart_with_journal_mounted(home: &Path) -> std::process::Output {
 /// it; it does not confirm the trial or serve the half-restored home.
 #[test]
 fn partial_automatic_rollback_does_not_keep_the_trial() {
+    if !can_mount_journal() {
+        return;
+    }
     let root = dir("partial-auto");
     let home = root.join("h");
     fs::create_dir_all(&home).unwrap();
@@ -905,6 +938,9 @@ fn partial_automatic_rollback_does_not_keep_the_trial() {
 /// cannot be what decides.
 #[test]
 fn partial_manual_rollback_does_not_keep_the_trial() {
+    if !can_mount_journal() {
+        return;
+    }
     let root = dir("partial-manual");
     let home = root.join("h");
     fs::create_dir_all(&home).unwrap();
