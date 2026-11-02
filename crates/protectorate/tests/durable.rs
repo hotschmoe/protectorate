@@ -253,6 +253,62 @@ fn kept(hub: &Hub) {
     );
 }
 
+/// A valid event before an undecodable frame must not publish state or release its intents.
+#[test]
+fn undecodable_journal_publishes_nothing() {
+    let home = unique("bad-journal").join("home");
+    let mut journal = pt_journal::Journal::open(&home.join("journal"))
+        .expect("open journal")
+        .0;
+    let event = pt_core::Event {
+        at: 1,
+        kind: pt_core::EventKind::Spawn(pt_core::SpawnSpec {
+            request_id: "replay-test".into(),
+            name: "replay-test".into(),
+            parent: None,
+            layout: pt_core::Layout::Root,
+            claim: pt_core::Claim {
+                path: home.join("project").to_string_lossy().into_owned(),
+                writable: true,
+            },
+            target: pt_core::Target {
+                harness: pt_core::Harness::Claude,
+                mode: pt_core::Mode::Headless,
+                provider: String::new(),
+                model: String::new(),
+            },
+            effort: None,
+            resleeve_to: Vec::new(),
+            budget: None,
+            disk_limit: None,
+            d9: false,
+        }),
+    };
+    journal.append(&pt_core::codec::encode(&event)).unwrap();
+    journal.append(&[pt_core::codec::FORMAT]).unwrap();
+    drop(journal);
+
+    let output = Command::new(bin())
+        .arg("--home")
+        .arg(&home)
+        .args(["serve", "--listen", "off"])
+        .env_remove("PROTECTORATE_TOKEN")
+        .env_remove("PROTECTORATE_SOCKET")
+        .output()
+        .unwrap();
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success(), "{error}");
+    assert!(
+        error.contains("journal frame 1: event truncated"),
+        "{error}"
+    );
+    assert!(!home.join("stream.log").exists());
+    assert!(!home.join("run/api.sock").exists());
+    assert!(!home.join("sleeves/0").exists());
+    let (_, recovered) = pt_journal::Journal::open(&home.join("journal")).unwrap();
+    assert_eq!(recovered.frames.len(), 2);
+}
+
 /// The live hub's journal (when this machine has one), copied and opened by this binary: every
 /// frame decodes and the hub's sleeves are the ones an independent replay finds. The copy runs
 /// with the owner's home read-only and no harness programs, since its sleeves' paths are the

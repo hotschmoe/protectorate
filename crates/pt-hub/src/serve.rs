@@ -157,6 +157,10 @@ pub fn retry_probation_restore(home: &Path) -> Result<String, String> {
 }
 
 pub fn serve(o: ServeOptions) -> Result<Exit, String> {
+    #[cfg(all(target_os = "linux", target_env = "gnu"))]
+    if !pt_sys::set_malloc_arena_max(2) {
+        warning!("could not limit glibc malloc arenas");
+    }
     let home = Home::prepare(&o.home).map_err(|e| e.to_string())?;
     let trial = crate::update::probation_at_start(&home)?;
     if let Some(v) = &trial {
@@ -179,15 +183,16 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
             cut.reason
         );
     }
-    let mut events = Vec::with_capacity(rec.frames.len());
-    for (i, f) in rec.frames.iter().enumerate() {
-        events.push(codec::decode(f).map_err(|e| format!("journal frame {i}: {e}"))?);
+    let count = rec.frames.len();
+    let mut state = pt_core::State::default();
+    for (i, f) in rec.frames.into_iter().enumerate() {
+        let event = codec::decode(&f).map_err(|e| format!("journal frame {i}: {e}"))?;
+        pt_core::apply(&mut state, &event);
     }
-    let state = pt_core::replay(&events);
     crate::update::stop_orphan_scopes(&tokens.hub_tag, state.next_sleeve);
     info!(
         "replayed {} events: {} sleeves, {} effects",
-        events.len(),
+        count,
         state.sleeves.len(),
         state.effects.len()
     );
