@@ -214,9 +214,12 @@ log's newest lines. `hub info` and `doctor` report `history capped: <sleeve id>`
 any of that sleeve's docs. The name stays while the sleeve is under the same budget, including
 across a restart. It leaves when that sleeve's sources are gone, or when a later start finds
 the total under a raised budget. Other sleeves are unaffected. A commit writes the
-manifest when the index changed. It removes a segment whose docs are all dead and rewrites one
-that is at least half dead, then deletes the old files. Opening the index removes segment files
-the manifest does not name, and warns when the manifest itself is missing.
+manifest when the index changed. It removes segments whose docs are all dead in their own
+manifest update, and deletes those files only after that rename. It then rewrites a segment
+that is at least half dead in a later manifest update, and deletes the old file after that
+rename. A rewrite failure leaves the dead-segment removal in place. Opening the index removes
+segment files the manifest does not name, warns when the manifest itself is missing, and
+warns and still opens when reclaim fails.
 
 ## Events
 

@@ -316,7 +316,11 @@ impl Index {
                 dir.display()
             );
         }
-        ix.reclaim()?;
+        // A full disk here must not fail the open. The hub treats any other open
+        // error as a corrupt index and rebuilds, which drops history whose logs are gone.
+        if let Err(e) = ix.reclaim() {
+            eprintln!("warning: history: reclaim failed in {}: {e}", dir.display());
+        }
         ix.recount();
         ix.bind_members();
         ix.release_if_budget_raised(stored_budget);
@@ -878,10 +882,13 @@ impl Index {
         }
         self.dirty = false;
         // Pending docs are in a segment now. Rebuild before reclaim so a failed
-        // reclaim does not leave them indexed as pending.
+        // reclaim does not leave them indexed as pending, and again after so a
+        // reclaim that deleted dead segments and then failed still has live maps
+        // that match the segments that remain.
         self.recount();
-        self.reclaim()?;
+        let reclaimed = self.reclaim();
         self.recount();
+        reclaimed?;
         self.merge()?;
         self.recount();
         Ok(())
@@ -965,76 +972,95 @@ impl Index {
         write_atomic(&self.dir, &self.dir.join(MANIFEST), text.as_bytes())
     }
 
-    /// Removes a segment whose docs are all dead, and rewrites one that is at least half
-    /// dead, in one manifest commit. New segment files are written first. The old files
-    /// are removed only after that manifest is durable. A crash before the rename keeps
-    /// the previous manifest; the unreferenced files are swept on the next open.
+    /// Removes segments whose docs are all dead, then rewrites one that is at least half
+    /// dead. Each half is its own manifest commit. Dead files are deleted only after their
+    /// manifest is durable, and a later rewrite failure does not put them back. New rewrite
+    /// files are written first; the old file goes after that rename. A crash before a rename
+    /// keeps the previous manifest, and the next open sweeps files it does not name.
     fn reclaim(&mut self) -> io::Result<()> {
-        let mut plan: Vec<(usize, bool)> = Vec::new();
-        for (i, s) in self.segs.iter().enumerate() {
-            let n = s.docs.len();
-            let dead = s.docs.iter().filter(|m| !self.live(m)).count();
-            if n == 0 || dead == n {
-                plan.push((i, false));
-            } else if dead >= n - dead {
-                plan.push((i, true));
-            }
+        self.drop_dead_segments()?;
+        self.rewrite_half_dead()
+    }
+
+    /// Drops segments with no live docs, high indexes first. The manifest is committed
+    /// before any file is removed. A manifest failure puts the segments back and leaves
+    /// the files in place.
+    fn drop_dead_segments(&mut self) -> io::Result<()> {
+        let dead: Vec<usize> = self
+            .segs
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| segment_fully_dead(s, |m| self.live(m)))
+            .map(|(i, _)| i)
+            .collect();
+        if dead.is_empty() {
+            return Ok(());
         }
+        let mut removed = Vec::new();
+        for i in dead.into_iter().rev() {
+            removed.push((i, self.segs.remove(i)));
+        }
+        if let Err(e) = self.write_manifest() {
+            for (i, seg) in removed.into_iter().rev() {
+                self.segs.insert(i, seg);
+            }
+            return Err(e);
+        }
+        for (_, seg) in removed {
+            self.remove_segment_file(&seg.name)?;
+        }
+        Ok(())
+    }
+
+    /// Rewrites a segment whose dead docs are at least half of its docs. A write or
+    /// manifest failure drops only the new files. Segments already removed as fully dead
+    /// stay removed.
+    fn rewrite_half_dead(&mut self) -> io::Result<()> {
+        let plan: Vec<usize> = self
+            .segs
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| segment_half_dead(s, |m| self.live(m)))
+            .map(|(i, _)| i)
+            .collect();
         if plan.is_empty() {
             return Ok(());
         }
-        let mut fresh = std::collections::BTreeMap::new();
-        for &(i, rewrite) in &plan {
-            if rewrite {
-                match self.write_live_segment(i) {
-                    Ok(seg) => {
-                        fresh.insert(i, seg);
-                    }
-                    Err(e) => {
-                        self.drop_unreferenced(fresh.into_values());
-                        return Err(e);
-                    }
+        let mut fresh = Vec::new();
+        for &i in &plan {
+            match self.write_live_segment(i) {
+                Ok(seg) => fresh.push((i, seg)),
+                Err(e) => {
+                    self.drop_unreferenced(fresh.into_iter().map(|(_, seg)| seg));
+                    return Err(e);
                 }
             }
         }
-        // High indexes first, so a removal does not shift one that is still planned.
-        enum Undo {
-            Insert(usize, Seg),
-            Put(usize, Seg),
-        }
-        let mut undo = Vec::new();
-        for (i, rewrite) in plan.into_iter().rev() {
-            if rewrite {
-                let neu = fresh.remove(&i).expect("rewritten segment");
-                let old = std::mem::replace(&mut self.segs[i], neu);
-                undo.push(Undo::Put(i, old));
-            } else {
-                undo.push(Undo::Insert(i, self.segs.remove(i)));
-            }
+        let mut old = Vec::new();
+        for (i, neu) in fresh.into_iter().rev() {
+            old.push((i, std::mem::replace(&mut self.segs[i], neu)));
         }
         if let Err(e) = self.write_manifest() {
             let mut neu = Vec::new();
-            for u in undo.into_iter().rev() {
-                match u {
-                    Undo::Insert(i, seg) => self.segs.insert(i, seg),
-                    Undo::Put(i, seg) => neu.push(std::mem::replace(&mut self.segs[i], seg)),
-                }
+            for (i, seg) in old.into_iter().rev() {
+                neu.push(std::mem::replace(&mut self.segs[i], seg));
             }
             self.drop_unreferenced(neu);
             return Err(e);
         }
-        for u in undo {
-            let seg = match u {
-                Undo::Insert(_, seg) | Undo::Put(_, seg) => seg,
-            };
-            let p = self.dir.join(&seg.name);
-            match fs::remove_file(&p) {
-                Ok(()) => {}
-                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-                Err(e) => return Err(ctx(e, "remove dead", p.display())),
-            }
+        for (_, seg) in old {
+            self.remove_segment_file(&seg.name)?;
         }
         Ok(())
+    }
+
+    fn remove_segment_file(&self, name: &str) -> io::Result<()> {
+        let p = self.dir.join(name);
+        match fs::remove_file(&p) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(ctx(e, "remove dead", p.display())),
+        }
     }
 
     /// Writes a new segment containing the live docs of `index`, in their original order.
@@ -1450,6 +1476,22 @@ impl Index {
             bytes: manifest + self.segs.iter().map(|s| s.bytes).sum::<u64>(),
         }
     }
+}
+
+/// A segment with no docs, or whose every doc is dead, is deleted rather than rewritten.
+fn segment_fully_dead(s: &Seg, mut live: impl FnMut(&Meta) -> bool) -> bool {
+    let n = s.docs.len();
+    n == 0 || s.docs.iter().filter(|m| !live(m)).count() == n
+}
+
+/// At least half the docs are dead, and at least one doc is still live.
+fn segment_half_dead(s: &Seg, mut live: impl FnMut(&Meta) -> bool) -> bool {
+    let n = s.docs.len();
+    if n == 0 {
+        return false;
+    }
+    let dead = s.docs.iter().filter(|m| !live(m)).count();
+    dead < n && dead >= n - dead
 }
 
 fn flush_limit() -> usize {
