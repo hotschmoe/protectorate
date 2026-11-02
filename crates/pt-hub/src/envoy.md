@@ -17,7 +17,7 @@ capability). `--json` prints the API's answer; `protectorate --help` lists every
 | `sleeve list` / `sleeve show <s>` | sleeves: id, name, lifecycle, activity, harness, directory |
 | `sleeve spawn <name> --path <dir> --harness H [--model M] [--message TEXT]` | a root sleeve on a directory (one root per directory) |
 | `sleeve spawn <name> --parent <root> --harness H [--readonly]` | a child on its own worktree and branch `pt/<name>` (or a read-only view) |
-| `sleeve send <s> <text>` | queue a message (its next prompt); `--steer` adds it to the running turn |
+| `sleeve send <s> <text>` | queue a message (its next prompt); `--steer` adds it to a running Codex or Pi turn. Claude and Grok cannot steer: queue instead |
 | `sleeve wait <s> --until idle --timeout <secs>` | block until it settles (`done`, `blocked`, `parked`, `ended` too) |
 | `sleeve transcript <s> [--from SEQ]` | its chat: prompts, replies, tool calls |
 | `sleeve interrupt|stop|rm <s>` | end the turn; stop it and its children; remove it |

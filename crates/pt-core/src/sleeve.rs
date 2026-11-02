@@ -731,7 +731,7 @@ impl Core<'_> {
         let pane = s.target.mode == Mode::Pane;
         let steers = s.target.harness.steers() && s.life == Life::Running;
         let working = s.proc == Proc::Up
-            && s.activity == Activity::Working
+            && matches!(s.activity, Activity::Working | Activity::Blocked { .. })
             && s.turn.is_some()
             && !self.frozen(to);
         let delivering =
@@ -772,9 +772,13 @@ impl Core<'_> {
                 self.sl(to).steer_slot = Some(request_id.to_string());
                 self.reply(Reply::Steering);
             }
+            SendMode::Steer if !s.target.harness.steers() && !(self.deliverable(to) && queue_empty) => self.refuse(
+                Code::FailedPrecondition,
+                "this harness cannot steer a running turn; omit --steer to queue the message for its next turn",
+            ),
             SendMode::Steer if !(self.deliverable(to) && queue_empty) => self.refuse(
                 Code::FailedPrecondition,
-                "cannot steer now; queue it instead",
+                "the sleeve has no steerable turn ready; omit --steer to queue the message for its next turn",
             ),
             _ => {
                 insert(self, MsgState::Queued);

@@ -121,6 +121,8 @@ fn crash_mid_turn_recovers() {
         let s = hub.sleeve("two");
         (s["incarnation"]["activity"]["state"].as_str() == Some("working")).then_some(())
     });
+    hub.cli(&["sleeve", "send", "two", "Keep working.", "--steer"])
+        .ok();
     std::thread::sleep(Duration::from_secs(1));
     hub.kill9();
     eventually(
