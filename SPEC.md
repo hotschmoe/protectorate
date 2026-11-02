@@ -289,8 +289,10 @@ the same dispatch code. There are no external sources such as email, calendar or
     docs or 8 MiB of source text and says when the range was cut. The next page starts after
     the last doc id (`--after`). Tool paths are kept to the
     same budget as tool text (512 bytes). Each sleeve has its own budget of 1 GiB of source
-    text, and so does each source. Past that, the source drops its oldest docs and keeps the
-    newest lines; a sleeve that is full does not stop the others. `doctor` and `hub info`
+    text, and so does each source. Past a source's budget, that source drops its oldest docs.
+    Past a sleeve's budget, the oldest docs of that sleeve are dropped, whichever of its logs
+    they came from, and the newest lines stay. A full sleeve does not stop the others.
+    `doctor` and `hub info`
     report `history capped`. A commit removes a segment whose docs are all dead, and rewrites
     one that is at least half dead, in that same manifest update; the old files go after the
     rename. Opening an index removes segment files the manifest does not name.

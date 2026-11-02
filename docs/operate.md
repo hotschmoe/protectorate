@@ -205,9 +205,10 @@ and the next page starts after it. The index is
 derived and rebuilt in the background if it fails to open. Catch-up commits bounded batches,
 and failed commits are retried. Below each configured root, discovery and reopening ignore
 symbolic links and non-regular files. Tool paths in the index are clipped to 512 bytes.
-Each sleeve, and each log, may keep 1 GiB of source text. Past that the index keeps the
-newest lines of that log and `hub info` and `doctor` report `history capped`; other sleeves
-are unaffected. A commit removes a segment whose docs are all dead and rewrites one that is at least half
+Each sleeve, and each log, may keep 1 GiB of source text. Past a sleeve's budget the index
+keeps the newest lines across that sleeve's logs; past a log's own budget it keeps that
+log's newest lines. `hub info` and `doctor` report `history capped`. Other sleeves are
+unaffected. A commit removes a segment whose docs are all dead and rewrites one that is at least half
 dead, then deletes the old files. Opening the index removes segment files the manifest does
 not name.
 
