@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 use pt_api::{self as api, EpochMs, method as m};
 use pt_json::ToJson;
 
-use crate::{Args, Client, Fail};
+use crate::args::Args;
+use crate::client::Client;
+use crate::fail::Fail;
 
 /// Methods a D9 approval may hold: the CLI waits as long as the hub may.
 const APPROVAL_WAIT: Duration = Duration::from_secs(3600);

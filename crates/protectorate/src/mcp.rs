@@ -15,7 +15,8 @@ use pt_api::{self as api, method as m};
 use pt_json::{Value, obj};
 
 use crate::cli::entry_line;
-use crate::{Client, Fail};
+use crate::client::Client;
+use crate::fail::Fail;
 
 /// Newest first; an unknown version requested by the client gets the first.
 const VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -111,7 +112,7 @@ fn fail_text(e: Fail) -> String {
 
 impl Server {
     fn write(&self, msg: &Value) {
-        let mut out = crate::lock(&self.out);
+        let mut out = lock(&self.out);
         let _ = writeln!(out, "{msg}");
         let _ = out.flush();
     }
@@ -136,12 +137,12 @@ impl Server {
             .copied()
             .unwrap_or(VERSIONS[0]);
         if let Some(name) = params["clientInfo"]["name"].as_str() {
-            let mut agent = crate::lock(&self.agent);
+            let mut agent = lock(&self.agent);
             if agent.is_empty() {
                 *agent = agent_name(name);
             }
         }
-        *crate::lock(&self.initialized) = true;
+        *lock(&self.initialized) = true;
         obj! {
             "protocolVersion" => version,
             "capabilities" => obj! { "tools" => obj! { "listChanged" => false } },
@@ -166,7 +167,7 @@ impl Server {
                 let Some(t) = args["text"].as_str().filter(|t| !t.is_empty()) else {
                     return Err((INVALID_PARAMS, "envoy_send needs text".into()));
                 };
-                let agent = crate::lock(&self.agent).clone();
+                let agent = lock(&self.agent).clone();
                 let req = api::EnvoySendRequest {
                     text: t.to_string(),
                     agent: Some(if agent.is_empty() {
@@ -238,7 +239,7 @@ impl Server {
                 Err((INVALID_REQUEST, "not a JSON-RPC 2.0 request".into())),
             );
         }
-        let ready = *crate::lock(&self.initialized);
+        let ready = *lock(&self.initialized);
         let result = match method.as_str() {
             "initialize" => Ok(self.initialize(params)),
             "ping" => Ok(obj! {}),
@@ -312,4 +313,8 @@ pub fn serve(client: &Client, agent: Option<&str>) -> Result<(), String> {
         let _ = w.join();
     }
     Ok(())
+}
+
+fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }

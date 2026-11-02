@@ -4,16 +4,21 @@
 
 #![forbid(unsafe_code)]
 
+mod args;
 mod cli;
+mod client;
+mod fail;
 mod mcp;
 
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::time::Duration;
 
-use pt_api::{ApiError, ErrorBody, ErrorCode, Method};
-use pt_json::{FromJson, ToJson, Value};
+use pt_api::ErrorCode;
+
+use crate::args::Args;
+use crate::client::Client;
+use crate::fail::Fail;
 
 mod web {
     include!(concat!(env!("OUT_DIR"), "/web.rs"));
@@ -95,184 +100,10 @@ Harnesses: claude, codex, grok, pi_vendor, pi_local. --json prints the API's ans
 job run --wait exits with the job's code, or 3 interrupted, 5 lost, and 6 when the
 hub stays unreachable for about 60 seconds.";
 
-pub struct Args {
-    pub words: Vec<String>,
-    flags: Vec<(String, Option<String>)>,
-}
-
-/// Flags that take no value; every other `--flag` takes the next word.
-const SWITCHES: &[&str] = &[
-    "--json",
-    "--steer",
-    "--help",
-    "--pending",
-    "--readonly",
-    "--even-if-present",
-    "--maintenance",
-    "--envoy",
-    "--check",
-    "--rollback",
-    "--retry-rollback",
-    "--refresh",
-    "--all",
-    "--no-wait",
-    "--wait",
-    "--force",
-];
-
-impl Args {
-    fn parse(raw: Vec<String>) -> Result<Args, String> {
-        let mut words = Vec::new();
-        let mut flags = Vec::new();
-        let mut it = raw.into_iter();
-        while let Some(a) = it.next() {
-            if a == "--" {
-                words.extend(it.by_ref());
-                break;
-            }
-            if let Some(f) = a.strip_prefix("--") {
-                if let Some((k, v)) = f.split_once('=') {
-                    flags.push((format!("--{k}"), Some(v.to_string())));
-                } else if SWITCHES.contains(&a.as_str()) {
-                    flags.push((a, None));
-                } else {
-                    let v = it.next().ok_or_else(|| format!("{a} needs a value"))?;
-                    flags.push((a, Some(v)));
-                }
-            } else {
-                words.push(a);
-            }
-        }
-        Ok(Args { words, flags })
-    }
-
-    pub fn flag(&self, name: &str) -> Option<&str> {
-        self.flags
-            .iter()
-            .rev()
-            .find(|(k, _)| k == name)
-            .and_then(|(_, v)| v.as_deref())
-    }
-
-    pub fn all(&self, name: &str) -> Vec<String> {
-        self.flags
-            .iter()
-            .filter(|(k, _)| k == name)
-            .filter_map(|(_, v)| v.clone())
-            .collect()
-    }
-
-    pub fn has(&self, name: &str) -> bool {
-        self.flags.iter().any(|(k, _)| k == name)
-    }
-
-    pub fn word(&self, i: usize, what: &str) -> Result<&str, String> {
-        self.words
-            .get(i)
-            .map(String::as_str)
-            .ok_or_else(|| format!("missing {what}"))
-    }
-
-    pub fn rest(&self, from: usize, what: &str) -> Result<String, String> {
-        let t = self.words.get(from..).unwrap_or(&[]).join(" ");
-        if t.is_empty() {
-            return Err(format!("missing {what}"));
-        }
-        Ok(t)
-    }
-
-    pub fn num(&self, name: &str) -> Result<Option<u64>, String> {
-        self.flag(name)
-            .map(|v| {
-                v.parse()
-                    .map_err(|_| format!("{name} {v:?} is not a number"))
-            })
-            .transpose()
-    }
-}
-
-pub fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
 fn home(a: &Args) -> PathBuf {
     a.flag("--home")
         .map(PathBuf::from)
         .unwrap_or_else(pt_hub::default_home)
-}
-
-#[derive(Debug)]
-pub enum Fail {
-    Usage(String),
-    Api(ApiError),
-    Other(String),
-    Exit(u8),
-}
-
-impl std::fmt::Display for Fail {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Usage(e) | Self::Other(e) => f.write_str(e),
-            Self::Api(e) => write!(f, "{e}"),
-            Self::Exit(code) => write!(f, "exit {code}"),
-        }
-    }
-}
-
-impl From<String> for Fail {
-    fn from(s: String) -> Fail {
-        Fail::Usage(s)
-    }
-}
-
-/// The hub over its unix socket.
-pub struct Client {
-    pub socket: PathBuf,
-    pub token: Option<String>,
-}
-
-impl Client {
-    fn raw(&self, method: &str, body: &Value, wait: Duration) -> Result<Value, Fail> {
-        let client =
-            pt_http::Client::unix(&self.socket).read_timeout(Some(wait + Duration::from_secs(30)));
-        let auth = self.token.as_ref().map(|t| format!("Bearer {t}"));
-        let mut headers = vec![("Content-Type", "application/json")];
-        if let Some(a) = &auth {
-            headers.push(("Authorization", a.as_str()));
-        }
-        let path = format!("{}{method}", pt_api::API_PREFIX);
-        let r = client
-            .request("POST", &path, &headers, body.to_string().as_bytes())
-            .map_err(|e| Fail::Other(format!("{}: {e}", self.socket.display())))?;
-        let v = pt_json::parse_bytes(&r.body).map_err(|e| {
-            Fail::Other(format!(
-                "{method}: hub answered {} with bad JSON: {e}",
-                r.status
-            ))
-        })?;
-        if r.status != 200 {
-            return Err(match ErrorBody::from_json(&v) {
-                Ok(b) => Fail::Api(b.error),
-                Err(_) => Fail::Other(format!("{method}: hub answered {}: {v}", r.status)),
-            });
-        }
-        Ok(v)
-    }
-
-    /// Calls `M`, allowing the hub `wait` before the answer (Wait, EnvoyWait, D9 approvals).
-    pub fn call_for<M: Method>(
-        &self,
-        req: &M::Request,
-        wait: Duration,
-    ) -> Result<M::Response, Fail> {
-        let v = self.raw(M::NAME, &req.to_json(), wait)?;
-        M::Response::from_json(&v)
-            .map_err(|e| Fail::Other(format!("{}: the hub's answer does not parse: {e}", M::NAME)))
-    }
-
-    pub fn call<M: Method>(&self, req: &M::Request) -> Result<M::Response, Fail> {
-        self.call_for::<M>(req, Duration::from_secs(30))
-    }
 }
 
 fn serve(a: &Args) -> Result<(), Fail> {
