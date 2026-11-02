@@ -282,6 +282,7 @@ fn undecodable_journal_publishes_nothing() {
             budget: None,
             disk_limit: None,
             d9: false,
+            by_envoy: false,
         }),
     };
     journal.append(&pt_core::codec::encode(&event)).unwrap();
