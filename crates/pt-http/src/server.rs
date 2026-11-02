@@ -1,7 +1,13 @@
 //! The server: accept loop, one thread per connection, keep-alive and graceful shutdown.
 
+use crate::handshake::check_handshake;
+use crate::headers::Headers;
+use crate::request::Request;
+use crate::response::{Body, Response, WebSocketFn};
+use crate::unix::{unix_bind, unix_connect};
 use crate::wire::{self, ChunkedWriter, Error, Framing, Stream, Timed};
-use crate::{Body, Peer, Request, Response, WebSocket, ws};
+use crate::ws::WebSocket;
+use pt_sys::PeerCred;
 use std::collections::HashMap;
 use std::io::{self, BufReader, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
@@ -121,7 +127,7 @@ impl ShutdownHandle {
                 }
                 TcpStream::connect_timeout(&a, Duration::from_secs(1)).map(drop)
             }
-            Wake::Unix(path) => crate::unix_connect(path).map(drop),
+            Wake::Unix(path) => unix_connect(path).map(drop),
         };
     }
 }
@@ -152,7 +158,7 @@ impl Server {
         handler: impl Fn(&Request, &Peer) -> Response + Send + Sync + 'static,
     ) -> io::Result<Server> {
         let ctx = |e: io::Error| io::Error::new(e.kind(), format!("bind {}: {e}", path.display()));
-        let l = crate::unix_bind(path).map_err(ctx)?;
+        let l = unix_bind(path).map_err(ctx)?;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(ctx)?;
         Ok(Server::new(
             Listener::Unix(l),
@@ -295,7 +301,7 @@ fn drain(shared: &Shared) {
 enum Next {
     Again,
     Close,
-    Upgrade(crate::WebSocketFn),
+    Upgrade(WebSocketFn),
 }
 
 fn serve(shared: &Shared, stream: Stream, peer: &Peer, slot: &Slot) {
@@ -392,7 +398,7 @@ fn handle(
         resp.headers.remove(h);
     }
     if let Body::WebSocket(_) = resp.body {
-        let accept = match ws::check_handshake(&req) {
+        let accept = match check_handshake(&req) {
             Ok(accept) => accept,
             Err(refusal) => {
                 return write_response(out, &req, refusal, false)
@@ -414,7 +420,7 @@ fn handle(
     Ok(if keep { Next::Again } else { Next::Close })
 }
 
-fn start(status: u16, headers: &crate::Headers, framing: &str) -> String {
+fn start(status: u16, headers: &Headers, framing: &str) -> String {
     let mut head = format!("HTTP/1.1 {status} {}\r\n", wire::reason(status));
     for (n, v) in headers.iter() {
         head.push_str(&format!("{n}: {v}\r\n"));
@@ -458,8 +464,16 @@ fn write_response(out: &mut Stream, req: &Request, resp: Response, keep: bool) -
 }
 
 fn error_response(out: &mut Stream, status: u16, why: &str) -> io::Result<()> {
-    let mut headers = crate::Headers::default();
+    let mut headers = Headers::default();
     headers.add("Content-Type", "text/plain; charset=utf-8");
     let framing = format!("Content-Length: {}\r\nConnection: close\r\n", why.len() + 1);
     out.write_all((start(status, &headers, &framing) + why + "\n").as_bytes())
+}
+
+/// Who is on the other end of a connection.
+#[derive(Debug, Clone)]
+pub enum Peer {
+    Tcp(SocketAddr),
+    /// Credentials of the connecting process (SO_PEERCRED).
+    Unix(PeerCred),
 }

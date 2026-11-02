@@ -1,6 +1,7 @@
 //! A small blocking client for loopback TCP and unix sockets, with a WebSocket client.
 
-use crate::Headers;
+use crate::headers::{Headers, is_token};
+use crate::unix::unix_connect;
 use crate::wire::{self, Error, Framing, Stream, Timed};
 use crate::ws::{self, WebSocket};
 use std::fmt;
@@ -161,7 +162,7 @@ impl Client {
     ) -> io::Result<BufReader<Timed>> {
         let invalid =
             |what: &str| io::Error::new(io::ErrorKind::InvalidInput, format!("invalid {what}"));
-        if !wire::is_token(method) {
+        if !is_token(method) {
             return Err(invalid("method"));
         }
         if !path.starts_with('/') || path.bytes().any(|b| b <= b' ' || b == 0x7f) {
@@ -173,7 +174,7 @@ impl Client {
         };
         let mut head = format!("{method} {path} HTTP/1.1\r\nHost: {host}\r\n{extra}");
         for (n, v) in headers {
-            if !wire::is_token(n) || v.bytes().any(|b| matches!(b, b'\r' | b'\n' | 0)) {
+            if !is_token(n) || v.bytes().any(|b| matches!(b, b'\r' | b'\n' | 0)) {
                 return Err(invalid("header"));
             }
             head.push_str(&format!("{n}: {v}\r\n"));
@@ -185,7 +186,7 @@ impl Client {
                 s.set_nodelay(true)?;
                 Stream::Tcp(s)
             }
-            Target::Unix(p) => Stream::Unix(crate::unix_connect(p)?),
+            Target::Unix(p) => Stream::Unix(unix_connect(p)?),
         };
         let mut timed = Timed {
             stream,

@@ -1,6 +1,7 @@
 //! Sockets, the HTTP/1.1 message grammar and body framing, shared by server and client.
 
-use crate::{Headers, Request};
+use crate::headers::{Headers, is_token};
+use crate::request::Request;
 use std::io::{self, BufRead, Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::os::unix::net::UnixStream;
@@ -140,7 +141,7 @@ pub(crate) struct Head {
     pub(crate) headers: Headers,
 }
 
-const MAX_HEADERS: usize = 100;
+pub(crate) const MAX_HEADERS: usize = 100;
 
 /// Reads a line of at most `limit` bytes including its LF. False at EOF; `line` holds any partial.
 fn read_line(
@@ -229,12 +230,6 @@ fn field_text(b: &[u8]) -> Result<String, Error> {
         return Err(Error::Status(400, "control byte in head"));
     }
     String::from_utf8(b.to_vec()).map_err(|_| Error::Status(400, "head is not UTF-8"))
-}
-
-pub(crate) fn is_token(s: &str) -> bool {
-    !s.is_empty()
-        && s.bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
 }
 
 pub(crate) fn parse_request(head: Head) -> Result<Request, Error> {
@@ -452,28 +447,6 @@ impl ChunkedWriter<'_> {
     }
 }
 
-pub(crate) fn percent_decode(s: &str) -> String {
-    let b = s.as_bytes();
-    let mut out = Vec::with_capacity(b.len());
-    let mut i = 0;
-    while i < b.len() {
-        let hex = |c: u8| (c as char).to_digit(16);
-        match b[i] {
-            b'+' => out.push(b' '),
-            b'%' if i + 2 < b.len() => match (hex(b[i + 1]), hex(b[i + 2])) {
-                (Some(h), Some(l)) => {
-                    out.push((h * 16 + l) as u8);
-                    i += 2;
-                }
-                _ => out.push(b'%'),
-            },
-            c => out.push(c),
-        }
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
 pub(crate) fn reason(status: u16) -> &'static str {
     match status {
         100 => "Continue",
@@ -505,65 +478,4 @@ pub(crate) fn reason(status: u16) -> &'static str {
         505 => "HTTP Version Not Supported",
         _ => "",
     }
-}
-
-/// Parses pipelined requests from `data`, fed in small reads, and checks the limits hold.
-pub fn fuzz_request(data: &[u8]) {
-    const HEAD: usize = 2048;
-    const BODY: usize = 4096;
-    struct Trickle<'a>(&'a [u8], usize);
-    impl Read for Trickle<'_> {
-        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            let n = buf.len().min(self.0.len()).min(1 + self.1 % 61);
-            self.1 = self.1.wrapping_mul(31).wrapping_add(7);
-            buf[..n].copy_from_slice(&self.0[..n]);
-            self.0 = &self.0[n..];
-            Ok(n)
-        }
-    }
-    let seed = data.first().copied().unwrap_or(0) as usize;
-    let mut r = io::BufReader::with_capacity(97, Trickle(data, seed));
-    for _ in 0..64 {
-        let Ok(Some(head)) = read_head(&mut r, HEAD) else {
-            return;
-        };
-        assert!(head.start.len() <= HEAD);
-        assert!(head.headers.0.len() <= MAX_HEADERS);
-        let Ok(req) = parse_request(head) else { return };
-        assert!(req.path().len() <= HEAD);
-        let hosts = req.headers.get_all("Host").count();
-        assert!(
-            hosts == 1 || (req.http10 && hosts == 0),
-            "{hosts} Host fields"
-        );
-        let _ = req.query_param("a");
-        if crate::ws::check_handshake(&req).is_ok() {
-            assert_canonical_key(req.header("Sec-WebSocket-Key").unwrap_or(""));
-        }
-        let Ok(framing) = framing(&req.headers) else {
-            return;
-        };
-        match read_body(&mut r, framing, BODY, HEAD) {
-            Ok(body) => assert!(body.len() <= BODY),
-            Err(_) => return,
-        }
-    }
-}
-
-/// An accepted Sec-WebSocket-Key decodes to 16 bytes that encode back to the same text.
-fn assert_canonical_key(key: &str) {
-    const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let (mut bytes, mut acc, mut bits) = (Vec::new(), 0u32, 0);
-    for c in key.trim_end_matches('=').bytes() {
-        let v = A.iter().position(|&a| a == c).expect("base64 alphabet");
-        acc = acc << 6 | v as u32;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            bytes.push((acc >> bits) as u8);
-            acc &= (1 << bits) - 1;
-        }
-    }
-    assert_eq!(bytes.len(), 16, "{key}");
-    assert_eq!(crate::ws::base64(&bytes), key);
 }
