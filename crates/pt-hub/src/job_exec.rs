@@ -802,7 +802,11 @@ impl NodeExec {
     ) -> Result<bool, Fail> {
         let nid = node_job_id(&self.hub, job);
         let token = self.token(view, job);
-        let start = self.hub.jobs.log_len(job, attempt);
+        let start = self
+            .hub
+            .jobs
+            .log_offset(job, attempt)
+            .map_err(|e| Fail::Save(e.to_string()))?;
         let mut at = start;
         let mut done = false;
         let result = loop {

@@ -19,6 +19,12 @@ fn cvt(rc: libc::c_int) -> io::Result<libc::c_int> {
     }
 }
 
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+pub fn set_malloc_arena_max(max: i32) -> bool {
+    // SAFETY: mallopt takes integer parameters and does not borrow any memory.
+    unsafe { libc::mallopt(libc::M_ARENA_MAX, max) != 0 }
+}
+
 /// Waits for a priority change on a file, as used by cgroup event files.
 pub fn poll_priority(file: &impl AsFd, timeout: Duration) -> io::Result<bool> {
     let mut pfd = libc::pollfd {

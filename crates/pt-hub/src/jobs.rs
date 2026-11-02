@@ -96,7 +96,8 @@ pub fn ended(s: JobState) -> bool {
 
 #[derive(Clone, Default)]
 struct Meta {
-    log_bytes: Option<u64>,
+    /// A failed append whose rollback could not be synced.
+    log_error: Option<String>,
     started_at_ms: Option<u64>,
     fetched: Option<Vec<Fetched>>,
 }
@@ -124,14 +125,36 @@ impl JobStore {
     }
 
     pub fn log_len(&self, job: JobId, attempt: u32) -> u64 {
-        let mut m = lock(&self.meta);
-        let e = m.entry((job, attempt)).or_default();
-        *e.log_bytes
-            .get_or_insert_with(|| fs::metadata(self.log_path(job, attempt)).map_or(0, |m| m.len()))
+        fs::metadata(self.log_path(job, attempt)).map_or(0, |m| m.len())
+    }
+
+    fn check_log(&self, job: JobId, attempt: u32) -> io::Result<()> {
+        if let Some(error) = lock(&self.meta)
+            .get(&(job, attempt))
+            .and_then(|m| m.log_error.clone())
+        {
+            return Err(io::Error::other(error));
+        }
+        Ok(())
+    }
+
+    /// Syncs the existing copy before using its length as the next fetch offset.
+    pub fn log_offset(&self, job: JobId, attempt: u32) -> io::Result<u64> {
+        self.check_log(job, attempt)?;
+        let path = self.log_path(job, attempt);
+        let ctx = |e: io::Error| io::Error::new(e.kind(), format!("{}: {e}", path.display()));
+        let f = match OpenOptions::new().append(true).open(&path) {
+            Ok(f) => f,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
+            Err(e) => return Err(ctx(e)),
+        };
+        f.sync_data().map_err(ctx)?;
+        Ok(f.metadata().map_err(ctx)?.len())
     }
 
     /// Appends bytes that start at `at`, which must be the hub copy's length.
     pub fn append(&self, job: JobId, attempt: u32, at: u64, bytes: &[u8]) -> io::Result<u64> {
+        self.check_log(job, attempt)?;
         let path = self.log_path(job, attempt);
         let ctx = |e: io::Error| io::Error::new(e.kind(), format!("{}: {e}", path.display()));
         fs::create_dir_all(self.dir(job, attempt)).map_err(ctx)?;
@@ -146,15 +169,22 @@ impl JobStore {
                 "the hub copy is {len} bytes, not {at}"
             ))));
         }
-        f.write_all(bytes)
-            .and_then(|()| f.sync_data())
-            .map_err(ctx)?;
-        let n = at + bytes.len() as u64;
-        lock(&self.meta)
-            .entry((job, attempt))
-            .or_default()
-            .log_bytes = Some(n);
-        Ok(n)
+        // A failed write or sync may have extended the file; retry only after a synced rollback.
+        if let Err(e) = f.write_all(bytes).and_then(|()| f.sync_data()) {
+            if let Err(rollback) = f.set_len(at).and_then(|()| f.sync_data()) {
+                let error = ctx(io::Error::new(
+                    e.kind(),
+                    format!("{e}; rolling back to {at} bytes: {rollback}"),
+                ));
+                lock(&self.meta)
+                    .entry((job, attempt))
+                    .or_default()
+                    .log_error = Some(error.to_string());
+                return Err(error);
+            }
+            return Err(ctx(e));
+        }
+        Ok(at + bytes.len() as u64)
     }
 
     /// Up to `limit` bytes of the hub copy from `offset`, and the copy's length.

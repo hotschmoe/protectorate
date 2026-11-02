@@ -13,7 +13,7 @@
 mod common;
 
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
@@ -412,6 +412,20 @@ fn hub_runs_the_fleet_and_node_jobs() {
         ])
         .json();
     assert_eq!(end["eof"].as_bool(), Some(true), "{end}");
+
+    // A partial write can leave bytes on disk after the last successful append.
+    let log_path = hub
+        .home
+        .join("jobs")
+        .join(&uname)
+        .join(done["attempt"].as_u64().unwrap().to_string())
+        .join("log");
+    let mut file = OpenOptions::new().append(true).open(log_path).unwrap();
+    file.write_all(b"partial").unwrap();
+    file.sync_data().unwrap();
+    let shown = job_json(&hub, &uname);
+    assert_eq!(shown["log_bytes"].as_u64(), Some((log.len() + 7) as u64));
+    assert_eq!(log_text(&hub, &uname, log.len() as u64), "partial");
 
     #[cfg(debug_assertions)]
     {
