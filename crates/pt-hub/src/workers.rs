@@ -220,17 +220,15 @@ fn unpark_envoy(hub: &Hub, report: &Report) {
     let Some(id) = envoy_id(&view.state) else {
         return;
     };
-    let Some(s) = view.state.sleeve(id) else {
+    let Some(Life::Parked(ParkReason::Ineligible { harness })) =
+        view.state.sleeve(id).map(|s| s.life)
+    else {
         return;
     };
-    if s.life != Life::Parked(ParkReason::NoTarget) || hub.doctor.gated(id).is_none() {
-        return;
-    }
-    let name = s.target.harness.as_str();
+    let name = harness.as_str();
     if !report.eligible(name) {
         return;
     }
-    hub.doctor.ungate(id);
     hub.bus.event(
         Kind::Sleeve,
         Level::Info,

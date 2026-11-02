@@ -9,14 +9,15 @@
 //! spawn field is another bit, not another tag. `EventKind::Send` is tag 1, or tag 39 when it
 //! marks D9. Tags 0, 1 and 32 decode and re-encode to the same bytes. Tags 33 to 37 are Start
 //! and Resleeve with an effort, a permanent artifact check, an artifact collection, and
-//! Continue. Older tags leave the mark unset.
+//! Continue. Older tags leave the mark unset. `EventKind::TargetChosen` is tag 22 with a target
+//! or none, and tag 40 when doctor refused Envoy's harness.
 
 use crate::event::*;
 use crate::model::*;
 
 pub const FORMAT: u8 = 1;
 /// Highest event tag this binary reads. Any incompatible encoding must get a new event tag.
-pub const MAX_EVENT_TAG: u8 = 39;
+pub const MAX_EVENT_TAG: u8 = 40;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -735,11 +736,23 @@ impl Wire for EventKind {
                 g.put(w);
                 live.put(w);
             }
-            E::TargetChosen { sleeve, g, target } => {
-                w.push(22);
+            E::TargetChosen { sleeve, g, chosen } => {
+                w.push(if matches!(chosen, Chosen::Ineligible(_)) {
+                    40
+                } else {
+                    22
+                });
                 sleeve.put(w);
                 g.put(w);
-                target.put(w);
+                // Tag 22 carries an `Option<Target>`.
+                match chosen {
+                    Chosen::Target(t) => {
+                        w.push(1);
+                        t.put(w);
+                    }
+                    Chosen::NoTarget => w.push(0),
+                    Chosen::Ineligible(h) => h.put(w),
+                }
             }
             E::NodeChosen {
                 job,
@@ -921,7 +934,10 @@ impl Wire for EventKind {
             22 => E::TargetChosen {
                 sleeve: Wire::get(r)?,
                 g: Wire::get(r)?,
-                target: Wire::get(r)?,
+                chosen: match Option::<Target>::get(r)? {
+                    Some(t) => Chosen::Target(t),
+                    None => Chosen::NoTarget,
+                },
             },
             23 => E::NodeChosen {
                 job: Wire::get(r)?,
@@ -1010,6 +1026,11 @@ impl Wire for EventKind {
                 spec.d9 = true;
                 E::Spawn(spec)
             }
+            40 => E::TargetChosen {
+                sleeve: Wire::get(r)?,
+                g: Wire::get(r)?,
+                chosen: Chosen::Ineligible(Wire::get(r)?),
+            },
             _ => return Err(DecodeError::UnknownTag { what: "event", tag }),
         })
     }

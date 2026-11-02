@@ -54,8 +54,12 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
             }
         }
         E::ScopeProbed { sleeve, g, live } => on_scope(owed, prev, *sleeve, *g, *live, now),
-        E::TargetChosen { sleeve, g, target } => {
-            on_target(owed, prev, *sleeve, *g, target.as_ref())
+        E::TargetChosen { sleeve, g, chosen } => {
+            let target = match chosen {
+                Chosen::Target(t) => Some(t),
+                Chosen::NoTarget | Chosen::Ineligible(_) => None,
+            };
+            on_target(owed, prev, *sleeve, *g, target)
         }
         E::Observed { sleeve, g, obs } => on_obs(owed, prev, *sleeve, *g, obs, now),
         E::Exited { sleeve, g, cause } => on_exit(owed, prev, *sleeve, *g, *cause, None, now),

@@ -221,7 +221,7 @@ pub enum EventKind {
     TargetChosen {
         sleeve: SleeveId,
         g: Gen,
-        target: Option<Target>,
+        chosen: Chosen,
     },
     NodeChosen {
         job: JobId,
@@ -278,6 +278,16 @@ pub enum EventKind {
         sleeve: SleeveId,
         text: String,
     },
+}
+
+/// What target selection answered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Chosen {
+    Target(Target),
+    /// No candidate fits: the sleeve parks.
+    NoTarget,
+    /// Doctor refused Envoy's own harness: Envoy parks instead of moving to another one.
+    Ineligible(Harness),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

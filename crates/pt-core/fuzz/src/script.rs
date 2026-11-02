@@ -124,6 +124,7 @@ fn park_text(life: &Life) -> String {
         ParkReason::Flapping(None) => "flapping".into(),
         ParkReason::BriefUnconfirmed => "brief_unconfirmed".into(),
         ParkReason::Guard(g) => format!("g{}", g.number()),
+        ParkReason::Ineligible { harness } => format!("ineligible ({})", harness_name(*harness)),
     }
 }
 

@@ -114,6 +114,7 @@ pub fn park_wire(r: ParkReason) -> String {
         ParkReason::Flapping(None) => "flapping".into(),
         ParkReason::BriefUnconfirmed => "brief_unconfirmed".into(),
         ParkReason::Guard(g) => format!("g{}", g.number()),
+        ParkReason::Ineligible { harness } => format!("ineligible ({})", harness.as_str()),
     }
 }
 

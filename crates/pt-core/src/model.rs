@@ -266,4 +266,8 @@ pub enum ParkReason {
     Flapping(Option<Harness>),
     BriefUnconfirmed,
     Guard(Guardrail),
+    /// Doctor refused Envoy's own harness. Envoy waits for a doctor run that finds it eligible.
+    Ineligible {
+        harness: Harness,
+    },
 }

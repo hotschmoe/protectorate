@@ -207,7 +207,11 @@ pub fn event(b: &mut Bytes) -> Event {
         22 => E::TargetChosen {
             sleeve: s(b),
             g: g(b),
-            target: opt(b, target),
+            chosen: match b.below(3) {
+                0 => Chosen::Target(target(b)),
+                1 => Chosen::NoTarget,
+                _ => Chosen::Ineligible(target(b).harness),
+            },
         },
         23 => E::NodeChosen {
             job: j(b),

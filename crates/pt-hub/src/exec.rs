@@ -20,8 +20,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use pt_core::{
-    Ask, Choice, EffectId, EffectKind, EffectState, EventKind, ExitCause, Gen, Harness, Intent,
-    Layout, Life, Obs, Party, ProbeResult, Sleeve, SleeveId, Target, TurnEnd,
+    Ask, Cause, Choice, Chosen, EffectId, EffectKind, EffectState, EventKind, ExitCause, Gen,
+    Guardrail, Harness, Intent, Layout, Life, Obs, Party, ProbeResult, Sleeve, SleeveId, Target,
+    TurnEnd,
 };
 use pt_drivers::{Ack, AckKind, Decision, Entry, ErrorClass, Session, Stop};
 use pt_json::obj;
@@ -518,9 +519,9 @@ impl SleeveExec {
             Intent::SelectTarget {
                 sleeve,
                 g,
+                cause,
                 candidates,
                 exclude,
-                ..
             } => {
                 let hub = &self.hub;
                 let eligible = |t: &Target| {
@@ -528,31 +529,48 @@ impl SleeveExec {
                         && hub.doctor.check(&hub.config, t.harness).is_ok()
                 };
                 let quotas = hub.quotas.list();
-                // Envoy whose own harness doctor refused parks rather than moving elsewhere.
-                let envoy_gated =
-                    envoy_id(&view.state) == Some(sleeve) && hub.doctor.gated(sleeve).is_some();
-                let chosen = if envoy_gated {
-                    Err("Envoy's harness failed doctor".to_string())
-                } else {
-                    crate::select::select_target(
+                // Envoy whose own harness doctor refused at launch parks rather than moving
+                // elsewhere, and journals which harness it waits for.
+                let refused = match view.state.sleeve(sleeve).map(|s| s.target.harness) {
+                    Some(h)
+                        if envoy_id(&view.state) == Some(sleeve)
+                            && cause == Cause::Guard(Guardrail::StartFailed)
+                            && hub.doctor.check(&hub.config, h).is_err() =>
+                    {
+                        Some(h)
+                    }
+                    _ => None,
+                };
+                let chosen = match refused {
+                    Some(h) => {
+                        info!(
+                            "sleeve {}: Envoy's harness {} failed doctor",
+                            sleeve.0,
+                            h.as_str()
+                        );
+                        Chosen::Ineligible(h)
+                    }
+                    None => match crate::select::select_target(
                         now_ms(),
                         &candidates,
                         &exclude,
                         &eligible,
                         &quotas,
-                    )
+                    ) {
+                        Ok((t, why)) => {
+                            info!(
+                                "sleeve {}: resleeve target {:?}: {why}",
+                                sleeve.0, t.harness
+                            );
+                            Chosen::Target(t)
+                        }
+                        Err(why) => {
+                            info!("sleeve {}: {why}", sleeve.0);
+                            Chosen::NoTarget
+                        }
+                    },
                 };
-                match &chosen {
-                    Ok((t, why)) => {
-                        info!(
-                            "sleeve {}: resleeve target {:?}: {why}",
-                            sleeve.0, t.harness
-                        )
-                    }
-                    Err(why) => info!("sleeve {}: {why}", sleeve.0),
-                }
-                let target = chosen.ok().map(|(t, _)| t);
-                self.submit(EventKind::TargetChosen { sleeve, g, target });
+                self.submit(EventKind::TargetChosen { sleeve, g, chosen });
             }
             Intent::Checkpoint { sleeve, g } => {
                 if let Some(s) = view.state.sleeve(sleeve) {
@@ -817,8 +835,7 @@ impl SleeveExec {
         resume: Option<String>,
     ) -> Result<(), String> {
         let hub = self.hub.clone();
-        hub.doctor
-            .gate_launch(&hub.bus, s.id, &s.name, target.harness)?;
+        hub.doctor.gate_launch(&hub.bus, &s.name, target.harness)?;
         let harness =
             driver_harness(target.harness).ok_or("that harness has no headless driver")?;
         let mut program = program(&hub, target.harness)

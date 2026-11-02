@@ -2,6 +2,7 @@
 //! 12b items 2 and 7).
 
 use crate::Core;
+use crate::event::Chosen;
 use crate::intent::{Code, EffectKind, Intent, Notice, Reply};
 use crate::model::*;
 use crate::state::*;
@@ -369,7 +370,7 @@ impl Core<'_> {
         self.out.push(intent);
     }
 
-    pub(crate) fn target_chosen(&mut self, sid: SleeveId, g: Gen, target: Option<&Target>) {
+    pub(crate) fn target_chosen(&mut self, sid: SleeveId, g: Gen, chosen: &Chosen) {
         let Some(s) = self.st.sleeves.get(&sid) else {
             return;
         };
@@ -377,11 +378,14 @@ impl Core<'_> {
             return;
         }
         let auto = s.guard.cause != Some(Cause::Manual);
-        match target {
-            Some(t)
+        match chosen {
+            Chosen::Target(t)
                 if t.valid() && !s.guard.tried.contains(t) && !(auto && t.mode == Mode::Pane) =>
             {
                 self.launch_target(sid, t.clone())
+            }
+            Chosen::Ineligible(harness) => {
+                self.park(sid, ParkReason::Ineligible { harness: *harness })
             }
             _ => self.park(sid, ParkReason::NoTarget),
         }

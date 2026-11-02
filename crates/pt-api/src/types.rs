@@ -291,7 +291,8 @@ api_records! {
         pub role: SleeveRole,
         pub lifecycle: Lifecycle,
         /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed or `g<N>`.
-        /// A flap after a rejected login is `flapping (<harness> login rejected)`.
+        /// A flap after a rejected login is `flapping (<harness> login rejected)`. Envoy whose
+        /// own harness doctor refused is `ineligible (<harness>)` until doctor finds it eligible.
         pub park_reason: Option<String>,
         /// The directory the incarnation works in (a child's worktree, a root's claim).
         pub path: String = String::new(),
