@@ -625,6 +625,33 @@ fn hub_runs_the_fleet_and_node_jobs() {
         assert!(serve.0.try_wait().unwrap().is_none());
     }
 
+    let waited = hub.cli(&[
+        "job",
+        "run",
+        "--node",
+        "e2e-hubfleet",
+        "--wait",
+        "--",
+        "sh",
+        "-c",
+        "sleep 1; echo waited; exit 23",
+    ]);
+    assert_eq!(waited.status, 23, "{} {}", waited.stdout, waited.stderr);
+    assert_eq!(waited.stdout, "waited\n");
+    let waited = hub.cli(&[
+        "job",
+        "run",
+        "--node",
+        "e2e-hubfleet",
+        "--wait",
+        "--",
+        "sh",
+        "-c",
+        "echo success",
+    ]);
+    assert_eq!(waited.status, 0, "{}", waited.stderr);
+    assert_eq!(waited.stdout, "success\n");
+
     // A job that leaves an artifact in its directory.
     let cwd = work.to_str().unwrap();
     let abs = format!("{cwd}/out.bin");

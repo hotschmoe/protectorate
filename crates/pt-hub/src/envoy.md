@@ -23,7 +23,7 @@ capability). `--json` prints the API's answer; `protectorate --help` lists every
 | `sleeve interrupt|stop|rm <s>` | end the turn; stop it and its children; remove it |
 | `sleeve start <s>` / `sleeve resleeve <s> --harness H` | start a stopped or parked sleeve; move a settled one |
 | `node list` / `node show <n>` | fleet machines: online, presence (jobs wait while someone is at one), load, inventory |
-| `job run --node N\|--arch A [--cwd DIR] [--artifact PATH]... -- <argv>` | a command on a node (queued until an AWAY node is free); `--even-if-present` only when it must |
+| `job run --node N\|--arch A [--wait] [--cwd DIR] [--artifact PATH]... -- <argv>` | a command on a node (queued until an AWAY node is free); `--wait` prints its log and returns its exit code; `--even-if-present` only when it must |
 | `job list`, `job show <j>`, `job log <j> [--offset N]`, `job cancel <j>` | its state and exit, its output, cancel it |
 | `job artifact <j> <path> --out FILE` | a file the job left, checked against its SHA-256 |
 | `quota list`, `event list` | quota, the event log |

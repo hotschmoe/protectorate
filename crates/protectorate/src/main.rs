@@ -74,7 +74,7 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   node update (<node>... | --all) [--version TAG] [--channel stable|dev] [--probation SECS]
         [--no-wait]
   job run (--node ID | --arch ARCH) [--even-if-present] [--on-present idle|kill]
-        [--maintenance] [--timeout SECS] [--cwd DIR] [--artifact PATH]... -- <argv...>
+        [--maintenance] [--wait] [--timeout SECS] [--cwd DIR] [--artifact PATH]... -- <argv...>
   job ls [--node N] [--limit N] | job show|cancel <job> | job log <job> [--offset N] [--limit N]
   job artifact <job> <path> [--out FILE]
   quota list
@@ -110,6 +110,7 @@ const SWITCHES: &[&str] = &[
     "--refresh",
     "--all",
     "--no-wait",
+    "--wait",
     "--force",
 ];
 
@@ -199,6 +200,7 @@ pub enum Fail {
     Usage(String),
     Api(ApiError),
     Other(String),
+    Exit(u8),
 }
 
 impl From<String> for Fail {
@@ -421,5 +423,6 @@ fn main() -> ExitCode {
             eprintln!("error: {e}");
             ExitCode::from(1)
         }
+        Err(Fail::Exit(code)) => ExitCode::from(code),
     }
 }

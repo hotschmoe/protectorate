@@ -712,6 +712,11 @@ fn job_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
     };
     match a.word(1, "a job command (run, ls, show, log, artifact, cancel)")? {
         "run" => {
+            if a.has("--wait") && o.json {
+                return Err(Fail::Usage(
+                    "job run --wait prints the log and cannot be combined with --json".into(),
+                ));
+            }
             let target = match (a.flag("--node"), a.flag("--arch")) {
                 (Some(n), None) => api::JobTarget::Node {
                     node_id: n.to_string(),
@@ -732,7 +737,11 @@ fn job_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 timeout_secs: a.num("--timeout")?,
             };
             let v = c.call_for::<m::RunJob>(&req, APPROVAL_WAIT)?;
-            o.show(&v, |j| println!("{}", job_line(j)));
+            if a.has("--wait") {
+                wait_job(c, v)?;
+            } else {
+                o.show(&v, |j| println!("{}", job_line(j)));
+            }
         }
         "ls" | "list" => {
             let req = api::ListJobsRequest {
@@ -779,6 +788,53 @@ fn job_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
         other => return Err(Fail::Usage(format!("unknown job command {other:?}"))),
     }
     Ok(())
+}
+
+fn wait_job(c: &Client, mut job: api::Job) -> Result<(), Fail> {
+    use api::JobState as S;
+    let id = api::JobRef {
+        job_id: job.id.clone(),
+    };
+    while !matches!(
+        job.state,
+        S::Succeeded | S::Failed | S::Interrupted | S::Cancelled | S::Abandoned
+    ) {
+        std::thread::sleep(Duration::from_millis(500));
+        job = c.call::<m::GetJob>(&id)?;
+    }
+    let mut offset = 0;
+    loop {
+        let log = c.call::<m::GetJobLog>(&api::GetJobLogRequest {
+            job_id: job.id.clone(),
+            offset,
+            limit: Some(1 << 20),
+        })?;
+        print!("{}", log.text);
+        if log.eof {
+            break;
+        }
+        if log.next_offset <= offset {
+            return Err(Fail::Other(format!(
+                "job {}: log stopped at {offset}",
+                job.id
+            )));
+        }
+        offset = log.next_offset;
+    }
+    if job.state == S::Succeeded {
+        return Ok(());
+    }
+    if let Some(code) = job.exit_code.filter(|code| (1..=255).contains(code)) {
+        return Err(Fail::Exit(code as u8));
+    }
+    Err(Fail::Other(format!(
+        "job {} ended {}{}",
+        job.id,
+        job.state,
+        job.error
+            .as_ref()
+            .map_or(String::new(), |e| format!(": {e}"))
+    )))
 }
 
 /// Every slice of the artifact, checked against its SHA-256, to `--out` or stdout.
