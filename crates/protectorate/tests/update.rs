@@ -1010,6 +1010,13 @@ fn node_update_admission_lost_reply_and_confirmation() {
     }
 
     fs::write(&pause, "1").unwrap();
+    // Each refused update above was admitted too; wait for this one's own admission.
+    let admitted = || {
+        sup.log_text()
+            .matches("update admitted for testing")
+            .count()
+    };
+    let before = admitted();
     let fields = obj! { "type" => "Update", "version" => "v0.0.2", "api" => fake.url.as_str(), "repo" => "o/r", "probation_secs" => 30u64 }.to_string();
     let mut link = UnixStream::connect(&sock).unwrap();
     link.write_all(b"{\"tags\":[\"tag:hub\"]}\n").unwrap();
@@ -1017,9 +1024,7 @@ fn node_update_admission_lost_reply_and_confirmation() {
     link.shutdown(Shutdown::Both).unwrap();
     drop(link);
     eventually("update admitted", Duration::from_secs(10), || {
-        sup.log_text()
-            .contains("update admitted for testing")
-            .then_some(())
+        (admitted() > before).then_some(())
     });
     let submit = node_rpc(
         &node,
