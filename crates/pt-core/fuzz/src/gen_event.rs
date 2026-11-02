@@ -118,6 +118,7 @@ pub fn event(b: &mut Bytes) -> Event {
             budget: opt(b, |b| b.u64()),
             disk_limit: opt(b, |b| b.u64()),
             effort: opt(b, |b| b.string()),
+            d9: b.bool(),
         }),
         1 => E::Send {
             to: s(b),
@@ -129,6 +130,7 @@ pub fn event(b: &mut Bytes) -> Event {
             } else {
                 SendMode::Queue
             },
+            d9: b.bool(),
         },
         2 => E::Interrupt { sleeve: s(b) },
         3 => E::Compact { sleeve: s(b) },

@@ -15,9 +15,12 @@ reads no clock, so `replay(journal) == live state`. The hub's core thread is its
 
 ## Events
 
-- Commands: `Spawn`, `Send` (queue or steer; mail is a `Send` from `Party::Sleeve`. A sleeve may
-  land 8 of those on the live root named `envoy` per 10 minutes; the times are kept on the sender
-  and the next one is refused until the window moves), `Interrupt`,
+- Commands: `Spawn`, `Send` (queue or steer; mail is a `Send` from `Party::Sleeve`. One tree may
+  land 8 of those on the live root named `envoy` per 10 minutes, counted on the tree's root, and
+  one sleeve may land 8 on its parent in the same window. The refusal says when the window
+  reopens. The core journals the events and replay rebuilds the times. A spawn or send from a
+  D9-origin turn marks the sleeve, and the mark is inherited by its children; Envoy is never
+  marked), `Interrupt`,
   `Compact`, `RespondApproval`, `Stop`, `Remove`, `Start`, `Resleeve`, `Abandon`, `Viewed`,
   `CreateJob`, `CancelJob`, `AbandonJob`, `RequeueJob`, `RequestApproval` (a code rule asks the
   owner, D9). Each gets exactly one `Intent::Reply`.

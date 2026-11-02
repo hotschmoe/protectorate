@@ -64,7 +64,8 @@ impl Core<'_> {
                 from,
                 text,
                 mode,
-            } => self.send(*to, request_id, *from, text, *mode),
+                d9,
+            } => self.send(*to, request_id, *from, text, *mode, *d9),
             E::Interrupt { sleeve } => self.interrupt_cmd(*sleeve),
             E::Compact { sleeve } => self.compact_cmd(*sleeve),
             E::RespondApproval {
@@ -165,8 +166,8 @@ impl Core<'_> {
         self.out.push(Intent::Reply(r));
     }
 
-    pub(crate) fn refuse(&mut self, code: Code, why: &'static str) {
-        self.reply(Reply::Refused(code, why));
+    pub(crate) fn refuse(&mut self, code: Code, why: impl Into<String>) {
+        self.reply(Reply::Refused(code, why.into()));
     }
 
     pub(crate) fn notify(&mut self, to: Party, sleeve: Option<SleeveId>, notice: Notice) {

@@ -57,6 +57,7 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
                 budget: b.bool().then(|| 1000 + b.below(4000)),
                 disk_limit: b.bool().then(|| 1 << 30),
                 effort: b.bool().then(|| "high".into()),
+                d9: b.bool(),
             })
         }
         2 | 3 => {
@@ -75,6 +76,7 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
                 } else {
                     SendMode::Queue
                 },
+                d9: b.bool(),
             }
         }
         4 => E::Interrupt { sleeve: s },

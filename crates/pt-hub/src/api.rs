@@ -477,6 +477,7 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         resleeve_to: targets(hub, &r.resleeve_to),
         budget: r.budget,
         disk_limit: None,
+        d9: false,
     };
     let id = match command(hub, EventKind::Spawn(spec))? {
         Reply::Spawned(id) => id,
@@ -491,6 +492,7 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
                 from: c.who.party(),
                 text: prefix(&view.state, c.who, "", &text),
                 mode: SendMode::Queue,
+                d9: false,
             },
         )?;
     }
@@ -556,6 +558,7 @@ fn send_message(c: &Ctx<'_>, r: api::SendMessageRequest) -> Result<api::Sent> {
                 api::Delivery::Queue => SendMode::Queue,
                 api::Delivery::Steer => SendMode::Steer,
             },
+            d9: false,
         },
     )?;
     Ok(api::Sent { request_id })
@@ -1262,6 +1265,7 @@ fn envoy_send(c: &Ctx<'_>, r: api::EnvoySendRequest) -> Result<api::Sent> {
             from: c.who.party(),
             text: prefix(&view.state, c.who, agent, &r.text),
             mode: SendMode::Queue,
+            d9: false,
         },
     )?;
     Ok(api::Sent { request_id })

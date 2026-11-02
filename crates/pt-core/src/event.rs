@@ -24,6 +24,8 @@ pub struct SpawnSpec {
     pub resleeve_to: Vec<Target>,
     pub budget: Option<u64>,
     pub disk_limit: Option<u64>,
+    /// The spawning turn had D9 origin. The child is marked, and so are its children.
+    pub d9: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -119,6 +121,8 @@ pub enum EventKind {
         from: Party,
         text: String,
         mode: SendMode,
+        /// The sending turn had D9 origin. The recipient is marked, and so are its children.
+        d9: bool,
     },
     Interrupt {
         sleeve: SleeveId,

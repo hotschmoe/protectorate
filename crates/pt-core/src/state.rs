@@ -15,6 +15,8 @@ pub struct State {
     pub next_effect: u64,
     pub next_job: u64,
     pub next_approval: u64,
+    /// Next [`Message::seq`]. It moves only when a message is accepted, so replay assigns the same numbers.
+    pub next_msg: u64,
     pub sleeves: BTreeMap<SleeveId, Sleeve>,
     pub effects: BTreeMap<EffectId, Effect>,
     pub jobs: BTreeMap<JobId, Job>,
@@ -83,8 +85,12 @@ pub struct Sleeve {
     pub interrupt_at: Millis,
     pub loop_hash: Option<u64>,
     pub loop_count: u32,
-    /// When this sleeve's mails to Envoy were accepted. The window drops the rest on the next one.
+    /// When this tree's mails to Envoy were accepted. Only the root's list is used.
     pub envoy_mails: Vec<Millis>,
+    /// When this sleeve's mails to its parent were accepted.
+    pub parent_mails: Vec<Millis>,
+    /// A D9-origin turn spawned this sleeve or sent to it, or its parent is marked. Envoy is never marked.
+    pub d9: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -152,6 +158,8 @@ pub struct Message {
     pub text: String,
     pub mode: SendMode,
     pub state: MsgState,
+    /// Order among accepted messages. Replay assigns the same numbers.
+    pub seq: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

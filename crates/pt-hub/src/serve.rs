@@ -243,6 +243,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
             resleeve_to,
             budget: None,
             disk_limit: None,
+            d9: false,
         }));
     }
 

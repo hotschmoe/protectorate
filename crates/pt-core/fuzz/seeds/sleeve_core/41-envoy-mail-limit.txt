@@ -1,14 +1,21 @@
-#scenario 5b0e2eeab1dd165a
-# A sleeve may mail Envoy eight times in ten minutes. The ninth is refused.
-# Mail to its parent, a duplicate, the owner's mail and Envoy's own mail do not spend that budget.
-# A steer counts. After the window, one more lands. The counter is journaled: a crash does not reset it.
+#scenario 18284f0e866fbf08
+# One tree may mail Envoy eight times in ten minutes. A ninth, from any sleeve in the tree, is refused.
+# Mail to a parent is its own per-sender budget of eight. A duplicate, the owner's mail and Envoy's
+# own mail do not spend the Envoy budget. A steer does. Another tree has its own Envoy budget.
+# The refusal names when the window reopens. A crash does not reset either counter.
 spawn envoy /w/e harness=codex
 spawn root /w/a
 spawn leaf /wt/leaf parent=root
+spawn sib /wt/sib parent=root
+spawn other /w/b
+spawn ochild /wt/ochild parent=other
 run
 obs envoy ready
 obs root ready
 obs leaf ready
+obs sib ready
+obs other ready
+obs ochild ready
 send root p1 from=leaf
 send root p2 from=leaf
 send root p3 from=leaf
@@ -18,6 +25,21 @@ send root p6 from=leaf
 send root p7 from=leaf
 send root p8 from=leaf
 expect root msg:p8=Queued
+send root p9 from=leaf
+expect root msg:p9=
+expect-reply too many messages to the parent from this sleeve; the window reopens in 600s
+send root q1 from=sib
+send root q2 from=sib
+send root q3 from=sib
+send root q4 from=sib
+send root q5 from=sib
+send root q6 from=sib
+send root q7 from=sib
+send root q8 from=sib
+expect root msg:q8=Queued
+send root q9 from=sib
+expect root msg:q9=
+expect-reply too many messages to the parent from this sleeve; the window reopens in 600s
 send envoy m1 from=leaf
 send envoy m1 from=leaf
 send envoy s1 steer from=leaf
@@ -29,11 +51,20 @@ send envoy m6 from=leaf
 send envoy m7 from=leaf
 send envoy owner1
 send envoy self1 from=envoy
-expect envoy activity=Delivering msg:m1=InFlight msg:s1=SteerHeld msg:m7=Queued msg:owner1=Queued msg:self1=Queued queue=8
+expect envoy activity=Delivering msg:m1=InFlight msg:s1=SteerHeld msg:m7=Queued msg:owner1=Queued msg:self1=Queued
+send envoy e1 from=sib
+expect envoy msg:e1=
+expect-reply too many messages to Envoy from this tree; the window reopens in 600s
+send envoy o1 from=ochild
+expect envoy msg:o1=Queued
 commit
 crash empty
 send envoy m9 from=leaf
 expect envoy msg:m9=
+send root p10 from=leaf
+expect root msg:p10=
 tick 10m
 send envoy m10 from=leaf
 expect envoy msg:m10=Queued
+send root p11 from=leaf
+expect root msg:p11=Queued
