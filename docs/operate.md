@@ -197,7 +197,9 @@ already long past, and a window once that grace has ended, count as reset, and t
 may spend the row for that reason. It is not a missing reading. A reset at or before the
 epoch is ignored and the percent still counts.
 A model-scoped Claude window (the weekly Sonnet or Opus cap, shown as `wk <name>`) gates a
-resleeve only when that candidate's model name contains the name. A row that only reports
+resleeve of the same family, ignoring case and version, so `Sonnet 4.5` gates `sonnet` and
+`claude-sonnet-4-5`. A candidate with no model is gated by any of those caps that is under
+the usable minimum. A row that only reports
 other models' caps is not spent. The account windows always count. Pi with a vendor login and
 Antigravity have no meter and are never chosen. A resleeve list that is only those is not
 reported as short of quota. A Codex window keeps the length the vendor

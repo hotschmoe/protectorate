@@ -21,18 +21,35 @@ fn reset_at(w: &QuotaWindow) -> Option<u64> {
     w.resets_at_ms.map(|r| r.0).filter(|t| *t > 0)
 }
 
-/// Account windows always gate. A Claude model cap (`wk <name>`) gates a candidate only when
-/// the candidate's model name contains that name.
-fn gates(label: &str, model: &str) -> bool {
+/// Model families. A cap and a candidate match when both carry the same one, ignoring
+/// case and version digits (`Sonnet 4.5` is `sonnet`).
+const FAMILIES: [&str; 3] = ["sonnet", "opus", "haiku"];
+
+/// Account windows always gate. A model cap gates the same family. With no model, only a
+/// cap under `min` gates, because the default may be that model. `None` ignores caps.
+fn gates(label: &str, model: &str, used: f64, min: Option<f64>) -> bool {
     let Some(scope) = label.strip_prefix("wk ") else {
         return true;
     };
     if scope.is_empty() {
         return true;
     }
-    let scope = letters(scope);
-    let model = letters(model);
-    scope.len() >= 3 && model.contains(&scope)
+    if model.is_empty() {
+        return min.is_some_and(|min| (100.0 - used).clamp(0.0, 100.0) < min);
+    }
+    match (family(scope), family(model)) {
+        (Some(cap), Some(got)) => cap == got,
+        (Some(_), None) => false,
+        (None, _) => {
+            let name = letters(scope);
+            name.len() >= 3 && letters(model).contains(&name)
+        }
+    }
+}
+
+fn family(s: &str) -> Option<&'static str> {
+    let folded = letters(s);
+    FAMILIES.into_iter().find(|name| folded.contains(name))
 }
 
 fn letters(s: &str) -> String {
@@ -43,14 +60,14 @@ fn letters(s: &str) -> String {
 }
 
 /// The row has finite usage windows, and none of them apply to `model`.
-fn other_scopes_only(q: &Quota, model: &str) -> bool {
+fn other_scopes_only(q: &Quota, model: &str, min: f64) -> bool {
     let mut any = false;
     for w in &q.windows {
-        if w.used_pct.filter(|u| u.is_finite()).is_none() {
+        let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
             continue;
-        }
+        };
         any = true;
-        if gates(&w.label, model) {
+        if gates(&w.label, model, used, Some(min)) {
             return false;
         }
     }
@@ -72,7 +89,8 @@ pub struct Health {
     pub healthy: bool,
 }
 
-/// One ordered resleeve candidate. An empty `model` gates on the account windows only.
+/// One ordered resleeve candidate. An empty `model` gates on the account windows and on any
+/// exhausted model cap.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Candidate {
     pub harness: Harness,
@@ -143,7 +161,8 @@ fn projected_unused(w: &QuotaWindow, used: f64, fetched_ms: u64, now_ms: u64) ->
 }
 
 /// Scores a fresh quota by its windows that have not yet reset. `None` when nothing is usable.
-fn score(q: &Quota, now_ms: u64, model: &str) -> Option<Scored> {
+/// `min` is what makes an empty model notice an exhausted cap. `None` ignores caps.
+fn score(q: &Quota, now_ms: u64, model: &str, min: Option<f64>) -> Option<Scored> {
     struct Cand {
         label: String,
         remaining: f64,
@@ -152,12 +171,12 @@ fn score(q: &Quota, now_ms: u64, model: &str) -> Option<Scored> {
     }
     let mut cands = Vec::new();
     for w in &q.windows {
-        if !gates(&w.label, model) {
-            continue;
-        }
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
             continue;
         };
+        if !gates(&w.label, model, used, min) {
+            continue;
+        }
         if reset_at(w).is_some_and(|r| r <= now_ms) {
             continue;
         }
@@ -199,12 +218,12 @@ fn score(q: &Quota, now_ms: u64, model: &str) -> Option<Scored> {
 fn past_blocks(q: &Quota, now_ms: u64, min: f64, model: &str) -> bool {
     let fetched = q.fetched_at_ms.0;
     q.windows.iter().any(|w| {
-        if !gates(&w.label, model) {
-            return false;
-        }
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
             return false;
         };
+        if !gates(&w.label, model, used, Some(min)) {
+            return false;
+        }
         let Some(reset) = reset_at(w) else {
             return false;
         };
@@ -277,27 +296,28 @@ fn availability(now_ms: u64, size: TaskSize, cand: &Candidate, quotas: &[Quota])
         return Availability::Unknown;
     }
     // A row that only names other models' caps is not "no reading": spending it would ignore them.
-    if other_scopes_only(q, model) {
+    if other_scopes_only(q, model, size.min_usable_pct()) {
         return Availability::Exhausted;
     }
     if past_blocks(q, now_ms, size.min_usable_pct(), model) {
         return Availability::Exhausted;
     }
-    match score(q, now_ms, model) {
+    match score(q, now_ms, model, Some(size.min_usable_pct())) {
         Some(s) if s.usable < size.min_usable_pct() => Availability::Exhausted,
         Some(_) => Availability::Available,
-        None if counted_reset(q, now_ms, model) => Availability::Reset,
+        None if counted_reset(q, now_ms, model, size.min_usable_pct()) => Availability::Reset,
         None => Availability::Unknown,
     }
 }
 
 /// A gating window whose reset has passed. Once it no longer blocks, the row is a reset,
 /// not a candidate with no reading.
-fn counted_reset(q: &Quota, now_ms: u64, model: &str) -> bool {
+fn counted_reset(q: &Quota, now_ms: u64, model: &str, min: f64) -> bool {
     q.windows.iter().any(|w| {
-        gates(&w.label, model)
-            && w.used_pct.filter(|u| u.is_finite()).is_some()
-            && reset_at(w).is_some_and(|r| r <= now_ms)
+        let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
+            return false;
+        };
+        gates(&w.label, model, used, Some(min)) && reset_at(w).is_some_and(|r| r <= now_ms)
     })
 }
 
@@ -388,10 +408,10 @@ pub fn select_target(
             if past_blocks(q, now_ms, size.min_usable_pct(), &cand.model) {
                 continue;
             }
-            if other_scopes_only(q, &cand.model) {
+            if other_scopes_only(q, &cand.model, size.min_usable_pct()) {
                 continue;
             }
-            let Some(s) = score(q, now_ms, &cand.model) else {
+            let Some(s) = score(q, now_ms, &cand.model, Some(size.min_usable_pct())) else {
                 continue;
             };
             if s.usable < size.min_usable_pct() || best.as_ref().is_some_and(|b| s.score <= b.score)
@@ -454,7 +474,7 @@ pub fn spare_quota(now_ms: u64, q: &Quota) -> Option<f64> {
     if state(q) != State::Fresh {
         return None;
     }
-    score(q, now_ms, "").map(|s| s.expiring)
+    score(q, now_ms, "", None).map(|s| s.expiring)
 }
 
 /// The spare-quota trigger (D29): every metered subscription whose projected unused quota at

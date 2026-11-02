@@ -456,8 +456,11 @@ seconds ago is still that limit. A stamp already long past when the row was fetc
 reset, and so does a window once the grace has ended. The fallback may then spend the row
 because its windows have reset. That is not a missing reading. A reset at or before the epoch
 is no reset time, and the percent still counts. Model-scoped Claude windows (`wk <name>`) stay on the quota row
-and gate a candidate only when its model name contains that name (`opus` gates
-`claude-opus-4-6`, and does not gate a Sonnet candidate). The account windows always gate
+and gate a candidate of the same family (opus, sonnet, haiku), ignoring case and version
+(`Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus). A candidate
+with no model is gated by any of those caps that is under the usable minimum, since the
+default may be that model. A name that is not one of those families still gates when the
+model name contains it. The account windows always gate
 (`5h`, `wk`), as does the single credit or rate-limit window of the other subscriptions. A
 row whose only windows are caps for other models is exhausted, not an unknown reading that
 may be spent. `pi_vendor` and Antigravity have no

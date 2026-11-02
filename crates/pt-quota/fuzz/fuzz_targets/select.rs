@@ -156,22 +156,21 @@ fuzz_target!(|data: &[u8]| {
             {
                 assert_ne!(state(q), State::Error, "a failed reading was spent");
                 assert!(
-                    !only_other_scopes(q, &c.model),
+                    !only_other_scopes(q, &c.model, size.min_usable_pct()),
                     "a row with only other models' caps was spent"
                 );
                 if matches!(state(q), State::Fresh | State::Stale) {
+                    let min = size.min_usable_pct();
                     assert!(
-                        !still_enforcing(q, now, size.min_usable_pct(), &c.model),
+                        !still_enforcing(q, now, min, &c.model),
                         "a passed exhausted window was spent"
                     );
-                }
-                if state(q) == State::Stale
-                    && let Some(usable) = open_usable(q, now, &c.model)
-                {
-                    assert!(
-                        usable + 1e-9 >= size.min_usable_pct(),
-                        "stale row at {usable}% usable was spent"
-                    );
+                    if let Some(usable) = open_usable(q, now, &c.model, min) {
+                        assert!(
+                            usable + 1e-9 >= min,
+                            "row at {usable}% usable was spent"
+                        );
+                    }
                 }
             }
             if h == Harness::PiLocal
@@ -189,7 +188,7 @@ fuzz_target!(|data: &[u8]| {
                     && let Some(q) = quotas.iter().find(|q| q.subscription == sub)
                     && state(q) == State::Stale
                     && !still_enforcing(q, now, size.min_usable_pct(), &c.model)
-                    && let Some(usable) = open_usable(q, now, &c.model)
+                    && let Some(usable) = open_usable(q, now, &c.model, size.min_usable_pct())
                     && usable + 1e-9 >= size.min_usable_pct()
                 {
                     panic!("stale row at {usable}% usable was parked");
@@ -240,24 +239,40 @@ fuzz_target!(|data: &[u8]| {
 });
 
 /// SPEC 8. An account window always applies: anything that is not `wk` plus a name, including
-/// bare `wk` and a `wk` with no name. A name is the letters and digits that follow `wk`. Shorter
-/// than three letters it is not a model cap. Otherwise it applies only when the candidate's
-/// model contains that name (`opus` applies to `claude-opus-4-6`, not to Sonnet).
-fn applies(label: &str, model: &str) -> bool {
+/// bare `wk`. A cap applies to the same family (opus, sonnet, haiku), ignoring case and
+/// version, so `Sonnet 4.5` applies to `sonnet` and `claude-sonnet-4-5`. A candidate with no
+/// model is gated only by a cap under the task minimum. Any other name applies when the model
+/// contains it.
+fn applies(label: &str, model: &str, used: f64, min: f64) -> bool {
     let Some(rest) = label.strip_prefix("wk ") else {
         return true;
     };
+    if rest.is_empty() {
+        return true;
+    }
+    if model.is_empty() {
+        return (100.0 - used).clamp(0.0, 100.0) < min;
+    }
     let fold = |s: &str| -> String {
         s.chars()
             .filter(|c| c.is_ascii_alphanumeric())
             .flat_map(|c| c.to_lowercase())
             .collect()
     };
-    let name = fold(rest);
-    if name.is_empty() {
-        return true;
+    let family = |s: &str| -> Option<&'static str> {
+        let folded = fold(s);
+        ["sonnet", "opus", "haiku"]
+            .into_iter()
+            .find(|name| folded.contains(name))
+    };
+    match (family(rest), family(model)) {
+        (Some(cap), Some(got)) => cap == got,
+        (Some(_), None) => false,
+        (None, _) => {
+            let name = fold(rest);
+            name.len() >= 3 && fold(model).contains(&name)
+        }
     }
-    name.len() >= 3 && fold(model).contains(&name)
 }
 
 fn map_windows(quotas: &[Quota], mut f: impl FnMut(&mut QuotaWindow)) -> Vec<Quota> {
@@ -270,14 +285,14 @@ fn map_windows(quotas: &[Quota], mut f: impl FnMut(&mut QuotaWindow)) -> Vec<Quo
     out
 }
 
-fn only_other_scopes(q: &Quota, model: &str) -> bool {
+fn only_other_scopes(q: &Quota, model: &str, min: f64) -> bool {
     let mut saw = false;
     for w in &q.windows {
-        if w.used_pct.filter(|u| u.is_finite()).is_none() {
+        let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
             continue;
-        }
+        };
         saw = true;
-        if applies(&w.label, model) {
+        if applies(&w.label, model, used, min) {
             return false;
         }
     }
@@ -294,15 +309,15 @@ fn metered(h: Harness) -> Option<Subscription> {
 }
 
 /// Tightest remaining percent of windows that have not reset. `None` when nothing scores.
-fn open_usable(q: &Quota, now_ms: u64, model: &str) -> Option<f64> {
+fn open_usable(q: &Quota, now_ms: u64, model: &str, min: f64) -> Option<f64> {
     let mut usable = None;
     for w in &q.windows {
-        if !applies(&w.label, model) {
-            continue;
-        }
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
             continue;
         };
+        if !applies(&w.label, model, used, min) {
+            continue;
+        }
         // A reset at or before the epoch is not a reset. A later stamp that has passed is.
         if w.resets_at_ms
             .map(|r| r.0)
@@ -326,12 +341,12 @@ fn still_enforcing(q: &Quota, now_ms: u64, min: f64, model: &str) -> bool {
     const TEN_MINUTES_MS: u64 = 10 * 60 * 1000;
     let fetched = q.fetched_at_ms.0;
     q.windows.iter().any(|w| {
-        if !applies(&w.label, model) {
-            return false;
-        }
         let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
             return false;
         };
+        if !applies(&w.label, model, used, min) {
+            return false;
+        }
         if (100.0 - used).clamp(0.0, 100.0) >= min {
             return false;
         }

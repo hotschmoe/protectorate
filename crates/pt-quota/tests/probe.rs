@@ -731,8 +731,9 @@ fn a_stale_local_reading_is_not_spent() {
     assert!(!out.contains("without a fresh quota reading"), "{out}");
 }
 
-/// A weekly Sonnet cap is shown on the row and does not exhaust Claude when the account
-/// window still has room. The local model is not chosen ahead of that account window.
+/// A weekly Sonnet cap is shown on the row. It does not exhaust an Opus candidate while the
+/// account window has room, and the local model is not chosen ahead of that. A candidate
+/// with no model is gated by the full cap, since the default may be Sonnet.
 #[test]
 fn a_model_scoped_window_does_not_exhaust_the_subscription() {
     let home = scratch(&format!("scoped-window-{}", std::process::id()));
@@ -761,7 +762,7 @@ fn a_model_scoped_window_does_not_exhaust_the_subscription() {
             allow,
         ])
     };
-    let both = run("claude,pi_local");
+    let both = run("claude:opus,pi_local");
     let claude = line_of(&both, "claude");
     assert_eq!(state_of(claude), "fresh", "{both}");
     assert!(
@@ -774,12 +775,47 @@ fn a_model_scoped_window_does_not_exhaust_the_subscription() {
     );
     assert!(!both.contains("target PiLocal"), "{both}");
 
-    let only = run("claude");
+    let bare = run("claude");
     assert!(
-        only.contains("target Claude:") && only.contains("5h"),
-        "{only}"
+        bare.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{bare}"
     );
-    assert!(!only.contains("target none"), "{only}");
+    assert!(!bare.contains("target Claude:"), "{bare}");
+}
+
+/// `Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus. A candidate
+/// with no model is gated by that full cap.
+#[test]
+fn a_versioned_cap_gates_its_model_family() {
+    let home = scratch(&format!("versioned-cap-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"versioned-claude"}}"#,
+    );
+    let (port, _) = serve(vec![(
+        "/api/oauth/usage",
+        r#"{"five_hour":{"utilization":0,"resets_at":"2100-01-01T00:00:00Z"},"limits":[{"kind":"weekly_scoped","percent":100,"resets_at":"2100-01-08T00:00:00Z","scope":{"model":{"display_name":"Sonnet 4.5"}}}]}"#,
+    )]);
+    let base = format!("http://127.0.0.1:{port}");
+    let home_s = home.to_str().unwrap();
+    let run = |allow: &str| probe(&["--home", home_s, "--claude-url", &base, "--allow", allow]);
+    let shown = run("claude:opus");
+    let line = line_of(&shown, "claude");
+    assert!(line.contains("sonnet") && line.contains("100%"), "{line}");
+    for model in ["claude:sonnet", "claude:claude-sonnet-4-5", "claude"] {
+        let out = run(model);
+        assert!(
+            out.contains(
+                "target none: all eligible resleeve targets have insufficient fresh quota"
+            ),
+            "{model}: {out}"
+        );
+        assert!(!out.contains("target Claude:"), "{model}: {out}");
+    }
+    assert!(
+        shown.contains("target Claude:") && shown.contains("5h"),
+        "{shown}"
+    );
 }
 
 /// The Opus weekly cap gates a Claude candidate whose model is Opus, and does not gate Sonnet.
