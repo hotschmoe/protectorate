@@ -15,7 +15,8 @@ rm -f "$logs"/*.log "$logs"/failed "$logs"/times.new
 touch "$times" "$logs/failed" "$logs/times.new"
 
 # Doctests are left out: the workspace has none, and building them costs a rustdoc per crate.
-cargo test --locked --workspace --tests --no-run --message-format=json-render-diagnostics |
+PROTECTORATE_BUILD_VERSION=${PROTECTORATE_BUILD_VERSION:-dev} cargo test --locked --workspace \
+    --tests --no-run --message-format=json-render-diagnostics |
     grep '"reason":"compiler-artifact"' | grep '"profile":{[^}]*"test":true' |
     sed -n 's/.*"manifest_path":"\([^"]*\)".*"kind":\["\([^"]*\)".*"executable":"\([^"]*\)".*/\1 \2 \3/p' >"$logs/list"
 [ -s "$logs/list" ] || { echo "test: no test binaries" >&2; exit 1; }
