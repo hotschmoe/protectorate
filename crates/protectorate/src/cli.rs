@@ -1,7 +1,7 @@
 //! `protectorate <noun> <verb>`: one hub API method per command, a table or a line for people,
 //! the API's own JSON under `--json`.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use pt_api::{self as api, EpochMs, method as m};
 use pt_json::ToJson;
@@ -803,14 +803,34 @@ fn wait_job(c: &Client, mut job: api::Job) -> Result<(), Fail> {
         job_id: job.id.clone(),
     };
     eprintln!("job {}: waiting", job.id);
+    let mut unreachable: Option<Instant> = None;
     while !matches!(
         job.state,
         S::Succeeded | S::Failed | S::Interrupted | S::Cancelled | S::Abandoned | S::Lost
     ) {
         std::thread::sleep(Duration::from_millis(500));
-        job = c.call::<m::GetJob>(&id).map_err(|e| Fail::Other(format!(
-            "job {}: cannot query the hub ({e}); it may be restarting; inspect with `protectorate job show {}`", id.job_id, id.job_id
-        )))?;
+        match c.call::<m::GetJob>(&id) {
+            Ok(next) => {
+                unreachable = None;
+                job = next;
+            }
+            // The hub answered. Retrying a refusal does not reach a restarting hub.
+            Err(Fail::Api(e)) => {
+                return Err(Fail::Other(format!(
+                    "job {}: cannot query the hub ({e}); inspect with `protectorate job show {}`",
+                    id.job_id, id.job_id
+                )));
+            }
+            Err(e) => {
+                let since = unreachable.get_or_insert_with(Instant::now);
+                if since.elapsed() >= Duration::from_secs(4) {
+                    return Err(Fail::Other(format!(
+                        "job {}: cannot query the hub ({e}); it may be restarting; inspect with `protectorate job show {}`",
+                        id.job_id, id.job_id
+                    )));
+                }
+            }
+        }
     }
     let exit = if matches!(job.state, S::Succeeded | S::Failed) {
         job.exit_code
