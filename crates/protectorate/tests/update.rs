@@ -691,7 +691,16 @@ fn hub_rollbacks_restore_a_journal_the_previous_binary_cannot_read() {
         assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
         assert!(home.join("sleeves").join(lower.to_string()).is_dir());
         assert!(!home.join("sleeves").join(next.to_string()).exists());
-        assert!(!gitdir.exists());
+        assert!(gitdir.join("gitdir").is_file(), "gitdir stays put");
+        let checkout = home.join("claims").join(next.to_string());
+        assert!(
+            err.contains(&format!(
+                "left worktree {} and gitdir {} in place",
+                checkout.display(),
+                gitdir.display()
+            )),
+            "{err}"
+        );
         let aside = fs::read_dir(home.join("update-aside"))
             .unwrap()
             .map(|e| e.unwrap().path())
@@ -704,14 +713,7 @@ fn hub_rollbacks_restore_a_journal_the_previous_binary_cannot_read() {
                 .join("transcript.jsonl")
                 .is_file()
         );
-        assert!(
-            aside
-                .join("gitdirs")
-                .join(next.to_string())
-                .join(format!("wt-{next}"))
-                .join("gitdir")
-                .is_file()
-        );
+        assert!(!aside.join("gitdirs").exists());
         assert!(!home.join("journal/segment-00000000000000000001").exists());
         assert!(err.contains(&aside.display().to_string()), "{err}");
         let sup = Supervisor::start(
