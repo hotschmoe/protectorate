@@ -5,7 +5,7 @@ use crate::fetch::{MAX_ASSET, MAX_SUMS, MAX_VERSION};
 use crate::sums::plain_name;
 use crate::{Error, ErrorKind, Pick, Release, Result, Source, Sums};
 use pt_json::{ToJson, record};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -637,7 +637,10 @@ impl Store {
                 if p.executable {
                     set_executable(&dest).map_err(ioctx)?;
                 }
-                File::open(&dest)
+                // Windows flushes only a handle opened for writing.
+                OpenOptions::new()
+                    .write(true)
+                    .open(&dest)
                     .and_then(|f| f.sync_all())
                     .map_err(ioctx)?;
             }
