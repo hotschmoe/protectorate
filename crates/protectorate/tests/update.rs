@@ -37,6 +37,20 @@ use common::{Hub, LONG, Run, bin, eventually, free_port, tail, temp_repo};
 use pt_http::{Config, Request, Response, Server, ShutdownHandle};
 use pt_json::{Value, obj};
 
+/// A child that another test forks holds a copy of the lock until it execs, so a reopen
+/// right after a drop can see the lock as busy for a moment.
+fn open_journal(dir: &Path) -> pt_journal::Journal {
+    eventually(
+        "the journal lock",
+        Duration::from_secs(10),
+        || match pt_journal::Journal::open(dir) {
+            Ok((journal, _)) => Some(journal),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => None,
+            Err(e) => panic!("{}: {e}", dir.display()),
+        },
+    )
+}
+
 fn arch() -> &'static str {
     match std::env::consts::ARCH {
         "x86_64" => "amd64",
@@ -667,7 +681,7 @@ fn hub_rollbacks_restore_a_journal_the_previous_binary_cannot_read() {
             fields.insert("deadline_ms", 1u64);
             fs::write(home.join("releases/probation.json"), p.to_string()).unwrap();
         }
-        let (mut journal, _) = pt_journal::Journal::open(&home.join("journal")).unwrap();
+        let mut journal = open_journal(&home.join("journal"));
         let mut event = pt_core::codec::encode(&pt_core::Event {
             at: 1,
             kind: pt_core::EventKind::Tick,
@@ -858,7 +872,7 @@ fn partial_automatic_rollback_does_not_keep_the_trial() {
         .unwrap(),
     );
     std::os::unix::fs::symlink("v0.0.1", home.join("releases/previous")).unwrap();
-    let (mut journal, _) = pt_journal::Journal::open(home.join("journal").as_path()).unwrap();
+    let mut journal = open_journal(&home.join("journal"));
     let event = pt_core::codec::encode(&pt_core::Event {
         at: 1,
         kind: pt_core::EventKind::Tick,
@@ -978,7 +992,7 @@ fn partial_manual_rollback_does_not_keep_the_trial() {
         .unwrap(),
     );
     std::os::unix::fs::symlink("v0.0.1", home.join("releases/previous")).unwrap();
-    let (mut journal, _) = pt_journal::Journal::open(home.join("journal").as_path()).unwrap();
+    let mut journal = open_journal(&home.join("journal"));
     let event = pt_core::codec::encode(&pt_core::Event {
         at: 1,
         kind: pt_core::EventKind::Tick,
@@ -990,7 +1004,7 @@ fn partial_manual_rollback_does_not_keep_the_trial() {
     fs::create_dir_all(&snapshot).unwrap();
     fs::copy(&segment, snapshot.join("segment-00000000000000000000")).unwrap();
     fs::write(home.join("journal/TRIAL"), b"trial journal\n").unwrap();
-    let (mut journal, _) = pt_journal::Journal::open(home.join("journal").as_path()).unwrap();
+    let mut journal = open_journal(&home.join("journal"));
     let mut bad = pt_core::codec::encode(&pt_core::Event {
         at: 2,
         kind: pt_core::EventKind::Tick,
@@ -1347,7 +1361,7 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
     drop(sup);
     let segment = home.join("journal/segment-00000000000000000000");
     let readable = fs::read(&segment).unwrap();
-    let (mut journal, _) = pt_journal::Journal::open(home.join("journal").as_path()).unwrap();
+    let mut journal = open_journal(&home.join("journal"));
     let mut event = pt_core::codec::encode(&pt_core::Event {
         at: 1,
         kind: pt_core::EventKind::Tick,
