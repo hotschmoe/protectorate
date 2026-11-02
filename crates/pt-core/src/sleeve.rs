@@ -854,12 +854,15 @@ impl Core<'_> {
 
     /// Accepts one bounded mail, or refuses it and says when the window reopens.
     /// Mail to Envoy spends the sender's tree budget, kept on the root. Mail to a parent
-    /// who is not Envoy spends that sender's own budget. A `d9` send marks the recipient.
+    /// who is not Envoy spends that sender's own budget. A `d9` send marks the recipient,
+    /// and so does a send from a sleeve that is already marked, so a relay cannot wash the mark.
     fn mail_ok(&mut self, to: SleeveId, from: Party, d9: bool) -> bool {
         if !self.within_mail_bound(to, from) {
             return false;
         }
-        if d9 {
+        let from_marked =
+            matches!(from, Party::Sleeve(id) if self.st.sleeve(id).is_some_and(|s| s.d9));
+        if d9 || from_marked {
             self.mark_d9(to);
         }
         true

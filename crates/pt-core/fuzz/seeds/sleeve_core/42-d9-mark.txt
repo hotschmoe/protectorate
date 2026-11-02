@@ -1,13 +1,16 @@
-#scenario 94a9d5801e33d3eb
+#scenario 88a96f1b97494428
 # A D9 send marks the recipient and the children it already has. A child spawned later inherits.
-# A marked spawn marks that sleeve. An ordinary send does not spread the mark. Envoy is never marked.
-# The mark is part of the event: a crash keeps it and replay rebuilds it.
+# A marked spawn marks that sleeve. A send from a marked sleeve marks its recipient, so a relay
+# cannot leave the parent unmarked. An ordinary send from an unmarked sleeve does not spread it.
+# Envoy is never marked. The mark is part of the event: a crash keeps it and replay rebuilds it.
 spawn envoy /w/e harness=codex
 spawn root /w/a
 spawn leaf /wt/leaf parent=root
 spawn kid /wt/kid parent=root
 spawn plain /w/b
 spawn plainchild /wt/pc parent=plain
+spawn relay /w/d
+spawn hop /wt/hop parent=relay d9
 run
 obs envoy ready
 obs root ready
@@ -15,6 +18,8 @@ obs leaf ready
 obs kid ready
 obs plain ready
 obs plainchild ready
+obs relay ready
+obs hop ready
 send root m1 d9 from=envoy
 expect root d9=true
 expect leaf d9=true
@@ -29,6 +34,11 @@ expect child d9=true
 send plainchild m2 from=plain
 expect plain d9=false
 expect plainchild d9=false
+expect relay d9=false
+expect hop d9=true
+send relay hop1 from=hop
+expect relay d9=true
+expect hop d9=true
 send envoy m3 d9 from=root
 expect envoy d9=false
 commit
@@ -41,4 +51,6 @@ expect marked d9=true
 expect child d9=true
 expect plain d9=false
 expect plainchild d9=false
+expect relay d9=true
+expect hop d9=true
 expect envoy d9=false
