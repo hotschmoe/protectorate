@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! spawn NAME PATH [parent=NAME] [view] [harness=H] [pane] [budget=N] [disk=N] [effort=E] [to=H,H]
-//! send NAME ID [steer] [from=NAME]
+//! send NAME ID [steer] [from=NAME|from=agent:NAME]
 //! continue NAME                    a second journaled continuation; the first is sent by the core
 //! stop|remove|interrupt|compact|viewed NAME
 //! start|resleeve NAME [harness=H] [effort=E]
@@ -24,7 +24,7 @@
 //! run | step [N] | commit         step N executes the Nth released intent (from 0)
 //! crash [empty] [down=DURATION]     the hub dies at the last commit and restarts DURATION later
 //! job ID | cancel-job N | requeue-job N | abandon-job N
-//! expect NAME life=.. g=N activity=.. guard=.. harness=.. queue=N msg:ID=..
+//! expect NAME life=.. g=N activity=.. guard=.. harness=.. queue=N agent=NAME|none msg:ID=.. from:ID=Party
 //! expect-effect KEY state=.. attempt=N count=N
 //! expect-job N state=..           expect-none NAME
 //! expect-approval ID [g=N] state=.. decision=allow|deny|none orphan=.. response=KEY
@@ -207,6 +207,7 @@ impl Runner {
             "send" => {
                 let to = self.id(arg(1)?)?;
                 let from = match kv("from") {
+                    Some(n) if n.starts_with("agent:") => Party::Agent,
                     Some(n) => Party::Sleeve(self.id(n)?),
                     None => Party::Owner,
                 };
@@ -581,13 +582,21 @@ impl Runner {
                 "harness" => format!("{:?}", s.target.harness).to_lowercase(),
                 "queue" => s.queue.len().to_string(),
                 "effort" => s.effort.clone().unwrap_or("none".into()),
+                "agent" => s.turn_agent.clone().unwrap_or_else(|| "none".into()),
                 _ => match k.strip_prefix("msg:") {
                     Some(id) => s
                         .messages
                         .get(id)
                         .map(|m| variant(&m.state))
                         .unwrap_or_default(),
-                    None => return Err(format!("bad key {k}")),
+                    None => match k.strip_prefix("from:") {
+                        Some(id) => s
+                            .messages
+                            .get(id)
+                            .map(|m| variant(&m.from))
+                            .unwrap_or_default(),
+                        None => return Err(format!("bad key {k}")),
+                    },
                 },
             };
             if got != v {

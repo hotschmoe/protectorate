@@ -75,12 +75,17 @@ Guardrails in code interrupt, resume, resleeve or park a sleeve that fails (quot
 crash, silent, looping and so on). A third resleeve within an hour parks it; `sleeve list` shows
 the park reason. After a native resume of a headless turn that a crash ended, the hub sends one
 short continuation prompt for that owner turn, including when a later generation is the one that
-sends it. The prompt is sent as Envoy, so a rejection is not reported as a message the owner
-sent. A second crash of the same turn does not send another, even after the ten-minute resume
-window, and a later owner message is a new turn with its own prompt. An owner
-interrupt, a guardrail interrupt, a desync during either of those, a planned stop, a restart of
-an idle sleeve, and a manual resleeve do not. A restart while the resumed incarnation is still booting still sends it. A crash of an incarnation that already reached idle does not carry it. A settle of that turn drops it with no warning, including one recorded after resume while the sleeve is idle, so a later start does not warn about a turn the journal already settled. If
-that prompt cannot be sent, the debt is dropped and the event log says the turn will not continue on its own.
+sends it. The prompt is sent as the party that opened that owner turn. An agent steer
+replaces that party, which keeps D9 on the continued turn and reports a rejection to that
+party. A second crash of the same turn does not send another, even after the ten-minute
+resume window, and a later owner message is a new turn with its own prompt. An owner
+interrupt, a guardrail interrupt, a desync during either of those, a planned stop, a restart
+of an idle sleeve, and a manual resleeve do not. A restart while the resumed incarnation is
+still booting still sends it. A crash of an incarnation that already reached idle does not
+carry it. A settle of that turn drops it with no warning, including one recorded after
+resume while the sleeve is idle, so a later start does not warn about a turn the journal
+already settled. If that prompt cannot be sent, the debt is dropped and the event log says
+the turn will not continue on its own.
 
 ## Approvals and D9
 

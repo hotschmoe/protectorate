@@ -16,6 +16,16 @@ const BRIEF_PROMPT: &str = "Continue from .protectorate/BRIEF.md: read it first,
 /// and not for a turn this prompt itself started.
 const CONTINUE_PROMPT: &str = "The previous turn was interrupted. Continue from where it stopped.";
 
+/// The agent name `Hub::from_label` reads from a `ga:<name>:` request id. Empty when the id
+/// has the prefix and no name; absent when the sender is not an agent or the id has no prefix.
+fn agent_name(from: Party, request_id: &str) -> Option<String> {
+    if from != Party::Agent {
+        return None;
+    }
+    let rest = request_id.strip_prefix("ga:")?;
+    Some(rest.split(':').next().unwrap_or("").to_string())
+}
+
 fn name_ok(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
@@ -86,6 +96,8 @@ impl Core<'_> {
                 turn: None,
                 desync_during_turn: false,
                 turn_seq: 0,
+                turn_from: Party::Owner,
+                turn_agent: None,
                 auto_continue: None,
                 queue: VecDeque::new(),
                 steer_slot: None,
@@ -905,6 +917,12 @@ impl Core<'_> {
     }
 
     fn steer(&mut self, sid: SleeveId, request_id: &str) {
+        let from = self.st.sleeves[&sid].messages[request_id].from;
+        if let Some(name) = agent_name(from, request_id) {
+            let s = self.sl(sid);
+            s.turn_from = Party::Agent;
+            s.turn_agent = Some(name);
+        }
         let s = &self.st.sleeves[&sid];
         let kind = EffectKind::Steer {
             sleeve: sid,
@@ -977,8 +995,11 @@ impl Core<'_> {
         // A continuation belongs to the turn already begun. Any other prompt starts the next one
         // and supersedes a continuation that turn still owed.
         if !r.starts_with("continue:") {
+            let from = s.messages[&r].from;
             s.turn_seq += 1;
             s.auto_continue = None;
+            s.turn_from = from;
+            s.turn_agent = agent_name(from, &r);
         }
     }
 
@@ -1386,6 +1407,7 @@ impl Core<'_> {
         if seq != s.turn_seq || text.is_empty() {
             return;
         }
+        let from = s.turn_from;
         let key = Self::continue_key(sid, seq);
         if s.messages.contains_key(&key)
             || !s.queue.is_empty()
@@ -1408,9 +1430,10 @@ impl Core<'_> {
         self.sl(sid).messages.insert(
             key.clone(),
             Message {
-                // Envoy, so a rejection or a "may have applied" notice is not reported as a
-                // message the owner sent. A rejected continuation still warns the owner.
-                from: Party::Envoy,
+                // The party that opened this owner turn (an agent steer replaces it), so the
+                // continued turn keeps that origin and a rejection is reported to that party.
+                // A rejected continuation still warns the owner.
+                from,
                 text: text.to_string(),
                 mode: SendMode::Queue,
                 state: MsgState::Queued,

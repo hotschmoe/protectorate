@@ -269,6 +269,11 @@ impl Hub {
             Some(Party::Envoy) => "envoy".into(),
             Some(Party::Agent) => match request_id.strip_prefix("ga:") {
                 Some(rest) => format!("agent:{}", rest.split(':').next().unwrap_or("")),
+                None if request_id.starts_with("continue:") => state
+                    .sleeve(to)
+                    .and_then(|s| s.turn_agent.clone())
+                    .map(|name| format!("agent:{name}"))
+                    .unwrap_or_else(|| "agent".into()),
                 None => "agent".into(),
             },
             Some(Party::Sleeve(x)) => state

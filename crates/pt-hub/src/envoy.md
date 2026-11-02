@@ -48,8 +48,9 @@ harness; it can be replaced with another level.
   turn was interrupted. Continue from where it stopped." That is once per owner turn, including
   across a later resume. It does not send that after an interrupt, a desync during one, a second
   time for the same owner turn, or after a restart of an idle sleeve. The continuation is sent
-  as Envoy, so a rejection is not reported as a message the owner sent. A later owner message is
-  a new turn and can be continued on its own.
+  as the party that opened that owner turn. An agent steer replaces that party, which keeps D9
+  on the continued turn and reports a rejection to that party. A later owner message is a new
+  turn and can be continued on its own.
   A continuation that cannot be delivered is dropped, and a crash after the incarnation reached
   idle does not carry it into the next one. A settle of that turn drops it with no warning,
   including one the journal already recorded while the sleeve was idle, so a later start does

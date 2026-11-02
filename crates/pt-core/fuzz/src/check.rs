@@ -411,6 +411,11 @@ fn continue_prompts(prev: &State, st: &State, sim: &Sim) {
                 s.id,
                 ps.life
             );
+            assert_eq!(
+                st.sleeves[&s.id].messages[request_id].from, ps.turn_from,
+                "continue for {:?} turn {seq} is sent as {:?}, the turn was opened by {:?}",
+                s.id, st.sleeves[&s.id].messages[request_id].from, ps.turn_from
+            );
         }
     }
 }

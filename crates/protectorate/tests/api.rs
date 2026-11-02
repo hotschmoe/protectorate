@@ -560,6 +560,90 @@ fn d9_agent_turns_need_owner_approval() {
     hub.cli(&["sleeve", "interrupt", "envoy"]).ok();
 }
 
+/// D9 after a mid-turn crash: an agent-started Envoy turn is continued as that agent, so a
+/// removal during the continued turn still waits for the owner.
+#[test]
+fn d9_continuation_after_crash_still_asks() {
+    if !have_runtime() {
+        return;
+    }
+    let mut hub = Hub::start("d9-continue");
+    hub.wait("envoy", "idle", 120);
+    let envoy_id = hub.sleeve("envoy")["id"].as_str().unwrap().to_string();
+    let agent = hub.printed("envoy-only token: ");
+    let victim_repo = temp_repo("d9c-victim");
+    hub.spawn_pi("victim", &victim_repo);
+
+    let long = "Write the numbers from 1 to 1500 as words, one per line, with no other text.";
+    hub.cli_env(
+        &[("PROTECTORATE_TOKEN", agent.as_str())],
+        &["envoy", "send", "--as", "grokbot", long],
+    )
+    .ok();
+    eventually(
+        "Envoy working on the agent's message",
+        Duration::from_secs(90),
+        || {
+            let s = hub.sleeve("envoy");
+            (s["incarnation"]["activity"]["state"].as_str() == Some("working")).then_some(())
+        },
+    );
+    hub.restart();
+    eventually("the continued turn", Duration::from_secs(180), || {
+        let s = hub.sleeve("envoy");
+        (s["incarnation"]["activity"]["state"].as_str() == Some("working")).then_some(())
+    });
+    let g = hub.sleeve("envoy")["incarnation"]["g"].as_u64().unwrap();
+    assert!(g >= 2, "resumed as a later generation, got g{g}");
+    let token = hub.sleeve_token(&envoy_id, g);
+    let (tx, rx) = mpsc::channel();
+    let home = hub.home.clone();
+    std::thread::spawn(move || {
+        let out = Command::new(bin())
+            .arg("--home")
+            .arg(home)
+            .args(["sleeve", "rm", "victim"])
+            .env("PROTECTORATE_TOKEN", token)
+            .output()
+            .expect("run protectorate");
+        let _ = tx.send(out);
+    });
+    let a = eventually("the D9 approval", Duration::from_secs(20), || {
+        let v = hub.cli(&["--json", "approval", "list", "--pending"]).json();
+        v["approvals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| {
+                a["title"]
+                    .as_str()
+                    .is_some_and(|t| t.starts_with("remove sleeve victim"))
+            })
+            .cloned()
+    });
+    assert!(
+        a["summary"].as_str().unwrap().contains("agent:grokbot"),
+        "{a}"
+    );
+    assert!(rx.try_recv().is_err(), "the removal waits for the owner");
+    let entries = hub.transcript("envoy");
+    assert!(
+        of_type(&entries, "user_message").iter().any(|e| {
+            e["entry"]["text"].as_str()
+                == Some("The previous turn was interrupted. Continue from where it stopped.")
+                && e["entry"]["from"].as_str() == Some("agent:grokbot")
+        }),
+        "the continuation is attributed to the agent: {entries:?}"
+    );
+    let id = a["id"].as_str().unwrap().to_string();
+    hub.cli(&["approval", "decide", &id, "deny"]).ok();
+    let out = rx
+        .recv_timeout(Duration::from_secs(20))
+        .expect("rm returns");
+    assert_eq!(out.status.code(), Some(4), "denied: {out:?}");
+    assert_eq!(hub.sleeve("victim")["lifecycle"].as_str(), Some("running"));
+}
+
 struct Mcp {
     child: std::process::Child,
     stdin: std::process::ChildStdin,

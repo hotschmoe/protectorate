@@ -327,7 +327,9 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   warning, including when a protocol desync kills the sleeve during that interrupt.
   The hub journals a `Continue` event and the effect is allocated only when that
   event is applied, so a journal recorded before the event existed replays to the same effects.
-  The prompt is sent as Envoy, so a rejection is not reported as a message the owner sent.
+  The prompt is sent as the party that opened that owner turn. An agent steer replaces that
+  party, which keeps D9 on the continued turn and reports a rejection to that party. The owner
+  still hears when the prompt cannot be sent.
   It is not sent after a planned stop, a hub restart of an idle sleeve, or a manual resleeve (the
   brief is that continuation). A debt still held when recovery finds that incarnation already idle
   and armed is dropped, with `TurnNeedsPrompt`; a resume that is still booting keeps the debt.
