@@ -68,13 +68,13 @@ pub fn api_state(s: JobState) -> api::JobState {
     match s {
         JobState::Queued => A::Queued,
         JobState::Submitting => A::Submitting,
-        JobState::SubmitUncertain => A::SubmitUncertain,
+        JobState::SubmitUncertain { .. } => A::SubmitUncertain,
         JobState::Running => A::Running,
-        JobState::Collecting => A::Collecting,
+        JobState::Collecting { .. } => A::Collecting,
         JobState::Succeeded => A::Succeeded,
         JobState::Failed(_) => A::Failed,
         JobState::Interrupted => A::Interrupted,
-        JobState::Lost => A::Lost,
+        JobState::Lost { .. } => A::Lost,
         JobState::Cancelling => A::Cancelling,
         JobState::Cancelled => A::Cancelled,
         JobState::Abandoned => A::Abandoned,
@@ -314,12 +314,19 @@ pub fn view(store: &JobStore, j: &Job) -> api::Job {
         queued_at_ms: EpochMs(req.as_ref().map_or(0, |r| r.queued_at_ms)),
         started_at_ms: store.started(j.id, j.attempt).map(EpochMs),
         ended_at_ms: ended(j.state).then_some(EpochMs(j.state_at)),
-        exit_code: j.exit.map(i64::from),
+        exit_code: match j.state {
+            JobState::Collecting { exit, .. }
+            | JobState::Failed(
+                pt_core::JobFailure::Exit(exit) | pt_core::JobFailure::Artifact(exit),
+            ) => Some(i64::from(exit)),
+            JobState::Succeeded => Some(0),
+            _ => None,
+        },
         error: match j.state {
             JobState::Failed(pt_core::JobFailure::NodeRemoved(n)) => {
                 Some(format!("node {} was removed", n.0))
             }
-            JobState::Failed(pt_core::JobFailure::Artifact) => {
+            JobState::Failed(pt_core::JobFailure::Artifact(_)) => {
                 let mut issues: Vec<String> = j
                     .artifact_refusals
                     .iter()

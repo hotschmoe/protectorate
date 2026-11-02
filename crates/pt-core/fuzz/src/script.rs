@@ -24,6 +24,7 @@
 //! run | step [N] | commit         step N executes the Nth released intent (from 0)
 //! crash [empty] [down=DURATION]     the hub dies at the last commit and restarts DURATION later
 //! job ID | cancel-job N | requeue-job N | abandon-job N
+//! job-report N running|exited=CODE|interrupted|cancelled|unknown=EPOCH|refused=busy|refused=invalid
 //! expect NAME life=.. g=N activity=.. guard=.. harness=.. queue=N effort=.. agent=NAME|none d9=true|false msg:ID=.. from:ID=Party [park=REST]
 //!   d9turn=none|PARTY/SPAWNS, e.g. `Agent/1` or `Sleeve/0`.
 //!   `park=` is the rest of the line, the hub's park string (`flapping (claude login rejected)`).
@@ -471,17 +472,42 @@ impl Runner {
                     },
                 });
             }
-            "job-exit" => {
+            "job-exit" | "job-report" => {
                 let job = JobId(num(arg(1)?)?);
                 let (attempt, node) = {
                     let j = self.job(job)?;
                     (j.attempt, j.node.ok_or("job has no node")?)
                 };
+                let report = if words[0] == "job-exit" {
+                    JobReport::Exited { code: 0 }
+                } else if flag("running") {
+                    JobReport::Running { offset: 64 }
+                } else if flag("interrupted") {
+                    JobReport::Interrupted
+                } else if flag("cancelled") {
+                    JobReport::Cancelled
+                } else if let Some(code) = kv("exited") {
+                    JobReport::Exited {
+                        code: code.parse().map_err(|_| format!("bad exit code {code}"))?,
+                    }
+                } else if let Some(epoch) = kv("unknown") {
+                    JobReport::Unknown { epoch: num(epoch)? }
+                } else if let Some(reason) = kv("refused") {
+                    JobReport::Refused {
+                        invalid: match reason {
+                            "invalid" => true,
+                            "busy" => false,
+                            _ => return Err(format!("bad refusal {reason}")),
+                        },
+                    }
+                } else {
+                    return Err("missing job report".into());
+                };
                 self.sim.apply(E::JobStatus {
                     job,
                     attempt,
                     node,
-                    report: JobReport::Exited { code: 0 },
+                    report,
                 });
             }
             "artifact-result" => {
@@ -586,6 +612,35 @@ impl Runner {
                 let want = kv("state").ok_or("missing state")?;
                 if variant(&j.state) != want {
                     return Err(format!("job state is {:?}, expected {want}", j.state));
+                }
+                if let Some(want) = kv("epoch_changed") {
+                    let JobState::SubmitUncertain { epoch_changed } = j.state else {
+                        return Err("job is not submit uncertain".into());
+                    };
+                    if epoch_changed.to_string() != want {
+                        return Err(format!("epoch_changed is {epoch_changed}, expected {want}"));
+                    }
+                }
+                if let Some(want) = kv("cancelling") {
+                    let JobState::Lost { cancelling } = j.state else {
+                        return Err("job is not lost".into());
+                    };
+                    if cancelling.to_string() != want {
+                        return Err(format!("cancelling is {cancelling}, expected {want}"));
+                    }
+                }
+                if let Some(want) = kv("exit") {
+                    let exit = match j.state {
+                        JobState::Collecting { exit, .. }
+                        | JobState::Failed(JobFailure::Exit(exit) | JobFailure::Artifact(exit)) => {
+                            exit
+                        }
+                        JobState::Succeeded => 0,
+                        _ => return Err("job has no exit code".into()),
+                    };
+                    if exit.to_string() != want {
+                        return Err(format!("exit is {exit}, expected {want}"));
+                    }
                 }
             }
             "expect-approval" if self.checked => self.expect_approval(&words)?,

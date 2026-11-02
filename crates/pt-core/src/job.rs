@@ -36,11 +36,11 @@ impl Core<'_> {
         let now = self.now;
         let j = self.job(id);
         // The first loss starts the abandon window. Collecting is a retry of that same loss.
-        if state == JobState::Lost {
+        if matches!(state, JobState::Lost { .. }) {
             if j.lost_at.is_none() {
                 j.lost_at = Some(now);
             }
-        } else if state != JobState::Collecting {
+        } else if !matches!(state, JobState::Collecting { .. }) {
             j.lost_at = None;
         }
         j.state = state;
@@ -50,11 +50,17 @@ impl Core<'_> {
     /// Enters Lost and tells the owner once per episode. Collecting is the same episode:
     /// bouncing back into Lost keeps the first-loss stamp and does not alarm again.
     fn lose(&mut self, id: JobId) {
-        if self.st.jobs[&id].state == JobState::Lost {
+        let state = self.st.jobs[&id].state;
+        if matches!(state, JobState::Lost { .. }) {
             return;
         }
         let again = self.st.jobs[&id].lost_at.is_some();
-        self.set_job(id, JobState::Lost);
+        self.set_job(
+            id,
+            JobState::Lost {
+                cancelling: state == JobState::Cancelling,
+            },
+        );
         if !again {
             self.notify(Party::Owner, None, Notice::JobLost { job: id });
         }
@@ -108,13 +114,43 @@ impl Core<'_> {
             .collect()
     }
 
+    fn close_cancels(&mut self, id: JobId) {
+        for eff in self.node_writes(id, false) {
+            self.goal_reached(eff);
+        }
+    }
+
+    fn finish(&mut self, id: JobId, state: JobState, ack: bool) {
+        debug_assert!(matches!(
+            state,
+            JobState::Succeeded
+                | JobState::Failed(_)
+                | JobState::Interrupted
+                | JobState::Cancelled
+                | JobState::Abandoned
+        ));
+        self.set_job(id, state);
+        self.close_cancels(id);
+        if ack {
+            self.node_effect(id, true);
+        }
+        let n = match state {
+            JobState::Interrupted => Notice::JobInterrupted { job: id },
+            _ => Notice::JobFinished {
+                job: id,
+                ok: state == JobState::Succeeded,
+            },
+        };
+        self.notify(Party::Owner, None, n);
+    }
+
     /// On Tick and recovery, re-sends a cancel while the job may still run and the collected
     /// ack until the node takes it (12a items 5 and 7). A node's status cannot tell whether
     /// either landed, so they are re-sent rather than probed, up to `NODE_RESENDS` attempts.
     fn resend_node_writes(&mut self, id: JobId) {
         let cancel_wanted = matches!(
             self.st.jobs[&id].state,
-            JobState::Cancelling | JobState::Lost | JobState::Abandoned
+            JobState::Cancelling | JobState::Lost { .. } | JobState::Abandoned
         );
         let mut writes = self.node_writes(id, true);
         if cancel_wanted {
@@ -154,14 +190,11 @@ impl Core<'_> {
                 excluded: Vec::new(),
                 submit: None,
                 offset: 0,
-                exit: None,
-                verify_failures: 0,
                 artifact_refusals: Vec::new(),
                 artifact_incomplete: None,
                 seen_at: now,
                 state_at: now,
                 lost_at: None,
-                needs_new_attempt: false,
             },
         );
         self.st.job_requests.insert(request_id.to_string(), id);
@@ -200,19 +233,22 @@ impl Core<'_> {
             return;
         }
         match (self.effect_state(eff).expect("effect exists"), j.state) {
-            (EffectState::Probing, JobState::Submitting) => {
-                self.set_job(id, JobState::SubmitUncertain)
-            }
-            (EffectState::Confirmed, JobState::Submitting | JobState::SubmitUncertain) => {
+            (EffectState::Probing, JobState::Submitting) => self.set_job(
+                id,
+                JobState::SubmitUncertain {
+                    epoch_changed: false,
+                },
+            ),
+            (EffectState::Confirmed, JobState::Submitting | JobState::SubmitUncertain { .. }) => {
                 // The node acknowledged the submit: it journaled and started the job.
                 self.set_job(id, JobState::Running)
             }
-            (EffectState::Intent, JobState::SubmitUncertain) => {
+            (EffectState::Intent, JobState::SubmitUncertain { .. }) => {
                 self.set_job(id, JobState::Submitting)
             }
             (
                 EffectState::Failed | EffectState::Rejected,
-                JobState::Submitting | JobState::SubmitUncertain,
+                JobState::Submitting | JobState::SubmitUncertain { .. },
             ) => {
                 // The node provably never took it (it refused, or every attempt was not
                 // applied): pick a node again, same attempt.
@@ -252,6 +288,8 @@ impl Core<'_> {
                     self.effect_report(eff, attempt, Report::Nacked);
                 } else if state == EffectState::Probing {
                     self.effect_report(eff, attempt, Report::Probed(ProbeResult::NotApplied));
+                } else if matches!(state, EffectState::Intent | EffectState::Uncertain) {
+                    self.not_applied(eff);
                 }
             }
             JobReport::Unknown { epoch } if state == EffectState::Probing => {
@@ -259,7 +297,9 @@ impl Core<'_> {
                 if *epoch == j.epoch {
                     self.effect_report(eff, attempt, Report::Probed(ProbeResult::NotApplied));
                 } else {
-                    self.job(id).needs_new_attempt = true;
+                    if let JobState::SubmitUncertain { epoch_changed } = &mut self.job(id).state {
+                        *epoch_changed = true;
+                    }
                     self.effect_report(eff, attempt, Report::Probed(ProbeResult::Unknowable));
                 }
             }
@@ -280,17 +320,12 @@ impl Core<'_> {
         let now = self.now;
         self.job(id).seen_at = now;
         use JobState as J;
-        if matches!(state, J::Submitting | J::SubmitUncertain)
+        if matches!(state, J::Submitting | J::SubmitUncertain { .. })
             && let JobReport::Refused { invalid } = report
         {
             // Leave the submitting states first so the record is not retried.
             if *invalid {
-                self.set_job(id, J::Failed(JobFailure::Invalid));
-                self.notify(
-                    Party::Owner,
-                    None,
-                    Notice::JobFinished { job: id, ok: false },
-                );
+                self.finish(id, J::Failed(JobFailure::Invalid), false);
             } else {
                 let node = self.st.jobs[&id].node.expect("node");
                 let j = self.job(id);
@@ -309,13 +344,12 @@ impl Core<'_> {
         let state = self.st.jobs[&id].state;
         match (state, report) {
             (
-                J::Submitting | J::SubmitUncertain | J::Running | J::Lost,
+                J::Submitting | J::SubmitUncertain { .. } | J::Running | J::Lost { .. },
                 JobReport::Running { offset },
             ) => {
                 self.job(id).offset = *offset;
                 // A lost job the owner cancelled is still being cancelled once it answers.
-                let cancelled = state == J::Lost && !self.node_writes(id, false).is_empty();
-                if cancelled {
+                if matches!(state, J::Lost { cancelling: true }) {
                     self.set_job(id, J::Cancelling);
                 } else if state != J::Running {
                     self.set_job(id, J::Running);
@@ -329,32 +363,34 @@ impl Core<'_> {
                 });
             }
             (
-                J::Submitting | J::SubmitUncertain | J::Running | J::Lost,
+                J::Submitting | J::SubmitUncertain { .. } | J::Running | J::Lost { .. },
                 JobReport::Exited { code },
             ) => {
-                self.job(id).exit = Some(*code);
-                self.set_job(id, J::Collecting);
+                self.close_cancels(id);
+                self.set_job(
+                    id,
+                    J::Collecting {
+                        exit: *code,
+                        verify_failures: 0,
+                    },
+                );
                 self.fetch(id);
             }
-            (J::Submitting | J::SubmitUncertain | J::Running | J::Lost, JobReport::Interrupted) => {
-                self.set_job(id, J::Interrupted);
-                self.notify(Party::Owner, None, Notice::JobInterrupted { job: id });
-            }
-            (J::Submitting | J::SubmitUncertain | J::Running | J::Lost, JobReport::Cancelled) => {
-                self.set_job(id, J::Cancelled);
-                self.node_effect(id, true);
-            }
-            (J::Running, JobReport::Unknown { .. }) => self.lose(id),
+            (
+                J::Submitting | J::SubmitUncertain { .. } | J::Running | J::Lost { .. },
+                JobReport::Interrupted,
+            ) => self.finish(id, J::Interrupted, false),
+            (
+                J::Submitting | J::SubmitUncertain { .. } | J::Running | J::Lost { .. },
+                JobReport::Cancelled,
+            ) => self.finish(id, J::Cancelled, true),
+            // The journal replays every report through this arm, so its outcome and its
+            // collected ack stay as they were.
             (
                 J::Cancelling,
                 JobReport::Cancelled | JobReport::Exited { .. } | JobReport::Interrupted,
-            ) => {
-                self.set_job(id, J::Cancelled);
-                for eff in self.node_writes(id, false) {
-                    self.goal_reached(eff);
-                }
-                self.node_effect(id, true);
-            }
+            ) => self.finish(id, J::Cancelled, true),
+            (J::Running, JobReport::Unknown { .. }) => self.lose(id),
             _ => {}
         }
     }
@@ -377,33 +413,34 @@ impl Core<'_> {
         let Some(j) = self.st.jobs.get(&id) else {
             return;
         };
-        if j.attempt != attempt || j.state != JobState::Collecting {
+        let JobState::Collecting { exit, .. } = j.state else {
+            return;
+        };
+        if j.attempt != attempt {
             return;
         }
         let now = self.now;
         self.job(id).seen_at = now;
-        let j = &self.st.jobs[&id];
-        let code = j.exit.unwrap_or(-1);
         let done = if result == crate::ArtifactCheck::Verified {
-            Some(if code == 0 {
+            Some(if exit == 0 {
                 JobState::Succeeded
             } else {
-                JobState::Failed(JobFailure::Exit(code))
+                JobState::Failed(JobFailure::Exit(exit))
             })
         } else if result == crate::ArtifactCheck::Permanent {
-            Some(JobState::Failed(JobFailure::Artifact))
+            Some(JobState::Failed(JobFailure::Artifact(exit)))
         } else {
-            let j = self.job(id);
-            j.verify_failures += 1;
-            (j.verify_failures >= MAX_VERIFY).then_some(JobState::Failed(JobFailure::Artifact))
+            let JobState::Collecting {
+                verify_failures, ..
+            } = &mut self.job(id).state
+            else {
+                unreachable!();
+            };
+            *verify_failures += 1;
+            (*verify_failures >= MAX_VERIFY).then_some(JobState::Failed(JobFailure::Artifact(exit)))
         };
         match done {
-            Some(state) => {
-                self.set_job(id, state);
-                self.node_effect(id, true);
-                let ok = state == JobState::Succeeded;
-                self.notify(Party::Owner, None, Notice::JobFinished { job: id, ok });
-            }
+            Some(state) => self.finish(id, state, true),
             None => self.fetch(id),
         }
     }
@@ -418,7 +455,7 @@ impl Core<'_> {
         let Some(j) = self.st.jobs.get(&id) else {
             return;
         };
-        if j.attempt != attempt || j.state != JobState::Collecting {
+        if j.attempt != attempt || !matches!(j.state, JobState::Collecting { .. }) {
             return;
         }
         let now = self.now;
@@ -427,16 +464,19 @@ impl Core<'_> {
         j.artifact_refusals = refusals.to_vec();
         j.artifact_incomplete = incomplete.map(str::to_owned);
         if incomplete.is_some() {
-            j.verify_failures += 1;
-            if j.verify_failures < MAX_VERIFY {
+            let JobState::Collecting {
+                exit,
+                verify_failures,
+            } = &mut j.state
+            else {
+                unreachable!();
+            };
+            *verify_failures += 1;
+            if *verify_failures < MAX_VERIFY {
                 return self.fetch(id);
             }
-            self.set_job(id, JobState::Failed(JobFailure::Artifact));
-            self.notify(
-                Party::Owner,
-                None,
-                Notice::JobFinished { job: id, ok: false },
-            );
+            let exit = *exit;
+            self.finish(id, JobState::Failed(JobFailure::Artifact(exit)), false);
         } else {
             self.artifacts_checked(
                 id,
@@ -458,17 +498,17 @@ impl Core<'_> {
             .submit
             .is_some_and(|e| self.effect_state(e) == Some(EffectState::Intent));
         match j.state {
-            JobState::Queued => self.set_job(id, JobState::Cancelled),
+            JobState::Queued => self.finish(id, JobState::Cancelled, false),
             // Its submit has not been dispatched, and now never is: nothing reached the node.
             JobState::Submitting if unsent => {
                 let eff = j.submit.expect("submit");
-                self.set_job(id, JobState::Cancelled);
+                self.finish(id, JobState::Cancelled, false);
                 self.withdraw(eff);
             }
             JobState::Submitting
-            | JobState::SubmitUncertain
+            | JobState::SubmitUncertain { .. }
             | JobState::Running
-            | JobState::Lost => {
+            | JobState::Lost { .. } => {
                 self.set_job(id, JobState::Cancelling);
                 self.node_effect(id, false);
             }
@@ -486,11 +526,16 @@ impl Core<'_> {
         let Some(j) = self.st.jobs.get(&id) else {
             return self.refuse(Code::NotFound, "no such job");
         };
-        let stuck = j.state == JobState::SubmitUncertain && j.needs_new_attempt;
-        if j.state != JobState::Lost && !stuck {
+        let stuck = matches!(
+            j.state,
+            JobState::SubmitUncertain {
+                epoch_changed: true
+            }
+        );
+        if !matches!(j.state, JobState::Lost { .. }) && !stuck {
             return self.refuse(Code::FailedPrecondition, "only a lost job can be abandoned");
         }
-        self.set_job(id, JobState::Abandoned);
+        self.finish(id, JobState::Abandoned, false);
         self.node_effect(id, false);
         self.reply(Reply::Accepted);
     }
@@ -499,12 +544,7 @@ impl Core<'_> {
         if self.st.jobs.get(&id).map(|j| j.state) != Some(JobState::Queued) {
             return;
         }
-        self.set_job(id, JobState::Failed(JobFailure::NodeRemoved(node)));
-        self.notify(
-            Party::Owner,
-            None,
-            Notice::JobFinished { job: id, ok: false },
-        );
+        self.finish(id, JobState::Failed(JobFailure::NodeRemoved(node)), false);
     }
 
     /// An explicit new attempt: the only way a job runs again.
@@ -512,8 +552,13 @@ impl Core<'_> {
         let Some(j) = self.st.jobs.get(&id) else {
             return self.refuse(Code::NotFound, "no such job");
         };
-        let stuck = j.state == JobState::SubmitUncertain && j.needs_new_attempt;
-        if !matches!(j.state, JobState::Interrupted | JobState::Lost) && !stuck {
+        let stuck = matches!(
+            j.state,
+            JobState::SubmitUncertain {
+                epoch_changed: true
+            }
+        );
+        if !matches!(j.state, JobState::Interrupted | JobState::Lost { .. }) && !stuck {
             return self.refuse(
                 Code::FailedPrecondition,
                 "only an interrupted, lost or unknowable job is requeued",
@@ -524,11 +569,8 @@ impl Core<'_> {
         j.node = None;
         j.submit = None;
         j.offset = 0;
-        j.exit = None;
-        j.verify_failures = 0;
         j.artifact_refusals.clear();
         j.artifact_incomplete = None;
-        j.needs_new_attempt = false;
         self.set_job(id, JobState::Queued);
         self.schedule(id);
         self.reply(Reply::Accepted);
@@ -543,15 +585,15 @@ impl Core<'_> {
             // From the first loss, not the latest bounce back into Lost. Entering Lost
             // always records that stamp, so a Lost job without one does not start the window.
             let loss_for = match (state, lost_at) {
-                (JobState::Lost | JobState::Collecting, Some(t)) => Some(t),
+                (JobState::Lost { .. } | JobState::Collecting { .. }, Some(t)) => Some(t),
                 _ => None,
             };
             if loss_for.is_some_and(|t| since(now, t) >= LOST_ABANDON) {
-                self.set_job(id, JobState::Abandoned);
+                self.finish(id, JobState::Abandoned, false);
                 self.node_effect(id, false);
             } else {
                 match state {
-                    JobState::SubmitUncertain | JobState::Running
+                    JobState::SubmitUncertain { .. } | JobState::Running
                         if since(now, seen_at) >= LEASE =>
                     {
                         self.lose(id);
@@ -559,11 +601,11 @@ impl Core<'_> {
                     JobState::Cancelling if since(now, state_at) >= LEASE => self.lose(id),
                     // No artifact check answered within the lease: Lost, and a later Exited
                     // report collects again. That retry does not move the first-loss stamp.
-                    JobState::Collecting if since(now, seen_at) >= LEASE => self.lose(id),
-                    JobState::SubmitUncertain
+                    JobState::Collecting { .. } if since(now, seen_at) >= LEASE => self.lose(id),
+                    JobState::SubmitUncertain { .. }
                     | JobState::Running
                     | JobState::Cancelling
-                    | JobState::Lost => self.poll(id),
+                    | JobState::Lost { .. } => self.poll(id),
                     _ => {}
                 }
             }
@@ -579,16 +621,21 @@ impl Core<'_> {
         for id in ids {
             match self.st.jobs[&id].state {
                 JobState::Queued => self.schedule(id),
-                JobState::Submitting => self.set_job(id, JobState::SubmitUncertain),
+                JobState::Submitting => self.set_job(
+                    id,
+                    JobState::SubmitUncertain {
+                        epoch_changed: false,
+                    },
+                ),
                 JobState::Cancelling if since(self.now, self.st.jobs[&id].state_at) >= LEASE => {
                     self.lose(id);
                     self.poll(id);
                 }
-                JobState::SubmitUncertain
+                JobState::SubmitUncertain { .. }
                 | JobState::Running
                 | JobState::Cancelling
-                | JobState::Lost => self.poll(id),
-                JobState::Collecting => self.fetch(id),
+                | JobState::Lost { .. } => self.poll(id),
+                JobState::Collecting { .. } => self.fetch(id),
                 _ => {}
             }
             self.resend_node_writes(id);

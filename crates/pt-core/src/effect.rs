@@ -238,7 +238,10 @@ impl Core<'_> {
             EffectKind::NodeSubmit { job, .. } => {
                 let j = &st.jobs[job];
                 j.submit == Some(id)
-                    && matches!(j.state, JobState::Submitting | JobState::SubmitUncertain)
+                    && matches!(
+                        j.state,
+                        JobState::Submitting | JobState::SubmitUncertain { .. }
+                    )
             }
             EffectKind::NodeCancel { job, .. } => st.jobs[job].state == JobState::Cancelling,
             EffectKind::NodeAckCollected { .. } => true,

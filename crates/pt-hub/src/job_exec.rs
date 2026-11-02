@@ -449,7 +449,7 @@ impl NodeExec {
                     && j.node == Some(self.node)
                     && matches!(
                         j.state,
-                        JobState::Submitting | JobState::SubmitUncertain | JobState::Running
+                        JobState::Submitting | JobState::SubmitUncertain { .. } | JobState::Running
                     )
             });
             if live {
@@ -727,7 +727,7 @@ impl NodeExec {
                     .state
                     .jobs
                     .get(&job)
-                    .is_some_and(|j| j.state == JobState::Collecting);
+                    .is_some_and(|j| matches!(j.state, JobState::Collecting { .. }));
                 if collecting && self.current(&view, job, attempt) {
                     self.collect(&view, job, attempt);
                 }

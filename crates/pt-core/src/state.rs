@@ -382,8 +382,6 @@ pub struct Job {
     pub submit: Option<EffectId>,
     /// The node's log length at its last Running report (not the hub's read position).
     pub offset: u64,
-    pub exit: Option<i32>,
-    pub verify_failures: u32,
     pub artifact_refusals: Vec<crate::ArtifactRefusal>,
     pub artifact_incomplete: Option<String>,
     /// Last answer from the node about this attempt.
@@ -392,21 +390,19 @@ pub struct Job {
     /// First time this attempt entered Lost. A later Collecting retry does not move it.
     /// Cleared once the job leaves Lost and Collecting.
     pub lost_at: Option<Millis>,
-    /// The node did not know the job and its epoch changed: only an explicit requeue continues.
-    pub needs_new_attempt: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum JobState {
     Queued,
     Submitting,
-    SubmitUncertain,
+    SubmitUncertain { epoch_changed: bool },
     Running,
-    Collecting,
+    Collecting { exit: i32, verify_failures: u32 },
     Succeeded,
     Failed(JobFailure),
     Interrupted,
-    Lost,
+    Lost { cancelling: bool },
     Cancelling,
     Cancelled,
     Abandoned,
@@ -416,7 +412,7 @@ pub enum JobState {
 pub enum JobFailure {
     Invalid,
     Exit(i32),
-    Artifact,
+    Artifact(i32),
     /// The node it was pinned to left the fleet before it ran.
     NodeRemoved(NodeId),
 }

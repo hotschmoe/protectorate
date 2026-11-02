@@ -749,7 +749,10 @@ fn wanted(prev: &State, e: &Effect) -> bool {
         EffectKind::NodeSubmit { job, .. } => {
             let j = &prev.jobs[job];
             j.submit == Some(e.id)
-                && matches!(j.state, JobState::Submitting | JobState::SubmitUncertain)
+                && matches!(
+                    j.state,
+                    JobState::Submitting | JobState::SubmitUncertain { .. }
+                )
         }
         EffectKind::NodeCancel { job, .. } => prev.jobs[job].state == JobState::Cancelling,
         EffectKind::NodeAckCollected { .. } => true,
