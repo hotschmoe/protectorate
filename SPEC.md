@@ -560,7 +560,9 @@ These rules override the design reports wherever the reports say otherwise. The 
    "unknown job" answer counts as never-seen only when the node's journal epoch matches the one in
    the hub's submit record. Otherwise the job is Uncertain and needs an explicit new attempt.
 6. **Cancelling has a timeout.** If no status arrives within the 5 min lease, Cancelling moves to
-   Lost, and a later status reconciles it. No state may wait forever on a node.
+   Lost, and a later status reconciles it. No state may wait forever on a node. A collection is
+   abandoned 24 hours after the job is first lost, even when the node keeps reporting and
+   collection starts again, and a failed local save fails that collection.
 7. **Every non-terminal state has a recovery action.** Probing re-probes. Collecting re-fetches
    from its recorded offset. Cancelling re-sends the cancel. Provisioning waits for its completion
    barrier and then records or removes the worktree. Stop during Provisioning waits for that

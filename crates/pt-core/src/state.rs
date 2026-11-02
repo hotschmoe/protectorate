@@ -336,6 +336,9 @@ pub struct Job {
     /// Last answer from the node about this attempt.
     pub seen_at: Millis,
     pub state_at: Millis,
+    /// First time this attempt entered Lost. A later Collecting retry does not move it.
+    /// Cleared once the job leaves Lost and Collecting.
+    pub lost_at: Option<Millis>,
     /// The node did not know the job and its epoch changed: only an explicit requeue continues.
     pub needs_new_attempt: bool,
 }

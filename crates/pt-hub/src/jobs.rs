@@ -608,6 +608,8 @@ enum Fail {
     Node(ErrorReply),
     /// The bytes came, but are not the artifact the node described.
     Check(String),
+    /// The hub could not write what it fetched. The node is fine; the collection fails.
+    Save(String),
     /// Sent, then the connection failed: the call may have applied.
     Io(String),
     /// The node's refusal already went in as the job's status, which resolves the record.
@@ -617,7 +619,7 @@ enum Fail {
 impl Fail {
     fn text(&self) -> String {
         match self {
-            Fail::Reach(e) | Fail::Io(e) | Fail::Check(e) => e.clone(),
+            Fail::Reach(e) | Fail::Io(e) | Fail::Check(e) | Fail::Save(e) => e.clone(),
             Fail::Node(r) => format!("node refused ({}): {}", r.code, r.message),
             Fail::Answered => "answered".into(),
         }
@@ -904,11 +906,13 @@ impl NodeExec {
                         attempt,
                         native: None,
                     },
-                    Err(Fail::Reach(reason) | Fail::Check(reason)) => EventKind::Nacked {
-                        effect,
-                        attempt,
-                        reason,
-                    },
+                    Err(Fail::Reach(reason) | Fail::Check(reason) | Fail::Save(reason)) => {
+                        EventKind::Nacked {
+                            effect,
+                            attempt,
+                            reason,
+                        }
+                    }
                     Err(Fail::Node(r)) => {
                         let reason = format!("{}: {}", r.code, r.message);
                         if matches!(r.code, NodeCode::Internal) {
@@ -1124,7 +1128,7 @@ impl NodeExec {
             if !bytes.is_empty() {
                 match self.hub.jobs.append(job, attempt, at, &bytes) {
                     Ok(n) => at = n,
-                    Err(e) => break Err(Fail::Reach(e.to_string())),
+                    Err(e) => break Err(Fail::Save(e.to_string())),
                 }
             }
             if end.done {
@@ -1142,9 +1146,10 @@ impl NodeExec {
     }
 
     /// Exited: the rest of the log, then each artifact. A dropped connection saves what was
-    /// fetched and reports nothing: the lease makes the job Lost and its next status collects
-    /// again. A node refusal or a failed local save is submitted; a byte mismatch is an
-    /// incomplete collection and counts toward the verify limit.
+    /// fetched and reports nothing, so it does not use a verify attempt: the job is Lost, and
+    /// abandoned 24h after it first went Lost even if collection keeps restarting. A node
+    /// refusal or a failed local save is submitted; a byte mismatch is an incomplete collection
+    /// and counts toward the verify limit.
     fn collect(&mut self, view: &View, job: JobId, attempt: u32) {
         let mut refusals = view
             .state
@@ -1154,7 +1159,7 @@ impl NodeExec {
             .unwrap_or_default();
         match self.pull_log(view, job, attempt, None) {
             Ok(_) => {}
-            Err(Fail::Check(e)) => {
+            Err(Fail::Check(e) | Fail::Save(e)) => {
                 warning!("job {}: the log: {e}", job.0);
                 return self.submit(EventKind::ArtifactCollection {
                     job,
@@ -1245,7 +1250,7 @@ impl NodeExec {
         let nid = node_job_id(&self.hub, job);
         let file = n.to_string();
         let dest = self.hub.jobs.artifact_path(job, attempt, &file);
-        let io = |e: io::Error| Fail::Reach(format!("{}: {e}", dest.display()));
+        let io = |e: io::Error| Fail::Save(format!("{}: {e}", dest.display()));
         if let Some(d) = dest.parent() {
             fs::create_dir_all(d).map_err(io)?;
         }

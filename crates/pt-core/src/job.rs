@@ -11,7 +11,7 @@ use crate::state::*;
 
 /// No answer for this long: Lost. Also the Cancelling timeout (12a item 6).
 pub const LEASE: Millis = 5 * MINUTE;
-/// Lost this long: Abandoned.
+/// Abandoned this long after the first loss. Returning to Collecting does not restart it.
 pub const LOST_ABANDON: Millis = 24 * HOUR;
 /// A node that refused a submit as busy or unfit is skipped this long.
 pub const EXCLUDE_FOR: Millis = 10 * MINUTE;
@@ -36,8 +36,25 @@ impl Core<'_> {
     fn set_job(&mut self, id: JobId, state: JobState) {
         let now = self.now;
         let j = self.job(id);
+        // The first loss starts the abandon window. Collecting is a retry of that same loss.
+        if state == JobState::Lost {
+            if j.lost_at.is_none() {
+                j.lost_at = Some(now);
+            }
+        } else if state != JobState::Collecting {
+            j.lost_at = None;
+        }
         j.state = state;
         j.state_at = now;
+    }
+
+    /// Enters Lost once and tells the owner. A job already Lost keeps its first-loss stamp.
+    fn lose(&mut self, id: JobId) {
+        if self.st.jobs[&id].state == JobState::Lost {
+            return;
+        }
+        self.set_job(id, JobState::Lost);
+        self.notify(Party::Owner, None, Notice::JobLost { job: id });
     }
 
     fn poll(&mut self, id: JobId) {
@@ -140,6 +157,7 @@ impl Core<'_> {
                 artifact_incomplete: None,
                 seen_at: now,
                 state_at: now,
+                lost_at: None,
                 needs_new_attempt: false,
             },
         );
@@ -323,10 +341,7 @@ impl Core<'_> {
                 self.set_job(id, J::Cancelled);
                 self.node_effect(id, true);
             }
-            (J::Running, JobReport::Unknown { .. }) => {
-                self.set_job(id, J::Lost);
-                self.notify(Party::Owner, None, Notice::JobLost { job: id });
-            }
+            (J::Running, JobReport::Unknown { .. }) => self.lose(id),
             (
                 J::Cancelling,
                 JobReport::Cancelled | JobReport::Exited { .. } | JobReport::Interrupted,
@@ -521,30 +536,33 @@ impl Core<'_> {
         let ids: Vec<JobId> = self.st.jobs.keys().copied().collect();
         for id in ids {
             let j = &self.st.jobs[&id];
-            match j.state {
-                JobState::SubmitUncertain | JobState::Running if since(now, j.seen_at) >= LEASE => {
-                    self.set_job(id, JobState::Lost);
-                    self.notify(Party::Owner, None, Notice::JobLost { job: id });
+            let (state, seen_at, state_at, lost_at) = (j.state, j.seen_at, j.state_at, j.lost_at);
+            // From the first loss, not the latest bounce back into Lost.
+            let loss_for = match (state, lost_at) {
+                (JobState::Lost | JobState::Collecting, Some(t)) => Some(t),
+                (JobState::Lost, None) => Some(state_at),
+                _ => None,
+            };
+            if loss_for.is_some_and(|t| since(now, t) >= LOST_ABANDON) {
+                self.set_job(id, JobState::Abandoned);
+                self.node_effect(id, false);
+            } else {
+                match state {
+                    JobState::SubmitUncertain | JobState::Running
+                        if since(now, seen_at) >= LEASE =>
+                    {
+                        self.lose(id);
+                    }
+                    JobState::Cancelling if since(now, state_at) >= LEASE => self.lose(id),
+                    // No artifact check answered within the lease: Lost, and a later Exited
+                    // report collects again. That retry does not move the first-loss stamp.
+                    JobState::Collecting if since(now, seen_at) >= LEASE => self.lose(id),
+                    JobState::SubmitUncertain
+                    | JobState::Running
+                    | JobState::Cancelling
+                    | JobState::Lost => self.poll(id),
+                    _ => {}
                 }
-                JobState::Cancelling if since(now, j.state_at) >= LEASE => {
-                    self.set_job(id, JobState::Lost);
-                    self.notify(Party::Owner, None, Notice::JobLost { job: id });
-                }
-                // No artifact check answered within the lease: Lost, and a later Exited
-                // report collects again.
-                JobState::Collecting if since(now, j.seen_at) >= LEASE => {
-                    self.set_job(id, JobState::Lost);
-                    self.notify(Party::Owner, None, Notice::JobLost { job: id });
-                }
-                JobState::Lost if since(now, j.state_at) >= LOST_ABANDON => {
-                    self.set_job(id, JobState::Abandoned);
-                    self.node_effect(id, false);
-                }
-                JobState::SubmitUncertain
-                | JobState::Running
-                | JobState::Cancelling
-                | JobState::Lost => self.poll(id),
-                _ => {}
             }
             self.resend_node_writes(id);
         }
@@ -560,8 +578,7 @@ impl Core<'_> {
                 JobState::Queued => self.schedule(id),
                 JobState::Submitting => self.set_job(id, JobState::SubmitUncertain),
                 JobState::Cancelling if since(self.now, self.st.jobs[&id].state_at) >= LEASE => {
-                    self.set_job(id, JobState::Lost);
-                    self.notify(Party::Owner, None, Notice::JobLost { job: id });
+                    self.lose(id);
                     self.poll(id);
                 }
                 JobState::SubmitUncertain

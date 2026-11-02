@@ -174,7 +174,9 @@ job artifact <job> <path> [--out FILE]
   or absolute for the node; it is fetched when the job ends, and `job artifact` writes it to
   `--out` or stdout after checking its sha256. A path outside that directory is refused. A
   dropped connection while fetching saves what arrived and does not use up the three attempts;
-  the hub collects again when the node next reports the job.
+  the hub collects again when the node next reports the job. A local save failure is submitted
+  as an incomplete collection and fails the job through those three attempts. The job is
+  abandoned 24 hours after it is first lost, including when collection keeps restarting.
 - `job run --wait` prints the log and exits with the job's code. A hub that cannot be reached is
   retried for a few seconds; it then exits naming the job id.
 - `job log` lags a running job by up to 10 s.
