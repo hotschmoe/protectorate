@@ -577,7 +577,11 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
         .args(["--home", &home_s, "hub", "probation"])
         .output()
         .unwrap();
-    assert!(not_from_releases.status.success());
+    assert!(
+        !not_from_releases.status.success()
+            && String::from_utf8_lossy(&not_from_releases.stderr).contains("stop the hub"),
+        "{not_from_releases:?}"
+    );
     let n = sup.starts().len();
     let rollback = cli(&home, &["--json", "hub", "update", "--rollback"]).json();
     assert_eq!(rollback["target"].as_str(), Some("v0.0.1"), "{rollback}");
@@ -947,13 +951,13 @@ fn release_switches_survive_a_crash_at_each_step() {
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
     let p = probation(&home);
     assert_eq!(p["version"].as_str(), Some("v0.0.2"), "{p}");
+    drop(sup);
     let idle = cli(&home, &["hub", "probation"]);
     assert!(
         idle.stdout.contains("no release on trial"),
         "{}",
         idle.stdout
     );
-    drop(sup);
 
     let sup = Supervisor::start(
         &home,
