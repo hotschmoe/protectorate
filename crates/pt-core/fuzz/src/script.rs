@@ -7,7 +7,7 @@
 //! invariants and the replay check apply to scenarios too.
 //!
 //! ```text
-//! spawn NAME PATH [parent=NAME] [view] [harness=H] [pane] [budget=N] [disk=N] [effort=E] [to=H,H] [d9]
+//! spawn NAME PATH [parent=NAME] [view] [harness=H] [pane] [budget=N] [disk=N] [effort=E] [to=H,H] [d9] [by-envoy]
 //! send NAME ID [steer] [from=NAME|from=agent:NAME] [d9]
 //! continue NAME                    a second journaled continuation; the first is sent by the core
 //! stop|remove|interrupt|compact|viewed NAME
@@ -25,6 +25,7 @@
 //! crash [empty] [down=DURATION]     the hub dies at the last commit and restarts DURATION later
 //! job ID | cancel-job N | requeue-job N | abandon-job N
 //! expect NAME life=.. g=N activity=.. guard=.. harness=.. queue=N effort=.. agent=NAME|none d9=true|false msg:ID=.. from:ID=Party [park=REST]
+//!   d9turn=none|PARTY/SPAWNS, e.g. `Agent/1` or `Sleeve/0`.
 //!   `park=` is the rest of the line, the hub's park string (`flapping (claude login rejected)`).
 //! expect-reply TEXT...             Refused matches its text; any other reply matches its variant
 //! expect-effect KEY state=.. attempt=N count=N
@@ -124,6 +125,7 @@ fn park_text(life: &Life) -> String {
         ParkReason::Flapping(None) => "flapping".into(),
         ParkReason::BriefUnconfirmed => "brief_unconfirmed".into(),
         ParkReason::Guard(g) => format!("g{}", g.number()),
+        ParkReason::Ineligible { harness } => format!("ineligible ({})", harness_name(*harness)),
     }
 }
 
@@ -249,21 +251,25 @@ impl Runner {
                     disk_limit: kv("disk").map(num).transpose()?,
                     effort: kv("effort").map(str::to_string),
                     d9: flag("d9"),
+                    by_envoy: flag("by-envoy"),
                 };
                 self.sim.apply(E::Spawn(spec));
             }
             "send" => {
                 let to = self.id(arg(1)?)?;
-                let from = match kv("from") {
-                    Some(n) if n.starts_with("agent:") => Party::Agent,
-                    Some(n) => Party::Sleeve(self.id(n)?),
-                    None => Party::Owner,
+                let (from, agent) = match kv("from") {
+                    Some(n) => match n.strip_prefix("agent:") {
+                        Some(name) => (Party::Agent, Some(name.to_string())),
+                        None => (Party::Sleeve(self.id(n)?), None),
+                    },
+                    None => (Party::Owner, None),
                 };
                 let id = arg(2)?;
                 self.sim.apply(E::Send {
                     to,
                     request_id: id.into(),
                     from,
+                    agent,
                     text: format!("text of {id}"),
                     mode: if flag("steer") {
                         SendMode::Steer
@@ -422,7 +428,7 @@ impl Runner {
                         "stop" => p.stop = pick(&["exit", "linger"])?,
                         "other" => p.other = pick(&["ack", "nack", "lost"])?,
                         "probe" => p.probe = pick(&["applied", "notapplied", "unknowable"])?,
-                        "select" => p.select = pick(&["first", "none", "second"])?,
+                        "select" => p.select = pick(&["first", "none", "second", "ineligible"])?,
                         "poll" => p.poll = pick(&[])?,
                         "fetch" => p.fetch = pick(&["ok", "bad"])?,
                         _ => return Err(format!("bad policy key {k}")),
@@ -659,6 +665,9 @@ impl Runner {
                 "effort" => s.effort.clone().unwrap_or("none".into()),
                 "agent" => s.turn_agent.clone().unwrap_or_else(|| "none".into()),
                 "d9" => s.d9.to_string(),
+                "d9turn" => s.d9_turn.as_ref().map_or("none".into(), |t| {
+                    format!("{}/{}", variant(&t.from), t.spawns)
+                }),
                 _ => match k.strip_prefix("msg:") {
                     Some(id) => s
                         .messages

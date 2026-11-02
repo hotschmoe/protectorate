@@ -45,7 +45,10 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
             let n = sim.st.next_sleeve;
             E::Spawn(SpawnSpec {
                 request_id: format!("spawn-{}", b.below(n + 2)),
-                name: format!("s{}", b.below(n + 2)),
+                name: match b.below(n + 3) {
+                    0 => ENVOY_NAME.into(),
+                    i => format!("s{}", i - 1),
+                },
                 parent,
                 layout,
                 claim: Claim {
@@ -58,18 +61,20 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
                 disk_limit: b.bool().then(|| 1 << 30),
                 effort: b.bool().then(|| "high".into()),
                 d9: b.bool(),
+                by_envoy: b.bool(),
             })
         }
         2 | 3 => {
-            let from = if b.bool() {
-                Party::Owner
-            } else {
-                Party::Sleeve(sleeve(sim, b))
+            let (from, agent) = match b.below(3) {
+                0 => (Party::Owner, None),
+                1 => (Party::Agent, Some(format!("a{}", b.below(2)))),
+                _ => (Party::Sleeve(sleeve(sim, b)), None),
             };
             E::Send {
                 to: s,
                 request_id: format!("m{}", b.below(12)),
                 from,
+                agent,
                 text: "do the thing".into(),
                 mode: if b.below(3) == 0 {
                     SendMode::Steer

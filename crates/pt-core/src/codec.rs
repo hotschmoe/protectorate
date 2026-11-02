@@ -4,19 +4,22 @@
 //!
 //! Journals are never rewritten, so a tag keeps its layout forever: new variants and fields get
 //! new tags. `Obs::ApprovalRequested` is tag 2 without an ask and tag 11 with one.
-//! `EventKind::Spawn` is tag 0, tag 32 with an effort, and tag 38 when it marks D9. Tag 38 is
-//! the tag 0 body plus a flags byte: bit 0 then an effort string, bit 1 the mark. A later
-//! spawn field is another bit, not another tag. `EventKind::Send` is tag 1, or tag 39 when it
-//! marks D9. Tags 0, 1 and 32 decode and re-encode to the same bytes. Tags 33 to 37 are Start
-//! and Resleeve with an effort, a permanent artifact check, an artifact collection, and
-//! Continue. Older tags leave the mark unset.
+//! `EventKind::Spawn` is tag 0, tag 32 with an effort, and tag 38 when it marks D9 or Envoy
+//! asked for it. Tag 38 is the tag 0 body plus a flags byte: bit 0 then an effort string, bit 1
+//! the mark, bit 2 Envoy's. A later spawn field is another bit, not another tag.
+//! `EventKind::Send` is tag 1, or tag 39 when it marks D9, and tag 41 when it names a vendor
+//! agent: the tag 1 body, the mark, then the name. Tags 0, 1 and 32 decode and re-encode to the
+//! same bytes. Tags 33 to 37 are Start and Resleeve with an effort, a permanent artifact check,
+//! an artifact collection, and Continue. Older tags leave the mark unset.
+//! `EventKind::TargetChosen` is tag 22 with a target or none, and tag 40 when doctor refused
+//! Envoy's harness.
 
 use crate::event::*;
 use crate::model::*;
 
 pub const FORMAT: u8 = 1;
 /// Highest event tag this binary reads. Any incompatible encoding must get a new event tag.
-pub const MAX_EVENT_TAG: u8 = 39;
+pub const MAX_EVENT_TAG: u8 = 41;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -364,6 +367,7 @@ impl Wire for SpawnSpec {
             budget: Wire::get(r)?,
             disk_limit: Wire::get(r)?,
             d9: false,
+            by_envoy: false,
         })
     }
 }
@@ -563,14 +567,21 @@ impl Wire for EventKind {
         use EventKind as E;
         match self {
             E::Spawn(spec) => {
-                // Bit 0: an effort string follows. Bit 1: this spawn marks D9. Tag 38 exists
-                // only with the mark set, so a tag 0 or 32 event re-encodes to itself.
-                if spec.d9 {
+                // Bit 0: an effort string follows. Bit 1: this spawn marks D9. Bit 2: Envoy
+                // asked for it. Tag 38 exists only with bit 1 or 2 set, so a tag 0 or 32 event
+                // re-encodes to itself.
+                if spec.d9 || spec.by_envoy {
                     w.push(38);
                     spec.put(w);
-                    let mut flags = 0x02;
+                    let mut flags = 0;
                     if spec.effort.is_some() {
                         flags |= 0x01;
+                    }
+                    if spec.d9 {
+                        flags |= 0x02;
+                    }
+                    if spec.by_envoy {
+                        flags |= 0x04;
                     }
                     w.push(flags);
                     if let Some(effort) = &spec.effort {
@@ -589,16 +600,25 @@ impl Wire for EventKind {
                 to,
                 request_id,
                 from,
+                agent,
                 text,
                 mode,
                 d9,
             } => {
-                w.push(if *d9 { 39 } else { 1 });
+                w.push(match (agent, d9) {
+                    (Some(_), _) => 41,
+                    (None, true) => 39,
+                    (None, false) => 1,
+                });
                 to.put(w);
                 request_id.put(w);
                 from.put(w);
                 text.put(w);
                 mode.put(w);
+                if let Some(agent) = agent {
+                    d9.put(w);
+                    agent.put(w);
+                }
             }
             E::Interrupt { sleeve } => {
                 w.push(2);
@@ -735,11 +755,23 @@ impl Wire for EventKind {
                 g.put(w);
                 live.put(w);
             }
-            E::TargetChosen { sleeve, g, target } => {
-                w.push(22);
+            E::TargetChosen { sleeve, g, chosen } => {
+                w.push(if matches!(chosen, Chosen::Ineligible(_)) {
+                    40
+                } else {
+                    22
+                });
                 sleeve.put(w);
                 g.put(w);
-                target.put(w);
+                // Tag 22 carries an `Option<Target>`.
+                match chosen {
+                    Chosen::Target(t) => {
+                        w.push(1);
+                        t.put(w);
+                    }
+                    Chosen::NoTarget => w.push(0),
+                    Chosen::Ineligible(h) => h.put(w),
+                }
             }
             E::NodeChosen {
                 job,
@@ -839,6 +871,7 @@ impl Wire for EventKind {
                 to: Wire::get(r)?,
                 request_id: Wire::get(r)?,
                 from: Wire::get(r)?,
+                agent: None,
                 text: Wire::get(r)?,
                 mode: Wire::get(r)?,
                 d9: tag == 39,
@@ -921,7 +954,10 @@ impl Wire for EventKind {
             22 => E::TargetChosen {
                 sleeve: Wire::get(r)?,
                 g: Wire::get(r)?,
-                target: Wire::get(r)?,
+                chosen: match Option::<Target>::get(r)? {
+                    Some(t) => Chosen::Target(t),
+                    None => Chosen::NoTarget,
+                },
             },
             23 => E::NodeChosen {
                 job: Wire::get(r)?,
@@ -998,7 +1034,7 @@ impl Wire for EventKind {
             38 => {
                 let mut spec: SpawnSpec = Wire::get(r)?;
                 let flags = r.u8()?;
-                if (flags & !0x03) != 0 || (flags & 0x02) == 0 {
+                if (flags & !0x07) != 0 || (flags & 0x06) == 0 {
                     return Err(DecodeError::UnknownTag {
                         what: "spawn flag",
                         tag: flags,
@@ -1007,9 +1043,24 @@ impl Wire for EventKind {
                 if flags & 0x01 != 0 {
                     spec.effort = Some(Wire::get(r)?);
                 }
-                spec.d9 = true;
+                spec.d9 = flags & 0x02 != 0;
+                spec.by_envoy = flags & 0x04 != 0;
                 E::Spawn(spec)
             }
+            41 => E::Send {
+                to: Wire::get(r)?,
+                request_id: Wire::get(r)?,
+                from: Wire::get(r)?,
+                text: Wire::get(r)?,
+                mode: Wire::get(r)?,
+                d9: Wire::get(r)?,
+                agent: Some(Wire::get(r)?),
+            },
+            40 => E::TargetChosen {
+                sleeve: Wire::get(r)?,
+                g: Wire::get(r)?,
+                chosen: Chosen::Ineligible(Wire::get(r)?),
+            },
             _ => return Err(DecodeError::UnknownTag { what: "event", tag }),
         })
     }

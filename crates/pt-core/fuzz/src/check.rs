@@ -346,7 +346,7 @@ pub fn step(prev: &State, st: &State, sim: &Sim) {
     invariants(st, sim);
 }
 
-/// At most one live `continue:<sleeve>:<seq>` prompt per owner turn. An unsent one may be sent
+/// At most one live continuation prompt per owner turn. An unsent one may be sent
 /// again, under the same key, after its generation dies. A new one is owed by the previous state
 /// or is that re-delivery.
 fn continue_prompts(prev: &State, st: &State, sim: &Sim) {
@@ -357,15 +357,16 @@ fn continue_prompts(prev: &State, st: &State, sim: &Sim) {
                 sleeve,
                 g,
                 request_id,
+                kind: MsgKind::Continuation { turn: seq },
                 ..
             } = &e.kind
             else {
                 continue;
             };
-            if *sleeve != s.id || !request_id.starts_with("continue:") {
+            if *sleeve != s.id {
                 continue;
             }
-            let seq = continue_seq(s.id, request_id);
+            let seq = *seq;
             if e.state != EffectState::Abandoned {
                 assert!(
                     live.insert(seq),
@@ -440,15 +441,6 @@ fn owed_continuations(st: &State, sim: &Sim) {
     }
 }
 
-fn continue_seq(sid: SleeveId, request_id: &str) -> u64 {
-    let prefix = format!("continue:{}:", sid.0);
-    let Some(rest) = request_id.strip_prefix(&prefix) else {
-        panic!("continue effect key {request_id} is not {prefix}<seq>");
-    };
-    rest.parse()
-        .unwrap_or_else(|_| panic!("continue effect key {request_id} has no turn seq"))
-}
-
 /// A message whose prompt or steer record ended while still Intent (never dispatched) is back
 /// in its queue: neither lost nor shown as "may have applied".
 fn unsent_messages(prev: &State, st: &State) {
@@ -471,7 +463,7 @@ fn unsent_messages(prev: &State, st: &State) {
             let m = s.messages.get(r).map(|m| m.state);
             // A stop, park, or resleeve drops an unsent continuation instead of sending it
             // on the next start. It is Rejected, with no "may have applied" notice.
-            let dropped_continue = r.starts_with("continue:")
+            let dropped_continue = matches!(pm.kind, MsgKind::Continuation { .. })
                 && matches!(m, Some(MsgState::Rejected))
                 && matches!(
                     s.life,
@@ -689,6 +681,11 @@ pub fn invariants(st: &State, sim: &Sim) {
                 assert!(s.d9, "a child of a D9-marked sleeve is unmarked");
             }
         }
+        assert!(
+            s.d9_turn.is_none() || (s.name == ENVOY_NAME && s.parent.is_none()),
+            "{:?} has a D9 turn and is not Envoy",
+            s.id
+        );
         if s.parent.is_none() {
             assert!(
                 st.live_children(s.id) <= MAX_CHILDREN,

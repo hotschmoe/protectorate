@@ -29,7 +29,8 @@ pub struct Policy {
     pub other: u8,
     /// Probe answers: 0 applied, 1 not applied, 2 unknowable.
     pub probe: u8,
-    /// select_target: 0 first candidate, 1 none, 2 second candidate.
+    /// select_target: 0 first candidate, 1 none, 2 second candidate, 3 doctor refused the
+    /// sleeve's own harness.
     pub select: u8,
     /// Node answers (see `job_report`).
     pub poll: u8,
@@ -305,12 +306,19 @@ impl Sim {
                 ..
             } => {
                 let ok: Vec<&Target> = candidates.iter().filter(|t| !exclude.contains(t)).collect();
-                let target = match p.select % 3 {
-                    0 => ok.first().map(|t| (*t).clone()),
-                    1 => None,
-                    _ => ok.get(1).or(ok.first()).map(|t| (*t).clone()),
+                let pick = |t: Option<&&Target>| {
+                    t.map_or(Chosen::NoTarget, |t| Chosen::Target((*t).clone()))
                 };
-                self.apply(EventKind::TargetChosen { sleeve, g, target });
+                let chosen = match p.select % 4 {
+                    0 => pick(ok.first()),
+                    1 => Chosen::NoTarget,
+                    2 => pick(ok.get(1).or(ok.first())),
+                    _ => self
+                        .st
+                        .sleeve(sleeve)
+                        .map_or(Chosen::NoTarget, |s| Chosen::Ineligible(s.target.harness)),
+                };
+                self.apply(EventKind::TargetChosen { sleeve, g, chosen });
             }
             Intent::ScheduleJob { job, exclude } => {
                 let Some(j) = self.st.jobs.get(&job) else {

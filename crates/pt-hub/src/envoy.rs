@@ -1,21 +1,15 @@
-//! Envoy, the hub's own sleeve: its name, how the state names it, and who started its current
-//! turn (D9).
+//! Envoy, the hub's own sleeve: its name, how the state names it, and how its D9 turn origin
+//! (journaled by the core as `Sleeve::d9_turn`) reads.
 
 use pt_core::{Party, SleeveId, State};
 
 pub const ENVOY: &str = pt_core::ENVOY_NAME;
 
-/// D9: who started Envoy's current turn. `origin` is `agent:<name>` or `mail:<name>` when an
-/// agent message, or mail from a D9-marked sleeve, was written into it (as its prompt or a
-/// steer). A crash keeps the origin and the spawn count: the exit does not clear them, and
-/// the continuation replaces the origin. A usage-limit or auth settle keeps them too, because
-/// Envoy resleeves and that brief is sent as the owner, so it cannot put the origin back.
-/// A finished settle, or a prompt that is not a continuation or a resleeve brief, clears both.
-#[derive(Debug, Default)]
-pub struct EnvoyTurn {
-    pub origin: Option<String>,
-    /// Sleeves Envoy spawned in this turn.
-    pub spawns: u64,
+/// D9: who gave Envoy's current turn its origin, `agent:<name>` or `mail:<name>`; `None`
+/// outside such a turn.
+pub fn d9_origin(state: &State, envoy: SleeveId) -> Option<String> {
+    let t = state.sleeve(envoy)?.d9_turn.as_ref()?;
+    Some(party_label(state, t.from, t.agent.as_deref()))
 }
 
 /// The live (not removed) sleeve named `envoy` with no parent.
@@ -29,26 +23,21 @@ pub fn envoy_id(state: &State) -> Option<SleeveId> {
 
 /// The `from` label a harness sees on a user message: owner, envoy, agent:<name>, or
 /// mail:<name> from a sleeve. A resleeve brief is an effect, not a message, so it is
-/// labeled owner. A continuation has no `ga:` name and uses the turn's recorded agent.
+/// labeled owner. A continuation carries the turn's agent name; an agent message with no
+/// recorded name is `agent:`.
 pub fn from_label(state: &State, to: SleeveId, request_id: &str) -> String {
-    let party = state
-        .sleeve(to)
-        .and_then(|s| s.messages.get(request_id))
-        .map(|m| m.from);
-    match party {
-        Some(Party::Owner) | None => "owner".into(),
-        Some(Party::Envoy) => "envoy".into(),
-        Some(Party::Agent) => match request_id.strip_prefix("ga:") {
-            Some(rest) => format!("agent:{}", rest.split(':').next().unwrap_or("")),
-            None if request_id.starts_with("continue:") => state
-                .sleeve(to)
-                .and_then(|s| s.turn_agent.clone())
-                .map(|name| format!("agent:{name}"))
-                // No recorded name still carries the prefix, so D9 fails closed.
-                .unwrap_or_else(|| "agent:".into()),
-            None => "agent".into(),
-        },
-        Some(Party::Sleeve(x)) => state
+    match state.sleeve(to).and_then(|s| s.messages.get(request_id)) {
+        Some(m) => party_label(state, m.from, m.agent.as_deref()),
+        None => "owner".into(),
+    }
+}
+
+fn party_label(state: &State, from: Party, agent: Option<&str>) -> String {
+    match from {
+        Party::Owner => "owner".into(),
+        Party::Envoy => "envoy".into(),
+        Party::Agent => format!("agent:{}", agent.unwrap_or("")),
+        Party::Sleeve(x) => state
             .sleeve(x)
             .map_or_else(|| format!("mail:{}", x.0), |s| format!("mail:{}", s.name)),
     }

@@ -85,7 +85,8 @@ CLI on the hub machine (section 3.1).
         A crash keeps the origin and the spawn count; the exit does not clear them, and the
         continuation of that turn does not start the count over. A usage-limit or auth settle
         keeps them too. The brief of an Envoy resleeve is sent as the owner and does not clear
-        that origin or that count.
+        that origin or that count. Any other settle clears both. The core journals both, so a
+        hub restart keeps them.
 
 ## 3. Layers
 
@@ -127,7 +128,7 @@ CLI on the hub machine (section 3.1).
   owner. Mail from an unmarked sleeve does not. `Wait --until report` returns when the waited-on
   sleeve has mailed after the cursor, and it returns that report's seq. `--after-seq` sets the
   cursor; without it the cursor is the waiter's newest message to the sleeve, so the same report
-  releases a later wait again. A message whose request id starts with `continue:` is not mail
+  releases a later wait again. The core's continuation of a turn is not mail
   for that cursor: it is not a report, and it does not move the cursor. A waiter who has never
   messaged the sleeve counts all of its past upward mail. The owner's or Envoy's wait counts
   mail to the parent or to Envoy. A parent's wait
@@ -188,7 +189,7 @@ One Linux machine, one `protectorate` process plus its headscale and member chil
 - **Mail:** delivery, re-delivery and escalation. Who may send is in section 3.1. `Wait --until
   report` returns the newest upward report's seq. `--after-seq` moves the cursor; without it the
   cursor is the waiter's newest message to the sleeve, and a waiter who never messaged it counts
-  all of its past upward mail. A message whose request id starts with `continue:` is not mail
+  all of its past upward mail. The core's continuation of a turn is not mail
   for that cursor: it is not a report, and it does not move the cursor. The owner's or Envoy's
   wait counts mail to the parent or to Envoy. A parent's wait counts only mail to that parent.
   A wait on Envoy is invalid, because Envoy never sends as a sleeve.
@@ -225,8 +226,9 @@ crash, every incarnation goes to Recovering and resumes natively.
     branch children. Any other directory that already exists is left for `--path` to adopt.
     A name already in use, a name the core would refuse, or a harness with no headless mode,
     is refused before the directory
-    is created and before the D9 gate, so that refusal does not count. A spawn that reaches
-    the gate does. A refused spawn removes the directory only when no live claim overlaps it
+    is created and before the D9 gate, so that refusal does not count. An Envoy spawn counts
+    against its D9 turn once the core applies it; one the owner denies, or that times out at
+    the gate, does not. Envoy's spawns pass the gate one at a time. A refused spawn removes the directory only when no live claim overlaps it
     and it is still that
     empty commit; otherwise the directory stays and the error says so. A spawn the core does not
     answer, or whose reply is lost, keeps the directory without that check.

@@ -4,13 +4,12 @@
 //! and resleeve skips it. Envoy whose own harness is refused parks (one owner notice, no resleeve
 //! loop) and starts again once a later run finds that harness eligible.
 
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use pt_api::{EventKind as Kind, Level};
-use pt_core::{Harness, SleeveId};
+use pt_core::Harness;
 use pt_doctor::Report;
 
 use crate::bus::Bus;
@@ -31,8 +30,6 @@ pub struct Doctor {
     running: Mutex<()>,
     refresh: Mutex<bool>,
     wake: Condvar,
-    /// Sleeves whose launch the gate refused, with why; cleared by the next allowed launch.
-    gated: Mutex<BTreeMap<SleeveId, String>>,
     net: Mutex<Option<Net>>,
     /// The embedded headscale and member, unpacked once per process: hashing them on every
     /// run would cost seconds.
@@ -65,10 +62,6 @@ impl Doctor {
                 .0;
         }
         r.clone()
-    }
-
-    pub fn gated(&self, id: SleeveId) -> Option<String> {
-        lock(&self.gated).get(&id).cloned()
     }
 
     /// Keeps `net` for the runs and loads the cached report.
@@ -133,11 +126,6 @@ impl Doctor {
         *asked = false;
     }
 
-    /// Lets sleeve `id` through the gate again.
-    pub fn ungate(&self, id: SleeveId) {
-        lock(&self.gated).remove(&id);
-    }
-
     /// Why `h` may not be used, from the report as it stands; a hub with no report yet allows a
     /// harness its config does not rule out.
     pub fn check(&self, config: &Config, h: Harness) -> Result<(), String> {
@@ -152,36 +140,24 @@ impl Doctor {
 
     /// The executor's gate before a launch. It waits for the first report of a hub with none
     /// cached, so nothing launches before doctor has spoken once.
-    pub fn gate_launch(
-        &self,
-        bus: &Bus,
-        id: SleeveId,
-        name: &str,
-        h: Harness,
-    ) -> Result<(), String> {
+    pub fn gate_launch(&self, bus: &Bus, name: &str, h: Harness) -> Result<(), String> {
         let res = match self.wait_report(FIRST_WAIT) {
             Some(r) => verdict(&r, h),
             None => Ok(()),
         };
-        match &res {
-            Ok(()) => {
-                lock(&self.gated).remove(&id);
-            }
-            Err(why) => {
-                lock(&self.gated).insert(id, why.clone());
-                let what = if name == ENVOY {
-                    "Envoy parks until it is fixed"
-                } else {
-                    "it resleeves to an eligible harness or parks"
-                };
-                bus.event(
-                    Kind::Sleeve,
-                    Level::Alarm,
-                    name,
-                    "owner",
-                    &format!("launch refused: {why}; {what}"),
-                );
-            }
+        if let Err(why) = &res {
+            let what = if name == ENVOY {
+                "Envoy parks until it is fixed"
+            } else {
+                "it resleeves to an eligible harness or parks"
+            };
+            bus.event(
+                Kind::Sleeve,
+                Level::Alarm,
+                name,
+                "owner",
+                &format!("launch refused: {why}; {what}"),
+            );
         }
         res
     }

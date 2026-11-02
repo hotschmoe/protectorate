@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use crate::emit::Out;
 use crate::error::DriverError;
-use crate::event::{AckKind, Decision, Entry, ErrorClass, Event, Harness, classify};
+use crate::event::{AckKind, Decision, Entry, ErrorClass, Event, Harness, PromptKind, classify};
 use crate::plan::{plan, vet_effort};
 use crate::protocol::Protocol;
 use crate::spec::SpawnSpec;
@@ -453,6 +453,7 @@ pub(crate) fn deliver(
     out: &mut Out,
     request_id: &str,
     from: &str,
+    kind: PromptKind,
     text: &str,
     steer: Option<&str>,
 ) -> Result<(), DriverError> {
@@ -470,6 +471,7 @@ pub(crate) fn deliver(
             from: from.to_owned(),
             text: text.to_owned(),
             steer: steer.is_some(),
+            kind,
         },
     );
     Ok(())
@@ -516,13 +518,20 @@ impl Session {
     /// harness's answer to it: harness output before it predates the prompt and is no
     /// evidence for it. The verdict comes as `Entry::PromptAck` and through
     /// [`Session::wait_ack`].
-    pub fn send_user(&self, request_id: &str, from: &str, text: &str) -> Result<(), DriverError> {
+    pub fn send_user(
+        &self,
+        request_id: &str,
+        from: &str,
+        kind: PromptKind,
+        text: &str,
+    ) -> Result<(), DriverError> {
         self.with_core(|core| {
             deliver(
                 core.proto.as_mut(),
                 &mut core.out,
                 request_id,
                 from,
+                kind,
                 text,
                 None,
             )
@@ -545,6 +554,7 @@ impl Session {
                 &mut core.out,
                 request_id,
                 from,
+                PromptKind::Prompt,
                 text,
                 Some(expected_turn),
             )

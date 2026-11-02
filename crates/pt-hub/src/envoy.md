@@ -58,7 +58,7 @@ harness; it can be replaced with another level.
   replaces that party, which keeps D9 on the continued turn and reports a rejection to that
   party. A continuation with no recorded
   agent name is still labeled `agent:`, so D9 stays on. Spawns already made in the turn still
-  count after a crash, and the exit does not clear the origin. A usage-limit or auth settle
+  count after a crash or a hub restart, and the exit does not clear the origin. A usage-limit or auth settle
   keeps the origin and the count. The resleeve brief is sent as the owner and does not clear
   them. A later
   owner message is a new turn and can be continued on its own.
@@ -110,8 +110,8 @@ rule above. Mail from an unmarked sleeve does not.
 
 `sleeve wait <s> --until report` returns when `s` has mailed since the cursor, and prints that
 report's seq. `--after-seq N` counts only mail with a seq above N. Without it the cursor is your
-newest message to `s`, and the same report releases a later wait again. A message whose request
-id starts with `continue:` is not mail for that cursor. A wait from someone who
+newest message to `s`, and the same report releases a later wait again. The hub's continuation
+of a turn after a crash is not mail for that cursor. A wait from someone who
 has never messaged `s` counts all of its past upward mail. Your wait counts mail to you or to
 that sleeve's parent. A parent's wait counts only mail to that parent. Waiting on yourself for a
 report is invalid, because you never send as a sleeve.

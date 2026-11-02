@@ -114,6 +114,7 @@ pub fn park_wire(r: ParkReason) -> String {
         ParkReason::Flapping(None) => "flapping".into(),
         ParkReason::BriefUnconfirmed => "brief_unconfirmed".into(),
         ParkReason::Guard(g) => format!("g{}", g.number()),
+        ParkReason::Ineligible { harness } => format!("ineligible ({})", harness.as_str()),
     }
 }
 
@@ -307,6 +308,7 @@ pub fn chat_entry(sleeve: SleeveId, l: &Line, delta: bool) -> api::ChatEntry {
             from,
             text,
             steer,
+            ..
         } => A::UserMessage {
             request_id: request_id.clone(),
             from: from.clone(),

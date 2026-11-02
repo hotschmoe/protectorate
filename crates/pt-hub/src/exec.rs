@@ -20,10 +20,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use pt_core::{
-    Ask, Choice, EffectId, EffectKind, EffectState, EventKind, ExitCause, Gen, Harness, Intent,
-    Layout, Life, Obs, Party, ProbeResult, Sleeve, SleeveId, Target, TurnEnd,
+    Ask, Cause, Choice, Chosen, EffectId, EffectKind, EffectState, EventKind, ExitCause, Gen,
+    Guardrail, Harness, Intent, Layout, Life, MsgKind, Obs, ProbeResult, Sleeve, SleeveId, Target,
+    TurnEnd,
 };
-use pt_drivers::{Ack, AckKind, Decision, Entry, ErrorClass, Session, Stop};
+use pt_drivers::{Ack, AckKind, Decision, Entry, ErrorClass, PromptKind, Session, Stop};
 use pt_json::obj;
 
 use crate::brief;
@@ -156,6 +157,15 @@ fn cleanup_scratch(path: &Path) {
 }
 
 /// Runs `f` on a new named thread; the error says what could not start.
+/// How the transcript records a prompt of this kind.
+fn prompt_kind(kind: MsgKind) -> PromptKind {
+    match kind {
+        MsgKind::Prompt => PromptKind::Prompt,
+        MsgKind::Continuation { .. } => PromptKind::Continuation,
+        MsgKind::Brief => PromptKind::Brief,
+    }
+}
+
 fn spawn(name: String, f: impl FnOnce() + Send + 'static) -> Result<(), String> {
     thread::Builder::new()
         .name(name.clone())
@@ -181,6 +191,7 @@ struct Prompt<'a> {
     effect: EffectId,
     attempt: u32,
     request_id: &'a str,
+    kind: MsgKind,
     text: &'a str,
     /// The turn a steer is for; none for a prompt.
     steer: Option<&'a str>,
@@ -518,9 +529,9 @@ impl SleeveExec {
             Intent::SelectTarget {
                 sleeve,
                 g,
+                cause,
                 candidates,
                 exclude,
-                ..
             } => {
                 let hub = &self.hub;
                 let eligible = |t: &Target| {
@@ -528,31 +539,48 @@ impl SleeveExec {
                         && hub.doctor.check(&hub.config, t.harness).is_ok()
                 };
                 let quotas = hub.quotas.list();
-                // Envoy whose own harness doctor refused parks rather than moving elsewhere.
-                let envoy_gated =
-                    envoy_id(&view.state) == Some(sleeve) && hub.doctor.gated(sleeve).is_some();
-                let chosen = if envoy_gated {
-                    Err("Envoy's harness failed doctor".to_string())
-                } else {
-                    crate::select::select_target(
+                // Envoy whose own harness doctor refused at launch parks rather than moving
+                // elsewhere, and journals which harness it waits for.
+                let refused = match view.state.sleeve(sleeve).map(|s| s.target.harness) {
+                    Some(h)
+                        if envoy_id(&view.state) == Some(sleeve)
+                            && cause == Cause::Guard(Guardrail::StartFailed)
+                            && hub.doctor.check(&hub.config, h).is_err() =>
+                    {
+                        Some(h)
+                    }
+                    _ => None,
+                };
+                let chosen = match refused {
+                    Some(h) => {
+                        info!(
+                            "sleeve {}: Envoy's harness {} failed doctor",
+                            sleeve.0,
+                            h.as_str()
+                        );
+                        Chosen::Ineligible(h)
+                    }
+                    None => match crate::select::select_target(
                         now_ms(),
                         &candidates,
                         &exclude,
                         &eligible,
                         &quotas,
-                    )
+                    ) {
+                        Ok((t, why)) => {
+                            info!(
+                                "sleeve {}: resleeve target {:?}: {why}",
+                                sleeve.0, t.harness
+                            );
+                            Chosen::Target(t)
+                        }
+                        Err(why) => {
+                            info!("sleeve {}: {why}", sleeve.0);
+                            Chosen::NoTarget
+                        }
+                    },
                 };
-                match &chosen {
-                    Ok((t, why)) => {
-                        info!(
-                            "sleeve {}: resleeve target {:?}: {why}",
-                            sleeve.0, t.harness
-                        )
-                    }
-                    Err(why) => info!("sleeve {}: {why}", sleeve.0),
-                }
-                let target = chosen.ok().map(|(t, _)| t);
-                self.submit(EventKind::TargetChosen { sleeve, g, target });
+                self.submit(EventKind::TargetChosen { sleeve, g, chosen });
             }
             Intent::Checkpoint { sleeve, g } => {
                 if let Some(s) = view.state.sleeve(sleeve) {
@@ -644,6 +672,7 @@ impl SleeveExec {
             EffectKind::SendPrompt {
                 g,
                 ref request_id,
+                kind,
                 ref text,
                 ..
             } => {
@@ -652,6 +681,7 @@ impl SleeveExec {
                     effect,
                     attempt,
                     request_id,
+                    kind,
                     text,
                     steer: None,
                 };
@@ -669,6 +699,7 @@ impl SleeveExec {
                     effect,
                     attempt,
                     request_id,
+                    kind: MsgKind::Prompt,
                     text,
                     steer: Some(expected_turn),
                 };
@@ -817,8 +848,7 @@ impl SleeveExec {
         resume: Option<String>,
     ) -> Result<(), String> {
         let hub = self.hub.clone();
-        hub.doctor
-            .gate_launch(&hub.bus, s.id, &s.name, target.harness)?;
+        hub.doctor.gate_launch(&hub.bus, &s.name, target.harness)?;
         let harness =
             driver_harness(target.harness).ok_or("that harness has no headless driver")?;
         let mut program = program(&hub, target.harness)
@@ -1039,10 +1069,7 @@ impl SleeveExec {
             return ended();
         }
         let from = from_label(&view.state, self.id, p.request_id);
-        if envoy_id(&view.state) == Some(self.id) {
-            self.note_envoy_origin(view, p.request_id, &from, p.steer.is_some());
-        }
-        let noted = self.mail_note(view, p.request_id, p.steer.is_some());
+        let noted = self.mail_note(view, p.kind, p.steer.is_some());
         let owned;
         let text = if let Some(note) = &noted {
             owned = format!("{note}{}", p.text);
@@ -1052,7 +1079,7 @@ impl SleeveExec {
         };
         let sent = match p.steer {
             Some(turn) => session.steer(p.request_id, &from, text, turn),
-            None => session.send_user(p.request_id, &from, text),
+            None => session.send_user(p.request_id, &from, prompt_kind(p.kind), text),
         };
         match sent {
             Ok(()) => {}
@@ -1073,8 +1100,8 @@ impl SleeveExec {
 
     /// The first prompt of a new sleeve names the mail variables. Envoy already has them in
     /// its instructions, and a resleeve brief repeats them.
-    fn mail_note(&self, view: &View, request_id: &str, steer: bool) -> Option<String> {
-        if steer || request_id.starts_with("resleeve:") {
+    fn mail_note(&self, view: &View, kind: MsgKind, steer: bool) -> Option<String> {
+        if steer || kind == MsgKind::Brief {
             return None;
         }
         let s = view.state.sleeve(self.id)?;
@@ -1094,41 +1121,6 @@ impl SleeveExec {
                 "Mail Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`).\n\n"
             ),
         })
-    }
-
-    /// D9: records who started Envoy's next turn before its prompt is written. A prompt starts
-    /// a new turn. A steer from an agent, or from a D9-marked sleeve, taints the running one.
-    /// Mail from an unmarked sleeve clears the origin. A continuation keeps the origin and the
-    /// spawn count of the turn it resumes, and restores a marked-mail or agent origin after a crash.
-    /// An Envoy resleeve brief is sent as the owner, so it does not replace the origin. The exit
-    /// and a quota or auth settle leave the origin in place; this prompt must not clear it.
-    fn note_envoy_origin(&self, view: &View, request_id: &str, from: &str, steer: bool) {
-        let marked = view
-            .state
-            .sleeve(self.id)
-            .and_then(|s| s.messages.get(request_id))
-            .is_some_and(|m| match m.from {
-                Party::Sleeve(id) => view.state.sleeve(id).is_some_and(|s| s.d9),
-                _ => false,
-            });
-        let origin = (from.starts_with("agent:") || marked).then(|| from.to_string());
-        let mut t = crate::lock::lock(&self.hub.envoy_turn);
-        // A resleeve brief has no message, so `from` is owner and `origin` is None. Keeping
-        // the turn means leaving whatever the exit left, not writing that owner label in.
-        let resumed = request_id.starts_with("continue:") || request_id.starts_with("resleeve:");
-        if !steer {
-            if resumed {
-                if origin.is_some() {
-                    t.origin = origin;
-                }
-            } else {
-                t.origin = origin;
-                t.spawns = 0;
-            }
-        } else if origin.is_some() {
-            t.origin = origin;
-        }
-        debug!("envoy turn origin: {:?}", t.origin);
     }
 
     fn inbox(&self, view: &View, request_id: &str, text: &str) -> io::Result<()> {
@@ -1448,9 +1440,6 @@ impl Pump {
         self.prompt_reports(hub, &entry);
         let before = self.prev_error.take();
         let mut obs = Vec::new();
-        // A finished settle ends the D9 turn. A usage limit or a rejected login resleeves,
-        // and the brief is sent as the owner, so clearing here would drop the origin for good.
-        let mut clear_envoy_turn = false;
         match &entry {
             Entry::SessionInfo { native_id, .. } => {
                 self.ready = true;
@@ -1507,7 +1496,6 @@ impl Pump {
                     end = TurnEnd::UsageLimit;
                 }
                 self.last_error = None;
-                clear_envoy_turn = !matches!(end, TurnEnd::UsageLimit | TurnEnd::AuthFailed);
                 obs.push(Obs::TurnSettled { end });
             }
             Entry::Error { class, text } => {
@@ -1535,11 +1523,6 @@ impl Pump {
             Entry::UserMessage { .. } | Entry::PromptAck { .. } | Entry::Notice { .. } => {}
         }
         let exited = matches!(entry, Entry::Exited { .. });
-        // An exit keeps the origin and the count. The continuation replaces the origin;
-        // a resleeve brief is the owner's prompt and must not have to.
-        if clear_envoy_turn && envoy_id(&hub.view().state) == Some(id) {
-            *crate::lock::lock(&hub.envoy_turn) = Default::default();
-        }
         let note = Note {
             harness: matches!(entry, Entry::SessionInfo { .. }).then_some(harness),
             level: None,

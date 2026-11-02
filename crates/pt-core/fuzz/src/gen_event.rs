@@ -119,11 +119,13 @@ pub fn event(b: &mut Bytes) -> Event {
             disk_limit: opt(b, |b| b.u64()),
             effort: opt(b, |b| b.string()),
             d9: b.bool(),
+            by_envoy: b.bool(),
         }),
         1 => E::Send {
             to: s(b),
             request_id: b.string(),
             from: party(b),
+            agent: opt(b, |b| b.string()),
             text: b.string(),
             mode: if b.bool() {
                 SendMode::Steer
@@ -207,7 +209,11 @@ pub fn event(b: &mut Bytes) -> Event {
         22 => E::TargetChosen {
             sleeve: s(b),
             g: g(b),
-            target: opt(b, target),
+            chosen: match b.below(3) {
+                0 => Chosen::Target(target(b)),
+                1 => Chosen::NoTarget,
+                _ => Chosen::Ineligible(target(b).harness),
+            },
         },
         23 => E::NodeChosen {
             job: j(b),

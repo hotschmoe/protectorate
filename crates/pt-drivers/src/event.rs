@@ -12,6 +12,16 @@ pt_json::string_enum! {
         Pi = "pi",
     }
 
+    /// What a user message is to the caller's turn. The driver records it as given.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum PromptKind {
+        Prompt = "prompt",
+        /// The caller's continuation of a turn a crash ended.
+        Continuation = "continuation",
+        /// A resleeve's brief prompt.
+        Brief = "brief",
+    }
+
     /// What a tool does, for the collapsed work-group summary.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum ToolKind {
@@ -117,6 +127,7 @@ pt_json::tagged_enum! {
             from: String,
             text: String,
             steer: bool = false,
+            kind: PromptKind = PromptKind::Prompt,
         },
         PromptAck = "prompt_ack" {
             request_id: String,

@@ -20,7 +20,8 @@ mod sleeve;
 
 pub use approval::{ACTION_PREFIX, tool_approval_id};
 pub use event::{
-    ArtifactCheck, ArtifactRefusal, Ask, Event, EventKind, JobReport, JobSpec, Obs, SpawnSpec,
+    ArtifactCheck, ArtifactRefusal, Ask, Chosen, Event, EventKind, JobReport, JobSpec, Obs,
+    SpawnSpec,
 };
 pub use guard::limits;
 pub use intent::{Class, Code, EffectKind, Intent, Notice, Reply};
@@ -61,10 +62,11 @@ impl Core<'_> {
                 to,
                 request_id,
                 from,
+                agent,
                 text,
                 mode,
                 d9,
-            } => self.send(*to, request_id, *from, text, *mode, *d9),
+            } => self.send(*to, request_id, *from, agent.as_deref(), text, *mode, *d9),
             E::Interrupt { sleeve } => self.interrupt_cmd(*sleeve),
             E::Compact { sleeve } => self.compact_cmd(*sleeve),
             E::RespondApproval {
@@ -135,9 +137,7 @@ impl Core<'_> {
                 pid,
             } => self.launched(*sleeve, *g, scope, *pid),
             E::ScopeProbed { sleeve, g, live } => self.scope_probed(*sleeve, *g, *live),
-            E::TargetChosen { sleeve, g, target } => {
-                self.target_chosen(*sleeve, *g, target.as_ref())
-            }
+            E::TargetChosen { sleeve, g, chosen } => self.target_chosen(*sleeve, *g, chosen),
             E::NodeChosen {
                 job,
                 attempt,

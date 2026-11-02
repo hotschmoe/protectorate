@@ -2217,7 +2217,7 @@ fn doctor_refuses_an_ineligible_harness_and_envoy_waits_for_it() {
     let owner = fakes.join("owner");
     fs::create_dir_all(owner.join(".claude")).unwrap();
     fs::write(owner.join(".claude/.credentials.json"), "{}").unwrap();
-    let hub = Hub::start_config(
+    let mut hub = Hub::start_config(
         "doctor",
         "claude",
         &[("claude_program", claude.to_str().unwrap().into())],
@@ -2280,6 +2280,16 @@ fn doctor_refuses_an_ineligible_harness_and_envoy_waits_for_it() {
     assert_ne!(start.status, 0);
     assert!(start.stderr.contains("ineligible"), "{}", start.stderr);
 
+    // The journal says why Envoy waits, so a hub restart (an update re-execs) still knows.
+    hub.restart();
+    let envoy = hub.sleeve("envoy");
+    assert_eq!(envoy["lifecycle"].as_str(), Some("parked"), "{envoy}");
+    assert_eq!(
+        envoy["park_reason"].as_str(),
+        Some("ineligible (claude)"),
+        "{envoy}"
+    );
+
     // Fixed, and logged in for the hub: the next doctor run finds claude eligible and starts
     // Envoy again.
     fs::write(fakes.join("health"), "fixed\n").unwrap();
@@ -2299,6 +2309,9 @@ fn doctor_refuses_an_ineligible_harness_and_envoy_waits_for_it() {
             .iter()
             .any(|e| e.contains("claude is eligible again; starting Envoy"))
             .then_some(())
+    });
+    eventually("Envoy to leave the park", Duration::from_secs(30), || {
+        (hub.sleeve("envoy")["park_reason"].as_str() != Some("ineligible (claude)")).then_some(())
     });
 }
 

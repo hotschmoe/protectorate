@@ -100,7 +100,7 @@ A sleeve is named by its id or its name.
   it does not. `--until report` returns when that sleeve has mailed since the cursor, and prints
   that report's seq. `--after-seq N` counts only mail with a seq above N. Without it the cursor
   is the waiter's newest message to the sleeve, so the same report releases a later wait again.
-  A message whose request id starts with `continue:` is not mail for that cursor: it is not a
+  The hub's continuation of a turn after a crash is not mail for that cursor: it is not a
   report, and it does not move the cursor. A waiter who has never messaged the sleeve counts
   all of its past upward mail. The owner's wait
   counts mail to the parent or to Envoy. A parent's wait counts only mail to that parent. A wait
@@ -155,10 +155,11 @@ mail can start a turn is the 8-per-10-minutes limit above:
 
 - `sleeve rm`;
 - `job run`;
-- `sleeve spawn` past `d9_spawn_limit` spawns in that turn (default 3). A crash keeps
+- `sleeve spawn` past `d9_spawn_limit` spawns in that turn (default 3). A spawn counts once
+  it is made, so a denied or timed-out one does not. A crash keeps
   the origin and that count: the exit does not clear them, and the continuation is the same
   turn. A usage-limit or auth settle keeps them too. The resleeve brief is sent as the owner
-  and does not clear them.
+  and does not clear them. Both are journaled, so a hub restart keeps them.
 
 A node job with `--maintenance` from any sleeve, Envoy included, always waits for the owner. The
 waiting call fails after `d9_approval_timeout_secs` (default 900). Pending approvals live in

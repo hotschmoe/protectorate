@@ -1,0 +1,47 @@
+#scenario 7f66eea4c6a59b0f
+# Envoy's D9 turn is journaled. An agent's prompt opens it, and an Envoy spawn counts once it
+# applies. A crash, the continuation and a hub restart keep the origin and the count. A usage
+# settle keeps both through the resleeve brief; the next done settle clears them. An owner
+# prompt opens a turn without one, and an agent's steer gives the running turn its origin.
+spawn envoy /w/e
+run
+obs envoy ready
+send envoy m1 from=agent:grokbot
+run
+expect envoy activity=Working d9turn=Agent/0
+spawn kid /w/k by-envoy
+run
+expect envoy d9turn=Agent/1
+spawn mine /w/m
+run
+expect envoy d9turn=Agent/1
+exit envoy
+run
+obs envoy ready
+run
+expect envoy activity=Working d9turn=Agent/1 msg:continue:0:1=Delivered
+crash
+run
+expect envoy d9turn=Agent/1
+obs envoy ready
+run
+send envoy m2 from=agent:duet
+run
+expect envoy activity=Working d9turn=Agent/0 agent=duet
+spawn kid2 /w/k2 by-envoy
+run
+expect envoy d9turn=Agent/1
+obs envoy settled=usage
+expect envoy life=Resleeving guard=Quiescing d9turn=Agent/1
+run
+obs envoy ready
+run
+expect envoy life=Running guard=Cooldown activity=Working d9turn=Agent/1
+obs envoy settled
+expect envoy activity=Idle d9turn=none
+send envoy m3
+run
+expect envoy activity=Working d9turn=none
+send envoy m4 steer from=agent:grokbot
+run
+expect envoy d9turn=Agent/0

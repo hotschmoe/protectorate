@@ -67,7 +67,7 @@ pub struct Sleeve {
     /// Who opened the current owner turn. An agent steer, or mail from a D9-marked sleeve,
     /// replaces it. A continuation is sent as this party, so D9 sees the same origin the turn had.
     pub turn_from: Party,
-    /// The agent name on that message's `ga:<name>:` request id, when `turn_from` is an agent.
+    /// That message's agent name, when `turn_from` is an agent.
     pub turn_agent: Option<String>,
     /// The owner turn that still owes one continuation, if any. One per turn, across generations.
     /// Set when a native resume follows a headless turn a crash ended, unless that turn was itself
@@ -77,6 +77,8 @@ pub struct Sleeve {
     /// A protocol desync while idle drops it; a resume then warns because the prompt was not sent.
     /// Only a journaled `Continue` allocates the prompt.
     pub auto_continue: Option<u64>,
+    /// Envoy only: the current turn has D9 origin (SPEC 2 principle 10).
+    pub d9_turn: Option<D9Turn>,
 
     /// Request ids of queued messages, FIFO.
     pub queue: VecDeque<String>,
@@ -110,6 +112,33 @@ pub struct Sleeve {
     pub parent_mails: Vec<Millis>,
     /// A D9-origin turn spawned this sleeve or sent to it, or its parent is marked. Envoy is never marked.
     pub d9: bool,
+}
+
+impl Sleeve {
+    /// Running and idle with nothing left to send: no queued message, no continuation still
+    /// owed (the executor journals it in a later batch), and no post-restart probe pending.
+    pub fn settled_idle(&self) -> bool {
+        self.life == Life::Running
+            && matches!(self.activity, Activity::Idle { .. })
+            && self.queue.is_empty()
+            && self.auto_continue.is_none()
+            && !self.probing
+    }
+}
+
+/// D9 on Envoy's current turn: a vendor agent or a D9-marked sleeve opened it, or steered it.
+/// A prompt that is not a continuation or a resleeve brief replaces it (`None` from anyone
+/// else). A continuation or a steer from such a party replaces the origin and keeps the count.
+/// The brief, a crash, the exit, and a usage-limit or auth settle keep both. Any other settle
+/// clears it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct D9Turn {
+    /// `Party::Agent`, or the marked `Party::Sleeve`.
+    pub from: Party,
+    /// The agent's name, when `from` is an agent.
+    pub agent: Option<String>,
+    /// Sleeves Envoy spawned in this turn, counted when the spawn applies.
+    pub spawns: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -174,6 +203,9 @@ pub enum Activity {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Message {
     pub from: Party,
+    /// The vendor agent's name when `from` is an agent. A continuation carries the turn's.
+    pub agent: Option<String>,
+    pub kind: MsgKind,
     pub text: String,
     pub mode: SendMode,
     pub state: MsgState,

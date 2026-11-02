@@ -8,7 +8,7 @@
 //! ```text
 //! let (session, events) = pt_drivers::spawn(spec)?;
 //! // wait for Entry::SessionInfo, then:
-//! session.send_user("req-1", "owner", "hello")?;
+//! session.send_user("req-1", "owner", PromptKind::Prompt, "hello")?;
 //! match session.wait_ack("req-1", timeout) { Ack::Confirmed { .. } => .., .. }
 //! for event in events { .. }                    // ends after Entry::Exited
 //! ```
@@ -35,8 +35,8 @@ mod spec;
 
 pub use error::DriverError;
 pub use event::{
-    AckKind, Decision, Entry, ErrorClass, Event, Harness, Stop, ToolKind, ToolStatus, TouchedPath,
-    Usage, classify,
+    AckKind, Decision, Entry, ErrorClass, Event, Harness, PromptKind, Stop, ToolKind, ToolStatus,
+    TouchedPath, Usage, classify,
 };
 pub use session::{Ack, Session, spawn};
 pub use spec::{Permission, SpawnSpec};

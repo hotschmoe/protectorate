@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::emit::{MAX_BLOCK, Out};
-use crate::event::{AckKind, Decision, Entry, Event, Harness};
+use crate::event::{AckKind, Decision, Entry, Event, Harness, PromptKind};
 use crate::plan::plan;
 use crate::protocol::Protocol;
 use crate::session;
@@ -47,8 +47,20 @@ pub fn fuzz_feed(harness: Harness, input: &[u8]) -> usize {
             let p = proto.as_mut();
             let text = if arg.is_empty() { "hi" } else { arg };
             let sent = match verb {
-                "send" => session::deliver(p, &mut out, &req, "fuzz", text, None).is_ok(),
-                "steer" => session::deliver(p, &mut out, &req, "fuzz", "hi", Some(arg)).is_ok(),
+                "send" => {
+                    session::deliver(p, &mut out, &req, "fuzz", PromptKind::Prompt, text, None)
+                        .is_ok()
+                }
+                "steer" => session::deliver(
+                    p,
+                    &mut out,
+                    &req,
+                    "fuzz",
+                    PromptKind::Prompt,
+                    "hi",
+                    Some(arg),
+                )
+                .is_ok(),
                 "approve" => answer(p, &mut out, arg, Decision::AllowOnce),
                 "session" => answer(p, &mut out, arg, Decision::AllowSession),
                 "deny" => answer(p, &mut out, arg, Decision::Deny),

@@ -18,7 +18,7 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
             from,
             text,
             mode,
-            d9: _,
+            ..
         } => on_send(owed, prev, *to, request_id, *from, text, *mode),
         E::Stop { sleeve } => on_stop(owed, prev, *sleeve, false),
         E::Remove { sleeve } => on_stop(owed, prev, *sleeve, true),
@@ -54,8 +54,12 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
             }
         }
         E::ScopeProbed { sleeve, g, live } => on_scope(owed, prev, *sleeve, *g, *live, now),
-        E::TargetChosen { sleeve, g, target } => {
-            on_target(owed, prev, *sleeve, *g, target.as_ref())
+        E::TargetChosen { sleeve, g, chosen } => {
+            let target = match chosen {
+                Chosen::Target(t) => Some(t),
+                Chosen::NoTarget | Chosen::Ineligible(_) => None,
+            };
+            on_target(owed, prev, *sleeve, *g, target)
         }
         E::Observed { sleeve, g, obs } => on_obs(owed, prev, *sleeve, *g, obs, now),
         E::Exited { sleeve, g, cause } => on_exit(owed, prev, *sleeve, *g, *cause, None, now),
@@ -110,7 +114,8 @@ fn note_dequeue(owed: &mut BTreeMap<SleeveId, u64>, st: &State, s: &Sleeve) {
     if s.target.mode == Mode::Pane || !deliverable(st, s) {
         return;
     }
-    if s.queue.front().is_some_and(|k| !k.starts_with("continue:")) {
+    let prompt = |k: &String| s.messages.get(k).is_some_and(|m| m.kind == MsgKind::Prompt);
+    if s.queue.front().is_some_and(prompt) {
         clear(owed, s.id);
     }
 }
@@ -169,9 +174,14 @@ fn interrupt_resleeves(s: &Sleeve, now: Millis) -> bool {
     recent_count(&s.guard.strikes, now, STRIKE_WINDOW) >= STRIKE_LIMIT
 }
 
+fn continuation(s: &Sleeve, seq: u64) -> Option<&Message> {
+    s.messages
+        .values()
+        .find(|m| m.kind == MsgKind::Continuation { turn: seq })
+}
+
 fn continue_state(s: &Sleeve, seq: u64) -> Option<MsgState> {
-    let key = format!("continue:{}:{seq}", s.id.0);
-    s.messages.get(&key).map(|m| m.state)
+    continuation(s, seq).map(|m| m.state)
 }
 
 fn death_cause(s: &Sleeve, cause: ExitCause, was: &Activity, kill: Option<Cause>) -> Cause {
@@ -324,8 +334,7 @@ fn on_continue(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, sid: SleeveId, 
     if seq != s.turn_seq || text.is_empty() {
         return;
     }
-    let key = format!("continue:{}:{seq}", sid.0);
-    if s.messages.contains_key(&key)
+    if continuation(s, seq).is_some()
         || !s.queue.is_empty()
         || matches!(s.activity, Activity::Delivering { .. })
         || !deliverable(prev, s)
@@ -377,6 +386,18 @@ fn on_send(
     }
     let mut queued = s.clone();
     queued.queue.push_back(request_id.to_string());
+    queued.messages.insert(
+        request_id.to_string(),
+        Message {
+            from,
+            agent: None,
+            kind: MsgKind::Prompt,
+            text: text.to_string(),
+            mode,
+            state: MsgState::Queued,
+            seq: prev.next_msg,
+        },
+    );
     note_dequeue(owed, prev, &queued);
 }
 
