@@ -12,12 +12,35 @@ use crate::state::*;
 const BRIEF_PROMPT: &str = "Continue from .protectorate/BRIEF.md: read it first, then carry on \
                             with the task it describes.";
 
-fn name_ok(name: &str) -> bool {
+/// A sleeve name: 1-64 bytes of `[A-Za-z0-9._-]`.
+pub fn name_ok(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
         && name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.')
+}
+
+/// Refusal for the outermost root or writable claim that overlaps `path`. `kind` is
+/// `directory` or `worktree`. The caller drops removed sleeves.
+pub fn overlap_refusal<'a>(
+    sleeves: impl Iterator<Item = &'a Sleeve>,
+    path: &str,
+    kind: &str,
+) -> Option<String> {
+    let hit = sleeves
+        .filter(|s| (s.claim.writable || s.parent.is_none()) && paths_overlap(&s.claim.path, path))
+        .min_by(|a, b| {
+            (a.claim.path.len(), a.claim.path.as_str(), a.name.as_str()).cmp(&(
+                b.claim.path.len(),
+                b.claim.path.as_str(),
+                b.name.as_str(),
+            ))
+        })?;
+    Some(format!(
+        "the {kind} overlaps sleeve {} ({})",
+        hit.name, hit.claim.path
+    ))
 }
 
 impl Guard {
@@ -110,80 +133,73 @@ impl Core<'_> {
         self.reply(Reply::Spawned(id));
     }
 
-    fn spawn_check(&self, spec: &SpawnSpec) -> Result<(), (Code, &'static str)> {
+    fn spawn_check(&self, spec: &SpawnSpec) -> Result<(), (Code, String)> {
         use Code::*;
+        let no = |code, why: &str| Err((code, why.to_string()));
         if !name_ok(&spec.name) {
-            return Err((InvalidArgument, "name must be 1-64 of [A-Za-z0-9._-]"));
+            return no(InvalidArgument, "name must be 1-64 of [A-Za-z0-9._-]");
         }
         if !path_ok(&spec.claim.path) {
-            return Err((
+            return no(
                 InvalidArgument,
                 "claim path must be absolute and normalized",
-            ));
+            );
         }
-        if !spec.target.valid() || !spec.resleeve_to.iter().all(Target::valid) {
-            return Err((InvalidArgument, "that harness has no headless mode"));
+        if let Some(why) = std::iter::once(&spec.target)
+            .chain(&spec.resleeve_to)
+            .find_map(Target::invalid_reason)
+        {
+            return Err((InvalidArgument, why));
         }
         let others = || self.st.sleeves.values().filter(|s| s.life != Life::Removed);
         if others().any(|s| s.name == spec.name) {
-            return Err((AlreadyExists, "a sleeve has that name"));
+            return no(AlreadyExists, "a sleeve has that name");
         }
         let path = &spec.claim.path;
-        let clashes_writable = || {
-            others().any(|s| {
-                (s.claim.writable || s.parent.is_none()) && paths_overlap(&s.claim.path, path)
-            })
-        };
         let Some(pid) = spec.parent else {
             if spec.layout != Layout::Root || !spec.claim.writable {
-                return Err((InvalidArgument, "a root has a writable Root claim"));
+                return no(InvalidArgument, "a root has a writable Root claim");
             }
-            if clashes_writable() {
-                return Err((
-                    AlreadyExists,
-                    "the directory overlaps a root or writable claim",
-                ));
+            if let Some(why) = overlap_refusal(others(), path, "directory") {
+                return Err((AlreadyExists, why));
             }
             return Ok(());
         };
         let Some(p) = self.st.sleeve(pid).filter(|p| p.life != Life::Removed) else {
-            return Err((NotFound, "no such parent"));
+            return no(NotFound, "no such parent");
         };
         if p.parent.is_some() {
-            return Err((FailedPrecondition, "children are depth 1"));
+            return no(FailedPrecondition, "children are depth 1");
         }
         if !p.life.live() {
-            return Err((FailedPrecondition, "the parent is stopping or stopped"));
+            return no(FailedPrecondition, "the parent is stopping or stopped");
         }
         if self.st.live_children(pid) >= MAX_CHILDREN {
-            return Err((FailedPrecondition, "the root has 8 live children"));
+            return no(FailedPrecondition, "the root has 8 live children");
         }
         match spec.layout {
-            Layout::Root => return Err((InvalidArgument, "a child has a Worktree or View layout")),
+            Layout::Root => return no(InvalidArgument, "a child has a Worktree or View layout"),
             Layout::Worktree => {
                 if !spec.claim.writable {
-                    return Err((InvalidArgument, "a worktree claim is writable"));
+                    return no(InvalidArgument, "a worktree claim is writable");
                 }
-                if clashes_writable() {
-                    return Err((
-                        AlreadyExists,
-                        "the worktree overlaps a root or writable claim",
-                    ));
+                if let Some(why) = overlap_refusal(others(), path, "worktree") {
+                    return Err((AlreadyExists, why));
                 }
             }
             Layout::View => {
                 if spec.claim.writable || !path_within(path, &p.claim.path) {
-                    return Err((InvalidArgument, "a view is read-only inside the root"));
+                    return no(InvalidArgument, "a view is read-only inside the root");
                 }
             }
         }
         if let Some(b) = p.budget {
             let left = b.saturating_sub(p.used);
             if left == 0 || spec.budget.is_some_and(|c| c > left) {
-                return Err((
+                return no(
                     FailedPrecondition,
                     "the budget exceeds the root's remainder",
-                ));
+                );
             }
         }
         Ok(())
@@ -438,7 +454,11 @@ impl Core<'_> {
                     self.notify(
                         Party::Sleeve(p),
                         Some(sid),
-                        Notice::ChildCrashed { child: sid },
+                        if cause == ExitCause::Oom && kill_cause.is_none() {
+                            Notice::ChildOom { child: sid }
+                        } else {
+                            Notice::ChildCrashed { child: sid }
+                        },
                     );
                 }
                 let c = match (kill_cause, cause) {
@@ -590,8 +610,8 @@ impl Core<'_> {
                 "only a parked or stopped sleeve starts",
             );
         }
-        if target.is_some_and(|t| !t.valid()) {
-            return self.refuse(Code::InvalidArgument, "that harness has no headless mode");
+        if let Some(why) = target.and_then(Target::invalid_reason) {
+            return self.refuse(Code::InvalidArgument, why);
         }
         if let Some(p) = s.parent {
             if !self.st.sleeves[&p].life.live() {

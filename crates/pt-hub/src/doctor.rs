@@ -101,10 +101,8 @@ fn config(hub: &Hub, net: &Net) -> pt_doctor::Config {
         }
     }
     if let Some(why) = unconfigured(hub, Harness::PiLocal) {
-        cfg.unconfigured.push((
-            wire::harness_wire(Harness::PiLocal).to_string(),
-            why.to_string(),
-        ));
+        cfg.unconfigured
+            .push((Harness::PiLocal.as_str().to_string(), why.to_string()));
     }
     let (headscale, member) = lock(&hub.doctor.unpacked)
         .get_or_insert_with(|| {
@@ -183,7 +181,7 @@ fn unpark_envoy(hub: &Hub, report: &Report) {
     if s.life != Life::Parked(ParkReason::NoTarget) || hub.doctor.gated(id).is_none() {
         return;
     }
-    let name = wire::harness_wire(s.target.harness);
+    let name = s.target.harness.as_str();
     if !report.eligible(name) {
         return;
     }
@@ -260,14 +258,14 @@ pub fn check(hub: &Hub, h: Harness) -> Result<(), String> {
     match hub.doctor.report() {
         Some(r) => verdict(&r, h),
         None => match unconfigured(hub, h) {
-            Some(why) => Err(format!("harness {} is {why}", wire::harness_wire(h))),
+            Some(why) => Err(format!("harness {} is {why}", h.as_str())),
             None => Ok(()),
         },
     }
 }
 
 fn verdict(r: &Report, h: Harness) -> Result<(), String> {
-    let name = wire::harness_wire(h);
+    let name = h.as_str();
     let Some(entry) = r.harnesses.iter().find(|x| x.name == name) else {
         return Err(format!("doctor does not know the harness {name}"));
     };

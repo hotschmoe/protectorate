@@ -23,6 +23,8 @@ impl std::error::Error for Error {}
 
 type Result<T> = std::result::Result<T, Error>;
 
+const MASK_SIZE_BYTES: u64 = 1 << 20;
+
 fn err<T>(msg: String) -> Result<T> {
     Err(Error(msg))
 }
@@ -44,6 +46,7 @@ pub struct SandboxSpec {
     pub workspace: PathBuf,
     /// Private home, writable. Becomes `$HOME` inside. The hub fills it; we never do.
     pub home: PathBuf,
+    pub scratch: PathBuf,
     pub ro_paths: Vec<PathBuf>,
     /// Never `/`. A writable path may hold masked paths; the masks still apply inside it.
     pub rw_paths: Vec<PathBuf>,
@@ -57,6 +60,8 @@ pub struct SandboxSpec {
     /// masked state dir) is still reachable. The host's runtime dir is always replaced by a
     /// private empty one.
     pub masks: Vec<PathBuf>,
+    /// Host device nodes bound at the same path when they exist. Missing paths are skipped.
+    pub devices: Vec<PathBuf>,
     /// Host variables copied in when set (the allowlist).
     pub env_allow: Vec<String>,
     /// Set after the allowlist, so these win.
@@ -65,7 +70,13 @@ pub struct SandboxSpec {
 }
 
 impl SandboxSpec {
-    pub fn new(sleeve: &str, generation: u64, workspace: PathBuf, home: PathBuf) -> SandboxSpec {
+    pub fn new(
+        sleeve: &str,
+        generation: u64,
+        workspace: PathBuf,
+        home: PathBuf,
+        scratch: PathBuf,
+    ) -> SandboxSpec {
         SandboxSpec {
             sleeve: sleeve.to_string(),
             generation,
@@ -77,11 +88,13 @@ impl SandboxSpec {
             },
             workspace,
             home,
+            scratch,
             ro_paths: Vec::new(),
             rw_paths: Vec::new(),
             git_dirs: Vec::new(),
             tmp_size_bytes: 1 << 30,
             masks: Vec::new(),
+            devices: Vec::new(),
             env_allow: default_env_allow(),
             env: Vec::new(),
             bwrap: PathBuf::from("bwrap"),
@@ -112,6 +125,9 @@ impl SandboxSpec {
             args.push("-p".into());
             args.push(format!("MemoryMax={}", self.limits.memory_max_bytes));
             args.extend(["-p".into(), "MemorySwapMax=0".into()]);
+            // The default stop policy SIGKILLs the whole scope after one child is OOM-killed,
+            // so a build dies with the harness and the guardrail cannot tell them apart.
+            args.extend(["-p".into(), "OOMPolicy=continue".into()]);
             args.push("-p".into());
             args.push(format!("CPUQuota={}%", self.limits.cpu_quota_percent));
             args.push("-p".into());
@@ -151,6 +167,13 @@ impl SandboxSpec {
         ]);
         a.extend(["--size".into(), self.tmp_size_bytes.to_string()]);
         a.extend(["--tmpfs".into(), "/tmp".into()]);
+        let scratch = existing(&self.scratch).ok_or_else(|| {
+            Error(format!(
+                "sandbox scratch {} does not exist",
+                self.scratch.display()
+            ))
+        })?;
+        bind(a, "--bind", &scratch, Path::new("/tmp/pt"));
 
         let runtime = existing(&runtime_dir());
         let mounts = self.mounts(runtime.as_deref())?;
@@ -159,12 +182,32 @@ impl SandboxSpec {
             match m.kind {
                 Kind::Ro => a.extend(["--ro-bind".into(), p.clone(), p]),
                 Kind::Rw => a.extend(["--bind".into(), p.clone(), p]),
-                Kind::MaskDir => a.extend(["--tmpfs".into(), p]),
+                Kind::MaskDir => a.extend([
+                    "--size".into(),
+                    MASK_SIZE_BYTES.to_string(),
+                    "--tmpfs".into(),
+                    p,
+                ]),
                 Kind::MaskFile => a.extend(["--ro-bind".into(), "/dev/null".into(), p]),
                 Kind::Runtime => {
-                    a.extend(["--perms".into(), "0700".into(), "--tmpfs".into(), p]);
+                    a.extend([
+                        "--perms".into(),
+                        "0700".into(),
+                        "--size".into(),
+                        MASK_SIZE_BYTES.to_string(),
+                        "--tmpfs".into(),
+                        p,
+                    ]);
                 }
             }
+        }
+        // After the fresh /dev and any mask, so a listed node stays visible.
+        for dev in &self.devices {
+            let p = path_arg(dev)?;
+            if !dev.exists() {
+                continue;
+            }
+            a.extend(["--dev-bind".into(), p.clone(), p]);
         }
 
         a.extend(["--chdir".into(), path_arg(&self.workspace)?]);
@@ -176,7 +219,8 @@ impl SandboxSpec {
             }
         }
         env.push(("HOME".into(), path_arg(&self.home)?));
-        env.push(("TMPDIR".into(), "/tmp".into()));
+        env.push(("TMPDIR".into(), "/tmp/pt/tmp".into()));
+        env.push(("CARGO_TARGET_DIR".into(), "/tmp/pt/target".into()));
         if let Some(rt) = &runtime {
             env.push(("XDG_RUNTIME_DIR".into(), path_arg(rt)?));
         }

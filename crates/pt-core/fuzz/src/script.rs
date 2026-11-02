@@ -23,7 +23,8 @@
 //! run | step [N] | commit         step N executes the Nth released intent (from 0)
 //! crash [empty] [down=DURATION]     the hub dies at the last commit and restarts DURATION later
 //! job ID | cancel-job N | requeue-job N | abandon-job N
-//! expect NAME life=.. g=N activity=.. guard=.. harness=.. queue=N msg:ID=..
+//! expect NAME life=.. g=N activity=.. guard=.. harness=.. queue=N msg:ID=.. [park=REST]
+//!   `park=` is the rest of the line, the hub's park string (`flapping (claude login rejected)`).
 //! expect-effect KEY state=.. attempt=N count=N
 //! expect-job N state=..           expect-none NAME
 //! expect-approval ID [g=N] state=.. decision=allow|deny|none orphan=.. response=KEY
@@ -92,6 +93,36 @@ fn harness(s: &str) -> Result<Harness, String> {
         "pi_local" => Harness::PiLocal,
         _ => return Err(format!("unknown harness {s}")),
     })
+}
+
+/// The wire name `park_wire` uses. Kept here so a scenario can check the string.
+fn harness_name(h: Harness) -> &'static str {
+    match h {
+        Harness::Claude => "claude",
+        Harness::Codex => "codex",
+        Harness::Grok => "grok",
+        Harness::Antigravity => "antigravity",
+        Harness::PiVendor => "pi_vendor",
+        Harness::PiLocal => "pi_local",
+    }
+}
+
+/// The park string the hub shows. Empty when the sleeve is not parked.
+fn park_text(life: &Life) -> String {
+    let Life::Parked(reason) = life else {
+        return String::new();
+    };
+    match reason {
+        ParkReason::Provision => "provision".into(),
+        ParkReason::NoTarget => "no_target".into(),
+        ParkReason::Launch => "launch".into(),
+        ParkReason::Flapping(Some(h)) => {
+            format!("flapping ({} login rejected)", harness_name(*h))
+        }
+        ParkReason::Flapping(None) => "flapping".into(),
+        ParkReason::BriefUnconfirmed => "brief_unconfirmed".into(),
+        ParkReason::Guard(g) => format!("g{}", g.number()),
+    }
 }
 
 fn target(h: Harness, pane: bool) -> Target {
@@ -403,7 +434,23 @@ impl Runner {
                     _ => E::AbandonJob { job },
                 });
             }
-            "expect" if self.checked => self.expect(&words)?,
+            "expect" if self.checked => {
+                // `park=` keeps its spaces, so it is the rest of the line and comes last.
+                let (head, park) = match line.split_once(" park=") {
+                    Some((head, park)) => (head, Some(park.trim())),
+                    None => (line, None),
+                };
+                let words: Vec<&str> = head.split_whitespace().collect();
+                self.expect(&words)?;
+                if let Some(want) = park {
+                    let name = words.get(1).copied().ok_or("missing sleeve")?;
+                    let s = &self.sim.st.sleeves[&self.id(name)?];
+                    let got = park_text(&s.life);
+                    if got != want {
+                        return Err(format!("{name}: park is {got}, expected {want}"));
+                    }
+                }
+            }
             "expect-effect" if self.checked => {
                 let key = arg(1)?;
                 let all: Vec<&Effect> = self

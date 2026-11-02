@@ -12,7 +12,6 @@
 //! Only the newest snapshot and its segment are read; older ones are kept on disk.
 
 #![forbid(unsafe_code)]
-#![cfg_attr(verus_keep_ghost, feature(proc_macro_hygiene))]
 
 pub mod codec;
 pub mod crc32c;

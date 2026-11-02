@@ -4005,7 +4005,12 @@ enum QuotaReading {
 }
 
 final class QuotaWindow {
-  const QuotaWindow({required this.label, this.usedPct, this.resetsAt});
+  const QuotaWindow({
+    required this.label,
+    this.usedPct,
+    this.resetsAt,
+    this.lengthMs,
+  });
 
   factory QuotaWindow.fromJson(Object? json) {
     final j = _object(json, 'QuotaWindow');
@@ -4016,6 +4021,7 @@ final class QuotaWindow {
         j['resets_at_ms'],
         (e0) => _time(e0, 'QuotaWindow.resets_at_ms'),
       ),
+      lengthMs: _opt(j['length_ms'], (e0) => _int(e0, 'QuotaWindow.length_ms')),
     );
   }
 
@@ -4026,10 +4032,14 @@ final class QuotaWindow {
 
   final DateTime? resetsAt;
 
+  /// Vendor window length in milliseconds, when the reading named one.
+  final int? lengthMs;
+
   Map<String, Object?> toJson() => {
     'label': label,
     if (usedPct case final v?) 'used_pct': v,
     if (resetsAt case final v?) 'resets_at_ms': v.millisecondsSinceEpoch,
+    if (lengthMs case final v?) 'length_ms': v,
   };
 }
 
@@ -4594,6 +4604,7 @@ final class Sleeve {
   final Lifecycle lifecycle;
 
   /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed or `g<N>`.
+  /// A flap after a rejected login is `flapping (<harness> login rejected)`.
   final String? parkReason;
 
   /// The directory the incarnation works in (a child's worktree, a root's claim).
@@ -4698,6 +4709,7 @@ final class SpawnSleeveRequest {
     required this.name,
     required this.harness,
     this.path,
+    this.newPath,
     this.parentId,
     this.view,
     this.mode = Mode.headless,
@@ -4715,6 +4727,10 @@ final class SpawnSleeveRequest {
       name: _string(j['name'], 'SpawnSleeveRequest.name'),
       harness: Harness.fromJson(j['harness']),
       path: _opt(j['path'], (e0) => _string(e0, 'SpawnSleeveRequest.path')),
+      newPath: _opt(
+        j['new_path'],
+        (e0) => _string(e0, 'SpawnSleeveRequest.new_path'),
+      ),
       parentId: _opt(
         j['parent_id'],
         (e0) => _string(e0, 'SpawnSleeveRequest.parent_id'),
@@ -4750,6 +4766,10 @@ final class SpawnSleeveRequest {
   /// The directory a root claims; a child works in its parent's.
   final String? path;
 
+  /// Create this directory under `projects_dir` and claim it as a new root.
+  /// Takes no `path`, `parent_id` or `view`. The owner, a paired device and Envoy only.
+  final String? newPath;
+
   /// Makes this a child of that root.
   final String? parentId;
 
@@ -4778,6 +4798,7 @@ final class SpawnSleeveRequest {
     'name': name,
     'harness': harness.toJson(),
     if (path case final v?) 'path': v,
+    if (newPath case final v?) 'new_path': v,
     if (parentId case final v?) 'parent_id': v,
     if (view case final v?) 'view': v.toJson(),
     'mode': mode.toJson(),

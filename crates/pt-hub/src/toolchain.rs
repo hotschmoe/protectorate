@@ -129,13 +129,9 @@ fn seed_profile(home: &Path) -> io::Result<()> {
     seed(&home.join(".profile"), PROFILE)
 }
 
-/// The owner's git identity, so a sleeve's commits do not need flags. A sleeve may change it:
-/// the file is only written when the home has none.
-fn seed_gitconfig(home: &Path) -> io::Result<()> {
-    let path = home.join(".gitconfig");
-    if path.symlink_metadata().is_ok() {
-        return Ok(());
-    }
+/// The owner's `user.name` and `user.email` from git's global config. Empty or multi-line
+/// values are ignored.
+pub(crate) fn git_user() -> (Option<String>, Option<String>) {
     let get = |key: &str| {
         Command::new("git")
             .args(["config", "--global", "--get", key])
@@ -145,7 +141,17 @@ fn seed_gitconfig(home: &Path) -> io::Result<()> {
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .filter(|v| !v.is_empty() && !v.contains('\n'))
     };
-    let (name, email) = (get("user.name"), get("user.email"));
+    (get("user.name"), get("user.email"))
+}
+
+/// The owner's git identity, so a sleeve's commits do not need flags. A sleeve may change it:
+/// the file is only written when the home has none.
+fn seed_gitconfig(home: &Path) -> io::Result<()> {
+    let path = home.join(".gitconfig");
+    if path.symlink_metadata().is_ok() {
+        return Ok(());
+    }
+    let (name, email) = git_user();
     if name.is_none() && email.is_none() {
         return Ok(());
     }

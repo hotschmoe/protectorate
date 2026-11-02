@@ -2,7 +2,7 @@
 //! billing endpoint.
 
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use pt_api::Subscription;
 use pt_json::Value;
@@ -121,6 +121,8 @@ impl Reader for Grok {
     }
 
     fn read(&self, now_ms: u64, timeout: Duration) -> Result<Snapshot> {
+        let started = Instant::now();
+        let left = || timeout.saturating_sub(started.elapsed());
         let home = home_dir(self.home.as_deref())?;
         let login = pick_login(&read_login(&home.join(".grok").join("auth.json"))?)?;
         if login.expires_at_ms.is_some_and(|e| now_ms >= e) {
@@ -140,15 +142,19 @@ impl Reader for Grok {
         let mut snap = parse_billing(&http::get(&Get {
             url: &url,
             headers: &headers,
-            timeout,
+            timeout: left().max(Duration::from_millis(1)),
         })?)?;
+        // The settings call gets only the time left. A full second budget here used to
+        // outlive the cache deadline and drop the billing body that had already arrived.
         if snap.plan.is_empty() {
-            let url = format!("{base}/v1/settings");
-            if let Ok(body) = http::get(&Get {
-                url: &url,
-                headers: &headers,
-                timeout,
-            }) && let Ok(v) = pt_json::parse_bytes(&body)
+            let remain = left();
+            if remain >= Duration::from_millis(1)
+                && let Ok(body) = http::get(&Get {
+                    url: &format!("{base}/v1/settings"),
+                    headers: &headers,
+                    timeout: remain,
+                })
+                && let Ok(v) = pt_json::parse_bytes(&body)
             {
                 snap.plan = v
                     .get("subscription_tier_display")
