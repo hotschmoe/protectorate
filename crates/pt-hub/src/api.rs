@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use pt_api::{self as api, ApiError, ErrorCode, Method, Scope, method as m};
 use pt_core::{
     Claim, Code, EventKind, Layout, Life, MsgState, Party, Reply, SendMode, SleeveId, SpawnSpec,
-    State, Target,
+    State, Target, path_ok, path_within, paths_overlap,
 };
 use pt_drivers::Entry;
 use pt_json::{FromJson, ToJson, Value};
@@ -370,11 +370,206 @@ fn get_transcript(c: &Ctx<'_>, r: api::GetTranscriptRequest) -> Result<api::Tran
 // ---- sleeves -------------------------------------------------------------------------------
 
 fn canonical(p: &str) -> Result<String> {
-    let path =
-        std::fs::canonicalize(p).map_err(|e| err(ErrorCode::Invalid, format!("path {p}: {e}")))?;
+    let path = match std::fs::canonicalize(p) {
+        Ok(path) => path,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(err(ErrorCode::Invalid, format!("the hub cannot see {p}")));
+        }
+        Err(e) => return Err(err(ErrorCode::Invalid, format!("path {p}: {e}"))),
+    };
     path.to_str()
         .map(str::to_string)
         .ok_or_else(|| err(ErrorCode::Invalid, "path must be UTF-8"))
+}
+
+/// Branch of a repo the hub creates. A child worktree needs a commit to branch from.
+const NEW_PROJECT_BRANCH: &str = "main";
+
+/// The outermost root or writable claim that overlaps `path`, for the 409.
+fn overlap_claim(st: &State, path: &str) -> Option<String> {
+    let hit = st
+        .sleeves
+        .values()
+        .filter(|s| {
+            s.life != Life::Removed
+                && (s.claim.writable || s.parent.is_none())
+                && paths_overlap(&s.claim.path, path)
+        })
+        .min_by(|a, b| {
+            (a.claim.path.len(), a.claim.path.as_str(), a.name.as_str()).cmp(&(
+                b.claim.path.len(),
+                b.claim.path.as_str(),
+                b.name.as_str(),
+            ))
+        })?;
+    Some(format!(
+        "the directory overlaps sleeve {} ({})",
+        hit.name, hit.claim.path
+    ))
+}
+
+/// The absolute directory a new project will occupy, or why it will not.
+fn resolve_new_project(hub: &Hub, given: &str) -> Result<String> {
+    let configured = hub.config.projects_dir.as_str();
+    if configured.is_empty() {
+        return Err(err(
+            ErrorCode::Invalid,
+            "projects_dir is not set; new projects are off",
+        ));
+    }
+    if !path_ok(configured) {
+        return Err(err(
+            ErrorCode::Invalid,
+            "projects_dir must be an absolute normalized path",
+        ));
+    }
+    let root = match std::fs::canonicalize(configured) {
+        Ok(p) if p.is_dir() => p,
+        Ok(p) => {
+            return Err(err(
+                ErrorCode::Invalid,
+                format!("projects_dir {} is not a directory", p.display()),
+            ));
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(err(
+                ErrorCode::Invalid,
+                format!("the hub cannot see {configured}"),
+            ));
+        }
+        Err(e) => {
+            return Err(err(
+                ErrorCode::Invalid,
+                format!("projects_dir {configured}: {e}"),
+            ));
+        }
+    };
+    let Some(root_s) = root.to_str() else {
+        return Err(err(ErrorCode::Invalid, "projects_dir must be UTF-8"));
+    };
+    // `path_within` treats `/` as containing every absolute path.
+    if root_s == "/" {
+        return Err(err(ErrorCode::Invalid, "projects_dir must not be /"));
+    }
+    if given.contains('\0') {
+        return Err(err(
+            ErrorCode::Invalid,
+            format!("new_path {given} is not a normalized path"),
+        ));
+    }
+    let full = if given.starts_with('/') {
+        given.to_string()
+    } else {
+        format!("{root_s}/{given}")
+    };
+    if !path_ok(&full) {
+        return Err(err(
+            ErrorCode::Invalid,
+            format!("new_path {given} is not a normalized path"),
+        ));
+    }
+    if !path_within(&full, root_s) || full == root_s {
+        return Err(err(
+            ErrorCode::Invalid,
+            format!("{given} is outside projects_dir"),
+        ));
+    }
+    if let Ok(home) = std::fs::canonicalize(&hub.home.root)
+        && let Some(home) = home.to_str()
+        && path_within(&full, home)
+    {
+        return Err(err(
+            ErrorCode::Invalid,
+            "a project cannot be inside the hub's home",
+        ));
+    }
+    let Some(rel) = full.strip_prefix(root_s).and_then(|r| r.strip_prefix('/')) else {
+        return Err(err(
+            ErrorCode::Invalid,
+            format!("{given} is outside projects_dir"),
+        ));
+    };
+    let mut cur = root;
+    let names: Vec<&str> = rel.split('/').collect();
+    for (i, name) in names.iter().enumerate() {
+        let next = cur.join(name);
+        let last = i + 1 == names.len();
+        match std::fs::symlink_metadata(&next) {
+            Ok(m) if m.file_type().is_symlink() => {
+                return Err(err(
+                    ErrorCode::Invalid,
+                    format!("path {} goes through a symlink", next.display()),
+                ));
+            }
+            Ok(_) if last => {
+                return Err(err(
+                    ErrorCode::Conflict,
+                    format!("{} already exists", next.display()),
+                ));
+            }
+            Ok(m) if m.is_dir() => cur = next,
+            Ok(_) => {
+                return Err(err(
+                    ErrorCode::Invalid,
+                    format!("{} is not a directory", next.display()),
+                ));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound && last => {
+                return next
+                    .to_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| err(ErrorCode::Invalid, "path must be UTF-8"));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(err(
+                    ErrorCode::Invalid,
+                    format!("the hub cannot see {}", next.display()),
+                ));
+            }
+            Err(e) => {
+                return Err(err(
+                    ErrorCode::Invalid,
+                    format!("path {}: {e}", next.display()),
+                ));
+            }
+        }
+    }
+    Err(err(ErrorCode::Invalid, "new_path names no directory"))
+}
+
+fn create_project(path: &Path) -> Result<()> {
+    if let Err(e) = std::fs::create_dir(path) {
+        return Err(if e.kind() == std::io::ErrorKind::AlreadyExists {
+            err(
+                ErrorCode::Conflict,
+                format!("{} already exists", path.display()),
+            )
+        } else {
+            err(
+                ErrorCode::Invalid,
+                format!("create {}: {e}", path.display()),
+            )
+        });
+    }
+    if let Err(e) = crate::git::init_empty(path, NEW_PROJECT_BRANCH, "Initial commit") {
+        discard_new_project(path);
+        return Err(err(
+            ErrorCode::Internal,
+            format!("git init {}: {e}", path.display()),
+        ));
+    }
+    Ok(())
+}
+
+/// Removes a repo this call created after the spawn was refused. A symlink is left alone.
+fn discard_new_project(path: &Path) {
+    let Ok(meta) = std::fs::symlink_metadata(path) else {
+        return;
+    };
+    if meta.file_type().is_symlink() || !meta.is_dir() || !path.join(".git").is_dir() {
+        return;
+    }
+    let _ = std::fs::remove_dir_all(path);
 }
 
 fn targets(hub: &Hub, list: &[api::Harness]) -> Vec<Target> {
@@ -402,6 +597,22 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
     if r.mode == api::Mode::Pane {
         return Err(unavailable("pane mode"));
     }
+    let creating = match r.new_path.as_deref() {
+        Some("") => return Err(err(ErrorCode::Invalid, "new_path is empty")),
+        Some(_) if !c.who.full() => {
+            return Err(err(
+                ErrorCode::Forbidden,
+                "only the owner or Envoy creates a project",
+            ));
+        }
+        Some(_) if r.path.is_some() || r.parent_id.is_some() || r.view.is_some() => {
+            return Err(err(
+                ErrorCode::Invalid,
+                "new_path makes a root and takes no path, parent or view",
+            ));
+        }
+        other => other,
+    };
     let parent = match (&r.parent_id, c.who) {
         (None, Principal::Sleeve(x)) => Some(*x),
         (None, _) => None,
@@ -425,35 +636,41 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         .and_then(|p| st.sleeve(p))
         .map(|p| p.claim.path.clone());
     let given = r.path.as_deref().unwrap_or("");
-    let path = match (layout, given) {
-        (Layout::Root, "") => return Err(err(ErrorCode::Invalid, "path is required for a root")),
-        (Layout::Root, p) => canonical(p)?,
-        (Layout::Worktree, "") => {
-            let dir: PathBuf = hub.home.worktrees().join(format!(
-                "{}-{}",
-                r.name,
-                random_hex(6).map_err(internal)?
-            ));
-            dir.to_string_lossy().into_owned()
-        }
-        // A new worktree's path need not exist yet; when it does, it is claimed by its real
-        // path, and a symlink there is refused (it could name another sleeve's worktree).
-        (Layout::Worktree, p) => match std::fs::symlink_metadata(p) {
-            Ok(m) if m.file_type().is_symlink() => {
-                return Err(err(ErrorCode::Invalid, format!("path {p} is a symlink")));
+    let path = if let Some(given) = creating {
+        resolve_new_project(hub, given)?
+    } else {
+        match (layout, given) {
+            (Layout::Root, "") => {
+                return Err(err(ErrorCode::Invalid, "path is required for a root"));
             }
-            Ok(_) => canonical(p)?,
-            Err(_) => {
-                let p = Path::new(p);
-                let dir = p.parent().and_then(|d| d.to_str()).unwrap_or("/");
-                match p.file_name().and_then(|f| f.to_str()) {
-                    Some(file) if file != ".." => format!("{}/{file}", canonical(dir)?),
-                    _ => return Err(err(ErrorCode::Invalid, "path names no directory")),
+            (Layout::Root, p) => canonical(p)?,
+            (Layout::Worktree, "") => {
+                let dir: PathBuf = hub.home.worktrees().join(format!(
+                    "{}-{}",
+                    r.name,
+                    random_hex(6).map_err(internal)?
+                ));
+                dir.to_string_lossy().into_owned()
+            }
+            // A new worktree's path need not exist yet; when it does, it is claimed by its real
+            // path, and a symlink there is refused (it could name another sleeve's worktree).
+            (Layout::Worktree, p) => match std::fs::symlink_metadata(p) {
+                Ok(m) if m.file_type().is_symlink() => {
+                    return Err(err(ErrorCode::Invalid, format!("path {p} is a symlink")));
                 }
-            }
-        },
-        (Layout::View, "") => parent_path.unwrap_or_default(),
-        (Layout::View, p) => canonical(p)?,
+                Ok(_) => canonical(p)?,
+                Err(_) => {
+                    let p = Path::new(p);
+                    let dir = p.parent().and_then(|d| d.to_str()).unwrap_or("/");
+                    match p.file_name().and_then(|f| f.to_str()) {
+                        Some(file) if file != ".." => format!("{}/{file}", canonical(dir)?),
+                        _ => return Err(err(ErrorCode::Invalid, "path names no directory")),
+                    }
+                }
+            },
+            (Layout::View, "") => parent_path.unwrap_or_default(),
+            (Layout::View, p) => canonical(p)?,
+        }
     };
     let target = wire::target(
         &hub.config,
@@ -461,14 +678,29 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         r.provider.as_deref().unwrap_or(""),
         r.model.as_deref().unwrap_or(""),
     );
+    if creating.is_some()
+        && let Some(why) = overlap_claim(st, &path)
+    {
+        return Err(err(ErrorCode::Conflict, why));
+    }
+    let request_id = new_id("spawn:")?;
     rule::gate(hub, c.who, Guarded::Spawn(&r.name))?;
+    let made = if creating.is_some() {
+        if let Some(why) = overlap_claim(&hub.view().state, &path) {
+            return Err(err(ErrorCode::Conflict, why));
+        }
+        create_project(Path::new(&path))?;
+        true
+    } else {
+        false
+    };
     let spec = SpawnSpec {
-        request_id: new_id("spawn:")?,
+        request_id,
         name: r.name,
         parent,
         layout,
         claim: Claim {
-            path,
+            path: path.clone(),
             writable: layout != Layout::View,
         },
         target,
@@ -477,9 +709,21 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         budget: r.budget,
         disk_limit: None,
     };
-    let id = match command(hub, EventKind::Spawn(spec))? {
-        Reply::Spawned(id) => id,
-        other => return Err(internal(format!("unexpected reply {other:?}"))),
+    let id = match command(hub, EventKind::Spawn(spec)) {
+        Ok(Reply::Spawned(id)) => id,
+        Ok(other) => {
+            if made {
+                discard_new_project(Path::new(&path));
+            }
+            return Err(internal(format!("unexpected reply {other:?}")));
+        }
+        Err(e) => {
+            // A timeout means the core may already have claimed the directory.
+            if made && e.code != ErrorCode::Timeout {
+                discard_new_project(Path::new(&path));
+            }
+            return Err(e);
+        }
     };
     if let Some(text) = r.message.filter(|t| !t.is_empty()) {
         command(

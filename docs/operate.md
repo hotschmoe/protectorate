@@ -43,7 +43,7 @@ always give it the token.
 
 ```
 sleeve list | sleeve show <sleeve>
-sleeve spawn <name> (--path DIR | --parent SLEEVE [--readonly]) [--harness H]
+sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
       [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
 sleeve send <sleeve> <text...> [--steer]
 sleeve interrupt|stop|rm|takeover <sleeve>
@@ -55,11 +55,21 @@ sleeve wait <sleeve> [--until idle|done|blocked|parked|ended] [--timeout SECS]
 
 A sleeve is named by its id or its name.
 
-- **spawn** with `--path DIR` makes a root sleeve on that directory (one root per directory). With
-  `--parent SLEEVE` it makes a child of that root: its own git worktree and branch by default, or
-  a read-only view of the root with `--readonly`. A root has at most 8 live children. `--harness`
-  defaults to `claude`. `--resleeve-to` is the ordered list automatic resleeves walk (default
-  `pi_local`). `--message` is the first prompt.
+- **spawn** with `--path DIR` makes a root sleeve on that directory (one root per directory). The
+  directory must already exist where the hub can see it; a missing one is `the hub cannot see
+  DIR`, and a path that overlaps a root or writable claim names that sleeve and its claim. With
+  `--new-path DIR` the owner, a paired device or Envoy (not a sleeve) creates a root that does
+  not exist yet. `projects_dir` in `config.json` is the absolute directory this is allowed under;
+  empty, the default, turns it off, and `/` is refused. `DIR` is a relative path under that
+  directory or an absolute path strictly inside it. The hub creates it and `git init`s it on
+  branch `main` with one empty commit (author `protectorate`), then claims it, so a child
+  worktree has a commit to branch from. A `.` or `..` component, a symlink, a path outside
+  `projects_dir`, a path inside the hub's home, or a path that already exists is refused. A
+  crash, or a spawn the core does not answer, after the directory is created and before the
+  sleeve is claimed leaves the directory; remove it before trying the same path again. With `--parent SLEEVE` it makes a child of that root: its own git worktree and branch
+  by default, or a read-only view of the root with `--readonly`. A root has at most 8 live
+  children. `--harness` defaults to `claude`. `--resleeve-to` is the ordered list automatic
+  resleeves walk (default `pi_local`). `--message` is the first prompt.
 - **send** queues a message, delivered at the next turn boundary; `--steer` sends it into the
   current turn instead.
 - **interrupt** stops the current turn; **stop** ends the incarnation; **rm** removes the sleeve.

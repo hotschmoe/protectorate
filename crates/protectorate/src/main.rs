@@ -59,7 +59,7 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   harness login <claude|codex|grok|pi> [-- ARGS...]
                                     the sleeves' shared login, on this terminal, without the API
   sleeve list | sleeve show <sleeve>
-  sleeve spawn <name> (--path DIR | --parent SLEEVE [--readonly]) [--harness H]
+  sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
         [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
   sleeve send <sleeve> <text...> [--steer]
   sleeve interrupt|stop|rm|takeover <sleeve>

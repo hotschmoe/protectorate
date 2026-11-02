@@ -1102,6 +1102,269 @@ exec '{real_pi}' "$@""#
     assert!(probe.lines().any(|l| l == "sleeve_socket=ok"), "{probe}");
 }
 
+/// A new project root is created only under `projects_dir`, as an empty repo a child can branch
+/// from. An overlap names the claim, and a path the hub cannot see says so.
+#[test]
+fn new_project_root() {
+    if !have_runtime() {
+        return;
+    }
+    {
+        let off = Hub::start("noproj");
+        let r = off.cli(&[
+            "sleeve",
+            "spawn",
+            "x",
+            "--new-path",
+            "x",
+            "--harness",
+            "pi_local",
+        ]);
+        assert_ne!(r.status, 0, "{}", r.stderr);
+        assert!(r.stderr.contains("projects_dir is not set"), "{}", r.stderr);
+    }
+    let projects = unique("projects");
+    std::fs::create_dir_all(&projects).unwrap();
+    let projects = std::fs::canonicalize(&projects).unwrap();
+    let proj = projects.to_str().unwrap();
+    let hub = Hub::start_config(
+        "newproj",
+        "pi_local",
+        &[("projects_dir", proj.into())],
+        &[],
+        &[],
+    );
+    let both = hub.cli(&[
+        "sleeve",
+        "spawn",
+        "x",
+        "--path",
+        proj,
+        "--new-path",
+        "x",
+        "--harness",
+        "pi_local",
+    ]);
+    assert_eq!(both.status, 2, "{}", both.stderr);
+    assert!(
+        both.stderr.contains("mutually exclusive"),
+        "{}",
+        both.stderr
+    );
+
+    let missing = projects.join("no-such-dir");
+    let gone = hub.cli(&[
+        "sleeve",
+        "spawn",
+        "gone",
+        "--path",
+        missing.to_str().unwrap(),
+        "--harness",
+        "pi_local",
+    ]);
+    assert!(
+        gone.stderr
+            .contains(&format!("the hub cannot see {}", missing.display())),
+        "{}",
+        gone.stderr
+    );
+
+    let v = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "voice",
+            "--new-path",
+            "voice",
+            "--harness",
+            "pi_local",
+        ])
+        .json();
+    hub.wait("voice", "idle", 120);
+    let path = projects.join("voice");
+    assert_eq!(v["path"].as_str(), Some(path.to_str().unwrap()));
+    assert_eq!(
+        git_out(&path, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "main"
+    );
+    assert_eq!(
+        git_out(&path, &["log", "-1", "--format=%s"]),
+        "Initial commit"
+    );
+    assert_eq!(
+        git_out(&path, &["log", "-1", "--format=%an <%ae>"]),
+        "protectorate <protectorate@localhost>"
+    );
+    assert!(git_out(&path, &["ls-tree", "HEAD"]).is_empty());
+
+    let kid = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "voice-kid",
+            "--parent",
+            "voice",
+            "--harness",
+            "pi_local",
+        ])
+        .json();
+    hub.wait("voice-kid", "idle", 120);
+    assert_eq!(kid["branch"].as_str(), Some("pt/voice-kid"));
+    let kid_path = std::path::PathBuf::from(kid["path"].as_str().unwrap());
+    assert_eq!(
+        git_out(&kid_path, &["rev-parse", "--abbrev-ref", "HEAD"]),
+        "pt/voice-kid"
+    );
+
+    let again = hub.cli(&[
+        "sleeve",
+        "spawn",
+        "voice2",
+        "--path",
+        path.to_str().unwrap(),
+        "--harness",
+        "pi_local",
+    ]);
+    assert!(again.stderr.contains("409"), "{}", again.stderr);
+    assert!(
+        again.stderr.contains("overlaps sleeve voice")
+            && again.stderr.contains(path.to_str().unwrap()),
+        "{}",
+        again.stderr
+    );
+
+    let exists = hub.cli(&[
+        "sleeve",
+        "spawn",
+        "voice3",
+        "--new-path",
+        "voice",
+        "--harness",
+        "pi_local",
+    ]);
+    assert!(
+        exists.stderr.contains("already exists"),
+        "{}",
+        exists.stderr
+    );
+
+    let nested = hub.cli(&[
+        "sleeve",
+        "spawn",
+        "nested",
+        "--new-path",
+        "voice/nested",
+        "--harness",
+        "pi_local",
+    ]);
+    assert!(
+        nested.stderr.contains("overlaps sleeve voice"),
+        "{}",
+        nested.stderr
+    );
+    assert!(!path.join("nested").exists());
+
+    let escaped = projects
+        .parent()
+        .unwrap()
+        .join(format!("escaped-{}", std::process::id()));
+    let trick_rel = format!("../{}", escaped.file_name().unwrap().to_str().unwrap());
+    let trick = hub.cli(&[
+        "sleeve",
+        "spawn",
+        "trick",
+        "--new-path",
+        &trick_rel,
+        "--harness",
+        "pi_local",
+    ]);
+    assert_ne!(trick.status, 0, "{}", trick.stderr);
+    assert!(!escaped.exists(), "a .. path was created: {}", trick.stderr);
+
+    let elsewhere = unique("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, projects.join("link")).unwrap();
+    let sym = hub.cli(&[
+        "sleeve",
+        "spawn",
+        "sym",
+        "--new-path",
+        "link/evil",
+        "--harness",
+        "pi_local",
+    ]);
+    assert!(sym.stderr.contains("symlink"), "{}", sym.stderr);
+    assert!(!elsewhere.join("evil").exists());
+
+    let outside = hub.cli(&[
+        "sleeve",
+        "spawn",
+        "out",
+        "--new-path",
+        "/etc/protectorate-not-a-project",
+        "--harness",
+        "pi_local",
+    ]);
+    assert!(
+        outside.stderr.contains("outside projects_dir"),
+        "{}",
+        outside.stderr
+    );
+    assert!(!std::path::Path::new("/etc/protectorate-not-a-project").exists());
+
+    hub.wait("envoy", "idle", 120);
+    let envoy = hub.sleeve("envoy");
+    let envoy_id = envoy["id"].as_str().unwrap();
+    let g = envoy["incarnation"]["g"].as_u64().unwrap();
+    let token = hub.sleeve_token(envoy_id, g);
+    let as_envoy = [("PROTECTORATE_TOKEN", token.as_str())];
+    let by_envoy = hub
+        .cli_env(
+            &as_envoy,
+            &[
+                "--json",
+                "sleeve",
+                "spawn",
+                "envoy-made",
+                "--new-path",
+                "envoy-made",
+                "--harness",
+                "pi_local",
+            ],
+        )
+        .json();
+    assert_eq!(
+        by_envoy["path"].as_str(),
+        Some(projects.join("envoy-made").to_str().unwrap())
+    );
+
+    let voice_id = v["id"].as_str().unwrap();
+    let voice_g = hub.sleeve("voice")["incarnation"]["g"].as_u64().unwrap();
+    let sleeve_token = hub.sleeve_token(voice_id, voice_g);
+    let as_sleeve = [("PROTECTORATE_TOKEN", sleeve_token.as_str())];
+    let sneaky = hub.cli_env(
+        &as_sleeve,
+        &[
+            "sleeve",
+            "spawn",
+            "sneak",
+            "--new-path",
+            "sneak",
+            "--harness",
+            "pi_local",
+        ],
+    );
+    assert_eq!(sneaky.status, 4, "{}", sneaky.stderr);
+    assert!(
+        sneaky.stderr.contains("only the owner or Envoy"),
+        "{}",
+        sneaky.stderr
+    );
+    assert!(!projects.join("sneak").exists());
+}
+
 /// The pid of the `serve` running on `home`.
 fn serve_pid(home: &std::path::Path) -> u32 {
     let want = format!("--home\0{}\0serve\0", home.display());

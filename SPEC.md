@@ -168,9 +168,18 @@ crash, every incarnation goes to Recovering and resumes natively.
   generation number `g`. Mode (pane or headless), harness, provider and model belong to the
   incarnation, so a resleeve can change all of them.
 - **Tree rules:**
-  - One root per directory, never two. Writable claims never overlap.
+  - One root per directory, never two. Writable claims never overlap. A spawn that overlaps one
+    is refused with the sleeve and the claim it overlaps.
   - Children are depth 1, at most 8 live per root. A child gets its own git worktree and branch by
     default, or a read-only view of the root.
+  - **New project roots.** The owner, a paired device and Envoy may
+    `sleeve spawn <name> --new-path DIR`. A sleeve may not (it spawns only its own children), and
+    a vendor agent cannot call `SpawnSleeve`. The hub creates `DIR` and `git init`s it on branch
+    `main` with one empty commit, then claims it as a root. `DIR` must be a new path strictly
+    inside `projects_dir` (`config.json`; empty, the default, turns this off, and `/` is refused):
+    a relative path under that directory or an absolute path inside it, with no `.` or `..`
+    component and no symlink, and not inside the hub's home. A path the hub cannot see is refused
+    with `the hub cannot see DIR`. D9 still counts the spawn.
   - Stopping or removing the root stops every child in the same step. A root crash, resume,
     resleeve or park leaves the children running.
   - Native subagents run inside the incarnation, and we don't manage them.

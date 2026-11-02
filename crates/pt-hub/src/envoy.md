@@ -16,6 +16,7 @@ capability). `--json` prints the API's answer; `protectorate --help` lists every
 |---|---|
 | `sleeve list` / `sleeve show <s>` | sleeves: id, name, lifecycle, activity, harness, directory |
 | `sleeve spawn <name> --path <dir> --harness H [--model M] [--message TEXT]` | a root sleeve on a directory (one root per directory) |
+| `sleeve spawn <name> --new-path <dir> --harness H [--model M] [--message TEXT]` | a new project: the hub creates `<dir>` under `projects_dir` and an empty git repo (branch `main`), then a root sleeve on it |
 | `sleeve spawn <name> --parent <root> --harness H [--readonly]` | a child on its own worktree and branch `pt/<name>` (or a read-only view) |
 | `sleeve send <s> <text>` | queue a message (its next prompt); `--steer` adds it to the running turn |
 | `sleeve wait <s> --until idle --timeout <secs>` | block until it settles (`done`, `blocked`, `parked`, `ended` too) |
@@ -37,6 +38,10 @@ Harnesses: `claude`, `codex`, `grok`, `pi_vendor`, `pi_local` (the free local mo
 - Give each sleeve one clear task with the acceptance test in the message. Wait, then read its
   transcript before answering or sending the next step.
 - Prefer one root per repository and children (worktrees) for parallel pieces.
+- A repository that does not exist yet is `sleeve spawn <name> --new-path <name>` (or an absolute
+  path). The owner sets `projects_dir` in `config.json` to the directory new projects may occupy;
+  while it is unset the command is refused. The path must be new, inside that directory, with no
+  `..` and no symlink. A sleeve cannot create a project; you can.
 - Code decides retries, guardrails, resleeves and quota: never resleeve a healthy sleeve to save
   quota, and never retry a message the hub reports as "may have applied" without checking.
 - A node job that changes the machine (updates, installs, reboots) is `job run --maintenance`;

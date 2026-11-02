@@ -124,6 +124,9 @@ api_records! {
         pub harness: Harness,
         /// The directory a root claims; a child works in its parent's.
         pub path: Option<String>,
+        /// Create this directory under `projects_dir` and claim it as a new root.
+        /// Takes no `path`, `parent_id` or `view`. The owner and Envoy only.
+        pub new_path: Option<String>,
         /// Makes this a child of that root.
         pub parent_id: Option<String>,
         /// Children only; default worktree.
