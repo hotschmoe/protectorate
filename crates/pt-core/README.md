@@ -41,7 +41,9 @@ reads no clock, so `replay(journal) == live state`. The hub's core thread is its
   a continuation still queued, including one fencing put back unsent, and warns once. An idle
   crash that ends in a park or a resleeve drops a debt with no warning. A hub restart that
   finds the resumed incarnation already idle drops the debt with no warning: it reached
-  Ready and nothing was sent after that. A settle of that owner turn drops the debt
+  Ready and nothing was sent after that. A protocol desync while the incarnation is idle
+  drops the debt, and the owner is warned when the resume does not replace it. A desync
+  during boot keeps a debt. A settle of that owner turn drops the debt
   with no warning, including one recorded after resume while the incarnation is idle.
   The prompt effect is allocated only while applying this event.
 - `Tick`, `HubRecovered`.

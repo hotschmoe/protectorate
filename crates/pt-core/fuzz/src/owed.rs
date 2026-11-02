@@ -238,7 +238,8 @@ fn on_exit(
             | Activity::Blocked { .. }
             | Activity::Interrupting
             | Activity::Compacting
-    ) || (*was == Activity::Unknown && s.desync_during_turn);
+    ) || (*was == Activity::Unknown
+        && (s.desync_during_turn || s.desync_while_idle));
     match s.life {
         Life::Launching | Life::Running | Life::Recovering => {}
         Life::Resleeving => {

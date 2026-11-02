@@ -340,7 +340,9 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   and armed is dropped with no warning: it reached Ready and nothing was sent after that.
   A resume that is still booting keeps the debt.
   A `Continue` that cannot be delivered drops the debt and warns. A crash of an incarnation that
-  already reached idle does not carry the debt. When the prompt cannot be sent, the owner and
+  already reached idle does not carry the debt. A protocol desync while that incarnation is idle
+  drops the debt the same way, and the owner is warned when the resume does not replace it. A
+  desync during boot keeps a debt. When the prompt cannot be sent, the owner and
   the parent get `TurnNeedsPrompt`. A settle of that same owner turn drops the debt with no
   warning, including one recorded after resume while the incarnation is already idle, so a later
   hub start does not send `TurnNeedsPrompt` for a turn the journal already settled.

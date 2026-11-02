@@ -56,7 +56,10 @@ pub struct Sleeve {
     pub activity: Activity,
     /// The native turn id bound by the current turn's prompt ack.
     pub turn: Option<String>,
+    /// A protocol desync arrived during this turn, so the kill still counts as interrupting it.
     pub desync_during_turn: bool,
+    /// A protocol desync killed this incarnation from Idle. That is not a turn to continue.
+    pub desync_while_idle: bool,
     /// Owner turns begun here. Incremented when a prompt other than a continuation is dequeued.
     pub turn_seq: u64,
     /// Who opened the current owner turn. An agent steer replaces it. A continuation is sent
@@ -69,6 +72,7 @@ pub struct Sleeve {
     /// a continuation or an interrupt. Dropped with no warning at recovery once that incarnation
     /// is idle and armed (it reached Ready and nothing was sent after that), and when a settle
     /// of this owner turn is journaled, including while the incarnation is idle.
+    /// A protocol desync while idle drops it; a resume then warns because the prompt was not sent.
     /// Only a journaled `Continue` allocates the prompt.
     pub auto_continue: Option<u64>,
 

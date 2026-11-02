@@ -95,6 +95,7 @@ impl Core<'_> {
                 activity: Activity::Ended,
                 turn: None,
                 desync_during_turn: false,
+                desync_while_idle: false,
                 turn_seq: 0,
                 turn_from: Party::Owner,
                 turn_agent: None,
@@ -256,6 +257,7 @@ impl Core<'_> {
         s.receipt = None;
         s.turn = None;
         s.desync_during_turn = false;
+        s.desync_while_idle = false;
         s.activity = Activity::Booting;
         s.boot_at = now;
         s.progress_at = now;
@@ -499,16 +501,19 @@ impl Core<'_> {
                     (None, _) if was == Activity::Booting => Cause::Guard(Guardrail::StartFailed),
                     (None, _) => Cause::Guard(Guardrail::Crash),
                 };
-                // Read before after_death: a new incarnation clears the desync flag.
+                // Read before after_death: a new incarnation clears both desync flags.
                 let was_desync = self.st.sleeves[&sid].desync_during_turn;
+                let desync_while_idle = self.st.sleeves[&sid].desync_while_idle;
                 // An idle death that parks or resleeves drops a debt with no warning. A
-                // working turn still warns. `Unknown` without the desync flag is the same
-                // shape as an idle desync, which also must not grow a new warning here.
+                // working turn still warns. Unknown without a mid-turn desync is that idle
+                // death, including a desync that started while idle.
                 let idle_death = matches!(was, Activity::Idle { .. })
                     || (was == Activity::Unknown && !was_desync);
                 self.after_death(sid, c, idle_death);
                 // Idle (and anything past boot) does not carry a continuation into the next
                 // incarnation. Booting still does. A working crash may set a fresh debt below.
+                // Unknown from an idle desync drops the debt; it does not count as interrupted,
+                // so the resume below does not set a fresh one.
                 let reached_idle = matches!(
                     was,
                     Activity::Idle { .. }
@@ -517,7 +522,8 @@ impl Core<'_> {
                         | Activity::Blocked { .. }
                         | Activity::Interrupting
                         | Activity::Compacting
-                ) || (was == Activity::Unknown && was_desync);
+                ) || (was == Activity::Unknown
+                    && (was_desync || desync_while_idle));
                 let had = self.st.sleeves[&sid].auto_continue;
                 if reached_idle && had.is_some() {
                     self.sl(sid).auto_continue = None;
@@ -1344,11 +1350,17 @@ impl Core<'_> {
                 // would continue the turn the owner stopped. `turn` is cleared for the
                 // same reason: it stays set across the interrupt.
                 let interrupting = s.activity == Activity::Interrupting;
+                let idle = matches!(s.activity, Activity::Idle { .. });
                 let active = !interrupting
                     && (matches!(s.activity, Activity::Working | Activity::Blocked { .. })
                         || matches!(s.activity, Activity::Delivering { effect } if self.effect_state(effect) != Some(EffectState::Intent)));
                 let s = self.sl(sid);
                 s.desync_during_turn |= active;
+                // Separate from the mid-turn flag: resume must not treat this as interrupted
+                // and set a fresh debt. The exit drops the one already held.
+                if idle {
+                    s.desync_while_idle = true;
+                }
                 if interrupting {
                     s.turn = None;
                 }

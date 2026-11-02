@@ -89,7 +89,9 @@ An idle crash that ends in a park or a resleeve drops a debt and does not warn. 
 while the resumed incarnation is still booting still sends it. A hub restart that finds
 that incarnation already idle drops the debt with no warning: it reached Ready and
 nothing was sent after that. A crash of an incarnation that already reached idle does not
-carry it. A settle of that turn drops it with no warning, including one recorded after
+carry it. A protocol desync while it is idle drops the debt, and the owner is warned when
+the resume does not replace it. A desync during boot keeps a debt. A settle of that turn
+drops it with no warning, including one recorded after
 resume while the sleeve is idle, so a later start does not warn about a turn the journal
 already settled. If that prompt cannot be sent, the debt is dropped and the event log says
 the turn will not continue on its own.

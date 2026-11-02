@@ -56,7 +56,9 @@ harness; it can be replaced with another level.
   idle does not carry it into the next one. A stop, park, or resleeve drops one that is still
   queued and warns once. An idle crash that ends in a park or a resleeve drops a debt and
   does not warn. A hub restart that finds the resumed incarnation already idle drops the
-  debt with no warning: it reached Ready and nothing was sent after that. A settle of
+  debt with no warning: it reached Ready and nothing was sent after that. A protocol desync
+  while the incarnation is idle drops the debt, and you are warned when the resume does not
+  replace it. A desync during boot keeps a debt. A settle of
   that turn drops it with no warning, including one the journal already recorded while
   the sleeve was idle, so a later start does
   not warn. A warning means that prompt was not sent.
