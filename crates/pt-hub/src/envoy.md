@@ -32,7 +32,10 @@ capability). `--json` prints the API's answer; `protectorate --help` lists every
 
 Harnesses: `claude`, `codex`, `grok`, `pi_vendor`, `pi_local` (the free local model).
 `--effort` sets the harness's reasoning effort (for example `low`, `medium`, or `high`);
-available levels depend on the harness and model. Omit it for the harness default.
+available levels depend on the harness and model. On spawn, omitting it uses the harness default.
+On start or resleeve, omitting it keeps the earlier effort for the same harness; changing harness
+uses the new harness's default. An explicitly set effort cannot currently be cleared for the same
+harness; it can be replaced with another level.
 
 ## How to work
 
