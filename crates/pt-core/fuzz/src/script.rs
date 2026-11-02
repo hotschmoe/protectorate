@@ -423,7 +423,7 @@ impl Runner {
                         "stop" => p.stop = pick(&["exit", "linger"])?,
                         "other" => p.other = pick(&["ack", "nack", "lost"])?,
                         "probe" => p.probe = pick(&["applied", "notapplied", "unknowable"])?,
-                        "select" => p.select = pick(&["first", "none", "second"])?,
+                        "select" => p.select = pick(&["first", "none", "second", "ineligible"])?,
                         "poll" => p.poll = pick(&[])?,
                         "fetch" => p.fetch = pick(&["ok", "bad"])?,
                         _ => return Err(format!("bad policy key {k}")),
