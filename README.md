@@ -91,7 +91,7 @@ the app and the embedded web build) and Dart (for `make check-gen`) are optional
 make build          # debug build of the workspace
 make release        # release binaries for this machine
 make web release    # the same, with the Flutter web build embedded
-make test           # e2e tests (cargo test --workspace)
+make test           # e2e test binaries side by side (scripts/test.sh), then the fuzz seeds
 make test-paid      # also the Claude, Codex and Grok e2e tests, which spend a little quota
 make check          # fmt --check, clippy -D warnings, test, check-deps, check-gen, app-check, check-version
 make version        # the version every build here carries: the git tag (docs/install.md, Versioning)

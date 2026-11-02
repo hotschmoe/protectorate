@@ -491,8 +491,11 @@ fn build_jobs_follow_the_cpu_quota() {
     let mut s = spec("jobs", &base);
     s.limits.cpu_quota_percent = 250;
     assert_eq!(stdout(&sh(&s, probe)), "2 2 -p=2 2");
+    // A new incarnation each time, as the hub does: the last scope may still be going away.
+    s.generation += 1;
     s.limits.cpu_quota_percent = 50;
     assert_eq!(stdout(&sh(&s, probe)), "1 1 -p=1 1");
+    s.generation += 1;
     s.env.push(("CARGO_BUILD_JOBS".into(), "7".into()));
     assert_eq!(stdout(&sh(&s, probe)), "7 1 -p=1 1");
     s.scope = false;
