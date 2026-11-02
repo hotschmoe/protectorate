@@ -207,7 +207,11 @@ fn prestart(state: &Path, previous: &Path, log: Option<&File>, stop: &Stop) -> b
             "release on probation, {} s left for the hub to make contact",
             remaining.as_secs()
         )),
-        Ok(pt_update::Verdict::Idle | pt_update::Verdict::Confirmed) => {}
+        Ok(
+            pt_update::Verdict::Idle
+            | pt_update::Verdict::Confirmed
+            | pt_update::Verdict::Kept { .. },
+        ) => {}
         Err(e) => say(format!("probation: {e}; starting releases/current anyway")),
     }
     true

@@ -117,16 +117,9 @@ fn probation_prestart_locked(home: &Path, held: bool) -> Result<String, String> 
             .map_err(|e| e.to_string())?
         {
             pt_update::Verdict::Idle => "no release on trial".into(),
-            pt_update::Verdict::Confirmed => {
-                if store
-                    .probation()
-                    .map_err(|e| e.to_string())?
-                    .is_some_and(|p| p.restore_failed.is_some())
-                {
-                    "snapshot restore failed; keeping the current release".into()
-                } else {
-                    "the release on trial was confirmed".into()
-                }
+            pt_update::Verdict::Confirmed => "the release on trial was confirmed".into(),
+            pt_update::Verdict::Kept { .. } => {
+                "snapshot restore failed; keeping the current release".into()
             }
             pt_update::Verdict::Waiting { remaining } => {
                 format!("on trial, {} s left", remaining.as_secs())
@@ -146,10 +139,8 @@ pub fn retry_probation_restore(home: &Path) -> Result<String, String> {
     let store = pt_update::Store::open(home).map_err(|e| e.to_string())?;
     store.retry_restore().map_err(|e| e.to_string())?;
     let result = probation_prestart_locked(home, true)?;
-    if let Some(error) = store
-        .probation()
-        .map_err(|e| e.to_string())?
-        .and_then(|p| p.restore_failed)
+    if let Some((_, pt_update::Phase::Kept { error })) =
+        store.probation_phase().map_err(|e| e.to_string())?
     {
         return Err(error);
     }
@@ -159,13 +150,16 @@ pub fn retry_probation_restore(home: &Path) -> Result<String, String> {
 pub fn serve(o: ServeOptions) -> Result<Exit, String> {
     let home = Home::prepare(&o.home).map_err(|e| e.to_string())?;
     let trial = crate::update::probation_at_start(&home)?;
-    if let Some(v) = &trial {
-        info!("release {v} is on trial: it stays once the health check passes");
+    if let Some(t) = &trial {
+        info!(
+            "release {} is on trial: it stays once the health check passes",
+            t.version
+        );
     }
     run(o, home.clone(), trial).map_err(|e| crate::update::failed_start(&home, &e))
 }
 
-fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, String> {
+fn run(o: ServeOptions, home: Home, trial: Option<crate::update::Trial>) -> Result<Exit, String> {
     let config = Config::load(&home).map_err(|e| e.to_string())?;
     let (tokens, new_owner) = Tokens::load_or_create(&home).map_err(|e| e.to_string())?;
     let devices = Devices::load(&home).map_err(|e| e.to_string())?;
