@@ -119,6 +119,8 @@ pub enum EventKind {
         to: SleeveId,
         request_id: String,
         from: Party,
+        /// The vendor agent's name, when `from` is an agent.
+        agent: Option<String>,
         text: String,
         mode: SendMode,
         /// The sending turn had D9 origin. The recipient is marked, and so are its children.

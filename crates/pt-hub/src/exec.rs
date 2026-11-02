@@ -21,10 +21,10 @@ use std::time::{Duration, Instant};
 
 use pt_core::{
     Ask, Cause, Choice, Chosen, EffectId, EffectKind, EffectState, EventKind, ExitCause, Gen,
-    Guardrail, Harness, Intent, Layout, Life, Obs, Party, ProbeResult, Sleeve, SleeveId, Target,
-    TurnEnd,
+    Guardrail, Harness, Intent, Layout, Life, MsgKind, Obs, Party, ProbeResult, Sleeve, SleeveId,
+    Target, TurnEnd,
 };
-use pt_drivers::{Ack, AckKind, Decision, Entry, ErrorClass, Session, Stop};
+use pt_drivers::{Ack, AckKind, Decision, Entry, ErrorClass, PromptKind, Session, Stop};
 use pt_json::obj;
 
 use crate::brief;
@@ -157,6 +157,15 @@ fn cleanup_scratch(path: &Path) {
 }
 
 /// Runs `f` on a new named thread; the error says what could not start.
+/// How the transcript records a prompt of this kind.
+fn prompt_kind(kind: MsgKind) -> PromptKind {
+    match kind {
+        MsgKind::Prompt => PromptKind::Prompt,
+        MsgKind::Continuation { .. } => PromptKind::Continuation,
+        MsgKind::Brief => PromptKind::Brief,
+    }
+}
+
 fn spawn(name: String, f: impl FnOnce() + Send + 'static) -> Result<(), String> {
     thread::Builder::new()
         .name(name.clone())
@@ -182,6 +191,7 @@ struct Prompt<'a> {
     effect: EffectId,
     attempt: u32,
     request_id: &'a str,
+    kind: MsgKind,
     text: &'a str,
     /// The turn a steer is for; none for a prompt.
     steer: Option<&'a str>,
@@ -662,6 +672,7 @@ impl SleeveExec {
             EffectKind::SendPrompt {
                 g,
                 ref request_id,
+                kind,
                 ref text,
                 ..
             } => {
@@ -670,6 +681,7 @@ impl SleeveExec {
                     effect,
                     attempt,
                     request_id,
+                    kind,
                     text,
                     steer: None,
                 };
@@ -687,6 +699,7 @@ impl SleeveExec {
                     effect,
                     attempt,
                     request_id,
+                    kind: MsgKind::Prompt,
                     text,
                     steer: Some(expected_turn),
                 };
@@ -1057,9 +1070,9 @@ impl SleeveExec {
         }
         let from = from_label(&view.state, self.id, p.request_id);
         if envoy_id(&view.state) == Some(self.id) {
-            self.note_envoy_origin(view, p.request_id, &from, p.steer.is_some());
+            self.note_envoy_origin(view, p.request_id, p.kind, &from, p.steer.is_some());
         }
-        let noted = self.mail_note(view, p.request_id, p.steer.is_some());
+        let noted = self.mail_note(view, p.kind, p.steer.is_some());
         let owned;
         let text = if let Some(note) = &noted {
             owned = format!("{note}{}", p.text);
@@ -1069,7 +1082,7 @@ impl SleeveExec {
         };
         let sent = match p.steer {
             Some(turn) => session.steer(p.request_id, &from, text, turn),
-            None => session.send_user(p.request_id, &from, text),
+            None => session.send_user(p.request_id, &from, prompt_kind(p.kind), text),
         };
         match sent {
             Ok(()) => {}
@@ -1090,8 +1103,8 @@ impl SleeveExec {
 
     /// The first prompt of a new sleeve names the mail variables. Envoy already has them in
     /// its instructions, and a resleeve brief repeats them.
-    fn mail_note(&self, view: &View, request_id: &str, steer: bool) -> Option<String> {
-        if steer || request_id.starts_with("resleeve:") {
+    fn mail_note(&self, view: &View, kind: MsgKind, steer: bool) -> Option<String> {
+        if steer || kind == MsgKind::Brief {
             return None;
         }
         let s = view.state.sleeve(self.id)?;
@@ -1119,7 +1132,14 @@ impl SleeveExec {
     /// spawn count of the turn it resumes, and restores a marked-mail or agent origin after a crash.
     /// An Envoy resleeve brief is sent as the owner, so it does not replace the origin. The exit
     /// and a quota or auth settle leave the origin in place; this prompt must not clear it.
-    fn note_envoy_origin(&self, view: &View, request_id: &str, from: &str, steer: bool) {
+    fn note_envoy_origin(
+        &self,
+        view: &View,
+        request_id: &str,
+        kind: MsgKind,
+        from: &str,
+        steer: bool,
+    ) {
         let marked = view
             .state
             .sleeve(self.id)
@@ -1132,7 +1152,7 @@ impl SleeveExec {
         let mut t = crate::lock::lock(&self.hub.envoy_turn);
         // A resleeve brief has no message, so `from` is owner and `origin` is None. Keeping
         // the turn means leaving whatever the exit left, not writing that owner label in.
-        let resumed = request_id.starts_with("continue:") || request_id.starts_with("resleeve:");
+        let resumed = kind != MsgKind::Prompt;
         if !steer {
             if resumed {
                 if origin.is_some() {

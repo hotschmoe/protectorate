@@ -127,7 +127,7 @@ CLI on the hub machine (section 3.1).
   owner. Mail from an unmarked sleeve does not. `Wait --until report` returns when the waited-on
   sleeve has mailed after the cursor, and it returns that report's seq. `--after-seq` sets the
   cursor; without it the cursor is the waiter's newest message to the sleeve, so the same report
-  releases a later wait again. A message whose request id starts with `continue:` is not mail
+  releases a later wait again. The core's continuation of a turn is not mail
   for that cursor: it is not a report, and it does not move the cursor. A waiter who has never
   messaged the sleeve counts all of its past upward mail. The owner's or Envoy's wait counts
   mail to the parent or to Envoy. A parent's wait
@@ -188,7 +188,7 @@ One Linux machine, one `protectorate` process plus its headscale and member chil
 - **Mail:** delivery, re-delivery and escalation. Who may send is in section 3.1. `Wait --until
   report` returns the newest upward report's seq. `--after-seq` moves the cursor; without it the
   cursor is the waiter's newest message to the sleeve, and a waiter who never messaged it counts
-  all of its past upward mail. A message whose request id starts with `continue:` is not mail
+  all of its past upward mail. The core's continuation of a turn is not mail
   for that cursor: it is not a report, and it does not move the cursor. The owner's or Envoy's
   wait counts mail to the parent or to Envoy. A parent's wait counts only mail to that parent.
   A wait on Envoy is invalid, because Envoy never sends as a sleeve.

@@ -67,7 +67,7 @@ pub struct Sleeve {
     /// Who opened the current owner turn. An agent steer, or mail from a D9-marked sleeve,
     /// replaces it. A continuation is sent as this party, so D9 sees the same origin the turn had.
     pub turn_from: Party,
-    /// The agent name on that message's `ga:<name>:` request id, when `turn_from` is an agent.
+    /// That message's agent name, when `turn_from` is an agent.
     pub turn_agent: Option<String>,
     /// The owner turn that still owes one continuation, if any. One per turn, across generations.
     /// Set when a native resume follows a headless turn a crash ended, unless that turn was itself
@@ -186,6 +186,9 @@ pub enum Activity {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Message {
     pub from: Party,
+    /// The vendor agent's name when `from` is an agent. A continuation carries the turn's.
+    pub agent: Option<String>,
+    pub kind: MsgKind,
     pub text: String,
     pub mode: SendMode,
     pub state: MsgState,

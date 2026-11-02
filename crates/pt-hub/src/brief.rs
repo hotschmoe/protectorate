@@ -7,7 +7,7 @@ use std::fs;
 use std::path::Path;
 
 use pt_core::{Cause, EffectId, EffectKind, Gen, Sleeve, SleeveId};
-use pt_drivers::{Entry, ToolStatus};
+use pt_drivers::{Entry, PromptKind, ToolStatus};
 
 use crate::git;
 use crate::hub::Hub;
@@ -20,8 +20,6 @@ const BUDGET: usize = 16 << 10;
 /// The pre-run search hits' share of the budget.
 const HITS_BUDGET: usize = 4 << 10;
 const HITS_PER_QUERY: usize = 3;
-/// The brief prompt's request id prefix (pt-core); it is not part of the task.
-const BRIEF_REQUEST: &str = "resleeve:";
 const TEST_RUNNERS: &[&str] = &[
     "cargo test",
     "make test",
@@ -231,9 +229,9 @@ fn build(hub: &Hub, view: &View, workdir: &Path, spec: &Spec<'_>, entries: &[Lin
     let users: Vec<&str> = entries
         .iter()
         .filter_map(|e| match &e.entry {
-            Entry::UserMessage {
-                text, request_id, ..
-            } if !request_id.starts_with(BRIEF_REQUEST) => Some(text.as_str()),
+            Entry::UserMessage { text, kind, .. } if *kind != PromptKind::Brief => {
+                Some(text.as_str())
+            }
             _ => None,
         })
         .collect();

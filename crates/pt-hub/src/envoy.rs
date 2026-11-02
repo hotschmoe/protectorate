@@ -29,26 +29,17 @@ pub fn envoy_id(state: &State) -> Option<SleeveId> {
 
 /// The `from` label a harness sees on a user message: owner, envoy, agent:<name>, or
 /// mail:<name> from a sleeve. A resleeve brief is an effect, not a message, so it is
-/// labeled owner. A continuation has no `ga:` name and uses the turn's recorded agent.
+/// labeled owner. A continuation carries the turn's agent name; an agent message with no
+/// recorded name is `agent:`.
 pub fn from_label(state: &State, to: SleeveId, request_id: &str) -> String {
-    let party = state
-        .sleeve(to)
-        .and_then(|s| s.messages.get(request_id))
-        .map(|m| m.from);
-    match party {
-        Some(Party::Owner) | None => "owner".into(),
-        Some(Party::Envoy) => "envoy".into(),
-        Some(Party::Agent) => match request_id.strip_prefix("ga:") {
-            Some(rest) => format!("agent:{}", rest.split(':').next().unwrap_or("")),
-            None if request_id.starts_with("continue:") => state
-                .sleeve(to)
-                .and_then(|s| s.turn_agent.clone())
-                .map(|name| format!("agent:{name}"))
-                // No recorded name still carries the prefix, so D9 fails closed.
-                .unwrap_or_else(|| "agent:".into()),
-            None => "agent".into(),
-        },
-        Some(Party::Sleeve(x)) => state
+    let Some(m) = state.sleeve(to).and_then(|s| s.messages.get(request_id)) else {
+        return "owner".into();
+    };
+    match m.from {
+        Party::Owner => "owner".into(),
+        Party::Envoy => "envoy".into(),
+        Party::Agent => format!("agent:{}", m.agent.as_deref().unwrap_or("")),
+        Party::Sleeve(x) => state
             .sleeve(x)
             .map_or_else(|| format!("mail:{}", x.0), |s| format!("mail:{}", s.name)),
     }

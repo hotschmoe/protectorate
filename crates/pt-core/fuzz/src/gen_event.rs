@@ -124,6 +124,7 @@ pub fn event(b: &mut Bytes) -> Event {
             to: s(b),
             request_id: b.string(),
             from: party(b),
+            agent: opt(b, |b| b.string()),
             text: b.string(),
             mode: if b.bool() {
                 SendMode::Steer

@@ -474,7 +474,7 @@ Each entry: where, what was done, what right looks like.
   accepts that. Right: carry the origin through messages Envoy sends (a request chain), and add
   pushes to the list when the API grows them.
 - **Vendor agents read a filtered Envoy transcript** (`pt-hub`, api.rs `agent_transcript`):
-  `EnvoyRead` with the envoy-only token shows each `ga:` message and the assistant text and
+  `EnvoyRead` with the envoy-only token shows each agent message and the assistant text and
   settle of the turn it started, up to another sender's message; owner and sleeve messages,
   tools and reasoning are left out. All agents share the one token, so they see each other's
   exchanges, and an answer can still quote what Envoy learned elsewhere. It reads the whole

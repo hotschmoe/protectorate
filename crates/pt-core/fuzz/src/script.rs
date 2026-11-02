@@ -255,16 +255,19 @@ impl Runner {
             }
             "send" => {
                 let to = self.id(arg(1)?)?;
-                let from = match kv("from") {
-                    Some(n) if n.starts_with("agent:") => Party::Agent,
-                    Some(n) => Party::Sleeve(self.id(n)?),
-                    None => Party::Owner,
+                let (from, agent) = match kv("from") {
+                    Some(n) => match n.strip_prefix("agent:") {
+                        Some(name) => (Party::Agent, Some(name.to_string())),
+                        None => (Party::Sleeve(self.id(n)?), None),
+                    },
+                    None => (Party::Owner, None),
                 };
                 let id = arg(2)?;
                 self.sim.apply(E::Send {
                     to,
                     request_id: id.into(),
                     from,
+                    agent,
                     text: format!("text of {id}"),
                     mode: if flag("steer") {
                         SendMode::Steer

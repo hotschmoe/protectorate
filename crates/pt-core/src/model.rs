@@ -149,6 +149,17 @@ pub enum Party {
     Sleeve(SleeveId),
 }
 
+/// What a prompt is to the owner turn it goes into.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MsgKind {
+    /// A message someone sent. Dequeued, it opens the next owner turn.
+    Prompt,
+    /// The one continuation of owner turn `turn` after a crash ended it.
+    Continuation { turn: u64 },
+    /// A resleeve's brief prompt. It has no message and is sent as the owner.
+    Brief,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SendMode {
     Queue,

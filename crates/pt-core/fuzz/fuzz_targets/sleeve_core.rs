@@ -61,15 +61,16 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
             })
         }
         2 | 3 => {
-            let from = if b.bool() {
-                Party::Owner
-            } else {
-                Party::Sleeve(sleeve(sim, b))
+            let (from, agent) = match b.below(3) {
+                0 => (Party::Owner, None),
+                1 => (Party::Agent, Some(format!("a{}", b.below(2)))),
+                _ => (Party::Sleeve(sleeve(sim, b)), None),
             };
             E::Send {
                 to: s,
                 request_id: format!("m{}", b.below(12)),
                 from,
+                agent,
                 text: "do the thing".into(),
                 mode: if b.below(3) == 0 {
                     SendMode::Steer

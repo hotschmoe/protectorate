@@ -308,6 +308,7 @@ pub fn chat_entry(sleeve: SleeveId, l: &Line, delta: bool) -> api::ChatEntry {
             from,
             text,
             steer,
+            ..
         } => A::UserMessage {
             request_id: request_id.clone(),
             from: from.clone(),

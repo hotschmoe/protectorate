@@ -7,10 +7,10 @@ use std::time::{Duration, Instant};
 
 use pt_api::{self as api, ApiError, ErrorCode, Method, method as m};
 use pt_core::{
-    ApprovalState, Claim, EventKind, Layout, Life, MsgState, Party, Reply, SendMode, SleeveId,
-    Source, SpawnSpec, State, Target, name_ok, overlap_refusal, path_ok, path_within,
+    ApprovalState, Claim, EventKind, Layout, Life, MsgKind, MsgState, Party, Reply, SendMode,
+    SleeveId, Source, SpawnSpec, State, Target, name_ok, overlap_refusal, path_ok, path_within,
 };
-use pt_drivers::Entry;
+use pt_drivers::{Entry, PromptKind};
 use pt_json::{FromJson, ToJson, Value};
 
 use crate::approvals;
@@ -838,6 +838,7 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
                 to: id,
                 request_id: new_request(c, "")?,
                 from: c.who.party(),
+                agent: None,
                 text: prefix(&view.state, c.who, "", &text),
                 mode: SendMode::Queue,
                 d9,
@@ -860,7 +861,8 @@ fn prefix(state: &State, who: &Principal, agent: &str, text: &str) -> String {
     }
 }
 
-/// A request id that names its sender's kind; `envoy::from_label` reads the agent name back.
+/// A request id that names its sender's kind, for logs. Nothing parses it: the message carries
+/// its party and agent name.
 fn new_request(c: &Ctx<'_>, agent: &str) -> Result<String> {
     let r = random_hex(16).map_err(internal)?;
     Ok(match c.who {
@@ -909,6 +911,7 @@ fn send_message(c: &Ctx<'_>, r: api::SendMessageRequest) -> Result<api::Sent> {
             to: id,
             request_id: request_id.clone(),
             from,
+            agent: None,
             text: prefix(&view.state, c.who, "", &r.text),
             mode: match r.delivery {
                 api::Delivery::Queue => SendMode::Queue,
@@ -1708,6 +1711,7 @@ fn envoy_send(c: &Ctx<'_>, r: api::EnvoySendRequest) -> Result<api::Sent> {
             to: id,
             request_id: request_id.clone(),
             from: c.who.party(),
+            agent: Some(agent.to_string()),
             text: prefix(&view.state, c.who, agent, &r.text),
             mode: SendMode::Queue,
             d9: false,
@@ -1734,10 +1738,10 @@ fn not_for_sleeves() -> ApiError {
     )
 }
 
-/// What vendor agents see of Envoy's transcript: each `ga:` message, then the assistant text
-/// and settle of the turn it started, until another sender's message. A `continue:` prompt is
-/// the same turn, so the answer after a crash stays visible. No tool calls, no reasoning,
-/// nothing the owner or a sleeve said.
+/// What vendor agents see of Envoy's transcript: each agent message, then the assistant text
+/// and settle of the turn it started, until another sender's message. A continuation is the
+/// same turn, so the answer after a crash stays visible. No tool calls, no reasoning, nothing
+/// the owner or a sleeve said.
 fn agent_transcript(
     hub: &Hub,
     id: SleeveId,
@@ -1747,12 +1751,22 @@ fn agent_transcript(
     let limit = limit.unwrap_or(TRANSCRIPT_DEFAULT).clamp(1, TRANSCRIPT_MAX) as usize;
     let store = hub.transcripts.get(id).map_err(internal)?;
     let lines = lock(&store).all().map_err(internal)?;
+    let view = hub.view();
+    let from_agent = |r: &str| {
+        view.state
+            .sleeve(id)
+            .and_then(|s| s.messages.get(r))
+            .is_some_and(|m| m.from == Party::Agent)
+    };
     let mut agent = false;
     let mut shown = lines.iter().filter(|l| {
         let keep = match &l.entry {
-            Entry::UserMessage { request_id, .. } if request_id.starts_with("continue:") => false,
+            Entry::UserMessage {
+                kind: PromptKind::Continuation,
+                ..
+            } => false,
             Entry::UserMessage { request_id, .. } => {
-                agent = request_id.starts_with("ga:");
+                agent = from_agent(request_id);
                 agent
             }
             Entry::AssistantText { .. } => agent,
@@ -1794,7 +1808,10 @@ fn answer(hub: &Hub, id: SleeveId, request_id: &str, idle: bool) -> Option<(Stri
             Entry::AssistantText { text: t, .. } => text.push(t.clone()),
             Entry::TurnSettled { .. } => return Some((text.join("\n"), e.seq)),
             // The hub's continuation of this turn. The reply after it is still this answer.
-            Entry::UserMessage { request_id: r, .. } if r.starts_with("continue:") => {}
+            Entry::UserMessage {
+                kind: PromptKind::Continuation,
+                ..
+            } => {}
             Entry::UserMessage { .. } => break,
             _ => {}
         }
@@ -1907,13 +1924,13 @@ fn reached(state: &State, id: SleeveId, until: api::WaitUntil) -> bool {
 }
 
 /// The newest message the waiter has already sent to `waited`, if any.
-/// A `continue:` row is the same turn, not mail: it does not move the cursor.
+/// A continuation is the same turn, not mail: it does not move the cursor.
 fn report_watermark(state: &State, waited: SleeveId, waiter: Party) -> Option<u64> {
     state.sleeve(waited).and_then(|s| {
         s.messages
-            .iter()
-            .filter(|(id, m)| m.from == waiter && !id.starts_with("continue:"))
-            .map(|(_, m)| m.seq)
+            .values()
+            .filter(|m| m.from == waiter && m.kind == MsgKind::Prompt)
+            .map(|m| m.seq)
             .max()
     })
 }
@@ -1922,7 +1939,7 @@ fn report_watermark(state: &State, waited: SleeveId, waiter: Party) -> Option<u6
 /// `after` replaces the default, which is the waiter's newest message to `waited`
 /// (or every past report when the waiter has sent none).
 /// A parent counts only mail in its own mailbox. Anyone else also counts mail to Envoy.
-/// A `continue:` row is not a report.
+/// A continuation is not a report.
 fn upward_report(
     state: &State,
     waited: SleeveId,
@@ -1947,8 +1964,8 @@ fn upward_report(
         let Some(dest) = state.sleeve(d) else {
             continue;
         };
-        for (id, m) in &dest.messages {
-            if id.starts_with("continue:") {
+        for m in dest.messages.values() {
+            if m.kind != MsgKind::Prompt {
                 continue;
             }
             if m.from == Party::Sleeve(waited) && floor.is_none_or(|w| m.seq > w) {

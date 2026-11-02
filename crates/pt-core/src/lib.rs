@@ -62,10 +62,11 @@ impl Core<'_> {
                 to,
                 request_id,
                 from,
+                agent,
                 text,
                 mode,
                 d9,
-            } => self.send(*to, request_id, *from, text, *mode, *d9),
+            } => self.send(*to, request_id, *from, agent.as_deref(), text, *mode, *d9),
             E::Interrupt { sleeve } => self.interrupt_cmd(*sleeve),
             E::Compact { sleeve } => self.compact_cmd(*sleeve),
             E::RespondApproval {

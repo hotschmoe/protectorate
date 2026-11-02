@@ -7,7 +7,8 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use pt_drivers::{
-    Ack, Entry, ErrorClass, Event, Harness, Session, SpawnSpec, Stop, ToolKind, ToolStatus,
+    Ack, Entry, ErrorClass, Event, Harness, PromptKind, Session, SpawnSpec, Stop, ToolKind,
+    ToolStatus,
 };
 
 pub const READY: &str = "Reply with exactly the word READY and nothing else.";
@@ -245,7 +246,7 @@ impl Run {
         self.next_req += 1;
         let req = format!("req-{}", self.next_req);
         self.session
-            .send_user(&req, "owner", text)
+            .send_user(&req, "owner", PromptKind::Prompt, text)
             .expect("send_user");
         req
     }

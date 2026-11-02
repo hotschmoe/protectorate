@@ -35,6 +35,7 @@ pub enum EffectKind {
         sleeve: SleeveId,
         g: Gen,
         request_id: String,
+        kind: MsgKind,
         text: String,
     },
     Steer {

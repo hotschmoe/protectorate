@@ -100,7 +100,7 @@ A sleeve is named by its id or its name.
   it does not. `--until report` returns when that sleeve has mailed since the cursor, and prints
   that report's seq. `--after-seq N` counts only mail with a seq above N. Without it the cursor
   is the waiter's newest message to the sleeve, so the same report releases a later wait again.
-  A message whose request id starts with `continue:` is not mail for that cursor: it is not a
+  The hub's continuation of a turn after a crash is not mail for that cursor: it is not a
   report, and it does not move the cursor. A waiter who has never messaged the sleeve counts
   all of its past upward mail. The owner's wait
   counts mail to the parent or to Envoy. A parent's wait counts only mail to that parent. A wait

@@ -16,16 +16,6 @@ const BRIEF_PROMPT: &str = "Continue from .protectorate/BRIEF.md: read it first,
 /// and not for a turn this prompt itself started.
 const CONTINUE_PROMPT: &str = "The previous turn was interrupted. Continue from where it stopped.";
 
-/// The agent name `Hub::from_label` reads from a `ga:<name>:` request id. Empty when the id
-/// has the prefix and no name; absent when the sender is not an agent or the id has no prefix.
-fn agent_name(from: Party, request_id: &str) -> Option<String> {
-    if from != Party::Agent {
-        return None;
-    }
-    let rest = request_id.strip_prefix("ga:")?;
-    Some(rest.split(':').next().unwrap_or("").to_string())
-}
-
 /// A sleeve name: 1-64 bytes of `[A-Za-z0-9._-]`.
 pub fn name_ok(name: &str) -> bool {
     !name.is_empty()
@@ -859,11 +849,13 @@ impl Core<'_> {
 
     // ----- messages -----
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn send(
         &mut self,
         to: SleeveId,
         request_id: &str,
         from: Party,
+        agent: Option<&str>,
         text: &str,
         mode: SendMode,
         d9: bool,
@@ -871,9 +863,11 @@ impl Core<'_> {
         if !self.existing(to) {
             return;
         }
+        // Only an agent has a name.
+        let agent = agent.filter(|_| from == Party::Agent);
         let s = &self.st.sleeves[&to];
         if let Some(m) = s.messages.get(request_id) {
-            if m.from == from && m.text == text && m.mode == mode {
+            if m.from == from && m.agent.as_deref() == agent && m.text == text && m.mode == mode {
                 return self.reply(Reply::Duplicate);
             }
             return self.refuse(
@@ -911,6 +905,8 @@ impl Core<'_> {
                 request_id.to_string(),
                 Message {
                     from,
+                    agent: agent.map(str::to_string),
+                    kind: MsgKind::Prompt,
                     text: text.to_string(),
                     mode,
                     state,
@@ -996,11 +992,12 @@ impl Core<'_> {
     }
 
     fn steer(&mut self, sid: SleeveId, request_id: &str) {
-        let from = self.st.sleeves[&sid].messages[request_id].from;
-        if let Some(name) = agent_name(from, request_id) {
+        let m = &self.st.sleeves[&sid].messages[request_id];
+        let (from, agent) = (m.from, m.agent.clone());
+        if from == Party::Agent {
             let s = self.sl(sid);
             s.turn_from = Party::Agent;
-            s.turn_agent = Some(name);
+            s.turn_agent = agent;
         } else if let Party::Sleeve(id) = from
             && self.st.sleeve(id).is_some_and(|s| s.d9)
         {
@@ -1166,24 +1163,28 @@ impl Core<'_> {
             return;
         };
         let s = &self.st.sleeves[&sid];
+        let m = &s.messages[&r];
+        let msg_kind = m.kind;
         let kind = EffectKind::SendPrompt {
             sleeve: sid,
             g: s.g,
             request_id: r.clone(),
-            text: s.messages[&r].text.clone(),
+            kind: msg_kind,
+            text: m.text.clone(),
         };
         let eff = self.new_effect(kind, r.clone());
         let s = self.sl(sid);
-        s.messages.get_mut(&r).expect("queued message").state = MsgState::InFlight(eff);
+        let m = s.messages.get_mut(&r).expect("queued message");
+        m.state = MsgState::InFlight(eff);
+        let (from, agent) = (m.from, m.agent.clone());
         s.activity = Activity::Delivering { effect: eff };
         // A continuation belongs to the turn already begun. Any other prompt starts the next one
         // and supersedes a continuation that turn still owed.
-        if !r.starts_with("continue:") {
-            let from = s.messages[&r].from;
+        if msg_kind == MsgKind::Prompt {
             s.turn_seq += 1;
             s.auto_continue = None;
             s.turn_from = from;
-            s.turn_agent = agent_name(from, &r);
+            s.turn_agent = agent;
         }
     }
 
@@ -1240,7 +1241,13 @@ impl Core<'_> {
             return self.on_brief_prompt(sid, id, native);
         }
         let request_id = self.st.effects[&id].key.clone();
-        let continued = request_id.starts_with("continue:");
+        let continued = matches!(
+            self.st.effects[&id].kind,
+            EffectKind::SendPrompt {
+                kind: MsgKind::Continuation { .. },
+                ..
+            }
+        );
         let state = self.effect_state(id).expect("effect exists");
         if let Some(m) = self.sl(sid).messages.get_mut(&request_id)
             && m.state == MsgState::InFlight(id)
@@ -1567,7 +1574,7 @@ impl Core<'_> {
             .map(|m| m.state)
     }
 
-    /// Drops the continuation debt and any `continue:` message still queued. An in-flight
+    /// Drops the continuation debt and any continuation still queued. An in-flight
     /// unsent prompt is not queued yet; fencing puts it back, and the exit then drops it.
     /// Rejected, not left queued: a later start must not send it. No `MessageRejected` —
     /// the caller warns with `TurnNeedsPrompt` when something was actually dropped.
@@ -1584,16 +1591,21 @@ impl Core<'_> {
 
     fn reject_queued_continues(&mut self, sid: SleeveId) -> bool {
         let s = self.sl(sid);
+        let continuation = |id: &String| {
+            s.messages
+                .get(id)
+                .is_some_and(|m| matches!(m.kind, MsgKind::Continuation { .. }))
+        };
         let keys: Vec<String> = s
             .queue
             .iter()
-            .filter(|id| id.starts_with("continue:"))
+            .filter(|id| continuation(id))
             .cloned()
             .collect();
         if keys.is_empty() {
             return false;
         }
-        s.queue.retain(|id| !id.starts_with("continue:"));
+        s.queue.retain(|id| !keys.contains(id));
         for id in keys {
             if let Some(m) = s.messages.get_mut(&id) {
                 m.state = MsgState::Rejected;
@@ -1649,7 +1661,7 @@ impl Core<'_> {
         if seq != s.turn_seq || text.is_empty() {
             return;
         }
-        let from = s.turn_from;
+        let (from, agent) = (s.turn_from, s.turn_agent.clone());
         let key = Self::continue_key(sid, seq);
         if s.messages.contains_key(&key)
             || !s.queue.is_empty()
@@ -1678,6 +1690,8 @@ impl Core<'_> {
                 // sleeve, replaces it), so the continued turn keeps that origin and a rejection
                 // is reported to that party. A rejected continuation still warns the owner.
                 from,
+                agent,
+                kind: MsgKind::Continuation { turn: seq },
                 text: text.to_string(),
                 mode: SendMode::Queue,
                 state: MsgState::Queued,
@@ -1717,6 +1731,7 @@ impl Core<'_> {
                     sleeve: sid,
                     g,
                     request_id: key.clone(),
+                    kind: MsgKind::Brief,
                     text: BRIEF_PROMPT.to_string(),
                 };
                 let eff = self.new_effect(kind, key);

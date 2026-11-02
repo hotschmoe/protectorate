@@ -7,7 +7,8 @@
 //! `EventKind::Spawn` is tag 0, tag 32 with an effort, and tag 38 when it marks D9. Tag 38 is
 //! the tag 0 body plus a flags byte: bit 0 then an effort string, bit 1 the mark. A later
 //! spawn field is another bit, not another tag. `EventKind::Send` is tag 1, or tag 39 when it
-//! marks D9. Tags 0, 1 and 32 decode and re-encode to the same bytes. Tags 33 to 37 are Start
+//! marks D9, and tag 41 when it names a vendor agent: the tag 1 body, the mark, then the
+//! name. Tags 0, 1 and 32 decode and re-encode to the same bytes. Tags 33 to 37 are Start
 //! and Resleeve with an effort, a permanent artifact check, an artifact collection, and
 //! Continue. Older tags leave the mark unset. `EventKind::TargetChosen` is tag 22 with a target
 //! or none, and tag 40 when doctor refused Envoy's harness.
@@ -17,7 +18,7 @@ use crate::model::*;
 
 pub const FORMAT: u8 = 1;
 /// Highest event tag this binary reads. Any incompatible encoding must get a new event tag.
-pub const MAX_EVENT_TAG: u8 = 40;
+pub const MAX_EVENT_TAG: u8 = 41;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -590,16 +591,25 @@ impl Wire for EventKind {
                 to,
                 request_id,
                 from,
+                agent,
                 text,
                 mode,
                 d9,
             } => {
-                w.push(if *d9 { 39 } else { 1 });
+                w.push(match (agent, d9) {
+                    (Some(_), _) => 41,
+                    (None, true) => 39,
+                    (None, false) => 1,
+                });
                 to.put(w);
                 request_id.put(w);
                 from.put(w);
                 text.put(w);
                 mode.put(w);
+                if let Some(agent) = agent {
+                    d9.put(w);
+                    agent.put(w);
+                }
             }
             E::Interrupt { sleeve } => {
                 w.push(2);
@@ -852,6 +862,7 @@ impl Wire for EventKind {
                 to: Wire::get(r)?,
                 request_id: Wire::get(r)?,
                 from: Wire::get(r)?,
+                agent: None,
                 text: Wire::get(r)?,
                 mode: Wire::get(r)?,
                 d9: tag == 39,
@@ -1026,6 +1037,15 @@ impl Wire for EventKind {
                 spec.d9 = true;
                 E::Spawn(spec)
             }
+            41 => E::Send {
+                to: Wire::get(r)?,
+                request_id: Wire::get(r)?,
+                from: Wire::get(r)?,
+                text: Wire::get(r)?,
+                mode: Wire::get(r)?,
+                d9: Wire::get(r)?,
+                agent: Some(Wire::get(r)?),
+            },
             40 => E::TargetChosen {
                 sleeve: Wire::get(r)?,
                 g: Wire::get(r)?,
