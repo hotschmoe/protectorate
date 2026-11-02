@@ -1,6 +1,6 @@
-//! The handler layer: who is calling, what they may touch, and one function per method of
-//! pt-api's table. Commands become core events whose replies come back after the journal fsync;
-//! reads use the published view.
+//! The handler layer: what each caller (`principal.rs`) may touch, and one function per method
+//! of pt-api's table. Commands become core events whose replies come back after the journal
+//! fsync; reads use the published view.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
