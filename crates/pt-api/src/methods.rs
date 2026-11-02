@@ -517,7 +517,7 @@ api_records! {
 
     /// A harness as `doctor` found it (SPEC 7, D33).
     pub struct DoctorHarness {
-        /// The hub's name for it, `pi_durable` included.
+        /// The hub's name for the harness.
         pub name: String,
         pub present: bool,
         pub path: String,

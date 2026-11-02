@@ -203,7 +203,7 @@ pub fn driver_harness(h: Harness) -> Option<pt_drivers::Harness> {
         Harness::Claude => pt_drivers::Harness::Claude,
         Harness::Codex => pt_drivers::Harness::Codex,
         Harness::Grok => pt_drivers::Harness::Grok,
-        Harness::PiVendor | Harness::PiLocal | Harness::PiDurable => pt_drivers::Harness::Pi,
+        Harness::PiVendor | Harness::PiLocal => pt_drivers::Harness::Pi,
         Harness::Antigravity => return None,
     })
 }

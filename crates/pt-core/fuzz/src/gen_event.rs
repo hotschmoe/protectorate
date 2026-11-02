@@ -5,17 +5,16 @@ use pt_core::*;
 use crate::Bytes;
 
 fn target(b: &mut Bytes) -> Target {
-    const H: [Harness; 7] = [
+    const H: [Harness; 6] = [
         Harness::Claude,
         Harness::Codex,
         Harness::Grok,
         Harness::Antigravity,
         Harness::PiVendor,
         Harness::PiLocal,
-        Harness::PiDurable,
     ];
     Target {
-        harness: H[b.below(7) as usize],
+        harness: H[b.below(6) as usize],
         mode: if b.bool() { Mode::Pane } else { Mode::Headless },
         provider: b.string(),
         model: b.string(),
