@@ -265,3 +265,88 @@ fn failed_history_commit_retries_without_new_transcript_data() {
         "retry did not need new transcript bytes"
     );
 }
+
+/// Indexed user text is clipped to 32 KiB, so the fixture is many lines.
+const INDEXED_TEXT: usize = 32 << 10;
+
+fn user_line(seq: u64, text: &str) -> String {
+    format!(
+        r#"{{"seq":{seq},"g":1,"time_ms":{seq},"entry":{{"type":"user_message","request_id":"fixture-{seq}","from":"owner","text":"{text}"}}}}"#
+    )
+}
+
+#[test]
+fn history_budget_under_a_mebibyte_is_refused() {
+    let home = unique("hbudget").join("home");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(home.join("config.json"), r#"{"history_budget_bytes":0}"#).unwrap();
+    let out = Command::new(bin())
+        .args(["--home", home.to_str().unwrap(), "serve", "--listen", "off"])
+        .output()
+        .expect("run serve");
+    assert!(
+        !out.status.success(),
+        "serve started with history_budget_bytes 0"
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    let floor = 1u64 << 20;
+    assert!(
+        err.contains(&format!(
+            "history_budget_bytes must be at least {floor} bytes"
+        )),
+        "{err}"
+    );
+}
+
+#[test]
+fn history_budget_in_config_caps_the_sleeve() {
+    let floor = 1u64 << 20;
+    let hub = Hub::start_config(
+        "hcap",
+        "pi_local",
+        &[
+            ("history_budget_bytes", Value::from(floor)),
+            ("scopes", Value::from(false)),
+        ],
+        &[],
+        &[],
+    );
+    let id = eventually("envoy", Duration::from_secs(15), || {
+        let sleeve = hub.sleeve("envoy");
+        let id = sleeve["id"].as_str()?;
+        (!id.is_empty()).then(|| id.to_string())
+    });
+    let transcript = hub.home.join(format!("sleeves/{id}/transcript.jsonl"));
+    if let Some(dir) = transcript.parent() {
+        fs::create_dir_all(dir).unwrap();
+    }
+    let oldest = format!("quartzoldestline {}", "x".repeat(INDEXED_TEXT));
+    let newest = format!("quartznewestline {}", "y".repeat(INDEXED_TEXT));
+    let fill = "m".repeat(INDEXED_TEXT);
+    // One more full clip than the floor can hold, plus overhead, so the oldest line is evicted.
+    let n = (floor as usize / INDEXED_TEXT) + 8;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&transcript)
+        .unwrap();
+    use std::io::Write;
+    writeln!(file, "{}", user_line(10_000, &oldest)).unwrap();
+    for seq in 1..n - 1 {
+        writeln!(file, "{}", user_line(10_000 + seq as u64, &fill)).unwrap();
+    }
+    writeln!(file, "{}", user_line(10_000 + n as u64, &newest)).unwrap();
+    drop(file);
+    found(&hub, "quartznewestline", 20);
+    let gone = hits(
+        &hub.cli(&["--json", "history", "search", "quartzoldestline"])
+            .json(),
+    );
+    assert!(gone.is_empty(), "the oldest line stayed: {gone:?}");
+    let info = hub.cli(&["hub", "info"]);
+    assert!(
+        info.ok().contains(&format!("history capped: {id}")),
+        "{}",
+        info.stdout
+    );
+}

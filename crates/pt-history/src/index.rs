@@ -28,6 +28,9 @@ const MAX_MERGE: u64 = 1 << 30;
 /// does not pass another budget. Each doc counts its source text plus its per-doc
 /// overhead. The hub reads `history_budget_bytes` once at start and passes it here.
 pub const DEFAULT_BUDGET: u64 = 1 << 30;
+/// Smallest `history_budget_bytes` the hub accepts. Exactly this value is allowed.
+/// A configured 0 is not the default.
+pub const MIN_BUDGET: u64 = 1 << 20;
 /// Docs one [`Index::read`] materializes. The hub's history read uses the same cap.
 pub const READ_DOCS: usize = 200;
 /// Source-text bytes one [`Index::read`] materializes before it reports more.

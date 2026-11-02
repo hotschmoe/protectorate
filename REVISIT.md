@@ -830,7 +830,8 @@ Each entry: where, what was done, what right looks like.
   texts and builds a new one from scratch. Fast: a k-way merge of postings, if merge time shows up.
 - **History keeps a sleeve's newest lines** (`pt-history`, index.rs): each sleeve and each
   source may keep `history_budget_bytes` (default 1 GiB), counting each doc's source text
-  plus its per-doc overhead. The hub reads that key once, at start. Past a
+  plus its per-doc overhead. The hub reads that key once, at start. A value under
+  1 MiB, including 0, is a config error. Exactly 1 MiB is allowed. Past a
   source's budget, that source's oldest docs go.
   Past a sleeve's budget, the oldest docs of that sleeve go, from any of its logs, so a new
   session still gets indexed. `doctor` / `hub info` name each capped sleeve (`history capped: <id>`)

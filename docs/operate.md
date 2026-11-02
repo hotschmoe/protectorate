@@ -206,7 +206,9 @@ derived and rebuilt in the background if it fails to open. Catch-up commits boun
 A failed commit removes the segment files that attempt wrote, and the hub retries it with
 backoff up to 30 seconds. Below each configured root, discovery and reopening ignore
 symbolic links and non-regular files. Tool paths in the index are clipped to 512 bytes.
-`history_budget_bytes` (default 1 GiB) is read when the hub starts. Each sleeve, and each
+`history_budget_bytes` (default 1 GiB) is read when the hub starts. A value under 1 MiB,
+including 0, is a config error and the hub does not start. Exactly 1 MiB is allowed, and a
+missing key keeps the default. Each sleeve, and each
 log, may keep that many bytes. That counts each doc's source text plus a
 per-doc overhead, so a flood of tiny docs stays inside the budget. Past a sleeve's budget the index
 keeps the newest lines across that sleeve's logs; past a log's own budget it keeps that

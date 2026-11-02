@@ -38,7 +38,7 @@ use std::path::PathBuf;
 
 pub use discover::discover;
 pub use extract::{TEXT_MAX, TOOL_MAX, parse_time};
-pub use index::{DEFAULT_BUDGET, Index, Ingested, READ_BYTES, READ_DOCS, Stats};
+pub use index::{DEFAULT_BUDGET, Index, Ingested, MIN_BUDGET, READ_BYTES, READ_DOCS, Stats};
 pub use pt_drivers::Harness;
 
 pt_json::string_enum! {

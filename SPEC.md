@@ -291,7 +291,9 @@ the same dispatch code. There are no external sources such as email, calendar or
     docs or 8 MiB of source text and says when the range was cut. The next page starts after
     the last doc id (`--after`). Tool paths are kept to the
     same budget as tool text (512 bytes). `history_budget_bytes` in the owner config
-    (default 1 GiB) is read when the hub starts. Each sleeve has that budget, and so
+    (default 1 GiB) is read when the hub starts. A value under 1 MiB, including 0, is
+    refused and the hub does not start. Exactly 1 MiB is allowed. A missing key keeps
+    the default. Each sleeve has that budget, and so
     does each source. The budget counts each doc's source text plus a per-doc overhead (its
     session, source, tool, paths, and a fixed header). Past a source's budget, that source
     drops its oldest docs.
