@@ -1,0 +1,18 @@
+#scenario 3afa5738de08da17
+# A desync on an acknowledged Grok turn without a native turn id warns; an idle desync does not.
+spawn busy /w/a harness=grok
+run
+obs busy ready
+policy prompt=ack-no-turn
+send busy m1
+run
+expect busy activity=Working
+obs busy desync
+run
+expect-notice TurnNeedsPrompt count=1
+spawn idle /w/b harness=grok
+run
+obs idle ready
+obs idle desync
+run
+expect-notice TurnNeedsPrompt count=1

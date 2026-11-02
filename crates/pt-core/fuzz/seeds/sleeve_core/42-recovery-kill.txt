@@ -1,0 +1,12 @@
+#scenario f0a68bf451655619
+# The hub observes a live child, confirms its own recovery kill, and suppresses crash mail.
+spawn root /w/a
+run
+obs root ready
+spawn kid /wt/kid parent=root
+run
+obs kid ready
+commit
+crash
+run
+expect-notice ChildCrashed count=0

@@ -1,0 +1,12 @@
+#scenario 68dc94743871a6b1
+# Recovery warns for a scope already gone, but not when a confirmed recovery kill stopped it.
+spawn root /w/a
+run
+obs root ready
+spawn kid /wt/kid parent=root
+run
+obs kid ready
+commit
+crash empty
+run
+expect-notice ChildCrashed count=1

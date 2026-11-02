@@ -1,0 +1,17 @@
+#scenario b46d81127489994d
+# Explicit efforts on start and resleeve survive the journal.
+spawn root /w/a effort=low
+run
+obs root ready
+stop root
+run
+expect root life=Stopped
+start root effort=high
+run
+obs root ready
+expect root effort=high
+resleeve root harness=claude effort=medium
+run
+obs root ready
+run
+expect root effort=medium

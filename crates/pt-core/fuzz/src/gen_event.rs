@@ -104,7 +104,7 @@ pub fn event(b: &mut Bytes) -> Event {
     let j = |b: &mut Bytes| JobId(b.u64());
     let a = |b: &mut Bytes| b.u64() as u32;
     use EventKind as E;
-    let kind = match b.below(32) {
+    let kind = match b.below(33) {
         0 => E::Spawn(SpawnSpec {
             request_id: b.string(),
             name: b.string(),
@@ -223,7 +223,11 @@ pub fn event(b: &mut Bytes) -> Event {
         25 => E::ArtifactsChecked {
             job: j(b),
             attempt: a(b),
-            result: match b.below(3) { 0 => ArtifactCheck::Verified, 1 => ArtifactCheck::Retryable, _ => ArtifactCheck::Permanent },
+            result: match b.below(3) {
+                0 => ArtifactCheck::Verified,
+                1 => ArtifactCheck::Retryable,
+                _ => ArtifactCheck::Permanent,
+            },
         },
         26 => E::Observed {
             sleeve: s(b),
@@ -245,10 +249,21 @@ pub fn event(b: &mut Bytes) -> Event {
             job: j(b),
             node: NodeId(b.u64()),
         },
-        _ => E::RequestApproval {
+        31 => E::RequestApproval {
             sleeve: s(b),
             ask: ask(b),
             timeout: b.u64(),
+        },
+        _ => E::ArtifactCollection {
+            job: j(b),
+            attempt: a(b),
+            refusals: (0..b.below(3))
+                .map(|_| ArtifactRefusal {
+                    path: b.string(),
+                    reason: b.string(),
+                })
+                .collect(),
+            incomplete: opt(b, |b| b.string()),
         },
     };
     Event { at, kind }

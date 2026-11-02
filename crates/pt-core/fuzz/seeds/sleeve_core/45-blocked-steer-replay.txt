@@ -1,0 +1,15 @@
+#scenario 174d2210f7d06557
+# A refused blocked steer stays refused when the command journal is replayed.
+spawn root /w/a harness=codex
+run
+obs root ready
+send root m1
+run
+obs root approval=t1
+expect root activity=Blocked
+send root steer1 steer
+expect-reply Refused
+expect-effect steer1 count=0
+commit
+crash empty
+run

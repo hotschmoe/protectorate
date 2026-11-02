@@ -1,0 +1,10 @@
+#scenario 0eb1cb53d9087d8b
+# An acknowledged turn with a native id warns after an unexpected exit.
+spawn root /w/a harness=codex
+run
+obs root ready
+send root m1
+run
+expect root activity=Working
+exit root
+expect-notice TurnNeedsPrompt count=1

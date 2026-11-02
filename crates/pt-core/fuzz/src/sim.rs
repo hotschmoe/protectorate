@@ -60,6 +60,7 @@ pub struct Sim {
     pub responses: BTreeMap<EffectId, Gen>,
     /// Intents of the most recent apply.
     pub last: Vec<Intent>,
+    pub notices: Vec<Notice>,
     pub steps: usize,
 }
 
@@ -87,6 +88,7 @@ impl Sim {
             resleeves: Vec::new(),
             responses: BTreeMap::new(),
             last: Vec::new(),
+            notices: Vec::new(),
             steps: 0,
         }
     }
@@ -101,6 +103,10 @@ impl Sim {
         );
         let prev = self.st.clone();
         let out = apply(&mut self.st, &e);
+        self.notices.extend(out.iter().filter_map(|i| match i {
+            Intent::Notify { notice, .. } => Some(notice.clone()),
+            _ => None,
+        }));
         if std::env::var_os("PT_TRACE").is_some() {
             eprintln!("{:>4} {:?}", self.log.len(), e.kind);
             for i in &out {
@@ -316,7 +322,11 @@ impl Sim {
                 self.apply(EventKind::ArtifactsChecked {
                     job,
                     attempt,
-                    result: if p.fetch % 2 == 0 { ArtifactCheck::Verified } else { ArtifactCheck::Retryable },
+                    result: if p.fetch % 2 == 0 {
+                        ArtifactCheck::Verified
+                    } else {
+                        ArtifactCheck::Retryable
+                    },
                 });
             }
             Intent::ReadLog { .. }
@@ -375,7 +385,7 @@ impl Sim {
             EffectKind::SendPrompt { .. }
             | EffectKind::Steer { .. }
             | EffectKind::RespondApproval { .. }
-            | EffectKind::Compact { .. } => match p.prompt % 4 {
+            | EffectKind::Compact { .. } => match p.prompt % 5 {
                 0 => {
                     self.apply(ack(Some(format!("turn-{}", effect.0))));
                 }
@@ -385,7 +395,10 @@ impl Sim {
                 2 => {
                     self.apply(lost);
                 }
-                _ => {}
+                3 => {}
+                _ => {
+                    self.apply(ack(None));
+                }
             },
             _ => match p.other % 3 {
                 0 => {
