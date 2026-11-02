@@ -318,10 +318,13 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   resleeves go to headless mode, walking the sleeve's ordered `resleeve_to` list (default
   `[pi_local]`). A third resleeve within an hour parks the sleeve.
 - **Auto-continue:** after a native resume of a headless turn that a crash ended, the core sends
-  one short continuation prompt, and at most one for that owner turn. A turn the continuation
-  itself started is not continued again; the owner and the parent get `TurnNeedsPrompt`. An owner
-  interrupt, or a guardrail that interrupts (silent, loop, turn wallclock), is not continued and
-  gets no warning, including when a protocol desync kills the sleeve during that interrupt.
+  one short continuation prompt, keyed to that owner turn. A turn gets at most one, across
+  generations: a second crash of the same turn does not send another, including after the resume
+  window, and an unsent continuation keeps its key when a later generation sends it. A later
+  owner message is a new turn and can be continued once. A turn the continuation itself started
+  is not continued again; the owner and the parent get `TurnNeedsPrompt`. An owner interrupt, or
+  a guardrail that interrupts (silent, loop, turn wallclock), is not continued and gets no
+  warning, including when a protocol desync kills the sleeve during that interrupt.
   The hub journals a `Continue` event and the effect is allocated only when that
   event is applied, so a journal recorded before the event existed replays to the same effects.
   It is not sent after a planned stop, a hub restart of an idle sleeve, or a manual resleeve (the

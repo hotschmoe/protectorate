@@ -1,0 +1,22 @@
+#scenario a15ce6592a82d10d
+# An unsent continuation is returned to the queue and sent on the next generation
+# under the same owner-turn key. That is not a second continuation.
+spawn root /w/a
+run
+obs root ready
+send root m1
+run
+expect root activity=Working
+exit root
+run
+obs root ready
+step 1
+expect root activity=Delivering
+exit root
+run
+obs root ready
+run
+expect root activity=Working
+expect-effect continue:0:1 state=Confirmed count=2
+expect-effect continue:* count=2
+expect-notice TurnNeedsPrompt count=0

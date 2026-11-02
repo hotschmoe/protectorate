@@ -74,7 +74,9 @@ A sleeve is named by its id or its name.
 Guardrails in code interrupt, resume, resleeve or park a sleeve that fails (quota exhausted,
 crash, silent, looping and so on). A third resleeve within an hour parks it; `sleeve list` shows
 the park reason. After a native resume of a headless turn that a crash ended, the hub sends one
-short continuation prompt, and not a second one for the turn that prompt started. An owner
+short continuation prompt for that owner turn, including when a later generation is the one that
+sends it. A second crash of the same turn does not send another, even after the ten-minute resume
+window, and a later owner message is a new turn with its own prompt. An owner
 interrupt, a guardrail interrupt, a desync during either of those, a planned stop, a restart of
 an idle sleeve, and a manual resleeve do not. A restart while the resumed incarnation is still booting still sends it. If
 that prompt cannot be sent, the event log says the turn will not continue on its own.

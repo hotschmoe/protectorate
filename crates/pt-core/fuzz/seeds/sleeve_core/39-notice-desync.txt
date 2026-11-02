@@ -1,4 +1,4 @@
-#scenario 5464bf4a4505c4d2
+#scenario 65e95768508c95d3
 # A desync of an acknowledged Grok turn with no native turn id continues once after resume.
 # An idle desync is not an interrupted turn, so it does not.
 spawn busy /w/a harness=grok
@@ -16,7 +16,7 @@ obs busy ready
 run
 expect busy activity=Working
 expect-notice TurnNeedsPrompt count=0
-expect-effect continue:0:2 state=Confirmed count=1
+expect-effect continue:0:1 state=Confirmed count=1
 spawn idle /w/b harness=grok
 run
 obs idle ready

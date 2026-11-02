@@ -215,13 +215,9 @@ impl Core<'_> {
         }
         s.guard.resumes.push(now);
         s.guard.state = GuardState::Resuming;
-        let keep = s.auto_continue.is_some();
+        // The debt is an owner-turn seq, so a new generation must not rewrite it.
         let target = s.target.clone();
         self.start_incarnation(sid, target, true);
-        if keep {
-            let g = self.st.sleeves[&sid].g;
-            self.sl(sid).auto_continue = Some(g);
-        }
     }
 
     /// Enters the resleeve path: Quiescing while the incarnation lives, else a forced capture.

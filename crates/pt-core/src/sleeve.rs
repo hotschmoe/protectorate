@@ -85,6 +85,7 @@ impl Core<'_> {
                 activity: Activity::Ended,
                 turn: None,
                 desync_during_turn: false,
+                turn_seq: 0,
                 auto_continue: None,
                 queue: VecDeque::new(),
                 steer_slot: None,
@@ -483,13 +484,16 @@ impl Core<'_> {
                 let s = &self.st.sleeves[&sid];
                 let resuming = interrupted_turn && s.guard.state == GuardState::Resuming;
                 let headless = s.target.mode == Mode::Headless;
+                let seq = s.turn_seq;
                 if resuming {
-                    // One continuation per owner turn: a turn this prompt started is not continued.
-                    if headless && !self.continued_this_turn(sid, g) {
-                        let g = self.st.sleeves[&sid].g;
-                        self.sl(sid).auto_continue = Some(g);
-                    } else {
-                        self.needs_prompt(sid);
+                    // One continuation per owner turn, whichever generation sends it.
+                    let state = (seq > 0).then(|| self.continue_state(sid, seq)).flatten();
+                    match (headless, state) {
+                        (true, None) if seq > 0 => self.sl(sid).auto_continue = Some(seq),
+                        (true, Some(MsgState::Queued)) => {
+                            // Fencing put the unsent prompt back. The next generation sends it.
+                        }
+                        _ => self.needs_prompt(sid),
                     }
                 }
             }
@@ -943,8 +947,10 @@ impl Core<'_> {
         let s = self.sl(sid);
         s.messages.get_mut(&r).expect("queued message").state = MsgState::InFlight(eff);
         s.activity = Activity::Delivering { effect: eff };
-        // A message of this generation continues the work, so the auto prompt is not also sent.
-        if s.auto_continue == Some(s.g) && !r.starts_with("continue:") {
+        // A continuation belongs to the turn already begun. Any other prompt starts the next one
+        // and supersedes a continuation that turn still owed.
+        if !r.starts_with("continue:") {
+            s.turn_seq += 1;
             s.auto_continue = None;
         }
     }
@@ -1203,7 +1209,7 @@ impl Core<'_> {
                 }
                 s.activity = Activity::Idle { seen: false };
                 s.turn = None;
-                if s.auto_continue == Some(s.g) {
+                if s.auto_continue == Some(s.turn_seq) {
                     s.auto_continue = None;
                 }
                 // Whatever the harness still asked in this turn went away with it.
@@ -1289,13 +1295,16 @@ impl Core<'_> {
         }
     }
 
-    /// The dying generation's turn was started by a continuation prompt.
-    fn continued_this_turn(&self, sid: SleeveId, g: Gen) -> bool {
-        let key = format!("continue:{}:{}", sid.0, g.0);
-        matches!(
-            self.st.sleeves[&sid].messages.get(&key).map(|m| &m.state),
-            Some(MsgState::InFlight(_) | MsgState::Delivered | MsgState::MayHaveApplied)
-        )
+    fn continue_key(sid: SleeveId, seq: u64) -> String {
+        format!("continue:{}:{}", sid.0, seq)
+    }
+
+    /// The continuation already issued for this owner turn, if any.
+    fn continue_state(&self, sid: SleeveId, seq: u64) -> Option<MsgState> {
+        self.st.sleeves[&sid]
+            .messages
+            .get(&Self::continue_key(sid, seq))
+            .map(|m| m.state)
     }
 
     /// The owner, and the parent when there is one, hear that nobody continued the turn.
@@ -1311,7 +1320,7 @@ impl Core<'_> {
     /// can still go out. Allocates nothing; the effect belongs to that later event.
     fn offer_auto_continue(&mut self, sid: SleeveId) {
         let s = &self.st.sleeves[&sid];
-        if s.auto_continue != Some(s.g) {
+        if s.auto_continue != Some(s.turn_seq) {
             return;
         }
         if !s.queue.is_empty() || matches!(s.activity, Activity::Delivering { .. }) {
@@ -1332,19 +1341,19 @@ impl Core<'_> {
         }
     }
 
-    /// Applies a journaled `Continue`. One prompt for the owed generation, or a warning when
+    /// Applies a journaled `Continue`. One prompt for the owed owner turn, or a warning when
     /// that prompt cannot be sent. A journal without this event allocates nothing.
     pub(crate) fn continue_turn(&mut self, sid: SleeveId, text: &str) {
         let Some(s) = self.st.sleeves.get(&sid) else {
             return;
         };
-        let Some(g) = s.auto_continue else {
+        let Some(seq) = s.auto_continue else {
             return;
         };
-        if g != s.g || text.is_empty() {
+        if seq != s.turn_seq || text.is_empty() {
             return;
         }
-        let key = format!("continue:{}:{}", sid.0, g.0);
+        let key = Self::continue_key(sid, seq);
         if s.messages.contains_key(&key)
             || !s.queue.is_empty()
             || matches!(s.activity, Activity::Delivering { .. })

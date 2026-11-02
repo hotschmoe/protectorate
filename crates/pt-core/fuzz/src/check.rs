@@ -344,11 +344,12 @@ pub fn step(prev: &State, st: &State, sim: &Sim) {
     invariants(st, sim);
 }
 
-/// At most one `continue:<sleeve>:<g>` prompt per generation, and only when the previous state
-/// owed it: a headless turn the previous generation was still running, not a stop or a resleeve.
+/// At most one live `continue:<sleeve>:<seq>` prompt per owner turn. An unsent one may be sent
+/// again, under the same key, after its generation dies. A new one is owed by the previous state
+/// or is that re-delivery.
 fn continue_prompts(prev: &State, st: &State, sim: &Sim) {
     for s in st.sleeves.values() {
-        let mut gens = BTreeSet::new();
+        let mut live = BTreeSet::new();
         for e in st.effects.values() {
             let EffectKind::SendPrompt {
                 sleeve,
@@ -362,47 +363,56 @@ fn continue_prompts(prev: &State, st: &State, sim: &Sim) {
             if *sleeve != s.id || !request_id.starts_with("continue:") {
                 continue;
             }
-            assert_eq!(
-                request_id,
-                &format!("continue:{}:{}", s.id.0, g.0),
-                "continue effect {} has a mismatched key",
-                e.key
-            );
-            assert!(
-                gens.insert(*g),
-                "two continue effects for {:?} g{}",
-                s.id,
-                g.0
-            );
+            let seq = continue_seq(s.id, request_id);
+            if e.state != EffectState::Abandoned {
+                assert!(
+                    live.insert(seq),
+                    "two continue effects for {:?} turn {seq}",
+                    s.id
+                );
+            }
             if prev.effects.contains_key(&e.id) {
                 continue;
             }
             let ps = &prev.sleeves[&s.id];
+            let redelivery = ps
+                .messages
+                .get(request_id)
+                .is_some_and(|m| m.state == MsgState::Queued);
+            assert!(
+                g.0 >= 2 && !sim.alive.contains(&(s.id, Gen(g.0 - 1))),
+                "continue for {:?} turn {seq} but generation {} did not die",
+                s.id,
+                g.0 - 1
+            );
+            if redelivery {
+                continue;
+            }
             assert_eq!(
                 ps.auto_continue,
-                Some(*g),
-                "continue for {:?} g{} without a debt from an interrupted turn",
-                s.id,
-                g.0
+                Some(seq),
+                "continue for {:?} turn {seq} without a debt from an interrupted turn",
+                s.id
             );
             assert_eq!(ps.target.mode, Mode::Headless);
             assert_eq!(
                 ps.life,
                 Life::Running,
-                "continue for {:?} g{} while {:?}",
+                "continue for {:?} turn {seq} while {:?}",
                 s.id,
-                g.0,
                 ps.life
-            );
-            assert!(
-                g.0 >= 2 && !sim.alive.contains(&(s.id, Gen(g.0 - 1))),
-                "continue for {:?} g{} but generation {} did not die",
-                s.id,
-                g.0,
-                g.0 - 1
             );
         }
     }
+}
+
+fn continue_seq(sid: SleeveId, request_id: &str) -> u64 {
+    let prefix = format!("continue:{}:", sid.0);
+    let Some(rest) = request_id.strip_prefix(&prefix) else {
+        panic!("continue effect key {request_id} is not {prefix}<seq>");
+    };
+    rest.parse()
+        .unwrap_or_else(|_| panic!("continue effect key {request_id} has no turn seq"))
 }
 
 /// A message whose prompt or steer record ended while still Intent (never dispatched) is back
