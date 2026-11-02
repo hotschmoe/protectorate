@@ -1865,14 +1865,7 @@ fn envoy_wait(c: &Ctx<'_>, r: api::EnvoyWaitRequest) -> Result<api::EnvoyReply> 
                 ErrorCode::Conflict,
                 format!("message {request_id} may or may not have reached Envoy"),
             ))),
-            MsgState::Delivered => {
-                // Published before this batch's intents run, so a crash can show Idle
-                // and Delivered while the continuation is still owed or only queued.
-                let owed =
-                    s.auto_continue.is_some() || s.queue.iter().any(|r| r.starts_with("continue:"));
-                let idle = matches!(s.activity, pt_core::Activity::Idle { .. }) && !owed;
-                answer(hub, id, &request_id, idle).map(Ok)
-            }
+            MsgState::Delivered => answer(hub, id, &request_id, s.settled_idle()).map(Ok),
             _ => None,
         }
     });
@@ -1902,9 +1895,7 @@ fn reached(state: &State, id: SleeveId, until: api::WaitUntil) -> bool {
     let Some(s) = state.sleeve(id) else {
         return false;
     };
-    let idle = matches!(s.activity, pt_core::Activity::Idle { .. })
-        && s.queue.is_empty()
-        && s.life == Life::Running;
+    let idle = s.settled_idle();
     match until {
         api::WaitUntil::Idle => idle,
         api::WaitUntil::Done => idle && s.activity == (pt_core::Activity::Idle { seen: false }),

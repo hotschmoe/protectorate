@@ -112,6 +112,18 @@ pub struct Sleeve {
     pub d9: bool,
 }
 
+impl Sleeve {
+    /// Running and idle with nothing left to send: no queued message, no continuation still
+    /// owed (the executor journals it in a later batch), and no post-restart probe pending.
+    pub fn settled_idle(&self) -> bool {
+        self.life == Life::Running
+            && matches!(self.activity, Activity::Idle { .. })
+            && self.queue.is_empty()
+            && self.auto_continue.is_none()
+            && !self.probing
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Receipt {
     pub scope: String,
