@@ -295,17 +295,20 @@ the same dispatch code. There are no external sources such as email, calendar or
     refused and the hub does not start. Exactly 1 MiB is allowed. A missing key keeps
     the default. Each sleeve has that budget, and so
     does each source. The budget counts each doc's source text plus a per-doc overhead (its
-    session, source, tool, paths, and a fixed header). Past a source's budget, that source
-    drops its oldest docs.
-    Past a sleeve's budget, the oldest docs of that sleeve are dropped, whichever of its logs
-    they came from, and the newest lines stay. A full sleeve does not stop the others.
+    session, source, tool, paths, and a fixed header). An unsleeved source drops its own
+    oldest docs once it is past the budget. A sleeved source does not: past a sleeve's
+    budget, the oldest docs of that sleeve are dropped, whichever of its logs they came
+    from. Newest means ingest order. A rebuild ingests each sleeve's files oldest first,
+    by mtime, so an older log is not ranked above a newer session. A full sleeve does not
+    stop the others.
     `doctor` and `hub info` report `history capped: <sleeve id>` once eviction has dropped
     any of that sleeve's docs. The name stays while the sleeve is under the same budget.
-    It leaves when that sleeve's sources are gone, or when a later start finds the total
-    under a raised budget. The set is filled when the index opens. A commit writes the manifest when the index changed. It removes
+    It leaves when that sleeve is removed, when its sources are gone, or when a later start
+    finds the total under a raised budget. The set is filled when the index opens. A commit writes the manifest when the index changed. It removes
     segments whose docs are all dead in their own manifest update, and deletes those files
-    only after that rename. It then rewrites a segment that is at least half dead in a later
-    manifest update; the old file goes after that rename. A rewrite failure leaves the
+    only after that rename. It then rewrites a segment whose dead bytes are at least its
+    live bytes, and some docs are still live, in a later manifest update; the old file goes
+    after that rename. A rewrite failure leaves the
     dead-segment removal in place. A failed commit removes the segment files that attempt
     created, and the hub retries it with backoff. Opening an index removes segment files the
     manifest does not name, warns when it does that because the manifest is missing, and

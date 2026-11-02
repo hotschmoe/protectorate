@@ -15,7 +15,7 @@ use std::thread;
 use std::time::Duration;
 
 use pt_api::Harness as ApiHarness;
-use pt_core::{Proc, Sleeve, SleeveId};
+use pt_core::{Life, Proc, Sleeve, SleeveId};
 use pt_drivers::{Entry, Harness};
 use pt_history::{ContextUsage, Doc, Filters, Hit, Index, Query, Selector, Source, SourceKind};
 
@@ -84,8 +84,9 @@ struct Passes {
 pub struct History {
     ix: Mutex<Result<Index, String>>,
     /// Sleeve ids at the history budget. Copied out of the index at open and after each
-    /// catch-up, so a reader does not take the index lock. A sleeve leaves the set once it
-    /// is back under the budget.
+    /// catch-up, so a reader does not take the index lock. A sleeve leaves the set when it
+    /// is removed, when its sources are gone, or when a later open finds the total under a
+    /// raised budget.
     capped: Mutex<BTreeSet<String>>,
     /// The sleeve kind each native session ran as (the drivers say only `pi`).
     harnesses: Mutex<HashMap<String, ApiHarness>>,
@@ -216,9 +217,25 @@ impl History {
         let view = hub.view();
         let mut changed = false;
         for s in view.state.sleeves.values() {
+            if s.life == Life::Removed {
+                continue;
+            }
             if only.is_none_or(|o| o == s.id) {
                 changed |= self.sleeve_pass(hub, &mut p, s);
             }
+        }
+        // A pass that started before the removal can mark the sleeve again. Clear from
+        // the view published since, before this pass copies the set out.
+        let removed_now: Vec<String> = hub
+            .view()
+            .state
+            .sleeves
+            .values()
+            .filter(|s| s.life == Life::Removed)
+            .map(|s| s.id.0.to_string())
+            .collect();
+        for id in &removed_now {
+            self.uncap_sleeve(id);
         }
         let mut failed = false;
         if let Ok(ix) = &mut *lock(&self.ix)
@@ -239,6 +256,17 @@ impl History {
             self.sync_capped(&ix.capped_sleeves());
         }
         failed
+    }
+
+    /// Drops a removed sleeve from the capped set. The index lock is taken before the
+    /// capped set, same as [`Self::sync_capped`]. Docs stay.
+    pub fn uncap_sleeve(&self, id: &str) {
+        if let Ok(ix) = &mut *lock(&self.ix) {
+            ix.clear_sleeve_cap(id);
+            lock(&self.capped).remove(id);
+        } else {
+            lock(&self.capped).remove(id);
+        }
     }
 
     /// Replaces the named set with `now`. A sleeve that was not named warns once.
@@ -356,6 +384,18 @@ impl History {
         t.skip = skip;
         t.limit = hold;
         sources.push(t);
+        // Oldest file first. Newest means ingest order, so a rebuild must not rank an
+        // older log above a newer session. A missing mtime sorts first.
+        sources.sort_by(|a, b| {
+            let mtime = |p: &Path| {
+                p.metadata()
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH)
+            };
+            mtime(&a.path)
+                .cmp(&mtime(&b.path))
+                .then_with(|| a.path.cmp(&b.path))
+        });
         let mut changed = false;
         for src in &sources {
             let got = match &mut *lock(&self.ix) {

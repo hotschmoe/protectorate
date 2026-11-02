@@ -211,15 +211,16 @@ including 0, is a config error and the hub does not start. Exactly 1 MiB is allo
 missing key keeps the default. Each sleeve, and each
 log, may keep that many bytes. That counts each doc's source text plus a
 per-doc overhead, so a flood of tiny docs stays inside the budget. Past a sleeve's budget the index
-keeps the newest lines across that sleeve's logs; past a log's own budget it keeps that
-log's newest lines. `hub info` and `doctor` report `history capped: <sleeve id>` once eviction has dropped
+keeps the newest lines across that sleeve's logs. Newest means the order they were ingested.
+A rebuild reads each sleeve's files oldest first, by mtime. An unsleeved log still keeps its
+own newest lines once it is past the budget. `hub info` and `doctor` report `history capped: <sleeve id>` once eviction has dropped
 any of that sleeve's docs. The name stays while the sleeve is under the same budget, including
-across a restart. It leaves when that sleeve's sources are gone, or when a later start finds
-the total under a raised budget. Other sleeves are unaffected. A commit writes the
+across a restart. It leaves when that sleeve is removed, when its sources are gone, or when a
+later start finds the total under a raised budget. Other sleeves are unaffected. A commit writes the
 manifest when the index changed. It removes segments whose docs are all dead in their own
 manifest update, and deletes those files only after that rename. It then rewrites a segment
-that is at least half dead in a later manifest update, and deletes the old file after that
-rename. A rewrite failure leaves the dead-segment removal in place. Opening the index removes
+whose dead bytes are at least its live bytes, with some docs still live, and deletes the old
+file after that rename. A rewrite failure leaves the dead-segment removal in place. Opening the index removes
 segment files the manifest does not name, warns when the manifest itself is missing, and
 warns and still opens when reclaim fails.
 

@@ -831,13 +831,15 @@ Each entry: where, what was done, what right looks like.
 - **History keeps a sleeve's newest lines** (`pt-history`, index.rs): each sleeve and each
   source may keep `history_budget_bytes` (default 1 GiB), counting each doc's source text
   plus its per-doc overhead. The hub reads that key once, at start. A value under
-  1 MiB, including 0, is a config error. Exactly 1 MiB is allowed. Past a
-  source's budget, that source's oldest docs go.
+  1 MiB, including 0, is a config error. Exactly 1 MiB is allowed. An unsleeved
+  source drops its own oldest docs past the budget. A sleeved source does not.
   Past a sleeve's budget, the oldest docs of that sleeve go, from any of its logs, so a new
-  session still gets indexed. `doctor` / `hub info` name each capped sleeve (`history capped: <id>`)
+  session still gets indexed. Newest means ingest order. A rebuild ingests each sleeve's
+  files oldest first, by mtime. `doctor` / `hub info` name each capped sleeve (`history capped: <id>`)
   once eviction has dropped any of its docs. The name stays under the same budget and leaves
-  when that sleeve's sources are gone, or when a later start finds the total under a raised
-  budget. A sleeve at its
+  when that sleeve is removed, when its sources are gone, or when a later start finds the
+  total under a raised budget. A segment is rewritten when its dead bytes are at least its
+  live bytes and some docs are still live. A sleeve at its
   budget does not stop the others. There is no cap across all sleeves. The measured ratio is
   1 GiB of logs to 11 MB of index.
   Right: raise the caps if a real log needs more of the index.

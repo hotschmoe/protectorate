@@ -640,9 +640,9 @@ impl Index {
         self.sleeves.get(sleeve).map(|s| s.total).unwrap_or(0)
     }
 
-    /// Drops older docs until `stored` is within its own budget and its sleeve is within
-    /// the sleeve budget. Sleeve eviction takes the oldest doc of any of that sleeve's
-    /// sources. False when `keep` itself cannot fit.
+    /// Drops older docs until the budget holds. A sleeved source loses the oldest doc of
+    /// the sleeve, from any of its logs. An unsleeved source loses its own oldest doc.
+    /// False when `keep` itself cannot fit.
     fn fit(
         &mut self,
         stored: &str,
@@ -654,11 +654,13 @@ impl Index {
         if need > self.budget {
             return false;
         }
-        while self.kept_of(stored) > self.budget {
-            if !self.drop_oldest_except(stored, keep) {
-                return false;
+        if sleeve.is_none() {
+            while self.kept_of(stored) > self.budget {
+                if !self.drop_oldest_except(stored, keep) {
+                    return false;
+                }
+                *dropped = true;
             }
-            *dropped = true;
         }
         if let Some(sleeve) = sleeve {
             while self.sleeve_kept(sleeve) > self.budget {
@@ -975,11 +977,12 @@ impl Index {
         write_atomic(&self.dir, &self.dir.join(MANIFEST), text.as_bytes())
     }
 
-    /// Removes segments whose docs are all dead, then rewrites one that is at least half
-    /// dead. Each half is its own manifest commit. Dead files are deleted only after their
-    /// manifest is durable, and a later rewrite failure does not put them back. New rewrite
-    /// files are written first; the old file goes after that rename. A crash before a rename
-    /// keeps the previous manifest, and the next open sweeps files it does not name.
+    /// Removes segments whose docs are all dead, then rewrites one whose dead bytes are at
+    /// least its live bytes. Each half is its own manifest commit. Dead files are deleted
+    /// only after their manifest is durable, and a later rewrite failure does not put them
+    /// back. New rewrite files are written first; the old file goes after that rename. A
+    /// crash before a rename keeps the previous manifest, and the next open sweeps files
+    /// it does not name.
     fn reclaim(&mut self) -> io::Result<()> {
         self.drop_dead_segments()?;
         self.rewrite_half_dead()
@@ -1015,15 +1018,15 @@ impl Index {
         Ok(())
     }
 
-    /// Rewrites a segment whose dead docs are at least half of its docs. A write or
-    /// manifest failure drops only the new files. Segments already removed as fully dead
-    /// stay removed.
+    /// Rewrites a segment whose dead bytes are at least its live bytes, and which still
+    /// has a live doc. A write or manifest failure drops only the new files. Segments
+    /// already removed as fully dead stay removed.
     fn rewrite_half_dead(&mut self) -> io::Result<()> {
         let plan: Vec<usize> = self
             .segs
             .iter()
             .enumerate()
-            .filter(|(_, s)| segment_half_dead(s, |m| self.live(m)))
+            .filter(|(_, s)| segment_half_dead(s, |m| self.live(m), |m| self.doc_charge(m)))
             .map(|(i, _)| i)
             .collect();
         if plan.is_empty() {
@@ -1290,11 +1293,33 @@ impl Index {
     }
 
     /// Sleeve ids eviction has dropped a doc from. The name stays while the sleeve is under
-    /// the same budget. It leaves when that sleeve's sources are gone, or when a later open
-    /// finds the total under a raised budget. Readers of the hub copy this set out so
-    /// `doctor` does not take the index lock.
+    /// the same budget. It leaves when that sleeve is removed, when its sources are gone,
+    /// or when a later open finds the total under a raised budget. Readers of the hub copy
+    /// this set out so `doctor` does not take the index lock.
     pub fn capped_sleeves(&self) -> Vec<String> {
         self.capped_ids.iter().cloned().collect()
+    }
+
+    /// Clears the capped name for a sleeve that was removed. Docs stay. Sets `dirty` when
+    /// a flag or the name actually changed, so the next commit records it.
+    pub fn clear_sleeve_cap(&mut self, sleeve: &str) {
+        let keys: Vec<String> = self
+            .members
+            .get(sleeve)
+            .map(|keys| keys.iter().cloned().collect())
+            .unwrap_or_default();
+        let mut changed = self.capped_ids.remove(sleeve);
+        for key in keys {
+            if let Some(s) = self.sources.get_mut(&key)
+                && s.capped
+            {
+                s.capped = false;
+                changed = true;
+            }
+        }
+        if changed {
+            self.dirty = true;
+        }
     }
 
     fn bind_members(&mut self) {
@@ -1487,14 +1512,25 @@ fn segment_fully_dead(s: &Seg, mut live: impl FnMut(&Meta) -> bool) -> bool {
     n == 0 || s.docs.iter().filter(|m| !live(m)).count() == n
 }
 
-/// At least half the docs are dead, and at least one doc is still live.
-fn segment_half_dead(s: &Seg, mut live: impl FnMut(&Meta) -> bool) -> bool {
-    let n = s.docs.len();
-    if n == 0 {
-        return false;
+/// Dead bytes are at least the live bytes, and some live bytes remain. A segment whose
+/// docs are all dead is deleted instead. The charge is the indexed byte charge, not the
+/// token count stored on the doc.
+fn segment_half_dead(
+    s: &Seg,
+    mut live: impl FnMut(&Meta) -> bool,
+    mut charge: impl FnMut(&Meta) -> u64,
+) -> bool {
+    let mut dead = 0u64;
+    let mut alive = 0u64;
+    for m in &s.docs {
+        let c = charge(m);
+        if live(m) {
+            alive = alive.saturating_add(c);
+        } else {
+            dead = dead.saturating_add(c);
+        }
     }
-    let dead = s.docs.iter().filter(|m| !live(m)).count();
-    dead < n && dead >= n - dead
+    alive > 0 && dead >= alive
 }
 
 fn flush_limit() -> usize {
