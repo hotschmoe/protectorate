@@ -194,8 +194,9 @@ job artifact <job> <path> [--out FILE]
   abandoned 24 hours after it is first lost, including when collection keeps restarting.
   The owner hears about that loss once; a later drop in the same episode does not alarm again.
 - `job run --wait` prints the log and exits with the job's code. A hub that cannot be reached is
-  retried for about 60 seconds, including across a restart or `hub update`; it then exits 6,
-  naming the job id. When the job has no process exit code, the hub's own result is 3 for
+  retried for about 60 seconds, including across a restart or `hub update`, and the same retry
+  covers the log read after the job ends. It then exits 6, naming the job id. A refusal is not
+  retried. When the job has no process exit code, the hub's own result is 3 for
   interrupted, 5 for lost, and 1 for cancelled, abandoned, or failed without a code. A failed
   job still returns its own code, so a job that itself exits 3, 5, or 6 shares that number; the
   message names which one it was.

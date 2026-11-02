@@ -850,30 +850,47 @@ fn wait_job(c: &Client, mut job: api::Job) -> Result<(), Fail> {
         eprintln!("inspect later with `protectorate job show {}`", job.id);
     }
     let mut offset = 0;
+    // Same window as the status poll above. A refusal is the hub's answer, so it is not retried.
+    let mut unreachable: Option<Instant> = None;
     loop {
-        let log = c
-            .call::<m::GetJobLog>(&api::GetJobLogRequest {
-                job_id: job.id.clone(),
-                offset,
-                limit: Some(1 << 20),
-            })
-            .map_err(|e| {
-                Fail::Other(format!(
+        match c.call::<m::GetJobLog>(&api::GetJobLogRequest {
+            job_id: job.id.clone(),
+            offset,
+            limit: Some(1 << 20),
+        }) {
+            Ok(log) => {
+                unreachable = None;
+                print!("{}", log.text);
+                if log.eof || (job.state == S::Lost && log.next_offset <= offset) {
+                    break;
+                }
+                if log.next_offset <= offset {
+                    return Err(Fail::Other(format!(
+                        "job {}: log stopped at {offset}",
+                        job.id
+                    )));
+                }
+                offset = log.next_offset;
+            }
+            Err(Fail::Api(e)) => {
+                return Err(Fail::Other(format!(
                     "job {}: cannot read the log ({e}); inspect with `protectorate job log {}`",
                     id.job_id, id.job_id
-                ))
-            })?;
-        print!("{}", log.text);
-        if log.eof || (job.state == S::Lost && log.next_offset <= offset) {
-            break;
+                )));
+            }
+            Err(e) => {
+                let since = unreachable.get_or_insert_with(Instant::now);
+                if since.elapsed() >= Duration::from_secs(60) {
+                    let msg = format!(
+                        "job {}: cannot read the log ({e}); it may be restarting; inspect with `protectorate job log {}`",
+                        id.job_id, id.job_id
+                    );
+                    eprintln!("error: {msg}");
+                    return Err(Fail::Exit(6));
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
         }
-        if log.next_offset <= offset {
-            return Err(Fail::Other(format!(
-                "job {}: log stopped at {offset}",
-                job.id
-            )));
-        }
-        offset = log.next_offset;
     }
     if job.state == S::Succeeded {
         return Ok(());
