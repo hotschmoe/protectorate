@@ -1,7 +1,6 @@
-use super::{CpuInfo, OsInfo, parallelism};
-use crate::clean;
+use super::info::{CpuInfo, CpuTimes, Mem, OsInfo, parallelism};
 use crate::exec;
-use crate::sample::{CpuTimes, Mem};
+use crate::text::clean;
 use pt_frame::msg::{Disk, Gpu, Toolchain};
 use std::collections::BTreeSet;
 use std::fs;

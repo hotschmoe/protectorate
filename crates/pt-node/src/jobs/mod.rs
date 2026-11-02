@@ -30,6 +30,8 @@ use pt_frame::msg::{
     self, ArtifactEnd, ErrorCode, JobInfo, JobState, LogEnd, OnPresent, PresenceState, SubmitJob,
 };
 
+use crate::clock::unix_now;
+pub use crate::job_error::JobError;
 use crate::presence::{Detector, Gate, job_gate};
 use crate::sys::{Isolator, Orphan, Proc, Receipt};
 use journal::{Entry, Journal};
@@ -42,21 +44,6 @@ const DRAIN: Duration = Duration::from_secs(5);
 const MAX_ID: usize = 64;
 const MAX_ARGS_BYTES: usize = 256 << 10;
 const MAX_ENV: usize = 256;
-
-#[derive(Debug)]
-pub struct JobError {
-    pub code: ErrorCode,
-    pub message: String,
-}
-
-impl JobError {
-    pub(crate) fn new(code: ErrorCode, message: impl Into<String>) -> JobError {
-        JobError {
-            code,
-            message: message.into(),
-        }
-    }
-}
 
 pub struct Options {
     /// Linux: allow systemd scopes (a trial run still decides).
@@ -215,7 +202,7 @@ impl Runner {
                 reason: Some(reason.into()),
                 log_bytes,
                 log_truncated: log_bytes >= job.log_cap,
-                at: crate::unix_now(),
+                at: unix_now(),
             };
             t.journal.append(&entry).map_err(|e| e.to_string())?;
             apply_end(&mut job.info, &entry);
@@ -254,7 +241,7 @@ impl Runner {
                 ))
             })?;
         }
-        let now = crate::unix_now();
+        let now = unix_now();
         t.journal
             .append(&Entry::Submit {
                 spec: spec.clone(),
@@ -281,7 +268,7 @@ impl Runner {
                     start_time: r.start_time,
                     scope: r.scope.clone(),
                     isolation: self.inner.isolator.kind(),
-                    at: crate::unix_now(),
+                    at: unix_now(),
                 };
                 // The process already runs: a failed receipt is logged, never a reason to stop.
                 if let Err(e) = t.journal.append(&entry) {
@@ -314,7 +301,7 @@ impl Runner {
                     reason: Some(format!("start failed: {e}")),
                     log_bytes: 0,
                     log_truncated: false,
-                    at: crate::unix_now(),
+                    at: unix_now(),
                 };
                 if let Err(e) = t.journal.append(&entry) {
                     eprintln!("protectorate-node: {e}");
@@ -461,7 +448,7 @@ impl Runner {
             reason,
             log_bytes: live.log_bytes.load(Ordering::SeqCst),
             log_truncated: live.log_truncated.load(Ordering::SeqCst),
-            at: crate::unix_now(),
+            at: unix_now(),
         };
         let mut t = self.table();
         if let Err(e) = t.journal.append(&entry) {
@@ -484,7 +471,7 @@ impl Runner {
         let entry = Entry::Lowered {
             job_id: key.0.clone(),
             attempt: key.1,
-            at: crate::unix_now(),
+            at: unix_now(),
         };
         if let Err(e) = t.journal.append(&entry) {
             eprintln!("protectorate-node: {e}");
@@ -537,7 +524,7 @@ impl Runner {
             let entry = Entry::Cancel {
                 job_id: job_id.to_string(),
                 attempt,
-                at: crate::unix_now(),
+                at: unix_now(),
             };
             t.journal.append(&entry).map_err(internal)?;
             job.info.state = JobState::Cancelling;
@@ -574,7 +561,7 @@ impl Runner {
             .append(&Entry::Collected {
                 job_id: job_id.to_string(),
                 attempt,
-                at: crate::unix_now(),
+                at: unix_now(),
             })
             .map_err(internal)?;
         t.jobs.remove(&key);

@@ -2,8 +2,8 @@
 //! created suspended and assigned before its first instruction, so no child escapes the job.
 //! Jobs run as the agent's account, LocalSystem under the service (REVISIT: runner account).
 
+use super::receipt::{Orphan, Receipt};
 use super::win32::{self, Job};
-use super::{Orphan, Receipt};
 use pt_frame::msg::{Isolation, SubmitJob};
 use std::io;
 use std::os::windows::process::CommandExt;

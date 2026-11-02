@@ -4,7 +4,7 @@
 
 use super::win32::{self, Job};
 use super::win32_proc::{self, Spawn, Token};
-use crate::presence::{Config, Observation, Session};
+use crate::probe::{Config, Observation, Session};
 use std::fs::File;
 use std::io::Read;
 use std::sync::mpsc;

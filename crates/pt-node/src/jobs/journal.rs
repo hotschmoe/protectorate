@@ -7,6 +7,8 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
+use crate::clock::unix_now;
+use crate::id::random_id;
 use pt_frame::msg::{Isolation, JobState, SubmitJob};
 use pt_json::{ToJson, tagged_enum};
 
@@ -59,7 +61,7 @@ impl Journal {
     pub fn open(path: &Path) -> Result<Opened, String> {
         let ctx = |what: &str, e: io::Error| format!("journal {}: {what}: {e}", path.display());
         if !path.exists() {
-            let epoch = crate::random_id();
+            let epoch = random_id();
             let mut journal = Journal {
                 path: path.to_path_buf(),
                 file: OpenOptions::new()
@@ -71,7 +73,7 @@ impl Journal {
             journal
                 .append(&Entry::Epoch {
                     epoch: epoch.clone(),
-                    created_at: crate::unix_now(),
+                    created_at: unix_now(),
                 })
                 .map_err(|e| ctx("writing the epoch", e))?;
             sync_dir(path).map_err(|e| ctx("syncing its directory", e))?;

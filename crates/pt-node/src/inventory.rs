@@ -1,4 +1,6 @@
-use crate::{clean, exec, sys};
+use crate::clock::unix_now;
+use crate::text::clean;
+use crate::{exec, sys};
 use pt_frame::msg::{Inventory, Toolchain};
 use std::time::Duration;
 
@@ -14,7 +16,7 @@ pub fn collect() -> Inventory {
         (tc.join().unwrap_or_default(), gpus)
     });
     Inventory {
-        collected_at: crate::unix_now(),
+        collected_at: unix_now(),
         hostname: clean(&sys::hostname(), NAME_MAX),
         os_name: clean(&os.name, NAME_MAX),
         os_version: clean(&os.version, NAME_MAX),

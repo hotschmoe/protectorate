@@ -2,7 +2,7 @@
 //! (root, or the `input` group). logind alone is a snapshot; evdev needs a long-lived Detector.
 
 use crate::exec;
-use crate::presence::{Config, Observation, Session};
+use crate::probe::{Config, Observation, Session};
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{ErrorKind, Read};

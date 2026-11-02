@@ -1,7 +1,7 @@
-use super::{CpuInfo, OsInfo, parallelism, win32};
-use crate::clean;
+use super::info::{CpuInfo, CpuTimes, Mem, OsInfo, parallelism};
+use super::win32;
 use crate::exec;
-use crate::sample::{CpuTimes, Mem};
+use crate::text::clean;
 use pt_frame::msg::{Disk, Gpu, Toolchain};
 use std::io;
 use std::time::Duration;

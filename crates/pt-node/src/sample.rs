@@ -1,20 +1,8 @@
+use crate::clock::unix_now;
 use crate::sys;
+pub use crate::sys::{CpuTimes, Mem};
 use pt_frame::msg::Sample;
 use std::time::Duration;
-
-/// Cumulative CPU time counters; only ratios between two readings mean anything.
-#[derive(Clone, Copy)]
-pub struct CpuTimes {
-    pub busy: u64,
-    pub total: u64,
-}
-
-pub struct Mem {
-    pub total: u64,
-    pub available: u64,
-    pub swap_total: u64,
-    pub swap_free: u64,
-}
 
 /// Keeps the previous CPU reading so a long-running node gets a delta per sample.
 #[derive(Default)]
@@ -48,7 +36,7 @@ impl Sampler {
         };
         let mem = sys::memory();
         Sample {
-            taken_at: crate::unix_now(),
+            taken_at: unix_now(),
             cpu_percent,
             load: sys::load_avg().map(|l| l.iter().copied().map(round2).collect()),
             mem_total_bytes: mem.as_ref().map(|m| m.total),

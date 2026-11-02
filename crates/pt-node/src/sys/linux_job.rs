@@ -3,8 +3,8 @@
 //! work here (REVISIT). Either way the job leads its own process group, so a signal reaches the
 //! whole tree; a scope also catches processes that leave the group.
 
-use super::linux::ffi;
-use super::{Orphan, Receipt};
+use super::linux::{ffi, lower_to_idle};
+use super::receipt::{Orphan, Receipt};
 use crate::exec;
 use pt_frame::msg::{Isolation, SubmitJob};
 use std::fs;
@@ -204,11 +204,11 @@ impl Proc {
     /// Nice 19 and idle I/O for the tree, and for every process in the scope.
     pub fn lower(&mut self) -> io::Result<()> {
         let pid = self.child.id();
-        let result = super::lower_to_idle(pid);
+        let result = lower_to_idle(pid);
         if self.scope.is_some() {
             for p in cgroup_members(pid) {
                 if p != pid {
-                    let _ = super::lower_to_idle(p);
+                    let _ = lower_to_idle(p);
                 }
             }
         }

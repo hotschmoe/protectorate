@@ -10,7 +10,7 @@ use std::path::{Component, Path, PathBuf};
 
 use pt_frame::msg::{self, ErrorCode};
 
-use crate::jobs::JobError;
+use crate::job_error::JobError;
 
 fn bad(m: String) -> JobError {
     JobError::new(ErrorCode::BadRequest, m)

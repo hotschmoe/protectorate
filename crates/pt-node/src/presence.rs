@@ -1,6 +1,9 @@
 //! Human presence at the machine (SPEC 3.5). Only local seat input and lock state count; remote
 //! logins never do.
 
+use crate::clock::unix_now;
+pub use crate::probe::Config;
+use crate::probe::Session;
 use crate::sys;
 use pt_frame::msg::{Presence, PresenceState as State};
 use std::path::PathBuf;
@@ -9,23 +12,6 @@ use std::path::PathBuf;
 /// AWAY or UNKNOWN, re-read at every detection, which then replaces the platform probe (source
 /// `test-override`). A missing or unreadable file reads as UNKNOWN. Only the e2e tests set it.
 pub const OVERRIDE_ENV: &str = "PROTECTORATE_NODE_TEST_PRESENCE";
-
-#[derive(Clone, Copy)]
-pub struct Config {
-    /// Idle seconds at or above which a person counts as away.
-    pub away_after_secs: u64,
-    /// A locked screen counts as away once idle this long (a person who just locked is still there).
-    pub locked_grace_secs: u64,
-}
-
-impl Default for Config {
-    fn default() -> Config {
-        Config {
-            away_after_secs: 600,
-            locked_grace_secs: 60,
-        }
-    }
-}
 
 /// One JSON line, `{"session":N,"idle_ms":M}`, for the caller's own session: what the
 /// Windows service reads from `idle-probe`, which it starts inside the console session.
@@ -55,23 +41,6 @@ pub fn job_gate(p: &Presence) -> Gate {
             p.source, p.detail
         )),
     }
-}
-
-pub(crate) enum Session {
-    Failed,
-    Absent,
-    Present,
-}
-
-/// What a platform probe saw, before the threshold policy is applied.
-pub(crate) struct Observation {
-    pub session: Session,
-    /// Seconds since the last local input; a lower bound when the probe only watched for a while.
-    pub idle_secs: Option<u64>,
-    pub locked: Option<bool>,
-    pub source: &'static str,
-    pub detail: String,
-    pub alt_idle_secs: Option<u64>,
 }
 
 pub struct Detector {
@@ -114,7 +83,7 @@ impl Detector {
             detail: o.detail,
             alt_idle_secs: o.alt_idle_secs,
             away_after_secs: cfg.away_after_secs,
-            sampled_at: crate::unix_now(),
+            sampled_at: unix_now(),
         }
     }
 
@@ -133,7 +102,7 @@ impl Detector {
             detail: format!("{OVERRIDE_ENV}={}", path.display()),
             alt_idle_secs: None,
             away_after_secs: self.cfg.away_after_secs,
-            sampled_at: crate::unix_now(),
+            sampled_at: unix_now(),
         }
     }
 }
