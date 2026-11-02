@@ -1,10 +1,10 @@
 //! The fuzz targets' driver: protocol mappers fed arbitrary harness lines and calls, with the
 //! event-stream invariants the hub relies on checked after every step.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::emit::{MAX_BLOCK, Out};
-use crate::event::{AckKind, Decision, Entry, Event, Harness, PromptKind};
+use crate::event::{AckKind, Decision, Entry, Event, Harness, PromptKind, Stop};
 use crate::plan::plan;
 use crate::protocol::Protocol;
 use crate::session;
@@ -21,12 +21,22 @@ use crate::spec::{Permission, SpawnSpec};
 pub fn fuzz_feed(harness: Harness, input: &[u8]) -> usize {
     let mut spec = SpawnSpec::new(harness, "harness", "/work");
     let mut lines = input.split(|b| *b == b'\n').peekable();
+    let mut checked = false;
     if let Some(header) = lines.next_if(|l| l.first() == Some(&b'#')) {
         for word in String::from_utf8_lossy(&header[1..]).split_whitespace() {
             if let Some(id) = word.strip_prefix("resume=") {
                 spec.resume = Some(id.to_owned());
             } else if word == "supervised" && harness != Harness::Pi {
                 spec.permission = Permission::Supervised;
+            } else if let Some(hash) = word.strip_prefix("check=") {
+                let body = input
+                    .iter()
+                    .position(|b| *b == b'\n')
+                    .map_or(&[][..], |i| &input[i + 1..]);
+                let actual = body.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+                    (h ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3)
+                });
+                checked = u64::from_str_radix(hash, 16).ok() == Some(actual);
             }
         }
     }
@@ -72,6 +82,65 @@ pub fn fuzz_feed(harness: Harness, input: &[u8]) -> usize {
                     }
                     false
                 }
+                "expect" => {
+                    if checked && harness == Harness::Claude {
+                        match arg {
+                            "foreign-started" => assert_eq!(
+                                (
+                                    check.foreign_started,
+                                    check.foreign_settled,
+                                    check.confirmed.len()
+                                ),
+                                (1, 0, 0)
+                            ),
+                            "foreign-settled" => assert_eq!(
+                                (
+                                    check.foreign_started,
+                                    check.foreign_settled,
+                                    check.confirmed.len()
+                                ),
+                                (1, 1, 0)
+                            ),
+                            "echo-behind-foreign" => assert_eq!(
+                                (
+                                    check.foreign_started,
+                                    check.foreign_settled,
+                                    check.confirmed.len(),
+                                    check.started.len()
+                                ),
+                                (1, 0, 1, 0)
+                            ),
+                            "echoed-turn-started" => assert_eq!(
+                                (
+                                    check.foreign_settled,
+                                    check.confirmed.len(),
+                                    check.started.len()
+                                ),
+                                (1, 1, 1)
+                            ),
+                            "foreign-interrupted" => assert_eq!(check.foreign_cancelled, 1),
+                            "own-not-interrupted" => assert_eq!(check.own_cancelled, 0),
+                            "prompt-confirmed" => assert_eq!(
+                                (
+                                    check.foreign_settled,
+                                    check.confirmed.len(),
+                                    check.own_settled
+                                ),
+                                (1, 1, 0)
+                            ),
+                            "own-settled" => assert_eq!(
+                                (
+                                    check.foreign_settled,
+                                    check.confirmed.len(),
+                                    check.own_settled
+                                ),
+                                (1, 1, 1)
+                            ),
+                            _ => panic!("unknown checked expectation {arg}"),
+                        }
+                    }
+                    false
+                }
                 _ => false,
             };
             if sent && matches!(verb, "send" | "steer") {
@@ -111,6 +180,12 @@ struct Check {
     started: HashSet<String>,
     /// The prompt whose turn the next settle ends.
     current: Option<String>,
+    turns: VecDeque<bool>,
+    foreign_started: usize,
+    foreign_settled: usize,
+    own_settled: usize,
+    foreign_cancelled: usize,
+    own_cancelled: usize,
     /// Prompts whose turn settled with no turn_started for them.
     settled_unstarted: HashSet<String>,
     requested: HashSet<String>,
@@ -171,8 +246,15 @@ impl Check {
                 );
                 assert!(!self.sent[r], "a steer starts no turn");
                 self.started.insert(r.clone());
+                self.turns.push_back(false);
             }
-            Entry::TurnSettled { usage, .. } => {
+            Entry::TurnStarted {
+                request_id: None, ..
+            } => {
+                self.turns.push_back(true);
+                self.foreign_started += 1;
+            }
+            Entry::TurnSettled { usage, stop, .. } => {
                 for n in [
                     usage.input,
                     usage.output,
@@ -181,7 +263,16 @@ impl Check {
                 ] {
                     assert!(n <= 1 << 40, "token counts are bounded");
                 }
-                if let Some(r) = self.current.take()
+                let foreign = self.turns.pop_front().unwrap_or(false);
+                if foreign {
+                    self.foreign_settled += 1;
+                    self.foreign_cancelled += usize::from(*stop == Stop::Cancelled);
+                } else {
+                    self.own_settled += 1;
+                    self.own_cancelled += usize::from(*stop == Stop::Cancelled);
+                }
+                if !foreign
+                    && let Some(r) = self.current.take()
                     && !self.started.contains(&r)
                 {
                     assert!(

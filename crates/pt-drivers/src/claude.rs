@@ -26,10 +26,10 @@ pub(crate) struct Claude {
     uuid_base: String,
     sent: u64,
     /// (request id, message uuid) written but not yet echoed back.
-    unechoed: VecDeque<(String, String)>,
-    /// Uuids echoed or given up on, so a late echo of one is told from a foreign one.
+    unechoed: VecDeque<Pending>,
+    /// Recently echoed UUIDs, so a duplicate echo is told from a foreign one.
     done: VecDeque<String>,
-    turn: Option<Turn>,
+    running: VecDeque<Run>,
     approvals: HashMap<String, Approval>,
     denied: HashSet<String>,
     msg_id: String,
@@ -39,11 +39,27 @@ pub(crate) struct Claude {
     next_control: u64,
 }
 
-struct Turn {
-    /// Our interrupt's control request id, once sent.
-    interrupt: Option<String>,
-    /// Claude answered that interrupt with success: the result that follows is its result.
-    interrupt_accepted: bool,
+struct Pending {
+    request_id: String,
+    uuid: String,
+    interrupt: Interrupt,
+}
+
+struct Run {
+    origin: Origin,
+    announced: bool,
+    interrupt: Interrupt,
+}
+
+enum Origin {
+    Ours { request_id: String, uuid: String },
+    Foreign,
+}
+
+enum Interrupt {
+    None,
+    Sent(String),
+    Accepted,
 }
 
 struct Approval {
@@ -65,7 +81,7 @@ impl Claude {
             sent: 0,
             unechoed: VecDeque::new(),
             done: VecDeque::new(),
-            turn: None,
+            running: VecDeque::new(),
             approvals: HashMap::new(),
             denied: HashSet::new(),
             msg_id: String::new(),
@@ -175,6 +191,8 @@ impl Claude {
             | "task_started"
             | "task_progress"
             | "task_notification"
+            | "task_updated"
+            | "background_tasks_changed"
             | "files_persisted"
             | "local_command_output"
             | "informational" => {}
@@ -274,13 +292,14 @@ impl Claude {
         if msg["isReplay"].as_bool() == Some(true) {
             let uuid = msg["uuid"].as_str().unwrap_or_default();
             let ours =
-                self.unechoed.iter().any(|(_, u)| u == uuid) || self.done.iter().any(|u| u == uuid);
+                self.unechoed.iter().any(|p| p.uuid == uuid) || self.done.iter().any(|u| u == uuid);
             // A background task's notification is input Claude queued itself.
             if !ours && msg["origin"]["kind"].as_str() == Some("task-notification") {
                 out.notice(
                     "harness_input",
                     "claude queued its own task-notification message",
                 );
+                self.foreign_run(out);
                 return;
             }
             let is_prompt = content.as_str().is_some()
@@ -299,6 +318,7 @@ impl Claude {
             .iter()
             .filter(|p| p["type"].as_str() == Some("tool_result"))
         {
+            self.output_run(out);
             let id = part["tool_use_id"].as_str().unwrap_or_default();
             let (output, truncated) = bounded_output(&content_text(&part["content"]));
             let status = if part["is_error"].as_bool() != Some(true) {
@@ -320,7 +340,7 @@ impl Claude {
 
     /// Our message `uuid` came back: that prompt is confirmed, wherever it is in the queue.
     fn on_echo(&mut self, uuid: &str, out: &mut Out) {
-        let Some(i) = self.unechoed.iter().position(|(_, u)| u == uuid) else {
+        let Some(i) = self.unechoed.iter().position(|p| p.uuid == uuid) else {
             if self.done.iter().any(|u| u == uuid) {
                 out.notice("stale_echo", format!("claude echoed message {uuid} late"));
             } else {
@@ -331,7 +351,12 @@ impl Claude {
             }
             return;
         };
-        let Some((request_id, uuid)) = self.unechoed.remove(i) else {
+        let Some(Pending {
+            request_id,
+            uuid,
+            interrupt,
+        }) = self.unechoed.remove(i)
+        else {
             return;
         };
         self.retire(uuid.clone());
@@ -341,10 +366,12 @@ impl Claude {
             native_turn_id: Some(uuid.clone()),
             detail: None,
         });
-        out.emit(Entry::TurnStarted {
-            request_id: Some(request_id),
-            native_turn_id: Some(uuid),
+        self.running.push_back(Run {
+            origin: Origin::Ours { request_id, uuid },
+            announced: false,
+            interrupt,
         });
+        self.announce_front(out);
     }
 
     fn retire(&mut self, uuid: String) {
@@ -354,14 +381,58 @@ impl Claude {
         self.done.push_back(uuid);
     }
 
+    fn foreign_run(&mut self, out: &mut Out) {
+        let interrupt = if self.running.is_empty() {
+            self.unechoed.front_mut().map_or(Interrupt::None, |p| {
+                std::mem::replace(&mut p.interrupt, Interrupt::None)
+            })
+        } else {
+            Interrupt::None
+        };
+        self.running.push_back(Run {
+            origin: Origin::Foreign,
+            announced: false,
+            interrupt,
+        });
+        self.announce_front(out);
+    }
+
+    fn announce_front(&mut self, out: &mut Out) {
+        let Some(run) = self.running.front_mut().filter(|r| !r.announced) else {
+            return;
+        };
+        run.announced = true;
+        let (request_id, native_turn_id) = match &run.origin {
+            Origin::Ours { request_id, uuid } => (Some(request_id.clone()), Some(uuid.clone())),
+            Origin::Foreign => (None, None),
+        };
+        out.emit(Entry::TurnStarted {
+            request_id,
+            native_turn_id,
+        });
+    }
+
+    fn output_run(&mut self, out: &mut Out) {
+        if self.running.is_empty() {
+            self.foreign_run(out);
+        }
+    }
+
     fn on_control_response(&mut self, msg: &Value) {
         let response = &msg["response"];
-        if let Some(turn) = self.turn.as_mut()
-            && turn.interrupt.is_some()
-            && response["request_id"].as_str() == turn.interrupt.as_deref()
-            && response["subtype"].as_str() == Some("success")
-        {
-            turn.interrupt_accepted = true;
+        if response["subtype"].as_str() == Some("success") {
+            let id = response["request_id"].as_str();
+            for interrupt in self
+                .running
+                .iter_mut()
+                .map(|r| &mut r.interrupt)
+                .chain(self.unechoed.iter_mut().map(|p| &mut p.interrupt))
+            {
+                if matches!(interrupt, Interrupt::Sent(sent) if Some(sent.as_str()) == id) {
+                    *interrupt = Interrupt::Accepted;
+                    break;
+                }
+            }
         }
     }
 
@@ -470,11 +541,14 @@ impl Claude {
 
     fn on_result(&mut self, msg: &Value, out: &mut Out) {
         self.check_session(msg, out);
-        let turn = self.turn.take();
+        if self.running.is_empty() {
+            self.foreign_run(out);
+        }
+        let turn = self.running.pop_front().expect("result has a run");
         let is_error = msg["is_error"].as_bool() == Some(true);
         let subtype = msg["subtype"].as_str().unwrap_or_default();
         // A result written before Claude took the interrupt is that result, success or error.
-        let interrupted = is_error && turn.as_ref().is_some_and(|t| t.interrupt_accepted)
+        let interrupted = is_error && matches!(turn.interrupt, Interrupt::Accepted)
             || msg["terminal_reason"]
                 .as_str()
                 .is_some_and(|r| r.starts_with("aborted"));
@@ -525,20 +599,9 @@ impl Claude {
             usage,
             duration_ms: msg["duration_ms"].as_u64(),
         });
-        if !self.unechoed.is_empty() {
-            out.notice(
-                "unechoed",
-                format!(
-                    "claude settled without echoing {} sent message(s)",
-                    self.unechoed.len()
-                ),
-            );
-            for (_, uuid) in std::mem::take(&mut self.unechoed) {
-                self.retire(uuid);
-            }
-        }
         self.approvals.clear();
         self.denied.clear();
+        self.announce_front(out);
     }
 }
 
@@ -553,8 +616,14 @@ impl Protocol for Claude {
         }
         match msg["type"].as_str().unwrap_or_default() {
             "system" => self.on_system(&msg, out),
-            "stream_event" => self.on_stream_event(&msg, out),
-            "assistant" => self.on_assistant(&msg, out),
+            "stream_event" => {
+                self.output_run(out);
+                self.on_stream_event(&msg, out);
+            }
+            "assistant" => {
+                self.output_run(out);
+                self.on_assistant(&msg, out);
+            }
             "user" => self.on_user(&msg, out),
             "control_request" => self.on_control_request(&msg, out),
             "result" => self.on_result(&msg, out),
@@ -580,7 +649,7 @@ impl Protocol for Claude {
                 "Claude cannot steer a running turn",
             ));
         }
-        if self.turn.is_some() {
+        if !self.running.is_empty() || !self.unechoed.is_empty() {
             return Err(DriverError::Busy);
         }
         self.sent += 1;
@@ -590,10 +659,10 @@ impl Protocol for Claude {
             "message" => obj! { "role" => "user", "content" => text },
             "uuid" => uuid.as_str(),
         });
-        self.unechoed.push_back((request_id.to_owned(), uuid));
-        self.turn = Some(Turn {
-            interrupt: None,
-            interrupt_accepted: false,
+        self.unechoed.push_back(Pending {
+            request_id: request_id.to_owned(),
+            uuid,
+            interrupt: Interrupt::None,
         });
         Ok(())
     }
@@ -608,7 +677,11 @@ impl Protocol for Claude {
     }
 
     fn interrupt(&mut self, out: &mut Out) -> Result<(), DriverError> {
-        let Some(turn) = self.turn.as_mut() else {
+        let interrupt = if let Some(run) = self.running.front_mut() {
+            &mut run.interrupt
+        } else if let Some(pending) = self.unechoed.front_mut() {
+            &mut pending.interrupt
+        } else {
             return Ok(());
         };
         self.next_control += 1;
@@ -618,7 +691,7 @@ impl Protocol for Claude {
             "request_id" => id.as_str(),
             "request" => obj! { "subtype" => "interrupt" },
         });
-        turn.interrupt = Some(id);
+        *interrupt = Interrupt::Sent(id);
         Ok(())
     }
 }
