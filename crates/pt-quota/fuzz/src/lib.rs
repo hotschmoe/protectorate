@@ -98,11 +98,20 @@ pub fn quota(b: &mut Bytes, now_ms: u64) -> Quota {
             },
         })
         .collect();
+    let subscription = SUBSCRIPTIONS[b.below(SUBSCRIPTIONS.len())];
+    // Bit 31 means the stamp is after now. The low 31 bits are the offset.
+    let raw = b.u32();
+    let offset = u64::from(raw & 0x7fff_ffff).saturating_mul(10);
+    let fetched = if raw & 0x8000_0000 != 0 {
+        now_ms.saturating_add(offset)
+    } else {
+        now_ms.saturating_sub(offset)
+    };
     Quota {
-        subscription: SUBSCRIPTIONS[b.below(SUBSCRIPTIONS.len())],
+        subscription,
         plan: String::new(),
         reading,
-        fetched_at_ms: EpochMs(now_ms.saturating_sub(u64::from(b.u32()) * 10)),
+        fetched_at_ms: EpochMs(fetched),
         windows,
         note: String::new(),
     }

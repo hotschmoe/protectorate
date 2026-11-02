@@ -164,11 +164,16 @@ fuzz_target!(|data: &[u8]| {
                 }
                 if matches!(state(q), State::Fresh | State::Stale) {
                     let min = size.min_usable_pct();
-                    assert!(
-                        !still_enforcing(q, now, min, &c.model),
-                        "a passed exhausted window was spent"
-                    );
-                    if let Some(usable) = open_usable(q, now, &c.model, min) {
+                    let enforcing = still_enforcing(q, now, min, &c.model);
+                    let usable = open_usable(q, now, &c.model, min);
+                    // A fresh row under the minimum is exhausted. Fallback must not spend it.
+                    if state(q) == State::Fresh
+                        && (enforcing || usable.is_some_and(|u| u + 1e-9 < min))
+                    {
+                        panic!("a fresh exhausted row was spent");
+                    }
+                    assert!(!enforcing, "a passed exhausted window was spent");
+                    if let Some(usable) = usable {
                         assert!(
                             usable + 1e-9 >= min,
                             "row at {usable}% usable was spent"
@@ -186,13 +191,18 @@ fuzz_target!(|data: &[u8]| {
             }
         }
         (None, Err(_)) => {
+            let min = size.min_usable_pct();
             for c in &allow {
+                // SPEC 8. Park only when no candidate is unknown, reset, or missing a row.
+                if unknown_or_reset(c, &quotas, now, min) {
+                    panic!("parked while {c:?} could be spent with no spare");
+                }
                 if let Some(sub) = metered(c.harness)
                     && let Some(q) = quotas.iter().find(|q| q.subscription == sub)
                     && state(q) == State::Stale
-                    && !still_enforcing(q, now, size.min_usable_pct(), &c.model)
-                    && let Some(usable) = open_usable(q, now, &c.model, size.min_usable_pct())
-                    && usable + 1e-9 >= size.min_usable_pct()
+                    && !still_enforcing(q, now, min, &c.model)
+                    && let Some(usable) = open_usable(q, now, &c.model, min)
+                    && usable + 1e-9 >= min
                 {
                     panic!("stale row at {usable}% usable was parked");
                 }
@@ -288,6 +298,8 @@ fn map_windows(quotas: &[Quota], mut f: impl FnMut(&mut QuotaWindow)) -> Vec<Quo
     out
 }
 
+/// SPEC 8. A row whose only finite windows are caps for other models is no reading
+/// for this candidate.
 fn only_other_scopes(q: &Quota, model: &str, min: f64) -> bool {
     let mut saw = false;
     for w in &q.windows {
@@ -311,13 +323,58 @@ fn metered(h: Harness) -> Option<Subscription> {
     }
 }
 
-/// SPEC 8. The stored length, else the label, else five hours.
+/// SPEC 8. Park is wrong when this candidate may be spent with no spare.
+///
+/// No row, a reading that was never a window for this model, or one whose gating
+/// windows have reset. `pi_vendor` and Antigravity are unmetered, not a missing
+/// reading. A local row that was never read may be spent; a stale or failed one
+/// may not.
+fn unknown_or_reset(c: &Candidate, quotas: &[Quota], now: u64, min: f64) -> bool {
+    if matches!(c.harness, Harness::PiVendor | Harness::Antigravity) {
+        return false;
+    }
+    if c.harness == Harness::PiLocal {
+        return quotas
+            .iter()
+            .find(|q| q.subscription == Subscription::Local)
+            .map(|q| state(q) == State::Unknown)
+            .unwrap_or(true);
+    }
+    let Some(sub) = metered(c.harness) else {
+        return false;
+    };
+    let Some(q) = quotas.iter().find(|q| q.subscription == sub) else {
+        return true;
+    };
+    match state(q) {
+        State::Unknown => true,
+        State::Error => false,
+        State::Fresh | State::Stale => {
+            if only_other_scopes(q, &c.model, min) {
+                return true;
+            }
+            if still_enforcing(q, now, min, &c.model) {
+                return false;
+            }
+            // A window that still counts is spare or exhausted, not unknown or reset.
+            if open_usable(q, now, &c.model, min).is_some() {
+                return false;
+            }
+            true
+        }
+    }
+}
+
+/// SPEC 8. Stored length when it is above zero, otherwise the length the label
+/// names, otherwise five hours.
 fn bound_ms(w: &QuotaWindow) -> u64 {
     const FIVE_HOURS_MS: u64 = 5 * 3_600_000;
-    w.length_ms
-        .filter(|ms| *ms > 0)
-        .or_else(|| window_length_ms(&w.label))
-        .unwrap_or(FIVE_HOURS_MS)
+    if let Some(stored) = w.length_ms
+        && stored > 0
+    {
+        return stored;
+    }
+    window_length_ms(&w.label).unwrap_or(FIVE_HOURS_MS)
 }
 
 /// Tightest remaining percent of windows that have not reset. `None` when nothing scores.
