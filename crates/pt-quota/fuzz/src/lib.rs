@@ -49,7 +49,18 @@ pub const SUBSCRIPTIONS: [Subscription; 5] = [
     Subscription::Api,
 ];
 
-const LABELS: [&str; 8] = ["5h", "wk", "day", "mo", "3d", "wk sonnet", "credits", "window"];
+const LABELS: [&str; 10] = [
+    "5h",
+    "wk",
+    "day",
+    "mo",
+    "3d",
+    "wk sonnet",
+    "credits",
+    "window",
+    "wk opus",
+    "wk sonnet 4.5",
+];
 
 fn pct(b: &mut Bytes) -> Option<f64> {
     match b.below(8) {
