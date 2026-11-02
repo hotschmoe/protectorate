@@ -460,7 +460,7 @@ fn choose(
         .filter_map(|v| Some((v, v.node.id.parse::<u64>().ok()?, v.hello.as_ref()?)))
         .filter(|(_, id, _)| !exclude.contains(&NodeId(*id)))
         .filter(|(v, _, h)| match &req.target {
-            api::JobTarget::Node { node_id } => v.node.id == *node_id || v.node.name == *node_id,
+            api::JobTarget::Node { node_id } => v.node.id == *node_id,
             api::JobTarget::Arch { arch: want } => arch(&h.arch) == arch(want),
         })
         .filter(|(v, ..)| even_if_present || v.node.presence.state == api::PresenceState::Away)

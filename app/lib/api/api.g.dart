@@ -3296,6 +3296,7 @@ sealed class JobTarget {
   Map<String, Object?> toJson();
 }
 
+/// Asked for by headscale id or name; the hub keeps the id.
 final class JobTargetNode extends JobTarget {
   const JobTargetNode({required this.nodeId});
 
@@ -4050,6 +4051,137 @@ enum ReleaseChannel {
   }
 
   String toJson() => wire;
+}
+
+final class RemoveNodeRequest {
+  const RemoveNodeRequest({required this.nodeId, this.force = false});
+
+  factory RemoveNodeRequest.fromJson(Object? json) {
+    final j = _object(json, 'RemoveNodeRequest');
+    return RemoveNodeRequest(
+      nodeId: _string(j['node_id'], 'RemoveNodeRequest.node_id'),
+      force: _or(
+        j['force'],
+        false,
+        (e0) => _bool(e0, 'RemoveNodeRequest.force'),
+      ),
+    );
+  }
+
+  /// By headscale id or name.
+  final String nodeId;
+
+  /// Remove it although it is online or has jobs in flight; those jobs go lost.
+  final bool force;
+
+  Map<String, Object?> toJson() => {'node_id': nodeId, 'force': force};
+}
+
+final class RemovedNode {
+  const RemovedNode({
+    required this.nodeId,
+    required this.name,
+    this.cancelledJobs = const <String>[],
+    this.orphanedJobs = const <String>[],
+    this.recordOnly = false,
+  });
+
+  factory RemovedNode.fromJson(Object? json) {
+    final j = _object(json, 'RemovedNode');
+    return RemovedNode(
+      nodeId: _string(j['node_id'], 'RemovedNode.node_id'),
+      name: _string(j['name'], 'RemovedNode.name'),
+      cancelledJobs: _or(
+        j['cancelled_jobs'],
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'RemovedNode.cancelled_jobs',
+          (e1) => _string(e1, 'RemovedNode.cancelled_jobs[]'),
+        ),
+      ),
+      orphanedJobs: _or(
+        j['orphaned_jobs'],
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'RemovedNode.orphaned_jobs',
+          (e1) => _string(e1, 'RemovedNode.orphaned_jobs[]'),
+        ),
+      ),
+      recordOnly: _or(
+        j['record_only'],
+        false,
+        (e0) => _bool(e0, 'RemovedNode.record_only'),
+      ),
+    );
+  }
+
+  final String nodeId;
+
+  final String name;
+
+  /// Queued jobs that could run only on this node, cancelled.
+  final List<String> cancelledJobs;
+
+  /// Jobs it had in flight (`force`), left to the lease: they go lost, then abandoned.
+  final List<String> orphanedJobs;
+
+  /// Headscale had already forgotten it; only the hub's enrollment record was left.
+  final bool recordOnly;
+
+  Map<String, Object?> toJson() => {
+    'node_id': nodeId,
+    'name': name,
+    'cancelled_jobs': cancelledJobs,
+    'orphaned_jobs': orphanedJobs,
+    'record_only': recordOnly,
+  };
+}
+
+final class RenameNodeRequest {
+  const RenameNodeRequest({required this.nodeId, required this.name});
+
+  factory RenameNodeRequest.fromJson(Object? json) {
+    final j = _object(json, 'RenameNodeRequest');
+    return RenameNodeRequest(
+      nodeId: _string(j['node_id'], 'RenameNodeRequest.node_id'),
+      name: _string(j['name'], 'RenameNodeRequest.name'),
+    );
+  }
+
+  /// By headscale id or name.
+  final String nodeId;
+
+  /// A tailnet DNS label no other node has.
+  final String name;
+
+  Map<String, Object?> toJson() => {'node_id': nodeId, 'name': name};
+}
+
+final class RenamedNode {
+  const RenamedNode({
+    required this.nodeId,
+    required this.from,
+    required this.to,
+  });
+
+  factory RenamedNode.fromJson(Object? json) {
+    final j = _object(json, 'RenamedNode');
+    return RenamedNode(
+      nodeId: _string(j['node_id'], 'RenamedNode.node_id'),
+      from: _string(j['from'], 'RenamedNode.from'),
+      to: _string(j['to'], 'RenamedNode.to'),
+    );
+  }
+
+  final String nodeId;
+
+  final String from;
+
+  final String to;
+
+  Map<String, Object?> toJson() => {'node_id': nodeId, 'from': from, 'to': to};
 }
 
 final class ResleeveRequest {
@@ -5281,6 +5413,20 @@ final class HubApi {
   /// `POST /api/ApproveNode`, scope `owner`.
   Future<ApprovedNode> approveNode(ApproveNodeRequest request) =>
       _call('ApproveNode', request.toJson(), ApprovedNode.fromJson);
+
+  /// Deletes the node from headscale, which revokes its tailnet key, and drops its
+  /// enrollment record. Queued jobs pinned to it are cancelled. An online node, or one with
+  /// jobs in flight, needs `force`.
+  ///
+  /// `POST /api/RemoveNode`, scope `owner`.
+  Future<RemovedNode> removeNode(RemoveNodeRequest request) =>
+      _call('RemoveNode', request.toJson(), RemovedNode.fromJson);
+
+  /// Renames the node in headscale and in its enrollment record; jobs follow its id.
+  ///
+  /// `POST /api/RenameNode`, scope `owner`.
+  Future<RenamedNode> renameNode(RenameNodeRequest request) =>
+      _call('RenameNode', request.toJson(), RenamedNode.fromJson);
 
   /// A maintenance job from a sleeve, or a job Envoy asks for in an agent's turn (D9), waits
   /// for the owner's approval.

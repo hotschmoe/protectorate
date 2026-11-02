@@ -13,7 +13,7 @@ use pt_frame::msg::HelloReply;
 
 use crate::client::NodeClient;
 use crate::headscale::{HsNode, TAG_NODE};
-use crate::{Fleet, view};
+use crate::{Fleet, Removal, view};
 
 #[derive(Clone, Debug)]
 pub struct PollConfig {
@@ -74,6 +74,8 @@ struct Shared {
     cfg: PollConfig,
     stop: AtomicBool,
     views: Mutex<BTreeMap<u64, NodeView>>,
+    /// Each polled node's link, for a rename or removal from outside the poller.
+    links: Mutex<BTreeMap<u64, Arc<Link>>>,
     publish: Publish,
 }
 
@@ -93,6 +95,7 @@ impl Poller {
             cfg,
             stop: AtomicBool::new(false),
             views: Mutex::new(BTreeMap::new()),
+            links: Mutex::new(BTreeMap::new()),
             publish,
         });
         let s = shared.clone();
@@ -114,6 +117,45 @@ impl Poller {
     pub fn node(&self, id: &str) -> Option<NodeView> {
         let id: u64 = id.parse().ok()?;
         lock(&self.shared.views).get(&id).cloned()
+    }
+
+    /// `Fleet::rename_node`, then the node's view and link carry the new name at once. Nothing
+    /// is published: the caller announces it.
+    pub fn rename(&self, id: u64, to: &str) -> crate::Result<HsNode> {
+        let s = &self.shared;
+        let _g = s.fleet.nodes_lock();
+        let node = s.fleet.rename_node(id, to)?;
+        if let Some(link) = lock(&s.links).get(&id) {
+            lock(&link.info).name = node.name.clone();
+        }
+        if let Some(v) = lock(&s.views).get_mut(&id) {
+            v.node.name = node.name.clone();
+        }
+        Ok(node)
+    }
+
+    /// `Fleet::remove_node`, then the node's polling stops and its view is gone at once. Once
+    /// headscale has deleted it, the view goes even when dropping the record failed. Nothing is
+    /// published: the caller announces it.
+    pub fn remove(&self, id: u64) -> crate::Result<Removal> {
+        let s = &self.shared;
+        let _g = s.fleet.nodes_lock();
+        let removed = s.fleet.remove_node(id);
+        let listed = s
+            .fleet
+            .admin()
+            .nodes()
+            .map(|l| l.iter().any(|n| n.id == id))
+            .unwrap_or(removed.is_err());
+        if !listed {
+            let link = lock(&s.links).remove(&id);
+            let mut views = lock(&s.views);
+            if let Some(link) = link {
+                link.stop.store(true, Ordering::SeqCst);
+            }
+            views.remove(&id);
+        }
+        removed
     }
 }
 
@@ -161,6 +203,7 @@ struct Link {
 fn manage(s: &Arc<Shared>) {
     let mut links: BTreeMap<u64, (Arc<Link>, JoinHandle<()>)> = BTreeMap::new();
     while !s.stop.load(Ordering::SeqCst) {
+        let g = s.fleet.nodes_lock();
         match s.fleet.admin().nodes() {
             Ok(list) => {
                 let nodes: Vec<HsNode> = list.into_iter().filter(|n| n.has_tag(TAG_NODE)).collect();
@@ -168,6 +211,7 @@ fn manage(s: &Arc<Shared>) {
             }
             Err(e) => eprintln!("pt-fleet: poller: listing nodes: {e}"),
         }
+        drop(g);
         nap(&[&s.stop], s.cfg.list_every);
     }
     for (link, _) in links.values() {
@@ -202,6 +246,7 @@ fn refresh(
             if let Some((_, t)) = links.remove(&n.id) {
                 let _ = t.join();
             }
+            lock(&s.links).remove(&n.id);
             eprintln!("pt-fleet: restarting poller thread for node {}", n.id);
         }
         if let Some((link, _)) = links.get(&n.id) {
@@ -218,6 +263,7 @@ fn refresh(
             .spawn(move || poll_node(&s2, &l2, id))
         {
             Ok(t) => {
+                lock(&s.links).insert(id, link.clone());
                 links.insert(id, (link, t));
             }
             Err(e) => eprintln!("pt-fleet: poller thread for node {id}: {e}"),
@@ -229,12 +275,17 @@ fn refresh(
         .copied()
         .collect();
     for id in gone {
-        if let Some((link, t)) = links.remove(&id) {
-            link.stop.store(true, Ordering::SeqCst);
-            let _ = t.join();
-        }
+        lock(&s.links).remove(&id);
+        let Some((link, t)) = links.remove(&id) else {
+            continue;
+        };
+        // A link `Poller::remove` stopped was announced by its caller.
+        let announced = link.stop.swap(true, Ordering::SeqCst);
+        let _ = t.join();
         lock(&s.views).remove(&id);
-        (s.publish)(FleetEvent::Removed(id.to_string()));
+        if !announced {
+            (s.publish)(FleetEvent::Removed(id.to_string()));
+        }
     }
 }
 
@@ -307,10 +358,14 @@ fn poll_node(s: &Shared, link: &Link, id: u64) {
         view.node.error = view.error.clone();
         view.node.last_seen_ms = last_ok
             .unwrap_or_else(|| EpochMs(info.last_seen_secs.map_or(0, |s| s.max(0) as u64 * 1000)));
-        lock(&s.views).insert(id, view.clone());
-        if !link.stop.load(Ordering::SeqCst) {
-            (s.publish)(FleetEvent::Node(Box::new(view.node.clone())));
+        // Under the views lock, so a rename or removal made during the round is not undone.
+        let mut views = lock(&s.views);
+        if link.stop.load(Ordering::SeqCst) {
+            return;
         }
+        view.node.name = lock(&link.info).name.clone();
+        views.insert(id, view.clone());
+        (s.publish)(FleetEvent::Node(Box::new(view.node.clone())));
     }
 }
 

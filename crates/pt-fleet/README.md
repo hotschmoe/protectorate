@@ -23,10 +23,12 @@ both exited; dropping the last `Fleet` clone also stops them.
 | `approve(auth_id, name, fingerprint)` | checks the fingerprint against headscale's `/key`, then register, `tag:node`, rename; records the pin in `enrolled.json` |
 | `record_pending(Registration)`, `pending()` | what the owner scanned or pasted but has not approved; headscale keeps registrations 15 min in memory and cannot list them |
 | `enrolled()` | approved nodes and the control key each pinned |
+| `rename_node(id, name)`, `remove_node(id)` | headscale first, then `enrolled.json`; a rename whose record write fails is put back in headscale, a removal whose record drop fails is finished by calling it again |
 | `Registration::parse(text)` | the QR payload `{"v":1,"auth_id":...,"control_key":"sha256:...","name":...}` |
 | `connect(node)` | `NodeClient` to `<tailnet ip or name>:7475` through member's DIAL |
 | `status()` | member STATUS: backend state, control key, peers (online, direct `cur_addr` or DERP `relay`) |
 | `poll(PollConfig, publish)` | `Poller`; `publish(FleetEvent::Node(Box<pt_api::Node>) / Removed(id))` |
+| `Poller::rename(id, name)`, `Poller::remove(id)` | the two above, holding off the poller's own node-list update, then the view follows at once; neither publishes (the caller announces it) |
 | `snapshot_headscale(label)` | stop headscale, copy db and keys to `<dir>/snapshots/<ms>-<label>/`, restart |
 | `control_fingerprint()` | `sha256:<hex>` of headscale's Noise key, as members pin it |
 | `headscale_state()`, `member_state()`, `kill_child(which)` | supervisor state; kill for tests and doctor |
