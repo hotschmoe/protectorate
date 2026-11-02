@@ -117,10 +117,12 @@ mod fake_logind {
     use crate::common::{json, num, text};
     use pt_json::Value;
     use std::fs;
+    use std::io::ErrorKind;
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::process::Command;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::sync::OnceLock;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     fn now_usec() -> u64 {
         SystemTime::now()
@@ -129,16 +131,37 @@ mod fake_logind {
             .as_micros() as u64
     }
 
+    /// The stand-in, written once. While it is open for writing, a child that another test
+    /// thread forks holds it until that child execs, and running it then fails with ETXTBSY;
+    /// so it is run here until it runs, and never written again.
+    fn loginctl_dir() -> &'static PathBuf {
+        static DIR: OnceLock<PathBuf> = OnceLock::new();
+        DIR.get_or_init(|| {
+            let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("fake-logind-bin");
+            fs::create_dir_all(&dir).unwrap();
+            let script = dir.join("loginctl");
+            fs::write(
+                &script,
+                "#!/bin/sh\ncase \"$1\" in\n list-sessions) echo \"s1 1000 u seat0 tty1\"; echo \"s2 1000 u - pts/0\";;\n show-session) cat \"$FAKE_DIR/$2\";;\nesac\n",
+            )
+            .unwrap();
+            fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+            for _ in 0..100 {
+                match Command::new(&script).output() {
+                    Err(e) if e.kind() == ErrorKind::ExecutableFileBusy => {
+                        std::thread::sleep(Duration::from_millis(20))
+                    }
+                    _ => break,
+                }
+            }
+            dir
+        })
+    }
+
     fn presence(case: &str, s1: &str) -> Value {
+        let bin = loginctl_dir();
         let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("fake-logind-{case}"));
         fs::create_dir_all(&dir).unwrap();
-        let script = dir.join("loginctl");
-        fs::write(
-            &script,
-            "#!/bin/sh\ncase \"$1\" in\n list-sessions) echo \"s1 1000 u seat0 tty1\"; echo \"s2 1000 u - pts/0\";;\n show-session) cat \"$FAKE_DIR/$2\";;\nesac\n",
-        )
-        .unwrap();
-        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
         fs::write(dir.join("s1"), s1).unwrap();
         fs::write(
             dir.join("s2"),
@@ -147,7 +170,7 @@ mod fake_logind {
         .unwrap();
         let path = format!(
             "{}:{}",
-            dir.display(),
+            bin.display(),
             std::env::var("PATH").unwrap_or_default()
         );
         let out = Command::new(env!("CARGO_BIN_EXE_protectorate-node"))
