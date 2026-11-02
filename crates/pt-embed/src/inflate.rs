@@ -5,6 +5,9 @@
 
 use std::fmt;
 
+/// Largest binary `unpack` inflates.
+pub const MAX_UNPACKED: usize = 512 << 20;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InflateError(pub &'static str);
 

@@ -13,10 +13,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-pub use inflate::{InflateError, crc32, gunzip, inflate};
-
-/// Largest binary `unpack` inflates.
-pub const MAX_UNPACKED: usize = 512 << 20;
+pub use inflate::{InflateError, MAX_UNPACKED, crc32, gunzip, inflate};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Embedded {

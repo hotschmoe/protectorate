@@ -1,6 +1,6 @@
 //! Running a program with a timeout, finding programs on PATH, and telling how one was installed.
 
-use crate::{Binary, Install};
+use crate::binary::{Binary, Install};
 use std::ffi::OsString;
 use std::io::Read;
 use std::path::{Path, PathBuf};
