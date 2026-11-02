@@ -113,6 +113,7 @@ impl State {
         files: Vec<String>,
     ) {
         let text = text.trim();
+        let files = take_files(files.iter().map(String::as_str));
         if text.is_empty() && files.is_empty() {
             return;
         }
@@ -130,7 +131,7 @@ impl State {
             session: self.session.clone(),
             harness: self.harness,
             tool: tool.map(|t| clip(t, 128).to_owned()),
-            files: take_files(files.iter().map(String::as_str)),
+            files,
             text: clip(text, max).to_owned(),
         }));
     }
