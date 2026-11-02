@@ -95,8 +95,7 @@ pub fn write(hub: &Hub, view: &View, workdir: &Path, spec: &Spec<'_>) -> Result<
     let s = spec.sleeve;
     let entries: Vec<Line> = hub
         .transcripts
-        .get(s.id)
-        .and_then(|t| crate::lock::lock(&t).all())
+        .all(s.id)
         .map_err(|e| format!("read transcript: {e}"))?;
     hub.history.catch_up(&hub.home, || hub.view(), Some(s.id));
     let text = build(hub, view, workdir, spec, &entries);

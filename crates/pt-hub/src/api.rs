@@ -256,18 +256,17 @@ fn transcript(
     limit: Option<u64>,
 ) -> Result<api::Transcript> {
     let limit = limit.unwrap_or(TRANSCRIPT_DEFAULT).clamp(1, TRANSCRIPT_MAX) as usize;
-    let store = hub.transcripts.get(id).map_err(internal)?;
-    let store = lock(&store);
     let (lines, more) = match from {
         Some(f) => {
-            let mut l = store
-                .after(f.saturating_sub(1), limit + 1)
+            let mut l = hub
+                .transcripts
+                .after(id, f.saturating_sub(1), limit + 1)
                 .map_err(internal)?;
             let more = l.len() > limit;
             l.truncate(limit);
             (l, more)
         }
-        None => (store.last(limit).map_err(internal)?, false),
+        None => (hub.transcripts.last(id, limit).map_err(internal)?, false),
     };
     Ok(api::Transcript {
         sleeve_id: id.0.to_string(),
@@ -1745,8 +1744,7 @@ fn agent_transcript(
     limit: Option<u64>,
 ) -> Result<api::Transcript> {
     let limit = limit.unwrap_or(TRANSCRIPT_DEFAULT).clamp(1, TRANSCRIPT_MAX) as usize;
-    let store = hub.transcripts.get(id).map_err(internal)?;
-    let lines = lock(&store).all().map_err(internal)?;
+    let lines = hub.transcripts.all(id).map_err(internal)?;
     let mut agent = false;
     let mut shown = lines.iter().filter(|l| {
         let keep = match &l.entry {
@@ -1782,8 +1780,7 @@ fn get_envoy_token(c: &Ctx<'_>, _: api::Empty) -> Result<api::EnvoyToken> {
 /// The assistant text of the turn that answered `request_id`, with the last seq read, once that
 /// turn settled (or, with `idle`, whatever it said before the sleeve went idle).
 fn answer(hub: &Hub, id: SleeveId, request_id: &str, idle: bool) -> Option<(String, u64)> {
-    let store = hub.transcripts.get(id).ok()?;
-    let lines = lock(&store).all().ok()?;
+    let lines = hub.transcripts.all(id).ok()?;
     let start = lines.iter().rposition(
         |e| matches!(&e.entry, Entry::UserMessage { request_id: r, .. } if r == request_id),
     )?;
@@ -1819,8 +1816,7 @@ fn latest_from(hub: &Hub, view: &View, id: SleeveId, party: Party) -> Result<Str
     if let Some((r, _)) = sending {
         return Ok(r.clone());
     }
-    let store = hub.transcripts.get(id).map_err(internal)?;
-    let lines = lock(&store).all().map_err(internal)?;
+    let lines = hub.transcripts.all(id).map_err(internal)?;
     let from_log = lines.iter().rev().find_map(|e| match &e.entry {
         Entry::UserMessage { request_id, .. } if mine(request_id) => Some(request_id.clone()),
         _ => None,

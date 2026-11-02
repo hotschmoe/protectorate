@@ -2897,3 +2897,92 @@ fn serve_pid(home: &std::path::Path) -> u32 {
         })
         .expect("the hub's serve process")
 }
+
+/// A transcript longer than any page, with a crash's torn line mid-file, a corrupt line and a
+/// torn last line: the hub's next entry continues the seqs on a line of its own, and pages from
+/// the start, the middle and the end skip exactly the broken lines.
+#[test]
+fn transcript_pages_skip_torn_and_corrupt_lines() {
+    // No model: Envoy parks, and its notice is the only entry the hub adds.
+    let mut hub = Hub::start_config(
+        "tpages",
+        "pi_local",
+        &[
+            ("scopes", pt_json::Value::from(false)),
+            ("pi_local_provider", pt_json::Value::from("")),
+        ],
+        &[],
+        &[],
+    );
+    let id = eventually("envoy", Duration::from_secs(15), || {
+        let id = hub.sleeve("envoy")["id"].as_str()?.to_string();
+        (!id.is_empty()).then_some(id)
+    });
+    hub.stop();
+    let path = hub.home.join(format!("sleeves/{id}/transcript.jsonl"));
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let line = |seq: u64| {
+        format!(
+            r#"{{"seq":{seq},"g":1,"time_ms":{seq},"entry":{{"type":"user_message","request_id":"fixture-{seq}","from":"owner","text":"line {seq}"}}}}"#
+        )
+    };
+    let n = 6000u64;
+    let (torn, corrupt) = (1234u64, 5500u64);
+    let mut text = String::new();
+    for seq in 1..=n {
+        let l = line(seq);
+        match seq {
+            s if s == torn => text.push_str(&l[..l.len() / 2]),
+            s if s == corrupt => text.push_str("{\"seq\":5500,"),
+            _ => text.push_str(&l),
+        }
+        text.push('\n');
+    }
+    let last = line(n + 1);
+    text.push_str(&last[..last.len() / 2]);
+    std::fs::write(&path, text).unwrap();
+    hub.restart();
+
+    let page = |args: &[&str]| {
+        let mut all = vec!["--json", "sleeve", "transcript", "envoy"];
+        all.extend_from_slice(args);
+        let v = hub.cli(&all).json();
+        let seqs: Vec<u64> = v["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["seq"].as_u64().unwrap())
+            .collect();
+        (seqs, v["more"].as_bool().unwrap_or(false))
+    };
+    let (after, _) = eventually("the hub's park notice", Duration::from_secs(20), || {
+        let (seqs, more) = page(&["--from", &(n + 1).to_string()]);
+        (!seqs.is_empty()).then_some((seqs, more))
+    });
+    assert_eq!(after, [n + 1], "the next entry after the torn last line");
+    let want: Vec<u64> = (1..=n).filter(|s| *s != torn && *s != corrupt).collect();
+    let (every, _) = page(&["--limit", "10000"]);
+    assert_eq!(
+        every[..],
+        [&want[..], &[n + 1]].concat(),
+        "every whole line"
+    );
+    let (latest, more) = page(&["--limit", "2000"]);
+    assert!(!more);
+    assert_eq!(latest[..], every[every.len() - 1999..], "the latest page");
+    assert_eq!(
+        page(&["--from", "1", "--limit", "5"]),
+        (vec![1, 2, 3, 4, 5], true),
+        "the first page"
+    );
+    assert_eq!(
+        page(&["--from", "1231", "--limit", "5"]),
+        (vec![1231, 1232, 1233, 1235, 1236], true),
+        "a page across the torn line"
+    );
+    assert_eq!(
+        page(&["--from", "5498", "--limit", "3"]),
+        (vec![5498, 5499, 5501], true),
+        "a page across the corrupt line"
+    );
+}
