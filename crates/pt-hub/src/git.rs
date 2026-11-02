@@ -189,10 +189,10 @@ pub fn worktree_add(
         .is_some_and(|b| b == path.as_os_str().as_encoded_bytes());
     if !mine {
         if fs::symlink_metadata(path).is_ok() || registered(root, path)? {
-            return Err(format!(
+            return Err(refuse_leftover(&format!(
                 "{} already exists; a new sleeve does not adopt an existing worktree",
                 path.display()
-            ));
+            )));
         }
         crate::home::write_private(&marker, path.as_os_str().as_encoded_bytes())
             .map_err(|e| e.to_string())?;
@@ -208,7 +208,7 @@ pub fn worktree_add(
         } else {
             c.args(["-b", branch]).arg(path).arg(&commit);
         }
-        run(c, "worktree add")?;
+        run(c, "worktree add").map_err(|e| refuse_leftover(&e))?;
     }
     let tip = rev_parse(path, &["--verify", "-q", "HEAD^{commit}"])?;
     let index = path.join(rev_parse(path, &["--git-path", "index"])?);
@@ -224,6 +224,10 @@ pub fn worktree_add(
 
 pub fn worktree_registered(root: &Path, path: &Path) -> Result<bool, String> {
     registered(root, path)
+}
+
+fn refuse_leftover(why: &str) -> String {
+    format!("{why}. Remove the leftover checkout and run git worktree prune in the root repository")
 }
 
 fn registered(root: &Path, path: &Path) -> Result<bool, String> {

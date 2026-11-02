@@ -16,6 +16,7 @@
 
 use std::cmp::Ordering;
 use std::fs::{self, File, OpenOptions};
+use std::os::unix::ffi::OsStringExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -726,29 +727,19 @@ fn quarantine_undo(dest: &Path, sleeves: &[(PathBuf, PathBuf)], why: String) -> 
     }
 }
 
-fn claim_path(sleeve: &Path) -> Option<PathBuf> {
-    let bytes = fs::read(sleeve.join("provisioned")).ok()?;
-    Some(PathBuf::from(String::from_utf8(bytes).ok()?))
-}
-
-/// The checkout and gitdir of a worktree claim. A root whose `.git` is a directory, and a
-/// view of a kept parent, are not listed: those trees are not the trial's to remove.
-fn worktree_left(sleeve: &Path, kept: &[PathBuf]) -> Option<(PathBuf, PathBuf)> {
-    let claim = claim_path(sleeve)?;
-    if kept.iter().any(|p| p == &claim) {
-        return None;
-    }
-    let text = fs::read_to_string(claim.join(".git")).ok()?;
+/// Checkout and gitdir from `worktree.path`. A root that claimed the owner's linked
+/// worktree has no marker, so that tree is not listed.
+fn worktree_left(sleeve: &Path) -> Option<(PathBuf, PathBuf)> {
+    let bytes = fs::read(sleeve.join("worktree.path")).ok()?;
+    let checkout = PathBuf::from(std::ffi::OsString::from_vec(bytes));
+    let text = fs::read_to_string(checkout.join(".git")).ok()?;
     let rel = text.lines().next()?.trim().strip_prefix("gitdir:")?.trim();
     let gitdir = if Path::new(rel).is_absolute() {
         PathBuf::from(rel)
     } else {
-        claim.join(rel)
+        checkout.join(rel)
     };
-    if gitdir.parent().and_then(|p| p.file_name()) != Some(std::ffi::OsStr::new("worktrees")) {
-        return None;
-    }
-    gitdir.is_dir().then_some((claim, gitdir))
+    gitdir.is_dir().then_some((checkout, gitdir))
 }
 
 fn hub_tag(home: &Path) -> Option<String> {
@@ -793,7 +784,6 @@ fn quarantine_sleeves(home: &Path, next_sleeve: u64) -> Result<Option<PathBuf>, 
     }
     let sleeves = home.join("sleeves");
     let mut ids = Vec::new();
-    let mut kept = Vec::new();
     match fs::read_dir(&sleeves) {
         Ok(entries) => {
             for entry in entries {
@@ -810,8 +800,6 @@ fn quarantine_sleeves(home: &Path, next_sleeve: u64) -> Result<Option<PathBuf>, 
                 }
                 if id >= next_sleeve {
                     ids.push(id);
-                } else if let Some(path) = claim_path(&entry.path()) {
-                    kept.push(path);
                 }
             }
         }
@@ -829,7 +817,7 @@ fn quarantine_sleeves(home: &Path, next_sleeve: u64) -> Result<Option<PathBuf>, 
     }
     let mut left = Vec::new();
     for id in &ids {
-        if let Some(pair) = worktree_left(&sleeves.join(id.to_string()), &kept)
+        if let Some(pair) = worktree_left(&sleeves.join(id.to_string()))
             && !left.iter().any(|(_, gitdir)| gitdir == &pair.1)
         {
             left.push(pair);
@@ -906,10 +894,12 @@ fn validate_headscale(snapshot: &Path) -> Result<(), RestoreError> {
 }
 
 fn park_rollback_files(dest: &Path) -> Result<(), RestoreError> {
+    // Sidecars first. Parking the database first and crashing leaves the trial WAL
+    // beside the restored database, and prepare puts that WAL back.
     let names = [
-        ".rollback-db.sqlite",
         ".rollback-db.sqlite-wal",
         ".rollback-db.sqlite-shm",
+        ".rollback-db.sqlite",
     ];
     if names.iter().all(|name| !dest.join(name).exists()) {
         return Ok(());
@@ -1242,6 +1232,74 @@ pub fn restore_snapshots(home: &Path, store: &Store, p: &Probation) -> Result<()
         eprintln!("update: kept the journal; this release reads every event");
     }
     Ok(())
+}
+
+/// Whether prestart will finish a journal swap or roll a release back. A busy journal
+/// lock then refuses the command. Otherwise the caller reports the probation state.
+pub fn restore_due(home: &Path) -> Result<bool, String> {
+    // A stage directory is removed or installed only under the journal lock. An aside
+    // beside a live journal is the preserved trial journal from a finished swap.
+    if !prefixed(home, ".journal-stage-")?.is_empty()
+        || (!home.join("journal").exists() && !prefixed(home, ".journal-aside-")?.is_empty())
+    {
+        return Ok(true);
+    }
+    let store = Store::open(home).map_err(|e| e.to_string())?;
+    if store.rollback_open().map_err(|e| e.to_string())? {
+        return Ok(true);
+    }
+    let Some(p) = store.probation().map_err(|e| e.to_string())? else {
+        return Ok(false);
+    };
+    if p.rolled_back_ms.is_some()
+        || store.current().map_err(|e| e.to_string())?.as_deref() != Some(p.version.as_str())
+    {
+        return Ok(false);
+    }
+    if p.restore_failed.is_some() && p.reason.is_none() {
+        return Ok(false);
+    }
+    if p.reason.is_some() || p.manual_rollback {
+        return Ok(true);
+    }
+    if p.contacted_ms.is_some() {
+        return Ok(false);
+    }
+    Ok(crate::home::now_ms() >= p.deadline_ms || p.starts >= pt_update::MAX_TRIAL_STARTS)
+}
+
+/// Holds the journal lock across the caller's restore when one is due. The lock is
+/// taken before [`finish_interrupted_journal_swap`] whenever `journal/` exists, so a
+/// restarting prestart cannot delete a retry's staging directory. When nothing is due
+/// and the lock is busy, returns `None` and leaves the journal alone.
+pub fn prepare_prestart(home: &Path, held: bool) -> Result<Option<File>, String> {
+    let due = restore_due(home)?;
+    if held {
+        finish_interrupted_journal_swap(home)?;
+        return Ok(None);
+    }
+    if due && home.join("journal").exists() {
+        let lock = acquire_journal_lock(home)?;
+        finish_interrupted_journal_swap(home)?;
+        return Ok(lock);
+    }
+    if due {
+        finish_interrupted_journal_swap(home)?;
+        return if home.join("journal/lock").exists() {
+            acquire_journal_lock(home)
+        } else {
+            Ok(None)
+        };
+    }
+    if home.join("journal").exists() {
+        if let Ok(lock) = acquire_journal_lock(home) {
+            finish_interrupted_journal_swap(home)?;
+            drop(lock);
+        }
+        return Ok(None);
+    }
+    finish_interrupted_journal_swap(home)?;
+    Ok(None)
 }
 
 /// The journal lock, taken before the release-store lock. `None` when the journal has no lock

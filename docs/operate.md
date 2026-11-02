@@ -305,9 +305,11 @@ the whole journal directory is replaced, so events after the journal snapshot ar
 headscale changes after its snapshot are lost. This includes nodes enrolled after the headscale
 snapshot; enroll them again. Sleeve directories whose id is at or above `next_sleeve` from the
 journal snapshot are moved to `<home>/update-aside/<time>-<pid>/` and are not deleted.
-Worktree checkouts and their gitdirs stay; the prestart log names them. Remove a leftover
-checkout when you no longer want it. Its `pt/<name>` branch survives, so a new sleeve with
-the same name starts from those commits. A new worktree does not adopt a path that already
+Worktree checkouts and their gitdirs stay; the prestart log names a sleeve that recorded
+its worktree. Remove a leftover checkout and run `git worktree prune` in the root
+repository. Until then the checkout holds `pt/<name>`, so a new worktree for that name is
+refused. The branch survives, and a new sleeve with the same name starts from those
+commits once the checkout is gone. A new worktree does not adopt a path that already
 exists. Prestart and the next hub start stop the systemd scopes of the quarantined sleeves.
 The prestart log names the quarantine directory.
 A configured fleet must be running so the database can be snapshotted. The service
@@ -337,7 +339,10 @@ and run
 `<home>/releases/previous/protectorate --home <home> hub probation --retry-rollback`, then start
 the service. The retry keeps a manual rollback: it restores headscale, and restores the journal
 only when the previous release cannot read it. It refuses while the hub holds the journal or
-headscale still has the database or its socket open. If a restore fails after a live file was
+headscale still has the database or its socket open. `hub probation` with nothing to roll
+back prints the probation state and exits 0 while the hub is running. Prestart takes the
+journal lock before it finishes an interrupted journal swap, when the journal directory is
+present. If a restore fails after a live file was
 replaced, prestart exits and the next prestart continues; it does not leave the trial serving
 half-restored data. `releases/rollback-open` records that open restore until the rollback
 finishes, so a later failure continues it too, including a manual rollback of a release that

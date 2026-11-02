@@ -374,9 +374,11 @@ straight from GitHub releases, on the stable or dev channel, as today.
     replaced. Journal events after the journal snapshot and headscale changes after its snapshot
     are lost. Sleeve directories with an id at or above the recorded `next_sleeve` move to
     `<home>/update-aside/<time>-<pid>/` and are not deleted. Worktree checkouts and gitdirs
-    stay; prestart lists them and stops those sleeves' scopes. The owner removes a leftover
-    checkout. Its `pt/<name>` branch survives, so a new sleeve with the same name starts from
-    those commits, and a new worktree does not adopt a path that already exists.
+    stay; prestart lists a sleeve that recorded `worktree.path` and stops those sleeves'
+    scopes. Remove a leftover checkout and run `git worktree prune` in the root repository.
+    Until then the checkout holds `pt/<name>`, so a new worktree for that name is refused.
+    The branch survives, and a new sleeve with the same name starts from those commits once
+    the checkout is gone. A new worktree does not adopt a path that already exists.
   - Manual `hub update --rollback` runs the restore offline before switching. It always restores
     headscale when there is a snapshot. It keeps the journal when the previous release can decode
     every intact frame; a torn final frame is ignored, the same way the journal opens. Otherwise
@@ -392,8 +394,10 @@ straight from GitHub releases, on the stable or dev channel, as today.
     and the next prestart continues the restore. Prestart writes `releases/rollback-open`,
     synced, before that first change and removes it only when the rollback finishes. A later
     failure while that file remains continues the restore, including a manual rollback of a
-    release that was already confirmed. Prestart takes the journal lock before
-    restoring, and `--retry-rollback` also refuses while headscale still has the database or its
+    release that was already confirmed. Prestart takes the journal lock before finishing an
+    interrupted journal swap, when the journal directory is present, and before restoring.
+    When no rollback is due it reports the probation state without that lock. `--retry-rollback`
+    refuses while the hub holds the journal or headscale still has the database or its
     socket open. If the trial binary itself cannot start, service needs the repair: neither an
     unreadable journal nor a failed binary can serve.
 - **Nodes, triggered by the hub:**
