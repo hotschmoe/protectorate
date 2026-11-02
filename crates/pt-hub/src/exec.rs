@@ -343,14 +343,6 @@ fn oom_kills(file: &mut fs::File) -> Result<u64, String> {
         .map_err(|e| format!("invalid oom_kill counter: {e}"))
 }
 
-fn scope_oom(scope: &str) -> Result<Option<bool>, String> {
-    let Some(cg) = pt_sandbox::scope_cgroup(scope).map_err(|e| e.to_string())? else {
-        return Ok(None);
-    };
-    let mut file = fs::File::open(cg.join("memory.events")).map_err(|e| e.to_string())?;
-    oom_kills(&mut file).map(|n| Some(n > 0))
-}
-
 struct OomWatch {
     stop: Sender<()>,
     result: Receiver<Result<bool, String>>,
@@ -1027,7 +1019,6 @@ impl SleeveExec {
             return Ok(());
         }
         let scope = self.hub.scope_name(self.id, g);
-        let oom = live.is_none() && matches!(scope_oom(&scope), Ok(Some(true)));
         pt_sandbox::kill_scope(&scope).map_err(|e| e.to_string())?;
         if live.is_some() {
             return Ok(());
@@ -1039,11 +1030,7 @@ impl SleeveExec {
             hub.submit(EventKind::Exited {
                 sleeve: id,
                 g,
-                cause: if oom {
-                    ExitCause::Oom
-                } else {
-                    ExitCause::Killed
-                },
+                cause: ExitCause::Killed,
             });
         })
     }
@@ -1197,6 +1184,7 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Rece
         refusal: None,
         prev_error: None,
         cause: ExitCause::Killed,
+        signal: None,
         expects: HashMap::new(),
         held: None,
     };
@@ -1248,7 +1236,8 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Rece
     }
     if let Some(watch) = &run.oom {
         match watch.finish() {
-            Ok(true) => p.cause = ExitCause::Oom,
+            Ok(true) if p.signal == Some(i64::from(pt_sys::SIGKILL)) => p.cause = ExitCause::Oom,
+            Ok(true) => {}
             Ok(false) => {}
             Err(e) => warning!("{scope}: OOM status unknown: {e}"),
         }
@@ -1271,6 +1260,7 @@ struct Pump {
     /// the driver writes right before `Exited`.
     prev_error: Option<ErrorClass>,
     cause: ExitCause,
+    signal: Option<i64>,
     /// Prompts being written, by request id.
     expects: HashMap<String, Expect>,
     /// A confirmed prompt whose ack had no native turn id: the harness's turn start may.
@@ -1491,6 +1481,7 @@ impl Pump {
             }
             Entry::Compaction { .. } => obs.push(Obs::CompactDone),
             Entry::Exited { code, signal, .. } => {
+                self.signal = *signal;
                 self.cause = match (self.refusal.or(before), code, signal) {
                     (Some(ErrorClass::Auth), ..) => ExitCause::Auth,
                     (Some(ErrorClass::Quota), ..) => ExitCause::Quota,

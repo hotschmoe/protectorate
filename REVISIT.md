@@ -392,8 +392,11 @@ Each entry: where, what was done, what right looks like.
   `memory.events` for `oom_kill` while its scope exists, then checks it again at exit. A scope
   collected before the watch attaches or before it can read an event leaves the cause unknown;
   the hub logs that and uses the driver's exit cause rather than guessing OOM. A hub restart can
-  likewise lose evidence for an already-collected scope. Right: a scope lifecycle that preserves
-  the event counter until the hub has recorded it.
+  likewise lose evidence for an already-collected scope. The hub requires the launcher to exit by
+  SIGKILL as well. Bwrap reports a killed harness as exit code 137, indistinguishable from a
+  normal exit 137, so that OOM is not classified. A launcher SIGKILL does not prove how the
+  harness exited. A recovered scope without a driver has no exit signal either. Right:
+  preserve the scope counter and the harness's actual wait status until the hub records them.
 - **A message sent during the post-restart probe is rejected** (pt-core `deliverable` ignores
   `Sleeve::probing`): a recovered Idle sleeve takes a `SendPrompt` before `ScopeProbed` answers,
   the executor holds no session for that g, and the Nack rejects the message (the sender is

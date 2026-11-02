@@ -667,7 +667,7 @@ exec sleep 300"#,
 }
 
 #[test]
-fn repeated_scope_oom_parks_and_reports_the_memory_limit() {
+fn child_oom_then_harness_exit_does_not_trip_g4() {
     let bus = std::process::Command::new("systemctl")
         .args(["--user", "show-environment"])
         .output();
@@ -688,8 +688,12 @@ if [ -f "$HOME/g" ]; then g=$(($(cat "$HOME/g") + 1)); fi
 echo "$g" > "$HOME/g"
 touch "$CARGO_TARGET_DIR/ready$g"
 while [ ! -e "$TMPDIR/go$g" ]; do sleep 0.1; done
-exec python3 -c 'a=[]
-while True: a.append(bytearray(4*1024*1024))'"#,
+python3 -c 'a=[]
+while True: a.append(bytearray(4*1024*1024))'
+touch "$CARGO_TARGET_DIR/child-killed$g"
+while [ ! -e "$TMPDIR/exit$g" ]; do sleep 0.1; done
+if [ "$g" = 1 ]; then exit 1; fi
+exit 137"#,
     );
     let config = pt_json::obj! {
         "envoy" => pt_json::obj! { "harness" => "claude" },
@@ -735,25 +739,45 @@ while True: a.append(bytearray(4*1024*1024))'"#,
         assert!(status.success(), "set memory limit on {scope}");
         std::thread::sleep(Duration::from_secs(1));
         std::fs::write(scratch.join(format!("tmp/go{g}")), "go").unwrap();
+        eventually(
+            "the OOM-killed child to leave the harness running",
+            Duration::from_secs(30),
+            || {
+                scratch
+                    .join(format!("target/child-killed{g}"))
+                    .exists()
+                    .then_some(())
+            },
+        );
+        let out = std::process::Command::new("systemctl")
+            .args(["--user", "show", "-p", "ControlGroup", "--value", &scope])
+            .output()
+            .unwrap();
+        let cg = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        assert!(!cg.is_empty(), "scope disappeared after child OOM");
+        let events = std::fs::read_to_string(format!("/sys/fs/cgroup{cg}/memory.events")).unwrap();
+        let killed: u64 = events
+            .lines()
+            .find_map(|line| line.strip_prefix("oom_kill "))
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(killed > 0, "no OOM kill in {scope}: {events}");
+        std::fs::write(scratch.join(format!("tmp/exit{g}")), "exit").unwrap();
     }
     eventually(
-        "the second OOM to park the sleeve",
+        "the harness to resume after both unrelated exits",
         Duration::from_secs(60),
-        || (hub.sleeve("oom")["lifecycle"].as_str() == Some("parked")).then_some(()),
+        || scratch.join("target/ready3").exists().then_some(()),
     );
-    eventually("both OOM notices", Duration::from_secs(10), || {
-        let entries = hub.transcript("oom");
-        let notices = of_type(&entries, "notice")
-            .iter()
-            .filter_map(|e| e["entry"]["text"].as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-        (notices
-            .matches("guardrail G4 tripped: the memory limit")
-            .count()
-            == 2)
-            .then_some(())
-    });
+    let entries = hub.transcript("oom");
+    let notices = of_type(&entries, "notice")
+        .iter()
+        .filter_map(|e| e["entry"]["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!notices.contains("guardrail G4"), "{notices}");
+    assert_ne!(hub.sleeve("oom")["lifecycle"].as_str(), Some("parked"));
 }
 
 /// A sleeve controls its repo's config and `.gitattributes` (a child, the shared git dir): the
