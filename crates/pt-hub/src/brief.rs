@@ -214,7 +214,7 @@ fn build(hub: &Hub, view: &View, workdir: &Path, spec: &Spec<'_>, entries: &[Lin
         "Sleeve {}, workspace {}, was {} (g{}), continues as g{}.\n",
         s.name,
         s.claim.path,
-        session.unwrap_or_else(|| wire::harness_wire(s.target.harness).to_string()),
+        session.unwrap_or_else(|| s.target.harness.as_str().to_string()),
         spec.from_gen.0,
         spec.to_gen.0
     );

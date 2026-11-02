@@ -202,3 +202,212 @@ fn commit_retries_preserve_documents_and_cursors() {
         assert!(stdout.contains("rebuild=identical"), "{stdout}");
     }
 }
+
+#[test]
+fn open_sweeps_unreferenced_segments() {
+    let dir = scratch("sweep");
+    let home = dir.join("home");
+    write(
+        &home.join(".claude/projects/project/session.jsonl"),
+        "{\"type\":\"user\",\"message\":{\"content\":\"sweepmarker\"}}\n",
+    );
+    let index = dir.join("index");
+    let a = index.join("a");
+    fs::create_dir_all(&a).unwrap();
+    fs::write(a.join("seg-00000099"), b"orphan").unwrap();
+    fs::write(a.join("seg-00000001.tmp"), b"partial").unwrap();
+    fs::write(a.join("sidecar"), b"leave").unwrap();
+    let out = run(&home, &index, &["sweepmarker"], None);
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(stdout.contains("query \"sweepmarker\": top 1"), "{stdout}");
+    assert!(stderr.contains("warning: history: no manifest"), "{stderr}");
+    assert!(!a.join("seg-00000099").exists());
+    assert!(!a.join("seg-00000001.tmp").exists());
+    assert_eq!(fs::read(a.join("sidecar")).unwrap(), b"leave");
+    assert!(a.join("manifest").is_file());
+}
+
+/// The indexed-byte charge of one user doc: source text plus the per-doc overhead.
+fn doc_charge(text: &str, session: &str, path: &Path, sleeve: &str) -> u64 {
+    let path = path.to_str().unwrap();
+    let stored = format!("claude:{sleeve}:{path}");
+    (text.len() + session.len() + stored.len() + sleeve.len() + 128) as u64
+}
+
+fn claude_user(text: &str) -> String {
+    format!("{{\"type\":\"user\",\"message\":{{\"content\":\"{text}\"}}}}\n")
+}
+
+#[test]
+fn small_budget_keeps_the_newest_lines_across_two_sessions() {
+    let dir = scratch("budget");
+    let home = dir.join("home");
+    let root = home.join(".claude/projects/project");
+    let sleeve = "4";
+    let old_path = root.join("a-old.jsonl");
+    let new_path = root.join("b-new.jsonl");
+    let tail_path = root.join("c-tail.jsonl");
+    let old_text = format!("{} oldsessiondoc", "x".repeat(4000));
+    let small_text = "smalllivedoc";
+    let new_text = "newsessiondoc";
+    let tail_text = "tailsessiondoc";
+    let old_charge = doc_charge(&old_text, "a-old", &old_path, sleeve);
+    let small_charge = doc_charge(small_text, "a-old", &old_path, sleeve);
+    let new_charge = doc_charge(new_text, "b-new", &new_path, sleeve);
+    let tail_charge = doc_charge(tail_text, "c-tail", &tail_path, sleeve);
+    // The first file fits whole, so its large doc and three small docs are committed
+    // together. The next file evicts only the large doc. Its charge is at least the three
+    // small ones, and one dead doc is not half of four, so the segment is rewritten only
+    // when the threshold counts bytes.
+    let first = old_charge + 3 * small_charge;
+    let budget = first + 1;
+    assert!(
+        old_charge >= 3 * small_charge,
+        "the dead doc has to outweigh the three live ones"
+    );
+    assert!(
+        new_charge > 1,
+        "the second file has to push the sleeve over"
+    );
+    assert!(
+        3 * small_charge + new_charge + tail_charge < budget,
+        "the live docs have to fit once the old one is gone"
+    );
+    let mut old = claude_user(&old_text);
+    for _ in 0..3 {
+        old.push_str(&claude_user(small_text));
+    }
+    write(&old_path, &old);
+    write(&new_path, &claude_user(new_text));
+    write(&tail_path, &claude_user(tail_text));
+    let index = dir.join("index");
+    let out = Command::new(PROBE)
+        .args([
+            "--home",
+            home.to_str().unwrap(),
+            "--index",
+            index.to_str().unwrap(),
+            "--runs",
+            "1",
+            "--budget",
+            &budget.to_string(),
+            "--sleeve",
+            sleeve,
+            "--query",
+            "oldsessiondoc",
+            "--query",
+            "smalllivedoc",
+            "--query",
+            "newsessiondoc",
+            "--query",
+            "tailsessiondoc",
+        ])
+        .output()
+        .expect("run history probe");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(out.status.success(), "stdout: {stdout}\nstderr: {stderr}");
+    assert!(stdout.contains("summary: files=3 docs=5 "), "{stdout}");
+    assert!(stdout.contains("rebuild=identical"), "{stdout}");
+    assert!(
+        stdout.contains("query \"oldsessiondoc\": top 0"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("query \"smalllivedoc\": top 3"), "{stdout}");
+    assert!(
+        stdout.contains("query \"newsessiondoc\": top 1"),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("query \"tailsessiondoc\": top 1"),
+        "{stdout}"
+    );
+    let caps: Vec<&str> = stdout
+        .lines()
+        .filter(|l| l.starts_with("capped:"))
+        .collect();
+    let named = format!("capped: {sleeve}");
+    assert_eq!(
+        caps,
+        vec![
+            "capped: none",
+            named.as_str(),
+            named.as_str(),
+            "capped: none",
+            named.as_str(),
+            named.as_str(),
+        ],
+        "{stdout}"
+    );
+    let b = index.join("b");
+    assert!(
+        !b.join("seg-00000000").exists(),
+        "the dead segment stays on disk"
+    );
+    let live: Vec<String> = fs::read_dir(&b)
+        .unwrap()
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter(|n| n.starts_with("seg-") && !n.ends_with(".tmp"))
+        .collect();
+    assert!(!live.is_empty(), "a live segment remains: {live:?}");
+}
+
+/// One page of `session` from the probe: doc ids, their turns, and whether another page remains.
+fn read_page(index: &Path, session: &str, after: Option<u64>) -> (Vec<u64>, Vec<u32>, bool) {
+    let mut cmd = Command::new(PROBE);
+    cmd.args(["--index", index.to_str().unwrap(), "--read", session]);
+    let after_text = after.map(|id| id.to_string());
+    if let Some(id) = &after_text {
+        cmd.args(["--after", id]);
+    }
+    let out = cmd.output().expect("run history probe");
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    let stderr = String::from_utf8(out.stderr).unwrap();
+    assert!(out.status.success(), "stdout: {stdout}\nstderr: {stderr}");
+    let mut ids = Vec::new();
+    let mut turns = Vec::new();
+    let mut more = None;
+    for line in stdout.lines() {
+        if let Some(rest) = line.strip_prefix("doc ") {
+            let mut parts = rest.split_whitespace();
+            ids.push(parts.next().unwrap().parse().unwrap());
+            turns.push(parts.next().unwrap().parse().unwrap());
+        } else if let Some(rest) = line.strip_prefix("more ") {
+            more = Some(rest == "true");
+        }
+    }
+    (ids, turns, more.expect("probe printed more"))
+}
+
+#[test]
+fn one_turn_pages_past_200_docs_with_after() {
+    let dir = scratch("page");
+    let home = dir.join("home");
+    let path = home.join(".claude/projects/project/page.jsonl");
+    let mut body = String::from("{\"type\":\"user\",\"message\":{\"content\":\"pageuser\"}}\n");
+    let tools = 250;
+    for i in 0..tools {
+        body.push_str(&format!(
+            "{{\"type\":\"assistant\",\"message\":{{\"content\":[{{\"type\":\"tool_use\",\"name\":\"Read\",\"input\":{{\"file_path\":\"p{i}\"}}}}]}}}}\n"
+        ));
+    }
+    write(&path, &body);
+    let index = dir.join("index");
+    let out = run(&home, &index, &["pageuser"], None);
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(stdout.contains("summary: files=1 docs=251"), "{stdout}");
+    let (first, turns, more) = read_page(&index.join("a"), "page", None);
+    assert_eq!(first.len(), 200, "{first:?}");
+    assert!(more);
+    assert!(turns.iter().all(|t| *t == 1), "{turns:?}");
+    let (second, turns2, more2) = read_page(&index.join("a"), "page", Some(*first.last().unwrap()));
+    assert!(!more2);
+    assert!(turns2.iter().all(|t| *t == 1), "{turns2:?}");
+    let mut all = first.clone();
+    all.extend(&second);
+    assert_eq!(all.len(), 251, "page lens {} {}", first.len(), second.len());
+    for pair in all.windows(2) {
+        assert_eq!(pair[1], pair[0] + 1, "gap or repeat at {pair:?}");
+    }
+}

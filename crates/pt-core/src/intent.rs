@@ -213,6 +213,7 @@ pub enum Notice {
     Resumed {
         g: Gen,
     },
+    TurnNeedsPrompt,
     Resleeved {
         g: Gen,
     },
@@ -307,5 +308,11 @@ pub enum Intent {
         job: JobId,
         attempt: u32,
         node: NodeId,
+    },
+    /// Journal a `Continue` event. The prompt effect is allocated only when that event is
+    /// applied, so replay of a journal that lacks it stays the same.
+    AutoContinue {
+        sleeve: SleeveId,
+        text: String,
     },
 }

@@ -28,8 +28,8 @@ use pt_api::{Quota, QuotaReading, QuotaWindow, Subscription};
 pub use cache::{Cache, Options};
 pub use error::{Error, Result};
 pub use select::{
-    Health, Spare, Target, select_target, select_with_fallback, spare_quota, spare_trigger,
-    window_length_ms,
+    Candidate, Health, Spare, Target, select_target, select_with_fallback, spare_quota,
+    spare_trigger, window_length_ms,
 };
 pub use task_size::{TaskSize, Thresholds, derive, median_of_last};
 pub use time::{fmt_age, now_ms, parse_rfc3339};
@@ -139,5 +139,6 @@ pub(crate) fn window(
         label: label.into(),
         used_pct: clamp_pct(used_pct),
         resets_at_ms: resets_at_ms.map(pt_api::EpochMs),
+        length_ms: None,
     }
 }

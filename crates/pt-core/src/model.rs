@@ -79,6 +79,18 @@ impl Harness {
     pub fn has_headless(self) -> bool {
         self != Harness::Antigravity
     }
+
+    /// The CLI and API name.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Harness::Claude => "claude",
+            Harness::Codex => "codex",
+            Harness::Grok => "grok",
+            Harness::Antigravity => "antigravity",
+            Harness::PiVendor => "pi_vendor",
+            Harness::PiLocal => "pi_local",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -99,6 +111,15 @@ pub struct Target {
 impl Target {
     pub fn valid(&self) -> bool {
         self.mode == Mode::Pane || self.harness.has_headless()
+    }
+
+    /// Why [`valid`](Self::valid) is false. The only reason is a headless harness that has none.
+    pub fn invalid_reason(&self) -> Option<String> {
+        if self.valid() {
+            None
+        } else {
+            Some(format!("{} has no headless mode", self.harness.as_str()))
+        }
     }
 }
 
@@ -235,7 +256,8 @@ pub enum ParkReason {
     Provision,
     NoTarget,
     Launch,
-    Flapping,
+    /// `Some` is the login rejected when the flap was an auth failure. Other flaps carry `None`.
+    Flapping(Option<Harness>),
     BriefUnconfirmed,
     Guard(Guardrail),
 }

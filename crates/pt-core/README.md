@@ -33,9 +33,25 @@ reads no clock, so `replay(journal) == live state`. The hub's core thread is its
 - `Launched` is the launch receipt (scope, pid), journaled as soon as spawn returns (12a item 2).
 - Answers to read-only intents: `ScopeProbed`, `TargetChosen`, `NodeChosen`, `JobStatus`
   (also the answer to a `Probe` of a node kind; `node` is the node that answered, and a report
-  from any node but the job's current one is dropped), `ArtifactsChecked`.
+  from any node but the job's current one is dropped), `ArtifactsChecked`, `ArtifactCollection`.
 - `Observed { sleeve, g, obs }` from drivers and pane screen rules; `Exited { sleeve, g }` once
   the scope is confirmed empty. A stale `g` is dropped.
+- `Continue { sleeve, text }` is not a command and has no reply. The hub journals it when the
+  core asks for one continuation prompt after a native resume of a headless turn a crash ended.
+  A fresh session is not continued: if that incarnation never acked a prompt, the owner is warned.
+  At most one per owner turn, across generations, and not after an interrupt or for a turn that
+  prompt started. The prompt is sent as the party that opened that owner turn. An agent steer
+  replaces that party, which keeps D9 on the continued turn and reports a rejection to that
+  party. If it cannot be delivered, the debt is dropped and the owner is warned, and a crash
+  after the incarnation reached idle does not carry the debt. A stop, park, or resleeve drops
+  a continuation still queued, including one fencing put back unsent, and warns once. An idle
+  crash that ends in a park or a resleeve drops a debt with no warning. A hub restart that
+  finds the resumed incarnation already idle drops the debt with no warning: it reached
+  Ready and nothing was sent after that. A protocol desync while the incarnation is idle
+  drops the debt, and the owner is warned when the resume does not replace it. A desync
+  during boot keeps a debt. A settle of that owner turn drops the debt
+  with no warning, including one recorded after resume while the incarnation is idle.
+  The prompt effect is allocated only while applying this event.
 - `Tick`, `HubRecovered`.
 
 ## Approvals

@@ -1,0 +1,22 @@
+#scenario 97819b4e2c1a2604
+# A continuation owed to a resume that already reached Ready is dropped when the
+# hub restarts. Nothing was sent after that Ready, so there is no warning.
+spawn debt /w/debt
+run
+obs debt ready
+send debt m1
+run
+expect debt activity=Working
+exit debt
+run
+obs debt ready
+commit
+crash
+expect-notice TurnNeedsPrompt count=0
+expect-effect continue:* count=0
+run
+obs debt ready
+run
+expect debt activity=Idle life=Running
+expect-effect continue:* count=0
+expect-notice TurnNeedsPrompt count=0

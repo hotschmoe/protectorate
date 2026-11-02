@@ -9,17 +9,6 @@ use crate::home::Config;
 use crate::hub::{Hub, View};
 use crate::transcript::Line;
 
-pub fn harness_wire(h: Harness) -> &'static str {
-    match h {
-        Harness::Claude => "claude",
-        Harness::Codex => "codex",
-        Harness::Grok => "grok",
-        Harness::Antigravity => "antigravity",
-        Harness::PiVendor => "pi_vendor",
-        Harness::PiLocal => "pi_local",
-    }
-}
-
 pub fn harness_from(s: &str) -> Option<Harness> {
     Some(match s {
         "claude" => Harness::Claude,
@@ -120,7 +109,8 @@ pub fn park_wire(r: ParkReason) -> String {
         ParkReason::Provision => "provision".into(),
         ParkReason::NoTarget => "no_target".into(),
         ParkReason::Launch => "launch".into(),
-        ParkReason::Flapping => "flapping".into(),
+        ParkReason::Flapping(Some(h)) => format!("flapping ({} login rejected)", h.as_str()),
+        ParkReason::Flapping(None) => "flapping".into(),
         ParkReason::BriefUnconfirmed => "brief_unconfirmed".into(),
         ParkReason::Guard(g) => format!("g{}", g.number()),
     }
@@ -225,7 +215,9 @@ pub fn workspace(s: &Sleeve) -> api::Workspace {
 }
 
 pub fn hub_info(hub: &Hub) -> api::HubInfo {
-    crate::transcript::lock(&hub.info).clone()
+    let mut info = crate::transcript::lock(&hub.info).clone();
+    info.history_capped = hub.history.capped_sleeves();
+    info
 }
 
 /// What the poller last learned of every node; none while the fleet is off or down.

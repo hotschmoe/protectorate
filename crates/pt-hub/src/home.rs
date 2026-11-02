@@ -215,6 +215,13 @@ pt_json::record! {
         /// The history index (SPEC 3.7). It is derived and holds log text, so keep it private
         /// and out of backups. Empty means `<home>/history`.
         pub history_dir: String = String::new(),
+        /// Absolute directory new project roots may be created under
+        /// (`sleeve spawn --new-path`). Empty turns that off.
+        pub projects_dir: String = String::new(),
+        /// Live indexed bytes one sleeve may keep, and one log may keep. Each doc counts its
+        /// source text plus per-doc overhead. Read once, when the hub starts. A value under
+        /// [`pt_history::MIN_BUDGET`] is a config error; exactly that floor is allowed.
+        pub history_budget_bytes: u64 = pt_history::DEFAULT_BUDGET,
         pub envoy: TargetConf = TargetConf {
             harness: "claude".to_string(),
             provider: String::new(),
@@ -266,12 +273,25 @@ impl Config {
     pub fn load(home: &Home) -> io::Result<Config> {
         let path = home.config();
         match fs::read(&path) {
-            Ok(bytes) => pt_json::from_bytes(&bytes).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("{}: {e}", path.display()),
-                )
-            }),
+            Ok(bytes) => {
+                let c: Config = pt_json::from_bytes(&bytes).map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("{}: {e}", path.display()),
+                    )
+                })?;
+                if c.history_budget_bytes < pt_history::MIN_BUDGET {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "{}: history_budget_bytes must be at least {} bytes",
+                            path.display(),
+                            pt_history::MIN_BUDGET
+                        ),
+                    ));
+                }
+                Ok(c)
+            }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 let c: Config = pt_json::from_str("{}").expect("defaults parse");
                 let text = pt_json::ToJson::to_json(&c).to_string();

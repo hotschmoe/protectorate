@@ -7,13 +7,16 @@
 //! `EventKind::Spawn` is tag 0, tag 32 with an effort, and tag 38 when it marks D9. Tag 38 is
 //! the tag 0 body plus a flags byte: bit 0 then an effort string, bit 1 the mark. A later
 //! spawn field is another bit, not another tag. `EventKind::Send` is tag 1, or tag 39 when it
-//! marks D9. Tags 0, 1 and 32 decode and re-encode to the same bytes. Tags 33 to 37 are
-//! reserved. Older tags leave the mark unset.
+//! marks D9. Tags 0, 1 and 32 decode and re-encode to the same bytes. Tags 33 to 37 are Start
+//! and Resleeve with an effort, a permanent artifact check, an artifact collection, and
+//! Continue. Older tags leave the mark unset.
 
 use crate::event::*;
 use crate::model::*;
 
 pub const FORMAT: u8 = 1;
+/// Highest event tag this binary reads. Any incompatible encoding must get a new event tag.
+pub const MAX_EVENT_TAG: u8 = 39;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -399,6 +402,19 @@ impl Wire for JobSpec {
     }
 }
 
+impl Wire for ArtifactRefusal {
+    fn put(&self, w: &mut Vec<u8>) {
+        self.path.put(w);
+        self.reason.put(w);
+    }
+    fn get(r: &mut Reader) -> Result<Self, DecodeError> {
+        Ok(Self {
+            path: Wire::get(r)?,
+            reason: Wire::get(r)?,
+        })
+    }
+}
+
 impl Wire for JobReport {
     fn put(&self, w: &mut Vec<u8>) {
         match self {
@@ -612,15 +628,29 @@ impl Wire for EventKind {
                 w.push(6);
                 sleeve.put(w);
             }
-            E::Start { sleeve, target } => {
-                w.push(7);
+            E::Start {
+                sleeve,
+                target,
+                effort,
+            } => {
+                w.push(if effort.is_some() { 33 } else { 7 });
                 sleeve.put(w);
                 target.put(w);
+                if let Some(effort) = effort {
+                    effort.put(w);
+                }
             }
-            E::Resleeve { sleeve, target } => {
-                w.push(8);
+            E::Resleeve {
+                sleeve,
+                target,
+                effort,
+            } => {
+                w.push(if effort.is_some() { 34 } else { 8 });
                 sleeve.put(w);
                 target.put(w);
+                if let Some(effort) = effort {
+                    effort.put(w);
+                }
             }
             E::Abandon { effect } => {
                 w.push(9);
@@ -735,11 +765,33 @@ impl Wire for EventKind {
                 node.put(w);
                 report.put(w);
             }
-            E::ArtifactsChecked { job, attempt, ok } => {
-                w.push(25);
+            E::ArtifactsChecked {
+                job,
+                attempt,
+                result,
+            } => {
+                w.push(if *result == ArtifactCheck::Permanent {
+                    35
+                } else {
+                    25
+                });
                 job.put(w);
                 attempt.put(w);
-                ok.put(w);
+                if *result != ArtifactCheck::Permanent {
+                    (*result == ArtifactCheck::Verified).put(w);
+                }
+            }
+            E::ArtifactCollection {
+                job,
+                attempt,
+                refusals,
+                incomplete,
+            } => {
+                w.push(36);
+                job.put(w);
+                attempt.put(w);
+                refusals.put(w);
+                incomplete.put(w);
             }
             E::Observed { sleeve, g, obs } => {
                 w.push(26);
@@ -770,12 +822,17 @@ impl Wire for EventKind {
                 ask.put(w);
                 timeout.put(w);
             }
+            E::Continue { sleeve, text } => {
+                w.push(37);
+                sleeve.put(w);
+                text.put(w);
+            }
         }
     }
 
     fn get(r: &mut Reader) -> Result<Self, DecodeError> {
         use EventKind as E;
-        let tag = r.tag("event", 39)?;
+        let tag = r.tag("event", MAX_EVENT_TAG)?;
         Ok(match tag {
             0 => E::Spawn(Wire::get(r)?),
             1 | 39 => E::Send {
@@ -807,10 +864,12 @@ impl Wire for EventKind {
             7 => E::Start {
                 sleeve: Wire::get(r)?,
                 target: Wire::get(r)?,
+                effort: None,
             },
             8 => E::Resleeve {
                 sleeve: Wire::get(r)?,
                 target: Wire::get(r)?,
+                effort: None,
             },
             9 => E::Abandon {
                 effect: Wire::get(r)?,
@@ -879,7 +938,11 @@ impl Wire for EventKind {
             25 => E::ArtifactsChecked {
                 job: Wire::get(r)?,
                 attempt: Wire::get(r)?,
-                ok: Wire::get(r)?,
+                result: if bool::get(r)? {
+                    ArtifactCheck::Verified
+                } else {
+                    ArtifactCheck::Retryable
+                },
             },
             26 => E::Observed {
                 sleeve: Wire::get(r)?,
@@ -907,6 +970,31 @@ impl Wire for EventKind {
                 spec.effort = Some(Wire::get(r)?);
                 E::Spawn(spec)
             }
+            33 => E::Start {
+                sleeve: Wire::get(r)?,
+                target: Wire::get(r)?,
+                effort: Some(Wire::get(r)?),
+            },
+            34 => E::Resleeve {
+                sleeve: Wire::get(r)?,
+                target: Wire::get(r)?,
+                effort: Some(Wire::get(r)?),
+            },
+            35 => E::ArtifactsChecked {
+                job: Wire::get(r)?,
+                attempt: Wire::get(r)?,
+                result: ArtifactCheck::Permanent,
+            },
+            36 => E::ArtifactCollection {
+                job: Wire::get(r)?,
+                attempt: Wire::get(r)?,
+                refusals: Wire::get(r)?,
+                incomplete: Wire::get(r)?,
+            },
+            37 => E::Continue {
+                sleeve: Wire::get(r)?,
+                text: Wire::get(r)?,
+            },
             38 => {
                 let mut spec: SpawnSpec = Wire::get(r)?;
                 let flags = r.u8()?;

@@ -625,6 +625,43 @@ fn hub_runs_the_fleet_and_node_jobs() {
         assert!(serve.0.try_wait().unwrap().is_none());
     }
 
+    let waited = hub.cli(&[
+        "job",
+        "run",
+        "--node",
+        "e2e-hubfleet",
+        "--wait",
+        "--",
+        "sh",
+        "-c",
+        "sleep 1; echo waited; exit 23",
+    ]);
+    assert_eq!(waited.status, 23, "{} {}", waited.stdout, waited.stderr);
+    assert_eq!(waited.stdout, "waited\n");
+    assert!(
+        waited.stderr.contains("job ") && waited.stderr.contains("failed (exit 23)"),
+        "{}",
+        waited.stderr
+    );
+    let waited = hub.cli(&[
+        "job",
+        "run",
+        "--node",
+        "e2e-hubfleet",
+        "--wait",
+        "--",
+        "sh",
+        "-c",
+        "echo success",
+    ]);
+    assert_eq!(waited.status, 0, "{}", waited.stderr);
+    assert_eq!(waited.stdout, "success\n");
+    assert!(
+        waited.stderr.contains("succeeded (exit 0)"),
+        "{}",
+        waited.stderr
+    );
+
     // A job that leaves an artifact in its directory.
     let cwd = work.to_str().unwrap();
     let abs = format!("{cwd}/out.bin");
@@ -683,10 +720,83 @@ fn hub_runs_the_fleet_and_node_jobs() {
         "{}",
         win.stderr
     );
-    // A missing artifact fails the job after its verify attempts.
-    let missing = run_job(&hub, &["--cwd", cwd, "--artifact", "nope.txt"], &["true"]);
+    // A permanent refusal is not retried.
+    let missing = run_job(
+        &hub,
+        &[
+            "--cwd",
+            cwd,
+            "--artifact",
+            "nope.txt",
+            "--artifact",
+            "out.bin",
+        ],
+        &["true"],
+    );
     let done = wait_job(&hub, &missing, &["succeeded", "failed"], 120);
     assert_eq!(done["state"].as_str(), Some("failed"), "{done}");
+    assert!(
+        done["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("nope.txt") && e.contains("node refused")),
+        "{done}"
+    );
+    assert_eq!(done["artifacts"][1]["sha256"], a["sha256"], "{done}");
+    let refusal = hub.cli(&[
+        "job",
+        "run",
+        "--node",
+        "e2e-hubfleet",
+        "--wait",
+        "--cwd",
+        cwd,
+        "--artifact",
+        "missing-wait.txt",
+        "--",
+        "true",
+    ]);
+    assert_eq!(refusal.status, 1, "{} {}", refusal.stdout, refusal.stderr);
+    assert!(
+        refusal.stderr.contains("failed")
+            && refusal.stderr.contains("missing-wait.txt")
+            && refusal.stderr.contains("node refused"),
+        "{}",
+        refusal.stderr
+    );
+    let log = fs::read_to_string(node_dir.join("serve.log")).unwrap_or_default();
+    assert_eq!(
+        log.matches("artifact \"nope.txt\" refused").count(),
+        1,
+        "{log}"
+    );
+    let blocked = run_job(
+        &hub,
+        &[
+            "--cwd",
+            cwd,
+            "--artifact",
+            "missing-meta.txt",
+            "--artifact",
+            "out.bin",
+        ],
+        &["sh", "-c", "sleep 3"],
+    );
+    fs::create_dir_all(hub.home.join(format!("jobs/{blocked}/1/artifacts.tmp"))).unwrap();
+    let done = wait_job(&hub, &blocked, &["succeeded", "failed"], 120);
+    assert_eq!(done["state"].as_str(), Some("failed"), "{done}");
+    assert!(
+        done["error"].as_str().is_some_and(
+            |e| e.contains("missing-meta.txt") && e.contains("saving artifact metadata")
+        ),
+        "{done}"
+    );
+    let held = node_rpc(&node_bin, &sock, "ListJobs", "{}");
+    assert!(
+        held["jobs"].as_array().unwrap().iter().any(|j| j["job_id"]
+            .as_str()
+            .is_some_and(|id| id.ends_with(&format!("-j{blocked}")))),
+        "{held}"
+    );
 
     // A 3 MB binary artifact in FetchArtifact slices, from the job's own directory (no --cwd).
     let big = run_job(
@@ -749,6 +859,12 @@ fn hub_runs_the_fleet_and_node_jobs() {
             node_log().contains(&format!("artifact {name:?} refused")),
             "{name}: {}",
             tail(&node_log(), 20)
+        );
+        assert_eq!(
+            node_log()
+                .matches(&format!("artifact {name:?} refused"))
+                .count(),
+            1
         );
     }
     assert!(

@@ -1,0 +1,14 @@
+#scenario 0424473684f76c01
+# An undispatched prompt is returned to the queue and does not trigger a turn warning.
+spawn root /w/a
+run
+obs root ready
+send root m1
+expect root activity=Delivering
+exit root
+expect-notice TurnNeedsPrompt count=0
+run
+obs root ready g=2
+run
+expect root msg:m1=Delivered
+expect-effect continue:* count=0

@@ -1,4 +1,6 @@
-//! Invariants I1-I10 and the table-driven reference transitions, checked after every apply.
+//! Invariants I1-I10, the auto-continue rule, an owed-continuations reference kept by the
+//! sim, and the table-driven reference transitions,
+//! checked after every apply.
 //!
 //! The reference tables are the edges of the design doc's lifecycle and effect diagrams (with the
 //! SPEC 12a/12b corrections). One apply may take several documented edges (a crash that resumes at
@@ -339,7 +341,112 @@ pub fn step(prev: &State, st: &State, sim: &Sim) {
     }
     unsent_messages(prev, st);
     approval_steps(prev, st);
+    continue_prompts(prev, st, sim);
+    owed_continuations(st, sim);
     invariants(st, sim);
+}
+
+/// At most one live `continue:<sleeve>:<seq>` prompt per owner turn. An unsent one may be sent
+/// again, under the same key, after its generation dies. A new one is owed by the previous state
+/// or is that re-delivery.
+fn continue_prompts(prev: &State, st: &State, sim: &Sim) {
+    for s in st.sleeves.values() {
+        let mut live = BTreeSet::new();
+        for e in st.effects.values() {
+            let EffectKind::SendPrompt {
+                sleeve,
+                g,
+                request_id,
+                ..
+            } = &e.kind
+            else {
+                continue;
+            };
+            if *sleeve != s.id || !request_id.starts_with("continue:") {
+                continue;
+            }
+            let seq = continue_seq(s.id, request_id);
+            if e.state != EffectState::Abandoned {
+                assert!(
+                    live.insert(seq),
+                    "two continue effects for {:?} turn {seq}",
+                    s.id
+                );
+            }
+            if prev.effects.contains_key(&e.id) {
+                continue;
+            }
+            let ps = &prev.sleeves[&s.id];
+            let redelivery = ps
+                .messages
+                .get(request_id)
+                .is_some_and(|m| m.state == MsgState::Queued);
+            assert!(
+                g.0 >= 2 && !sim.alive.contains(&(s.id, Gen(g.0 - 1))),
+                "continue for {:?} turn {seq} but generation {} did not die",
+                s.id,
+                g.0 - 1
+            );
+            if redelivery {
+                continue;
+            }
+            assert_eq!(
+                ps.auto_continue,
+                Some(seq),
+                "continue for {:?} turn {seq} without a debt from an interrupted turn",
+                s.id
+            );
+            assert_eq!(
+                sim.owed_before.get(&s.id).copied(),
+                Some(seq),
+                "continue for {:?} turn {seq} was not owed by the reference ({:?})",
+                s.id,
+                sim.last_kind
+            );
+            assert_eq!(ps.target.mode, Mode::Headless);
+            assert_eq!(
+                ps.life,
+                Life::Running,
+                "continue for {:?} turn {seq} while {:?}",
+                s.id,
+                ps.life
+            );
+            assert_eq!(
+                st.sleeves[&s.id].messages[request_id].from, ps.turn_from,
+                "continue for {:?} turn {seq} is sent as {:?}, the turn was opened by {:?}",
+                s.id, st.sleeves[&s.id].messages[request_id].from, ps.turn_from
+            );
+        }
+    }
+}
+
+/// The core's `auto_continue` matches the reference kept on `Sim`.
+fn owed_continuations(st: &State, sim: &Sim) {
+    for (id, s) in &st.sleeves {
+        assert_eq!(
+            s.auto_continue,
+            sim.owed.get(id).copied(),
+            "owed continuation for {id:?} after {}: core {:?} reference {:?}",
+            sim.last_kind,
+            s.auto_continue,
+            sim.owed.get(id).copied()
+        );
+    }
+    for id in sim.owed.keys() {
+        assert!(
+            st.sleeves.contains_key(id),
+            "reference owes a continuation for missing sleeve {id:?}"
+        );
+    }
+}
+
+fn continue_seq(sid: SleeveId, request_id: &str) -> u64 {
+    let prefix = format!("continue:{}:", sid.0);
+    let Some(rest) = request_id.strip_prefix(&prefix) else {
+        panic!("continue effect key {request_id} is not {prefix}<seq>");
+    };
+    rest.parse()
+        .unwrap_or_else(|_| panic!("continue effect key {request_id} has no turn seq"))
 }
 
 /// A message whose prompt or steer record ended while still Intent (never dispatched) is back
@@ -362,6 +469,21 @@ fn unsent_messages(prev: &State, st: &State) {
                 continue;
             }
             let m = s.messages.get(r).map(|m| m.state);
+            // A stop, park, or resleeve drops an unsent continuation instead of sending it
+            // on the next start. It is Rejected, with no "may have applied" notice.
+            let dropped_continue = r.starts_with("continue:")
+                && matches!(m, Some(MsgState::Rejected))
+                && matches!(
+                    s.life,
+                    Life::Parked(_)
+                        | Life::Stopping { .. }
+                        | Life::Stopped
+                        | Life::Removed
+                        | Life::Resleeving
+                );
+            if dropped_continue {
+                continue;
+            }
             assert!(
                 matches!(
                     m,

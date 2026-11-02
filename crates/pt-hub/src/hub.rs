@@ -24,9 +24,22 @@ use crate::wire;
 pub const ENVOY: &str = pt_core::ENVOY_NAME;
 
 /// One input to the core thread. Commands carry the channel their `Intent::Reply` goes to.
-pub struct Input {
-    pub kind: EventKind,
-    pub reply: Option<Sender<Reply>>,
+#[allow(clippy::large_enum_variant)]
+pub enum Input {
+    Event {
+        kind: EventKind,
+        reply: Option<Sender<Reply>>,
+    },
+    Snapshot {
+        dir: PathBuf,
+        reply: Sender<Result<JournalSnapshot, String>>,
+    },
+}
+
+/// A journal copied at a batch boundary, and the sleeve id the core would hand out next.
+pub struct JournalSnapshot {
+    pub at_ms: u64,
+    pub next_sleeve: u64,
 }
 
 /// The read-only snapshot published after each journaled batch.
@@ -37,8 +50,7 @@ pub struct View {
     pub since: BTreeMap<SleeveId, Millis>,
 }
 
-/// The test-only knob (`PT_TEST_FAULT=usage_limit:<sleeve name>`): the named sleeve's first
-/// settled turn is reported as hitting its usage limit, which trips G1 and forces a resleeve.
+/// The test-only knob reports a usage limit at the first turn's settle.
 pub struct Fault {
     pub sleeve: String,
     pub fired: AtomicBool,
@@ -47,9 +59,9 @@ pub struct Fault {
 impl Fault {
     pub fn from_env() -> Option<Fault> {
         let v = std::env::var("PT_TEST_FAULT").ok()?;
-        let sleeve = v.strip_prefix("usage_limit:")?.to_string();
+        let sleeve = v.strip_prefix("usage_limit:")?;
         Some(Fault {
-            sleeve,
+            sleeve: sleeve.to_string(),
             fired: AtomicBool::new(false),
         })
     }
@@ -61,7 +73,8 @@ impl Fault {
 
 /// D9: who started Envoy's current turn. `origin` is `agent:<name>` or `mail:<name>` when an
 /// agent message, or mail from a D9-marked sleeve, was written into it (as its prompt or a
-/// steer), and stays so until the turn settles.
+/// steer), and stays so until the turn settles. A crash clears the origin and keeps `spawns`;
+/// the continuation restores the origin without zeroing the count.
 #[derive(Debug, Default)]
 pub struct EnvoyTurn {
     pub origin: Option<String>,
@@ -119,11 +132,14 @@ impl Hub {
     ) -> Hub {
         let transcripts = Transcripts::new(home.clone());
         let jobs = JobStore::new(home.jobs());
-        let history = crate::history::History::open(&if config.history_dir.is_empty() {
-            home.history()
-        } else {
-            PathBuf::from(&config.history_dir)
-        });
+        let history = crate::history::History::open(
+            &if config.history_dir.is_empty() {
+                home.history()
+            } else {
+                PathBuf::from(&config.history_dir)
+            },
+            config.history_budget_bytes,
+        );
         let started_ms = now_ms();
         Hub {
             home,
@@ -139,6 +155,8 @@ impl Hub {
                 started_at_ms: pt_api::EpochMs(started_ms),
                 inventory: None,
                 sample: None,
+                history_capped: Vec::new(),
+                restore_error: None,
             }),
             owner_home,
             fault: Fault::from_env(),
@@ -167,7 +185,7 @@ impl Hub {
 
     /// Feeds an event to the core without waiting for its effect.
     pub fn submit(&self, kind: EventKind) {
-        if self.input.send(Input { kind, reply: None }).is_err() {
+        if self.input.send(Input::Event { kind, reply: None }).is_err() {
             debug!("core is gone; dropped an event");
         }
     }
@@ -177,7 +195,7 @@ impl Hub {
     pub fn command(&self, kind: EventKind, timeout: Duration) -> Result<Reply, CommandError> {
         let (tx, rx) = mpsc::channel();
         self.input
-            .send(Input {
+            .send(Input::Event {
                 kind,
                 reply: Some(tx),
             })
@@ -186,6 +204,15 @@ impl Hub {
             mpsc::RecvTimeoutError::Timeout => CommandError::Timeout,
             mpsc::RecvTimeoutError::Disconnected => CommandError::Down,
         })
+    }
+
+    pub fn snapshot_journal(&self, dir: PathBuf) -> Result<JournalSnapshot, String> {
+        let (tx, rx) = mpsc::channel();
+        self.input
+            .send(Input::Snapshot { dir, reply: tx })
+            .map_err(|_| "core is down".to_string())?;
+        rx.recv()
+            .map_err(|_| "core stopped while snapshotting the journal".to_string())?
     }
 
     /// The scope unit name of incarnation `g` of a sleeve on this hub.
@@ -280,6 +307,12 @@ impl Hub {
             Some(Party::Envoy) => "envoy".into(),
             Some(Party::Agent) => match request_id.strip_prefix("ga:") {
                 Some(rest) => format!("agent:{}", rest.split(':').next().unwrap_or("")),
+                None if request_id.starts_with("continue:") => state
+                    .sleeve(to)
+                    .and_then(|s| s.turn_agent.clone())
+                    .map(|name| format!("agent:{name}"))
+                    // No recorded name still carries the prefix, so D9 fails closed.
+                    .unwrap_or_else(|| "agent:".into()),
                 None => "agent".into(),
             },
             Some(Party::Sleeve(x)) => state

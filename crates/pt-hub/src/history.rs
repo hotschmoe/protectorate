@@ -6,7 +6,7 @@
 //! The index is derived. A missing directory is built from the sources; a corrupt one is moved
 //! aside (never deleted) and rebuilt the same way, so the hub always starts.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ use std::thread;
 use std::time::Duration;
 
 use pt_api::Harness as ApiHarness;
-use pt_core::{Proc, Sleeve, SleeveId};
+use pt_core::{Life, Proc, Sleeve, SleeveId};
 use pt_drivers::{Entry, Harness};
 use pt_history::{ContextUsage, Doc, Filters, Hit, Index, Query, Selector, Source, SourceKind};
 
@@ -25,6 +25,8 @@ use crate::log::{debug, info, warning};
 use crate::transcript::{Line, lock};
 
 const POLL: Duration = Duration::from_secs(1);
+/// Longest wait after a failed commit before the next catch-up.
+const COMMIT_BACKOFF_MAX: Duration = Duration::from_secs(30);
 
 /// Why a history read failed.
 #[derive(Debug)]
@@ -72,7 +74,8 @@ struct Track {
 #[derive(Default)]
 struct Passes {
     tracks: BTreeMap<SleeveId, Track>,
-    choices: HashMap<String, Choice>,
+    /// Native session id, per sleeve. One sleeve's id never selects another's log.
+    choices: HashMap<(SleeveId, String), Choice>,
     /// The last error per source and of the last commit, so a lasting one is logged once.
     errors: HashMap<PathBuf, String>,
     commit_error: Option<String>,
@@ -80,6 +83,11 @@ struct Passes {
 
 pub struct History {
     ix: Mutex<Result<Index, String>>,
+    /// Sleeve ids at the history budget. Copied out of the index at open and after each
+    /// catch-up, so a reader does not take the index lock. A sleeve leaves the set when it
+    /// is removed, when its sources are gone, or when a later open finds the total under a
+    /// raised budget.
+    capped: Mutex<BTreeSet<String>>,
     /// The sleeve kind each native session ran as (the drivers say only `pi`).
     harnesses: Mutex<HashMap<String, ApiHarness>>,
     passes: Mutex<Passes>,
@@ -104,8 +112,8 @@ fn log_root(home: &Path, kind: SourceKind) -> PathBuf {
     }
 }
 
-fn open_index(dir: &Path) -> Result<Index, String> {
-    match Index::open(dir) {
+fn open_index(dir: &Path, budget: u64) -> Result<Index, String> {
+    match Index::open(dir, budget) {
         Ok(ix) => Ok(ix),
         Err(e)
             if matches!(
@@ -129,7 +137,7 @@ fn open_index(dir: &Path) -> Result<Index, String> {
             );
             fs::rename(dir, &aside)
                 .map_err(|e| format!("history: move {} aside: {e}", dir.display()))?;
-            Index::open(dir).map_err(|e| e.to_string())
+            Index::open(dir, budget).map_err(|e| e.to_string())
         }
     }
 }
@@ -137,9 +145,9 @@ fn open_index(dir: &Path) -> Result<Index, String> {
 impl History {
     /// Opens the index in `dir`, rebuilding a corrupt one. Never fails: without an index the
     /// history methods answer `unavailable` with the reason.
-    pub fn open(dir: &Path) -> History {
-        let ix = open_index(dir);
-        match &ix {
+    pub fn open(dir: &Path, budget: u64) -> History {
+        let ix = open_index(dir, budget);
+        let capped = match &ix {
             Ok(ix) => {
                 let st = ix.stats();
                 info!(
@@ -148,11 +156,16 @@ impl History {
                     st.sessions,
                     dir.display()
                 );
+                ix.capped_sleeves().into_iter().collect()
             }
-            Err(e) => warning!("history is off: {e}"),
-        }
+            Err(e) => {
+                warning!("history is off: {e}");
+                BTreeSet::new()
+            }
+        };
         History {
             ix: Mutex::new(ix),
+            capped: Mutex::new(capped),
             harnesses: Mutex::new(HashMap::new()),
             passes: Mutex::new(Passes::default()),
         }
@@ -169,12 +182,23 @@ impl History {
         self.with(|ix| ix.search(q, f, limit))
     }
 
-    pub fn read(&self, sel: &Selector) -> Result<Vec<Doc>, Failure> {
-        self.with(|ix| ix.read(sel))
+    pub fn read(
+        &self,
+        sel: &Selector,
+        sleeves: Option<&[String]>,
+        limit: usize,
+    ) -> Result<(Vec<Doc>, bool), Failure> {
+        self.with(|ix| ix.read(sel, sleeves, limit))
     }
 
     pub fn docs(&self) -> u64 {
         self.with(|ix| Ok(ix.docs())).unwrap_or(0)
+    }
+
+    /// Sleeve ids at the history budget, in order. This does not take the index lock.
+    /// The set is filled when the index opens, before the first `doctor` run.
+    pub fn capped_sleeves(&self) -> Vec<String> {
+        lock(&self.capped).iter().cloned().collect()
     }
 
     pub fn context_usage(&self, session: &str) -> Option<ContextUsage> {
@@ -186,22 +210,41 @@ impl History {
     }
 
     /// Tails every source of `only` (or of every sleeve) to its end and commits. The brief calls
-    /// this before its pre-run search, so the outgoing session's last lines are in.
-    pub fn catch_up(&self, hub: &Hub, only: Option<SleeveId>) {
+    /// this before its pre-run search, so the outgoing session's last lines are in. True when
+    /// that commit failed.
+    pub fn catch_up(&self, hub: &Hub, only: Option<SleeveId>) -> bool {
         let mut p = lock(&self.passes);
         let view = hub.view();
         let mut changed = false;
         for s in view.state.sleeves.values() {
+            if s.life == Life::Removed {
+                continue;
+            }
             if only.is_none_or(|o| o == s.id) {
                 changed |= self.sleeve_pass(hub, &mut p, s);
             }
         }
+        // A pass that started before the removal can mark the sleeve again. Clear from
+        // the view published since, before this pass copies the set out.
+        let removed_now: Vec<String> = hub
+            .view()
+            .state
+            .sleeves
+            .values()
+            .filter(|s| s.life == Life::Removed)
+            .map(|s| s.id.0.to_string())
+            .collect();
+        for id in &removed_now {
+            self.uncap_sleeve(id);
+        }
+        let mut failed = false;
         if let Ok(ix) = &mut *lock(&self.ix)
             && (changed || ix.has_uncommitted())
         {
             match ix.commit() {
                 Ok(()) => p.commit_error = None,
                 Err(e) => {
+                    failed = true;
                     let e = e.to_string();
                     if p.commit_error.replace(e.clone()).as_ref() != Some(&e) {
                         warning!("history commit: {e}");
@@ -209,6 +252,32 @@ impl History {
                 }
             }
         }
+        if let Ok(ix) = &*lock(&self.ix) {
+            self.sync_capped(&ix.capped_sleeves());
+        }
+        failed
+    }
+
+    /// Drops a removed sleeve from the capped set. The index lock is taken before the
+    /// capped set, same as [`Self::sync_capped`]. Docs stay.
+    pub fn uncap_sleeve(&self, id: &str) {
+        if let Ok(ix) = &mut *lock(&self.ix) {
+            ix.clear_sleeve_cap(id);
+            lock(&self.capped).remove(id);
+        } else {
+            lock(&self.capped).remove(id);
+        }
+    }
+
+    /// Replaces the named set with `now`. A sleeve that was not named warns once.
+    fn sync_capped(&self, now: &[String]) {
+        let mut set = lock(&self.capped);
+        for id in now {
+            if set.insert(id.clone()) {
+                warning!("history capped: {id}");
+            }
+        }
+        set.retain(|id| now.iter().any(|n| n == id));
     }
 
     /// One sleeve: new `session_info` lines, a source per session, then the reads. Returns
@@ -234,11 +303,12 @@ impl History {
         for seen in &track.seen {
             let choice = p
                 .choices
-                .entry(seen.native_id.clone())
+                .entry((s.id, seen.native_id.clone()))
                 .or_insert(Choice::Undecided);
             if *choice != Choice::Undecided {
                 continue;
             }
+            // Walk a log root only while some session of that harness is still undecided.
             let logs = found.entry(seen.kind).or_insert_with(|| {
                 pt_history::discover(seen.kind, &log_root(&home, seen.kind))
                     .unwrap_or_default()
@@ -257,6 +327,29 @@ impl History {
                 *choice = Choice::Transcript;
             }
         }
+        // This pass's discover may show that a native log moved.
+        for seen in &track.seen {
+            let Some(logs) = found.get(&seen.kind) else {
+                continue;
+            };
+            let Some(found_path) = logs.get(&seen.native_id) else {
+                continue;
+            };
+            let Some(Choice::Native(path)) = p.choices.get_mut(&(s.id, seen.native_id.clone()))
+            else {
+                continue;
+            };
+            // A second file with the same session id is not a move. Follow the new
+            // path only once the old one is gone, so a copy does not drop the live log.
+            if path == found_path || path.exists() {
+                continue;
+            }
+            let old = path.clone();
+            if let Ok(ix) = &mut *lock(&self.ix) {
+                ix.forget(seen.kind, &old, Some(&sleeve));
+            }
+            *path = found_path.clone();
+        }
         {
             let mut harnesses = lock(&self.harnesses);
             for seen in &track.seen {
@@ -269,7 +362,9 @@ impl History {
         let mut skip = Vec::new();
         let mut hold = None;
         for seen in &track.seen {
-            match &p.choices[&seen.native_id] {
+            match &p.choices[&(s.id, seen.native_id.clone())] {
+                // Always skip the transcript for a native choice, including when this pass
+                // did not see the file. A missed discover must not index the session twice.
                 Choice::Native(path) => {
                     if !skip.contains(&seen.native_id) {
                         skip.push(seen.native_id.clone());
@@ -289,6 +384,18 @@ impl History {
         t.skip = skip;
         t.limit = hold;
         sources.push(t);
+        // Oldest file first. Newest means ingest order, so a rebuild must not rank an
+        // older log above a newer session. A missing mtime sorts first.
+        sources.sort_by(|a, b| {
+            let mtime = |p: &Path| {
+                p.metadata()
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::UNIX_EPOCH)
+            };
+            mtime(&a.path)
+                .cmp(&mtime(&b.path))
+                .then_with(|| a.path.cmp(&b.path))
+        });
         let mut changed = false;
         for src in &sources {
             let got = match &mut *lock(&self.ix) {
@@ -298,7 +405,7 @@ impl History {
             match got {
                 Ok(g) => {
                     p.errors.remove(&src.path);
-                    changed |= g.bytes > 0 || g.reset;
+                    changed |= g.bytes > 0 || g.reset || g.capped;
                 }
                 Err(e) => {
                     let e = e.to_string();
@@ -368,11 +475,17 @@ pub fn start(hub: &Arc<Hub>) {
     let started = thread::Builder::new()
         .name("pt-history".into())
         .spawn(move || {
+            let mut pause = POLL;
             loop {
                 let Some(hub) = weak.upgrade() else { return };
-                hub.history.catch_up(&hub, None);
+                let failed = hub.history.catch_up(&hub, None);
                 drop(hub);
-                thread::sleep(POLL);
+                thread::sleep(pause);
+                pause = if failed {
+                    pause.saturating_mul(2).min(COMMIT_BACKOFF_MAX)
+                } else {
+                    POLL
+                };
             }
         });
     if let Err(e) = started {

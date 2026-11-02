@@ -2198,7 +2198,7 @@ final class HistoryRead {
 
   final List<HistoryText> docs;
 
-  /// The hub cut the range short; read on from the last doc's turn.
+  /// The hub cut the range short. Pass the last doc's id as `after_doc` to read the next page.
   final bool more;
 
   Map<String, Object?> toJson() => {
@@ -2337,6 +2337,8 @@ final class HubInfo {
     required this.startedAt,
     this.inventory,
     this.sample,
+    this.historyCapped = const <String>[],
+    this.restoreError,
   });
 
   factory HubInfo.fromJson(Object? json) {
@@ -2347,6 +2349,19 @@ final class HubInfo {
       startedAt: _time(j['started_at_ms'], 'HubInfo.started_at_ms'),
       inventory: _opt(j['inventory'], Inventory.fromJson),
       sample: _opt(j['sample'], Sample.fromJson),
+      historyCapped: _or(
+        j['history_capped'],
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'HubInfo.history_capped',
+          (e1) => _string(e1, 'HubInfo.history_capped[]'),
+        ),
+      ),
+      restoreError: _opt(
+        j['restore_error'],
+        (e0) => _string(e0, 'HubInfo.restore_error'),
+      ),
     );
   }
 
@@ -2360,12 +2375,22 @@ final class HubInfo {
 
   final Sample? sample;
 
+  /// Sleeve ids whose history is at its text budget. Empty when every sleeve is under it.
+  /// `doctor` and `hub info` list these ids, and drop one when that sleeve is back under
+  /// the budget.
+  final List<String> historyCapped;
+
+  /// Set when a rollback restore failed and the trial release was kept.
+  final String? restoreError;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'version': version,
     'started_at_ms': startedAt.millisecondsSinceEpoch,
     if (inventory case final v?) 'inventory': v.toJson(),
     if (sample case final v?) 'sample': v.toJson(),
+    'history_capped': historyCapped,
+    if (restoreError case final v?) 'restore_error': v,
   };
 }
 
@@ -3213,7 +3238,7 @@ final class JobArtifactData {
 }
 
 final class JobList {
-  const JobList({this.jobs = const <Job>[]});
+  const JobList({this.jobs = const <Job>[], required this.scopedToCaller});
 
   factory JobList.fromJson(Object? json) {
     final j = _object(json, 'JobList');
@@ -3223,13 +3248,18 @@ final class JobList {
         const <Job>[],
         (e0) => _list(e0, 'JobList.jobs', Job.fromJson),
       ),
+      scopedToCaller: _bool(j['scoped_to_caller'], 'JobList.scoped_to_caller'),
     );
   }
 
   final List<Job> jobs;
 
+  /// Only the caller's and its children's jobs are visible.
+  final bool scopedToCaller;
+
   Map<String, Object?> toJson() => {
     'jobs': [for (final e0 in jobs) e0.toJson()],
+    'scoped_to_caller': scopedToCaller,
   };
 }
 
@@ -3996,7 +4026,12 @@ enum QuotaReading {
 }
 
 final class QuotaWindow {
-  const QuotaWindow({required this.label, this.usedPct, this.resetsAt});
+  const QuotaWindow({
+    required this.label,
+    this.usedPct,
+    this.resetsAt,
+    this.lengthMs,
+  });
 
   factory QuotaWindow.fromJson(Object? json) {
     final j = _object(json, 'QuotaWindow');
@@ -4007,6 +4042,7 @@ final class QuotaWindow {
         j['resets_at_ms'],
         (e0) => _time(e0, 'QuotaWindow.resets_at_ms'),
       ),
+      lengthMs: _opt(j['length_ms'], (e0) => _int(e0, 'QuotaWindow.length_ms')),
     );
   }
 
@@ -4017,10 +4053,14 @@ final class QuotaWindow {
 
   final DateTime? resetsAt;
 
+  /// Vendor window length in milliseconds, when the reading named one.
+  final int? lengthMs;
+
   Map<String, Object?> toJson() => {
     'label': label,
     if (usedPct case final v?) 'used_pct': v,
     if (resetsAt case final v?) 'resets_at_ms': v.millisecondsSinceEpoch,
+    if (lengthMs case final v?) 'length_ms': v,
   };
 }
 
@@ -4031,6 +4071,7 @@ final class ReadHistoryRequest {
     this.session,
     this.fromTurn = 0,
     this.toTurn,
+    this.afterDoc,
   });
 
   factory ReadHistoryRequest.fromJson(Object? json) {
@@ -4050,6 +4091,10 @@ final class ReadHistoryRequest {
         j['to_turn'],
         (e0) => _int(e0, 'ReadHistoryRequest.to_turn'),
       ),
+      afterDoc: _opt(
+        j['after_doc'],
+        (e0) => _int(e0, 'ReadHistoryRequest.after_doc'),
+      ),
     );
   }
 
@@ -4062,11 +4107,15 @@ final class ReadHistoryRequest {
   /// Absent: the session's last turn.
   final int? toTurn;
 
+  /// Skip this doc and every earlier one. A turn longer than one page continues from here.
+  final int? afterDoc;
+
   Map<String, Object?> toJson() => {
     if (docId case final v?) 'doc_id': v,
     if (session case final v?) 'session': v,
     'from_turn': fromTurn,
     if (toTurn case final v?) 'to_turn': v,
+    if (afterDoc case final v?) 'after_doc': v,
   };
 }
 
@@ -4230,6 +4279,7 @@ final class ResleeveRequest {
     required this.target,
     this.model,
     this.provider,
+    this.effort,
   });
 
   factory ResleeveRequest.fromJson(Object? json) {
@@ -4242,6 +4292,7 @@ final class ResleeveRequest {
         j['provider'],
         (e0) => _string(e0, 'ResleeveRequest.provider'),
       ),
+      effort: _opt(j['effort'], (e0) => _string(e0, 'ResleeveRequest.effort')),
     );
   }
 
@@ -4253,11 +4304,14 @@ final class ResleeveRequest {
 
   final String? provider;
 
+  final String? effort;
+
   Map<String, Object?> toJson() => {
     'sleeve_id': sleeveId,
     'target': target.toJson(),
     if (model case final v?) 'model': v,
     if (provider case final v?) 'provider': v,
+    if (effort case final v?) 'effort': v,
   };
 }
 
@@ -4442,7 +4496,8 @@ final class SearchHistoryRequest {
 
   final HistoryMode mode;
 
-  /// Sleeves by id or name, removed ones too. Empty means every sleeve the caller reaches.
+  /// Sleeves by id or name, removed ones too. Empty means every sleeve this caller may
+  /// read: its own, or every sleeve for Envoy and the owner (D26).
   final List<String> sleeves;
 
   /// `pi_local` and `pi_vendor` both match every Pi session.
@@ -4587,6 +4642,7 @@ final class Sleeve {
   final Lifecycle lifecycle;
 
   /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed or `g<N>`.
+  /// A flap after a rejected login is `flapping (<harness> login rejected)`.
   final String? parkReason;
 
   /// The directory the incarnation works in (a child's worktree, a root's claim).
@@ -4696,6 +4752,7 @@ final class SpawnSleeveRequest {
     required this.name,
     required this.harness,
     this.path,
+    this.newPath,
     this.parentId,
     this.view,
     this.mode = Mode.headless,
@@ -4713,6 +4770,10 @@ final class SpawnSleeveRequest {
       name: _string(j['name'], 'SpawnSleeveRequest.name'),
       harness: Harness.fromJson(j['harness']),
       path: _opt(j['path'], (e0) => _string(e0, 'SpawnSleeveRequest.path')),
+      newPath: _opt(
+        j['new_path'],
+        (e0) => _string(e0, 'SpawnSleeveRequest.new_path'),
+      ),
       parentId: _opt(
         j['parent_id'],
         (e0) => _string(e0, 'SpawnSleeveRequest.parent_id'),
@@ -4748,6 +4809,10 @@ final class SpawnSleeveRequest {
   /// The directory a root claims; a child works in its parent's.
   final String? path;
 
+  /// Create this directory under `projects_dir` and claim it as a new root.
+  /// Takes no `path`, `parent_id` or `view`. The owner, a paired device and Envoy only.
+  final String? newPath;
+
   /// Makes this a child of that root.
   final String? parentId;
 
@@ -4776,6 +4841,7 @@ final class SpawnSleeveRequest {
     'name': name,
     'harness': harness.toJson(),
     if (path case final v?) 'path': v,
+    if (newPath case final v?) 'new_path': v,
     if (parentId case final v?) 'parent_id': v,
     if (view case final v?) 'view': v.toJson(),
     'mode': mode.toJson(),
@@ -4795,6 +4861,7 @@ final class StartSleeveRequest {
     this.target,
     this.model,
     this.provider,
+    this.effort,
   });
 
   factory StartSleeveRequest.fromJson(Object? json) {
@@ -4807,6 +4874,10 @@ final class StartSleeveRequest {
         j['provider'],
         (e0) => _string(e0, 'StartSleeveRequest.provider'),
       ),
+      effort: _opt(
+        j['effort'],
+        (e0) => _string(e0, 'StartSleeveRequest.effort'),
+      ),
     );
   }
 
@@ -4818,11 +4889,14 @@ final class StartSleeveRequest {
 
   final String? provider;
 
+  final String? effort;
+
   Map<String, Object?> toJson() => {
     'sleeve_id': sleeveId,
     if (target case final v?) 'target': v.toJson(),
     if (model case final v?) 'model': v,
     if (provider case final v?) 'provider': v,
+    if (effort case final v?) 'effort': v,
   };
 }
 
@@ -5045,7 +5119,7 @@ final class UpdateHubRequest {
   /// A release tag, in place of the channel's newest.
   final String? version;
 
-  /// Swap `releases/current` and `releases/previous`, then restart.
+  /// Restore the required snapshots and restart on `releases/previous`.
   final bool rollback;
 
   Map<String, Object?> toJson() => {

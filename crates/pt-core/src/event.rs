@@ -152,10 +152,12 @@ pub enum EventKind {
     Start {
         sleeve: SleeveId,
         target: Option<Target>,
+        effort: Option<String>,
     },
     Resleeve {
         sleeve: SleeveId,
         target: Option<Target>,
+        effort: Option<String>,
     },
     Abandon {
         effect: EffectId,
@@ -244,7 +246,13 @@ pub enum EventKind {
     ArtifactsChecked {
         job: JobId,
         attempt: u32,
-        ok: bool,
+        result: ArtifactCheck,
+    },
+    ArtifactCollection {
+        job: JobId,
+        attempt: u32,
+        refusals: Vec<ArtifactRefusal>,
+        incomplete: Option<String>,
     },
 
     // Harness and scope observations, fenced by generation.
@@ -264,4 +272,23 @@ pub enum EventKind {
     Tick,
     /// The hub restarted and replayed the journal; issued once before any new input.
     HubRecovered,
+    /// One continuation prompt after a native resume of an interrupted turn. The hub journals
+    /// it when the core asks. Older journals have no such event, so they allocate no prompt.
+    Continue {
+        sleeve: SleeveId,
+        text: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArtifactCheck {
+    Verified,
+    Retryable,
+    Permanent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactRefusal {
+    pub path: String,
+    pub reason: String,
 }

@@ -1,0 +1,20 @@
+#scenario a36e6482ea69e0ea
+# A settle of the owed turn while the resumed incarnation is already idle drops the
+# continuation. The journal has that settle, so a later hub start does not warn.
+spawn settled /w/s
+run
+obs settled ready
+send settled m1
+run
+expect settled activity=Working
+exit settled
+run
+obs settled ready
+obs settled settled
+expect settled activity=Idle
+expect-effect continue:* count=0
+expect-notice TurnNeedsPrompt count=0
+commit
+crash
+expect-effect continue:* count=0
+expect-notice TurnNeedsPrompt count=0

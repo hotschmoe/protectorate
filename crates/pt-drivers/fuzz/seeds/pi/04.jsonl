@@ -1,5 +1,5 @@
 #
-{"id":"pt-1","type":"response","command":"get_state","success":true,"data":{"sessionId":"S","model":{"id":"m","provider":"p","contextWindow":99999999999999999999}}}
+{"id":"pt-1","type":"response","command":"get_state","success":true,"data":{"sessionId":"00000000-0000-4000-8000-000000000000","model":{"id":"m","provider":"p","contextWindow":99999999999999999999}}}
 !send /handled
 {"id":"pt-2","type":"response","command":"prompt","success":true,"data":{"disposition":"handled"}}
 !send A

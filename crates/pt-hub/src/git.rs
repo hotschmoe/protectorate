@@ -1,5 +1,6 @@
-//! The git the hub runs itself: child worktrees, checkpoints and the facts for a brief. Nothing
-//! here creates a ref or a file the worked-on repo would show.
+//! The git the hub runs itself: child worktrees, checkpoints, the facts for a brief, and the
+//! empty repository of a new project root. Nothing here writes into a repository a sleeve
+//! already controls.
 //!
 //! A sleeve controls its workspace and, for a child, the shared git dir, so it controls the
 //! repo's config and `.gitattributes`. Git runs commands from those (filters, hooks, fsmonitor,
@@ -72,6 +73,42 @@ fn rev_parse(dir: &Path, args: &[&str]) -> Result<String, String> {
 
 pub fn is_repo(dir: &Path) -> bool {
     dir.join(".git").exists()
+}
+
+/// `git init -b <branch>` and one empty commit, in a directory this hub just created.
+/// The commit uses the owner's git identity, or `protectorate` when a field is unset.
+/// Returns the commit id.
+pub fn init_empty(dir: &Path, branch: &str, message: &str) -> Result<String, String> {
+    if !branch_ok(branch) {
+        return Err(format!("bad branch name {branch}"));
+    }
+    let mut c = git(dir);
+    c.args(["init", "-q", "-b", branch]);
+    run(c, "init")?;
+    let (name, email) = crate::toolchain::git_user();
+    let name = name.unwrap_or_else(|| "protectorate".into());
+    let email = email.unwrap_or_else(|| "protectorate@localhost".into());
+    let mut c = git(dir);
+    c.env("GIT_AUTHOR_NAME", &name)
+        .env("GIT_AUTHOR_EMAIL", &email)
+        .env("GIT_COMMITTER_NAME", &name)
+        .env("GIT_COMMITTER_EMAIL", &email)
+        .args(["commit", "--allow-empty", "-qm", message]);
+    run(c, "commit")?;
+    rev_parse(dir, &["HEAD"])
+}
+
+fn branch_ok(branch: &str) -> bool {
+    !branch.is_empty()
+        && branch.len() <= 64
+        && !branch.starts_with('-')
+        && !branch.ends_with('.')
+        && !branch.ends_with('/')
+        && !branch.contains("..")
+        && !branch.contains("@{")
+        && branch
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'/'))
 }
 
 /// A git dir of the hub's own under `state_dir`, with `work` as its work tree: the config is
@@ -160,7 +197,7 @@ impl Shadow {
     }
 }
 
-fn head(repo: &Path) -> Option<String> {
+pub(crate) fn head(repo: &Path) -> Option<String> {
     rev_parse(repo, &["--verify", "-q", "HEAD^{commit}"])
         .ok()
         .filter(|h| !h.is_empty())
@@ -180,6 +217,22 @@ pub fn worktree_add(
         || fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
     {
         return Err(format!("{} goes through a symlink", path.display()));
+    }
+    // A cut-short add of this sleeve left the marker. Any other occupant of `path`
+    // is a leftover checkout; adopting it would reset someone else's worktree.
+    let marker = state_dir.join("worktree.path");
+    let mine = fs::read(&marker)
+        .ok()
+        .is_some_and(|b| b == path.as_os_str().as_encoded_bytes());
+    if !mine {
+        if fs::symlink_metadata(path).is_ok() || registered(root, path)? {
+            return Err(refuse_leftover(&format!(
+                "{} already exists; a new sleeve does not adopt an existing worktree",
+                path.display()
+            )));
+        }
+        crate::home::write_private(&marker, path.as_os_str().as_encoded_bytes())
+            .map_err(|e| e.to_string())?;
     }
     let commit = head(root).ok_or("the root's repository has no commit")?;
     if !registered(root, path)? {
@@ -206,7 +259,14 @@ pub fn worktree_add(
     Ok(())
 }
 
-/// Whether `path` is a work tree of the root's repository.
+pub fn worktree_registered(root: &Path, path: &Path) -> Result<bool, String> {
+    registered(root, path)
+}
+
+fn refuse_leftover(why: &str) -> String {
+    format!("{why}. Remove the leftover checkout and run git worktree prune in the root repository")
+}
+
 fn registered(root: &Path, path: &Path) -> Result<bool, String> {
     let mut c = git(root);
     c.args(["worktree", "list", "--porcelain"]);

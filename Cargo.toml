@@ -13,7 +13,6 @@ libc = "=0.2.191"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(verus_keep_ghost)'] }
 
 [profile.dev]
 debug = "line-tables-only"

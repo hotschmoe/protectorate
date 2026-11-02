@@ -8,12 +8,3 @@ publish.workspace = true
 
 [lints]
 workspace = true
-
-[package.metadata.verus]
-verify = true
-
-[features]
-verus = ["dep:vstd"]
-
-[dependencies]
-vstd = { version = "=0.0.0-2026-10-25-0158", optional = true }

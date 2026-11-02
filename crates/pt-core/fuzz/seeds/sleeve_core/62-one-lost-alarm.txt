@@ -1,0 +1,21 @@
+#scenario 1d42e8ec7e340df3
+# One lost-job alarm per episode. A collection that loses the link, starts again, and
+# loses it again does not alarm a second time. The 24h window is unchanged.
+job j1
+policy poll=1
+run
+expect-job 0 state=Running
+tick 10s
+step
+expect-job 0 state=Collecting
+tick 6m
+expect-job 0 state=Lost
+expect-notice JobLost count=1
+run
+expect-job 0 state=Lost
+tick 10s
+step
+expect-job 0 state=Collecting
+tick 6m
+expect-job 0 state=Lost
+expect-notice JobLost count=1

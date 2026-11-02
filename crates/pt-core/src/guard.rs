@@ -183,12 +183,14 @@ impl Core<'_> {
                 self.sl(sid).blocked_at = self.now;
                 self.deny_timed_out(sid, &approvals);
             }
-            Action::Resume => self.after_death(sid, Cause::Guard(g)),
+            Action::Resume => self.after_death(sid, Cause::Guard(g), false),
         }
     }
 
     /// The incarnation is dead and the sleeve is Recovering: resume, resleeve or park.
-    pub(crate) fn after_death(&mut self, sid: SleeveId, cause: Cause) {
+    /// `quiet` is an idle death: a park or resleeve drops a continuation debt without
+    /// telling the owner the turn will not continue.
+    pub(crate) fn after_death(&mut self, sid: SleeveId, cause: Cause, quiet: bool) {
         let now = self.now;
         let s = self.sl(sid);
         if s.life != Life::Recovering || s.proc != Proc::Down {
@@ -197,7 +199,7 @@ impl Core<'_> {
         if let Cause::Guard(g @ (Guardrail::AuthFailed | Guardrail::QuotaExhausted)) = cause {
             // Resuming into the same dead login or empty quota only fails again.
             self.notify(Party::Owner, Some(sid), Notice::Tripped { guardrail: g });
-            return self.begin_resleeve(sid, cause, None);
+            return self.begin_resleeve_quiet(sid, cause, None, quiet);
         }
         if cause == Cause::Guard(Guardrail::Oom) {
             let repeated = recent(&mut s.guard.ooms, now, OOM_WINDOW) > 0;
@@ -209,35 +211,59 @@ impl Core<'_> {
                 },
             );
             if repeated {
-                return self.park(sid, ParkReason::Guard(Guardrail::Oom));
+                return self.park_quiet(sid, ParkReason::Guard(Guardrail::Oom), quiet);
             }
             self.sl(sid).guard.ooms.push(now);
         }
         let s = self.sl(sid);
         if s.guard.state == GuardState::Resuming && cause != Cause::HubRestart {
             // The resumed incarnation failed before Ready.
-            return self.begin_resleeve(sid, cause, None);
+            return self.begin_resleeve_quiet(sid, cause, None, quiet);
         }
         if cause == Cause::Guard(Guardrail::StartFailed) {
-            return self.begin_resleeve(sid, cause, None);
+            return self.begin_resleeve_quiet(sid, cause, None, quiet);
         }
         let s = self.sl(sid);
         if recent(&mut s.guard.resumes, now, RESUME_WINDOW) >= RESUME_LIMIT {
-            return self.begin_resleeve(sid, cause, None);
+            return self.begin_resleeve_quiet(sid, cause, None, quiet);
         }
         s.guard.resumes.push(now);
         s.guard.state = GuardState::Resuming;
+        // The debt is an owner-turn seq, so a new generation must not rewrite it.
         let target = s.target.clone();
         self.start_incarnation(sid, target, true);
     }
 
     /// Enters the resleeve path: Quiescing while the incarnation lives, else a forced capture.
     pub(crate) fn begin_resleeve(&mut self, sid: SleeveId, cause: Cause, target: Option<Target>) {
+        self.begin_resleeve_quiet(sid, cause, target, false);
+    }
+
+    /// `quiet` is an idle death: drop a continuation debt without the owner warning.
+    /// A queued continuation is still dropped. The warning, when there is one, is once.
+    fn begin_resleeve_quiet(
+        &mut self,
+        sid: SleeveId,
+        cause: Cause,
+        target: Option<Target>,
+        quiet: bool,
+    ) {
+        let dropped = self.discard_continuation(sid);
+        let warn = dropped && !quiet;
         let now = self.now;
         let s = self.sl(sid);
         if cause != Cause::Manual {
+            s.guard.chosen_effort = None;
             if recent(&mut s.guard.resleeves, now, RESLEEVE_WINDOW) >= RESLEEVE_LIMIT {
-                return self.park(sid, ParkReason::Flapping);
+                let login = match cause {
+                    Cause::Guard(Guardrail::AuthFailed) => Some(s.target.harness),
+                    _ => None,
+                };
+                self.park_quiet(sid, ParkReason::Flapping(login), true);
+                if warn {
+                    self.needs_prompt(sid);
+                }
+                return;
             }
             s.guard.resleeves.push(now);
         }
@@ -245,18 +271,27 @@ impl Core<'_> {
         s.guard.cause = Some(cause);
         s.guard.tried.clear();
         s.guard.chosen = target;
-        if s.proc == Proc::Down {
-            return self.capture(sid, true);
+        let down = s.proc == Proc::Down;
+        if down {
+            self.capture(sid, true);
+            if warn {
+                self.needs_prompt(sid);
+            }
+            return;
         }
         s.guard.state = GuardState::Quiescing {
             deadline: now.saturating_add(QUIESCE_WAIT),
             nudged: false,
         };
-        if matches!(
+        let idle = matches!(
             s.activity,
             Activity::Idle { .. } | Activity::Booting | Activity::Unknown
-        ) {
+        );
+        if idle {
             self.stop_incarnation(sid);
+        }
+        if warn {
+            self.needs_prompt(sid);
         }
     }
 
@@ -376,12 +411,17 @@ impl Core<'_> {
         }
     }
 
-    pub(crate) fn resleeve_cmd(&mut self, sid: SleeveId, target: Option<&Target>) {
+    pub(crate) fn resleeve_cmd(
+        &mut self,
+        sid: SleeveId,
+        target: Option<&Target>,
+        effort: Option<&str>,
+    ) {
         let Some(s) = self.st.sleeve(sid).filter(|s| s.life != Life::Removed) else {
             return self.refuse(Code::NotFound, "no such sleeve");
         };
-        if target.is_some_and(|t| !t.valid()) {
-            return self.refuse(Code::InvalidArgument, "that harness has no headless mode");
+        if let Some(why) = target.and_then(Target::invalid_reason) {
+            return self.refuse(Code::InvalidArgument, why);
         }
         let armed = matches!(
             s.guard.state,
@@ -393,6 +433,7 @@ impl Core<'_> {
                 "only a running, settled sleeve resleeves",
             );
         }
+        self.sl(sid).guard.chosen_effort = effort.map(str::to_owned);
         self.begin_resleeve(sid, Cause::Manual, target.cloned());
         self.reply(Reply::Accepted);
     }

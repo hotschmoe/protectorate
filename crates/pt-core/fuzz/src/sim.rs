@@ -60,7 +60,17 @@ pub struct Sim {
     pub responses: BTreeMap<EffectId, Gen>,
     /// Intents of the most recent apply.
     pub last: Vec<Intent>,
+    pub notices: Vec<Notice>,
     pub steps: usize,
+    /// Owner-turn seq that still owes a continuation. Derived from events, not copied from
+    /// `Sleeve::auto_continue`. Snapshotted at commit so a crash rolls it back with the journal.
+    pub owed: BTreeMap<SleeveId, u64>,
+    owed_committed: BTreeMap<SleeveId, u64>,
+    /// `owed` before the event just applied. A new continuation effect must name one of these,
+    /// unless it is the re-delivery of a prompt that was still queued.
+    pub owed_before: BTreeMap<SleeveId, u64>,
+    /// For the mismatch panic.
+    pub last_kind: String,
 }
 
 impl Default for Sim {
@@ -87,7 +97,12 @@ impl Sim {
             resleeves: Vec::new(),
             responses: BTreeMap::new(),
             last: Vec::new(),
+            notices: Vec::new(),
             steps: 0,
+            owed: BTreeMap::new(),
+            owed_committed: BTreeMap::new(),
+            owed_before: BTreeMap::new(),
+            last_kind: String::new(),
         }
     }
 
@@ -100,7 +115,15 @@ impl Sim {
             "event codec round trip"
         );
         let prev = self.st.clone();
+        let owed_before = self.owed.clone();
         let out = apply(&mut self.st, &e);
+        self.owed_before = owed_before;
+        self.last_kind = format!("{:?}", e.kind);
+        crate::owed::note(&mut self.owed, &prev, &e.kind, e.at.max(prev.now));
+        self.notices.extend(out.iter().filter_map(|i| match i {
+            Intent::Notify { notice, .. } => Some(notice.clone()),
+            _ => None,
+        }));
         if std::env::var_os("PT_TRACE").is_some() {
             eprintln!("{:>4} {:?}", self.log.len(), e.kind);
             for i in &out {
@@ -129,6 +152,7 @@ impl Sim {
     pub fn commit(&mut self) {
         self.committed = self.log.len();
         self.committed_state = self.st.clone();
+        self.owed_committed = self.owed.clone();
         self.pending.extend(self.held.drain(..));
     }
 
@@ -146,6 +170,7 @@ impl Sim {
             "replay(journal) differs from the live state at the last commit"
         );
         self.st = replayed;
+        self.owed = self.owed_committed.clone();
         self.held.clear();
         self.pending.clear();
         let committed = self.committed;
@@ -316,13 +341,20 @@ impl Sim {
                 self.apply(EventKind::ArtifactsChecked {
                     job,
                     attempt,
-                    ok: p.fetch % 2 == 0,
+                    result: if p.fetch % 2 == 0 {
+                        ArtifactCheck::Verified
+                    } else {
+                        ArtifactCheck::Retryable
+                    },
                 });
             }
             Intent::ReadLog { .. }
             | Intent::Checkpoint { .. }
             | Intent::Notify { .. }
             | Intent::Reply(_) => {}
+            Intent::AutoContinue { sleeve, text } => {
+                self.apply(EventKind::Continue { sleeve, text });
+            }
         }
     }
 
@@ -375,7 +407,7 @@ impl Sim {
             EffectKind::SendPrompt { .. }
             | EffectKind::Steer { .. }
             | EffectKind::RespondApproval { .. }
-            | EffectKind::Compact { .. } => match p.prompt % 4 {
+            | EffectKind::Compact { .. } => match p.prompt % 5 {
                 0 => {
                     self.apply(ack(Some(format!("turn-{}", effect.0))));
                 }
@@ -385,7 +417,10 @@ impl Sim {
                 2 => {
                     self.apply(lost);
                 }
-                _ => {}
+                3 => {}
+                _ => {
+                    self.apply(ack(None));
+                }
             },
             _ => match p.other % 3 {
                 0 => {

@@ -67,7 +67,8 @@ fn intent_sleeve(i: &Intent) -> Option<SleeveId> {
         Intent::Execute { kind, .. } | Intent::Probe { kind, .. } => kind.sleeve(),
         Intent::ProbeScope { sleeve, .. }
         | Intent::SelectTarget { sleeve, .. }
-        | Intent::Checkpoint { sleeve, .. } => Some(*sleeve),
+        | Intent::Checkpoint { sleeve, .. }
+        | Intent::AutoContinue { sleeve, .. } => Some(*sleeve),
         _ => None,
     }
 }
@@ -575,7 +576,7 @@ impl SleeveExec {
                 let envoy_gated = Hub::envoy_id(&view.state) == Some(sleeve)
                     && hub.doctor.gated(sleeve).is_some();
                 let chosen = if envoy_gated {
-                    Err("Envoy's harness failed doctor")
+                    Err("Envoy's harness failed doctor".to_string())
                 } else {
                     crate::select::select_target(
                         now_ms(),
@@ -601,6 +602,9 @@ impl SleeveExec {
                 if let Some(s) = view.state.sleeve(sleeve) {
                     self.checkpoint(s, g);
                 }
+            }
+            Intent::AutoContinue { sleeve, text } => {
+                self.submit(EventKind::Continue { sleeve, text });
             }
             other => debug!("sleeve {}: ignored {other:?}", self.id.0),
         }
@@ -861,7 +865,7 @@ impl SleeveExec {
         let harness =
             driver_harness(target.harness).ok_or("that harness has no headless driver")?;
         let mut program = program(&hub, target.harness)
-            .ok_or_else(|| format!("{} is not installed", wire::harness_wire(target.harness)))?;
+            .ok_or_else(|| format!("{} is not installed", target.harness.as_str()))?;
         let home = hub.home.sleeve_home(s.id);
         fs::create_dir_all(&home).map_err(|e| format!("{}: {e}", home.display()))?;
         let logins = crate::logins::prepare_all(&hub.home.logins(), &home)
@@ -977,7 +981,7 @@ impl SleeveExec {
         spec.effort = s.effort.clone();
         spec.resume = resume;
         spec.prefix = Some(prefix);
-        let name = wire::harness_wire(target.harness);
+        let name = target.harness.as_str();
         if hub.config.supervised.iter().any(|h| h == name) {
             spec.permission = pt_drivers::Permission::Supervised;
         }
@@ -998,7 +1002,7 @@ impl SleeveExec {
             "sleeve {}: launched g{} ({}) in {scope}, pid {}",
             s.name,
             g.0,
-            wire::harness_wire(target.harness),
+            target.harness.as_str(),
             session.pid()
         );
         self.submit(EventKind::Launched {
@@ -1137,7 +1141,8 @@ impl SleeveExec {
 
     /// D9: records who started Envoy's next turn before its prompt is written. A prompt starts
     /// a new turn. A steer from an agent, or from a D9-marked sleeve, taints the running one.
-    /// Mail from an unmarked sleeve clears the origin.
+    /// Mail from an unmarked sleeve clears the origin. A continuation keeps the origin and the
+    /// spawn count of the turn it resumes, and restores a marked-mail or agent origin after a crash.
     fn note_envoy_origin(&self, view: &View, request_id: &str, from: &str, steer: bool) {
         let marked = view
             .state
@@ -1150,8 +1155,14 @@ impl SleeveExec {
         let origin = (from.starts_with("agent:") || marked).then(|| from.to_string());
         let mut t = crate::transcript::lock(&self.hub.envoy_turn);
         if !steer {
-            t.origin = origin;
-            t.spawns = 0;
+            if request_id.starts_with("continue:") {
+                if origin.is_some() {
+                    t.origin = origin;
+                }
+            } else {
+                t.origin = origin;
+                t.spawns = 0;
+            }
         } else if origin.is_some() {
             t.origin = origin;
         }
@@ -1558,9 +1569,17 @@ impl Pump {
             Entry::UserMessage { .. } | Entry::PromptAck { .. } | Entry::Notice { .. } => {}
         }
         let exited = matches!(entry, Entry::Exited { .. });
-        let settles = exited || matches!(entry, Entry::TurnSettled { .. });
-        if settles && Hub::envoy_id(&hub.view().state) == Some(id) {
-            *crate::transcript::lock(&hub.envoy_turn) = Default::default();
+        if (exited || matches!(entry, Entry::TurnSettled { .. }))
+            && Hub::envoy_id(&hub.view().state) == Some(id)
+        {
+            let mut t = crate::transcript::lock(&hub.envoy_turn);
+            if exited {
+                // The process died. The continuation is this same turn, so the spawn
+                // count stays until a real settle or the next prompt.
+                t.origin = None;
+            } else {
+                *t = Default::default();
+            }
         }
         let note = Note {
             harness: matches!(entry, Entry::SessionInfo { .. }).then_some(harness),

@@ -53,19 +53,19 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   version | --version
   hub info | hub state
   hub update [--check] [--channel stable|dev] [--version TAG] | hub update --rollback
-  hub probation                     run by the unit before each start, without the API
+  hub probation [--retry-rollback]  run by the unit before each start, without the API
   doctor [--refresh]
   harness update [PROGRAM...]       claude, codex, grok, pi; none means every installed one
   harness login <claude|codex|grok|pi> [-- ARGS...]
                                     the sleeves' shared login, on this terminal, without the API
   sleeve list | sleeve show <sleeve>
-  sleeve spawn <name> (--path DIR | --parent SLEEVE [--readonly]) [--harness H]
-        [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
+  sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
+        [--provider P] [--model M] [--effort E] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
   sleeve send <sleeve> <text...> [--steer]
         a sleeve may send to itself, its children, its parent, or envoy
   sleeve interrupt|stop|rm|takeover <sleeve>
-  sleeve start <sleeve> [--harness H] [--provider P] [--model M]
-  sleeve resleeve <sleeve> --harness H [--provider P] [--model M]
+  sleeve start <sleeve> [--harness H] [--provider P] [--model M] [--effort E]
+  sleeve resleeve <sleeve> --harness H [--provider P] [--model M] [--effort E]
   sleeve transcript <sleeve> [--from SEQ] [--limit N]
   sleeve wait <sleeve> [--until idle|done|blocked|parked|ended|report]
         [--after-seq N] [--timeout SECS]
@@ -76,7 +76,7 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   node update (<node>... | --all) [--version TAG] [--channel stable|dev] [--probation SECS]
         [--no-wait]
   job run (--node ID | --arch ARCH) [--even-if-present] [--on-present idle|kill]
-        [--maintenance] [--timeout SECS] [--cwd DIR] [--artifact PATH]... -- <argv...>
+        [--maintenance] [--wait] [--timeout SECS] [--cwd DIR] [--artifact PATH]... -- <argv...>
   job ls [--node N] [--limit N] | job show|cancel <job> | job log <job> [--offset N] [--limit N]
   job artifact <job> <path> [--out FILE]
   quota list
@@ -86,11 +86,14 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   history search <query...> [--mode all|any|phrase] [--sleeve S]... [--harness H]
         [--session ID] [--role user|assistant|tool-call|tool-error|compaction]...
         [--since 7d|MS] [--until 7d|MS] [--limit N]
-  history read --doc ID | history read <session> [--from TURN] [--to TURN]
+  history read --doc ID | history read <session> [--from TURN] [--to TURN] [--after DOC]
   device list | device add <name> | device pair <code> | device revoke <id>
   mcp --envoy [--token-file PATH] [--as NAME]
 
-Harnesses: claude, codex, grok, pi_vendor, pi_local. --json prints the API's answer.";
+Harnesses: claude, codex, grok, pi_vendor, pi_local. --json prints the API's answer.
+
+job run --wait exits with the job's code, or 3 interrupted, 5 lost, and 6 when the
+hub stays unreachable for about 60 seconds.";
 
 pub struct Args {
     pub words: Vec<String>,
@@ -109,9 +112,11 @@ const SWITCHES: &[&str] = &[
     "--envoy",
     "--check",
     "--rollback",
+    "--retry-rollback",
     "--refresh",
     "--all",
     "--no-wait",
+    "--wait",
     "--force",
 ];
 
@@ -201,6 +206,17 @@ pub enum Fail {
     Usage(String),
     Api(ApiError),
     Other(String),
+    Exit(u8),
+}
+
+impl std::fmt::Display for Fail {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Usage(e) | Self::Other(e) => f.write_str(e),
+            Self::Api(e) => write!(f, "{e}"),
+            Self::Exit(code) => write!(f, "exit {code}"),
+        }
+    }
 }
 
 impl From<String> for Fail {
@@ -327,10 +343,16 @@ fn run(a: &Args) -> Result<(), Fail> {
                 option_env!("PROTECTORATE_BUILD_VERSION").unwrap_or("dev")
             );
             println!("{}", net_line());
+            println!("hub-rollback: 1");
             return Ok(());
         }
         "hub" if a.words.get(1).map(String::as_str) == Some("probation") => {
-            let line = pt_hub::probation_prestart(&home(a)).map_err(Fail::Other)?;
+            let line = if a.has("--retry-rollback") {
+                pt_hub::retry_probation_restore(&home(a))
+            } else {
+                pt_hub::probation_prestart(&home(a))
+            }
+            .map_err(Fail::Other)?;
             println!("protectorate hub probation: {line}");
             return Ok(());
         }
@@ -423,5 +445,6 @@ fn main() -> ExitCode {
             eprintln!("error: {e}");
             ExitCode::from(1)
         }
+        Err(Fail::Exit(code)) => ExitCode::from(code),
     }
 }

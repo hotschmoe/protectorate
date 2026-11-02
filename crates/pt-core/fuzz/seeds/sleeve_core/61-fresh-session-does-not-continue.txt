@@ -1,0 +1,18 @@
+#scenario c39c72ad19da871e
+# A prompt that left the hub but was never acked did not start a turn. The relaunch is a
+# fresh session, so the hub warns and does not continue.
+spawn fresh /w/a
+run
+obs fresh ready
+policy prompt=none
+send fresh m1
+run
+expect fresh activity=Delivering
+expect-effect m1 state=Sent
+exit fresh
+run
+obs fresh ready
+run
+expect fresh activity=Idle
+expect-effect continue:* count=0
+expect-notice TurnNeedsPrompt count=1

@@ -6,12 +6,12 @@
 //! the hub passes the sessions it launched).
 //!
 //! ```text
-//! let mut ix = Index::open(dir)?;
+//! let mut ix = Index::open(dir, pt_history::DEFAULT_BUDGET)?;
 //! ix.ingest(&Source::new(SourceKind::Claude, path, session_id).sleeve("api"))?;
 //! ix.commit()?;                                  // ingested docs become searchable
 //! let hits = ix.search(&Query::all("journal torn tail"), &Filters::default(), 8)?;
 //! let pre = ix.search(&pt_history::brief_query(task), &filters, 3)?; // a brief's pre-run hits
-//! let turns = ix.read(&Selector::Turns { session, from: 3, to: 5 })?;
+//! let (turns, _more) = ix.read(&Selector::Turns { session, from: 3, to: 5, after: None }, None, READ_DOCS)?;
 //! ```
 //!
 //! Directory layout:
@@ -38,7 +38,7 @@ use std::path::PathBuf;
 
 pub use discover::discover;
 pub use extract::{TEXT_MAX, TOOL_MAX, parse_time};
-pub use index::{Index, Ingested, Stats};
+pub use index::{DEFAULT_BUDGET, Index, Ingested, MIN_BUDGET, READ_BYTES, READ_DOCS, Stats};
 pub use pt_drivers::Harness;
 
 pt_json::string_enum! {
@@ -213,11 +213,13 @@ pub struct Hit {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Selector {
     Doc(DocId),
-    /// Docs of `session` whose turn is in `from..=to`, in order.
+    /// Docs of `session` whose turn is in `from..=to`, in order. `after` skips that doc id
+    /// and every earlier one, so a turn with more docs than one page can continue.
     Turns {
         session: String,
         from: u32,
         to: u32,
+        after: Option<u64>,
     },
 }
 
@@ -259,6 +261,10 @@ pub fn fuzz_extract(data: &[u8]) -> usize {
                 _ => TEXT_MAX,
             };
             assert!(d.text.len() <= max, "doc text over its budget");
+            assert!(
+                d.files.iter().map(String::len).sum::<usize>() <= TOOL_MAX,
+                "doc paths over the tool budget"
+            );
             assert!(!d.text.is_empty() || !d.files.is_empty(), "empty doc");
             docs += 1;
         }

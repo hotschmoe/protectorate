@@ -22,8 +22,8 @@ use std::time::{Duration, Instant};
 
 use pt_api::{self as api, EpochMs, HubStreamMessage};
 use pt_core::{
-    EffectKind, EffectState, EventKind, Intent, Job, JobId, JobReport, JobSpec, JobState, NodeId,
-    Reply,
+    ArtifactRefusal, EffectKind, EffectState, EventKind, Intent, Job, JobId, JobReport, JobSpec,
+    JobState, NodeId, Reply,
 };
 use pt_fleet::NodeClient;
 use pt_frame::msg::{
@@ -359,6 +359,17 @@ pub fn view(hub: &Hub, j: &Job) -> api::Job {
             JobState::Failed(pt_core::JobFailure::NodeRemoved(n)) => {
                 Some(format!("node {} was removed", n.0))
             }
+            JobState::Failed(pt_core::JobFailure::Artifact) => {
+                let mut issues: Vec<String> = j
+                    .artifact_refusals
+                    .iter()
+                    .map(|r| format!("artifact {}: {}", r.path, r.reason))
+                    .collect();
+                if let Some(e) = &j.artifact_incomplete {
+                    issues.push(format!("collection incomplete: {e}"));
+                }
+                (!issues.is_empty()).then(|| issues.join("; "))
+            }
             _ => None,
         },
         log_bytes: hub.jobs.log_len(j.id, j.attempt),
@@ -597,6 +608,8 @@ enum Fail {
     Node(ErrorReply),
     /// The bytes came, but are not the artifact the node described.
     Check(String),
+    /// The hub could not write what it fetched. The node is fine; the collection fails.
+    Save(String),
     /// Sent, then the connection failed: the call may have applied.
     Io(String),
     /// The node's refusal already went in as the job's status, which resolves the record.
@@ -606,7 +619,7 @@ enum Fail {
 impl Fail {
     fn text(&self) -> String {
         match self {
-            Fail::Reach(e) | Fail::Io(e) | Fail::Check(e) => e.clone(),
+            Fail::Reach(e) | Fail::Io(e) | Fail::Check(e) | Fail::Save(e) => e.clone(),
             Fail::Node(r) => format!("node refused ({}): {}", r.code, r.message),
             Fail::Answered => "answered".into(),
         }
@@ -893,11 +906,13 @@ impl NodeExec {
                         attempt,
                         native: None,
                     },
-                    Err(Fail::Reach(reason) | Fail::Check(reason)) => EventKind::Nacked {
-                        effect,
-                        attempt,
-                        reason,
-                    },
+                    Err(Fail::Reach(reason) | Fail::Check(reason) | Fail::Save(reason)) => {
+                        EventKind::Nacked {
+                            effect,
+                            attempt,
+                            reason,
+                        }
+                    }
                     Err(Fail::Node(r)) => {
                         let reason = format!("{}: {}", r.code, r.message);
                         if matches!(r.code, NodeCode::Internal) {
@@ -1113,7 +1128,7 @@ impl NodeExec {
             if !bytes.is_empty() {
                 match self.hub.jobs.append(job, attempt, at, &bytes) {
                     Ok(n) => at = n,
-                    Err(e) => break Err(Fail::Reach(e.to_string())),
+                    Err(e) => break Err(Fail::Save(e.to_string())),
                 }
             }
             if end.done {
@@ -1130,17 +1145,27 @@ impl NodeExec {
         result.map(|()| done)
     }
 
-    /// Exited: the rest of the log, then each artifact, then `ArtifactsChecked`. A connection
-    /// failure reports nothing: the lease makes the job Lost and its next status collects again.
+    /// Exited: the rest of the log, then each artifact. A dropped connection saves what was
+    /// fetched and reports nothing, so it does not use a verify attempt: the job is Lost, and
+    /// abandoned 24h after it first went Lost even if collection keeps restarting. A node
+    /// refusal or a failed local save is submitted; a byte mismatch is an incomplete collection
+    /// and counts toward the verify limit.
     fn collect(&mut self, view: &View, job: JobId, attempt: u32) {
+        let mut refusals = view
+            .state
+            .jobs
+            .get(&job)
+            .map(|j| j.artifact_refusals.clone())
+            .unwrap_or_default();
         match self.pull_log(view, job, attempt, None) {
             Ok(_) => {}
-            Err(Fail::Check(e)) => {
+            Err(Fail::Check(e) | Fail::Save(e)) => {
                 warning!("job {}: the log: {e}", job.0);
-                return self.submit(EventKind::ArtifactsChecked {
+                return self.submit(EventKind::ArtifactCollection {
                     job,
                     attempt,
-                    ok: false,
+                    refusals,
+                    incomplete: Some(format!("log: {e}")),
                 });
             }
             Err(e) => return warning!("job {}: collecting the log: {}", job.0, e.text()),
@@ -1154,10 +1179,14 @@ impl NodeExec {
             .as_ref()
             .map(|r| r.artifacts.clone())
             .unwrap_or_default();
-        let mut fetched = Vec::new();
-        let mut ok = true;
+        let mut fetched = self.hub.jobs.fetched(job, attempt);
+        let mut incomplete = None;
+        let mut link_lost = false;
         let token = self.token(view, job);
         for (n, path) in wanted.iter().enumerate() {
+            if refusals.iter().any(|r| r.path == *path) || fetched.iter().any(|f| f.path == *path) {
+                continue;
+            }
             let got = self.fetch_artifact(job, attempt, n, path, token.clone());
             match got {
                 Ok(f) => {
@@ -1167,23 +1196,45 @@ impl NodeExec {
                     );
                     fetched.push(f);
                 }
+                Err(Fail::Node(r))
+                    if matches!(r.code, NodeCode::BadRequest | NodeCode::NotFound) =>
+                {
+                    let reason = Fail::Node(r).text();
+                    warning!("job {}: artifact {path}: {reason}", job.0);
+                    refusals.push(ArtifactRefusal {
+                        path: path.clone(),
+                        reason,
+                    });
+                }
                 Err(Fail::Io(e) | Fail::Reach(e)) => {
-                    return warning!("job {}: fetching {path}: {e}", job.0);
+                    warning!("job {}: artifact {path}: {e}", job.0);
+                    link_lost = true;
+                    break;
                 }
                 Err(e) => {
                     warning!("job {}: artifact {path}: {}", job.0, e.text());
-                    ok = false;
+                    incomplete.get_or_insert_with(|| format!("artifact {path}: {}", e.text()));
                 }
             }
         }
         if !wanted.is_empty() {
             if let Err(e) = self.hub.jobs.save_fetched(job, attempt, fetched) {
                 warning!("job {}: {e}", job.0);
-                ok = false;
+                incomplete.get_or_insert_with(|| format!("saving artifact metadata: {e}"));
+                link_lost = false;
+            } else {
+                stream(&self.hub, job);
             }
-            stream(&self.hub, job);
         }
-        self.submit(EventKind::ArtifactsChecked { job, attempt, ok });
+        if link_lost && incomplete.is_none() {
+            return;
+        }
+        self.submit(EventKind::ArtifactCollection {
+            job,
+            attempt,
+            refusals,
+            incomplete,
+        });
     }
 
     /// The file from the node's `FetchArtifact`, in slices, checked against the size and
@@ -1199,7 +1250,7 @@ impl NodeExec {
         let nid = node_job_id(&self.hub, job);
         let file = n.to_string();
         let dest = self.hub.jobs.artifact_path(job, attempt, &file);
-        let io = |e: io::Error| Fail::Reach(format!("{}: {e}", dest.display()));
+        let io = |e: io::Error| Fail::Save(format!("{}: {e}", dest.display()));
         if let Some(d) = dest.parent() {
             fs::create_dir_all(d).map_err(io)?;
         }

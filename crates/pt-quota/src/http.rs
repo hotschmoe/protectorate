@@ -22,15 +22,53 @@ pub fn get(req: &Get) -> Result<Vec<u8>> {
     match status {
         200..=299 => Ok(body),
         401 => Err(Error::Unauthorized),
-        403 => {
-            let lower = String::from_utf8_lossy(&body).to_lowercase();
-            if lower.contains("scope") || lower.contains("permission") {
-                Err(Error::Scope)
-            } else {
-                Err(Error::Http(403))
-            }
-        }
+        403 if scope_denied(&body) => Err(Error::Scope),
+        403 => Err(Error::Http(403)),
         s => Err(Error::Http(s)),
+    }
+}
+
+/// A 403 is a missing usage scope only when the body is the provider's structured error.
+/// `error` is the string `insufficient_scope` or `invalid_scope`, or an object whose `type`
+/// or `code` is one of those or `permission_error`. Text that merely says "permission" is not.
+fn scope_denied(body: &[u8]) -> bool {
+    let Ok(value) = pt_json::parse_bytes(body) else {
+        return false;
+    };
+    let Some(error) = value.get("error") else {
+        return false;
+    };
+    if let Some(token) = error.as_str() {
+        return scope_name(token);
+    }
+    error
+        .get("type")
+        .and_then(pt_json::Value::as_str)
+        .is_some_and(scope_code)
+        || error
+            .get("code")
+            .and_then(pt_json::Value::as_str)
+            .is_some_and(scope_code)
+}
+
+fn scope_name(token: &str) -> bool {
+    matches!(
+        token.to_ascii_lowercase().as_str(),
+        "insufficient_scope" | "invalid_scope"
+    )
+}
+
+fn scope_code(token: &str) -> bool {
+    scope_name(token) || token.eq_ignore_ascii_case("permission_error")
+}
+
+/// Whole seconds stay an integer. A shorter remainder is fractional, so a follow-up
+/// request can be given only the time left in the read.
+fn timeout_arg(timeout: Duration) -> String {
+    if timeout.subsec_nanos() == 0 && timeout.as_secs() >= 1 {
+        timeout.as_secs().to_string()
+    } else {
+        format!("{:.3}", timeout.as_secs_f64().max(0.001))
     }
 }
 
@@ -92,11 +130,12 @@ fn send(req: &Get) -> Result<(u16, Vec<u8>)> {
     for (name, value) in req.headers {
         config += &format!("header = {}\n", config_quote(&format!("{name}: {value}"))?);
     }
-    let secs = req.timeout.as_secs().max(1);
+    let max_time = timeout_arg(req.timeout);
+    let connect = timeout_arg(req.timeout.min(Duration::from_secs(10)));
     let mut cmd = Command::new("curl");
     cmd.args(["-q", "-sS", "--config", "-", "--proto", "=http,https"])
-        .args(["--max-time", &secs.to_string()])
-        .args(["--connect-timeout", &secs.min(10).to_string()])
+        .args(["--max-time", &max_time])
+        .args(["--connect-timeout", &connect])
         .args(["--max-filesize", &MAX_BODY.to_string()])
         .args(["-w", "\n%{http_code}"]);
     if local {

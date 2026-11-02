@@ -1,0 +1,18 @@
+#scenario a8ba5516e42750ed
+# A permanent refusal and incomplete collection never ack the node; complete refusal does.
+job j1
+run
+job-exit 0
+artifact-result 0 refused=missing incomplete
+expect-job 0 state=Collecting
+expect-effect collected:0:1 count=0
+artifact-result 0 refused=missing incomplete
+artifact-result 0 refused=missing incomplete
+expect-job 0 state=Failed
+expect-effect collected:0:1 count=0
+job j2
+run
+job-exit 1
+artifact-result 1 refused=missing
+expect-job 1 state=Failed
+expect-effect collected:1:1 count=1

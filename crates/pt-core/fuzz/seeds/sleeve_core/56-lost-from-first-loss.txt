@@ -1,0 +1,24 @@
+#scenario 03864d7836610319
+# A collection that loses the link, starts again, and loses it again is abandoned 24h after
+# the first loss. 23h after the second loss is still Lost. 23h54m is past 24h from the first
+# loss and still short of 24h from the second, so the window is the first loss.
+job j1
+policy poll=1
+run
+expect-job 0 state=Running
+tick 10s
+step
+expect-job 0 state=Collecting
+tick 6m
+expect-job 0 state=Lost
+run
+expect-job 0 state=Lost
+tick 10s
+step
+expect-job 0 state=Collecting
+tick 6m
+expect-job 0 state=Lost
+tick 23h
+expect-job 0 state=Lost
+tick 54m
+expect-job 0 state=Abandoned

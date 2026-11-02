@@ -1,0 +1,18 @@
+#scenario 912c74f2be6f98f7
+# A desync during an interrupt is G14's kill of a turn the owner already stopped.
+# Resume does not continue it.
+spawn root /w/a
+run
+obs root ready
+send root m1
+run
+expect root activity=Working
+interrupt root
+expect root activity=Interrupting
+obs root desync
+run
+obs root ready
+run
+expect root activity=Idle
+expect-effect continue:* count=0
+expect-notice TurnNeedsPrompt count=0
