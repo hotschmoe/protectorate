@@ -2899,12 +2899,12 @@ fn serve_pid(home: &std::path::Path) -> u32 {
 }
 
 /// A transcript longer than any page, with a crash's torn line mid-file, a corrupt line and a
-/// torn last line: the hub's next entry continues the seqs on a line of its own, and pages from
-/// the start, the middle and the end skip exactly the broken lines. A vendor agent reads only
-/// the turn it started.
+/// torn last line: pages from the start, the middle and the end skip exactly the broken lines,
+/// and the next entry would start on a line of its own. A vendor agent reads only the turn it
+/// started.
 #[test]
 fn transcript_pages_skip_torn_and_corrupt_lines() {
-    // No model: Envoy parks, and its notice is the only entry the hub adds.
+    // No model: Envoy parks before the stop, so the hub adds nothing to its transcript.
     let mut hub = Hub::start_config(
         "tpages",
         "pi_local",
@@ -2915,9 +2915,9 @@ fn transcript_pages_skip_torn_and_corrupt_lines() {
         &[],
         &[],
     );
-    let id = eventually("envoy", Duration::from_secs(15), || {
-        let id = hub.sleeve("envoy")["id"].as_str()?.to_string();
-        (!id.is_empty()).then_some(id)
+    let id = eventually("envoy parked", Duration::from_secs(60), || {
+        let s = hub.sleeve("envoy");
+        (s["lifecycle"].as_str() == Some("parked")).then(|| s["id"].as_str().unwrap().to_string())
     });
     let agent = hub.printed("envoy-only token: ");
     hub.stop();
@@ -2972,17 +2972,13 @@ fn transcript_pages_skip_torn_and_corrupt_lines() {
             .collect();
         (seqs, v["more"].as_bool().unwrap_or(false))
     };
-    let (after, _) = eventually("the hub's park notice", Duration::from_secs(20), || {
-        let (seqs, more) = page(&["--from", &(n + 1).to_string()]);
-        (!seqs.is_empty()).then_some((seqs, more))
-    });
-    assert_eq!(after, [n + 1], "the next entry after the torn last line");
     let want: Vec<u64> = (1..=n).filter(|s| *s != torn && *s != corrupt).collect();
     let (every, _) = page(&["--limit", "10000"]);
+    assert_eq!(every, want, "every whole line");
     assert_eq!(
-        every[..],
-        [&want[..], &[n + 1]].concat(),
-        "every whole line"
+        std::fs::read(&path).unwrap().last(),
+        Some(&b'\n'),
+        "opening the transcript ended the torn last line"
     );
     let (latest, more) = page(&["--limit", "2000"]);
     assert!(!more);
