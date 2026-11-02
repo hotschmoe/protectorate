@@ -81,8 +81,6 @@ pub enum RestoreError {
     Failed(String),
     /// A live file was replaced and the restore did not finish.
     Partial(String),
-    /// The hub still holds the journal.
-    Busy(String),
 }
 
 impl RestoreError {
@@ -94,13 +92,9 @@ impl RestoreError {
         Self::Partial(message.into())
     }
 
-    pub fn busy(message: impl Into<String>) -> Self {
-        Self::Busy(message.into())
-    }
-
     pub fn message(&self) -> &str {
         match self {
-            Self::Failed(m) | Self::Partial(m) | Self::Busy(m) => m,
+            Self::Failed(m) | Self::Partial(m) => m,
         }
     }
 }
@@ -932,7 +926,6 @@ impl Store {
                     Ok(Verdict::Confirmed)
                 }
             }
-            Err(e) if e.kind == ErrorKind::RestoreBusy => Err(e),
             other => other,
         }
     }
@@ -1115,7 +1108,6 @@ impl Store {
             let kind = match &e {
                 RestoreError::Failed(_) => ErrorKind::Restore,
                 RestoreError::Partial(_) => ErrorKind::RestorePartial,
-                RestoreError::Busy(_) => ErrorKind::RestoreBusy,
             };
             Error::new(kind, e.message())
         })?;

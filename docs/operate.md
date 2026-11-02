@@ -327,7 +327,8 @@ Sleeves do not survive the restart: they resume as after a crash.
 An update is refused if the stopped headscale snapshot still contains SQLite WAL or SHM files,
 or if the hub journal has more than its current single segment. A trial that later rotates the
 journal is still replaced as a whole directory on rollback. An update that fails before the
-probation record is written removes the snapshot directories it just created.
+probation record is written removes the snapshot directories it just created. A failure after
+that record is written keeps every snapshot directory the record names.
 
 If a snapshot cannot be restored before any live file is replaced, prestart reports the path and
 error, cancels the rollback, and keeps the trial release as `current`. The next start shows the

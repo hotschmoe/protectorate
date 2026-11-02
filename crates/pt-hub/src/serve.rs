@@ -94,8 +94,7 @@ pub enum Exit {
 
 /// `hub probation`, run by the unit before each start from `releases/previous`: counts the
 /// start of a release on trial and switches back after too many or once its window is over.
-/// The journal lock is taken before the release store when a restore is due, which is the
-/// order the running hub uses.
+/// The journal lock is taken before the release store. The hub is not running.
 pub fn probation_prestart(home: &Path) -> Result<String, String> {
     probation_prestart_locked(home, false)
 }
@@ -103,14 +102,12 @@ pub fn probation_prestart(home: &Path) -> Result<String, String> {
 /// `held` means this process already holds the journal lock. A second exclusive flock fails.
 fn probation_prestart_locked(home: &Path, held: bool) -> Result<String, String> {
     crate::update::finish_interrupted_journal_swap(home)?;
-    let store = pt_update::Store::open(home).map_err(|e| e.to_string())?;
     let _journal = if held {
         None
-    } else if crate::update::rollback_due(&store)? {
-        crate::update::acquire_journal_lock(home)?
     } else {
-        None
+        crate::update::acquire_journal_lock(home)?
     };
+    let store = pt_update::Store::open(home).map_err(|e| e.to_string())?;
     Ok(
         match store
             .start_attempt_with_restore(pt_update::MAX_TRIAL_STARTS, |p| {

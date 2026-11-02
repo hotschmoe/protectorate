@@ -61,8 +61,7 @@ fn update_err(e: pt_update::Error) -> ApiError {
         pt_update::ErrorKind::Store
         | pt_update::ErrorKind::Health
         | pt_update::ErrorKind::Restore
-        | pt_update::ErrorKind::RestorePartial
-        | pt_update::ErrorKind::RestoreBusy => ErrorCode::Internal,
+        | pt_update::ErrorKind::RestorePartial => ErrorCode::Internal,
     };
     err(code, e.message)
 }
@@ -344,10 +343,11 @@ pub fn update_hub(hub: &Hub, r: api::UpdateHubRequest) -> Result<api::HubUpdate,
     ) {
         Ok(sw) => sw,
         Err(e) => {
-            if let Some(dir) = &headscale_dir {
-                discard_dir(dir);
-            } else {
-                discard_dir(&scratch);
+            // The record is written before the pointer switch. Deleting a directory it
+            // names would leave the trial with nothing to restore.
+            let snapshot = headscale_dir.as_deref().unwrap_or(scratch.as_path());
+            if !record_names_snapshot(&store, snapshot) {
+                discard_dir(snapshot);
             }
             return Err(update_err(e));
         }
@@ -413,6 +413,25 @@ fn discard_dir(path: &Path) {
         return;
     }
     let _ = fs::remove_dir_all(path);
+}
+
+/// Whether `probation.json` names `dir` or a file inside it. An unreadable record might
+/// name it, so the directory stays.
+fn record_names_snapshot(store: &pt_update::Store, dir: &Path) -> bool {
+    match store.probation() {
+        Ok(Some(p)) => [
+            p.headscale_snapshot.as_deref(),
+            p.journal_snapshot.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|named| {
+            let named = Path::new(named);
+            named == dir || named.starts_with(dir)
+        }),
+        Err(_) => true,
+        Ok(None) => false,
+    }
 }
 
 fn sync_dir(dir: &Path) -> Result<(), String> {
@@ -775,21 +794,33 @@ fn quarantine_sleeves(home: &Path, next_sleeve: u64) -> Result<Option<PathBuf>, 
     let sleeves = home.join("sleeves");
     let mut ids = Vec::new();
     let mut kept = Vec::new();
-    if let Ok(entries) = fs::read_dir(&sleeves) {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let Some(name) = name.to_str() else { continue };
-            let Ok(id) = name.parse::<u64>() else {
-                continue;
-            };
-            if name != id.to_string() || !entry.path().is_dir() {
-                continue;
+    match fs::read_dir(&sleeves) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = entry.map_err(|e| {
+                    RestoreError::failed(format!("reading {}: {e}", sleeves.display()))
+                })?;
+                let name = entry.file_name();
+                let Some(name) = name.to_str() else { continue };
+                let Ok(id) = name.parse::<u64>() else {
+                    continue;
+                };
+                if name != id.to_string() || !entry.path().is_dir() {
+                    continue;
+                }
+                if id >= next_sleeve {
+                    ids.push(id);
+                } else if let Some(path) = claim_path(&entry.path()) {
+                    kept.push(path);
+                }
             }
-            if id >= next_sleeve {
-                ids.push(id);
-            } else if let Some(path) = claim_path(&entry.path()) {
-                kept.push(path);
-            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            return Err(RestoreError::failed(format!(
+                "reading {}: {e}",
+                sleeves.display()
+            )));
         }
     }
     ids.sort_unstable();
@@ -822,8 +853,21 @@ fn quarantine_sleeves(home: &Path, next_sleeve: u64) -> Result<Option<PathBuf>, 
         }
         moved_sleeves.push((to, src));
     }
-    let _ = sync_dir(&dest);
-    let _ = sync_dir(&sleeves);
+    // The renames are durable only once both directories, `update-aside/`, and the new
+    // entry under it have been synced. A failure here already moved live sleeve dirs.
+    sync_dir(&dest.join("sleeves")).map_err(RestoreError::partial)?;
+    sync_dir(&dest).map_err(RestoreError::partial)?;
+    let aside = dest.parent().ok_or_else(|| {
+        RestoreError::partial(format!(
+            "quarantine directory {} has no parent",
+            dest.display()
+        ))
+    })?;
+    sync_dir(aside).map_err(RestoreError::partial)?;
+    if let Some(root) = aside.parent() {
+        sync_dir(root).map_err(RestoreError::partial)?;
+    }
+    sync_dir(&sleeves).map_err(RestoreError::partial)?;
     for (checkout, gitdir) in &left {
         eprintln!(
             "update: left worktree {} and gitdir {} in place",
@@ -918,8 +962,12 @@ fn prepare_headscale(dest: &Path) -> Result<HeadscaleReady, RestoreError> {
     let old = dest.join(".rollback-db.sqlite");
     let old_wal = dest.join(".rollback-db.sqlite-wal");
     let old_shm = dest.join(".rollback-db.sqlite-shm");
-    if db.exists() && old.exists() && !staged.exists() {
+    // The staged copy already replaced the live database. `.rollback-*` is the previous
+    // database, not yet parked. Reporting Pending would let a later failure keep the trial
+    // on that replaced database.
+    if db.exists() && !staged.exists() && old.exists() {
         park_rollback_files(dest)?;
+        return Ok(HeadscaleReady::Restored);
     }
     if db.exists() && !old.exists() && (old_wal.exists() || old_shm.exists()) {
         put_back_file(&old_wal, &dest.join("db.sqlite-wal")).map_err(RestoreError::partial)?;
@@ -1141,7 +1189,11 @@ pub fn restore_snapshots(home: &Path, store: &Store, p: &Probation) -> Result<()
                 if let Some((dest, false)) = &headscale {
                     let _ = fs::remove_file(dest.join(".restore-db.sqlite"));
                 }
-                return Err(e);
+                return Err(if committed && matches!(e, RestoreError::Failed(_)) {
+                    RestoreError::partial(e.message().to_string())
+                } else {
+                    e
+                });
             }
         }
     }
@@ -1150,13 +1202,8 @@ pub fn restore_snapshots(home: &Path, store: &Store, p: &Probation) -> Result<()
             if !committed && let Some(staged) = &staged_journal {
                 discard_dir(staged);
             }
-            return Err(if committed {
-                match e {
-                    RestoreError::Failed(msg) | RestoreError::Busy(msg) => {
-                        RestoreError::partial(msg)
-                    }
-                    other => other,
-                }
+            return Err(if committed && matches!(e, RestoreError::Failed(_)) {
+                RestoreError::partial(e.message().to_string())
             } else {
                 e
             });
@@ -1192,7 +1239,9 @@ pub fn restore_snapshots(home: &Path, store: &Store, p: &Probation) -> Result<()
     Ok(())
 }
 
-fn lock_journal(home: &Path) -> Result<Option<File>, RestoreError> {
+/// The journal lock, taken before the release-store lock. `None` when the journal has no lock
+/// file yet. Fails while another process holds it.
+pub fn acquire_journal_lock(home: &Path) -> Result<Option<File>, String> {
     let path = home.join("journal/lock");
     if !path.exists() {
         return Ok(None);
@@ -1201,43 +1250,14 @@ fn lock_journal(home: &Path) -> Result<Option<File>, RestoreError> {
         .read(true)
         .write(true)
         .open(&path)
-        .map_err(|e| RestoreError::failed(format!("opening {}: {e}", path.display())))?;
+        .map_err(|e| format!("opening {}: {e}", path.display()))?;
     lock.try_lock().map_err(|e| {
-        RestoreError::busy(format!(
+        format!(
             "stop the hub before restoring a rollback ({}: {e})",
             path.display()
-        ))
+        )
     })?;
     Ok(Some(lock))
-}
-
-/// `hub probation` while a rollback is due. The journal lock is taken before the release
-/// store lock, which is the order the running hub uses.
-pub fn rollback_due(store: &Store) -> Result<bool, String> {
-    let Some(p) = store.probation().map_err(|e| e.to_string())? else {
-        return Ok(false);
-    };
-    if p.rolled_back_ms.is_some()
-        || store.current().map_err(|e| e.to_string())?.as_deref() != Some(p.version.as_str())
-    {
-        return Ok(false);
-    }
-    if p.restore_failed.is_some() && p.reason.is_none() {
-        return Ok(false);
-    }
-    if p.reason.is_some() || p.manual_rollback {
-        return Ok(true);
-    }
-    if p.contacted_ms.is_some() {
-        return Ok(false);
-    }
-    Ok(crate::home::now_ms() >= p.deadline_ms || p.starts >= pt_update::MAX_TRIAL_STARTS)
-}
-
-/// The journal lock, taken before the release-store lock. `None` when the journal has no lock
-/// file yet. Fails while another process holds it.
-pub fn acquire_journal_lock(home: &Path) -> Result<Option<File>, String> {
-    lock_journal(home).map_err(|e| e.message().to_string())
 }
 
 /// `--retry-rollback` refuses while headscale still has its database or socket open. The

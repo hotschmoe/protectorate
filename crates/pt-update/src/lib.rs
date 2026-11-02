@@ -53,8 +53,6 @@ pub enum ErrorKind {
     /// A snapshot restore replaced a live file and did not finish. Prestart must exit and
     /// run again; the trial must not serve the half-restored data.
     RestorePartial,
-    /// The hub still holds the journal, so a restore must not start.
-    RestoreBusy,
 }
 
 #[derive(Debug, Clone)]
