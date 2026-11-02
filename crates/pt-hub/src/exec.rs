@@ -67,7 +67,8 @@ fn intent_sleeve(i: &Intent) -> Option<SleeveId> {
         Intent::Execute { kind, .. } | Intent::Probe { kind, .. } => kind.sleeve(),
         Intent::ProbeScope { sleeve, .. }
         | Intent::SelectTarget { sleeve, .. }
-        | Intent::Checkpoint { sleeve, .. } => Some(*sleeve),
+        | Intent::Checkpoint { sleeve, .. }
+        | Intent::AutoContinue { sleeve, .. } => Some(*sleeve),
         _ => None,
     }
 }
@@ -494,6 +495,9 @@ impl SleeveExec {
                 if let Some(s) = view.state.sleeve(sleeve) {
                     self.checkpoint(s, g);
                 }
+            }
+            Intent::AutoContinue { sleeve, text } => {
+                self.submit(EventKind::Continue { sleeve, text });
             }
             other => debug!("sleeve {}: ignored {other:?}", self.id.0),
         }

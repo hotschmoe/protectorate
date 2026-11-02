@@ -268,6 +268,12 @@ pub enum EventKind {
     Tick,
     /// The hub restarted and replayed the journal; issued once before any new input.
     HubRecovered,
+    /// One continuation prompt after a native resume of an interrupted turn. The hub journals
+    /// it when the core asks. Older journals have no such event, so they allocate no prompt.
+    Continue {
+        sleeve: SleeveId,
+        text: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

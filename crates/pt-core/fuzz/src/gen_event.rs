@@ -104,7 +104,7 @@ pub fn event(b: &mut Bytes) -> Event {
     let j = |b: &mut Bytes| JobId(b.u64());
     let a = |b: &mut Bytes| b.u64() as u32;
     use EventKind as E;
-    let kind = match b.below(33) {
+    let kind = match b.below(34) {
         0 => E::Spawn(SpawnSpec {
             request_id: b.string(),
             name: b.string(),
@@ -253,6 +253,10 @@ pub fn event(b: &mut Bytes) -> Event {
             sleeve: s(b),
             ask: ask(b),
             timeout: b.u64(),
+        },
+        32 => E::Continue {
+            sleeve: s(b),
+            text: b.string(),
         },
         _ => E::ArtifactCollection {
             job: j(b),

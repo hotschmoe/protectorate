@@ -9,6 +9,7 @@
 //! ```text
 //! spawn NAME PATH [parent=NAME] [view] [harness=H] [pane] [budget=N] [disk=N] [effort=E] [to=H,H]
 //! send NAME ID [steer] [from=NAME]
+//! continue NAME                    a second journaled continuation; the first is sent by the core
 //! stop|remove|interrupt|compact|viewed NAME
 //! start|resleeve NAME [harness=H] [effort=E]
 //! approve NAME ID allow|deny [g=N]  ID: the harness's id, or action:N   abandon KEY
@@ -377,6 +378,14 @@ impl Runner {
                         _ => return Err(format!("bad policy key {k}")),
                     }
                 }
+            }
+            "continue" => {
+                let sleeve = self.id(arg(1)?)?;
+                self.sim.apply(E::Continue {
+                    sleeve,
+                    text: "The previous turn was interrupted. Continue from where it stopped."
+                        .into(),
+                });
             }
             "run" => self.sim.run(&self.policy),
             "step" => {

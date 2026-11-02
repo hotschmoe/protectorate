@@ -333,6 +333,9 @@ impl Sim {
             | Intent::Checkpoint { .. }
             | Intent::Notify { .. }
             | Intent::Reply(_) => {}
+            Intent::AutoContinue { sleeve, text } => {
+                self.apply(EventKind::Continue { sleeve, text });
+            }
         }
     }
 

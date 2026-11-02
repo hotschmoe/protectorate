@@ -317,6 +317,12 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
 - **Guardrail actions:** interrupt, resume (at most twice in 10 min), resleeve, or park. Automatic
   resleeves go to headless mode, walking the sleeve's ordered `resleeve_to` list (default
   `[pi_local]`). A third resleeve within an hour parks the sleeve.
+- **Auto-continue:** after a native resume of a turn that a crash or a guardrail killed, the core
+  sends one short continuation prompt, at most once for that interruption. The hub journals a
+  `Continue` event and the effect is allocated only when that event is applied, so a journal
+  recorded before the event existed replays to the same effects. It is not sent after a planned
+  stop, a hub restart of an idle sleeve, or a manual resleeve (the brief is that continuation).
+  When the prompt cannot be sent, the owner and the parent get `TurnNeedsPrompt` instead.
 - **Testing:** each machine is a pure function with a fuzz target. The target checks invariants I1
   to I10 against a table-driven reference model and checks `replay(journal) == live`.
 

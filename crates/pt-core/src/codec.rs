@@ -780,12 +780,17 @@ impl Wire for EventKind {
                 ask.put(w);
                 timeout.put(w);
             }
+            E::Continue { sleeve, text } => {
+                w.push(37);
+                sleeve.put(w);
+                text.put(w);
+            }
         }
     }
 
     fn get(r: &mut Reader) -> Result<Self, DecodeError> {
         use EventKind as E;
-        Ok(match r.tag("event", 36)? {
+        Ok(match r.tag("event", 37)? {
             0 => E::Spawn(Wire::get(r)?),
             1 => E::Send {
                 to: Wire::get(r)?,
@@ -936,12 +941,17 @@ impl Wire for EventKind {
                 attempt: Wire::get(r)?,
                 result: ArtifactCheck::Permanent,
             },
-            _ => E::ArtifactCollection {
+            36 => E::ArtifactCollection {
                 job: Wire::get(r)?,
                 attempt: Wire::get(r)?,
                 refusals: Wire::get(r)?,
                 incomplete: Wire::get(r)?,
             },
+            37 => E::Continue {
+                sleeve: Wire::get(r)?,
+                text: Wire::get(r)?,
+            },
+            tag => return Err(DecodeError::UnknownTag { what: "event", tag }),
         })
     }
 }

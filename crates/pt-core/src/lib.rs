@@ -172,6 +172,7 @@ impl Core<'_> {
                 self.tick_jobs();
                 self.tick_approvals();
             }
+            E::Continue { sleeve, text } => self.continue_turn(*sleeve, text),
             E::HubRecovered => {
                 self.recover_effects();
                 self.recover_sleeves();

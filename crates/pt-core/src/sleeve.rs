@@ -12,6 +12,9 @@ use crate::state::*;
 const BRIEF_PROMPT: &str = "Continue from .protectorate/BRIEF.md: read it first, then carry on \
                             with the task it describes.";
 
+/// Sent once, by the core, after a native resume of a turn a crash or guardrail interrupted.
+const CONTINUE_PROMPT: &str = "The previous turn was interrupted. Continue from where it stopped.";
+
 fn name_ok(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
@@ -81,6 +84,7 @@ impl Core<'_> {
                 activity: Activity::Ended,
                 turn: None,
                 desync_during_turn: false,
+                auto_continue: None,
                 queue: VecDeque::new(),
                 steer_slot: None,
                 messages: Default::default(),
@@ -472,10 +476,13 @@ impl Core<'_> {
                     (None, _) => Cause::Guard(Guardrail::Crash),
                 };
                 self.after_death(sid, c);
-                if interrupted_turn && self.st.sleeves[&sid].guard.state == GuardState::Resuming {
-                    self.notify(Party::Owner, Some(sid), Notice::TurnNeedsPrompt);
-                    if let Some(p) = parent {
-                        self.notify(Party::Sleeve(p), Some(sid), Notice::TurnNeedsPrompt);
+                let s = &self.st.sleeves[&sid];
+                if interrupted_turn && s.guard.state == GuardState::Resuming {
+                    if s.target.mode == Mode::Headless {
+                        let g = s.g;
+                        self.sl(sid).auto_continue = Some(g);
+                    } else {
+                        self.needs_prompt(sid);
                     }
                 }
             }
@@ -506,6 +513,7 @@ impl Core<'_> {
         }
         let s = self.sl(sid);
         s.life = Life::Stopping { remove };
+        s.auto_continue = None;
         s.guard.state = GuardState::Armed;
         s.guard.chosen = None;
         s.guard.tried.clear();
@@ -561,6 +569,7 @@ impl Core<'_> {
     pub(crate) fn park(&mut self, sid: SleeveId, reason: ParkReason) {
         let s = self.sl(sid);
         s.life = Life::Parked(reason);
+        s.auto_continue = None;
         s.guard.state = GuardState::Parked;
         s.guard.chosen = None;
         let parent = s.parent;
@@ -917,6 +926,10 @@ impl Core<'_> {
         let s = self.sl(sid);
         s.messages.get_mut(&r).expect("queued message").state = MsgState::InFlight(eff);
         s.activity = Activity::Delivering { effect: eff };
+        // A message of this generation continues the work, so the auto prompt is not also sent.
+        if s.auto_continue == Some(s.g) && !r.starts_with("continue:") {
+            s.auto_continue = None;
+        }
     }
 
     /// Activity just became Idle: let a quiescing resleeve stop the incarnation, else deliver.
@@ -972,6 +985,7 @@ impl Core<'_> {
             return self.on_brief_prompt(sid, id, native);
         }
         let request_id = self.st.effects[&id].key.clone();
+        let continued = request_id.starts_with("continue:");
         let state = self.effect_state(id).expect("effect exists");
         if let Some(m) = self.sl(sid).messages.get_mut(&request_id)
             && m.state == MsgState::InFlight(id)
@@ -995,6 +1009,9 @@ impl Core<'_> {
             if let Some(n) = notice {
                 self.notify(from, Some(sid), n);
             }
+        }
+        if continued && matches!(state, EffectState::Rejected | EffectState::Failed) {
+            self.needs_prompt(sid);
         }
         // Activity follows the effect's resolution (12a item 3), message or not.
         if self.st.sleeves[&sid].activity != (Activity::Delivering { effect: id }) {
@@ -1169,6 +1186,9 @@ impl Core<'_> {
                 }
                 s.activity = Activity::Idle { seen: false };
                 s.turn = None;
+                if s.auto_continue == Some(s.g) {
+                    s.auto_continue = None;
+                }
                 // Whatever the harness still asked in this turn went away with it.
                 self.withdraw_tool_approvals(sid, g);
                 let s = self.sl(sid);
@@ -1245,6 +1265,85 @@ impl Core<'_> {
         }
     }
 
+    /// The owner, and the parent when there is one, hear that nobody continued the turn.
+    fn needs_prompt(&mut self, sid: SleeveId) {
+        let parent = self.st.sleeves[&sid].parent;
+        self.notify(Party::Owner, Some(sid), Notice::TurnNeedsPrompt);
+        if let Some(p) = parent {
+            self.notify(Party::Sleeve(p), Some(sid), Notice::TurnNeedsPrompt);
+        }
+    }
+
+    /// After the resumed incarnation is ready: ask the hub to journal `Continue` when a prompt
+    /// can still go out. Allocates nothing; the effect belongs to that later event.
+    fn offer_auto_continue(&mut self, sid: SleeveId) {
+        let s = &self.st.sleeves[&sid];
+        if s.auto_continue != Some(s.g) {
+            return;
+        }
+        if !s.queue.is_empty() || matches!(s.activity, Activity::Delivering { .. }) {
+            self.sl(sid).auto_continue = None;
+            return;
+        }
+        if self.deliverable(sid) {
+            self.out.push(Intent::AutoContinue {
+                sleeve: sid,
+                text: CONTINUE_PROMPT.to_string(),
+            });
+            return;
+        }
+        let s = &self.st.sleeves[&sid];
+        if self.frozen(sid) || s.target.mode != Mode::Headless || !s.life.live() {
+            self.sl(sid).auto_continue = None;
+            self.needs_prompt(sid);
+        }
+    }
+
+    /// Applies a journaled `Continue`. One prompt for the owed generation, or a warning when
+    /// that prompt cannot be sent. A journal without this event allocates nothing.
+    pub(crate) fn continue_turn(&mut self, sid: SleeveId, text: &str) {
+        let Some(s) = self.st.sleeves.get(&sid) else {
+            return;
+        };
+        let Some(g) = s.auto_continue else {
+            return;
+        };
+        if g != s.g || text.is_empty() {
+            return;
+        }
+        let key = format!("continue:{}:{}", sid.0, g.0);
+        if s.messages.contains_key(&key)
+            || !s.queue.is_empty()
+            || matches!(s.activity, Activity::Delivering { .. })
+        {
+            self.sl(sid).auto_continue = None;
+            return;
+        }
+        if !self.deliverable(sid) {
+            let s = &self.st.sleeves[&sid];
+            let abandoned = !s.life.live() || matches!(s.life, Life::Parked(_) | Life::Resleeving);
+            if abandoned || self.frozen(sid) || s.target.mode != Mode::Headless {
+                self.sl(sid).auto_continue = None;
+                if !abandoned {
+                    self.needs_prompt(sid);
+                }
+            }
+            return;
+        }
+        self.sl(sid).messages.insert(
+            key.clone(),
+            Message {
+                from: Party::Owner,
+                text: text.to_string(),
+                mode: SendMode::Queue,
+                state: MsgState::Queued,
+            },
+        );
+        self.sl(sid).queue.push_back(key);
+        self.sl(sid).auto_continue = None;
+        self.deliver_next(sid);
+    }
+
     fn ready(&mut self, sid: SleeveId, session: &str) {
         let s = self.sl(sid);
         if s.activity != Activity::Booting {
@@ -1264,6 +1363,7 @@ impl Core<'_> {
                     self.notify(Party::Owner, Some(sid), Notice::Resumed { g });
                 }
                 self.settled(sid);
+                self.offer_auto_continue(sid);
             }
             (Life::Resleeving, GuardState::Launching) => {
                 let g = s.g;

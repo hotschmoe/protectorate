@@ -1,4 +1,4 @@
-#scenario 27073100882f9c35
+#scenario 0424473684f76c01
 # An undispatched prompt is returned to the queue and does not trigger a turn warning.
 spawn root /w/a
 run
@@ -11,3 +11,4 @@ run
 obs root ready g=2
 run
 expect root msg:m1=Delivered
+expect-effect continue:* count=0

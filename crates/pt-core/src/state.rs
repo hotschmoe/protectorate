@@ -57,6 +57,9 @@ pub struct Sleeve {
     /// The native turn id bound by the current turn's prompt ack.
     pub turn: Option<String>,
     pub desync_during_turn: bool,
+    /// Generation that still owes one continuation prompt after a native resume of an
+    /// interrupted turn. Only a journaled `Continue` allocates that prompt.
+    pub auto_continue: Option<Gen>,
 
     /// Request ids of queued messages, FIFO.
     pub queue: VecDeque<String>,

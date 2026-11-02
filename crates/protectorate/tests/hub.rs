@@ -132,8 +132,8 @@ fn sleeve_lifecycle() {
 }
 
 /// kill -9 of the hub mid-turn: on restart the journal replays, HubRecovered probes the scope,
-/// the sleeve resumes natively as g2, the transcript continues, and the prompt that was in
-/// flight is never delivered twice.
+/// the sleeve resumes natively as g2, the transcript continues, the interrupted turn gets one
+/// continuation prompt, and the prompt that was in flight is never delivered twice.
 #[test]
 fn crash_mid_turn_recovers() {
     if !have_runtime() {
@@ -216,14 +216,20 @@ fn crash_mid_turn_recovers() {
         "{events}"
     );
     assert!(
-        events["events"].as_array().unwrap().iter().any(|e| {
-            e["source"].as_str() == Some("two-child")
-                && e["target"].as_str() == Some("two")
-                && e["text"]
-                    .as_str()
-                    .is_some_and(|t| t.contains("interrupted turn") && t.contains("send a prompt"))
+        events["events"].as_array().unwrap().iter().all(|e| {
+            e["text"]
+                .as_str()
+                .is_none_or(|t| !t.contains("will not continue automatically"))
         }),
-        "{events}"
+        "the continuation prompt replaces the warning: {events}"
+    );
+    let child_entries = hub.transcript("two-child");
+    assert!(
+        of_type(&child_entries, "user_message").iter().any(|e| {
+            e["entry"]["text"].as_str()
+                == Some("The previous turn was interrupted. Continue from where it stopped.")
+        }),
+        "the child got one continuation prompt: {child_entries:?}"
     );
     let s = hub.sleeve("two");
     assert_eq!(s["lifecycle"].as_str(), Some("running"));
@@ -771,21 +777,36 @@ for line in sys.stdin:
         "desync",
     )
     .unwrap();
-    eventually("G14 and the parent notice", Duration::from_secs(60), || {
-        let events = hub.cli(&["--json", "event", "list"]).json();
-        events["events"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|e| {
-                e["source"].as_str() == Some("worker")
-                    && e["target"].as_str() == Some("parent")
-                    && e["text"]
-                        .as_str()
-                        .is_some_and(|t| t.contains("send a prompt"))
-            })
-            .then_some(())
-    });
+    eventually(
+        "the queued message to continue the resumed turn",
+        Duration::from_secs(60),
+        || {
+            of_type(&hub.transcript("worker"), "user_message")
+                .iter()
+                .any(|e| {
+                    e["g"].as_u64() == Some(2)
+                        && e["entry"]["text"].as_str() == Some("Change direction")
+                })
+                .then_some(())
+        },
+    );
+    let entries = hub.transcript("worker");
+    assert!(
+        of_type(&entries, "user_message").iter().all(|e| {
+            e["entry"]["text"].as_str()
+                != Some("The previous turn was interrupted. Continue from where it stopped.")
+        }),
+        "a queued message is the continuation: {entries:?}"
+    );
+    let events = hub.cli(&["--json", "event", "list"]).json();
+    assert!(
+        events["events"].as_array().unwrap().iter().all(|e| {
+            e["text"]
+                .as_str()
+                .is_none_or(|t| !t.contains("will not continue automatically"))
+        }),
+        "a queued message continues the turn, so there is no warning: {events}"
+    );
 }
 
 /// A sleeve controls its repo's config and `.gitattributes` (a child, the shared git dir): the

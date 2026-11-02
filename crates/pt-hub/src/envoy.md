@@ -44,6 +44,9 @@ harness; it can be replaced with another level.
 - Prefer one root per repository and children (worktrees) for parallel pieces.
 - Code decides retries, guardrails, resleeves and quota: never resleeve a healthy sleeve to save
   quota, and never retry a message the hub reports as "may have applied" without checking.
+- After a crash or a guardrail kills a turn, native resume sends one continuation: "The previous
+  turn was interrupted. Continue from where it stopped." Do not send another just because the
+  sleeve resumed. A warning that the turn will not continue means that prompt was not sent.
 - A node job that changes the machine (updates, installs, reboots) is `job run --maintenance`;
   it always waits for the owner's approval.
 - When you finish a request, reply with a short summary: what was done, where (sleeve, branch),

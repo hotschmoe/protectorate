@@ -73,7 +73,10 @@ A sleeve is named by its id or its name.
 
 Guardrails in code interrupt, resume, resleeve or park a sleeve that fails (quota exhausted,
 crash, silent, looping and so on). A third resleeve within an hour parks it; `sleeve list` shows
-the park reason.
+the park reason. After a native resume of a turn that a crash or a guardrail killed, the hub
+sends one short continuation prompt. A planned stop, a restart of an idle sleeve, and a manual
+resleeve do not; if that prompt cannot be sent, the event log says the turn will not continue
+on its own.
 
 ## Approvals and D9
 
