@@ -22,6 +22,9 @@ const MAX_BATCH: usize = 512;
 
 pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<Input>) {
     let mut exec = Executors::new(hub.clone());
+    for s in state.sleeves.values().filter(|s| s.life == Life::Removed) {
+        exec.release(s.id);
+    }
     let mut batch_n = hub.view().batch;
     let mut since: BTreeMap<SleeveId, (ActivityState, u64)> = BTreeMap::new();
     while let Ok(first) = rx.recv() {

@@ -909,10 +909,6 @@ Each entry: where, what was done, what right looks like.
 - **Sleeves have no systemd user bus** (`pt-sandbox`): the runtime dir is a private empty tmpfs on
   purpose, so a project test that needs `systemd-run --user` fails inside a sleeve. Right: decide
   whether a sleeve gets its own user manager or a scope-local one, if such tests matter.
-- **Deep target dirs overflow the unix socket path limit** (sleeves, e2e tests): a sleeve's
-  workspace plus a test's own socket under `target/` can pass `sun_path` (107 bytes), so sleeves
-  pick short dirs by hand. Right: a short per-sleeve `CARGO_TARGET_DIR` or a socket dir under
-  `/tmp`, once a second case shows which.
 - **Sleeve toolchain env is guessed from the owner's home** (`pt-hub` `toolchain.rs`): PATH tail,
   cache dirs and the Flutter SDK come from conventional locations, the hub's env and
   `sleeve_path`; a cargo `rustup` auto-install, `cargo install` and a second Flutter SDK are

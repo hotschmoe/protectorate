@@ -44,6 +44,7 @@ pub struct SandboxSpec {
     pub workspace: PathBuf,
     /// Private home, writable. Becomes `$HOME` inside. The hub fills it; we never do.
     pub home: PathBuf,
+    pub scratch: PathBuf,
     pub ro_paths: Vec<PathBuf>,
     /// Never `/`. A writable path may hold masked paths; the masks still apply inside it.
     pub rw_paths: Vec<PathBuf>,
@@ -65,7 +66,13 @@ pub struct SandboxSpec {
 }
 
 impl SandboxSpec {
-    pub fn new(sleeve: &str, generation: u64, workspace: PathBuf, home: PathBuf) -> SandboxSpec {
+    pub fn new(
+        sleeve: &str,
+        generation: u64,
+        workspace: PathBuf,
+        home: PathBuf,
+        scratch: PathBuf,
+    ) -> SandboxSpec {
         SandboxSpec {
             sleeve: sleeve.to_string(),
             generation,
@@ -77,6 +84,7 @@ impl SandboxSpec {
             },
             workspace,
             home,
+            scratch,
             ro_paths: Vec::new(),
             rw_paths: Vec::new(),
             git_dirs: Vec::new(),
@@ -151,6 +159,13 @@ impl SandboxSpec {
         ]);
         a.extend(["--size".into(), self.tmp_size_bytes.to_string()]);
         a.extend(["--tmpfs".into(), "/tmp".into()]);
+        let scratch = existing(&self.scratch).ok_or_else(|| {
+            Error(format!(
+                "sandbox scratch {} does not exist",
+                self.scratch.display()
+            ))
+        })?;
+        bind(a, "--bind", &scratch, Path::new("/tmp/pt"));
 
         let runtime = existing(&runtime_dir());
         let mounts = self.mounts(runtime.as_deref())?;
@@ -176,7 +191,8 @@ impl SandboxSpec {
             }
         }
         env.push(("HOME".into(), path_arg(&self.home)?));
-        env.push(("TMPDIR".into(), "/tmp".into()));
+        env.push(("TMPDIR".into(), "/tmp/pt/tmp".into()));
+        env.push(("CARGO_TARGET_DIR".into(), "/tmp/pt/target".into()));
         if let Some(rt) = &runtime {
             env.push(("XDG_RUNTIME_DIR".into(), path_arg(rt)?));
         }

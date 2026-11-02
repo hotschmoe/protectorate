@@ -25,6 +25,9 @@ impl Home {
     pub fn sleeve_home(&self, id: SleeveId) -> PathBuf {
         self.sleeve_dir(id).join("home")
     }
+    pub fn sleeve_scratch(&self, id: SleeveId) -> PathBuf {
+        self.sleeve_dir(id).join("scratch")
+    }
     pub fn transcript(&self, id: SleeveId) -> PathBuf {
         self.sleeve_dir(id).join("transcript.jsonl")
     }

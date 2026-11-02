@@ -178,7 +178,8 @@ crash, every incarnation goes to Recovering and resumes natively.
   agent):
   - user, mount, PID, IPC and UTS namespaces;
   - the host root bound read-only, with the workspace and a private home writable;
-  - a sized `/tmp`;
+  - a sized `/tmp`, with disk-backed per-sleeve build and temporary scratch mounted at a short
+    path and removed when the sleeve is removed;
   - tmpfs masks over the hub's state, `~/.ssh` and the owner's own credentials; every
     harness's shared hub login (`<home>/logins/`) and the owner's cargo registry, Go and pub
     caches bound read-write;

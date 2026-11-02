@@ -122,7 +122,20 @@ impl Executors {
     /// Lets a removed sleeve's executor finish what it was handed and end; later intents for it
     /// are answered here.
     pub fn release(&mut self, id: SleeveId) {
-        self.sleeves.remove(&id);
+        if self.sleeves.remove(&id).is_none() {
+            let path = self.hub.home.sleeve_scratch(id);
+            if let Err(e) = spawn(format!("pt-clean-{}", id.0), move || cleanup_scratch(&path)) {
+                warning!("sleeve {}: {e}", id.0);
+            }
+        }
+    }
+}
+
+fn cleanup_scratch(path: &Path) {
+    if let Err(e) = fs::remove_dir_all(path)
+        && e.kind() != io::ErrorKind::NotFound
+    {
+        warning!("remove sleeve scratch {}: {e}", path.display());
     }
 }
 
@@ -354,6 +367,15 @@ impl SleeveExec {
     fn run(mut self, rx: Receiver<Intent>) {
         for intent in rx {
             self.handle(intent);
+        }
+        if self
+            .hub
+            .view()
+            .state
+            .sleeve(self.id)
+            .is_some_and(|s| s.life == Life::Removed)
+        {
+            cleanup_scratch(&self.hub.home.sleeve_scratch(self.id));
         }
     }
 
@@ -768,7 +790,13 @@ impl SleeveExec {
         )
         .map_err(|e| format!("prepare the toolchain environment: {e}"))?;
         let work = workdir(&hub, s);
-        let mut sb = pt_sandbox::SandboxSpec::new(&hub.scope_sleeve(s.id), g.0, work.clone(), home);
+        let scratch = hub.home.sleeve_scratch(s.id);
+        for dir in [scratch.join("target"), scratch.join("tmp")] {
+            fs::create_dir_all(&dir)
+                .map_err(|e| format!("create scratch {}: {e}", dir.display()))?;
+        }
+        let mut sb =
+            pt_sandbox::SandboxSpec::new(&hub.scope_sleeve(s.id), g.0, work.clone(), home, scratch);
         sb.scope = hub.config.scopes;
         sb.masks = pt_sandbox::default_masks(&hub.owner_home);
         sb.masks.push(hub.home.root.clone());

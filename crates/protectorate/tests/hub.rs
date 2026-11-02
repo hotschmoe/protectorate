@@ -64,6 +64,7 @@ fn sleeve_lifecycle() {
     // Removed, the sleeve keeps nothing open in the hub: its executor ends, its transcript
     // closes.
     hub.cli(&["sleeve", "rm", "one"]).ok();
+    let scratch = hub.home.join(format!("sleeves/{id}/scratch"));
     let log = hub.home.join(format!("sleeves/{id}/transcript.jsonl"));
     let pid = serve_pid(&hub.home);
     let open = || {
@@ -89,7 +90,7 @@ fn sleeve_lifecycle() {
     eventually(
         "the removed sleeve's files and thread to go",
         Duration::from_secs(10),
-        || (!open() && threads() == 0).then_some(()),
+        || (!open() && threads() == 0 && !scratch.exists()).then_some(()),
     );
 
     assert_eq!(
@@ -880,6 +881,9 @@ exit 1"#,
     bash -lc 'command -v protectorate' >/dev/null 2>&1 && echo login_shell_cli=ok || echo login_shell_cli=lost
     echo "login_shell_cargo_home=$(bash -lc 'echo $CARGO_HOME')"
     echo "login_shell_rustup_home=$(bash -lc 'echo $RUSTUP_HOME')"
+    echo "target=$CARGO_TARGET_DIR tmp=$TMPDIR"
+    echo build > "$CARGO_TARGET_DIR/probe"
+    echo temp > "$TMPDIR/probe"
     [ -L "$HOME/.pi/agent/models.json" ] && [ -r "$HOME/.pi/agent/models.json" ] && echo pi_login=shared || echo pi_login=missing
     [ -r '{other}/notes.txt' ] && echo other_root=visible || echo other_root=hidden
     git commit -q --allow-empty -m "probe $PROTECTORATE_SLEEVE" >/dev/null 2>&1 \
@@ -945,12 +949,26 @@ exec '{real_pi}' "$@""#,
         "codex_login=HUB-CODEX",
         "pi_login=shared",
         "login_shell_cli=ok",
+        "target=/tmp/pt/target tmp=/tmp/pt/tmp",
         "other_root=hidden",
         "commit=ok",
         "committer=Owner \"Q\" Name <owner@example.test>",
     ] {
         assert!(probe.lines().any(|l| l == want), "want {want}:\n{probe}");
     }
+    let scratch = hub.home.join(format!("sleeves/{id}/scratch"));
+    assert_eq!(
+        std::fs::read_to_string(scratch.join("target/probe"))
+            .unwrap()
+            .trim(),
+        "build"
+    );
+    assert_eq!(
+        std::fs::read_to_string(scratch.join("tmp/probe"))
+            .unwrap()
+            .trim(),
+        "temp"
+    );
     // A worktree child sees its parent's git dirs, not the other root, and commits.
     let kid = hub
         .cli(&[
