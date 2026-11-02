@@ -135,6 +135,46 @@ fn history_search_scope_and_rebuild() {
     let r = as_alpha(&["history", "search", "--mode", "any", BETA_WORD, "OK"]);
     assert!(!r.ok().contains("beta"), "{}", r.stdout);
 
+    // D26: a parent sleeve does not see its child's runs.
+    const CHILD_WORD: &str = "TERN-9144";
+    let kid = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "tern",
+            "--parent",
+            "alpha",
+            "--harness",
+            "pi_local",
+        ])
+        .json();
+    assert_eq!(kid["role"].as_str(), Some("child"), "{kid:?}");
+    hub.wait("tern", "idle", 120);
+    hub.send(
+        "tern",
+        &format!("Remember the code word {CHILD_WORD}. Reply with exactly OK."),
+    );
+    hub.wait("tern", "idle", 180);
+    let child_hits = found(&hub, CHILD_WORD, 30);
+    assert!(
+        child_hits
+            .iter()
+            .all(|x| x["doc"]["sleeve"].as_str() == Some("tern")),
+        "{child_hits:?}"
+    );
+    assert!(
+        hits(&as_alpha(&["--json", "history", "search", CHILD_WORD]).json()).is_empty(),
+        "a parent does not see its child's history"
+    );
+    let r = as_alpha(&["history", "search", "--sleeve", "tern", CHILD_WORD]);
+    assert_ne!(r.status, 0);
+    assert!(r.stderr.contains("outside this capability"), "{}", r.stderr);
+    let child_doc = child_hits[0]["doc"]["doc_id"].as_u64().unwrap().to_string();
+    let r = as_alpha(&["history", "read", "--doc", &child_doc]);
+    assert_ne!(r.status, 0);
+    assert!(r.stderr.contains("no history doc"), "{}", r.stderr);
+
     // Corrupt a copy of the index and point the hub at it: the hub starts, moves the copy aside
     // and rebuilds it from the sources. The original is left as it was.
     hub.stop();
@@ -183,8 +223,6 @@ fn history_search_scope_and_rebuild() {
 #[test]
 #[cfg(debug_assertions)]
 fn failed_history_commit_retries_without_new_transcript_data() {
-    use std::io::Write;
-
     let arm = unique("history-arm");
     let hub = Hub::start_with(
         "history-retry",
@@ -205,7 +243,10 @@ fn failed_history_commit_retries_without_new_transcript_data() {
         .append(true)
         .open(&transcript)
         .unwrap();
-    writeln!(file, "{{\"seq\":10000,\"g\":1,\"time_ms\":1000,\"entry\":{{\"type\":\"user_message\",\"request_id\":\"fixture\",\"from\":\"owner\",\"text\":\"historyretryquartz\"}}}}").unwrap();
+    write_transcript_line(
+        &mut file,
+        r#"{"seq":10000,"g":1,"time_ms":1000,"entry":{"type":"user_message","request_id":"fixture","from":"owner","text":"historyretryquartz"}}"#,
+    );
     drop(file);
     eventually(
         "the injected commit failure",
@@ -223,5 +264,132 @@ fn failed_history_commit_retries_without_new_transcript_data() {
         fs::metadata(transcript).unwrap().len(),
         len,
         "retry did not need new transcript bytes"
+    );
+    let index = hub.home.join("history");
+    eventually(
+        "every history segment named by the manifest",
+        Duration::from_secs(15),
+        || referenced_segments(&index).then_some(()),
+    );
+}
+
+/// Every `seg-*` file is named by the manifest, and no partial rewrite is left behind.
+fn referenced_segments(index: &std::path::Path) -> bool {
+    let Ok(manifest) = fs::read_to_string(index.join("manifest")) else {
+        return false;
+    };
+    let Ok(entries) = fs::read_dir(index) else {
+        return false;
+    };
+    let mut segs = 0;
+    for ent in entries {
+        let Ok(ent) = ent else {
+            return false;
+        };
+        let name = ent.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.starts_with("seg-") {
+            continue;
+        }
+        if name.ends_with(".tmp") || !manifest.contains(name) {
+            return false;
+        }
+        segs += 1;
+    }
+    segs > 0
+}
+
+fn write_transcript_line(file: &mut fs::File, line: &str) {
+    use std::io::Write;
+    let mut buf = Vec::with_capacity(line.len() + 1);
+    buf.extend_from_slice(line.as_bytes());
+    buf.push(b'\n');
+    let n = file.write(&buf).expect("write a transcript line");
+    assert_eq!(n, buf.len(), "a transcript line must fit in one write");
+}
+
+/// Indexed user text is clipped to 32 KiB, so the fixture is many lines.
+const INDEXED_TEXT: usize = 32 << 10;
+
+fn user_line(seq: u64, text: &str) -> String {
+    format!(
+        r#"{{"seq":{seq},"g":1,"time_ms":{seq},"entry":{{"type":"user_message","request_id":"fixture-{seq}","from":"owner","text":"{text}"}}}}"#
+    )
+}
+
+#[test]
+fn history_budget_under_a_mebibyte_is_refused() {
+    let home = unique("hbudget").join("home");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(home.join("config.json"), r#"{"history_budget_bytes":0}"#).unwrap();
+    let out = Command::new(bin())
+        .args(["--home", home.to_str().unwrap(), "serve", "--listen", "off"])
+        .output()
+        .expect("run serve");
+    assert!(
+        !out.status.success(),
+        "serve started with history_budget_bytes 0"
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    let floor = 1u64 << 20;
+    assert!(
+        err.contains(&format!(
+            "history_budget_bytes must be at least {floor} bytes"
+        )),
+        "{err}"
+    );
+}
+
+#[test]
+fn history_budget_in_config_caps_the_sleeve() {
+    let floor = 1u64 << 20;
+    let hub = Hub::start_config(
+        "hcap",
+        "pi_local",
+        &[
+            ("history_budget_bytes", Value::from(floor)),
+            ("scopes", Value::from(false)),
+        ],
+        &[],
+        &[],
+    );
+    let id = eventually("envoy", Duration::from_secs(15), || {
+        let sleeve = hub.sleeve("envoy");
+        let id = sleeve["id"].as_str()?;
+        (!id.is_empty()).then(|| id.to_string())
+    });
+    let transcript = hub.home.join(format!("sleeves/{id}/transcript.jsonl"));
+    if let Some(dir) = transcript.parent() {
+        fs::create_dir_all(dir).unwrap();
+    }
+    let oldest = format!("quartzoldestline {}", "x".repeat(INDEXED_TEXT));
+    let newest = format!("quartznewestline {}", "y".repeat(INDEXED_TEXT));
+    let fill = "m".repeat(INDEXED_TEXT);
+    // One more full clip than the floor can hold, plus overhead, so the oldest line is evicted.
+    let n = (floor as usize / INDEXED_TEXT) + 8;
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&transcript)
+        .unwrap();
+    write_transcript_line(&mut file, &user_line(10_000, &oldest));
+    for seq in 1..n - 1 {
+        write_transcript_line(&mut file, &user_line(10_000 + seq as u64, &fill));
+    }
+    write_transcript_line(&mut file, &user_line(10_000 + n as u64, &newest));
+    drop(file);
+    found(&hub, "quartznewestline", 20);
+    let gone = hits(
+        &hub.cli(&["--json", "history", "search", "quartzoldestline"])
+            .json(),
+    );
+    assert!(gone.is_empty(), "the oldest line stayed: {gone:?}");
+    let info = hub.cli(&["hub", "info"]);
+    assert!(
+        info.ok().contains(&format!("history capped: {id}")),
+        "{}",
+        info.stdout
     );
 }

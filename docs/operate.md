@@ -250,15 +250,36 @@ endpoints are reported as misconfigured and are not contacted.
 history search <query...> [--mode all|any|phrase] [--sleeve S]... [--harness H]
       [--session ID] [--role user|assistant|tool-call|tool-error|compaction]...
       [--since 7d|MS] [--until 7d|MS] [--limit N]
-history read --doc ID | history read <session> [--from TURN] [--to TURN]
+history read --doc ID | history read <session> [--from TURN] [--to TURN] [--after DOC]
 ```
 
 A keyword index over the native session logs of the sessions the hub launched, plus the hub's own
 transcripts. `--since` and `--until` take `7d`, `3h`, `30m`, `90s` or epoch milliseconds. The
-owner can search everything; Envoy too; a sleeve only its own runs. The index is derived and
-rebuilt in the background if it fails to open. Catch-up commits bounded batches, and failed
-commits are retried. Below each configured root, discovery and reopening ignore symbolic links
-and non-regular files.
+owner can search everything; Envoy too; a sleeve only its own runs. `history read` returns at
+most 200 docs, or 8 MiB of their text. When the range continues, `--after` is the last doc id
+and the next page starts after it. The index is
+derived and rebuilt in the background if it fails to open. Catch-up commits bounded batches.
+A failed commit removes the segment files that attempt wrote, and the hub retries it with
+backoff up to 30 seconds. Below each configured root, discovery and reopening ignore
+symbolic links and non-regular files. Tool paths in the index are clipped to 512 bytes.
+`history_budget_bytes` (default 1 GiB) is read when the hub starts. A value under 1 MiB,
+including 0, is a config error and the hub does not start. Exactly 1 MiB is allowed, and a
+missing key keeps the default. Each sleeve, and each
+log, may keep that many bytes. That counts each doc's source text plus a
+per-doc overhead, so a flood of tiny docs stays inside the budget. Past a sleeve's budget the index
+keeps the newest lines across that sleeve's logs. Newest means the order they were ingested.
+A rebuild reads each sleeve's files oldest first, by mtime. An unsleeved log still keeps its
+own newest lines once it is past the budget. `hub info` and `doctor` report `history capped: <sleeve id>` once eviction has dropped
+any of that sleeve's docs. The name stays while the sleeve is under the same budget, including
+across a restart. It leaves when that sleeve is removed, when its sources are gone, or when a
+later start finds the total under a raised budget. Other sleeves are unaffected. A commit writes the
+manifest when the index changed. It removes segments whose docs are all dead in their own
+manifest update, and deletes those files only after that rename. It then rewrites a segment
+whose dead bytes are at least its live bytes, with some docs still live, and deletes the old
+file after that rename. A rewrite failure leaves the dead-segment removal in place. Opening the index removes
+segment files the manifest does not name, warns when the manifest itself is missing, and
+warns and still opens when reclaim fails. A reclaim failure after a durable commit is the
+same warning, and the commit stands.
 
 ## Events
 

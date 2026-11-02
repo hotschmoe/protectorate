@@ -844,16 +844,47 @@ Each entry: where, what was done, what right looks like.
   search needs a subagent's work.
 - **Merges re-tokenize stored text** (`pt-history`, index.rs): merging two segments decodes their
   texts and builds a new one from scratch. Fast: a k-way merge of postings, if merge time shows up.
-- **Leftover segments after a crash or failed commit** (`pt-history`, index.rs): a failure after a
-  segment is written, or a crash before obsolete merged segments are removed, can leave
-  unreferenced `seg-*` files.
-  Right: sweep unreferenced segment files at open.
+- **History keeps a sleeve's newest lines** (`pt-history`, index.rs): each sleeve and each
+  source may keep `history_budget_bytes` (default 1 GiB), counting each doc's source text
+  plus its per-doc overhead. The hub reads that key once, at start. A value under
+  1 MiB, including 0, is a config error. Exactly 1 MiB is allowed. An unsleeved
+  source drops its own oldest docs past the budget. A sleeved source does not.
+  Past a sleeve's budget, the oldest docs of that sleeve go, from any of its logs, so a new
+  session still gets indexed. Newest means ingest order. A rebuild ingests each sleeve's
+  files oldest first, by mtime. `doctor` / `hub info` name each capped sleeve (`history capped: <id>`)
+  once eviction has dropped any of its docs. The name stays under the same budget and leaves
+  when that sleeve is removed, when its sources are gone, or when a later start finds the
+  total under a raised budget. A segment is rewritten when its dead bytes are at least its
+  live bytes and some docs are still live. A sleeve at its
+  budget does not stop the others. There is no cap across all sleeves. Streaming
+  reclaim, to avoid holding about 1 GiB, is not wanted. The measured ratio is
+  1 GiB of logs to 11 MB of index.
+  Right: raise the caps if a real log needs more of the index.
 - **One source per session, decided per hub run** (`pt-hub`, history.rs): a headless session
   is in both its native log and the transcript; the native log wins once found, the transcript
   covers a session that ended without one, and the transcript waits at a live session's
-  `session_info` until its log appears. Decisions are not persisted, so a session indexed from
-  the transcript whose log appears in a later run (a native resume of a session that had none) is
-  indexed twice. Right: keep the choice per session in the index manifest.
+  `session_info` until its log appears. The choice is per sleeve, and the cursor, the drop
+  watermark and the budget share one key of sleeve plus path, so one sleeve's session id
+  does not select another's log. Discover walks a
+  harness's log root only while one of that sleeve's sessions is still undecided. A session
+  already chosen as native is left out of the transcript even when that pass did not see the
+  file, and a discover that returns a different path replaces the old one only when
+  that path is gone, and then drops its docs.
+  Decisions are not persisted, so a
+  session indexed from the transcript whose log appears in a later run (a native resume of a
+  session that had none) is indexed twice. Right: keep the choice per session in the index
+  manifest.
+- **A parent reads a child's live transcript** (`pt-hub`, api.rs `get_transcript`): `reaches`
+  is the sleeve itself or a direct child, so a parent still receives the child's full
+  transcript. That is supervision of a running child, and it is separate from history search,
+  which a sleeve credential limits to its own sleeve id (D26). Right: keep it.
+- **Pi must report the session id from argv** (`pt-drivers`, pi.rs): `get_state`'s `sessionId`
+  has to equal the id the hub passed (`--session` on resume, `--session-id` on a new session).
+  A different id is a protocol error. That becomes `Desync`, which trips G14
+  (`ProtocolDesync`, a kill). The death then follows G3: at most two resumes in ten minutes,
+  then a forced resleeve, and a third automatic resleeve within an hour parks the sleeve
+  (`ParkReason::Flapping`). A Pi that mints a new id on resume takes that path. Right: keep
+  the equality check.
 - **Native logs are found by session id under the sleeve's home** (`pt-hub`, history.rs): the
   drivers report the session id, not the log path, so the hub walks the harness's log root in the
   sleeve's private home (`pt_history::discover`), each second while a live session has no log

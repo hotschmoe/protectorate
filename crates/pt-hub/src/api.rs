@@ -1876,12 +1876,19 @@ fn wait(c: &Ctx<'_>, r: api::WaitRequest) -> Result<api::WaitResult> {
 
 const HISTORY_DEFAULT: u64 = 10;
 const HISTORY_MAX: u64 = 100;
-const HISTORY_READ_MAX: usize = 200;
 
 fn history_err(e: crate::history::Failure) -> ApiError {
     match e {
         crate::history::Failure::Off(_) => err(ErrorCode::Unavailable, e.to_string()),
         crate::history::Failure::Io(_) => internal(e),
+    }
+}
+
+/// D26: a sleeve reads its own run only. Envoy, the owner and a device read every sleeve.
+fn history_reaches(who: &Principal, id: SleeveId) -> bool {
+    match who {
+        Principal::Sleeve(x) => id == *x,
+        other => other.full(),
     }
 }
 
@@ -1901,7 +1908,7 @@ fn history_sleeves(c: &Ctx<'_>, st: &State, asked: &[String]) -> Result<Option<V
         }
         let reached: Vec<SleeveId> = named
             .into_iter()
-            .filter(|id| reaches(st, c.who, *id))
+            .filter(|id| history_reaches(c.who, *id))
             .collect();
         if reached.is_empty() {
             return Err(err(
@@ -1918,7 +1925,7 @@ fn history_sleeves(c: &Ctx<'_>, st: &State, asked: &[String]) -> Result<Option<V
         ids = st
             .sleeves
             .values()
-            .filter(|s| reaches(st, c.who, s.id))
+            .filter(|s| history_reaches(c.who, s.id))
             .map(|s| s.id)
             .collect();
     }
@@ -2044,6 +2051,7 @@ fn read_history(c: &Ctx<'_>, r: api::ReadHistoryRequest) -> Result<api::HistoryR
                 from: turn(r.from_turn),
                 to: r.to_turn.map_or(u32::MAX, turn),
                 session: session.clone(),
+                after: r.after_doc,
             },
             format!("no history of session {session} in that turn range"),
         ),
@@ -2051,23 +2059,17 @@ fn read_history(c: &Ctx<'_>, r: api::ReadHistoryRequest) -> Result<api::HistoryR
     };
     let view = c.hub.view();
     let st = &view.state;
-    let mut docs: Vec<pt_history::Doc> = c
+    // Scope and the doc cap run inside the index, before it copies text out.
+    let scope = history_sleeves(c, st, &[])?;
+    let (docs, more) = c
         .hub
         .history
-        .read(&sel)
-        .map_err(history_err)?
-        .into_iter()
-        .filter(|d| match doc_sleeve(d) {
-            Some(id) => reaches(st, c.who, id),
-            None => c.who.full(),
-        })
-        .collect();
+        .read(&sel, scope.as_deref(), pt_history::READ_DOCS)
+        .map_err(history_err)?;
     // Out of reach reads the same as absent.
     if docs.is_empty() {
         return Err(err(ErrorCode::NotFound, what));
     }
-    let more = docs.len() > HISTORY_READ_MAX;
-    docs.truncate(HISTORY_READ_MAX);
     Ok(api::HistoryRead {
         docs: docs
             .into_iter()

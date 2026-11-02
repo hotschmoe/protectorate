@@ -2198,7 +2198,7 @@ final class HistoryRead {
 
   final List<HistoryText> docs;
 
-  /// The hub cut the range short; read on from the last doc's turn.
+  /// The hub cut the range short. Pass the last doc's id as `after_doc` to read the next page.
   final bool more;
 
   Map<String, Object?> toJson() => {
@@ -2337,6 +2337,7 @@ final class HubInfo {
     required this.startedAt,
     this.inventory,
     this.sample,
+    this.historyCapped = const <String>[],
   });
 
   factory HubInfo.fromJson(Object? json) {
@@ -2347,6 +2348,15 @@ final class HubInfo {
       startedAt: _time(j['started_at_ms'], 'HubInfo.started_at_ms'),
       inventory: _opt(j['inventory'], Inventory.fromJson),
       sample: _opt(j['sample'], Sample.fromJson),
+      historyCapped: _or(
+        j['history_capped'],
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'HubInfo.history_capped',
+          (e1) => _string(e1, 'HubInfo.history_capped[]'),
+        ),
+      ),
     );
   }
 
@@ -2360,12 +2370,18 @@ final class HubInfo {
 
   final Sample? sample;
 
+  /// Sleeve ids whose history is at its text budget. Empty when every sleeve is under it.
+  /// `doctor` and `hub info` list these ids, and drop one when that sleeve is back under
+  /// the budget.
+  final List<String> historyCapped;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'version': version,
     'started_at_ms': startedAt.millisecondsSinceEpoch,
     if (inventory case final v?) 'inventory': v.toJson(),
     if (sample case final v?) 'sample': v.toJson(),
+    'history_capped': historyCapped,
   };
 }
 
@@ -4041,6 +4057,7 @@ final class ReadHistoryRequest {
     this.session,
     this.fromTurn = 0,
     this.toTurn,
+    this.afterDoc,
   });
 
   factory ReadHistoryRequest.fromJson(Object? json) {
@@ -4060,6 +4077,10 @@ final class ReadHistoryRequest {
         j['to_turn'],
         (e0) => _int(e0, 'ReadHistoryRequest.to_turn'),
       ),
+      afterDoc: _opt(
+        j['after_doc'],
+        (e0) => _int(e0, 'ReadHistoryRequest.after_doc'),
+      ),
     );
   }
 
@@ -4072,11 +4093,15 @@ final class ReadHistoryRequest {
   /// Absent: the session's last turn.
   final int? toTurn;
 
+  /// Skip this doc and every earlier one. A turn longer than one page continues from here.
+  final int? afterDoc;
+
   Map<String, Object?> toJson() => {
     if (docId case final v?) 'doc_id': v,
     if (session case final v?) 'session': v,
     'from_turn': fromTurn,
     if (toTurn case final v?) 'to_turn': v,
+    if (afterDoc case final v?) 'after_doc': v,
   };
 }
 
@@ -4452,7 +4477,8 @@ final class SearchHistoryRequest {
 
   final HistoryMode mode;
 
-  /// Sleeves by id or name, removed ones too. Empty means every sleeve the caller reaches.
+  /// Sleeves by id or name, removed ones too. Empty means every sleeve this caller may
+  /// read: its own, or every sleeve for Envoy and the owner (D26).
   final List<String> sleeves;
 
   /// `pi_local` and `pi_vendor` both match every Pi session.

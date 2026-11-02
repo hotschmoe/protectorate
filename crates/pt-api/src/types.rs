@@ -222,6 +222,10 @@ api_records! {
         pub started_at_ms: EpochMs,
         pub inventory: Option<Inventory>,
         pub sample: Option<Sample>,
+        /// Sleeve ids whose history is at its text budget. Empty when every sleeve is under it.
+        /// `doctor` and `hub info` list these ids, and drop one when that sleeve is back under
+        /// the budget.
+        pub history_capped: Vec<String> = Vec::new(),
     }
 
     /// One full snapshot. `GET /api/events` starts with it and then streams changes.

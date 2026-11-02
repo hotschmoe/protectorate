@@ -118,11 +118,14 @@ impl Hub {
     ) -> Hub {
         let transcripts = Transcripts::new(home.clone());
         let jobs = JobStore::new(home.jobs());
-        let history = crate::history::History::open(&if config.history_dir.is_empty() {
-            home.history()
-        } else {
-            PathBuf::from(&config.history_dir)
-        });
+        let history = crate::history::History::open(
+            &if config.history_dir.is_empty() {
+                home.history()
+            } else {
+                PathBuf::from(&config.history_dir)
+            },
+            config.history_budget_bytes,
+        );
         let started_ms = now_ms();
         Hub {
             home,
@@ -138,6 +141,7 @@ impl Hub {
                 started_at_ms: pt_api::EpochMs(started_ms),
                 inventory: None,
                 sample: None,
+                history_capped: Vec::new(),
             }),
             owner_home,
             fault: Fault::from_env(),

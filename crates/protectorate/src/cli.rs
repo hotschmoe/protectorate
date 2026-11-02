@@ -264,7 +264,10 @@ fn hub_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                     h.name,
                     h.version,
                     ago(h.started_at_ms)
-                )
+                );
+                if !h.history_capped.is_empty() {
+                    println!("history capped: {}", h.history_capped.join(", "));
+                }
             });
         }
         "state" => {
@@ -1014,12 +1017,14 @@ fn history_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                     session: None,
                     from_turn: 0,
                     to_turn: None,
+                    after_doc: None,
                 },
                 None => api::ReadHistoryRequest {
                     doc_id: None,
                     session: Some(a.word(2, "a session id, or --doc ID")?.to_string()),
                     from_turn: a.num("--from")?.unwrap_or(0),
                     to_turn: a.num("--to")?,
+                    after_doc: a.num("--after")?,
                 },
             };
             let v = c.call::<m::ReadHistory>(&req)?;
@@ -1031,8 +1036,10 @@ fn history_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                     }
                     println!("{}\n", d.text);
                 }
-                if v.more {
-                    println!("[more: read on with --from <the last turn>]");
+                if v.more
+                    && let Some(last) = v.docs.last()
+                {
+                    println!("[more: read on with --after {}]", last.doc.doc_id);
                 }
             });
         }

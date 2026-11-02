@@ -440,7 +440,8 @@ api_records! {
     pub struct SearchHistoryRequest {
         pub query: String,
         pub mode: HistoryMode = HistoryMode::All,
-        /// Sleeves by id or name, removed ones too. Empty means every sleeve the caller reaches.
+        /// Sleeves by id or name, removed ones too. Empty means every sleeve this caller may
+        /// read: its own, or every sleeve for Envoy and the owner (D26).
         pub sleeves: Vec<String> = Vec::new(),
         /// `pi_local` and `pi_vendor` both match every Pi session.
         pub harness: Option<Harness>,
@@ -500,6 +501,8 @@ api_records! {
         pub from_turn: u64 = 0,
         /// Absent: the session's last turn.
         pub to_turn: Option<u64>,
+        /// Skip this doc and every earlier one. A turn longer than one page continues from here.
+        pub after_doc: Option<u64>,
     }
 
     pub struct HistoryText {
@@ -509,7 +512,7 @@ api_records! {
 
     pub struct HistoryRead {
         pub docs: Vec<HistoryText> = Vec::new(),
-        /// The hub cut the range short; read on from the last doc's turn.
+        /// The hub cut the range short. Pass the last doc's id as `after_doc` to read the next page.
         pub more: bool = false,
     }
 
@@ -711,8 +714,8 @@ api_methods! {
     /// Blocks until the sleeve reaches `until` or the timeout passes.
     Wait(WaitRequest) -> WaitResult: Sleeve,
 
-    // History (SPEC 3.7): the sessions this hub launched. A sleeve reaches its own and its
-    // children's; Envoy and the owner reach every sleeve's.
+    // History (SPEC 3.7, D26): the sessions this hub launched. A sleeve reaches its own run
+    // only; Envoy and the owner reach every sleeve's.
     /// Keyword search with BM25 ranking, newest first on ties.
     SearchHistory(SearchHistoryRequest) -> HistoryHits: Sleeve,
     /// Whole docs, by id or by session and turn range.
