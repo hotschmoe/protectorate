@@ -31,7 +31,8 @@ envoy token                                # the envoy-only token
 Give them the envoy-only token, which can send to Envoy and read its replies and nothing else:
 
 - through their shell tool: `PROTECTORATE_TOKEN=<envoy-only token> protectorate envoy send --as
-  <agent> ...`, then `envoy wait`;
+  <agent> ...`, then `envoy wait`. That wait includes the reply from a continuation
+  of the same turn;
 - through MCP: `protectorate mcp --envoy [--token-file PATH] [--as NAME]`, a stdio server with
   the tools `envoy_send`, `envoy_wait` and `envoy_read`. The token comes from `--token-file` or
   `PROTECTORATE_TOKEN`; the agent's name from `--as` or the client's own name.

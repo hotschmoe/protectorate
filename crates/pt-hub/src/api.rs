@@ -1297,8 +1297,9 @@ fn not_for_sleeves() -> ApiError {
 }
 
 /// What vendor agents see of Envoy's transcript: each `ga:` message, then the assistant text
-/// and settle of the turn it started, until another sender's message. No tool calls, no
-/// reasoning, nothing the owner or a sleeve said.
+/// and settle of the turn it started, until another sender's message. A `continue:` prompt is
+/// the same turn, so the answer after a crash stays visible. No tool calls, no reasoning,
+/// nothing the owner or a sleeve said.
 fn agent_transcript(
     hub: &Hub,
     id: SleeveId,
@@ -1311,6 +1312,7 @@ fn agent_transcript(
     let mut agent = false;
     let mut shown = lines.iter().filter(|l| {
         let keep = match &l.entry {
+            Entry::UserMessage { request_id, .. } if request_id.starts_with("continue:") => false,
             Entry::UserMessage { request_id, .. } => {
                 agent = request_id.starts_with("ga:");
                 agent
@@ -1353,6 +1355,8 @@ fn answer(hub: &Hub, id: SleeveId, request_id: &str, idle: bool) -> Option<(Stri
         match &e.entry {
             Entry::AssistantText { text: t, .. } => text.push(t.clone()),
             Entry::TurnSettled { .. } => return Some((text.join("\n"), e.seq)),
+            // The hub's continuation of this turn. The reply after it is still this answer.
+            Entry::UserMessage { request_id: r, .. } if r.starts_with("continue:") => {}
             Entry::UserMessage { .. } => break,
             _ => {}
         }
