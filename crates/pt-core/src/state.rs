@@ -34,6 +34,8 @@ pub struct Sleeve {
     pub claim: Claim,
     /// The current (or next) incarnation's target.
     pub target: Target,
+    /// The effort the owner asked for, while the target's harness is the one it was asked of.
+    pub effort: Option<String>,
     pub resleeve_to: Vec<Target>,
     pub budget: Option<u64>,
     /// Tokens used; a root's count includes its children's.

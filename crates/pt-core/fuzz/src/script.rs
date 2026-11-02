@@ -7,7 +7,7 @@
 //! invariants and the replay check apply to scenarios too.
 //!
 //! ```text
-//! spawn NAME PATH [parent=NAME] [view] [harness=H] [pane] [budget=N] [disk=N] [to=H,H]
+//! spawn NAME PATH [parent=NAME] [view] [harness=H] [pane] [budget=N] [disk=N] [effort=E] [to=H,H]
 //! send NAME ID [steer] [from=NAME]
 //! stop|remove|interrupt|compact|viewed NAME
 //! start|resleeve NAME [harness=H]
@@ -199,6 +199,7 @@ impl Runner {
                     resleeve_to: to,
                     budget: kv("budget").map(num).transpose()?,
                     disk_limit: kv("disk").map(num).transpose()?,
+                    effort: kv("effort").map(str::to_string),
                 };
                 self.sim.apply(E::Spawn(spec));
             }

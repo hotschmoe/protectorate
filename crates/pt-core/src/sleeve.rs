@@ -66,6 +66,7 @@ impl Core<'_> {
                 layout: spec.layout,
                 claim: spec.claim.clone(),
                 target: spec.target.clone(),
+                effort: spec.effort.clone(),
                 resleeve_to: spec.resleeve_to.clone(),
                 budget: spec.budget,
                 used: 0,
@@ -225,6 +226,9 @@ impl Core<'_> {
             None
         };
         s.g = g;
+        if s.target.harness != target.harness {
+            s.effort = None;
+        }
         s.target = target.clone();
         s.receipt = None;
         s.turn = None;

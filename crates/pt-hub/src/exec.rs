@@ -824,6 +824,7 @@ impl SleeveExec {
         spec.g = g.0;
         spec.model = Some(target.model.clone()).filter(|m| !m.is_empty());
         spec.provider = Some(target.provider.clone()).filter(|p| !p.is_empty());
+        spec.effort = s.effort.clone();
         spec.resume = resume;
         spec.prefix = Some(prefix);
         let name = wire::harness_wire(target.harness);

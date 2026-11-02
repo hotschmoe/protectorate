@@ -481,11 +481,18 @@ fn forced_resleeve_with_brief() {
             &pi_provider(),
             "--model",
             &pi_model(),
+            "--effort",
+            "low",
             "--resleeve-to",
             "pi_local",
         ])
         .json();
     hub.wait("six", "idle", 120);
+    assert_eq!(
+        hub.sleeve("six")["incarnation"]["effort"].as_str(),
+        Some("low"),
+        "the requested effort reaches the harness and shows in the view"
+    );
     let id = s["id"].as_str().unwrap().to_string();
     hub.send("six", READY);
     let s = eventually("the resleeve to land", Duration::from_secs(240), || {
@@ -497,6 +504,11 @@ fn forced_resleeve_with_brief() {
         done.then_some(s)
     });
     assert_eq!(s["resleeve_to"].as_array().map(<[_]>::len), Some(1));
+    assert_ne!(
+        s["incarnation"]["effort"].as_str(),
+        Some("low"),
+        "a resleeve to another harness starts on that harness's default effort"
+    );
     assert!(
         scope_pids(&hub.scope(&id, 1)).is_empty(),
         "g1's scope is empty"

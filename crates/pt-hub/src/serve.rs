@@ -239,6 +239,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
                 writable: true,
             },
             target,
+            effort: None,
             resleeve_to,
             budget: None,
             disk_limit: None,

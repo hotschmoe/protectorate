@@ -132,3 +132,29 @@ fn steer() {
     }
     run.stop();
 }
+
+/// An effort Pi does not take is dropped with a notice, and the session starts on its default.
+#[test]
+fn unknown_effort_falls_back() {
+    if !configured() {
+        return;
+    }
+    let Some(program) = program(Harness::Pi) else {
+        return skip(Harness::Pi, "binary not found");
+    };
+    let repo = temp_repo("pi-effort");
+    let mut s = spec(Harness::Pi, &program, &repo);
+    local(&mut s);
+    s.effort = Some("bogus".into());
+    let mut run = Run::start(s);
+    run.ready(Duration::from_secs(90)).expect("ready");
+    let log = run.stop();
+    assert!(common::has(&log, |e| matches!(
+        e,
+        Entry::Notice { code: Some(c), .. } if c == "effort"
+    )));
+    assert!(common::has(&log, |e| matches!(
+        e,
+        Entry::SessionInfo { effort, .. } if effort.as_deref() != Some("bogus")
+    )));
+}

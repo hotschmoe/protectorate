@@ -140,6 +140,7 @@ impl Shared {
 
 /// Starts the harness. Events arrive on the receiver until `Entry::Exited`, which is last.
 pub fn spawn(mut spec: SpawnSpec) -> Result<(Session, Receiver<Event>), DriverError> {
+    let effort_note = crate::vet_effort(&mut spec);
     let (args, mut proto) = plan(&spec, &mut crate::emit::new_uuid)?;
     let mut cmd = match spec.prefix.take() {
         Some(mut prefix) => {
@@ -179,6 +180,9 @@ pub fn spawn(mut spec: SpawnSpec) -> Result<(Session, Receiver<Event>), DriverEr
     let (events_tx, events_rx) = mpsc::channel();
     let (stdin_tx, stdin_rx) = mpsc::channel::<Queued>();
     let mut out = Out::new(spec.g);
+    if let Some(note) = effort_note {
+        out.notice("effort", note);
+    }
     proto.start(&mut out);
     let shared = Arc::new(Shared {
         core: Mutex::new(Core {

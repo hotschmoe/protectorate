@@ -921,3 +921,8 @@ Each entry: where, what was done, what right looks like.
 - **Doctor ignores API-key env vars** (`pt-doctor`): `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and
   `XAI_API_KEY` no longer count as a login, since sleeves never see them. Right: a deliberate
   API-key login per harness in `<home>/logins/` if API billing is wanted for a sleeve.
+- **Effort is checked by a fixed list for Claude, Grok and Pi** (`pt-drivers` `vet_effort`): each
+  CLI's documented levels are compiled in; a model that accepts fewer is the CLI's to refuse.
+  Codex is checked against its `model/list` catalog after the handshake. A resleeve to another
+  harness starts on that harness's default effort without a notice of its own (the view shows
+  `effort`). Right: read each CLI's model catalog if a model-specific refusal costs a sleeve.

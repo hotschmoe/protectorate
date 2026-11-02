@@ -3,7 +3,8 @@
 //! exactly the bytes `encode` produces, and fails loudly on an unknown tag or trailing bytes.
 //!
 //! Journals are never rewritten, so a tag keeps its layout forever: new variants and fields get
-//! new tags. `Obs::ApprovalRequested` is tag 2 without an ask and tag 11 with one.
+//! new tags. `Obs::ApprovalRequested` is tag 2 without an ask and tag 11 with one, and
+//! `EventKind::Spawn` is tag 0 without an effort and tag 32 with one.
 
 use crate::event::*;
 use crate::model::*;
@@ -326,6 +327,7 @@ impl Wire for SpawnSpec {
             layout: Wire::get(r)?,
             claim: Wire::get(r)?,
             target: Wire::get(r)?,
+            effort: None,
             resleeve_to: Wire::get(r)?,
             budget: Wire::get(r)?,
             disk_limit: Wire::get(r)?,
@@ -514,10 +516,17 @@ impl Wire for EventKind {
     fn put(&self, w: &mut Vec<u8>) {
         use EventKind as E;
         match self {
-            E::Spawn(spec) => {
-                w.push(0);
-                spec.put(w);
-            }
+            E::Spawn(spec) => match &spec.effort {
+                None => {
+                    w.push(0);
+                    spec.put(w);
+                }
+                Some(effort) => {
+                    w.push(32);
+                    spec.put(w);
+                    effort.put(w);
+                }
+            },
             E::Send {
                 to,
                 request_id,
@@ -723,7 +732,7 @@ impl Wire for EventKind {
 
     fn get(r: &mut Reader) -> Result<Self, DecodeError> {
         use EventKind as E;
-        Ok(match r.tag("event", 31)? {
+        Ok(match r.tag("event", 32)? {
             0 => E::Spawn(Wire::get(r)?),
             1 => E::Send {
                 to: Wire::get(r)?,
@@ -844,10 +853,15 @@ impl Wire for EventKind {
                 ask: Wire::get(r)?,
                 timeout: Wire::get(r)?,
             },
-            _ => E::JobNodeRemoved {
+            31 => E::JobNodeRemoved {
                 job: Wire::get(r)?,
                 node: Wire::get(r)?,
             },
+            _ => {
+                let mut spec: SpawnSpec = Wire::get(r)?;
+                spec.effort = Some(Wire::get(r)?);
+                E::Spawn(spec)
+            }
         })
     }
 }
