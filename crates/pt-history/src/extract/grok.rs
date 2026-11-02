@@ -4,8 +4,9 @@
 
 use pt_json::Value;
 
-use super::{Item, State, text_of, tool_call};
-use crate::Role;
+use super::item::{Item, State};
+use super::text::{text_of, tool_call};
+use crate::doc::Role;
 
 pub fn line(v: &Value, st: &mut State, out: &mut Vec<Item>) -> bool {
     match v["type"].as_str() {

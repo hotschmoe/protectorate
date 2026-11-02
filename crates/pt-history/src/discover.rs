@@ -6,7 +6,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::safe_open;
-use crate::{Source, SourceKind};
+use crate::source::{Source, SourceKind};
 
 pub fn discover(kind: SourceKind, root: &Path) -> io::Result<Vec<Source>> {
     let mut files = Vec::new();

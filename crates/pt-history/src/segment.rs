@@ -23,7 +23,7 @@ use std::ops::Range;
 use pt_drivers::Harness;
 use pt_journal::crc32c::crc32c;
 
-use crate::Role;
+use crate::doc::Role;
 use crate::token::tokenize;
 
 const MAGIC: &[u8; 8] = b"PTHISTSG";

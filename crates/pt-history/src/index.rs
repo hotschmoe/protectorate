@@ -9,10 +9,11 @@ use std::path::{Path, PathBuf};
 use pt_journal::crc32c::crc32c;
 use pt_json::ToJson;
 
+use crate::doc::{ContextUsage, Doc, DocId, Selector};
 use crate::extract::{self, Draft, Item, State};
 use crate::segment::{self, Dict, DocIn, Meta, NONE};
+use crate::source::{Source, SourceKind};
 use crate::tail::{self, Cursor};
-use crate::{ContextUsage, Doc, DocId, Selector, Source, SourceKind};
 
 const MANIFEST: &str = "manifest";
 const MANIFEST_MAGIC: &str = "PTHISTMF";

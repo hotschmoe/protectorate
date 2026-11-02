@@ -3,8 +3,9 @@
 
 use pt_drivers::{Entry, Event, ToolStatus};
 
-use super::{Item, State, tool_call};
-use crate::Role;
+use super::item::{Item, State};
+use super::text::tool_call;
+use crate::doc::Role;
 use crate::tail::clip;
 
 pub fn line(bytes: &[u8], st: &mut State, out: &mut Vec<Item>) -> bool {

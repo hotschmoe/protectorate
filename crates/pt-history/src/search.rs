@@ -5,9 +5,9 @@ use std::collections::{HashMap, HashSet};
 use std::io;
 
 use crate::index::{Index, Seg};
+use crate::query::{Filters, Hit, Mode, Query, Snippet};
 use crate::segment::{self, Meta};
 use crate::token::tokenize;
-use crate::{Filters, Hit, Mode, Query, Snippet};
 
 /// Snippet length in bytes.
 pub const SNIPPET: usize = 240;

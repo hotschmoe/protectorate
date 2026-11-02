@@ -25,218 +25,25 @@
 #![forbid(unsafe_code)]
 
 mod discover;
+mod doc;
 mod extract;
 mod index;
+mod query;
 mod safe_open;
 mod search;
 #[doc(hidden)]
 pub mod segment;
+mod source;
 pub mod tail;
 pub mod token;
 
-use std::path::PathBuf;
-
 pub use discover::discover;
+pub use doc::{ContextUsage, Doc, DocId, Role, Selector};
 pub use extract::{TEXT_MAX, TOOL_MAX, parse_time};
 pub use index::{DEFAULT_BUDGET, Index, Ingested, MIN_BUDGET, READ_BYTES, READ_DOCS, Stats};
 pub use pt_drivers::Harness;
-
-pt_json::string_enum! {
-    /// Where a log comes from. `Hub` is the hub's own transcript of normalized entries.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-    pub enum SourceKind {
-        Claude = "claude",
-        Codex = "codex",
-        Grok = "grok",
-        Pi = "pi",
-        Hub = "hub",
-    }
-
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-    pub enum Role {
-        User = "user",
-        Assistant = "assistant",
-        ToolCall = "tool_call",
-        ToolError = "tool_error",
-        Compaction = "compaction",
-    }
-}
-
-impl Role {
-    fn from_code(c: u64) -> Option<Role> {
-        Role::ALL.get(usize::try_from(c).ok()?).copied()
-    }
-}
-
-/// One log file to index, from the caller's allowlist.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Source {
-    pub kind: SourceKind,
-    pub path: PathBuf,
-    /// The native session id (the sleeve id for a hub transcript, until its `session_info`).
-    pub session: String,
-    pub sleeve: Option<String>,
-    /// Read no further than this byte offset (a frozen view of a live file).
-    pub limit: Option<u64>,
-    /// Sessions whose docs and usage this source does not emit, because another source
-    /// indexes them (a hub transcript repeats every headless session's native log).
-    pub skip: Vec<String>,
-}
-
-impl Source {
-    pub fn new(kind: SourceKind, path: impl Into<PathBuf>, session: impl Into<String>) -> Source {
-        Source {
-            kind,
-            path: path.into(),
-            session: session.into(),
-            sleeve: None,
-            limit: None,
-            skip: Vec::new(),
-        }
-    }
-
-    pub fn sleeve(mut self, sleeve: impl Into<String>) -> Source {
-        self.sleeve = Some(sleeve.into());
-        self
-    }
-}
-
-/// An index-wide document id; ids grow in ingest order.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct DocId(pub u64);
-
-/// One indexed unit: a prompt, an assistant message, a tool call, a failed tool result or a
-/// compaction summary, with its provenance in the source file.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Doc {
-    pub id: DocId,
-    pub session: String,
-    pub harness: Option<Harness>,
-    pub sleeve: Option<String>,
-    /// The user prompt count in the session up to and including this doc (0 before the first).
-    pub turn: u32,
-    pub role: Role,
-    pub time_ms: u64,
-    pub tool: Option<String>,
-    pub files: Vec<String>,
-    pub text: String,
-    pub path: PathBuf,
-    /// Byte offset of the source line in `path`.
-    pub offset: u64,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Mode {
-    /// Every word (or quoted phrase) must match.
-    #[default]
-    All,
-    /// Any word may match; BM25 ranks.
-    Any,
-    /// The whole query is one phrase.
-    Phrase,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Query {
-    pub text: String,
-    pub mode: Mode,
-}
-
-impl Query {
-    pub fn all(text: impl Into<String>) -> Query {
-        Query {
-            text: text.into(),
-            mode: Mode::All,
-        }
-    }
-
-    pub fn any(text: impl Into<String>) -> Query {
-        Query {
-            text: text.into(),
-            mode: Mode::Any,
-        }
-    }
-
-    pub fn phrase(text: impl Into<String>) -> Query {
-        Query {
-            text: text.into(),
-            mode: Mode::Phrase,
-        }
-    }
-}
-
-/// Every set field must match. `sleeves` and `roles` empty mean any; times are inclusive.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Filters {
-    /// Any of these sleeves.
-    pub sleeves: Vec<String>,
-    pub harness: Option<Harness>,
-    pub session: Option<String>,
-    pub since_ms: Option<u64>,
-    pub until_ms: Option<u64>,
-    pub roles: Vec<Role>,
-}
-
-/// Up to [`SNIPPET`] bytes around the best cluster of matches; `highlights` are byte
-/// ranges within `text`.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Snippet {
-    pub text: String,
-    pub highlights: Vec<(usize, usize)>,
-}
-
-impl Snippet {
-    /// The text with every highlight wrapped in `open` and `close`.
-    pub fn marked(&self, open: &str, close: &str) -> String {
-        let mut out = String::with_capacity(self.text.len() + 8 * self.highlights.len());
-        let mut at = 0;
-        for &(s, e) in &self.highlights {
-            out.push_str(&self.text[at..s]);
-            out.push_str(open);
-            out.push_str(&self.text[s..e]);
-            out.push_str(close);
-            at = e;
-        }
-        out.push_str(&self.text[at..]);
-        out
-    }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct Hit {
-    pub doc: Doc,
-    pub score: f64,
-    pub snippet: Snippet,
-}
-
-/// What [`Index::read`] returns.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Selector {
-    Doc(DocId),
-    /// Docs of `session` whose turn is in `from..=to`, in order. `after` skips that doc id
-    /// and every earlier one, so a turn with more docs than one page can continue.
-    Turns {
-        session: String,
-        from: u32,
-        to: u32,
-        after: Option<u64>,
-    },
-}
-
-pt_json::record! {
-    /// A session's context fill from its own log: prompt tokens of the latest model call, the
-    /// window when the log states it, and how often the harness compacted.
-    #[derive(Clone, Debug, Default, PartialEq)]
-    pub struct ContextUsage {
-        pub session: String,
-        pub harness: Option<Harness>,
-        pub tokens: u64 = 0,
-        pub window: Option<u64>,
-        pub at_ms: u64 = 0,
-        pub compactions: u32 = 0,
-        pub turns: u32 = 0,
-    }
-}
+pub use query::{Filters, Hit, Mode, Query, Snippet};
+pub use source::{Source, SourceKind};
 
 pub use search::{SNIPPET, brief_query};
 
