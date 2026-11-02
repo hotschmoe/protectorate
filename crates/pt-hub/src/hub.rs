@@ -138,6 +138,7 @@ impl Hub {
                 started_at_ms: pt_api::EpochMs(started_ms),
                 inventory: None,
                 sample: None,
+                history_capped: false,
             }),
             owner_home,
             fault: Fault::from_env(),

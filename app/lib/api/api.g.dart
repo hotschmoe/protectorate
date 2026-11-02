@@ -2337,6 +2337,7 @@ final class HubInfo {
     required this.startedAt,
     this.inventory,
     this.sample,
+    this.historyCapped = false,
   });
 
   factory HubInfo.fromJson(Object? json) {
@@ -2347,6 +2348,11 @@ final class HubInfo {
       startedAt: _time(j['started_at_ms'], 'HubInfo.started_at_ms'),
       inventory: _opt(j['inventory'], Inventory.fromJson),
       sample: _opt(j['sample'], Sample.fromJson),
+      historyCapped: _or(
+        j['history_capped'],
+        false,
+        (e0) => _bool(e0, 'HubInfo.history_capped'),
+      ),
     );
   }
 
@@ -2360,12 +2366,17 @@ final class HubInfo {
 
   final Sample? sample;
 
+  /// A sleeve's history is at its text budget: that sleeve keeps its newest lines, and
+  /// `doctor` reports `history capped`.
+  final bool historyCapped;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'version': version,
     'started_at_ms': startedAt.millisecondsSinceEpoch,
     if (inventory case final v?) 'inventory': v.toJson(),
     if (sample case final v?) 'sample': v.toJson(),
+    'history_capped': historyCapped,
   };
 }
 

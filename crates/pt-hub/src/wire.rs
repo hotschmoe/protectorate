@@ -224,7 +224,9 @@ pub fn workspace(s: &Sleeve) -> api::Workspace {
 }
 
 pub fn hub_info(hub: &Hub) -> api::HubInfo {
-    crate::transcript::lock(&hub.info).clone()
+    let mut info = crate::transcript::lock(&hub.info).clone();
+    info.history_capped = hub.history.capped();
+    info
 }
 
 /// What the poller last learned of every node; none while the fleet is off or down.

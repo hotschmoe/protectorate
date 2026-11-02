@@ -23,9 +23,11 @@ const FLUSH: usize = 96 << 20;
 const MAX_SEGMENTS: usize = 8;
 /// Merges never build a segment larger than this.
 const MAX_MERGE: u64 = 1 << 30;
-/// Segment bytes at which ingest stops. A later open of a fresh directory rebuilds from the logs.
+/// Live source-text bytes one sleeve may keep. Only that sleeve's sources stop or shed;
+/// the others keep ingesting.
 const MAX_INDEX: u64 = 1 << 30;
-/// File bytes one source contributes. The cursor stays, and further bytes of that file are not read.
+/// Live source-text bytes one source may keep. Past this, its oldest docs are dropped and
+/// later lines are what stay.
 const MAX_SOURCE: u64 = 1 << 30;
 /// Docs one [`Index::read`] materializes. The hub's history read uses the same cap.
 pub const READ_DOCS: usize = 200;
@@ -58,6 +60,11 @@ pt_json::record! {
         sleeve: Option<String>,
         cursor: Cursor,
         state: State,
+        /// Oldest docs were dropped, or this source was refused, because its sleeve or it
+        /// reached its text budget. `doctor` and `hub info` report that.
+        capped: bool = false,
+        /// File length at which a capped source last made no progress. Zero when it is not stalled.
+        stall_len: u64 = 0,
     }
 
     #[derive(Clone, Debug)]
@@ -144,6 +151,8 @@ pub struct Ingested {
     pub overlong: u32,
     /// The file was replaced or rewritten; its earlier docs were dropped.
     pub reset: bool,
+    /// This call is what first marked the source capped.
+    pub capped: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -166,6 +175,8 @@ pub struct Index {
     pub(crate) syms: Syms,
     sources: BTreeMap<String, SourceRec>,
     drops: BTreeMap<String, u64>,
+    /// Live source-text bytes per stored source key (`kind:path`), including pending docs.
+    kept: BTreeMap<String, u64>,
     /// Dead docs by source symbol: ids below the value were dropped.
     dead: std::collections::HashMap<u32, u64>,
     usage: BTreeMap<String, ContextUsage>,
@@ -226,6 +237,7 @@ impl Index {
             syms: Syms::default(),
             sources: BTreeMap::new(),
             drops: BTreeMap::new(),
+            kept: BTreeMap::new(),
             dead: Default::default(),
             usage: BTreeMap::new(),
             pending: Vec::new(),
@@ -280,10 +292,6 @@ impl Index {
         Ok(())
     }
 
-    fn index_bytes(&self) -> u64 {
-        self.segs.iter().map(|s| s.bytes).sum()
-    }
-
     fn load(&mut self, name: &str) -> io::Result<Seg> {
         let path = self.dir.join(name);
         let bytes = fs::read(&path).map_err(|e| ctx(e, "read", path.display()))?;
@@ -332,14 +340,22 @@ impl Index {
 
     fn recount(&mut self) {
         let (mut n, mut len) = (0, 0);
+        let mut kept: BTreeMap<String, u64> = BTreeMap::new();
         for s in &self.segs {
             for m in s.docs.iter().filter(|m| self.live(m)) {
                 n += 1;
                 len += u64::from(m.len);
+                if let Some(src) = self.syms.name(m.source) {
+                    *kept.entry(src.to_owned()).or_default() += u64::from(m.text_len);
+                }
             }
+        }
+        for p in &self.pending {
+            *kept.entry(p.source.clone()).or_default() += p.draft.text.len() as u64;
         }
         self.live_docs = n;
         self.live_len = len;
+        self.kept = kept;
     }
 
     /// Reads `source` from its cursor to its current end (or `limit`) and queues the docs it
@@ -362,6 +378,8 @@ impl Index {
                 sleeve: source.sleeve.clone(),
                 cursor: Cursor::default(),
                 state: fresh_state(source),
+                capped: false,
+                stall_len: 0,
             });
         rec.sleeve = source.sleeve.clone();
         let mut opened = tail::open(&source.path, &rec.cursor)?;
@@ -371,35 +389,40 @@ impl Index {
         };
         if opened.reset {
             self.drop_source(stored.clone(), self.next_doc);
+            self.discard_pending(&stored);
+            self.kept.insert(stored.clone(), 0);
             rec.state = fresh_state(source);
             rec.cursor = opened.start.clone();
+            rec.capped = false;
+            rec.stall_len = 0;
             self.dirty = true;
         }
         if source.kind == SourceKind::Grok && rec.state.time_ms == 0 {
             rec.state.time_ms = grok_start(&source.path).unwrap_or(0);
         }
-        // Caps come after the reset check: a replaced file still drops its old docs, and
-        // catch_up commits that drop when this call then refuses to read.
-        if opened.start.offset >= MAX_SOURCE && opened.len > MAX_SOURCE {
-            self.sources.insert(key, rec);
-            return Err(io::Error::other(format!(
-                "history {}: source is past its {MAX_SOURCE} byte cap",
-                source.path.display()
-            )));
-        }
-        let end = source
-            .limit
-            .unwrap_or(opened.len)
-            .min(opened.len)
-            .min(MAX_SOURCE);
-        loop {
-            if opened.start.offset < end && self.index_bytes() >= MAX_INDEX {
-                self.sources.insert(key, rec);
-                return Err(io::Error::other(format!(
-                    "history {}: index is at its {MAX_INDEX} byte cap",
-                    self.dir.display()
-                )));
+        let was_capped = rec.capped;
+        self.sources.insert(key.clone(), rec.clone());
+        // Another source of this sleeve already holds the budget. Leave this cursor where
+        // it is, and do not read the same window again until the file grows.
+        if self.blocked_by_others(&stored, source.sleeve.as_deref()) {
+            if !rec.capped || rec.stall_len != opened.len {
+                rec.capped = true;
+                rec.stall_len = opened.len;
+                got.capped = !was_capped;
+                self.dirty = true;
             }
+            self.sources.insert(key, rec);
+            return Ok(got);
+        }
+        if rec.stall_len > 0
+            && opened.len <= rec.stall_len
+            && self.at_cap(&stored, source.sleeve.as_deref())
+        {
+            return Ok(got);
+        }
+        let end = source.limit.unwrap_or(opened.len).min(opened.len);
+        let mut aged: Option<(Vec<(u64, u32)>, usize)> = None;
+        loop {
             let start = opened.start.offset;
             let limit = start.saturating_add(tail::WINDOW as u64).min(end);
             let mut items = Vec::new();
@@ -440,39 +463,198 @@ impl Index {
                         ..ContextUsage::default()
                     });
                 u.turns = u.turns.max(draft.turn);
-                let bytes = draft.files.iter().fold(
-                    draft
-                        .text
-                        .len()
-                        .saturating_add(draft.session.len())
-                        .saturating_add(stored.len())
-                        .saturating_add(source.sleeve.as_ref().map_or(0, String::len))
-                        .saturating_add(draft.tool.as_ref().map_or(0, String::len))
-                        .saturating_add(128),
-                    |n, f| n.saturating_add(f.len().saturating_add(24)),
-                );
+                let id = self.next_doc;
+                let text_len = draft.text.len() as u64;
+                let bytes = queued_bytes(&draft, &stored, source.sleeve.as_deref());
                 self.pending_bytes = self.pending_bytes.saturating_add(bytes);
+                *self.kept.entry(stored.clone()).or_default() += text_len;
                 self.pending.push(Pending {
-                    id: self.next_doc,
+                    id,
                     offset,
                     source: stored.clone(),
                     sleeve: source.sleeve.clone(),
                     draft,
                 });
                 self.next_doc += 1;
+                let kept_now = self.kept_of(&stored);
+                if self.fit(&stored, source.sleeve.as_deref(), id, text_len, &mut aged) {
+                    if self.kept_of(&stored) < kept_now {
+                        note_capped(&mut rec, &mut got, was_capped);
+                    }
+                } else {
+                    self.undo_pending(id, &stored, text_len, bytes);
+                    got.docs = got.docs.saturating_sub(1);
+                    note_capped(&mut rec, &mut got, was_capped);
+                }
             }
             rec.cursor = tail.cursor;
             rec.state = state;
-            self.dirty |= tail.bytes > 0;
+            if tail.bytes > 0 {
+                rec.stall_len = 0;
+            }
+            self.dirty |= tail.bytes > 0 || got.capped;
             self.sources.insert(key.clone(), rec.clone());
             if self.pending_bytes >= flush_limit() {
                 self.commit()?;
+                aged = None;
+            }
+            if opened.start.offset == start
+                && opened.len > start
+                && self.at_cap(&stored, source.sleeve.as_deref())
+            {
+                rec.stall_len = opened.len;
+                note_capped(&mut rec, &mut got, was_capped);
+                self.dirty = true;
+                self.sources.insert(key, rec);
+                return Ok(got);
             }
             if opened.start.offset >= end || opened.start.offset == start {
                 break;
             }
         }
+        self.sources.insert(key, rec);
         Ok(got)
+    }
+
+    /// True when other sources of `sleeve` already hold its whole budget, so dropping this
+    /// source's own docs still could not free a byte.
+    fn blocked_by_others(&self, stored: &str, sleeve: Option<&str>) -> bool {
+        let Some(sleeve) = sleeve else {
+            return false;
+        };
+        let mine = self.kept_of(stored);
+        self.sleeve_kept(sleeve).saturating_sub(mine) >= MAX_INDEX
+    }
+
+    fn at_cap(&self, stored: &str, sleeve: Option<&str>) -> bool {
+        self.kept_of(stored) >= MAX_SOURCE
+            || sleeve.is_some_and(|s| self.sleeve_kept(s) >= MAX_INDEX)
+    }
+
+    fn kept_of(&self, stored: &str) -> u64 {
+        self.kept.get(stored).copied().unwrap_or(0)
+    }
+
+    fn sleeve_kept(&self, sleeve: &str) -> u64 {
+        let mut seen = std::collections::HashSet::new();
+        let mut n = 0u64;
+        for s in self.sources.values() {
+            if s.sleeve.as_deref() != Some(sleeve) {
+                continue;
+            }
+            let key = source_key(s.kind, &s.path);
+            if seen.insert(key.clone()) {
+                n = n.saturating_add(self.kept_of(&key));
+            }
+        }
+        n
+    }
+
+    /// Drops older docs of `stored` until it and its sleeve can hold `keep`. False when
+    /// `keep` itself cannot fit; nothing is dropped in that case.
+    fn fit(
+        &mut self,
+        stored: &str,
+        sleeve: Option<&str>,
+        keep: u64,
+        need: u64,
+        aged: &mut Option<(Vec<(u64, u32)>, usize)>,
+    ) -> bool {
+        let mine = self.kept_of(stored);
+        let others = sleeve
+            .map(|s| self.sleeve_kept(s).saturating_sub(mine))
+            .unwrap_or(0);
+        let limit = MAX_SOURCE.min(MAX_INDEX.saturating_sub(others.min(MAX_INDEX)));
+        if need > limit {
+            return false;
+        }
+        while self.kept_of(stored) > limit {
+            if !self.drop_oldest_except(stored, keep, aged) {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn drop_oldest_except(
+        &mut self,
+        stored: &str,
+        keep: u64,
+        aged: &mut Option<(Vec<(u64, u32)>, usize)>,
+    ) -> bool {
+        if aged.is_none() {
+            *aged = Some((self.aged_docs(stored), 0));
+        }
+        let (docs, at) = aged.as_mut().unwrap();
+        while *at < docs.len() {
+            let (id, len) = docs[*at];
+            *at += 1;
+            if id == keep || id < self.drops.get(stored).copied().unwrap_or(0) {
+                continue;
+            }
+            self.drop_source(stored.to_owned(), id.saturating_add(1));
+            self.sub_kept(stored, u64::from(len));
+            return true;
+        }
+        let Some(i) = self
+            .pending
+            .iter()
+            .position(|p| p.source == stored && p.id != keep)
+        else {
+            return false;
+        };
+        let p = self.pending.remove(i);
+        let bytes = queued_bytes(&p.draft, stored, p.sleeve.as_deref());
+        self.pending_bytes = self.pending_bytes.saturating_sub(bytes);
+        self.sub_kept(stored, p.draft.text.len() as u64);
+        true
+    }
+
+    fn aged_docs(&self, stored: &str) -> Vec<(u64, u32)> {
+        let Some(sym) = self.syms.get(stored) else {
+            return Vec::new();
+        };
+        let mut docs = Vec::new();
+        for s in &self.segs {
+            for m in &s.docs {
+                if m.source == sym && self.live(m) {
+                    docs.push((m.id, m.text_len));
+                }
+            }
+        }
+        docs.sort_by_key(|(id, _)| *id);
+        docs
+    }
+
+    fn undo_pending(&mut self, id: u64, stored: &str, text_len: u64, bytes: usize) {
+        let Some(i) = self.pending.iter().position(|p| p.id == id) else {
+            return;
+        };
+        self.pending.remove(i);
+        self.pending_bytes = self.pending_bytes.saturating_sub(bytes);
+        self.sub_kept(stored, text_len);
+        if self.next_doc == id.saturating_add(1) {
+            self.next_doc = id;
+        }
+    }
+
+    fn discard_pending(&mut self, stored: &str) {
+        let n = self.pending.len();
+        self.pending.retain(|p| p.source != stored);
+        if self.pending.len() == n {
+            return;
+        }
+        self.pending_bytes = self
+            .pending
+            .iter()
+            .map(|p| queued_bytes(&p.draft, &p.source, p.sleeve.as_deref()))
+            .sum();
+    }
+
+    fn sub_kept(&mut self, stored: &str, n: u64) {
+        if let Some(k) = self.kept.get_mut(stored) {
+            *k = k.saturating_sub(n);
+        }
     }
 
     fn note_usage(&mut self, item: Item) {
@@ -772,6 +954,12 @@ impl Index {
         self.live_docs
     }
 
+    /// A source has hit its own text budget or its sleeve's, and is keeping its newest lines
+    /// or waiting.
+    pub fn capped(&self) -> bool {
+        self.sources.values().any(|s| s.capped)
+    }
+
     pub fn stats(&self) -> Stats {
         let mut sessions = std::collections::HashSet::new();
         for s in &self.segs {
@@ -820,6 +1008,25 @@ fn inject_failure(phase: &str) -> io::Result<()> {
     }
     let _ = phase;
     Ok(())
+}
+
+fn note_capped(rec: &mut SourceRec, got: &mut Ingested, was_capped: bool) {
+    rec.capped = true;
+    got.capped = !was_capped;
+}
+
+fn queued_bytes(draft: &Draft, stored: &str, sleeve: Option<&str>) -> usize {
+    draft.files.iter().fold(
+        draft
+            .text
+            .len()
+            .saturating_add(draft.session.len())
+            .saturating_add(stored.len())
+            .saturating_add(sleeve.map_or(0, str::len))
+            .saturating_add(draft.tool.as_ref().map_or(0, String::len))
+            .saturating_add(128),
+        |n, f| n.saturating_add(f.len().saturating_add(24)),
+    )
 }
 
 fn fresh_state(source: &Source) -> State {

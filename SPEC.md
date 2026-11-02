@@ -285,9 +285,10 @@ the same dispatch code. There are no external sources such as email, calendar or
     sleeve id (D26). Envoy and the owner are unrestricted.
     `history read` applies the caller's sleeve scope before it copies text, then stops at 200
     docs or 8 MiB of source text and says when the range was cut. Tool paths are kept to the
-    same budget as tool text (512 bytes). Ingest stops once segments reach 1 GiB, or once one
-    source has given 1 GiB; later bytes of that log stay unread until a rebuild into a fresh
-    directory. Opening an index removes segment files the manifest does not name.
+    same budget as tool text (512 bytes). Each sleeve has its own budget of 1 GiB of source
+    text, and so does each source. Past that, the source drops its oldest docs and keeps the
+    newest lines; a sleeve that is full does not stop the others. `doctor` and `hub info`
+    report `history capped`. Opening an index removes segment files the manifest does not name.
   - Measured on this hub (2026-11-01, release build): 1 GiB of the newest real logs ingested
     in 1.9 s (540 MB/s, 48 MB peak RSS) into an 11 MB index; queries take 0.05 to 0.7 ms.
   - Fallback: `rusqlite` with FTS5, if our index proves insufficient (REVISIT.md).

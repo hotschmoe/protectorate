@@ -183,6 +183,11 @@ impl History {
         self.with(|ix| Ok(ix.docs())).unwrap_or(0)
     }
 
+    /// A sleeve's history is at its text budget.
+    pub fn capped(&self) -> bool {
+        self.with(|ix| Ok(ix.capped())).unwrap_or(false)
+    }
+
     pub fn context_usage(&self, session: &str) -> Option<ContextUsage> {
         self.with(|ix| Ok(ix.context_usage(session))).ok().flatten()
     }
@@ -310,7 +315,10 @@ impl History {
             match got {
                 Ok(g) => {
                     p.errors.remove(&src.path);
-                    changed |= g.bytes > 0 || g.reset;
+                    changed |= g.bytes > 0 || g.reset || g.capped;
+                    if g.capped {
+                        warning!("history capped: {}", src.path.display());
+                    }
                 }
                 Err(e) => {
                     let e = e.to_string();
