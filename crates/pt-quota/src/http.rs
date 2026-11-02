@@ -34,6 +34,16 @@ pub fn get(req: &Get) -> Result<Vec<u8>> {
     }
 }
 
+/// Whole seconds stay an integer. A shorter remainder is fractional, so a follow-up
+/// request can be given only the time left in the read.
+fn timeout_arg(timeout: Duration) -> String {
+    if timeout.subsec_nanos() == 0 && timeout.as_secs() >= 1 {
+        timeout.as_secs().to_string()
+    } else {
+        format!("{:.3}", timeout.as_secs_f64().max(0.001))
+    }
+}
+
 fn config_quote(s: &str) -> Result<String> {
     if s.chars().any(|c| c.is_control()) {
         return Err(Error::other("request contains a control character"));
@@ -92,11 +102,12 @@ fn send(req: &Get) -> Result<(u16, Vec<u8>)> {
     for (name, value) in req.headers {
         config += &format!("header = {}\n", config_quote(&format!("{name}: {value}"))?);
     }
-    let secs = req.timeout.as_secs().max(1);
+    let max_time = timeout_arg(req.timeout);
+    let connect = timeout_arg(req.timeout.min(Duration::from_secs(10)));
     let mut cmd = Command::new("curl");
     cmd.args(["-q", "-sS", "--config", "-", "--proto", "=http,https"])
-        .args(["--max-time", &secs.to_string()])
-        .args(["--connect-timeout", &secs.min(10).to_string()])
+        .args(["--max-time", &max_time])
+        .args(["--connect-timeout", &connect])
         .args(["--max-filesize", &MAX_BODY.to_string()])
         .args(["-w", "\n%{http_code}"]);
     if local {

@@ -72,10 +72,18 @@ impl Cache {
         let opts = self.opts;
         std::thread::scope(|scope| {
             for slot in &mut self.slots {
-                if let Some(pending) = &slot.pending {
+                if let Some(pending) = slot.pending.take() {
                     match pending.try_recv() {
-                        Err(mpsc::TryRecvError::Empty) => continue,
-                        Ok(_) | Err(mpsc::TryRecvError::Disconnected) => slot.pending = None,
+                        Err(mpsc::TryRecvError::Empty) => {
+                            slot.pending = Some(pending);
+                            continue;
+                        }
+                        Ok(result) => {
+                            // A read that missed the previous deadline still replaces the row.
+                            slot.settle(now_ms, result);
+                            continue;
+                        }
+                        Err(mpsc::TryRecvError::Disconnected) => {}
                     }
                 }
                 if !slot.due(&opts, force) {
@@ -98,19 +106,7 @@ impl Cache {
                             slot.reader.subscription()
                         ))),
                     };
-                    let now = Instant::now();
-                    slot.last_attempt = Some(now);
-                    match result {
-                        Ok(snap) => {
-                            slot.good = Some((snap, now_ms, now));
-                            slot.failures = 0;
-                            slot.last_err = None;
-                        }
-                        Err(e) => {
-                            slot.failures = slot.failures.saturating_add(1);
-                            slot.last_err = Some(e);
-                        }
-                    }
+                    slot.settle(now_ms, result);
                 });
             }
         });
@@ -127,6 +123,22 @@ impl Cache {
 }
 
 impl Slot {
+    fn settle(&mut self, now_ms: u64, result: crate::Result<Snapshot>) {
+        let now = Instant::now();
+        self.last_attempt = Some(now);
+        match result {
+            Ok(snap) => {
+                self.good = Some((snap, now_ms, now));
+                self.failures = 0;
+                self.last_err = None;
+            }
+            Err(e) => {
+                self.failures = self.failures.saturating_add(1);
+                self.last_err = Some(e);
+            }
+        }
+    }
+
     fn due(&self, opts: &Options, force: bool) -> bool {
         let Some(last) = self.last_attempt else {
             return true;

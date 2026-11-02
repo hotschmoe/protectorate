@@ -675,8 +675,10 @@ Each entry: where, what was done, what right looks like.
   restart must keep dispatch weighting.
 - **A stuck quota read can leave one worker behind** (`pt-quota`, cache.rs): publication has a
   deadline and cached rows age monotonically, but an OS-blocked file read cannot be cancelled;
-  the cache allows at most one such worker per reader and retries only after it returns. Right:
-  use a killable helper process if network filesystems make this a practical problem.
+  the cache allows at most one such worker per reader and retries only after it returns. A read
+  that does finish after the deadline is applied on the next refresh, and each curl in the read
+  gets only the time still left. Right: use a killable helper process if network filesystems
+  make this a practical problem.
 - **The web app embedded is about 17.7 MB** (`crates/protectorate/build.rs`; the bundled Inter fonts
   added about 1 MB on 2026-11-02): the release binary
   is 19.4 MB with it and 1.7 MB without; with gzipped headscale and member too (25 MB) the

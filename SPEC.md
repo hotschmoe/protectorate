@@ -441,6 +441,10 @@ windows like a fresh reading's: under the task's usable minimum the subscription
 and at or above it the fallback may still choose that harness, ahead of a candidate with no
 reading. `select_target` itself stays on fresh rows.
 
+A read that finishes after its deadline is kept and published on the next refresh. Each request
+inside that read gets only the time still left, so a follow-up call cannot discard a body that
+already arrived.
+
 **Spare quota (PROBLEMS P6).** A code rule triggers: projected unused capacity at reset is above X%
 and no high-priority work is queued. When it fires, the next backlog item goes to that harness.
 Envoy picks which item; code decides when and where. Work on public repos lands in a review inbox

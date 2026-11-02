@@ -572,3 +572,89 @@ fn stale_windows_still_gate_the_fallback() {
         "{spare}"
     );
 }
+
+/// Answers `routes` after the given delay, so a reader can outlive the cache deadline.
+fn serve_after(routes: Vec<(&'static str, &'static str, std::time::Duration)>) -> u16 {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut req = Vec::new();
+            let mut buf = [0u8; 1024];
+            while !req.windows(4).any(|w| w == b"\r\n\r\n") {
+                match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => req.extend_from_slice(&buf[..n]),
+                }
+            }
+            let text = String::from_utf8_lossy(&req);
+            let path = text.split(' ').nth(1).unwrap_or("").to_string();
+            let hit = routes.iter().find(|(p, _, _)| path.starts_with(p)).copied();
+            std::thread::spawn(move || {
+                let reply = match hit {
+                    Some((_, body, delay)) => {
+                        std::thread::sleep(delay);
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
+                    }
+                    None => {
+                        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                            .to_string()
+                    }
+                };
+                let _ = stream.write_all(reply.as_bytes());
+            });
+        }
+    });
+    port
+}
+
+/// A billing body that is already in hand survives the cache deadline. Grok's settings call
+/// gets only the time left, so the next refresh sees the percent instead of waiting out a
+/// second full timeout. The first line is the deadline; the late line is that body applied.
+#[test]
+#[cfg(debug_assertions)]
+fn a_read_that_finishes_after_the_deadline_is_kept() {
+    let home = scratch(&format!("late-grok-{}", std::process::id()));
+    write(
+        &home.join(".grok/auth.json"),
+        r#"{"https://auth.x.ai::fixture":{"key":"late-grok"}}"#,
+    );
+    // Billing answers at 3s of a 5s deadline and settings never answers. With the time left,
+    // settings is cut at the deadline and the percent is published on the refresh just after
+    // it. A second full timeout would still be inside settings at that refresh.
+    let port = serve_after(vec![
+        (
+            "/v1/billing",
+            r#"{"config":{"creditUsagePercent":40}}"#,
+            std::time::Duration::from_millis(3_000),
+        ),
+        (
+            "/v1/settings",
+            r#"{"subscription_tier_display":"Super"}"#,
+            std::time::Duration::from_millis(30_000),
+        ),
+    ]);
+    let base = format!("http://127.0.0.1:{port}");
+    let out = probe(&[
+        "--home",
+        home.to_str().unwrap(),
+        "--grok-url",
+        &base,
+        "--test-read-ms",
+        "5000",
+        "--test-late-ms",
+        "1500",
+    ]);
+    let first = line_of(&out, "grok");
+    assert_eq!(state_of(first), "error", "{out}");
+    assert!(first.contains("timed out"), "{first}");
+    assert!(
+        out.lines()
+            .any(|l| l.starts_with("late grok fresh") && l.contains("40%")),
+        "{out}"
+    );
+}
