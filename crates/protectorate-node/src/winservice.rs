@@ -1,6 +1,8 @@
 //! The Windows service (D11): `install-service` and `uninstall` through the system's sc.exe and
 //! icacls.exe, with every path and the service recorded in the install manifest. The service
-//! itself runs `serve --service` as LocalSystem (serve.rs, pt_node::windows).
+//! itself runs `supervise --service` as LocalSystem (supervise.rs, pt_node::windows) from the
+//! copy under %ProgramFiles%, which is never switched: that supervisor starts
+//! `releases\current\protectorate-node.exe serve`, the binary updates switch, and restarts it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -41,6 +43,7 @@ pub fn install(o: &Opts) -> Result<(), String> {
     }
     let state_dir = quotable(&o.state)?;
     restrict(&o.state)?;
+    let version = crate::service::into_releases(&o.state)?;
 
     // Each item goes into the manifest as soon as it exists, so a failed install can be undone.
     let mut m = Manifest {
@@ -61,7 +64,7 @@ pub fn install(o: &Opts) -> Result<(), String> {
         .map_err(|e| format!("copying {} to {}: {e}", exe.display(), bin.display()))?;
     record(&mut m, &bin.display().to_string(), "file")?;
     let command = format!(
-        "{} serve --service --state-dir {state_dir} --listen-tcp {LISTEN}",
+        "{} supervise --service --state-dir {state_dir} --listen-tcp {LISTEN}",
         quotable(&bin)?
     );
     sc(&[
@@ -80,7 +83,8 @@ pub fn install(o: &Opts) -> Result<(), String> {
         cfg.name, cfg.server_url
     );
     sc(&["description", SERVICE, &about])?;
-    // Restart=always: 5 s, 5 s, then every 60 s, also after a clean exit with an error.
+    // The supervisor restarts the node itself; these restart the supervisor: 5 s, 5 s, then
+    // every 60 s, also after a clean exit with an error.
     sc(&[
         "failure",
         SERVICE,
@@ -93,7 +97,7 @@ pub fn install(o: &Opts) -> Result<(), String> {
     sc(&["start", SERVICE])?;
     wait_for(SERVICE, RUNNING)?;
     println!(
-        "Installed and started the service {SERVICE} (LocalSystem, log {}).\nInstall manifest: {}\nUninstall, from a copy outside {}: {} uninstall --state-dir {}",
+        "Installed and started the service {SERVICE} on release {version} (LocalSystem, log {}).\nInstall manifest: {}\nUninstall, from a copy outside {}: {} uninstall --state-dir {}",
         o.state.join("node.log").display(),
         manifest.display(),
         prefix.display(),

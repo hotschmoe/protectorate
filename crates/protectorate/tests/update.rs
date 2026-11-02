@@ -1679,3 +1679,214 @@ fn harness_updates_run_daily_and_wait_for_a_sleeve_mid_turn() {
         || (pi_runs() == 2).then_some(()),
     );
 }
+
+/// `protectorate-node supervise`, the loop the Windows service runs in place of systemd, with
+/// release pointers switched the Windows way (`PT_TEST_POINTER_ASIDE`: the old link renamed
+/// aside, then the new one into place).
+struct Supervise {
+    child: Child,
+    log: PathBuf,
+}
+
+impl Supervise {
+    fn start(node: &Path, root: &Path, sock: &Path, env: &[(&str, &str)]) -> Supervise {
+        use std::os::unix::process::CommandExt;
+        let log = root.join("supervise.log");
+        let err = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log)
+            .unwrap();
+        let mut cmd = Command::new(node);
+        cmd.arg("supervise")
+            .arg("--state-dir")
+            .arg(root)
+            .arg("--forward-socket")
+            .arg(sock)
+            .args(["--no-scope", "--no-member"])
+            .stdin(Stdio::null())
+            .stdout(err.try_clone().unwrap())
+            .stderr(err)
+            .process_group(0)
+            .env("PT_TEST_POINTER_ASIDE", "1")
+            .env("CURL_HOME", root)
+            .env_remove("PROTECTORATE_TOKEN")
+            .env_remove("PROTECTORATE_SOCKET");
+        for (k, _) in std::env::vars().filter(|(k, _)| k.starts_with("CLAUDE")) {
+            cmd.env_remove(k);
+        }
+        for (k, v) in env {
+            cmd.env(k, v);
+        }
+        Supervise {
+            child: cmd.spawn().unwrap(),
+            log,
+        }
+    }
+
+    fn log_text(&self) -> String {
+        fs::read_to_string(&self.log).unwrap_or_default()
+    }
+
+    fn wait_log(&self, what: &str, needle: &str, secs: u64) {
+        let ok = (0..secs * 10).any(|_| {
+            let hit = self.log_text().contains(needle);
+            if !hit {
+                thread::sleep(Duration::from_millis(100));
+            }
+            hit
+        });
+        assert!(
+            ok,
+            "{what}: no {needle:?}\n--- supervise log ---\n{}",
+            tail(&self.log_text(), 60)
+        );
+    }
+
+    /// SIGTERM, as a service stop; true when it exited 0 in time.
+    fn stop(&mut self) -> bool {
+        let _ = pt_sys::kill_group(self.child.id(), pt_sys::SIGTERM);
+        for _ in 0..150 {
+            if let Ok(Some(st)) = self.child.try_wait() {
+                return st.success();
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        false
+    }
+}
+
+impl Drop for Supervise {
+    fn drop(&mut self) {
+        if !self.stop() {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
+fn no_pointer_leftovers(root: &Path) {
+    let names: Vec<String> = fs::read_dir(root.join("releases"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with("-new") || n.ends_with("-old"))
+        .collect();
+    assert!(names.is_empty(), "left over: {names:?}");
+}
+
+#[test]
+fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_switch() {
+    let node = node_bin().expect("cargo build --workspace must build protectorate-node");
+    let asset = format!("protectorate-node-linux-{}", arch());
+    let rel = |tag: &str, crash: bool| {
+        release(
+            tag,
+            vec![(
+                asset.clone(),
+                wrapper("protectorate-node", "--version", tag, &node, "", crash),
+            )],
+        )
+    };
+    let fake = serve_releases(vec![
+        rel("v0.0.2", false),
+        rel("v0.0.3", true),
+        rel("v0.0.4", false),
+    ]);
+    let root = dir("node-supervise");
+    install(
+        &root,
+        "v0.0.1",
+        "protectorate-node",
+        &wrapper("protectorate-node", "--version", "v0.0.1", &node, "", false),
+    );
+    // install-service names the installed release previous too.
+    std::os::unix::fs::symlink("v0.0.1", root.join("releases/previous")).unwrap();
+    let sock = root.join("s.sock");
+    let update = |tag: &str| {
+        let fields = obj! { "version" => tag, "api" => fake.url.as_str(), "repo" => "o/r", "probation_secs" => 60u64 }.to_string();
+        node_rpc(&node, &sock, "Update", &fields)
+    };
+    let hello = || (node_rpc(&node, &sock, "Hello", "{}").status == 0).then_some(());
+
+    let mut sup = Supervise::start(&node, &root, &sock, &[]);
+    sup.wait_log("first start", "start 1, release v0.0.1", 20);
+    eventually("node v0.0.1", Duration::from_secs(20), hello);
+
+    // An update: the node switches and exits 75; the supervisor runs the previous release's
+    // probation and starts the new one, which a non-Hello request confirms.
+    let out = update("v0.0.2");
+    assert_eq!(out.status, 0, "{} {}", out.stdout, out.stderr);
+    sup.wait_log("restart after the update", "start 2, release v0.0.2", 20);
+    assert!(
+        sup.log_text().contains("the node exited 75"),
+        "{}",
+        sup.log_text()
+    );
+    eventually("node v0.0.2", Duration::from_secs(20), hello);
+    assert_eq!(node_rpc(&node, &sock, "Presence", "{}").status, 0);
+    eventually("v0.0.2 confirmed", Duration::from_secs(10), || {
+        probation(&root)["contacted_ms"].as_u64()
+    });
+    assert_eq!(pointer(&root, "current").as_deref(), Some("v0.0.2"));
+    assert_eq!(pointer(&root, "previous").as_deref(), Some("v0.0.1"));
+    no_pointer_leftovers(&root);
+
+    // A release whose serve crashes at once: after three starts the probation the supervisor
+    // runs from previous switches back, and the supervisor starts v0.0.2 again.
+    let out = update("v0.0.3");
+    assert_eq!(out.status, 0, "{} {}", out.stdout, out.stderr);
+    sup.wait_log("v0.0.3 tried", "start 3, release v0.0.3", 20);
+    sup.wait_log("rolled back", "rolled back to v0.0.2", 60);
+    sup.wait_log("v0.0.2 again", "start 6, release v0.0.2", 20);
+    eventually("node v0.0.2 again", Duration::from_secs(20), hello);
+    let p = probation(&root);
+    assert_eq!(p["version"].as_str(), Some("v0.0.3"), "{p}");
+    assert!(p["rolled_back_ms"].as_u64().is_some(), "{p}");
+    assert!(p["reason"].as_str().unwrap_or("").contains("starts"), "{p}");
+    assert_eq!(pointer(&root, "current").as_deref(), Some("v0.0.2"));
+    no_pointer_leftovers(&root);
+
+    // Stopping the supervisor ends the node.
+    assert!(sup.stop(), "{}", sup.log_text());
+    eventually("node stopped", Duration::from_secs(10), || {
+        UnixStream::connect(&sock).is_err().then_some(())
+    });
+    drop(sup);
+
+    // An update torn between renaming the old `current` aside and the new one into place (the
+    // node dies there, as a power loss would): there is no `current` until the supervisor's
+    // next start finishes the switch, and the release on trial then starts and is confirmed.
+    let mut sup = Supervise::start(
+        &node,
+        &root,
+        &sock,
+        &[("PT_TEST_CRASH_AT", "current-aside")],
+    );
+    sup.wait_log("restart", "start 1, release v0.0.2", 20);
+    eventually(
+        "node v0.0.2 under the crash knob",
+        Duration::from_secs(20),
+        hello,
+    );
+    let out = update("v0.0.4");
+    assert_ne!(
+        out.status, 0,
+        "the reply dies with the node: {}",
+        out.stdout
+    );
+    sup.wait_log("torn switch", "the node exited 86", 20);
+    sup.wait_log("switch finished", "finished an interrupted switch", 20);
+    sup.wait_log("v0.0.4 started", "start 2, release v0.0.4", 20);
+    eventually("node v0.0.4", Duration::from_secs(20), hello);
+    assert_eq!(node_rpc(&node, &sock, "Presence", "{}").status, 0);
+    eventually("v0.0.4 confirmed", Duration::from_secs(10), || {
+        let p = probation(&root);
+        (p["version"].as_str() == Some("v0.0.4"))
+            .then(|| p["contacted_ms"].as_u64())
+            .flatten()
+    });
+    assert_eq!(pointer(&root, "current").as_deref(), Some("v0.0.4"));
+    assert_eq!(pointer(&root, "previous").as_deref(), Some("v0.0.2"));
+    no_pointer_leftovers(&root);
+    assert!(sup.stop(), "{}", sup.log_text());
+}

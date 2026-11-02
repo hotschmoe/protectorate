@@ -12,6 +12,7 @@ fn usage() -> String {
 {}
 {}
 {}
+{}
   inventory                         print the machine inventory as JSON
   sample                            print one sample as JSON
   presence [--away-after SECS]      print presence as JSON
@@ -23,6 +24,7 @@ fn usage() -> String {
   --version                         print the version, then whether member is embedded",
         crate::join::USAGE,
         crate::serve::USAGE,
+        crate::supervise::USAGE,
         crate::service::USAGE,
         crate::rpc::USAGE,
         crate::update::USAGE
@@ -52,6 +54,7 @@ pub fn run(args: Vec<String>) -> i32 {
             .map(|line| println!("{line}")),
         Some("join") => crate::join::run(&args[1..]),
         Some("serve") => crate::serve::run(&args[1..]),
+        Some("supervise") => crate::supervise::run(&args[1..]),
         Some("install-service") => crate::service::install(&args[1..]),
         Some("uninstall") => crate::service::uninstall(&args[1..]),
         Some("probation") => crate::update::probation(&args[1..]),

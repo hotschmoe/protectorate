@@ -255,7 +255,23 @@ hub request other than Hello. A node that has not done so within the
 probation window (`--probation`, default 600 s) reverts to its previous binary. The command waits
 for every node unless `--no-wait`. Update the hub first, then one node per OS and arch, then the
 rest. A node with running jobs answers `busy`; once an update is admitted, new jobs answer `busy`
-until the restart. A Windows node answers `unsupported`.
+until the restart.
+
+A Windows node updates the same way. The SCM cannot run a step before each start or restart a
+service from inside it, so the service runs a supervisor, `protectorate-node supervise --service`,
+from the copy under `%ProgramFiles%\protectorate-node`; that copy is never switched. The supervisor
+does what the systemd unit does: before each start it runs `releases\previous\protectorate-node.exe
+probation`, then it starts `releases\current\protectorate-node.exe serve` in a kill-on-close job,
+and it starts the node again 1 s after it exits 75 (update or rollback), 5 s after any other exit. A
+release that keeps failing to start is switched back after three starts, as on Linux. The running
+`.exe` is never overwritten: each release has its own directory. A rename cannot replace a directory
+link on Windows, so `current` and `previous` change by renaming the old link aside and the new one
+into place. A crash between the two leaves no `current`; the supervisor finishes the switch before
+its next start. The supervisor itself is the release that was installed and changes only with a
+reinstall. A Windows node installed by v0.7.0-dev.5 or older (`sc.exe qc protectorate-node` shows
+`serve --service`) runs `serve` straight from `%ProgramFiles%`, answers `unsupported` and must be
+reinstalled once; see [Windows node updates](windows-node-update.md), which also has the manual
+check for a real Windows machine.
 
 Neither hub nor node switches releases while a release is on trial; wait for confirmation or
 automatic rollback. Without `--version`, an update is available only when the newest release on
@@ -269,6 +285,8 @@ hub last. A node the old hub cannot update is reinstalled with the new release.
 
 Both update paths are tested end to end against a stand-in release server, and have run on the
 real fleet: `hub update` from v0.7.0-dev.1 to dev.2 and dev.3, `node update` from dev.2 to dev.3.
+The Windows supervisor loop and its pointer switch are tested end to end on Linux
+(`supervise` with `PT_TEST_POINTER_ASIDE=1`); on a real Windows node they have not run yet.
 
 ## Devices
 

@@ -4,7 +4,8 @@
 //!   curl (SPEC 15) and downloads its assets.
 //! - [`Store`] is `<root>/releases/`: [`Store::stage`] checks every asset against the release's
 //!   `SHA256SUMS` before anything lands in `releases/<version>/`, and the `current` and
-//!   `previous` symlinks switch by rename, so a crash leaves one or the other.
+//!   `previous` symlinks switch by rename (on Windows by renaming the old link aside first, a
+//!   change [`Store::open`] finishes after a crash), so a crash leaves one or the other.
 //! - [`Store::switch_on_probation`] puts a new release on trial: [`Store::confirm`] keeps it
 //!   (a node: the hub made contact; the hub: its own health check passed), and
 //!   [`Store::check_probation`] or [`Store::start_attempt`] (run by the service before each
