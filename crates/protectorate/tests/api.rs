@@ -14,6 +14,112 @@ use common::*;
 use pt_api::{METHODS, Scope};
 use pt_json::{Value, obj};
 
+#[test]
+fn job_wait_reports_lost_cancelled_and_hub_restart() {
+    use std::io::Read;
+    use std::os::unix::net::UnixListener;
+
+    for state in ["lost", "cancelled", "offline"] {
+        let path = std::env::temp_dir().join(format!(
+            "pt-wait-{}-{}.sock",
+            std::process::id(),
+            free_port()
+        ));
+        let listener = UnixListener::bind(&path).unwrap();
+        let (release, blocked) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            for step in 0..3 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                let mut length = 0;
+                loop {
+                    line.clear();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some((k, v)) = line.split_once(':')
+                        && k.eq_ignore_ascii_case("content-length")
+                    {
+                        length = v.trim().parse::<usize>().unwrap();
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                if step == 1 {
+                    blocked.recv_timeout(Duration::from_secs(10)).unwrap();
+                    if state == "offline" {
+                        return;
+                    }
+                }
+                let response = if step == 2 {
+                    format!(
+                        r#"{{"job_id":"42","offset":0,"next_offset":0,"text":"","eof":{}}}"#,
+                        state != "lost"
+                    )
+                } else {
+                    let status = if step == 0 { "queued" } else { state };
+                    format!(
+                        r#"{{"id":"42","target":{{"type":"node","node_id":"1"}},"argv":["true"],"state":"{status}","requested_by":"owner","queued_at_ms":1,"exit_code":23}}"#
+                    )
+                };
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
+                    response.len()
+                )
+                .unwrap();
+                if step == 1 && state == "offline" {
+                    return;
+                }
+            }
+        });
+        let mut cli = Command::new(bin())
+            .arg("--socket")
+            .arg(&path)
+            .args(["job", "run", "--node", "1", "--wait", "--", "true"])
+            .env_remove("PROTECTORATE_TOKEN")
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let (lines, output) = mpsc::channel();
+        let stderr = cli.stderr.take().unwrap();
+        let reader = std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines() {
+                lines.send(line.unwrap()).unwrap();
+            }
+        });
+        let first = output
+            .recv_timeout(Duration::from_secs(10))
+            .expect("job id before waiting for status");
+        assert!(
+            first.contains("job 42") && first.contains("waiting"),
+            "{first}"
+        );
+        release.send(()).unwrap();
+        let status = cli.wait().unwrap();
+        reader.join().unwrap();
+        server.join().unwrap();
+        let rest = output.try_iter().collect::<Vec<_>>().join("\n");
+        assert!(!status.success(), "{state}: {rest}");
+        if state == "offline" {
+            assert!(
+                rest.contains("job 42") && rest.contains("hub") && rest.contains("job show 42"),
+                "{rest}"
+            );
+        } else {
+            assert!(rest.contains(&format!("job 42: {state}")), "{rest}");
+            assert!(
+                !rest.contains("exit 23"),
+                "a stale exit code must not replace {state}: {rest}"
+            );
+        }
+    }
+}
+
 fn get(port: u16, path: &str, headers: &[(&str, &str)]) -> pt_http::ClientResponse {
     pt_http::Client::tcp(SocketAddr::from(([127, 0, 0, 1], port)))
         .request("GET", path, headers, b"")

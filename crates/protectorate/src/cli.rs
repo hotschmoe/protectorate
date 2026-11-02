@@ -802,22 +802,32 @@ fn wait_job(c: &Client, mut job: api::Job) -> Result<(), Fail> {
     let id = api::JobRef {
         job_id: job.id.clone(),
     };
+    eprintln!("job {}: waiting", job.id);
     while !matches!(
         job.state,
-        S::Succeeded | S::Failed | S::Interrupted | S::Cancelled | S::Abandoned
+        S::Succeeded | S::Failed | S::Interrupted | S::Cancelled | S::Abandoned | S::Lost
     ) {
         std::thread::sleep(Duration::from_millis(500));
-        job = c.call::<m::GetJob>(&id)?;
+        job = c.call::<m::GetJob>(&id).map_err(|e| Fail::Other(format!(
+            "job {}: cannot query the hub ({e}); it may be restarting; inspect with `protectorate job show {}`", id.job_id, id.job_id
+        )))?;
     }
     let mut offset = 0;
     loop {
-        let log = c.call::<m::GetJobLog>(&api::GetJobLogRequest {
-            job_id: job.id.clone(),
-            offset,
-            limit: Some(1 << 20),
-        })?;
+        let log = c
+            .call::<m::GetJobLog>(&api::GetJobLogRequest {
+                job_id: job.id.clone(),
+                offset,
+                limit: Some(1 << 20),
+            })
+            .map_err(|e| {
+                Fail::Other(format!(
+                    "job {}: cannot read the log ({e}); inspect with `protectorate job log {}`",
+                    id.job_id, id.job_id
+                ))
+            })?;
         print!("{}", log.text);
-        if log.eof {
+        if log.eof || (job.state == S::Lost && log.next_offset <= offset) {
             break;
         }
         if log.next_offset <= offset {
@@ -828,20 +838,30 @@ fn wait_job(c: &Client, mut job: api::Job) -> Result<(), Fail> {
         }
         offset = log.next_offset;
     }
+    let exit = if matches!(job.state, S::Succeeded | S::Failed) {
+        job.exit_code
+            .map_or(String::new(), |code| format!(" (exit {code})"))
+    } else {
+        String::new()
+    };
+    let detail = job
+        .error
+        .as_ref()
+        .map_or(String::new(), |e| format!(": {e}"));
+    eprintln!("job {}: {}{exit}{detail}", job.id, job.state);
+    if job.state == S::Lost {
+        eprintln!("inspect later with `protectorate job show {}`", job.id);
+    }
     if job.state == S::Succeeded {
         return Ok(());
     }
-    if let Some(code) = job.exit_code.filter(|code| (1..=255).contains(code)) {
+    if let Some(code) = job
+        .exit_code
+        .filter(|code| job.state == S::Failed && (1..=255).contains(code))
+    {
         return Err(Fail::Exit(code as u8));
     }
-    Err(Fail::Other(format!(
-        "job {} ended {}{}",
-        job.id,
-        job.state,
-        job.error
-            .as_ref()
-            .map_or(String::new(), |e| format!(": {e}"))
-    )))
+    Err(Fail::Exit(1))
 }
 
 /// Every slice of the artifact, checked against its SHA-256, to `--out` or stdout.
