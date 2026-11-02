@@ -113,8 +113,10 @@ pub fn parse_usage(body: &[u8]) -> Result<Snapshot> {
             .and_then(Value::as_i64)
             .filter(|n| *n > 0)
             .and_then(secs_to_ms);
-        snap.windows
-            .push(window(window_label(secs / 60), pct, reset));
+        // The label keeps whole minutes (`119` s is `1m`). The pace uses this length.
+        let mut w = window(window_label(secs / 60), pct, reset);
+        w.length_ms = u64::try_from(secs).ok().and_then(|s| s.checked_mul(1_000));
+        snap.windows.push(w);
     }
     if snap.windows.is_empty() {
         return Err(Error::other("usage response has no rate limit windows"));

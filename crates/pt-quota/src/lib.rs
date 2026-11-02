@@ -139,5 +139,6 @@ pub(crate) fn window(
         label: label.into(),
         used_pct: clamp_pct(used_pct),
         resets_at_ms: resets_at_ms.map(pt_api::EpochMs),
+        length_ms: None,
     }
 }

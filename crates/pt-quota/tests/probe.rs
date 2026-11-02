@@ -81,14 +81,18 @@ fn write(path: &Path, text: &str) {
 
 /// Serves canned bodies by path and records each request's Authorization header. A path under
 /// a `guarded` prefix answers 401 unless the request carries that bearer token.
-fn serve(routes: Vec<(&'static str, &'static str)>) -> (u16, Arc<Mutex<Vec<String>>>) {
+fn serve<S: Into<String>>(routes: Vec<(&'static str, S)>) -> (u16, Arc<Mutex<Vec<String>>>) {
     serve_guarded(routes, &[])
 }
 
-fn serve_guarded(
-    routes: Vec<(&'static str, &'static str)>,
+fn serve_guarded<S: Into<String>>(
+    routes: Vec<(&'static str, S)>,
     guarded: &'static [(&'static str, &'static str)],
 ) -> (u16, Arc<Mutex<Vec<String>>>) {
+    let routes: Vec<(&'static str, String)> = routes
+        .into_iter()
+        .map(|(path, body)| (path, body.into()))
+        .collect();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -120,7 +124,7 @@ fn serve_guarded(
             let body = routes
                 .iter()
                 .find(|(p, _)| path.starts_with(p))
-                .map(|(_, b)| *b);
+                .map(|(_, b)| b.clone());
             let reply = match body {
                 _ if denied => {
                     "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -789,4 +793,40 @@ fn an_unmetered_harness_is_not_spent_when_its_reading_is_missing() {
         "{out}"
     );
     assert!(!out.contains("target PiVendor"), "{out}");
+}
+
+/// Codex reports a window length in seconds. The label keeps whole minutes, so 119 seconds
+/// is shown as `1m`, and the pace uses the stored length rather than that minute.
+#[test]
+fn a_codex_window_keeps_its_length_for_the_pace() {
+    let home = scratch(&format!("window-length-{}", std::process::id()));
+    write(
+        &home.join(".codex/auth.json"),
+        r#"{"tokens":{"access_token":"length-codex"}}"#,
+    );
+    let reset_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs()
+        + 90;
+    let body = format!(
+        r#"{{"plan_type":"plus","rate_limit":{{"primary_window":{{"used_percent":50,"limit_window_seconds":119,"reset_at":{reset_at}}}}}}}"#
+    );
+    let (port, _) = serve(vec![("/wham/usage", body)]);
+    let base = format!("http://127.0.0.1:{port}");
+    let out = probe(&[
+        "--home",
+        home.to_str().unwrap(),
+        "--codex-url",
+        &base,
+        "--allow",
+        "codex",
+    ]);
+    let line = line_of(&out, "codex");
+    assert_eq!(state_of(line), "fresh", "{out}");
+    assert!(line.contains("[1m 50%"), "{line}");
+    assert!(
+        out.contains("target Codex:") && out.contains("~0% expiring unused, 50% usable now"),
+        "{out}"
+    );
 }

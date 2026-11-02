@@ -192,7 +192,8 @@ window whose reset time has already passed still blocks while it is over that li
 or before the epoch is ignored and the percent still counts. A model-scoped Claude window
 (the weekly Sonnet or Opus cap, shown as `wk <model>`) is displayed and does not by itself
 block a Claude resleeve. Pi with a vendor login and Antigravity have no meter and are never
-chosen. A local
+chosen. A Codex window keeps the length the vendor reported, which the dispatch weight uses.
+The label can be coarser (`119` seconds shows as `1m`). A local
 endpoint may use HTTPS or loopback HTTP; other HTTP
 endpoints are reported as misconfigured and are not contacted.
 

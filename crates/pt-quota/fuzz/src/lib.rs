@@ -78,6 +78,7 @@ pub fn quota(b: &mut Bytes, now_ms: u64) -> Quota {
                 1 => Some(EpochMs(now_ms.saturating_sub(u64::from(b.u32())))),
                 _ => Some(EpochMs(now_ms.saturating_add(u64::from(b.u32()) * 1000))),
             },
+            length_ms: None,
         })
         .collect();
     Quota {

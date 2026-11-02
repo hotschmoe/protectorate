@@ -450,7 +450,10 @@ remaining percent is under the task minimum. A reset at or before the epoch is n
 and the percent still counts. Model-scoped Claude windows (`wk <model>`) stay on the quota row
 for display and do not gate dispatch; the account windows do (`5h`, `wk`), as does the single
 credit or rate-limit window of the other subscriptions. `pi_vendor` and Antigravity have no
-meter and are never chosen on this path.
+meter and are never chosen on this path. The pace projection uses a vendor window length when
+the reading included one (Codex stores `limit_window_seconds`). The label stays what is shown
+and can be coarser (`119` seconds is `1m`). A minute label is still a length when the reading
+did not name one.
 
 A read that finishes after its deadline is kept and published on the next refresh. Each request
 inside that read gets only the time still left, so a follow-up call cannot discard a body that

@@ -462,6 +462,8 @@ api_records! {
         pub label: String,
         pub used_pct: Option<f64>,
         pub resets_at_ms: Option<EpochMs>,
+        /// Vendor window length in milliseconds, when the reading named one.
+        pub length_ms: Option<u64>,
     }
 
     pub struct Quota {

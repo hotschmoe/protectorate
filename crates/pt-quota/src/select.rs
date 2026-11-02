@@ -58,7 +58,7 @@ struct Scored {
     hours: Option<f64>,
 }
 
-/// Window length from its label: `5h`, `3d`, `wk`, `day`, `mo` or a word like `wk sonnet`.
+/// Window length from its label: `5h`, `5m`, `3d`, `wk`, `day`, `mo` or a word like `wk sonnet`.
 pub fn window_length_ms(label: &str) -> Option<u64> {
     const HOUR: u64 = 3_600_000;
     for tok in label.split_whitespace() {
@@ -70,6 +70,7 @@ pub fn window_length_ms(label: &str) -> Option<u64> {
                 let (num, unit) = tok.split_at(tok.len() - 1);
                 let n = num.parse::<u64>().ok().filter(|&n| n > 0);
                 match (n, unit) {
+                    (Some(n), "m") => n.checked_mul(60_000),
                     (Some(n), "h") => n.checked_mul(HOUR),
                     (Some(n), "d") => n.checked_mul(24 * HOUR),
                     _ => None,
@@ -86,7 +87,10 @@ pub fn window_length_ms(label: &str) -> Option<u64> {
 
 /// Extrapolates the pace from window start to the fetch time out to the reset.
 fn projected_unused(w: &QuotaWindow, used: f64, fetched_ms: u64, now_ms: u64) -> Option<f64> {
-    let length = window_length_ms(&w.label)? as f64;
+    let length = w
+        .length_ms
+        .filter(|&ms| ms > 0)
+        .or_else(|| window_length_ms(&w.label))? as f64;
     let resets = w.resets_at_ms?.0;
     if now_ms > resets {
         return None;
@@ -166,7 +170,7 @@ fn past_blocks(q: &Quota, now_ms: u64, min: f64) -> bool {
     })
 }
 
-fn row<'a>(quotas: &'a [Quota], sub: Subscription) -> Option<&'a Quota> {
+fn row(quotas: &[Quota], sub: Subscription) -> Option<&Quota> {
     quotas.iter().find(|q| q.subscription == sub)
 }
 
