@@ -116,6 +116,17 @@ fn crash_mid_turn_recovers() {
     let repo = temp_repo("crash");
     let s = hub.spawn_pi("two", &repo);
     let id = s["id"].as_str().unwrap().to_string();
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "two-child",
+        "--parent",
+        "two",
+        "--harness",
+        "pi_local",
+    ])
+    .ok();
+    hub.wait("two-child", "idle", 120);
     let long = hub.send("two", LONG);
     eventually("the long turn to start", Duration::from_secs(60), || {
         let s = hub.sleeve("two");
@@ -157,6 +168,16 @@ fn crash_mid_turn_recovers() {
         "the journal is replayed"
     );
     hub.wait("two", "idle", 180);
+    hub.wait("two-child", "idle", 180);
+    let events = hub.cli(&["--json", "event", "list"]).json();
+    assert!(
+        !events["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["text"].as_str() == Some("child two-child crashed")),
+        "{events}"
+    );
     let s = hub.sleeve("two");
     assert_eq!(s["lifecycle"].as_str(), Some("running"));
     let g = s["incarnation"]["g"].as_u64().unwrap();

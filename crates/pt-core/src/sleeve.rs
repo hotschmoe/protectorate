@@ -434,7 +434,9 @@ impl Core<'_> {
             Life::Launching | Life::Running | Life::Recovering => {
                 let parent = s.parent;
                 self.sl(sid).life = Life::Recovering;
-                if let Some(p) = parent {
+                if let Some(p) = parent
+                    && kill_cause != Some(Cause::HubRestart)
+                {
                     self.notify(
                         Party::Sleeve(p),
                         Some(sid),
