@@ -665,14 +665,15 @@ impl Core<'_> {
         let ids: Vec<SleeveId> = self.st.sleeves.keys().copied().collect();
         for sid in ids {
             let s = self.sl(sid);
-            // The resumed incarnation already reached Ready and is waiting. Keeping the debt
-            // would continue it on the next start, long after the turn.
+            // Idle means this incarnation reached Ready. A debt still held means no prompt
+            // was sent after that, so the continuation is dropped with no warning. Keeping
+            // it would send the prompt on a later start, long after the turn. A resume that
+            // is still booting keeps the debt.
             if s.auto_continue.is_some()
                 && matches!(s.activity, Activity::Idle { .. })
                 && s.guard.state == GuardState::Armed
             {
                 s.auto_continue = None;
-                self.needs_prompt(sid);
             }
             let s = self.sl(sid);
             if s.proc == Proc::Up {

@@ -84,7 +84,9 @@ interrupt, a guardrail interrupt, a desync during either of those, a planned sto
 of an idle sleeve, and a manual resleeve do not. A stop, park, or resleeve also drops a
 continuation that is still queued, including one that never left the hub, and warns once.
 An idle crash that ends in a park or a resleeve drops a debt and does not warn. A restart
-while the resumed incarnation is still booting still sends it. A crash of an incarnation that already reached idle does not
+while the resumed incarnation is still booting still sends it. A hub restart that finds
+that incarnation already idle drops the debt with no warning: it reached Ready and
+nothing was sent after that. A crash of an incarnation that already reached idle does not
 carry it. A settle of that turn drops it with no warning, including one recorded after
 resume while the sleeve is idle, so a later start does not warn about a turn the journal
 already settled. If that prompt cannot be sent, the debt is dropped and the event log says

@@ -335,7 +335,8 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   including one fencing put back because it never left, and the owner and the parent get
   `TurnNeedsPrompt`. An idle crash that ends in a park or a resleeve drops a debt with no warning.
   A debt still held when recovery finds that incarnation already idle
-  and armed is dropped, with `TurnNeedsPrompt`; a resume that is still booting keeps the debt.
+  and armed is dropped with no warning: it reached Ready and nothing was sent after that.
+  A resume that is still booting keeps the debt.
   A `Continue` that cannot be delivered drops the debt and warns. A crash of an incarnation that
   already reached idle does not carry the debt. When the prompt cannot be sent, the owner and
   the parent get `TurnNeedsPrompt`. A settle of that same owner turn drops the debt with no

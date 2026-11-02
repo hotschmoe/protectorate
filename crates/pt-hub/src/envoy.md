@@ -54,8 +54,10 @@ harness; it can be replaced with another level.
   A continuation that cannot be delivered is dropped, and a crash after the incarnation reached
   idle does not carry it into the next one. A stop, park, or resleeve drops one that is still
   queued and warns once. An idle crash that ends in a park or a resleeve drops a debt and
-  does not warn. A settle of that turn drops it with no warning,
-  including one the journal already recorded while the sleeve was idle, so a later start does
+  does not warn. A hub restart that finds the resumed incarnation already idle drops the
+  debt with no warning: it reached Ready and nothing was sent after that. A settle of
+  that turn drops it with no warning, including one the journal already recorded while
+  the sleeve was idle, so a later start does
   not warn. A warning means that prompt was not sent.
 - A node job that changes the machine (updates, installs, reboots) is `job run --maintenance`;
   it always waits for the owner's approval.
