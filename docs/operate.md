@@ -339,7 +339,9 @@ the service. The retry keeps a manual rollback: it restores headscale, and resto
 only when the previous release cannot read it. It refuses while the hub holds the journal or
 headscale still has the database or its socket open. If a restore fails after a live file was
 replaced, prestart exits and the next prestart continues; it does not leave the trial serving
-half-restored data. If the trial
+half-restored data. `releases/rollback-open` records that open restore until the rollback
+finishes, so a later failure continues it too, including a manual rollback of a release that
+was already confirmed. If the trial
 binary cannot start, the hub stays unavailable until the snapshot is repaired; do not point the old
 binary at an unreadable journal. The first update from a binary predating journal snapshots is not
 protected by this mechanism, because that binary takes the snapshot and runs prestart.

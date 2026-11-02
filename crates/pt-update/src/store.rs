@@ -897,16 +897,11 @@ impl Store {
                 let mut p = self
                     .probation()?
                     .ok_or_else(|| store_err("probation disappeared"))?;
-                // Contact is recorded only when nothing live was replaced. A partial
-                // restore leaves a reason and no contact; a later failure must not confirm.
-                let incomplete = e.kind == ErrorKind::RestorePartial
-                    || (p.restore_failed.is_some()
-                        && p.reason.is_some()
-                        && p.contacted_ms.is_none());
+                // `releases/rollback-open` is written before any live file is replaced.
+                // A later failure, including one that replaces nothing this time, must
+                // not confirm the trial. A confirmed manual rollback still has contact.
+                let incomplete = self.rollback_open()? || e.kind == ErrorKind::RestorePartial;
                 if incomplete {
-                    if p.reason.is_none() {
-                        p.reason = Some("rollback restore incomplete".into());
-                    }
                     p.restore_failed = Some(e.message.clone());
                     self.write_probation(&p)?;
                     eprintln!(
@@ -982,9 +977,9 @@ impl Store {
         {
             return Err(store_err("no failed restore for the current release"));
         }
-        // A partial restore has a reason and was never contacted. Keep the failure
-        // recorded so a retry that replaces nothing this time does not confirm.
-        let partial = p.contacted_ms.is_none() && p.reason.is_some();
+        // An open rollback marker means a live file was already replaced. Keep the
+        // failure recorded so a retry that replaces nothing this time does not confirm.
+        let partial = self.rollback_open()? || (p.contacted_ms.is_none() && p.reason.is_some());
         p.contacted_ms = None;
         p.reason = Some("retrying failed snapshot restore".into());
         if !partial {
@@ -1135,8 +1130,52 @@ impl Store {
                 );
             }
         }
+        self.clear_rollback_open()?;
         p.rolled_back_ms = Some(now_ms());
         self.write_probation(p)
+    }
+
+    /// Durable mark that this rollback has begun replacing live data. Cleared only
+    /// when the rollback finishes. The caller holds the store lock.
+    pub fn mark_rollback_open(&self) -> Result<()> {
+        let path = self.dir.join("rollback-open");
+        match fs::symlink_metadata(&path) {
+            Ok(_) => return Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(Error::io(format!("inspecting {}", path.display()), e));
+            }
+        }
+        let tmp = self.dir.join(unique("rollback-open"));
+        write_synced(&tmp, b"open\n")?;
+        if let Err(e) = fs::rename(&tmp, &path) {
+            let _ = fs::remove_file(&tmp);
+            return Err(Error::io(
+                format!("renaming {} to {}", tmp.display(), path.display()),
+                e,
+            ));
+        }
+        sync_dir(&self.dir)
+    }
+
+    pub fn rollback_open(&self) -> Result<bool> {
+        match fs::symlink_metadata(self.dir.join("rollback-open")) {
+            Ok(_) => Ok(true),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(Error::io(
+                format!("inspecting {}", self.dir.join("rollback-open").display()),
+                e,
+            )),
+        }
+    }
+
+    fn clear_rollback_open(&self) -> Result<()> {
+        let path = self.dir.join("rollback-open");
+        match fs::remove_file(&path) {
+            Ok(()) => sync_dir(&self.dir),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(Error::io(format!("removing {}", path.display()), e)),
+        }
     }
 }
 

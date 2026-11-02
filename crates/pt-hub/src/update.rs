@@ -1171,6 +1171,24 @@ pub fn restore_snapshots(home: &Path, store: &Store, p: &Probation) -> Result<()
         None => None,
     };
 
+    // Synced before scope stop, quarantine, the headscale replace, or the journal
+    // swap. A later failure while it exists stays partial, including one that
+    // replaces nothing on a later prestart.
+    let replacing = staged_journal.is_some() || headscale.is_some();
+    if replacing && let Err(e) = store.mark_rollback_open() {
+        if let Some(staged) = &staged_journal {
+            discard_dir(staged);
+        }
+        if let Some((dest, false)) = &headscale {
+            let _ = fs::remove_file(dest.join(".restore-db.sqlite"));
+        }
+        return Err(RestoreError::failed(e.to_string()));
+    }
+    let opened = |e: RestoreError| match e {
+        RestoreError::Failed(message) => RestoreError::Partial(message),
+        other => other,
+    };
+
     let mut committed = headscale.as_ref().is_some_and(|(_, done)| *done);
     if let (Some(next), Some(_)) = (p.next_sleeve, staged_journal.as_ref()) {
         match quarantine_sleeves(home, next) {
@@ -1189,11 +1207,7 @@ pub fn restore_snapshots(home: &Path, store: &Store, p: &Probation) -> Result<()
                 if let Some((dest, false)) = &headscale {
                     let _ = fs::remove_file(dest.join(".restore-db.sqlite"));
                 }
-                return Err(if committed && matches!(e, RestoreError::Failed(_)) {
-                    RestoreError::partial(e.message().to_string())
-                } else {
-                    e
-                });
+                return Err(opened(e));
             }
         }
     }
@@ -1202,17 +1216,12 @@ pub fn restore_snapshots(home: &Path, store: &Store, p: &Probation) -> Result<()
             if !committed && let Some(staged) = &staged_journal {
                 discard_dir(staged);
             }
-            return Err(if committed && matches!(e, RestoreError::Failed(_)) {
-                RestoreError::partial(e.message().to_string())
-            } else {
-                e
-            });
+            return Err(opened(e));
         }
         eprintln!(
             "update: restored headscale database from {}; nodes enrolled after this snapshot are lost",
             p.headscale_snapshot.as_deref().unwrap_or_default()
         );
-        committed = true;
     }
     if let Some(staged) = staged_journal {
         let snapshot = journal_snapshot.unwrap_or_default();
@@ -1226,11 +1235,7 @@ pub fn restore_snapshots(home: &Path, store: &Store, p: &Probation) -> Result<()
                 );
             }
             Err(e) => {
-                return Err(if committed && matches!(e, RestoreError::Failed(_)) {
-                    RestoreError::partial(e.message().to_string())
-                } else {
-                    e
-                });
+                return Err(opened(e));
             }
         }
     } else if p.journal_snapshot.is_some() {

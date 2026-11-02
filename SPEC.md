@@ -389,7 +389,10 @@ straight from GitHub releases, on the stable or dev channel, as today.
     shows the error on `hub info` and raises an alarm. Repair the snapshot, stop the hub, and
     retry with `hub probation --retry-rollback`. That retry keeps a manual rollback request.
     A restore that fails after a live file was replaced does not keep the trial: prestart exits
-    and the next prestart continues the restore. Prestart takes the journal lock before
+    and the next prestart continues the restore. Prestart writes `releases/rollback-open`,
+    synced, before that first change and removes it only when the rollback finishes. A later
+    failure while that file remains continues the restore, including a manual rollback of a
+    release that was already confirmed. Prestart takes the journal lock before
     restoring, and `--retry-rollback` also refuses while headscale still has the database or its
     socket open. If the trial binary itself cannot start, service needs the repair: neither an
     unreadable journal nor a failed binary can serve.
