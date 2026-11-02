@@ -1375,9 +1375,9 @@ impl Core<'_> {
         self.sl(sid).messages.insert(
             key.clone(),
             Message {
-                // Party is owner, envoy, agent or sleeve. Envoy is that sleeve, not the hub, and a
-                // new party would change the codec. A rejected continuation also warns the owner.
-                from: Party::Owner,
+                // Envoy, so a rejection or a "may have applied" notice is not reported as a
+                // message the owner sent. A rejected continuation still warns the owner.
+                from: Party::Envoy,
                 text: text.to_string(),
                 mode: SendMode::Queue,
                 state: MsgState::Queued,

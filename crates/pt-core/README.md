@@ -33,7 +33,8 @@ reads no clock, so `replay(journal) == live state`. The hub's core thread is its
 - `Continue { sleeve, text }` is not a command and has no reply. The hub journals it when the
   core asks for one continuation prompt after a native resume of a headless turn a crash ended.
   At most one per owner turn, across generations, and not after an interrupt or for a turn that
-  prompt started. The prompt effect is allocated only while applying this event.
+  prompt started. The prompt is sent as Envoy, so a rejection is not reported as a message the
+  owner sent. The prompt effect is allocated only while applying this event.
 - `Tick`, `HubRecovered`.
 
 ## Approvals
