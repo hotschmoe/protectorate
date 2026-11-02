@@ -148,10 +148,12 @@ pub enum EventKind {
     Start {
         sleeve: SleeveId,
         target: Option<Target>,
+        effort: Option<String>,
     },
     Resleeve {
         sleeve: SleeveId,
         target: Option<Target>,
+        effort: Option<String>,
     },
     Abandon {
         effect: EffectId,

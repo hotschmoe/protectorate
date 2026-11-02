@@ -573,15 +573,29 @@ impl Wire for EventKind {
                 w.push(6);
                 sleeve.put(w);
             }
-            E::Start { sleeve, target } => {
-                w.push(7);
+            E::Start {
+                sleeve,
+                target,
+                effort,
+            } => {
+                w.push(if effort.is_some() { 33 } else { 7 });
                 sleeve.put(w);
                 target.put(w);
+                if let Some(effort) = effort {
+                    effort.put(w);
+                }
             }
-            E::Resleeve { sleeve, target } => {
-                w.push(8);
+            E::Resleeve {
+                sleeve,
+                target,
+                effort,
+            } => {
+                w.push(if effort.is_some() { 34 } else { 8 });
                 sleeve.put(w);
                 target.put(w);
+                if let Some(effort) = effort {
+                    effort.put(w);
+                }
             }
             E::Abandon { effect } => {
                 w.push(9);
@@ -736,7 +750,7 @@ impl Wire for EventKind {
 
     fn get(r: &mut Reader) -> Result<Self, DecodeError> {
         use EventKind as E;
-        Ok(match r.tag("event", 32)? {
+        Ok(match r.tag("event", 34)? {
             0 => E::Spawn(Wire::get(r)?),
             1 => E::Send {
                 to: Wire::get(r)?,
@@ -766,10 +780,12 @@ impl Wire for EventKind {
             7 => E::Start {
                 sleeve: Wire::get(r)?,
                 target: Wire::get(r)?,
+                effort: None,
             },
             8 => E::Resleeve {
                 sleeve: Wire::get(r)?,
                 target: Wire::get(r)?,
+                effort: None,
             },
             9 => E::Abandon {
                 effect: Wire::get(r)?,
@@ -861,11 +877,21 @@ impl Wire for EventKind {
                 job: Wire::get(r)?,
                 node: Wire::get(r)?,
             },
-            _ => {
+            32 => {
                 let mut spec: SpawnSpec = Wire::get(r)?;
                 spec.effort = Some(Wire::get(r)?);
                 E::Spawn(spec)
             }
+            33 => E::Start {
+                sleeve: Wire::get(r)?,
+                target: Wire::get(r)?,
+                effort: Some(Wire::get(r)?),
+            },
+            _ => E::Resleeve {
+                sleeve: Wire::get(r)?,
+                target: Wire::get(r)?,
+                effort: Some(Wire::get(r)?),
+            },
         })
     }
 }

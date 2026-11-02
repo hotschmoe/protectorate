@@ -400,6 +400,7 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 target: a.flag("--harness").map(harness).transpose()?,
                 model: a.flag("--model").map(str::to_string),
                 provider: a.flag("--provider").map(str::to_string),
+                effort: a.flag("--effort").map(str::to_string),
             };
             let v = c.call::<m::StartSleeve>(&req)?;
             o.show(&v, |v| accepted(v, "starting"));
@@ -413,6 +414,7 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 )?,
                 model: a.flag("--model").map(str::to_string),
                 provider: a.flag("--provider").map(str::to_string),
+                effort: a.flag("--effort").map(str::to_string),
             };
             let v = c.call::<m::Resleeve>(&req)?;
             o.show(&v, |v| accepted(v, "resleeving"));

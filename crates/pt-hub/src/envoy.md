@@ -15,13 +15,13 @@ capability). `--json` prints the API's answer; `protectorate --help` lists every
 | Command | What it does |
 |---|---|
 | `sleeve list` / `sleeve show <s>` | sleeves: id, name, lifecycle, activity, harness, directory |
-| `sleeve spawn <name> --path <dir> --harness H [--model M] [--message TEXT]` | a root sleeve on a directory (one root per directory) |
+| `sleeve spawn <name> --path <dir> --harness H [--model M] [--effort E] [--message TEXT]` | a root sleeve on a directory (one root per directory) |
 | `sleeve spawn <name> --parent <root> --harness H [--readonly]` | a child on its own worktree and branch `pt/<name>` (or a read-only view) |
 | `sleeve send <s> <text>` | queue a message (its next prompt); `--steer` adds it to a running Codex or Pi turn. Claude and Grok cannot steer: queue instead |
 | `sleeve wait <s> --until idle --timeout <secs>` | block until it settles (`done`, `blocked`, `parked`, `ended` too) |
 | `sleeve transcript <s> [--from SEQ]` | its chat: prompts, replies, tool calls |
 | `sleeve interrupt|stop|rm <s>` | end the turn; stop it and its children; remove it |
-| `sleeve start <s>` / `sleeve resleeve <s> --harness H` | start a stopped or parked sleeve; move a settled one |
+| `sleeve start <s> [--effort E]` / `sleeve resleeve <s> --harness H [--model M] [--effort E]` | start a stopped or parked sleeve; move a settled one |
 | `node list` / `node show <n>` | fleet machines: online, presence (jobs wait while someone is at one), load, inventory |
 | `job run --node N\|--arch A [--wait] [--cwd DIR] [--artifact PATH]... -- <argv>` | a command on a node (queued until an AWAY node is free); `--wait` prints its log and returns its exit code; `--even-if-present` only when it must |
 | `job list`, `job show <j>`, `job log <j> [--offset N]`, `job cancel <j>` | its state and exit, its output, cancel it |
@@ -31,6 +31,8 @@ capability). `--json` prints the API's answer; `protectorate --help` lists every
 | `history read --doc N` / `history read <session> --from T --to T` | a hit's whole text, or a session's turns |
 
 Harnesses: `claude`, `codex`, `grok`, `pi_vendor`, `pi_local` (the free local model).
+`--effort` sets the harness's reasoning effort (for example `low`, `medium`, or `high`);
+available levels depend on the harness and model. Omit it for the harness default.
 
 ## How to work
 

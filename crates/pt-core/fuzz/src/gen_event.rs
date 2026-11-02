@@ -144,10 +144,12 @@ pub fn event(b: &mut Bytes) -> Event {
         7 => E::Start {
             sleeve: s(b),
             target: opt(b, target),
+            effort: opt(b, |b| b.string()),
         },
         8 => E::Resleeve {
             sleeve: s(b),
             target: opt(b, target),
+            effort: opt(b, |b| b.string()),
         },
         9 => E::Abandon { effect: e(b) },
         10 => E::Viewed { sleeve: s(b) },

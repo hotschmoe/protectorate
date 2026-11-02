@@ -928,9 +928,10 @@ Each entry: where, what was done, what right looks like.
   API-key login per harness in `<home>/logins/` if API billing is wanted for a sleeve.
 - **Effort is checked by a fixed list for Claude, Grok and Pi** (`pt-drivers` `vet_effort`): each
   CLI's documented levels are compiled in; a model that accepts fewer is the CLI's to refuse.
-  Codex is checked against its `model/list` catalog after the handshake. A resleeve to another
-  harness starts on that harness's default effort without a notice of its own (the view shows
-  `effort`). Right: read each CLI's model catalog if a model-specific refusal costs a sleeve.
+  Codex is checked against its `model/list` catalog after the handshake. An automatic resleeve
+  to another harness starts on that harness's default effort without a notice of its own (the
+  view shows `effort`); a manual start or resleeve may set it. Right: read each CLI's model
+  catalog if a model-specific refusal costs a sleeve.
 - **Rate limits are a failed turn, not a guardrail** (`pt-hub` `exec.rs`): a 429 or "overloaded"
   that survives the harness's own retries ends the turn as an error, the sleeve stays and idles,
   and the error entry is in the transcript; only quota (G1) and auth (G2) resleeve. The reset

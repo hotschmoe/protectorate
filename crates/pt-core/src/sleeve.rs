@@ -32,6 +32,7 @@ impl Guard {
             cause: None,
             forced: false,
             chosen: None,
+            chosen_effort: None,
             since_gen: Gen(0),
         }
     }
@@ -228,6 +229,9 @@ impl Core<'_> {
         s.g = g;
         if s.target.harness != target.harness {
             s.effort = None;
+        }
+        if let Some(effort) = s.guard.chosen_effort.take() {
+            s.effort = Some(effort);
         }
         s.target = target.clone();
         s.receipt = None;
@@ -581,7 +585,12 @@ impl Core<'_> {
         }
     }
 
-    pub(crate) fn start_cmd(&mut self, sid: SleeveId, target: Option<&Target>) {
+    pub(crate) fn start_cmd(
+        &mut self,
+        sid: SleeveId,
+        target: Option<&Target>,
+        effort: Option<&str>,
+    ) {
         if !self.existing(sid) {
             return;
         }
@@ -617,6 +626,7 @@ impl Core<'_> {
         g.state = GuardState::Armed;
         g.tried.clear();
         g.chosen = None;
+        g.chosen_effort = effort.map(str::to_owned);
         g.cause = None;
         self.start_incarnation(sid, target, true);
         self.reply(Reply::Accepted);

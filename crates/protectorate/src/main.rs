@@ -60,11 +60,11 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
                                     the sleeves' shared login, on this terminal, without the API
   sleeve list | sleeve show <sleeve>
   sleeve spawn <name> (--path DIR | --parent SLEEVE [--readonly]) [--harness H]
-        [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
+        [--provider P] [--model M] [--effort E] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
   sleeve send <sleeve> <text...> [--steer]
   sleeve interrupt|stop|rm|takeover <sleeve>
-  sleeve start <sleeve> [--harness H] [--provider P] [--model M]
-  sleeve resleeve <sleeve> --harness H [--provider P] [--model M]
+  sleeve start <sleeve> [--harness H] [--provider P] [--model M] [--effort E]
+  sleeve resleeve <sleeve> --harness H [--provider P] [--model M] [--effort E]
   sleeve transcript <sleeve> [--from SEQ] [--limit N]
   sleeve wait <sleeve> [--until idle|done|blocked|parked|ended] [--timeout SECS]
   approval list [--pending] | approval decide <id> allow|allow-session|deny

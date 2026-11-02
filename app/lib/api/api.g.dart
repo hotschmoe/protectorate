@@ -4206,6 +4206,7 @@ final class ResleeveRequest {
     required this.target,
     this.model,
     this.provider,
+    this.effort,
   });
 
   factory ResleeveRequest.fromJson(Object? json) {
@@ -4218,6 +4219,7 @@ final class ResleeveRequest {
         j['provider'],
         (e0) => _string(e0, 'ResleeveRequest.provider'),
       ),
+      effort: _opt(j['effort'], (e0) => _string(e0, 'ResleeveRequest.effort')),
     );
   }
 
@@ -4229,11 +4231,14 @@ final class ResleeveRequest {
 
   final String? provider;
 
+  final String? effort;
+
   Map<String, Object?> toJson() => {
     'sleeve_id': sleeveId,
     'target': target.toJson(),
     if (model case final v?) 'model': v,
     if (provider case final v?) 'provider': v,
+    if (effort case final v?) 'effort': v,
   };
 }
 
@@ -4764,6 +4769,7 @@ final class StartSleeveRequest {
     this.target,
     this.model,
     this.provider,
+    this.effort,
   });
 
   factory StartSleeveRequest.fromJson(Object? json) {
@@ -4776,6 +4782,10 @@ final class StartSleeveRequest {
         j['provider'],
         (e0) => _string(e0, 'StartSleeveRequest.provider'),
       ),
+      effort: _opt(
+        j['effort'],
+        (e0) => _string(e0, 'StartSleeveRequest.effort'),
+      ),
     );
   }
 
@@ -4787,11 +4797,14 @@ final class StartSleeveRequest {
 
   final String? provider;
 
+  final String? effort;
+
   Map<String, Object?> toJson() => {
     'sleeve_id': sleeveId,
     if (target case final v?) 'target': v.toJson(),
     if (model case final v?) 'model': v,
     if (provider case final v?) 'provider': v,
+    if (effort case final v?) 'effort': v,
   };
 }
 

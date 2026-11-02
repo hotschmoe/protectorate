@@ -581,16 +581,42 @@ fn optional_target(
 }
 
 fn start(c: &Ctx<'_>, r: api::StartSleeveRequest) -> Result<api::Accepted> {
-    let id = target_sleeve(c, &c.hub.view(), &r.sleeve_id)?;
-    let target = optional_target(c.hub, r.target, r.provider, r.model);
-    command(c.hub, EventKind::Start { sleeve: id, target })?;
+    let view = c.hub.view();
+    let id = target_sleeve(c, &view, &r.sleeve_id)?;
+    let target = if r.target.is_none() && (r.provider.is_some() || r.model.is_some()) {
+        let mut target = view.state.sleeves[&id].target.clone();
+        if let Some(provider) = r.provider {
+            target.provider = provider;
+        }
+        if let Some(model) = r.model {
+            target.model = model;
+        }
+        Some(target)
+    } else {
+        optional_target(c.hub, r.target, r.provider, r.model)
+    };
+    command(
+        c.hub,
+        EventKind::Start {
+            sleeve: id,
+            target,
+            effort: r.effort.filter(|e| !e.is_empty()),
+        },
+    )?;
     Ok(api::Accepted { approval_id: None })
 }
 
 fn resleeve(c: &Ctx<'_>, r: api::ResleeveRequest) -> Result<api::Accepted> {
     let id = target_sleeve(c, &c.hub.view(), &r.sleeve_id)?;
     let target = optional_target(c.hub, Some(r.target), r.provider, r.model);
-    command(c.hub, EventKind::Resleeve { sleeve: id, target })?;
+    command(
+        c.hub,
+        EventKind::Resleeve {
+            sleeve: id,
+            target,
+            effort: r.effort.filter(|e| !e.is_empty()),
+        },
+    )?;
     Ok(api::Accepted { approval_id: None })
 }
 

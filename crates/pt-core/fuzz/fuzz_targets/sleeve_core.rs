@@ -107,10 +107,12 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
         9 => E::Start {
             sleeve: s,
             target: b.bool().then(|| target(b)),
+            effort: None,
         },
         10 => E::Resleeve {
             sleeve: s,
             target: b.bool().then(|| target(b)),
+            effort: None,
         },
         11 => E::Abandon {
             effect: EffectId(b.below(sim.st.next_effect + 1)),

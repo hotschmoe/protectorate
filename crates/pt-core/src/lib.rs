@@ -80,8 +80,16 @@ impl Core<'_> {
             } => self.request_action(*sleeve, ask, *timeout),
             E::Stop { sleeve } => self.stop_cmd(*sleeve, false),
             E::Remove { sleeve } => self.stop_cmd(*sleeve, true),
-            E::Start { sleeve, target } => self.start_cmd(*sleeve, target.as_ref()),
-            E::Resleeve { sleeve, target } => self.resleeve_cmd(*sleeve, target.as_ref()),
+            E::Start {
+                sleeve,
+                target,
+                effort,
+            } => self.start_cmd(*sleeve, target.as_ref(), effort.as_deref()),
+            E::Resleeve {
+                sleeve,
+                target,
+                effort,
+            } => self.resleeve_cmd(*sleeve, target.as_ref(), effort.as_deref()),
             E::Abandon { effect } => self.abandon_cmd(*effect),
             E::Viewed { sleeve } => self.viewed_cmd(*sleeve),
             E::CreateJob { request_id, spec } => self.create_job(request_id, spec),

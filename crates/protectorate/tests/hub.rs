@@ -61,6 +61,33 @@ fn sleeve_lifecycle() {
     hub.cli(&["sleeve", "stop", "one"]).ok();
     hub.wait("one", "ended", 60);
     assert!(scope_pids(&scope).is_empty(), "{scope} is gone after stop");
+    hub.cli(&["sleeve", "start", "one", "--effort", "low"]).ok();
+    hub.wait("one", "idle", 120);
+    assert_eq!(
+        hub.sleeve("one")["incarnation"]["effort"].as_str(),
+        Some("low")
+    );
+    hub.cli(&[
+        "sleeve",
+        "resleeve",
+        "one",
+        "--harness",
+        "pi_local",
+        "--effort",
+        "high",
+    ])
+    .ok();
+    eventually(
+        "manual resleeve with effort",
+        Duration::from_secs(240),
+        || {
+            let s = hub.sleeve("one");
+            (s["lifecycle"].as_str() == Some("running")
+                && s["incarnation"]["g"].as_u64().is_some_and(|g| g >= 3)
+                && s["incarnation"]["effort"].as_str() == Some("high"))
+            .then_some(())
+        },
+    );
     // Removed, the sleeve keeps nothing open in the hub: its executor ends, its transcript
     // closes.
     hub.cli(&["sleeve", "rm", "one"]).ok();

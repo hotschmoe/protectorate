@@ -224,6 +224,7 @@ impl Core<'_> {
         let now = self.now;
         let s = self.sl(sid);
         if cause != Cause::Manual {
+            s.guard.chosen_effort = None;
             if recent(&mut s.guard.resleeves, now, RESLEEVE_WINDOW) >= RESLEEVE_LIMIT {
                 return self.park(sid, ParkReason::Flapping);
             }
@@ -364,7 +365,12 @@ impl Core<'_> {
         }
     }
 
-    pub(crate) fn resleeve_cmd(&mut self, sid: SleeveId, target: Option<&Target>) {
+    pub(crate) fn resleeve_cmd(
+        &mut self,
+        sid: SleeveId,
+        target: Option<&Target>,
+        effort: Option<&str>,
+    ) {
         let Some(s) = self.st.sleeve(sid).filter(|s| s.life != Life::Removed) else {
             return self.refuse(Code::NotFound, "no such sleeve");
         };
@@ -381,6 +387,7 @@ impl Core<'_> {
                 "only a running, settled sleeve resleeves",
             );
         }
+        self.sl(sid).guard.chosen_effort = effort.map(str::to_owned);
         self.begin_resleeve(sid, Cause::Manual, target.cloned());
         self.reply(Reply::Accepted);
     }

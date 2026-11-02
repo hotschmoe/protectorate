@@ -182,6 +182,7 @@ pub struct Guard {
     pub forced: bool,
     /// A target named by a manual resleeve, used instead of `select_target`.
     pub chosen: Option<Target>,
+    pub chosen_effort: Option<String>,
     /// The generation the last resleeve landed on; the brief lists Fenced records from here on.
     pub since_gen: Gen,
 }
