@@ -899,6 +899,133 @@ fn partial_automatic_rollback_does_not_keep_the_trial() {
     assert!(home.join("sleeves/6/transcript.jsonl").is_file());
 }
 
+/// A manual rollback of a confirmed trial quarantines, then the journal swap fails.
+/// The next prestart fails with nothing new to move and must still refuse to keep
+/// the trial. Contact was recorded when the trial was confirmed, so that field
+/// cannot be what decides.
+#[test]
+fn partial_manual_rollback_does_not_keep_the_trial() {
+    let root = dir("partial-manual");
+    let home = root.join("h");
+    fs::create_dir_all(&home).unwrap();
+    let real = PathBuf::from(bin());
+    install(
+        &home,
+        "v0.0.2",
+        "protectorate",
+        &wrapper("protectorate", "version", "v0.0.2", &real, "", false),
+    );
+    fs::create_dir_all(home.join("releases/v0.0.1")).unwrap();
+    write_exec(
+        &home.join("releases/v0.0.1/protectorate"),
+        std::str::from_utf8(&wrapper(
+            "protectorate",
+            "version",
+            "v0.0.1",
+            &real,
+            "",
+            false,
+        ))
+        .unwrap(),
+    );
+    std::os::unix::fs::symlink("v0.0.1", home.join("releases/previous")).unwrap();
+    let (mut journal, _) = pt_journal::Journal::open(home.join("journal").as_path()).unwrap();
+    let event = pt_core::codec::encode(&pt_core::Event {
+        at: 1,
+        kind: pt_core::EventKind::Tick,
+    });
+    journal.append(&event).unwrap();
+    drop(journal);
+    let segment = home.join("journal/segment-00000000000000000000");
+    let snapshot = home.join("snapshots/journal");
+    fs::create_dir_all(&snapshot).unwrap();
+    fs::copy(&segment, snapshot.join("segment-00000000000000000000")).unwrap();
+    fs::write(home.join("journal/TRIAL"), b"trial journal\n").unwrap();
+    let (mut journal, _) = pt_journal::Journal::open(home.join("journal").as_path()).unwrap();
+    let mut bad = pt_core::codec::encode(&pt_core::Event {
+        at: 2,
+        kind: pt_core::EventKind::Tick,
+    });
+    bad[9] = 33;
+    journal.append(&bad).unwrap();
+    drop(journal);
+    plant_sleeve(&home, 6, false);
+    plant_sleeve(&home, 7, false);
+    let record = obj! {
+        "version" => "v0.0.2",
+        "previous" => "v0.0.1",
+        "switched_ms" => 0u64,
+        "deadline_ms" => 1_000_000_000_000u64,
+        "contacted_ms" => 5u64,
+        "manual_rollback" => true,
+        "reason" => "manual rollback requested",
+        "next_sleeve" => 7u64,
+        "journal_snapshot_ms" => 1u64,
+        "journal_snapshot" => snapshot.display().to_string()
+    };
+    fs::write(home.join("releases/probation.json"), record.to_string()).unwrap();
+    let marker = home.join("releases/rollback-open");
+
+    let first = prestart_with_journal_mounted(&home);
+    let err = String::from_utf8_lossy(&first.stderr);
+    assert!(!first.status.success(), "{first:?}");
+    assert!(err.contains("incomplete"), "{err}");
+    assert!(
+        err.contains("moved trial sleeves at or above 7 to "),
+        "{err}"
+    );
+    assert!(!err.contains("keeping the current release"), "{err}");
+    assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
+    assert!(marker.is_file(), "{first:?}");
+    let p = probation(&home);
+    assert_eq!(
+        p["reason"].as_str(),
+        Some("manual rollback requested"),
+        "{p}"
+    );
+    assert!(p["manual_rollback"].as_bool().unwrap_or(false), "{p}");
+    assert_eq!(p["contacted_ms"].as_u64(), Some(5), "{p}");
+    assert!(
+        p["restore_failed"].as_str().unwrap_or("").contains("busy"),
+        "{p}"
+    );
+    assert!(p["rolled_back_ms"].is_null(), "{p}");
+    assert!(home.join("journal/TRIAL").is_file());
+    assert!(!home.join("sleeves/7").exists());
+    assert!(home.join("sleeves/6/transcript.jsonl").is_file());
+
+    let second = prestart_with_journal_mounted(&home);
+    let err = String::from_utf8_lossy(&second.stderr);
+    assert!(!second.status.success(), "{second:?}");
+    assert!(err.contains("incomplete"), "{err}");
+    assert!(!err.contains("keeping the current release"), "{err}");
+    assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
+    assert!(marker.is_file());
+    let p = probation(&home);
+    assert_eq!(
+        p["reason"].as_str(),
+        Some("manual rollback requested"),
+        "{p}"
+    );
+    assert!(p["manual_rollback"].as_bool().unwrap_or(false), "{p}");
+    assert_eq!(p["contacted_ms"].as_u64(), Some(5), "{p}");
+    assert!(p["restore_failed"].as_str().is_some(), "{p}");
+    assert!(home.join("journal/TRIAL").is_file());
+    assert!(!home.join("sleeves/7").exists());
+
+    let done = Command::new(home.join("releases/previous/protectorate"))
+        .arg("--home")
+        .arg(&home)
+        .args(["hub", "probation"])
+        .output()
+        .unwrap();
+    assert!(done.status.success(), "{done:?}");
+    assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
+    assert!(!marker.exists(), "{done:?}");
+    assert!(!home.join("journal/TRIAL").is_file());
+    assert!(probation(&home)["rolled_back_ms"].as_u64().is_some());
+}
+
 /// A hub killed at each step of a switch on probation, or of the rollback that ends one
 /// (`PT_TEST_CRASH_AT`, the store's crash knob), comes back on a release that worked with the
 /// way back intact: never on the new release with no trial, never with `previous` lost.
