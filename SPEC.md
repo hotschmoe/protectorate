@@ -83,6 +83,7 @@ CLI on the hub machine (section 3.1).
       - D9 still applies: in a turn a vendor agent or a D9-marked sleeve started, Envoy's
         removals, mass spawns and node jobs wait for the owner. This is the one remaining approval.
         A crash keeps the spawn count; the continuation of that turn does not start it over.
+        The brief of an Envoy resleeve keeps that origin and that count.
 
 ## 3. Layers
 
@@ -124,8 +125,10 @@ CLI on the hub machine (section 3.1).
   owner. Mail from an unmarked sleeve does not. `Wait --until report` returns when the waited-on
   sleeve has mailed after the cursor, and it returns that report's seq. `--after-seq` sets the
   cursor; without it the cursor is the waiter's newest message to the sleeve, so the same report
-  releases a later wait again. A waiter who has never messaged the sleeve counts all of its past
-  upward mail. The owner's or Envoy's wait counts mail to the parent or to Envoy. A parent's wait
+  releases a later wait again. A message whose request id starts with `continue:` is not mail
+  for that cursor: it is not a report, and it does not move the cursor. A waiter who has never
+  messaged the sleeve counts all of its past upward mail. The owner's or Envoy's wait counts
+  mail to the parent or to Envoy. A parent's wait
   counts only mail to that parent. A wait on Envoy is invalid, because Envoy never sends as a
   sleeve. A newly spawned sleeve's first prompt names `$PROTECTORATE_PARENT` (when it has one),
   `$PROTECTORATE_ENVOY` and `$PROTECTORATE_MAIL`, and a resleeve repeats them in the continuation
@@ -183,9 +186,10 @@ One Linux machine, one `protectorate` process plus its headscale and member chil
 - **Mail:** delivery, re-delivery and escalation. Who may send is in section 3.1. `Wait --until
   report` returns the newest upward report's seq. `--after-seq` moves the cursor; without it the
   cursor is the waiter's newest message to the sleeve, and a waiter who never messaged it counts
-  all of its past upward mail. The owner's or Envoy's wait counts mail to the parent or to Envoy.
-  A parent's wait counts only mail to that parent. A wait on Envoy is invalid, because Envoy
-  never sends as a sleeve.
+  all of its past upward mail. A message whose request id starts with `continue:` is not mail
+  for that cursor: it is not a report, and it does not move the cursor. The owner's or Envoy's
+  wait counts mail to the parent or to Envoy. A parent's wait counts only mail to that parent.
+  A wait on Envoy is invalid, because Envoy never sends as a sleeve.
 - **Approvals:** routing and timeouts.
 - **History:** an index over native session logs (section 3.7).
 - **Snapshots and backups**, and **audit**.
@@ -427,7 +431,9 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   The prompt is sent as the party that opened that owner turn. An agent steer, or mail from a
   D9-marked sleeve, replaces that party, which keeps D9 on the continued turn and reports a
   rejection to that party. A continuation does not clear an origin the turn already has, and it
-  does not reset the spawn count. An agent continuation with no recorded name is labeled
+  does not reset the spawn count. An Envoy resleeve brief (`resleeve:`) keeps that origin and
+  that count the same way, and a turn an agent started is still labeled `agent:<name>`. An agent
+  continuation with no recorded name is labeled
   `agent:`, so D9 still applies. The owner
   still hears when the prompt cannot be sent.
   It is not sent after a planned stop, a hub restart of an idle sleeve, or a manual resleeve (the

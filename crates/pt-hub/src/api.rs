@@ -1958,12 +1958,13 @@ fn reached(state: &State, id: SleeveId, until: api::WaitUntil) -> bool {
 }
 
 /// The newest message the waiter has already sent to `waited`, if any.
+/// A `continue:` row is the same turn, not mail: it does not move the cursor.
 fn report_watermark(state: &State, waited: SleeveId, waiter: Party) -> Option<u64> {
     state.sleeve(waited).and_then(|s| {
         s.messages
-            .values()
-            .filter(|m| m.from == waiter)
-            .map(|m| m.seq)
+            .iter()
+            .filter(|(id, m)| m.from == waiter && !id.starts_with("continue:"))
+            .map(|(_, m)| m.seq)
             .max()
     })
 }
@@ -1972,6 +1973,7 @@ fn report_watermark(state: &State, waited: SleeveId, waiter: Party) -> Option<u6
 /// `after` replaces the default, which is the waiter's newest message to `waited`
 /// (or every past report when the waiter has sent none).
 /// A parent counts only mail in its own mailbox. Anyone else also counts mail to Envoy.
+/// A `continue:` row is not a report.
 fn upward_report(
     state: &State,
     waited: SleeveId,
@@ -1996,7 +1998,10 @@ fn upward_report(
         let Some(dest) = state.sleeve(d) else {
             continue;
         };
-        for m in dest.messages.values() {
+        for (id, m) in &dest.messages {
+            if id.starts_with("continue:") {
+                continue;
+            }
             if m.from == Party::Sleeve(waited) && floor.is_none_or(|w| m.seq > w) {
                 best = Some(best.map_or(m.seq, |b: u64| b.max(m.seq)));
             }

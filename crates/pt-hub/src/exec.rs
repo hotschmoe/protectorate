@@ -1143,19 +1143,27 @@ impl SleeveExec {
     /// a new turn. A steer from an agent, or from a D9-marked sleeve, taints the running one.
     /// Mail from an unmarked sleeve clears the origin. A continuation keeps the origin and the
     /// spawn count of the turn it resumes, and restores a marked-mail or agent origin after a crash.
+    /// An Envoy resleeve brief (`resleeve:`) is that same turn: it keeps both, and a brief is not
+    /// a message, so a marked-mail origin is read from who opened the turn.
     fn note_envoy_origin(&self, view: &View, request_id: &str, from: &str, steer: bool) {
-        let marked = view
-            .state
-            .sleeve(self.id)
-            .and_then(|s| s.messages.get(request_id))
-            .is_some_and(|m| match m.from {
-                Party::Sleeve(id) => view.state.sleeve(id).is_some_and(|s| s.d9),
-                _ => false,
-            });
+        let sleeve = view.state.sleeve(self.id);
+        let marked_sender = |party: Party| match party {
+            Party::Sleeve(id) => view.state.sleeve(id).is_some_and(|s| s.d9),
+            _ => false,
+        };
+        // A resleeve brief has no message row. The process exit already cleared the origin,
+        // so the turn that brief resumes is what puts a marked-mail origin back.
+        let marked = if let Some(m) = sleeve.and_then(|s| s.messages.get(request_id)) {
+            marked_sender(m.from)
+        } else {
+            request_id.starts_with("resleeve:")
+                && sleeve.is_some_and(|s| marked_sender(s.turn_from))
+        };
         let origin = (from.starts_with("agent:") || marked).then(|| from.to_string());
         let mut t = crate::transcript::lock(&self.hub.envoy_turn);
+        let resumed = request_id.starts_with("continue:") || request_id.starts_with("resleeve:");
         if !steer {
-            if request_id.starts_with("continue:") {
+            if resumed {
                 if origin.is_some() {
                     t.origin = origin;
                 }

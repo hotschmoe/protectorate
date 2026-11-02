@@ -100,7 +100,9 @@ A sleeve is named by its id or its name.
   it does not. `--until report` returns when that sleeve has mailed since the cursor, and prints
   that report's seq. `--after-seq N` counts only mail with a seq above N. Without it the cursor
   is the waiter's newest message to the sleeve, so the same report releases a later wait again.
-  A waiter who has never messaged the sleeve counts all of its past upward mail. The owner's wait
+  A message whose request id starts with `continue:` is not mail for that cursor: it is not a
+  report, and it does not move the cursor. A waiter who has never messaged the sleeve counts
+  all of its past upward mail. The owner's wait
   counts mail to the parent or to Envoy. A parent's wait counts only mail to that parent. A wait
   on Envoy is invalid, because Envoy never sends as a sleeve.
 - **takeover** (the terminal view) is not built; it answers `unavailable`.
@@ -115,8 +117,10 @@ sends it. A fresh session does not get that prompt: if the dead incarnation neve
 the owner is warned instead. The prompt is sent as the party that opened that owner turn.
 An agent steer, or mail from a marked sleeve, replaces that party, which keeps D9 on the
 continued turn and reports a rejection to that party. A continuation does not reset the spawn
-count. A second crash of the same turn does not send another, even after the ten-minute
-resume window, and a later owner message is a new turn with its own prompt. An owner
+count. An Envoy resleeve brief keeps the origin and the count, and a turn an agent started
+stays labeled `agent:<name>`. A second crash of the same turn does not send another, even
+after the ten-minute resume window, and a later owner message is a new turn with its own
+prompt. An owner
 interrupt, a guardrail interrupt, a desync during either of those, a planned stop, a restart
 of an idle sleeve, and a manual resleeve do not. A stop, park, or resleeve also drops a
 continuation that is still queued, including one that never left the hub, and warns once.
@@ -151,7 +155,8 @@ mail can start a turn is the 8-per-10-minutes limit above:
 - `sleeve rm`;
 - `job run`;
 - `sleeve spawn` past `d9_spawn_limit` spawns in that turn (default 3). A crash keeps
-  that count: the continuation is the same turn.
+  that count: the continuation is the same turn. An Envoy resleeve brief is that same turn:
+  it keeps the origin and does not start the count over.
 
 A node job with `--maintenance` from any sleeve, Envoy included, always waits for the owner. The
 waiting call fails after `d9_approval_timeout_secs` (default 900). Pending approvals live in
