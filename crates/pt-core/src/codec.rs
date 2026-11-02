@@ -4,9 +4,11 @@
 //!
 //! Journals are never rewritten, so a tag keeps its layout forever: new variants and fields get
 //! new tags. `Obs::ApprovalRequested` is tag 2 without an ask and tag 11 with one.
-//! `EventKind::Spawn` is tag 0, tag 32 with an effort, tag 33 when it marks D9, and tag 34
-//! with both. `EventKind::Send` is tag 1, or tag 35 when it marks D9. Older tags leave the
-//! mark unset.
+//! `EventKind::Spawn` is tag 0, tag 32 with an effort, and tag 38 when it marks D9. Tag 38 is
+//! the tag 0 body plus a flags byte: bit 0 then an effort string, bit 1 the mark. A later
+//! spawn field is another bit, not another tag. `EventKind::Send` is tag 1, or tag 39 when it
+//! marks D9. Tags 0, 1 and 32 decode and re-encode to the same bytes. Tags 33 to 37 are
+//! reserved. Older tags leave the mark unset.
 
 use crate::event::*;
 use crate::model::*;
@@ -545,16 +547,26 @@ impl Wire for EventKind {
         use EventKind as E;
         match self {
             E::Spawn(spec) => {
-                let tag = match (spec.d9, spec.effort.is_some()) {
-                    (false, false) => 0,
-                    (false, true) => 32,
-                    (true, false) => 33,
-                    (true, true) => 34,
-                };
-                w.push(tag);
-                spec.put(w);
-                if let Some(effort) = &spec.effort {
+                // Bit 0: an effort string follows. Bit 1: this spawn marks D9. Tag 38 exists
+                // only with the mark set, so a tag 0 or 32 event re-encodes to itself.
+                if spec.d9 {
+                    w.push(38);
+                    spec.put(w);
+                    let mut flags = 0x02;
+                    if spec.effort.is_some() {
+                        flags |= 0x01;
+                    }
+                    w.push(flags);
+                    if let Some(effort) = &spec.effort {
+                        effort.put(w);
+                    }
+                } else if let Some(effort) = &spec.effort {
+                    w.push(32);
+                    spec.put(w);
                     effort.put(w);
+                } else {
+                    w.push(0);
+                    spec.put(w);
                 }
             }
             E::Send {
@@ -565,7 +577,7 @@ impl Wire for EventKind {
                 mode,
                 d9,
             } => {
-                w.push(if *d9 { 35 } else { 1 });
+                w.push(if *d9 { 39 } else { 1 });
                 to.put(w);
                 request_id.put(w);
                 from.put(w);
@@ -763,16 +775,16 @@ impl Wire for EventKind {
 
     fn get(r: &mut Reader) -> Result<Self, DecodeError> {
         use EventKind as E;
-        let tag = r.tag("event", 35)?;
+        let tag = r.tag("event", 39)?;
         Ok(match tag {
             0 => E::Spawn(Wire::get(r)?),
-            1 | 35 => E::Send {
+            1 | 39 => E::Send {
                 to: Wire::get(r)?,
                 request_id: Wire::get(r)?,
                 from: Wire::get(r)?,
                 text: Wire::get(r)?,
                 mode: Wire::get(r)?,
-                d9: tag == 35,
+                d9: tag == 39,
             },
             2 => E::Interrupt {
                 sleeve: Wire::get(r)?,
@@ -895,15 +907,19 @@ impl Wire for EventKind {
                 spec.effort = Some(Wire::get(r)?);
                 E::Spawn(spec)
             }
-            33 => {
+            38 => {
                 let mut spec: SpawnSpec = Wire::get(r)?;
+                let flags = r.u8()?;
+                if (flags & !0x03) != 0 || (flags & 0x02) == 0 {
+                    return Err(DecodeError::UnknownTag {
+                        what: "spawn flag",
+                        tag: flags,
+                    });
+                }
+                if flags & 0x01 != 0 {
+                    spec.effort = Some(Wire::get(r)?);
+                }
                 spec.d9 = true;
-                E::Spawn(spec)
-            }
-            34 => {
-                let mut spec: SpawnSpec = Wire::get(r)?;
-                spec.d9 = true;
-                spec.effort = Some(Wire::get(r)?);
                 E::Spawn(spec)
             }
             _ => return Err(DecodeError::UnknownTag { what: "event", tag }),
