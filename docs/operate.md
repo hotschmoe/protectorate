@@ -179,7 +179,8 @@ job artifact <job> <path> [--out FILE]
   as an incomplete collection and fails the job through those three attempts. The job is
   abandoned 24 hours after it is first lost, including when collection keeps restarting.
 - `job run --wait` prints the log and exits with the job's code. A hub that cannot be reached is
-  retried for a few seconds; it then exits naming the job id.
+  retried for about 60 seconds, including across a restart or `hub update`; it then exits naming
+  the job id.
 - `job log` lags a running job by up to 10 s.
 
 A job result is the node's claim: `job show` says which node reported it.

@@ -823,7 +823,7 @@ fn wait_job(c: &Client, mut job: api::Job) -> Result<(), Fail> {
             }
             Err(e) => {
                 let since = unreachable.get_or_insert_with(Instant::now);
-                if since.elapsed() >= Duration::from_secs(4) {
+                if since.elapsed() >= Duration::from_secs(60) {
                     return Err(Fail::Other(format!(
                         "job {}: cannot query the hub ({e}); it may be restarting; inspect with `protectorate job show {}`",
                         id.job_id, id.job_id
