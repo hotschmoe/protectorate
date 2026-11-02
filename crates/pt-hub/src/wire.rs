@@ -227,11 +227,7 @@ pub fn workspace(s: &Sleeve) -> api::Workspace {
 }
 
 pub fn hub_info(hub: &Hub) -> api::HubInfo {
-    api::HubInfo {
-        name: "protectorate".into(),
-        version: pt_version::VERSION.into(),
-        started_at_ms: EpochMs(hub.started_ms),
-    }
+    crate::transcript::lock(&hub.info).clone()
 }
 
 /// What the poller last learned of every node; none while the fleet is off or down.

@@ -76,6 +76,7 @@ pub struct Hub {
     pub envoy_turn: Mutex<EnvoyTurn>,
     pub uid: u32,
     pub started_ms: u64,
+    pub info: Mutex<pt_api::HubInfo>,
     pub owner_home: PathBuf,
     pub fault: Option<Fault>,
     pub bus: Bus,
@@ -122,6 +123,7 @@ impl Hub {
         } else {
             PathBuf::from(&config.history_dir)
         });
+        let started_ms = now_ms();
         Hub {
             home,
             config,
@@ -129,7 +131,14 @@ impl Hub {
             devices,
             envoy_turn: Mutex::new(EnvoyTurn::default()),
             uid,
-            started_ms: now_ms(),
+            started_ms,
+            info: Mutex::new(pt_api::HubInfo {
+                name: "protectorate".into(),
+                version: pt_version::VERSION.into(),
+                started_at_ms: pt_api::EpochMs(started_ms),
+                inventory: None,
+                sample: None,
+            }),
             owner_home,
             fault: Fault::from_env(),
             bus,

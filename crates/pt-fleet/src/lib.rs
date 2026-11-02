@@ -11,7 +11,7 @@ mod enroll;
 mod headscale;
 mod member;
 mod poller;
-mod view;
+pub mod view;
 
 use std::fmt;
 use std::fs::{self, OpenOptions};

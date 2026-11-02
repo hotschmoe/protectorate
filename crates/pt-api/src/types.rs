@@ -220,6 +220,8 @@ api_records! {
         pub name: String,
         pub version: String,
         pub started_at_ms: EpochMs,
+        pub inventory: Option<Inventory>,
+        pub sample: Option<Sample>,
     }
 
     /// One full snapshot. `GET /api/events` starts with it and then streams changes.
@@ -639,6 +641,10 @@ api_unions! {
         Approval = "approval" {
             seq: u64,
             approval: Approval,
+        },
+        Hub = "hub" {
+            seq: u64,
+            hub: HubInfo,
         },
         Node = "node" {
             seq: u64,
