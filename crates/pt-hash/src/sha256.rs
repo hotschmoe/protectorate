@@ -1,4 +1,4 @@
-use crate::Blocks;
+use crate::blocks::Blocks;
 use std::fs::File;
 use std::io::{self, Read};
 use std::path::Path;

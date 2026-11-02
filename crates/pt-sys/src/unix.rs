@@ -1,4 +1,4 @@
-use crate::PeerCred;
+use crate::cred::PeerCred;
 use std::io;
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd, RawFd};
 #[cfg(target_os = "linux")]
