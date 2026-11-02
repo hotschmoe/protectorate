@@ -740,15 +740,21 @@ Each entry: where, what was done, what right looks like.
   manual check on a spare Windows box, then a Windows e2e once a Windows runner exists.
 - **The Windows service is a frozen supervisor** (`protectorate-node` supervise.rs, D11): the SCM
   runs `supervise --service` from the %ProgramFiles% copy made at install, which runs
-  `releases\previous` probation and `releases\current` serve in a kill-on-close job with silent
-  breakaway (the node's own children, including the idle probe in the console session, which may
-  not share a job with session 0, go to jobs of their own), and restarts it 1 s after exit 75 and
-  5 s after any other. Updates never replace the supervisor, so a fix to it needs a reinstall;
-  installs from v0.7.0-dev.5 and older run `serve --service` directly and must be reinstalled
-  once. Never run on a real Windows node: the loop is e2e-tested on Linux only, and the
-  breakaway, `CREATE_NO_WINDOW` children and stdio into node.log are compiled for Windows but
-  untried. Right: the manual check in docs/windows-node-update.md on a spare box; a supervisor
-  that updates itself only if a real need appears.
+  `releases\previous` probation (in a kill-on-close job, killed after 60 s; if it fails or hangs,
+  the supervisor's own probation code counts the start and `current` starts anyway) and
+  `releases\current` serve in a kill-on-close job with silent breakaway (the node's own children,
+  including the idle probe in the console session, which may not share a job with session 0, go
+  to jobs of their own), and restarts it 1 s after exit 75 and 5 s after any other. Known
+  limitation: `node update` never replaces the supervisor and there is no remote command that
+  does, so a bug in it is fixed only by a reinstall; installs from v0.7.0-dev.5 and older run
+  `serve --service` directly and must be reinstalled once. The manual way out from the hub is a
+  `--maintenance` job that reruns the installer through Task Scheduler (the job itself dies with
+  the service it uninstalls); docs/windows-node-update.md has the steps, never run. A Windows
+  node refuses an update to a binary whose `--version` lacks `supervise: 1`, so it cannot be
+  downgraded below the supervisor. Never run on a real Windows node: the loop is e2e-tested on
+  Linux only, and the breakaway, `CREATE_NO_WINDOW` children and stdio into node.log are
+  compiled for Windows but untried. Right: the manual check in docs/windows-node-update.md on a
+  spare box; a supervisor that updates itself only if a real need appears.
 - **Node releases are state** (`protectorate-node install-service`): the unit runs
   `<state>/releases/current/protectorate-node`; install-service copies a binary that does not
   already run from there into `releases/<its version>/`. The manifest lists only the unit, so

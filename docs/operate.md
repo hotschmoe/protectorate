@@ -267,11 +267,13 @@ release that keeps failing to start is switched back after three starts, as on L
 `.exe` is never overwritten: each release has its own directory. A rename cannot replace a directory
 link on Windows, so `current` and `previous` change by renaming the old link aside and the new one
 into place. A crash between the two leaves no `current`; the supervisor finishes the switch before
-its next start. The supervisor itself is the release that was installed and changes only with a
-reinstall. A Windows node installed by v0.7.0-dev.5 or older (`sc.exe qc protectorate-node` shows
-`serve --service`) runs `serve` straight from `%ProgramFiles%`, answers `unsupported` and must be
-reinstalled once; see [Windows node updates](windows-node-update.md), which also has the manual
-check for a real Windows machine.
+its next start. A failed or hung probation (killed after 60 s) does not keep the node down: the
+supervisor counts the start itself and starts `current`. A Windows node refuses an update to a
+release older than the supervisor (its `--version` lacks `supervise: 1`). The supervisor itself is
+the release that was installed and changes only with a reinstall. A Windows node installed by
+v0.7.0-dev.5 or older (`sc.exe qc protectorate-node` shows `serve --service`) runs `serve` straight
+from `%ProgramFiles%`, answers `unsupported` and must be reinstalled once; see [Windows node
+updates](windows-node-update.md), which also has the manual check for a real Windows machine.
 
 Neither hub nor node switches releases while a release is on trial; wait for confirmation or
 automatic rollback. Without `--version`, an update is available only when the newest release on
