@@ -118,6 +118,7 @@ pub fn event(b: &mut Bytes) -> Event {
             resleeve_to: (0..b.below(3)).map(|_| target(b)).collect(),
             budget: opt(b, |b| b.u64()),
             disk_limit: opt(b, |b| b.u64()),
+            effort: opt(b, |b| b.string()),
         }),
         1 => E::Send {
             to: s(b),

@@ -168,7 +168,7 @@ pub fn sleeve(hub: &Hub, view: &View, s: &Sleeve) -> api::Sleeve {
         subscription: subscription(&s.target),
         provider: s.target.provider.clone(),
         model: s.target.model.clone(),
-        effort: None,
+        effort: (stats.g == s.g.0).then(|| stats.effort.clone()).flatten(),
         native_id: s.session.clone(),
         activity: api::Activity {
             state: activity(&s.activity),

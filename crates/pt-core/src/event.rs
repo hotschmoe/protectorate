@@ -18,6 +18,8 @@ pub struct SpawnSpec {
     pub layout: Layout,
     pub claim: Claim,
     pub target: Target,
+    /// Reasoning effort asked of the harness; it lasts until a resleeve changes the harness.
+    pub effort: Option<String>,
     /// Ordered resleeve targets handed to `select_target` (default `[pi_local]`, chosen by the hub).
     pub resleeve_to: Vec<Target>,
     pub budget: Option<u64>,
@@ -88,7 +90,8 @@ pub enum Obs {
         end: TurnEnd,
     },
     CompactDone,
-    /// Oversize or unparseable frame, or session id mismatch (G14).
+    /// An oversize frame, or valid JSON that contradicts the protocol state: a session id
+    /// mismatch, a reply nobody asked for (G14).
     Desync {
         detail: String,
     },

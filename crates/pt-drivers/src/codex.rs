@@ -19,6 +19,8 @@ pub(crate) struct Codex {
     cwd: String,
     model: Option<String>,
     effort: Option<String>,
+    /// Catalog pages read while checking `effort`.
+    model_pages: u8,
     resume: Option<String>,
     supervised: bool,
     next_id: u64,
@@ -35,8 +37,12 @@ pub(crate) struct Codex {
     context_window: Option<u64>,
 }
 
+/// Pages of Codex's model catalog read before giving up on finding the model.
+const MODEL_PAGES: u8 = 20;
+
 enum Rpc {
     Initialize,
+    Models,
     Open(&'static str),
     TurnStart(String),
     Steer(String),
@@ -71,6 +77,7 @@ impl Codex {
             cwd,
             model: spec.model.clone(),
             effort: spec.effort.clone(),
+            model_pages: 0,
             resume: spec.resume.clone(),
             supervised: spec.permission == Permission::Supervised,
             next_id: 0,
@@ -97,6 +104,60 @@ impl Codex {
         self.next_id += 1;
         self.pending.insert(self.next_id, rpc);
         out.write(obj! { "id" => self.next_id, "method" => method, "params" => params });
+    }
+
+    /// Asks for a page of the model catalog, to check the requested effort against it.
+    fn list_models(&mut self, cursor: Option<String>, out: &mut Out) {
+        self.model_pages += 1;
+        let mut params = obj! { "limit" => 100 };
+        if let Some(cursor) = cursor {
+            params
+                .as_object_mut()
+                .expect("obj! builds an object")
+                .insert("cursor", cursor);
+        }
+        self.call("model/list", params, Rpc::Models, out);
+    }
+
+    fn drop_effort(&mut self, why: String, out: &mut Out) {
+        if let Some(effort) = self.effort.take() {
+            out.notice(
+                "effort",
+                format!("codex: effort {effort:?} {why}; using the default"),
+            );
+        }
+    }
+
+    /// Reads one catalog page: the requested effort stays only if the model advertises it.
+    fn check_effort(&mut self, result: &Value, out: &mut Out) {
+        let Some(effort) = self.effort.clone() else {
+            return;
+        };
+        let models = result["data"].as_array().unwrap_or_default();
+        let entry = models.iter().find(|m| match &self.model {
+            Some(want) => m["model"].as_str() == Some(want.as_str()),
+            None => m["isDefault"].as_bool() == Some(true),
+        });
+        match entry {
+            Some(m) => {
+                let advertised = m["supportedReasoningEfforts"]
+                    .as_array()
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|e| e["reasoningEffort"].as_str() == Some(effort.as_str()));
+                if !advertised {
+                    self.drop_effort("is not advertised by its model".into(), out);
+                }
+            }
+            None => match opt_str(&result["nextCursor"]) {
+                Some(cursor) if self.model_pages < MODEL_PAGES => {
+                    return self.list_models(Some(cursor), out);
+                }
+                // A model the catalog lacks is Codex's to refuse when the thread opens.
+                _ => {}
+            },
+        }
+        self.open_thread(out);
     }
 
     fn open_thread(&mut self, out: &mut Out) {
@@ -200,15 +261,24 @@ impl Codex {
             .to_owned();
         let result = &msg["result"];
         match rpc {
-            Rpc::Initialize if failed => out.error(
+            Rpc::Initialize if failed => out.refuse(
                 classify(&message, None),
                 format!("codex initialize: {message}"),
             ),
             Rpc::Initialize => {
                 out.write(obj! { "method" => "initialized" });
+                if self.effort.is_some() {
+                    self.list_models(None, out);
+                } else {
+                    self.open_thread(out);
+                }
+            }
+            Rpc::Models if failed => {
+                self.drop_effort(format!("could not be checked ({message})"), out);
                 self.open_thread(out);
             }
-            Rpc::Open(method) if failed => out.error(
+            Rpc::Models => self.check_effort(result, out),
+            Rpc::Open(method) if failed => out.refuse(
                 classify(&message, None),
                 format!("codex {method}: {message}"),
             ),
@@ -235,7 +305,10 @@ impl Codex {
                     native_id: thread,
                     model: opt_str(&result["model"]),
                     provider: opt_str(&result["modelProvider"]),
-                    effort: opt_str(&result["reasoningEffort"]).or_else(|| self.effort.clone()),
+                    effort: self
+                        .effort
+                        .clone()
+                        .or_else(|| opt_str(&result["reasoningEffort"])),
                     cwd: opt_str(&result["cwd"]),
                 });
             }

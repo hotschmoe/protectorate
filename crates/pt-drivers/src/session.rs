@@ -70,8 +70,9 @@ struct Queued {
 }
 
 impl Core {
-    /// Releases what the last protocol step produced, in order. False when the harness has
-    /// stopped reading its stdin: the queue is over its bound and the session must fail.
+    /// Releases what the last protocol step produced, in order. False when the session must
+    /// fail: the harness has stopped reading its stdin (the queue is over its bound), or it
+    /// refused its handshake.
     fn pump(&mut self) -> bool {
         let mut ok = true;
         for w in std::mem::take(&mut self.out.writes) {
@@ -123,12 +124,12 @@ impl Core {
             }
             let _ = self.events.send(event);
         }
-        ok
+        ok && !self.out.refused
     }
 }
 
 impl Shared {
-    /// Pumps `core`, and kills the harness when its stdin queue overflowed.
+    /// Pumps `core`, and kills the harness when the session must fail.
     fn release(&self, core: &mut Core) -> bool {
         let ok = core.pump();
         if !ok {
@@ -140,6 +141,7 @@ impl Shared {
 
 /// Starts the harness. Events arrive on the receiver until `Entry::Exited`, which is last.
 pub fn spawn(mut spec: SpawnSpec) -> Result<(Session, Receiver<Event>), DriverError> {
+    let effort_note = crate::vet_effort(&mut spec);
     let (args, mut proto) = plan(&spec, &mut crate::emit::new_uuid)?;
     let mut cmd = match spec.prefix.take() {
         Some(mut prefix) => {
@@ -179,6 +181,9 @@ pub fn spawn(mut spec: SpawnSpec) -> Result<(Session, Receiver<Event>), DriverEr
     let (events_tx, events_rx) = mpsc::channel();
     let (stdin_tx, stdin_rx) = mpsc::channel::<Queued>();
     let mut out = Out::new(spec.g);
+    if let Some(note) = effort_note {
+        out.notice("effort", note);
+    }
     proto.start(&mut out);
     let shared = Arc::new(Shared {
         core: Mutex::new(Core {
@@ -351,7 +356,7 @@ fn read_stdout(shared: &Shared, harness: Harness, stdout: impl Read) {
     }
 }
 
-/// One stdout record: parsed and mapped, or reported as a protocol desync.
+/// One stdout record: parsed and mapped, or counted as stray output.
 pub(crate) fn handle_line(proto: &mut dyn Protocol, out: &mut Out, harness: Harness, line: &[u8]) {
     let line = line.strip_suffix(b"\r").unwrap_or(line);
     if line.iter().all(u8::is_ascii_whitespace) {
@@ -359,14 +364,7 @@ pub(crate) fn handle_line(proto: &mut dyn Protocol, out: &mut Out, harness: Harn
     }
     match pt_json::parse_bytes(line) {
         Ok(msg) if msg.as_object().is_some() => proto.on_message(msg, out),
-        Ok(_) => out.error(
-            ErrorClass::Protocol,
-            format!("{harness} wrote a stdout record that is not a JSON object"),
-        ),
-        Err(e) => out.error(
-            ErrorClass::Protocol,
-            format!("{harness} wrote an unparseable stdout line: {e}"),
-        ),
+        _ => out.stray_line(harness.as_str(), &String::from_utf8_lossy(line)),
     }
 }
 

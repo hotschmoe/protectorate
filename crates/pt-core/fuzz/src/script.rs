@@ -7,7 +7,7 @@
 //! invariants and the replay check apply to scenarios too.
 //!
 //! ```text
-//! spawn NAME PATH [parent=NAME] [view] [harness=H] [pane] [budget=N] [disk=N] [to=H,H]
+//! spawn NAME PATH [parent=NAME] [view] [harness=H] [pane] [budget=N] [disk=N] [effort=E] [to=H,H]
 //! send NAME ID [steer] [from=NAME]
 //! stop|remove|interrupt|compact|viewed NAME
 //! start|resleeve NAME [harness=H]
@@ -16,7 +16,7 @@
 //! obs NAME WHAT [g=N] [noask]       WHAT: ready progress[=H] approval=ID resolved=ID
 //!                                         settled[=usage|auth|interrupted|error] compactdone
 //!                                         desync screen=V usage=N disk=N forbidden
-//! exit NAME [oom] [code=N]          the incarnation's process tree dies
+//! exit NAME [oom|auth|quota] [code=N]  the incarnation's process tree dies
 //! tick DURATION                     e.g. 30s 16m 2h
 //! clock MILLIS                      the hub clock jumps to MILLIS (it never runs backwards)
 //! policy KEY=VALUE...               see `Policy`
@@ -199,6 +199,7 @@ impl Runner {
                     resleeve_to: to,
                     budget: kv("budget").map(num).transpose()?,
                     disk_limit: kv("disk").map(num).transpose()?,
+                    effort: kv("effort").map(str::to_string),
                 };
                 self.sim.apply(E::Spawn(spec));
             }
@@ -328,6 +329,10 @@ impl Runner {
                 let g = self.sim.st.sleeves[&sleeve].g;
                 let cause = if flag("oom") {
                     ExitCause::Oom
+                } else if flag("auth") {
+                    ExitCause::Auth
+                } else if flag("quota") {
+                    ExitCause::Quota
                 } else {
                     ExitCause::Exit(kv("code").map(num).transpose()?.unwrap_or(1) as i32)
                 };

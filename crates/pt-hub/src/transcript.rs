@@ -47,6 +47,7 @@ pub struct Stats {
     pub context_window: u64,
     pub provider: String,
     pub model: String,
+    pub effort: Option<String>,
     pub started_ms: u64,
     pub g: u64,
 }
@@ -55,10 +56,14 @@ impl Stats {
     fn fold(&mut self, e: &Line) {
         match &e.entry {
             Entry::SessionInfo {
-                model, provider, ..
+                model,
+                provider,
+                effort,
+                ..
             } => {
                 self.provider = provider.clone().unwrap_or_default();
                 self.model = model.clone().unwrap_or_default();
+                self.effort = effort.clone();
                 self.started_ms = e.time_ms;
                 self.g = e.g;
             }

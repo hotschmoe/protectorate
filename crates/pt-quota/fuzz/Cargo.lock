@@ -84,6 +84,7 @@ version = "0.0.0"
 name = "pt-quota"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "pt-api",
  "pt-json",
 ]

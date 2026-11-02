@@ -45,7 +45,7 @@ const NATIVE_WAIT: Duration = Duration::from_secs(2);
 /// What the executor hands the pump, which acknowledges each once it is in.
 enum Ordered {
     /// A report the pump submits in its stream.
-    Report(EventKind),
+    Report(Box<EventKind>),
     /// A prompt about to be written, which the pump reports from the driver's entries.
     Expect {
         request_id: String,
@@ -362,7 +362,12 @@ impl SleeveExec {
     fn submit(&self, kind: EventKind) {
         if let Some(live) = &self.live {
             let (tx, rx) = mpsc::channel();
-            if live.order.send((Ordered::Report(kind.clone()), tx)).is_ok() && rx.recv().is_ok() {
+            if live
+                .order
+                .send((Ordered::Report(Box::new(kind.clone())), tx))
+                .is_ok()
+                && rx.recv().is_ok()
+            {
                 return;
             }
         }
@@ -824,6 +829,7 @@ impl SleeveExec {
         spec.g = g.0;
         spec.model = Some(target.model.clone()).filter(|m| !m.is_empty());
         spec.provider = Some(target.provider.clone()).filter(|p| !p.is_empty());
+        spec.effort = s.effort.clone();
         spec.resume = resume;
         spec.prefix = Some(prefix);
         let name = wire::harness_wire(target.harness);
@@ -1040,6 +1046,9 @@ fn input_text(input: &Option<pt_json::Value>) -> String {
 fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Receiver<Order>) {
     let mut p = Pump {
         last_error: None,
+        ready: false,
+        refusal: None,
+        prev_error: None,
         cause: ExitCause::Killed,
         expects: HashMap::new(),
         held: None,
@@ -1100,6 +1109,13 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Rece
 
 struct Pump {
     last_error: Option<ErrorClass>,
+    /// The session announced itself (session_info).
+    ready: bool,
+    /// An auth or quota error the harness gave before it was ready: a refused handshake.
+    refusal: Option<ErrorClass>,
+    /// The class of the entry just before this one, when that was an error: the exit error
+    /// the driver writes right before `Exited`.
+    prev_error: Option<ErrorClass>,
     cause: ExitCause,
     /// Prompts being written, by request id.
     expects: HashMap<String, Expect>,
@@ -1124,10 +1140,10 @@ impl Pump {
     fn order(&mut self, hub: &Hub, o: Ordered) {
         match o {
             Ordered::Report(kind) => {
-                if let EventKind::Nacked { effect, .. } = &kind {
+                if let EventKind::Nacked { effect, .. } = &*kind {
                     self.expects.retain(|_, e| e.effect != *effect);
                 }
-                hub.submit(kind);
+                hub.submit(*kind);
             }
             Ordered::Expect {
                 request_id,
@@ -1247,11 +1263,15 @@ impl Pump {
             return false;
         }
         self.prompt_reports(hub, &entry);
+        let before = self.prev_error.take();
         let mut obs = Vec::new();
         match &entry {
-            Entry::SessionInfo { native_id, .. } => obs.push(Obs::Ready {
-                session: native_id.clone(),
-            }),
+            Entry::SessionInfo { native_id, .. } => {
+                self.ready = true;
+                obs.push(Obs::Ready {
+                    session: native_id.clone(),
+                })
+            }
             Entry::ToolCall { name, input, .. } => obs.push(Obs::Progress {
                 tool: Some(tool_hash(name, input)),
             }),
@@ -1290,7 +1310,7 @@ impl Pump {
                 let mut end = match stop {
                     Stop::Cancelled => TurnEnd::Interrupted,
                     Stop::Error => match self.last_error {
-                        Some(ErrorClass::Quota | ErrorClass::RateLimit) => TurnEnd::UsageLimit,
+                        Some(ErrorClass::Quota) => TurnEnd::UsageLimit,
                         Some(ErrorClass::Auth) => TurnEnd::AuthFailed,
                         _ => TurnEnd::Error,
                     },
@@ -1305,6 +1325,10 @@ impl Pump {
             }
             Entry::Error { class, text } => {
                 self.last_error = Some(*class);
+                self.prev_error = Some(*class);
+                if !self.ready && matches!(class, ErrorClass::Auth | ErrorClass::Quota) {
+                    self.refusal.get_or_insert(*class);
+                }
                 if *class == ErrorClass::Protocol {
                     obs.push(Obs::Desync {
                         detail: text.clone(),
@@ -1313,8 +1337,10 @@ impl Pump {
             }
             Entry::Compaction { .. } => obs.push(Obs::CompactDone),
             Entry::Exited { code, signal, .. } => {
-                self.cause = match (code, signal) {
-                    (Some(c), _) => ExitCause::Exit(*c as i32),
+                self.cause = match (self.refusal.or(before), code, signal) {
+                    (Some(ErrorClass::Auth), ..) => ExitCause::Auth,
+                    (Some(ErrorClass::Quota), ..) => ExitCause::Quota,
+                    (_, Some(c), _) => ExitCause::Exit(*c as i32),
                     _ => ExitCause::Killed,
                 };
             }

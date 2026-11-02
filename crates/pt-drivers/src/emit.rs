@@ -24,6 +24,10 @@ pub(crate) struct Out {
     /// Recently finalized blocks, so a late authoritative end does not repeat one.
     closed: VecDeque<Closed>,
     notes: HashSet<String>,
+    /// Stdout lines that were not JSON objects.
+    stray: u64,
+    /// The harness refused its handshake: the session must end now.
+    pub(crate) refused: bool,
     /// User messages whose line is queued but not yet written, by request id.
     unwritten: Vec<(String, Entry)>,
     pub(crate) events: Vec<Event>,
@@ -72,6 +76,8 @@ impl Out {
             open: None,
             closed: VecDeque::new(),
             notes: HashSet::new(),
+            stray: 0,
+            refused: false,
             unwritten: Vec::new(),
             events: Vec::new(),
             writes: Vec::new(),
@@ -145,11 +151,33 @@ impl Out {
         });
     }
 
+    /// The harness answered its handshake with an error: the session cannot become ready, so
+    /// the process is ended at once instead of leaving the hub to wait out its start timeout.
+    pub(crate) fn refuse(&mut self, class: ErrorClass, text: impl Into<String>) {
+        self.refused = true;
+        self.error(class, text);
+    }
+
     pub(crate) fn notice(&mut self, code: &str, text: impl Into<String>) {
         self.emit(Entry::Notice {
             code: Some(code.to_owned()),
             text: text.into(),
         });
+    }
+
+    /// A stdout line that is not a JSON object: output of the harness or of something it runs
+    /// (an MCP server, an extension, an npm wrapper), not a breach of the protocol. It is
+    /// counted and noticed at each power of two, so a chatty process cannot flood the stream.
+    pub(crate) fn stray_line(&mut self, harness: &str, line: &str) {
+        self.stray += 1;
+        if self.stray.is_power_of_two() {
+            let text = format!(
+                "{harness} wrote {} stdout lines that are not JSON objects; latest: {}",
+                self.stray,
+                bounded(line, 120)
+            );
+            self.notice("stray_stdout", text);
+        }
     }
 
     /// One notice per unmapped message type per session (NoMatch, not Desync).

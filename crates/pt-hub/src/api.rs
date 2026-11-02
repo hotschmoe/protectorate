@@ -472,6 +472,7 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
             writable: layout != Layout::View,
         },
         target,
+        effort: r.effort.filter(|e| !e.is_empty()),
         resleeve_to: targets(hub, &r.resleeve_to),
         budget: r.budget,
         disk_limit: None,
