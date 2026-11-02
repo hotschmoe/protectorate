@@ -178,12 +178,14 @@ crash, every incarnation goes to Recovering and resumes natively.
   agent):
   - user, mount, PID, IPC and UTS namespaces;
   - the host root bound read-only, with the workspace and a private home writable;
-  - a sized `/tmp`, with disk-backed per-sleeve build and temporary scratch mounted at a short
-    path and removed when the sleeve is removed;
+  - a sized `/tmp`, with disk-backed per-sleeve build and temporary scratch under the hub home,
+    mounted at a short path and removed when the sleeve is removed; launch refuses scratch on
+    tmpfs or ramfs;
   - tmpfs masks over the hub's state, `~/.ssh` and the owner's own credentials; every
     harness's shared hub login (`<home>/logins/`) and the owner's cargo registry, Go and pub
     caches bound read-write;
   - a systemd scope per incarnation with limits and `cgroup.kill`, plus the orphan reaper.
+    The hub observes the scope's OOM kills while it exists and reports them to the guardrail.
 
   Cut from today's sandbox: the network namespace, the egress proxy, cache overlays, nested cgroup
   delegation and the pin-approval gate. Sleeves share the host network and the owner's download
