@@ -339,6 +339,7 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 if let Some(b) = &s.branch {
                     println!("branch {b}");
                 }
+                println!("d9 {}", if s.d9 { "marked" } else { "no" });
             });
         }
         "spawn" => {
@@ -455,6 +456,7 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 sleeve_id: a.word(2, "a sleeve")?.to_string(),
                 until: word_enum(a.flag("--until").unwrap_or("idle"), "--until")?,
                 timeout_ms: t * 1000,
+                after_seq: a.num("--after-seq")?,
             };
             let v = c.call_for::<m::Wait>(&req, Duration::from_secs(t))?;
             o.show(&v, |v| {
@@ -464,8 +466,9 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                     .incarnation
                     .as_ref()
                     .map_or("-".into(), |i| i.activity.state.to_string());
+                let seq = v.seq.map(|s| format!(", seq {s}")).unwrap_or_default();
                 println!(
-                    "{}: {life}, {act}",
+                    "{}: {life}, {act}{seq}",
                     if v.reached { "reached" } else { "not reached" }
                 );
             });

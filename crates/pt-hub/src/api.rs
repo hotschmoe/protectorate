@@ -35,7 +35,7 @@ pub enum Principal {
     Device(String),
     /// Envoy's capability: sleeve scope, reaching every sleeve.
     Envoy(SleeveId),
-    /// A sleeve's `pc1.` capability: itself and its children.
+    /// A sleeve's `pc1.` capability: itself and its children. Mail also reaches its parent and Envoy.
     Sleeve(SleeveId),
     /// Vendor general agents: the Envoy methods only (D9).
     EnvoyOnly,
@@ -862,6 +862,8 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         return Err(err(ErrorCode::Conflict, why));
     }
     let request_id = new_id("spawn:")?;
+    // Before the gate: an approval wait can outlive the turn that made this spawn count.
+    let d9 = marks_d9(hub, c.who);
     rule::gate(hub, c.who, Guarded::Spawn(&r.name))?;
     // The gate can block for minutes. Re-check the name and the path, then create.
     let commit = if let Some(given) = creating {
@@ -897,6 +899,7 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         resleeve_to,
         budget: r.budget,
         disk_limit: None,
+        d9,
     };
     let id = match command(hub, EventKind::Spawn(spec)) {
         Ok(Reply::Spawned(id)) => id,
@@ -919,6 +922,7 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
                 from: c.who.party(),
                 text: prefix(&view.state, c.who, "", &text),
                 mode: SendMode::Queue,
+                d9,
             },
         )?;
     }
@@ -949,24 +953,50 @@ fn new_request(c: &Ctx<'_>, agent: &str) -> Result<String> {
     })
 }
 
+/// Envoy, in a turn that already has D9 origin, marks the sleeve it spawns or sends to.
+fn marks_d9(hub: &Hub, who: &Principal) -> bool {
+    matches!(who, Principal::Envoy(_)) && lock(&hub.envoy_turn).origin.is_some()
+}
+
+/// `reaches`, plus a sleeve mailing its parent or Envoy. Nothing else opens.
+fn may_mail(state: &State, who: &Principal, id: SleeveId) -> bool {
+    if reaches(state, who, id) {
+        return true;
+    }
+    let Principal::Sleeve(me) = *who else {
+        return false;
+    };
+    Hub::envoy_id(state) == Some(id) || state.sleeve(me).and_then(|s| s.parent) == Some(id)
+}
+
 fn send_message(c: &Ctx<'_>, r: api::SendMessageRequest) -> Result<api::Sent> {
     let view = c.hub.view();
-    let id = target_sleeve(c, &view, &r.sleeve_id)?;
+    let id = find(&view.state, &r.sleeve_id)?;
+    if !may_mail(&view.state, c.who, id) {
+        return Err(err(
+            ErrorCode::Forbidden,
+            "that sleeve is outside this capability",
+        ));
+    }
     if r.text.is_empty() {
         return Err(err(ErrorCode::Invalid, "text is required"));
     }
     let request_id = new_request(c, "")?;
+    let from = c.who.party();
+    let sender_marked =
+        matches!(from, Party::Sleeve(id) if view.state.sleeve(id).is_some_and(|s| s.d9));
     command(
         c.hub,
         EventKind::Send {
             to: id,
             request_id: request_id.clone(),
-            from: c.who.party(),
+            from,
             text: prefix(&view.state, c.who, "", &r.text),
             mode: match r.delivery {
                 api::Delivery::Queue => SendMode::Queue,
                 api::Delivery::Steer => SendMode::Steer,
             },
+            d9: marks_d9(c.hub, c.who) || sender_marked,
         },
     )?;
     Ok(api::Sent { request_id })
@@ -1674,7 +1704,7 @@ fn envoy_send(c: &Ctx<'_>, r: api::EnvoySendRequest) -> Result<api::Sent> {
     if matches!(c.who, Principal::Sleeve(_) | Principal::Envoy(_)) {
         return Err(err(
             ErrorCode::Forbidden,
-            "sleeves reach Envoy through their parent, not EnvoySend",
+            "sleeves mail Envoy with sleeve send, not EnvoySend",
         ));
     }
     let view = c.hub.view();
@@ -1702,6 +1732,7 @@ fn envoy_send(c: &Ctx<'_>, r: api::EnvoySendRequest) -> Result<api::Sent> {
             from: c.who.party(),
             text: prefix(&view.state, c.who, agent, &r.text),
             mode: SendMode::Queue,
+            d9: false,
         },
     )?;
     Ok(api::Sent { request_id })
@@ -1721,7 +1752,7 @@ fn envoy_read(c: &Ctx<'_>, r: api::EnvoyReadRequest) -> Result<api::Transcript> 
 fn not_for_sleeves() -> ApiError {
     err(
         ErrorCode::Forbidden,
-        "sleeves reach Envoy through their parent, not the Envoy methods",
+        "sleeves mail Envoy with sleeve send, not the Envoy methods",
     )
 }
 
@@ -1926,12 +1957,89 @@ fn reached(state: &State, id: SleeveId, until: api::WaitUntil) -> bool {
     }
 }
 
+/// The newest message the waiter has already sent to `waited`, if any.
+/// A `continue:` row is the same turn, not mail: it does not move the cursor.
+fn report_watermark(state: &State, waited: SleeveId, waiter: Party) -> Option<u64> {
+    state.sleeve(waited).and_then(|s| {
+        s.messages
+            .iter()
+            .filter(|(id, m)| m.from == waiter && !id.starts_with("continue:"))
+            .map(|(_, m)| m.seq)
+            .max()
+    })
+}
+
+/// The newest upward report from `waited` with a seq above the cursor.
+/// `after` replaces the default, which is the waiter's newest message to `waited`
+/// (or every past report when the waiter has sent none).
+/// A parent counts only mail in its own mailbox. Anyone else also counts mail to Envoy.
+/// A `continue:` row is not a report.
+fn upward_report(
+    state: &State,
+    waited: SleeveId,
+    waiter: Party,
+    after: Option<u64>,
+) -> Option<u64> {
+    let s = state.sleeve(waited)?;
+    let floor = after.or_else(|| report_watermark(state, waited, waiter));
+    let parent_only = matches!(waiter, Party::Sleeve(me) if s.parent == Some(me));
+    let mut dests = Vec::new();
+    if let Some(p) = s.parent {
+        dests.push(p);
+    }
+    if !parent_only
+        && let Some(e) = Hub::envoy_id(state)
+        && !dests.contains(&e)
+    {
+        dests.push(e);
+    }
+    let mut best = None;
+    for d in dests {
+        let Some(dest) = state.sleeve(d) else {
+            continue;
+        };
+        for (id, m) in &dest.messages {
+            if id.starts_with("continue:") {
+                continue;
+            }
+            if m.from == Party::Sleeve(waited) && floor.is_none_or(|w| m.seq > w) {
+                best = Some(best.map_or(m.seq, |b: u64| b.max(m.seq)));
+            }
+        }
+    }
+    best
+}
+
 fn wait(c: &Ctx<'_>, r: api::WaitRequest) -> Result<api::WaitResult> {
+    let deadline = Instant::now() + timeout(r.timeout_ms);
     if r.until == api::WaitUntil::Report {
-        return Err(unavailable("waiting for a report (sleeve mail upward)"));
+        let view = c.hub.view();
+        let resolved = find(&view.state, &r.sleeve_id).ok();
+        if r.sleeve_id == crate::hub::ENVOY
+            || resolved.is_some_and(|id| Hub::envoy_id(&view.state) == Some(id))
+        {
+            return Err(err(
+                ErrorCode::Invalid,
+                "Envoy never sends as a sleeve; wait for a sleeve",
+            ));
+        }
+        let id = target_sleeve(c, &view, &r.sleeve_id)?;
+        let waiter = c.who.party();
+        let after = r.after_seq;
+        let got = wait_for(c.hub, deadline, |v| {
+            if let Some(seq) = upward_report(&v.state, id, waiter, after) {
+                return Some(Some(seq));
+            }
+            let s = v.state.sleeve(id)?;
+            matches!(s.life, Life::Stopped | Life::Removed | Life::Parked(_)).then_some(None)
+        });
+        return Ok(api::WaitResult {
+            reached: got.as_ref().is_some_and(Option::is_some),
+            sleeve: sleeve_view(c.hub, id)?,
+            seq: got.flatten(),
+        });
     }
     let id = target_sleeve(c, &c.hub.view(), &r.sleeve_id)?;
-    let deadline = Instant::now() + timeout(r.timeout_ms);
     let got = wait_for(c.hub, deadline, |v| {
         if reached(&v.state, id, r.until) {
             return Some(true);
@@ -1943,6 +2051,7 @@ fn wait(c: &Ctx<'_>, r: api::WaitRequest) -> Result<api::WaitResult> {
     Ok(api::WaitResult {
         reached: got == Some(true),
         sleeve: sleeve_view(c.hub, id)?,
+        seq: None,
     })
 }
 

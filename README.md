@@ -73,7 +73,7 @@ through the idle probe and a job through the service were checked by hand, not y
   local release assets (`--from`), and `hub update` and `node update` have run only against a
   stand-in release server;
 - terminal takeover, Antigravity, `protectorate git push`, hub export
-  and import, sleeve-to-sleeve mail through the API, GPU leases, the backlog and spare-quota
+  and import, GPU leases, the backlog and spare-quota
   trigger (the function exists, nothing calls it), node `doctor`;
 - a hub update restarts the hub instead of re-executing it, so sleeves resume as after a crash;
 - Windows nodes cannot take the `Update` RPC; macOS and Android nodes do not compile;

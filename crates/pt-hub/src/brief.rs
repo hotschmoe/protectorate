@@ -400,6 +400,22 @@ fn build(hub: &Hub, view: &View, workdir: &Path, spec: &Spec<'_>, entries: &[Lin
     }
     b.push('\n');
 
+    b.push_str("## Mail\n");
+    let _ = writeln!(
+        b,
+        "Queue a message to the parent or to Envoy with `protectorate sleeve send <name> <text>`."
+    );
+    match s.parent.and_then(|p| view.state.sleeve(p)) {
+        Some(p) => {
+            let _ = writeln!(b, "The parent is {} (`$PROTECTORATE_PARENT`).", p.name);
+        }
+        None => b.push_str("This sleeve has no parent.\n"),
+    }
+    b.push_str(
+        "Envoy's name is `envoy` (`$PROTECTORATE_ENVOY`). `$PROTECTORATE_MAIL` is the command. \
+         The hub marks the message as mail from this sleeve.\n\n",
+    );
+
     let mut queries: Vec<&str> = users.last().into_iter().copied().collect();
     if users.len() > 1 {
         queries.extend(users.first());

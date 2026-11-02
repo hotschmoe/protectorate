@@ -7,8 +7,8 @@
 //! invariants and the replay check apply to scenarios too.
 //!
 //! ```text
-//! spawn NAME PATH [parent=NAME] [view] [harness=H] [pane] [budget=N] [disk=N] [effort=E] [to=H,H]
-//! send NAME ID [steer] [from=NAME|from=agent:NAME]
+//! spawn NAME PATH [parent=NAME] [view] [harness=H] [pane] [budget=N] [disk=N] [effort=E] [to=H,H] [d9]
+//! send NAME ID [steer] [from=NAME|from=agent:NAME] [d9]
 //! continue NAME                    a second journaled continuation; the first is sent by the core
 //! stop|remove|interrupt|compact|viewed NAME
 //! start|resleeve NAME [harness=H] [effort=E]
@@ -24,8 +24,9 @@
 //! run | step [N] | commit         step N executes the Nth released intent (from 0)
 //! crash [empty] [down=DURATION]     the hub dies at the last commit and restarts DURATION later
 //! job ID | cancel-job N | requeue-job N | abandon-job N
-//! expect NAME life=.. g=N activity=.. guard=.. harness=.. queue=N agent=NAME|none msg:ID=.. from:ID=Party [park=REST]
+//! expect NAME life=.. g=N activity=.. guard=.. harness=.. queue=N effort=.. agent=NAME|none d9=true|false msg:ID=.. from:ID=Party [park=REST]
 //!   `park=` is the rest of the line, the hub's park string (`flapping (claude login rejected)`).
+//! expect-reply TEXT...             Refused matches its text; any other reply matches its variant
 //! expect-effect KEY state=.. attempt=N count=N
 //! expect-job N state=..           expect-none NAME
 //! expect-approval ID [g=N] state=.. decision=allow|deny|none orphan=.. response=KEY
@@ -247,6 +248,7 @@ impl Runner {
                     budget: kv("budget").map(num).transpose()?,
                     disk_limit: kv("disk").map(num).transpose()?,
                     effort: kv("effort").map(str::to_string),
+                    d9: flag("d9"),
                 };
                 self.sim.apply(E::Spawn(spec));
             }
@@ -268,6 +270,7 @@ impl Runner {
                     } else {
                         SendMode::Queue
                     },
+                    d9: flag("d9"),
                 });
             }
             "stop" | "remove" | "interrupt" | "compact" | "viewed" | "start" | "resleeve" => {
@@ -531,20 +534,19 @@ impl Runner {
                 }
             }
             "expect-reply" if self.checked => {
+                let want = words[1..].join(" ");
                 let got = self
                     .sim
                     .last
                     .iter()
-                    .find_map(|i| {
-                        if let Intent::Reply(r) = i {
-                            Some(variant(r))
-                        } else {
-                            None
-                        }
+                    .find_map(|i| match i {
+                        Intent::Reply(Reply::Refused(_, why)) if why == &want => Some(why.clone()),
+                        Intent::Reply(r) => Some(variant(r)),
+                        _ => None,
                     })
                     .unwrap_or_default();
-                if got != arg(1)? {
-                    return Err(format!("reply {got}, expected {}", arg(1)?));
+                if got != want {
+                    return Err(format!("reply is {got:?}, expected {want:?}"));
                 }
             }
             "expect-effect" if self.checked => {
@@ -656,12 +658,13 @@ impl Runner {
                 "queue" => s.queue.len().to_string(),
                 "effort" => s.effort.clone().unwrap_or("none".into()),
                 "agent" => s.turn_agent.clone().unwrap_or_else(|| "none".into()),
+                "d9" => s.d9.to_string(),
                 _ => match k.strip_prefix("msg:") {
                     Some(id) => s
                         .messages
                         .get(id)
                         .map(|m| variant(&m.state))
-                        .ok_or_else(|| format!("no message {id}"))?,
+                        .unwrap_or_default(),
                     None => match k.strip_prefix("from:") {
                         Some(id) => s
                             .messages

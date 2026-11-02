@@ -685,6 +685,9 @@ pub fn invariants(st: &State, sim: &Sim) {
             }
             // I3
             assert!(p.parent.is_none(), "I3: depth above 1");
+            if p.d9 {
+                assert!(s.d9, "a child of a D9-marked sleeve is unmarked");
+            }
         }
         if s.parent.is_none() {
             assert!(

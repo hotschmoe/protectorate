@@ -15,6 +15,8 @@ pub struct State {
     pub next_effect: u64,
     pub next_job: u64,
     pub next_approval: u64,
+    /// Next [`Message::seq`]. It moves only when a message is accepted, so replay assigns the same numbers.
+    pub next_msg: u64,
     pub sleeves: BTreeMap<SleeveId, Sleeve>,
     pub effects: BTreeMap<EffectId, Effect>,
     pub jobs: BTreeMap<JobId, Job>,
@@ -62,8 +64,8 @@ pub struct Sleeve {
     pub desync_while_idle: bool,
     /// Owner turns begun here. Incremented when a prompt other than a continuation is dequeued.
     pub turn_seq: u64,
-    /// Who opened the current owner turn. An agent steer replaces it. A continuation is sent
-    /// as this party, so D9 sees the same origin the turn had.
+    /// Who opened the current owner turn. An agent steer, or mail from a D9-marked sleeve,
+    /// replaces it. A continuation is sent as this party, so D9 sees the same origin the turn had.
     pub turn_from: Party,
     /// The agent name on that message's `ga:<name>:` request id, when `turn_from` is an agent.
     pub turn_agent: Option<String>,
@@ -102,6 +104,12 @@ pub struct Sleeve {
     pub interrupt_at: Millis,
     pub loop_hash: Option<u64>,
     pub loop_count: u32,
+    /// When this tree's mails to Envoy were accepted. Only the root's list is used.
+    pub envoy_mails: Vec<Millis>,
+    /// When this sleeve's mails to its parent were accepted.
+    pub parent_mails: Vec<Millis>,
+    /// A D9-origin turn spawned this sleeve or sent to it, or its parent is marked. Envoy is never marked.
+    pub d9: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -169,6 +177,8 @@ pub struct Message {
     pub text: String,
     pub mode: SendMode,
     pub state: MsgState,
+    /// Order among accepted messages. Replay assigns the same numbers.
+    pub seq: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

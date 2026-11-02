@@ -18,8 +18,8 @@ capability). `--json` prints the API's answer; `protectorate --help` lists every
 | `sleeve spawn <name> --path <dir> --harness H [--model M] [--effort E] [--message TEXT]` | a root sleeve on a directory (one root per directory) |
 | `sleeve spawn <name> --new-path <dir> --harness H [--model M] [--effort E] [--message TEXT]` | a new project: the hub creates `<dir>` under `projects_dir` and an empty git repo (branch `main`), then a root sleeve on it |
 | `sleeve spawn <name> --parent <root> --harness H [--readonly]` | a child on its own worktree and branch `pt/<name>` (or a read-only view) |
-| `sleeve send <s> <text>` | queue a message (its next prompt); `--steer` adds it to a running Codex or Pi turn. Claude and Grok cannot steer: queue instead |
-| `sleeve wait <s> --until idle --timeout <secs>` | block until it settles (`done`, `blocked`, `parked`, `ended` too) |
+| `sleeve send <s> <text>` | queue a message (its next prompt); `--steer` adds it to a running Codex or Pi turn. Claude and Grok cannot steer: queue instead. A sleeve may send to itself, its children, its parent, or `envoy` |
+| `sleeve wait <s> --until idle --timeout <secs>` | block until it settles (`done`, `blocked`, `parked`, `ended` too). `--until report` returns when that sleeve has mailed since the cursor and prints that report's seq. Your wait counts mail to you or to that sleeve's parent. A parent's wait counts only mail to that parent. Waiting on yourself for a report is invalid, because you never send as a sleeve |
 | `sleeve transcript <s> [--from SEQ]` | its chat: prompts, replies, tool calls |
 | `sleeve interrupt|stop|rm <s>` | end the turn; stop it and its children; remove it |
 | `sleeve start <s> [--effort E]` / `sleeve resleeve <s> --harness H [--model M] [--effort E]` | start a stopped or parked sleeve; move a settled one |
@@ -54,10 +54,14 @@ harness; it can be replaced with another level.
   incarnation never acked a prompt, you are warned instead. That is once per owner turn, including
   across a later resume. It does not send that after an interrupt, a desync during one, a second
   time for the same owner turn, or after a restart of an idle sleeve. The continuation is sent
-  as the party that opened that owner turn. An agent steer replaces that party, which keeps D9
-  on the continued turn and reports a rejection to that party. A continuation with no recorded
+  as the party that opened that owner turn. An agent steer, or mail from a marked sleeve,
+  replaces that party, which keeps D9 on the continued turn and reports a rejection to that
+  party. A continuation with no recorded
   agent name is still labeled `agent:`, so D9 stays on. Spawns already made in the turn still
-  count after a crash. A later owner message is a new turn and can be continued on its own.
+  count after a crash, and the exit does not clear the origin. A usage-limit or auth settle
+  keeps the origin and the count. The resleeve brief is sent as the owner and does not clear
+  them. A later
+  owner message is a new turn and can be continued on its own.
   A continuation that cannot be delivered is dropped, and a crash after the incarnation reached
   idle does not carry it into the next one. A stop, park, or resleeve drops one that is still
   queued and warns once. An idle crash that ends in a park or a resleeve drops a debt and
@@ -83,3 +87,31 @@ with the owner's answer. For anything else big, heavy or dangerous, say that it 
 owner's approval, describe exactly what would happen, and wait for the owner to confirm.
 
 A message that starts with `[from sleeve <name>]` is mail from one of the sleeves.
+
+## Mail from sleeves
+
+A sleeve may mail its parent and you, and nothing else (not a sibling, not another tree, not the
+owner's methods). It runs `protectorate sleeve send <parent> <text>` or
+`protectorate sleeve send envoy <text>`. A newly spawned sleeve's first prompt names how: its
+parent's name is `$PROTECTORATE_PARENT` when it has one, your name is `$PROTECTORATE_ENVOY`, and
+`$PROTECTORATE_MAIL` is the command. Tell a sleeve it can ask you that way for help or for a
+design recommendation.
+
+The message is an ordinary send: it is queued for your next turn (or steered into the running
+one) and arrives marked `[from sleeve <name>]`. One tree can land at most 8 messages on you per
+10 minutes, counted on that tree's root. Further mail is refused, and the refusal says when the
+window reopens, so a tree cannot keep starting your turns. Upward mail to a parent who is not
+you has the same bound per sender. When the parent is you, that mail spends the tree's budget.
+
+A sleeve you spawned or sent to during a turn that already had D9 origin is marked, and so are
+its children. The mark is permanent for that sleeve id. A send from a marked sleeve marks the
+recipient, so the mark crosses a relay. Mail from a marked sleeve starts your turn under the D9
+rule above. Mail from an unmarked sleeve does not.
+
+`sleeve wait <s> --until report` returns when `s` has mailed since the cursor, and prints that
+report's seq. `--after-seq N` counts only mail with a seq above N. Without it the cursor is your
+newest message to `s`, and the same report releases a later wait again. A message whose request
+id starts with `continue:` is not mail for that cursor. A wait from someone who
+has never messaged `s` counts all of its past upward mail. Your wait counts mail to you or to
+that sleeve's parent. A parent's wait counts only mail to that parent. Waiting on yourself for a
+report is invalid, because you never send as a sleeve.

@@ -7,6 +7,9 @@ pub const SECOND: Millis = 1_000;
 pub const MINUTE: Millis = 60 * SECOND;
 pub const HOUR: Millis = 60 * MINUTE;
 
+/// Name of the hub's Envoy sleeve. Mail from another sleeve to that live root is rate-limited.
+pub const ENVOY_NAME: &str = "envoy";
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SleeveId(pub u64);
 

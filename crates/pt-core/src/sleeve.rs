@@ -139,8 +139,14 @@ impl Core<'_> {
                 interrupt_at: now,
                 loop_hash: None,
                 loop_count: 0,
+                envoy_mails: Vec::new(),
+                parent_mails: Vec::new(),
+                d9: false,
             },
         );
+        if spec.d9 || spec.parent.is_some_and(|p| self.st.sleeves[&p].d9) {
+            self.mark_d9(id);
+        }
         self.st.spawn_requests.insert(spec.request_id.clone(), id);
         let eff = self.new_effect(
             EffectKind::Provision {
@@ -860,6 +866,7 @@ impl Core<'_> {
         from: Party,
         text: &str,
         mode: SendMode,
+        d9: bool,
     ) {
         if !self.existing(to) {
             return;
@@ -897,21 +904,27 @@ impl Core<'_> {
         let delivering =
             matches!(s.activity, Activity::Delivering { .. }) && s.steer_slot.is_none();
         let queue_empty = s.queue.is_empty();
-        let msg = |state| Message {
-            from,
-            text: text.to_string(),
-            mode,
-            state,
-        };
         let insert = |core: &mut Self, state| {
-            core.sl(to)
-                .messages
-                .insert(request_id.to_string(), msg(state));
+            let seq = core.st.next_msg;
+            core.st.next_msg += 1;
+            core.sl(to).messages.insert(
+                request_id.to_string(),
+                Message {
+                    from,
+                    text: text.to_string(),
+                    mode,
+                    state,
+                    seq,
+                },
+            );
         };
 
         if pane {
             if mode == SendMode::Steer {
                 return self.refuse(Code::FailedPrecondition, "a pane cannot be steered");
+            }
+            if !self.mail_ok(to, from, d9) {
+                return;
             }
             insert(self, MsgState::Queued);
             if self.frozen(to) {
@@ -923,11 +936,17 @@ impl Core<'_> {
         }
         match mode {
             SendMode::Steer if steers && working => {
+                if !self.mail_ok(to, from, d9) {
+                    return;
+                }
                 insert(self, MsgState::Queued);
                 self.steer(to, request_id);
                 self.reply(Reply::Steering);
             }
             SendMode::Steer if steers && delivering => {
+                if !self.mail_ok(to, from, d9) {
+                    return;
+                }
                 insert(self, MsgState::SteerHeld);
                 self.sl(to).steer_slot = Some(request_id.to_string());
                 self.reply(Reply::Steering);
@@ -941,6 +960,9 @@ impl Core<'_> {
                 "the sleeve has no steerable turn ready; omit --steer to queue the message for its next turn",
             ),
             _ => {
+                if !self.mail_ok(to, from, d9) {
+                    return;
+                }
                 insert(self, MsgState::Queued);
                 self.sl(to).queue.push_back(request_id.to_string());
                 self.deliver_next(to);
@@ -979,6 +1001,12 @@ impl Core<'_> {
             let s = self.sl(sid);
             s.turn_from = Party::Agent;
             s.turn_agent = Some(name);
+        } else if let Party::Sleeve(id) = from
+            && self.st.sleeve(id).is_some_and(|s| s.d9)
+        {
+            let s = self.sl(sid);
+            s.turn_from = from;
+            s.turn_agent = None;
         }
         let s = &self.st.sleeves[&sid];
         let kind = EffectKind::Steer {
@@ -994,6 +1022,105 @@ impl Core<'_> {
             .get_mut(request_id)
             .expect("message")
             .state = MsgState::InFlight(eff);
+    }
+
+    /// Accepts one bounded mail, or refuses it and says when the window reopens.
+    /// Mail to Envoy spends the sender's tree budget, kept on the root. Mail to a parent
+    /// who is not Envoy spends that sender's own budget. A `d9` send marks the recipient,
+    /// and so does a send from a sleeve that is already marked, so a relay cannot wash the mark.
+    fn mail_ok(&mut self, to: SleeveId, from: Party, d9: bool) -> bool {
+        if !self.within_mail_bound(to, from) {
+            return false;
+        }
+        let from_marked =
+            matches!(from, Party::Sleeve(id) if self.st.sleeve(id).is_some_and(|s| s.d9));
+        if d9 || from_marked {
+            self.mark_d9(to);
+        }
+        true
+    }
+
+    fn within_mail_bound(&mut self, to: SleeveId, from: Party) -> bool {
+        let Party::Sleeve(sender) = from else {
+            return true;
+        };
+        if sender == to {
+            return true;
+        }
+        if self.is_envoy(to) {
+            return self.stamp_mail(self.tree_root(sender), true);
+        }
+        if self.st.sleeve(sender).and_then(|s| s.parent) == Some(to) {
+            return self.stamp_mail(sender, false);
+        }
+        true
+    }
+
+    /// `envoy` stamps the tree root's Envoy budget; otherwise the sender's parent budget.
+    fn stamp_mail(&mut self, id: SleeveId, envoy: bool) -> bool {
+        let now = self.now;
+        let stamps = if envoy {
+            &self.st.sleeves[&id].envoy_mails
+        } else {
+            &self.st.sleeves[&id].parent_mails
+        };
+        let mut n = 0;
+        let mut oldest = None;
+        for &t in stamps {
+            if crate::guard::since(now, t) < ENVOY_MAIL_WINDOW {
+                n += 1;
+                oldest = Some(oldest.map_or(t, |o: Millis| o.min(t)));
+            }
+        }
+        if n >= ENVOY_MAIL_LIMIT {
+            let oldest = oldest.expect("a full window has a stamp");
+            let left = ENVOY_MAIL_WINDOW - crate::guard::since(now, oldest);
+            let secs = left.div_ceil(SECOND).max(1);
+            let why = if envoy {
+                format!("too many messages to Envoy from this tree; the window reopens in {secs}s")
+            } else {
+                format!(
+                    "too many messages to the parent from this sleeve; the window reopens in {secs}s"
+                )
+            };
+            self.refuse(Code::FailedPrecondition, why);
+            return false;
+        }
+        let v = if envoy {
+            &mut self.sl(id).envoy_mails
+        } else {
+            &mut self.sl(id).parent_mails
+        };
+        v.retain(|&t| crate::guard::since(now, t) < ENVOY_MAIL_WINDOW);
+        v.push(now);
+        true
+    }
+
+    fn tree_root(&self, mut id: SleeveId) -> SleeveId {
+        while let Some(p) = self.st.sleeves[&id].parent {
+            id = p;
+        }
+        id
+    }
+
+    /// Marks `id` and its children. Envoy is never marked.
+    fn mark_d9(&mut self, id: SleeveId) {
+        if self.is_envoy(id) {
+            return;
+        }
+        self.sl(id).d9 = true;
+        let kids = self.st.children(id);
+        for k in kids {
+            if !self.is_envoy(k) {
+                self.sl(k).d9 = true;
+            }
+        }
+    }
+
+    fn is_envoy(&self, id: SleeveId) -> bool {
+        self.st.sleeve(id).is_some_and(|s| {
+            s.name == crate::ENVOY_NAME && s.parent.is_none() && s.life != Life::Removed
+        })
     }
 
     /// A Send can go out as the next prompt now.
@@ -1542,16 +1669,19 @@ impl Core<'_> {
             }
             return;
         }
+        let msg_seq = self.st.next_msg;
+        self.st.next_msg += 1;
         self.sl(sid).messages.insert(
             key.clone(),
             Message {
-                // The party that opened this owner turn (an agent steer replaces it), so the
-                // continued turn keeps that origin and a rejection is reported to that party.
-                // A rejected continuation still warns the owner.
+                // The party that opened this owner turn (an agent steer, or mail from a marked
+                // sleeve, replaces it), so the continued turn keeps that origin and a rejection
+                // is reported to that party. A rejected continuation still warns the owner.
                 from,
                 text: text.to_string(),
                 mode: SendMode::Queue,
                 state: MsgState::Queued,
+                seq: msg_seq,
             },
         );
         self.sl(sid).queue.push_back(key);

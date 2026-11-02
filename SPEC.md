@@ -80,9 +80,12 @@ CLI on the hub machine (section 3.1).
         enrolling or approving nodes, and deciding approvals are owner-only methods;
       - credentials and keys (`~/.ssh`, other harnesses' logins, hub tokens, headscale keys)
         stay masked from sleeves;
-      - D9 still applies: in a turn a vendor agent started, Envoy's removals, mass spawns and
-        node jobs wait for the owner. This is the one remaining approval. A crash keeps the
-        spawn count; the continuation of that turn does not start it over.
+      - D9 still applies: in a turn a vendor agent or a D9-marked sleeve started, Envoy's
+        removals, mass spawns and node jobs wait for the owner. This is the one remaining approval.
+        A crash keeps the origin and the spawn count; the exit does not clear them, and the
+        continuation of that turn does not start the count over. A usage-limit or auth settle
+        keeps them too. The brief of an Envoy resleeve is sent as the owner and does not clear
+        that origin or that count.
 
 ## 3. Layers
 
@@ -105,6 +108,33 @@ CLI on the hub machine (section 3.1).
   to protected branches), so it does not rest on Envoy's judgment alone (principle 10).
 - **The CLI is the API.** Every CLI command maps onto one hub API method. Envoy and shell-capable
   sleeves use the CLI.
+- **Who may mail whom.** A sleeve may send to itself, its children, its parent, and Envoy, and to
+  nothing else: not a sibling, not another tree, and not an owner-only method. The command is
+  `protectorate sleeve send <name> <text>` (`envoy` is Envoy's name; the parent's name is
+  `$PROTECTORATE_PARENT`). `envoy send` is the vendor-agent door and refuses a sleeve. Mail is an
+  ordinary `Send` (queue or steer; a pane gets `MailDeliver`) with the same marking as any sleeve
+  message: the text starts with `[from sleeve <name>]` and the request id is `mail:<id>:...`.
+  One tree may land at most 8 messages on Envoy in 10 minutes, counted on the tree's root. Upward
+  mail to a parent who is not Envoy has the same bound per sender. Mail to Envoy spends only the
+  tree's budget. The core journals the events and replay rebuilds the times. A refusal says when
+  the window reopens. Removing a child and spawning another under the same parent starts a new
+  parent-mail budget; the parent drives that loop. A turn with D9 origin that spawns a sleeve or
+  sends to one marks that sleeve. The mark is journaled, permanent for that sleeve id (a resleeve
+  does not clear it; a new sleeve with the same name is a new id and is unmarked), and inherited
+  by its children. A send from a marked sleeve marks the recipient, so the mark crosses a relay;
+  replay applies the same rule. `sleeve show` reports the mark. Mail from a marked sleeve starts
+  an Envoy turn with D9 origin, so the same removals, node jobs and mass spawns wait for the
+  owner. Mail from an unmarked sleeve does not. `Wait --until report` returns when the waited-on
+  sleeve has mailed after the cursor, and it returns that report's seq. `--after-seq` sets the
+  cursor; without it the cursor is the waiter's newest message to the sleeve, so the same report
+  releases a later wait again. A message whose request id starts with `continue:` is not mail
+  for that cursor: it is not a report, and it does not move the cursor. A waiter who has never
+  messaged the sleeve counts all of its past upward mail. The owner's or Envoy's wait counts
+  mail to the parent or to Envoy. A parent's wait
+  counts only mail to that parent. A wait on Envoy is invalid, because Envoy never sends as a
+  sleeve. A newly spawned sleeve's first prompt names `$PROTECTORATE_PARENT` (when it has one),
+  `$PROTECTORATE_ENVOY` and `$PROTECTORATE_MAIL`, and a resleeve repeats them in the continuation
+  brief.
 - The web build is embedded in the hub binary and served from the same origin.
 
 ### 3.2 Network
@@ -155,7 +185,13 @@ One Linux machine, one `protectorate` process plus its headscale and member chil
   raw byte ring and a VT screen model. Antigravity, which is pane-only (D13), is the one exception.
 - **Events and waits:** `Wait(until idle|done|blocked|report|ended|parked)` reads the state channel.
 - **Quota:** read-only readers per subscription, which feed dispatch.
-- **Mail:** delivery, re-delivery and escalation.
+- **Mail:** delivery, re-delivery and escalation. Who may send is in section 3.1. `Wait --until
+  report` returns the newest upward report's seq. `--after-seq` moves the cursor; without it the
+  cursor is the waiter's newest message to the sleeve, and a waiter who never messaged it counts
+  all of its past upward mail. A message whose request id starts with `continue:` is not mail
+  for that cursor: it is not a report, and it does not move the cursor. The owner's or Envoy's
+  wait counts mail to the parent or to Envoy. A parent's wait counts only mail to that parent.
+  A wait on Envoy is invalid, because Envoy never sends as a sleeve.
 - **Approvals:** routing and timeouts.
 - **History:** an index over native session logs (section 3.7).
 - **Snapshots and backups**, and **audit**.
@@ -394,9 +430,14 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   warning, including when a protocol desync kills the sleeve during that interrupt.
   The hub journals a `Continue` event and the effect is allocated only when that
   event is applied, so a journal recorded before the event existed replays to the same effects.
-  The prompt is sent as the party that opened that owner turn. An agent steer replaces that
-  party, which keeps D9 on the continued turn and reports a rejection to that party. An agent
-  continuation with no recorded name is labeled `agent:`, so D9 still applies. The owner
+  The prompt is sent as the party that opened that owner turn. An agent steer, or mail from a
+  D9-marked sleeve, replaces that party, which keeps D9 on the continued turn and reports a
+  rejection to that party. A continuation does not clear an origin the turn already has, and it
+  does not reset the spawn count. An exit keeps that origin too. A usage-limit or auth settle
+  keeps the origin and the count, and the Envoy resleeve brief is sent as the owner, so it does
+  not clear them. An agent
+  continuation with no recorded name is labeled
+  `agent:`, so D9 still applies. The owner
   still hears when the prompt cannot be sent.
   It is not sent after a planned stop, a hub restart of an idle sleeve, or a manual resleeve (the
   brief is that continuation). A stop, park, or resleeve also drops a continuation still queued,

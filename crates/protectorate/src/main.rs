@@ -62,11 +62,13 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
         [--provider P] [--model M] [--effort E] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
   sleeve send <sleeve> <text...> [--steer]
+        a sleeve may send to itself, its children, its parent, or envoy
   sleeve interrupt|stop|rm|takeover <sleeve>
   sleeve start <sleeve> [--harness H] [--provider P] [--model M] [--effort E]
   sleeve resleeve <sleeve> --harness H [--provider P] [--model M] [--effort E]
   sleeve transcript <sleeve> [--from SEQ] [--limit N]
-  sleeve wait <sleeve> [--until idle|done|blocked|parked|ended] [--timeout SECS]
+  sleeve wait <sleeve> [--until idle|done|blocked|parked|ended|report]
+        [--after-seq N] [--timeout SECS]
   approval list [--pending] | approval decide <id> allow|allow-session|deny
   node ls | node show <node> | node add [REGISTRATION] | node approve <auth_id>
         [--name NAME] [--fingerprint FP]

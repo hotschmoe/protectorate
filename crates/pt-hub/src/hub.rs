@@ -21,7 +21,7 @@ use crate::log::{debug, warning};
 use crate::transcript::{Line, Note, Transcripts, lock};
 use crate::wire;
 
-pub const ENVOY: &str = "envoy";
+pub const ENVOY: &str = pt_core::ENVOY_NAME;
 
 /// One input to the core thread. Commands carry the channel their `Intent::Reply` goes to.
 #[allow(clippy::large_enum_variant)]
@@ -71,10 +71,12 @@ impl Fault {
     }
 }
 
-/// D9: who started Envoy's current turn. `origin` is `agent:<name>` when an agent message was
-/// written into it (as its prompt or a steer), and stays so until the turn settles. A crash
-/// clears the origin and keeps `spawns`; the continuation restores the origin without zeroing
-/// the count.
+/// D9: who started Envoy's current turn. `origin` is `agent:<name>` or `mail:<name>` when an
+/// agent message, or mail from a D9-marked sleeve, was written into it (as its prompt or a
+/// steer). A crash keeps the origin and the spawn count: the exit does not clear them, and
+/// the continuation replaces the origin. A usage-limit or auth settle keeps them too, because
+/// Envoy resleeves and that brief is sent as the owner, so it cannot put the origin back.
+/// A finished settle, or a prompt that is not a continuation or a resleeve brief, clears both.
 #[derive(Debug, Default)]
 pub struct EnvoyTurn {
     pub origin: Option<String>,
@@ -296,7 +298,8 @@ impl Hub {
     }
 
     /// The `from` label a harness sees on a user message: owner, envoy, agent:<name>, or
-    /// mail:<name> from a sleeve.
+    /// mail:<name> from a sleeve. A resleeve brief is an effect, not a message, so it is
+    /// labeled owner. A continuation has no `ga:` name and uses the turn's recorded agent.
     pub fn from_label(state: &State, to: SleeveId, request_id: &str) -> String {
         let party = state
             .sleeve(to)

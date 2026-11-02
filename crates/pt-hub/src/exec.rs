@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use pt_core::{
     Ask, Choice, EffectId, EffectKind, EffectState, EventKind, ExitCause, Gen, Harness, Intent,
-    Layout, Life, Obs, ProbeResult, Proc, Sleeve, SleeveId, Target, TurnEnd,
+    Layout, Life, Obs, Party, ProbeResult, Proc, Sleeve, SleeveId, Target, TurnEnd,
 };
 use pt_drivers::{Ack, AckKind, Decision, Entry, ErrorClass, Session, Stop};
 use pt_json::obj;
@@ -958,6 +958,19 @@ impl SleeveExec {
             ("PROTECTORATE_SLEEVE".into(), s.name.clone()),
             ("PATH".into(), tools.path),
         ];
+        if let Some(name) = s
+            .parent
+            .and_then(|p| view.state.sleeve(p))
+            .map(|p| p.name.clone())
+        {
+            sb.env.push(("PROTECTORATE_PARENT".into(), name));
+        }
+        sb.env
+            .push(("PROTECTORATE_ENVOY".into(), crate::hub::ENVOY.into()));
+        sb.env.push((
+            "PROTECTORATE_MAIL".into(),
+            "protectorate sleeve send <name> <text>".into(),
+        ));
         sb.env.extend(tools.env);
         sb.env.extend(logins.env);
         let prefix = sb.command().map_err(|e| e.to_string())?;
@@ -1070,11 +1083,19 @@ impl SleeveExec {
         }
         let from = Hub::from_label(&view.state, self.id, p.request_id);
         if Hub::envoy_id(&view.state) == Some(self.id) {
-            self.note_envoy_origin(&from, p.steer.is_some(), p.request_id);
+            self.note_envoy_origin(view, p.request_id, &from, p.steer.is_some());
         }
+        let noted = self.mail_note(view, p.request_id, p.steer.is_some());
+        let owned;
+        let text = if let Some(note) = &noted {
+            owned = format!("{note}{}", p.text);
+            owned.as_str()
+        } else {
+            p.text
+        };
         let sent = match p.steer {
-            Some(turn) => session.steer(p.request_id, &from, p.text, turn),
-            None => session.send_user(p.request_id, &from, p.text),
+            Some(turn) => session.steer(p.request_id, &from, text, turn),
+            None => session.send_user(p.request_id, &from, text),
         };
         match sent {
             Ok(()) => {}
@@ -1093,19 +1114,62 @@ impl SleeveExec {
         }
     }
 
+    /// The first prompt of a new sleeve names the mail variables. Envoy already has them in
+    /// its instructions, and a resleeve brief repeats them.
+    fn mail_note(&self, view: &View, request_id: &str, steer: bool) -> Option<String> {
+        if steer || request_id.starts_with("resleeve:") {
+            return None;
+        }
+        let s = view.state.sleeve(self.id)?;
+        if s.turned || Hub::envoy_id(&view.state) == Some(self.id) {
+            return None;
+        }
+        let envoy = crate::hub::ENVOY;
+        let parent = s
+            .parent
+            .and_then(|p| view.state.sleeve(p))
+            .map(|p| p.name.as_str());
+        Some(match parent {
+            Some(name) => format!(
+                "Mail your parent ({name}, $PROTECTORATE_PARENT) or Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`).\n\n"
+            ),
+            None => format!(
+                "Mail Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`).\n\n"
+            ),
+        })
+    }
+
     /// D9: records who started Envoy's next turn before its prompt is written. A prompt starts
-    /// a new turn; a steer from an agent taints the running one. A continuation keeps the
-    /// spawn count already used in the turn it resumes.
-    fn note_envoy_origin(&self, from: &str, steer: bool, request_id: &str) {
-        let agent = from.starts_with("agent:").then(|| from.to_string());
+    /// a new turn. A steer from an agent, or from a D9-marked sleeve, taints the running one.
+    /// Mail from an unmarked sleeve clears the origin. A continuation keeps the origin and the
+    /// spawn count of the turn it resumes, and restores a marked-mail or agent origin after a crash.
+    /// An Envoy resleeve brief is sent as the owner, so it does not replace the origin. The exit
+    /// and a quota or auth settle leave the origin in place; this prompt must not clear it.
+    fn note_envoy_origin(&self, view: &View, request_id: &str, from: &str, steer: bool) {
+        let marked = view
+            .state
+            .sleeve(self.id)
+            .and_then(|s| s.messages.get(request_id))
+            .is_some_and(|m| match m.from {
+                Party::Sleeve(id) => view.state.sleeve(id).is_some_and(|s| s.d9),
+                _ => false,
+            });
+        let origin = (from.starts_with("agent:") || marked).then(|| from.to_string());
         let mut t = crate::transcript::lock(&self.hub.envoy_turn);
+        // A resleeve brief has no message, so `from` is owner and `origin` is None. Keeping
+        // the turn means leaving whatever the exit left, not writing that owner label in.
+        let resumed = request_id.starts_with("continue:") || request_id.starts_with("resleeve:");
         if !steer {
-            t.origin = agent;
-            if !request_id.starts_with("continue:") {
+            if resumed {
+                if origin.is_some() {
+                    t.origin = origin;
+                }
+            } else {
+                t.origin = origin;
                 t.spawns = 0;
             }
-        } else if agent.is_some() {
-            t.origin = agent;
+        } else if origin.is_some() {
+            t.origin = origin;
         }
         debug!("envoy turn origin: {:?}", t.origin);
     }
@@ -1427,6 +1491,9 @@ impl Pump {
         self.prompt_reports(hub, &entry);
         let before = self.prev_error.take();
         let mut obs = Vec::new();
+        // A finished settle ends the D9 turn. A usage limit or a rejected login resleeves,
+        // and the brief is sent as the owner, so clearing here would drop the origin for good.
+        let mut clear_envoy_turn = false;
         match &entry {
             Entry::SessionInfo { native_id, .. } => {
                 self.ready = true;
@@ -1483,6 +1550,7 @@ impl Pump {
                     end = TurnEnd::UsageLimit;
                 }
                 self.last_error = None;
+                clear_envoy_turn = !matches!(end, TurnEnd::UsageLimit | TurnEnd::AuthFailed);
                 obs.push(Obs::TurnSettled { end });
             }
             Entry::Error { class, text } => {
@@ -1510,17 +1578,10 @@ impl Pump {
             Entry::UserMessage { .. } | Entry::PromptAck { .. } | Entry::Notice { .. } => {}
         }
         let exited = matches!(entry, Entry::Exited { .. });
-        if (exited || matches!(entry, Entry::TurnSettled { .. }))
-            && Hub::envoy_id(&hub.view().state) == Some(id)
-        {
-            let mut t = crate::transcript::lock(&hub.envoy_turn);
-            if exited {
-                // The process died. The continuation is this same turn, so the spawn
-                // count stays until a real settle or the next prompt.
-                t.origin = None;
-            } else {
-                *t = Default::default();
-            }
+        // An exit keeps the origin and the count. The continuation replaces the origin;
+        // a resleeve brief is the owner's prompt and must not have to.
+        if clear_envoy_turn && Hub::envoy_id(&hub.view().state) == Some(id) {
+            *crate::transcript::lock(&hub.envoy_turn) = Default::default();
         }
         let note = Note {
             harness: matches!(entry, Entry::SessionInfo { .. }).then_some(harness),
