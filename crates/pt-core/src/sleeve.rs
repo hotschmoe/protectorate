@@ -757,7 +757,7 @@ impl Core<'_> {
         let pane = s.target.mode == Mode::Pane;
         let steers = s.target.harness.steers() && s.life == Life::Running;
         let working = s.proc == Proc::Up
-            && matches!(s.activity, Activity::Working | Activity::Blocked { .. })
+            && s.activity == Activity::Working
             && s.turn.is_some()
             && !self.frozen(to);
         let delivering =
