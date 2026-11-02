@@ -3,8 +3,6 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::ops::Index;
 
-use crate::write;
-
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum Value {
     #[default]
@@ -161,11 +159,6 @@ impl Value {
             _ => None,
         }
     }
-
-    /// Appends compact JSON to `out`.
-    pub fn write(&self, out: &mut String) {
-        let _ = write::value(self, out);
-    }
 }
 
 fn unescape_token(raw: &str) -> Option<Cow<'_, str>> {
@@ -208,13 +201,6 @@ impl Index<usize> for Value {
     type Output = Value;
     fn index(&self, index: usize) -> &Value {
         self.at(index).unwrap_or(&NULL)
-    }
-}
-
-/// Compact JSON, the same bytes as [`Value::write`].
-impl fmt::Display for Value {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write::value(self, f)
     }
 }
 

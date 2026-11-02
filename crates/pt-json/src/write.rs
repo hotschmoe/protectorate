@@ -3,7 +3,21 @@ use std::fmt::{self, Write};
 use crate::Value;
 use crate::parse::scan;
 
-pub(crate) fn value<W: Write>(v: &Value, w: &mut W) -> fmt::Result {
+impl Value {
+    /// Appends compact JSON to `out`.
+    pub fn write(&self, out: &mut String) {
+        let _ = value(self, out);
+    }
+}
+
+/// Compact JSON, the same bytes as [`Value::write`].
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        value(self, f)
+    }
+}
+
+fn value<W: Write>(v: &Value, w: &mut W) -> fmt::Result {
     match v {
         Value::Null => w.write_str("null"),
         Value::Bool(true) => w.write_str("true"),
