@@ -103,6 +103,17 @@ CLI on the hub machine (section 3.1).
   to protected branches), so it does not rest on Envoy's judgment alone (principle 10).
 - **The CLI is the API.** Every CLI command maps onto one hub API method. Envoy and shell-capable
   sleeves use the CLI.
+- **Who may mail whom.** A sleeve may send to itself, its children, its parent, and Envoy, and to
+  nothing else: not a sibling, not another tree, and not an owner-only method. The command is
+  `protectorate sleeve send <name> <text>` (`envoy` is Envoy's name; the parent's name is
+  `$PROTECTORATE_PARENT`). `envoy send` is the vendor-agent door and refuses a sleeve. Mail is an
+  ordinary `Send` (queue or steer; a pane gets `MailDeliver`) with the same marking as any sleeve
+  message: the text starts with `[from sleeve <name>]` and the request id is `mail:<id>:...`.
+  One sleeve may land at most 8 messages on Envoy in 10 minutes. The core journals those times on
+  the sender and refuses the rest until the window moves, so one sleeve cannot start Envoy turns
+  without a bound. Mail to a parent is not counted. A sleeve's message does not start a D9 turn.
+  D9 still applies only when a vendor agent started Envoy's turn. `Wait --until report` returns
+  when the waited-on sleeve sends to its parent or to Envoy after the wait started.
 - The web build is embedded in the hub binary and served from the same origin.
 
 ### 3.2 Network
@@ -153,7 +164,9 @@ One Linux machine, one `protectorate` process plus its headscale and member chil
   raw byte ring and a VT screen model. Antigravity, which is pane-only (D13), is the one exception.
 - **Events and waits:** `Wait(until idle|done|blocked|report|ended|parked)` reads the state channel.
 - **Quota:** read-only readers per subscription, which feed dispatch.
-- **Mail:** delivery, re-delivery and escalation.
+- **Mail:** delivery, re-delivery and escalation. Who may send is in section 3.1. `Wait --until
+  report` is the upward edge: the waited-on sleeve mailed its parent or Envoy after the wait
+  started.
 - **Approvals:** routing and timeouts.
 - **History:** an index over native session logs (section 3.7).
 - **Snapshots and backups**, and **audit**.
