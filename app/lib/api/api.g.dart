@@ -3180,7 +3180,7 @@ final class JobArtifactData {
 }
 
 final class JobList {
-  const JobList({this.jobs = const <Job>[], this.scopedToCaller = false});
+  const JobList({this.jobs = const <Job>[], required this.scopedToCaller});
 
   factory JobList.fromJson(Object? json) {
     final j = _object(json, 'JobList');
@@ -3190,11 +3190,7 @@ final class JobList {
         const <Job>[],
         (e0) => _list(e0, 'JobList.jobs', Job.fromJson),
       ),
-      scopedToCaller: _or(
-        j['scoped_to_caller'],
-        false,
-        (e0) => _bool(e0, 'JobList.scoped_to_caller'),
-      ),
+      scopedToCaller: _bool(j['scoped_to_caller'], 'JobList.scoped_to_caller'),
     );
   }
 
