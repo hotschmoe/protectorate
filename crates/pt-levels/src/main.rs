@@ -6,7 +6,7 @@
 //! Usage: pt-levels [--print] <crates dir>. `--print` also lists each parent's modules by level,
 //! 0 being the modules that use no sibling.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -202,6 +202,10 @@ struct Module {
     file: usize,
     /// `pub use` names, mapped to the absolute path they stand for.
     reexports: BTreeMap<String, Vec<String>>,
+    /// Modules re-exported whole with `pub use x::*`.
+    globs: Vec<Vec<String>>,
+    /// Names of the items defined in this module.
+    items: BTreeSet<String>,
 }
 
 struct Use {
@@ -234,6 +238,8 @@ impl Tree {
             children: BTreeMap::new(),
             file: if inline { self.modules[parent].file } else { m },
             reexports: BTreeMap::new(),
+            globs: Vec::new(),
+            items: BTreeSet::new(),
         });
         self.modules[parent].children.insert(name.to_string(), m);
         m
@@ -274,6 +280,14 @@ impl Tree {
                 && let Some(&def) = self.macros.get(seg)
             {
                 return (def, None);
+            }
+            if depth < 8 {
+                for glob in &self.modules[m].globs {
+                    let (g, rest) = self.resolve(glob, depth + 1);
+                    if rest.is_none() && self.modules[g].items.contains(seg) {
+                        return (g, Some(seg.clone()));
+                    }
+                }
             }
             return (m, Some(seg.clone()));
         }
@@ -316,6 +330,21 @@ fn build(tree: &mut Tree, m: usize, file: &Path, child_dir: &Path) -> Result<(),
                         i += 3;
                         continue;
                     }
+                }
+            }
+            Tok::Ident(k)
+                if matches!(
+                    k.as_str(),
+                    "struct" | "enum" | "union" | "trait" | "type" | "fn" | "const" | "static"
+                ) =>
+            {
+                if let Some(Tok::Ident(name)) = toks.get(i + 1).map(|t| &t.tok) {
+                    tree.modules[cur].items.insert(name.clone());
+                }
+            }
+            Tok::Ident(k) if k == "macro_rules" => {
+                if let Some(Tok::Ident(name)) = toks.get(i + 2).map(|t| &t.tok) {
+                    tree.modules[cur].items.insert(name.clone());
                 }
             }
             Tok::Open => depth += 1,
@@ -466,7 +495,9 @@ fn collect(tree: &mut Tree) -> Result<(), String> {
                         let Some(abs) = absolute(tree, cur, &segs) else {
                             continue;
                         };
-                        if public && name != "*" {
+                        if public && name == "*" {
+                            tree.modules[cur].globs.push(abs[..abs.len() - 1].to_vec());
+                        } else if public {
                             tree.modules[cur].reexports.insert(name, abs.clone());
                         }
                         tree.uses.push(Use {
@@ -759,6 +790,8 @@ fn run(dir: &Path, print: bool) -> Result<(Vec<String>, usize), String> {
                     children: BTreeMap::new(),
                     file: 0,
                     reexports: BTreeMap::new(),
+                    globs: Vec::new(),
+                    items: BTreeSet::new(),
                 }],
                 files: Vec::new(),
                 uses: Vec::new(),
