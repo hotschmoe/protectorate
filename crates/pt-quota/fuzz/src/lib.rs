@@ -73,12 +73,18 @@ pub fn quota(b: &mut Bytes, now_ms: u64) -> Quota {
         .map(|_| QuotaWindow {
             label: LABELS[b.below(LABELS.len())].to_string(),
             used_pct: pct(b),
-            resets_at_ms: match b.below(4) {
+            resets_at_ms: match b.below(5) {
                 0 => None,
-                1 => Some(EpochMs(now_ms.saturating_sub(u64::from(b.u32())))),
+                // A stamp at the epoch is "no reset"; the percent still counts.
+                1 => Some(EpochMs(0)),
+                2 => Some(EpochMs(now_ms.saturating_sub(u64::from(b.u32())))),
                 _ => Some(EpochMs(now_ms.saturating_add(u64::from(b.u32()) * 1000))),
             },
-            length_ms: None,
+            length_ms: match b.below(4) {
+                0 => None,
+                1 => Some(0),
+                _ => Some(u64::from(b.u32()).saturating_mul(1000)),
+            },
         })
         .collect();
     Quota {

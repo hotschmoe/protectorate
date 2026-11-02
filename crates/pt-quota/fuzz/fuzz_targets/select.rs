@@ -1,7 +1,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use pt_api::{Harness, Mode, Quota, Subscription};
+use pt_api::{Harness, Mode, Quota, QuotaWindow, Subscription};
 use pt_quota::{
     Candidate, Health, State, TaskSize, Thresholds, derive, select_target, select_with_fallback,
     spare_trigger, state,
@@ -41,6 +41,29 @@ fuzz_target!(|data: &[u8]| {
         }
     }
     let quotas: Vec<_> = (0..b.below(8)).map(|_| quota(&mut b, now)).collect();
+
+    // SPEC 8, stated on the outputs: an epoch reset is not a reset, and a stored length of 0
+    // is not a length. Clearing either leaves the pick unchanged.
+    let same_pick = |altered: &[Quota]| {
+        assert_eq!(
+            select_target(now, size, &allow, mode, &exclude, &quotas, &health),
+            select_target(now, size, &allow, mode, &exclude, altered, &health)
+        );
+        assert_eq!(
+            select_with_fallback(now, size, &allow, &quotas),
+            select_with_fallback(now, size, &allow, altered)
+        );
+    };
+    same_pick(&map_windows(&quotas, |w| {
+        if w.resets_at_ms.is_some_and(|r| r.0 == 0) {
+            w.resets_at_ms = None;
+        }
+    }));
+    same_pick(&map_windows(&quotas, |w| {
+        if w.length_ms == Some(0) {
+            w.length_ms = None;
+        }
+    }));
 
     let eligible = |h: Harness| {
         allow.iter().any(|c| c.harness == h)
@@ -216,10 +239,12 @@ fuzz_target!(|data: &[u8]| {
     }
 });
 
-/// SPEC 8. Account windows (`5h`, bare `wk`, and the other subscriptions' one window) always
-/// apply. `wk <name>` applies only when the model name contains `<name>`.
+/// SPEC 8. An account window always applies: anything that is not `wk` plus a name, including
+/// bare `wk` and a `wk` with no name. A name is the letters and digits that follow `wk`. Shorter
+/// than three letters it is not a model cap. Otherwise it applies only when the candidate's
+/// model contains that name (`opus` applies to `claude-opus-4-6`, not to Sonnet).
 fn applies(label: &str, model: &str) -> bool {
-    let Some(name) = label.strip_prefix("wk ") else {
+    let Some(rest) = label.strip_prefix("wk ") else {
         return true;
     };
     let fold = |s: &str| -> String {
@@ -228,8 +253,21 @@ fn applies(label: &str, model: &str) -> bool {
             .flat_map(|c| c.to_lowercase())
             .collect()
     };
-    let name = fold(name);
-    !name.is_empty() && name.len() >= 3 && fold(model).contains(&name)
+    let name = fold(rest);
+    if name.is_empty() {
+        return true;
+    }
+    name.len() >= 3 && fold(model).contains(&name)
+}
+
+fn map_windows(quotas: &[Quota], mut f: impl FnMut(&mut QuotaWindow)) -> Vec<Quota> {
+    let mut out = quotas.to_vec();
+    for q in &mut out {
+        for w in &mut q.windows {
+            f(w);
+        }
+    }
+    out
 }
 
 fn only_other_scopes(q: &Quota, model: &str) -> bool {
