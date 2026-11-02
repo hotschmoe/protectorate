@@ -180,6 +180,15 @@ impl SandboxSpec {
         if let Some(rt) = &runtime {
             env.push(("XDG_RUNTIME_DIR".into(), path_arg(rt)?));
         }
+        // A quota does not change the core count tools detect, so each would start a worker per
+        // host core and the scope would run out of memory.
+        if self.scope && self.limits.cpu_quota_percent > 0 {
+            let jobs = (self.limits.cpu_quota_percent / 100).max(1).to_string();
+            env.push(("CARGO_BUILD_JOBS".into(), jobs.clone()));
+            env.push(("GOMAXPROCS".into(), jobs.clone()));
+            env.push(("GOFLAGS".into(), format!("-p={jobs}")));
+            env.push(("FLUTTER_TEST_CONCURRENCY".into(), jobs));
+        }
         env.extend(self.env.iter().cloned());
         for (k, v) in env {
             a.extend(["--setenv".into(), k, v]);

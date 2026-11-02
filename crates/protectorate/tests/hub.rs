@@ -818,6 +818,14 @@ fn sandbox_reaches_only_its_own() {
     }
     std::fs::create_dir_all(owner.join(".claude")).unwrap();
     std::fs::write(owner.join(".claude/.credentials.json"), "OWNER-CLAUDE").unwrap();
+    // The owner's toolchain dirs and git identity, which a sleeve's private home must not lose.
+    std::fs::create_dir_all(owner.join(".cargo")).unwrap();
+    std::fs::create_dir_all(owner.join(".rustup")).unwrap();
+    std::fs::write(
+        owner.join(".gitconfig"),
+        "[user]\n\tname = Owner Name\n\temail = owner@example.test\n",
+    )
+    .unwrap();
     let (repo, other) = (temp_repo("sbx"), temp_repo("sbx-other"));
     // Stands in for a Claude Code that reads its login, refreshes it and fails.
     let fake_claude = dir.join("claude");
@@ -830,6 +838,7 @@ logins="${{PROTECTORATE_SOCKET%%/run/*}}/logins"
   cat "$CLAUDE_SECURESTORAGE_CONFIG_DIR/.credentials.json" 2>/dev/null; echo
   [ -e '{owner}/.claude/.credentials.json' ] && echo owner_login=visible || echo owner_login=hidden
   [ -r "$logins/.pi/agent/models.json" ] && echo pi_login=visible || echo pi_login=hidden
+  echo "codex_login=$(cat "$HOME/.codex/auth.json" 2>/dev/null)"
 }} > "$HOME/claude-probe.txt"
 printf REFRESHED > "$CLAUDE_SECURESTORAGE_CONFIG_DIR/.credentials.json"
 exit 1"#,
@@ -854,10 +863,16 @@ exit 1"#,
     touch "$run/sleeves/probe" 2>/dev/null && echo sleeves=writable || echo sleeves=readonly
     [ -e "$HOME/.claude/.credentials.json" ] && echo claude_login=visible || echo claude_login=hidden
     [ -e "${{run%/run}}/logins/.claude/.credentials.json" ] && echo hub_claude=visible || echo hub_claude=hidden
+    echo "codex_login=$(cat "$HOME/.codex/auth.json" 2>/dev/null)"
+    echo "claude_store=$CLAUDE_SECURESTORAGE_CONFIG_DIR"
+    bash -lc 'command -v protectorate' >/dev/null 2>&1 && echo login_shell_cli=ok || echo login_shell_cli=lost
+    echo "login_shell_cargo_home=$(bash -lc 'echo $CARGO_HOME')"
+    echo "login_shell_rustup_home=$(bash -lc 'echo $RUSTUP_HOME')"
     [ -L "$HOME/.pi/agent/models.json" ] && [ -r "$HOME/.pi/agent/models.json" ] && echo pi_login=shared || echo pi_login=missing
     [ -r '{other}/notes.txt' ] && echo other_root=visible || echo other_root=hidden
-    git -c user.name=probe -c user.email=probe@localhost commit -q --allow-empty \
-      -m "probe $PROTECTORATE_SLEEVE" >/dev/null 2>&1 && echo commit=ok || echo commit=failed
+    git commit -q --allow-empty -m "probe $PROTECTORATE_SLEEVE" >/dev/null 2>&1 \
+      && echo commit=ok || echo commit=failed
+    echo "committer=$(git log -1 --format='%cn <%ce>')"
   }} < /dev/null > "$HOME/probe.txt"
 fi
 exec '{real_pi}' "$@""#,
@@ -873,7 +888,11 @@ exec '{real_pi}' "$@""#,
             ("claude_program", fake_claude.to_str().unwrap().into()),
         ],
         &[],
-        &[("HOME", owner.to_str().unwrap())],
+        &[
+            ("HOME", owner.to_str().unwrap()),
+            ("CARGO_HOME", owner.join(".cargo").to_str().unwrap()),
+            ("RUSTUP_HOME", owner.join(".rustup").to_str().unwrap()),
+        ],
     );
     std::fs::create_dir_all(hub.home.join("logins/.claude")).unwrap();
     std::fs::write(
@@ -881,6 +900,8 @@ exec '{real_pi}' "$@""#,
         "HUB-CLAUDE",
     )
     .unwrap();
+    std::fs::create_dir_all(hub.home.join("logins/.codex")).unwrap();
+    std::fs::write(hub.home.join("logins/.codex/auth.json"), "HUB-CODEX").unwrap();
     hub.cli(&["doctor", "--refresh"]).ok();
     hub.spawn_pi("other", &other);
     let s = hub
@@ -908,10 +929,13 @@ exec '{real_pi}' "$@""#,
         "bin=readonly",
         "sleeves=readonly",
         "claude_login=hidden",
-        "hub_claude=hidden",
+        "hub_claude=visible",
+        "codex_login=HUB-CODEX",
         "pi_login=shared",
+        "login_shell_cli=ok",
         "other_root=hidden",
         "commit=ok",
+        "committer=Owner Name <owner@example.test>",
     ] {
         assert!(probe.lines().any(|l| l == want), "want {want}:\n{probe}");
     }
@@ -933,7 +957,11 @@ exec '{real_pi}' "$@""#,
     let kid_probe =
         std::fs::read_to_string(hub.home.join(format!("sleeves/{kid_id}/home/probe.txt")))
             .expect("the child's probe ran");
-    for want in ["other_root=hidden", "commit=ok"] {
+    for want in [
+        "other_root=hidden",
+        "commit=ok",
+        "committer=Owner Name <owner@example.test>",
+    ] {
         assert!(
             kid_probe.lines().any(|l| l == want),
             "want {want}:\n{kid_probe}"
@@ -946,8 +974,14 @@ exec '{real_pi}' "$@""#,
     );
     assert!(
         !home.join(".claude/.credentials.json").exists(),
-        "no Claude login is placed in a Pi sleeve's home"
+        "Claude's login is reached through its store dir, not a file in the home"
     );
+    for (key, dir) in [("cargo_home", ".cargo"), ("rustup_home", ".rustup")] {
+        let want = format!("login_shell_{key}={}", owner.join(dir).display());
+        assert!(probe.lines().any(|l| l == want), "want {want}:\n{probe}");
+    }
+    let store = format!("claude_store={}", hub.home.join("logins/.claude").display());
+    assert!(probe.lines().any(|l| l == store), "want {store}:\n{probe}");
 
     // A file an earlier hub left where a shared login belongs is replaced by the link at the
     // next launch (after a turn, so the native session exists to resume).
@@ -966,8 +1000,8 @@ exec '{real_pi}' "$@""#,
         "the copy became the shared login again"
     );
 
-    // A Claude sleeve reads the hub's login, not the owner's, cannot see Pi's, and its refresh
-    // lands in the one shared login.
+    // A Claude sleeve reads the hub's login, not the owner's, reaches the other harnesses' shared
+    // logins too, and its refresh lands in the one shared login.
     let c = hub
         .cli(&[
             "--json",
@@ -990,7 +1024,12 @@ exec '{real_pi}' "$@""#,
     let c_probe = eventually("the claude probe", Duration::from_secs(60), || {
         std::fs::read_to_string(&c_probe).ok()
     });
-    for want in ["HUB-CLAUDE", "owner_login=hidden", "pi_login=hidden"] {
+    for want in [
+        "HUB-CLAUDE",
+        "owner_login=hidden",
+        "pi_login=visible",
+        "codex_login=HUB-CODEX",
+    ] {
         assert!(
             c_probe.lines().any(|l| l == want),
             "want {want}:\n{c_probe}"

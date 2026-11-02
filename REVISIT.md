@@ -903,3 +903,21 @@ Each entry: where, what was done, what right looks like.
   fails is put back in headscale, a removal is finished by retrying it by id. Nothing compares
   the two on its own. Right: a doctor check that reports a record headscale does not list, or a
   name that differs.
+- **Sleeves have no systemd user bus** (`pt-sandbox`): the runtime dir is a private empty tmpfs on
+  purpose, so a project test that needs `systemd-run --user` fails inside a sleeve. Right: decide
+  whether a sleeve gets its own user manager or a scope-local one, if such tests matter.
+- **Deep target dirs overflow the unix socket path limit** (sleeves, e2e tests): a sleeve's
+  workspace plus a test's own socket under `target/` can pass `sun_path` (107 bytes), so sleeves
+  pick short dirs by hand. Right: a short per-sleeve `CARGO_TARGET_DIR` or a socket dir under
+  `/tmp`, once a second case shows which.
+- **Sleeve toolchain env is guessed from the owner's home** (`pt-hub` `toolchain.rs`): PATH tail,
+  cache dirs and the Flutter SDK come from conventional locations, the hub's env and
+  `sleeve_path`; a cargo `rustup` auto-install, `cargo install` and a second Flutter SDK are
+  unsupported (read-only). The shared registry, Go and pub caches are one blast radius for all
+  sleeves. Right: per-sleeve overlay caches seeded from the owner's, if a sleeve damages one.
+- **Sleeve git identity is seeded once** (`toolchain.rs`): `~/.gitconfig` is written when absent,
+  so a changed owner identity reaches only new sleeves. Right: rewrite a file that still carries
+  the seeded content.
+- **Doctor ignores API-key env vars** (`pt-doctor`): `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and
+  `XAI_API_KEY` no longer count as a login, since sleeves never see them. Right: a deliberate
+  API-key login per harness in `<home>/logins/` if API billing is wanted for a sleeve.

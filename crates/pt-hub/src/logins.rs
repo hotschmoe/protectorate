@@ -1,9 +1,10 @@
 //! The hub's own harness logins, `<home>/logins/`, laid out like a home so the quota readers and
 //! doctor find each file where the harness keeps it. `protectorate harness login` fills it with
-//! the vendor's own login command. Every sleeve of a harness shares that one login: its directory
-//! is bound read-write into the sandbox and the sleeve's home points at it, so a token refresh by
-//! one sleeve reaches all of them. A copy per sleeve would fork the refresh-token chain, and the
-//! first refresh would log every other copy out. The owner's own logins are never used.
+//! the vendor's own login command. Every sleeve shares every harness's one login, so a sleeve on
+//! any harness can run the others' CLIs: each directory is bound read-write into the sandbox and
+//! the sleeve's home points at it, so a token refresh by one sleeve reaches all of them. A copy
+//! per sleeve would fork the refresh-token chain, and the first refresh would log every other
+//! copy out. The owner's own logins are never used.
 
 use std::fs;
 use std::io;
@@ -61,16 +62,43 @@ fn private_dir(p: &Path) -> io::Result<()> {
     fs::set_permissions(p, fs::Permissions::from_mode(0o700))
 }
 
-/// What a launch on a harness adds to its sandbox.
+/// What a launch adds to its sandbox.
+#[derive(Default)]
 pub struct Shared {
-    /// The store directory, bound read-write.
-    pub dir: PathBuf,
+    /// The store directories, bound read-write.
+    pub dirs: Vec<PathBuf>,
     pub env: Vec<(String, String)>,
 }
 
-/// Prepares sleeve home `home` for a launch on `h`: links its login files to the store and seeds
-/// the settings it lacks. None for a harness with no login here.
-pub fn prepare(store: &Path, home: &Path, h: Harness) -> io::Result<Option<Shared>> {
+/// One harness per distinct store layout; the Pi kinds share one.
+const LOGIN_HARNESSES: [Harness; 4] = [
+    Harness::Claude,
+    Harness::Codex,
+    Harness::Grok,
+    Harness::PiVendor,
+];
+
+/// Prepares sleeve home `home` with every harness's login, so a sleeve on any harness can run
+/// the others' CLIs.
+pub fn prepare_all(store: &Path, home: &Path) -> io::Result<Shared> {
+    let mut all = Shared::default();
+    for h in LOGIN_HARNESSES {
+        if let Some(one) = prepare(store, home, h)? {
+            all.dirs.push(one.dir);
+            all.env.extend(one.env);
+        }
+    }
+    Ok(all)
+}
+
+struct One {
+    dir: PathBuf,
+    env: Vec<(String, String)>,
+}
+
+/// Links `h`'s login files in `home` to the store and seeds the settings it lacks. None for a
+/// harness with no login here.
+fn prepare(store: &Path, home: &Path, h: Harness) -> io::Result<Option<One>> {
     let Some(l) = layout(h) else {
         return Ok(None);
     };
@@ -105,7 +133,7 @@ pub fn prepare(store: &Path, home: &Path, h: Harness) -> io::Result<Option<Share
         )],
         _ => Vec::new(),
     };
-    Ok(Some(Shared { dir, env }))
+    Ok(Some(One { dir, env }))
 }
 
 /// `protectorate harness login <harness> [ARGS...]`: runs the vendor's own login into the store,

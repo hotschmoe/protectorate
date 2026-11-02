@@ -179,8 +179,9 @@ crash, every incarnation goes to Recovering and resumes natively.
   - user, mount, PID, IPC and UTS namespaces;
   - the host root bound read-only, with the workspace and a private home writable;
   - a sized `/tmp`;
-  - tmpfs masks over the hub's state, `~/.ssh` and the owner's own credentials; the running
-    harness's shared hub login (`<home>/logins/`) bound read-write;
+  - tmpfs masks over the hub's state, `~/.ssh` and the owner's own credentials; every
+    harness's shared hub login (`<home>/logins/`) and the owner's cargo registry, Go and pub
+    caches bound read-write;
   - a systemd scope per incarnation with limits and `cgroup.kill`, plus the orphan reaper.
 
   Cut from today's sandbox: the network namespace, the egress proxy, cache overlays, nested cgroup

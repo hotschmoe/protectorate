@@ -752,13 +752,16 @@ impl SleeveExec {
             .ok_or_else(|| format!("{} is not installed", wire::harness_wire(target.harness)))?;
         let home = hub.home.sleeve_home(s.id);
         fs::create_dir_all(&home).map_err(|e| format!("{}: {e}", home.display()))?;
-        let login =
-            crate::logins::prepare(&hub.home.logins(), &home, target.harness).map_err(|e| {
-                format!(
-                    "prepare the {} login: {e}",
-                    wire::harness_wire(target.harness)
-                )
-            })?;
+        let logins = crate::logins::prepare_all(&hub.home.logins(), &home)
+            .map_err(|e| format!("prepare the harness logins: {e}"))?;
+        let tools = crate::toolchain::prepare(
+            &hub.owner_home,
+            &home,
+            &hub.home.bin(),
+            &std::env::var("PATH").unwrap_or_default(),
+            &hub.config.sleeve_path,
+        )
+        .map_err(|e| format!("prepare the toolchain environment: {e}"))?;
         let work = workdir(&hub, s);
         let mut sb = pt_sandbox::SandboxSpec::new(&hub.scope_sleeve(s.id), g.0, work.clone(), home);
         sb.scope = hub.config.scopes;
@@ -783,11 +786,8 @@ impl SleeveExec {
             sb.ro_paths.push(real.clone());
             program = real;
         }
-        let mut login_env = Vec::new();
-        if let Some(shared) = login {
-            sb.rw_paths.push(shared.dir);
-            login_env = shared.env;
-        }
+        sb.rw_paths.extend(logins.dirs);
+        sb.rw_paths.extend(tools.rw);
         if s.layout == Layout::Worktree {
             let parent = s
                 .parent
@@ -797,7 +797,6 @@ impl SleeveExec {
                 .map_err(|e| e.to_string())?;
         }
         let token = hub.tokens.sleeve(s.id);
-        let path = std::env::var("PATH").unwrap_or_default();
         sb.env = vec![
             ("PROTECTORATE_TOKEN".into(), token),
             (
@@ -805,12 +804,10 @@ impl SleeveExec {
                 hub.home.sleeve_socket().to_string_lossy().into_owned(),
             ),
             ("PROTECTORATE_SLEEVE".into(), s.name.clone()),
-            (
-                "PATH".into(),
-                format!("{}:{path}", hub.home.bin().display()),
-            ),
+            ("PATH".into(), tools.path),
         ];
-        sb.env.extend(login_env);
+        sb.env.extend(tools.env);
+        sb.env.extend(logins.env);
         let prefix = sb.command().map_err(|e| e.to_string())?;
         let mut spec = pt_drivers::SpawnSpec::new(harness, program, work);
         spec.g = g.0;

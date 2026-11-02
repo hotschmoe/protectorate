@@ -226,7 +226,9 @@ login, the sandbox prerequisites (`bwrap`, `systemd-run --user`, linger), disk, 
 the embedded headscale and member. The result is cached in `<home>/doctor.json` and gates which
 harnesses dispatch and resleeve may use; a harness marked `NO` under ELIGIBLE is skipped. It runs
 at start, every 6 hours, and on `--refresh`. It checks that the hub's login files exist (below),
-not that they are valid. Nodes have no doctor yet.
+not that they are valid. A login is a file in that store only: `ANTHROPIC_API_KEY` and the like in
+the hub's environment do not count, because the sandbox clears the environment and a sleeve never
+sees them. Nodes have no doctor yet.
 
 ## Harness logins
 
@@ -235,9 +237,10 @@ harness login <claude|codex|grok|pi> [-- ARGS...]
 ```
 
 Sleeves never use your own logins. The hub keeps one login per harness in `<home>/logins/`, and
-every sleeve of that harness shares it: its directory is bound read-write into the sandbox, so a
-token one sleeve refreshes reaches the others (a copy per sleeve would fork the refresh token, and
-the first refresh would log the other copies out). `harness login` runs on the hub machine, on
+every sleeve shares all of them, whatever its own harness (a Claude sleeve can run `codex exec`):
+each directory is bound read-write into the sandbox, so a token one sleeve refreshes reaches the
+others (a copy per sleeve would fork the refresh token, and the first refresh would log the other
+copies out). `harness login` runs on the hub machine, on
 your terminal, without the API:
 
 - `claude`, `codex`, `grok`: the vendor's own login command (`claude auth login`, `codex login`,
@@ -249,6 +252,29 @@ your terminal, without the API:
   Run it again after you change your Pi models.
 
 Then `doctor --refresh`. Doctor names the command for a harness with no login.
+
+## Sleeve toolchains
+
+A sleeve builds with your toolchains, from a private home and a cleared environment:
+
+- `PATH` is the hub's CLI dir, the hub's own `PATH`, then `~/.cargo/bin`, `~/go/bin`,
+  `/usr/local/go/bin` and the dirs in `config.json` `sleeve_path`, where they exist. The hub
+  service often has a thinner `PATH` than your shell: list Go and Flutter there, for example
+  `"sleeve_path": ["/home/you/.local/go/bin", "/home/you/development/flutter/bin"]`. A seeded
+  `~/.profile` restores it in `bash -lc`, which otherwise resets it.
+- Rust: `RUSTUP_HOME` and `CARGO_HOME` are yours, read-only except cargo's `registry` and `git`.
+  A toolchain a project asks for that you have not installed fails; `rustup` cannot install.
+- Go (`GOMODCACHE`, `GOCACHE`) and Dart (`PUB_CACHE`) caches are yours, read-write. The Flutter SDK
+  is read-only except its `bin/cache`.
+- Builds start warm and every sleeve fills the same caches. The cost is that a sleeve can damage
+  them, and a corrupt cache hurts all of them; the tools lock for concurrent use.
+- `CARGO_BUILD_JOBS`, `GOMAXPROCS`, `GOFLAGS=-p=N` and `FLUTTER_TEST_CONCURRENCY` follow the
+  scope's CPU quota (`N` = quota / 100), since tools count host cores and a 4 GiB scope runs out
+  of memory otherwise.
+- git commits as your global `user.name` and `user.email`, copied into the sleeve's `~/.gitconfig`
+  when it has none; later changes to yours do not reach a sleeve that already has one.
+
+Not available: the systemd user bus (`systemd-run --user` in a test) and long unix socket paths.
 
 ## Updates and rollback
 

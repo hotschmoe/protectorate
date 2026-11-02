@@ -31,6 +31,7 @@ mod rule;
 mod select;
 mod serve;
 mod stream;
+mod toolchain;
 mod transcript;
 mod update;
 mod wire;

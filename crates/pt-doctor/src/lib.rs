@@ -64,7 +64,7 @@ record! {
         /// False for a harness whose login location is not known (antigravity).
         pub checked: bool,
         pub present: bool,
-        /// Where a login was found: home-relative file names or `env:NAME`. Never a value.
+        /// Where a login was found: home-relative file names. Never a value.
         pub found: Vec<String>,
     }
 
@@ -260,7 +260,6 @@ struct Spec {
     program: &'static str,
     update: &'static [&'static str],
     files: &'static [&'static str],
-    env: &'static [&'static str],
     checked: bool,
 }
 
@@ -270,7 +269,6 @@ const HARNESSES: &[Spec] = &[
         program: "claude",
         update: &["claude", "update"],
         files: &[".claude/.credentials.json"],
-        env: &["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
         checked: true,
     },
     Spec {
@@ -278,7 +276,6 @@ const HARNESSES: &[Spec] = &[
         program: "codex",
         update: &["codex", "update"],
         files: &[".codex/auth.json"],
-        env: &["OPENAI_API_KEY"],
         checked: true,
     },
     Spec {
@@ -286,7 +283,6 @@ const HARNESSES: &[Spec] = &[
         program: "grok",
         update: &["grok", "update"],
         files: &[".grok/auth.json"],
-        env: &["XAI_API_KEY"],
         checked: true,
     },
     Spec {
@@ -294,7 +290,6 @@ const HARNESSES: &[Spec] = &[
         program: "agy",
         update: &[],
         files: &[],
-        env: &[],
         checked: false,
     },
     Spec {
@@ -302,7 +297,6 @@ const HARNESSES: &[Spec] = &[
         program: "pi",
         update: &["pi", "update", "self"],
         files: &[".pi/agent/auth.json"],
-        env: &[],
         checked: true,
     },
     Spec {
@@ -310,7 +304,6 @@ const HARNESSES: &[Spec] = &[
         program: "pi",
         update: &["pi", "update", "self"],
         files: &[".pi/agent/models.json"],
-        env: &[],
         checked: true,
     },
     Spec {
@@ -318,7 +311,6 @@ const HARNESSES: &[Spec] = &[
         program: "pi",
         update: &["pi", "update", "self"],
         files: &[".pi/agent/auth.json"],
-        env: &[],
         checked: true,
     },
 ];
@@ -328,11 +320,6 @@ fn credentials(cfg: &Config, s: &Spec) -> Credentials {
     for f in s.files {
         if fs::metadata(cfg.home.join(f)).is_ok_and(|m| m.is_file() && m.len() > 0) {
             found.push(f.to_string());
-        }
-    }
-    for e in s.env {
-        if std::env::var_os(e).is_some_and(|v| !v.is_empty()) {
-            found.push(format!("env:{e}"));
         }
     }
     Credentials {

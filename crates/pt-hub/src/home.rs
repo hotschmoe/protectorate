@@ -222,6 +222,10 @@ pt_json::record! {
         /// Harnesses (`claude`, `codex`, `grok`) whose headless sleeves run supervised: each
         /// tool approval goes to the owner. Empty: every sleeve runs unsupervised.
         pub supervised: Vec<String> = Vec::new(),
+        /// Absolute dirs added to a sleeve's PATH when they exist and the hub's own PATH lacks
+        /// them, for toolchains the hub service does not see (Go, Flutter). `~/.cargo/bin` is
+        /// always considered.
+        pub sleeve_path: Vec<String> = Vec::new(),
         /// Run each incarnation in a systemd user scope (limits and cgroup.kill).
         pub scopes: bool = true,
         /// D9: sleeves Envoy may spawn in one turn an agent message started before each further

@@ -481,3 +481,20 @@ fn other_roots_are_masked_and_a_worktree_child_still_commits() {
     let refused = s.command().err().map(|e| e.to_string()).unwrap_or_default();
     assert!(refused.contains("overlaps the mask"), "{refused}");
 }
+
+/// A quota does not change the core count tools detect, so the sandbox sizes their worker pools
+/// to it; a caller's own value wins, and without a scope nothing is capped.
+#[test]
+fn build_jobs_follow_the_cpu_quota() {
+    let base = fixture("jobs");
+    let probe = "echo $CARGO_BUILD_JOBS $GOMAXPROCS $GOFLAGS $FLUTTER_TEST_CONCURRENCY";
+    let mut s = spec("jobs", &base);
+    s.limits.cpu_quota_percent = 250;
+    assert_eq!(stdout(&sh(&s, probe)), "2 2 -p=2 2");
+    s.limits.cpu_quota_percent = 50;
+    assert_eq!(stdout(&sh(&s, probe)), "1 1 -p=1 1");
+    s.env.push(("CARGO_BUILD_JOBS".into(), "7".into()));
+    assert_eq!(stdout(&sh(&s, probe)), "7 1 -p=1 1");
+    s.scope = false;
+    assert_eq!(stdout(&sh(&s, probe)), "7");
+}
