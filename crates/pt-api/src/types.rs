@@ -437,6 +437,8 @@ api_records! {
         pub started_at_ms: Option<EpochMs>,
         pub ended_at_ms: Option<EpochMs>,
         pub exit_code: Option<i64>,
+        /// Why the hub ended it when no node did, such as `node 4 was removed`.
+        pub error: Option<String>,
         /// Bytes of log the hub holds.
         pub log_bytes: u64 = 0,
         /// The node's directory the job ran in; absent means the node's own work dir.

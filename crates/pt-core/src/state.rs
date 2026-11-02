@@ -345,6 +345,8 @@ pub enum JobFailure {
     Invalid,
     Exit(i32),
     Artifact,
+    /// The node it was pinned to left the fleet before it ran.
+    NodeRemoved(NodeId),
 }
 
 impl State {

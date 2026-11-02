@@ -3,9 +3,11 @@
 //! reinstalled machine: `e2e-old` goes offline for good, the same machine came back as `e2e-new`,
 //! the owner removes the stale entry and renames the new one into the freed name. Along the way:
 //! name validation and collisions, refusing to remove an online node, queued jobs pinned to the
-//! removed node cancelled, a job queued by name that keeps to the node's id, the enrollment
-//! record failing to write after headscale changed (the rename is put back, the removal is
-//! finished by running it again), the event log, a removed node that cannot come back on its old
+//! removed node failing (by the scheduler on its own when the removal stopped short), a job
+//! queued by name that keeps to the node's id, digits-only names refused at join, approval and
+//! rename, the enrollment record failing to write after headscale changed (the rename is put
+//! back, the removal is finished by retrying it by id), a rename repeated after a crash
+//! repairing the record, the event log, a removed node that cannot come back on its old
 //! key, and everything surviving a hub restart, which reads headscale's own database again.
 //!
 //! Skips when the protectorate binary does not embed headscale and member, or when bwrap or
@@ -50,6 +52,17 @@ fn free_pair() -> u16 {
 /// `protectorate-node join`, the owner pasting its registration and approving it; the node id.
 fn join(hub: &Hub, node_bin: &Path, url: &str, name: &str, dir: &Path) -> String {
     fs::create_dir_all(dir).unwrap();
+    let digits = Command::new(node_bin)
+        .args(["join", url, "--name", "1234", "--state-dir"])
+        .arg(dir)
+        .output()
+        .unwrap();
+    assert!(!digits.status.success());
+    assert!(
+        String::from_utf8_lossy(&digits.stderr).contains("reads as a node id"),
+        "{}",
+        String::from_utf8_lossy(&digits.stderr)
+    );
     let mut join = Kill(
         Command::new(node_bin)
             .args(["join", url, "--name", name, "--state-dir"])
@@ -81,6 +94,8 @@ fn join(hub: &Hub, node_bin: &Path, url: &str, name: &str, dir: &Path) -> String
         .as_str()
         .unwrap()
         .to_string();
+    let r = hub.cli(&["node", "approve", &auth, "--name", "1234"]);
+    assert!(r.stderr.contains("reads as a node id"), "{}", r.stderr);
     let approved = hub.cli(&["--json", "node", "approve", &auth]).json();
     assert_eq!(approved["name"].as_str(), Some(name), "{approved}");
     let status = eventually("join to exit", Duration::from_secs(60), || {
@@ -312,34 +327,38 @@ fn owner_removes_a_stale_node_and_renames_its_successor() {
     );
 
     // The removal deletes the node in headscale, then the record cannot be dropped: the error
-    // says so, the node is gone from the list, and the next removal finishes the job.
+    // says so and names the id to retry with, and the node is gone from the list. The handler
+    // stopped before its jobs, as a crash there would: the scheduler fails the job pinned to the
+    // node headscale no longer lists on its own.
     let r = hub.cli(&["node", "rm", "e2e-old"]);
     assert_ne!(r.status, 0);
-    assert!(
-        r.stderr.contains("remove it again to finish"),
-        "{}",
-        r.stderr
-    );
+    let retry = format!("finish with: protectorate node rm {old}");
+    assert!(r.stderr.contains(&retry), "{}", r.stderr);
     assert!(listed(&hub, &old).is_none());
-    assert!(has_event(&hub, "alarm", "remove it again to finish"));
-    assert_eq!(job(&hub, &pinned)["state"].as_str(), Some("queued"));
+    assert!(has_event(&hub, "alarm", &retry));
+    let failed = wait_job(&hub, &pinned, &["failed"], 30);
+    let gone = format!("node {old} was removed");
+    assert_eq!(failed["error"].as_str(), Some(gone.as_str()), "{failed}");
+    assert!(
+        events(&hub).iter().any(|e| e["text"].as_str()
+            == Some(format!("job {pinned} failed: node {old} was removed").as_str())),
+        "{:?}",
+        events(&hub)
+    );
+    let r = hub.cli(&["job", "run", "--node", &old, "--", "true"]);
+    assert!(r.stderr.contains("no node"), "{}", r.stderr);
     blocker.lift();
-    let removed = hub.cli(&["--json", "node", "rm", "e2e-old"]).json();
+    let removed = hub.cli(&["--json", "node", "rm", &old]).json();
     assert_eq!(removed["node_id"].as_str(), Some(old.as_str()), "{removed}");
     assert_eq!(removed["record_only"].as_bool(), Some(true), "{removed}");
     assert_eq!(
-        removed["cancelled_jobs"],
-        Value::Array(vec![Value::from(pinned.as_str())]),
+        removed["failed_jobs"],
+        Value::Array(Vec::new()),
         "{removed}"
     );
-    assert_eq!(job(&hub, &pinned)["state"].as_str(), Some("cancelled"));
     assert!(!enrolled(&tailnet).iter().any(|(id, _)| *id == old));
-    assert!(has_event(
-        &hub,
-        "info",
-        &format!("node e2e-old removed; cancelled queued jobs {pinned}")
-    ));
-    let r = hub.cli(&["node", "rm", "e2e-old"]);
+    assert!(has_event(&hub, "info", "node e2e-old removed"));
+    let r = hub.cli(&["node", "rm", &old]);
     assert!(r.stderr.contains("no node"), "{}", r.stderr);
 
     // The new machine takes the freed name; its running job keeps to it by id.
@@ -359,8 +378,20 @@ fn owner_removes_a_stale_node_and_renames_its_successor() {
         "{:?}",
         enrolled(&tailnet)
     );
+    // A rename stopped after headscale and before its record (a crash), repeated: headscale
+    // already has the name, and the record is repaired.
+    let stale = fs::read_to_string(tailnet.join("enrolled.json"))
+        .unwrap()
+        .replace("\"e2e-old\"", "\"e2e-new\"");
+    fs::write(tailnet.join("enrolled.json"), stale).unwrap();
+    assert!(enrolled(&tailnet).contains(&(new.clone(), "e2e-new".to_string())));
     let human = hub.cli(&["node", "rename", "e2e-old", "e2e-old"]);
     assert!(human.ok().contains("from e2e-old to e2e-old"));
+    assert!(
+        enrolled(&tailnet).contains(&(new.clone(), "e2e-old".to_string())),
+        "{:?}",
+        enrolled(&tailnet)
+    );
     let still = job(&hub, &long);
     assert_eq!(still["state"].as_str(), Some("running"), "{still}");
     assert_eq!(still["node_id"].as_str(), Some(new.as_str()));

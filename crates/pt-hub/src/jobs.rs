@@ -351,6 +351,12 @@ pub fn view(hub: &Hub, j: &Job) -> api::Job {
         started_at_ms: hub.jobs.started(j.id, j.attempt).map(EpochMs),
         ended_at_ms: ended(j.state).then_some(EpochMs(j.state_at)),
         exit_code: j.exit.map(i64::from),
+        error: match j.state {
+            JobState::Failed(pt_core::JobFailure::NodeRemoved(n)) => {
+                Some(format!("node {} was removed", n.0))
+            }
+            _ => None,
+        },
         log_bytes: hub.jobs.log_len(j.id, j.attempt),
         cwd: req.as_ref().and_then(|r| r.cwd.clone()),
         artifacts,
@@ -505,6 +511,7 @@ fn scheduler(hub: &Hub, rx: &Receiver<Intent>) {
         };
         let nodes = up.poller.nodes();
         let view = hub.view();
+        let mut unseen: Vec<(JobId, NodeId)> = Vec::new();
         pending.retain(|job, exclude| {
             let Some(j) = view.state.jobs.get(job) else {
                 return false;
@@ -516,6 +523,12 @@ fn scheduler(hub: &Hub, rx: &Receiver<Intent>) {
                 warning!("job {}: its request does not parse", job.0);
                 return false;
             };
+            if let Some(node) = pinned(&req)
+                && !nodes.iter().any(|v| v.node.id == node.0.to_string())
+            {
+                unseen.push((*job, node));
+                return true;
+            }
             match choose(&nodes, &req, j.spec.even_if_present, exclude) {
                 Some((node, epoch)) => {
                     info!("job {}: attempt {} on node {}", job.0, j.attempt, node.0);
@@ -530,6 +543,43 @@ fn scheduler(hub: &Hub, rx: &Receiver<Intent>) {
                 None => true,
             }
         });
+        if !unseen.is_empty() {
+            gone_nodes(hub, &up, &unseen, &mut pending);
+        }
+    }
+}
+
+/// The node id a job may run only on.
+fn pinned(req: &JobRequest) -> Option<NodeId> {
+    match &req.target {
+        api::JobTarget::Node { node_id } => node_id.parse().ok().map(NodeId),
+        api::JobTarget::Arch { .. } => None,
+    }
+}
+
+/// Fails the queued jobs pinned to a node headscale itself no longer lists. The poller's views
+/// lag behind (a node approved a moment ago, a hub that just started), so only headscale's
+/// answer counts.
+fn gone_nodes(
+    hub: &Hub,
+    up: &crate::fleet::Up,
+    unseen: &[(JobId, NodeId)],
+    pending: &mut BTreeMap<JobId, Vec<NodeId>>,
+) {
+    let listed = match up.fleet.admin().nodes() {
+        Ok(l) => l,
+        Err(e) => return warning!("scheduler: listing headscale's nodes: {e}"),
+    };
+    for &(job, node) in unseen {
+        if listed
+            .iter()
+            .any(|n| n.id == node.0 && n.has_tag(pt_fleet::TAG_NODE))
+        {
+            continue;
+        }
+        info!("job {}: node {} was removed", job.0, node.0);
+        hub.submit(EventKind::JobNodeRemoved { job, node });
+        pending.remove(&job);
     }
 }
 

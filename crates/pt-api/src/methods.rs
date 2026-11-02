@@ -299,8 +299,9 @@ api_records! {
     pub struct RemovedNode {
         pub node_id: String,
         pub name: String,
-        /// Queued jobs that could run only on this node, cancelled.
-        pub cancelled_jobs: Vec<String> = Vec::new(),
+        /// Queued jobs that could run only on this node: failed, `node N was removed`. One
+        /// queued later (an approval was pending) fails the same way when the hub schedules it.
+        pub failed_jobs: Vec<String> = Vec::new(),
         /// Jobs it had in flight (`force`), left to the lease: they go lost, then abandoned.
         pub orphaned_jobs: Vec<String> = Vec::new(),
         /// Headscale had already forgotten it; only the hub's enrollment record was left.
@@ -675,8 +676,8 @@ api_methods! {
     /// Checks the control-key fingerprint, then registers, tags and names the node.
     ApproveNode(ApproveNodeRequest) -> ApprovedNode: Owner,
     /// Deletes the node from headscale, which revokes its tailnet key, and drops its
-    /// enrollment record. Queued jobs pinned to it are cancelled. An online node, or one with
-    /// jobs in flight, needs `force`.
+    /// enrollment record. Queued jobs pinned to it fail. An online node, or one with jobs in
+    /// flight, needs `force`. After a partial removal, retry by id.
     RemoveNode(RemoveNodeRequest) -> RemovedNode: Owner,
     /// Renames the node in headscale and in its enrollment record; jobs follow its id.
     RenameNode(RenameNodeRequest) -> RenamedNode: Owner,

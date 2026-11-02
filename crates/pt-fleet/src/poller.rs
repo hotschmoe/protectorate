@@ -136,8 +136,9 @@ impl Poller {
 
     /// `Fleet::remove_node`, then the node's polling stops and its view is gone at once. Once
     /// headscale has deleted it, the view goes even when dropping the record failed. Nothing is
-    /// published: the caller announces it.
-    pub fn remove(&self, id: u64) -> crate::Result<Removal> {
+    /// published: the caller announces it when the second value says the poller dropped the
+    /// node (it may have published the node during the removal).
+    pub fn remove(&self, id: u64) -> (crate::Result<Removal>, bool) {
         let s = &self.shared;
         let _g = s.fleet.nodes_lock();
         let removed = s.fleet.remove_node(id);
@@ -155,7 +156,7 @@ impl Poller {
             }
             views.remove(&id);
         }
-        removed
+        (removed, !listed)
     }
 }
 

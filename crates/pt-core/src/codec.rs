@@ -703,6 +703,11 @@ impl Wire for EventKind {
             }
             E::Tick => w.push(28),
             E::HubRecovered => w.push(29),
+            E::JobNodeRemoved { job, node } => {
+                w.push(31);
+                job.put(w);
+                node.put(w);
+            }
             E::RequestApproval {
                 sleeve,
                 ask,
@@ -718,7 +723,7 @@ impl Wire for EventKind {
 
     fn get(r: &mut Reader) -> Result<Self, DecodeError> {
         use EventKind as E;
-        Ok(match r.tag("event", 30)? {
+        Ok(match r.tag("event", 31)? {
             0 => E::Spawn(Wire::get(r)?),
             1 => E::Send {
                 to: Wire::get(r)?,
@@ -834,10 +839,14 @@ impl Wire for EventKind {
             },
             28 => E::Tick,
             29 => E::HubRecovered,
-            _ => E::RequestApproval {
+            30 => E::RequestApproval {
                 sleeve: Wire::get(r)?,
                 ask: Wire::get(r)?,
                 timeout: Wire::get(r)?,
+            },
+            _ => E::JobNodeRemoved {
+                job: Wire::get(r)?,
+                node: Wire::get(r)?,
             },
         })
     }
