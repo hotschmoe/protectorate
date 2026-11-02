@@ -142,6 +142,21 @@ fn api_surface() {
     }
     drop(s1);
     pair(port, &owner, "tablet");
+    let all = hub
+        .cli(&["--json", "event", "list", "--limit", "100"])
+        .json();
+    let events = all["events"].as_array().unwrap();
+    assert!(events.len() >= 2, "{all}");
+    let newest = hub.cli(&["--json", "event", "list", "--limit", "2"]).json();
+    assert_eq!(
+        newest["events"].as_array().unwrap(),
+        &events[events.len() - 2..]
+    );
+    let from = events[0]["seq"].as_u64().unwrap().to_string();
+    let first = hub
+        .cli(&["--json", "event", "list", "--from", &from, "--limit", "2"])
+        .json();
+    assert_eq!(first["events"].as_array().unwrap(), &events[..2]);
     let mut s2 = ws(port, &format!("{auth}&from_seq={}", last + 1), &[]).unwrap();
     let first = next(&mut s2);
     assert_ne!(
