@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use pt_api::{self as api, EpochMs, HubStreamMessage};
 use pt_core::{
@@ -44,6 +44,10 @@ const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a node executor waits for the core to take a `Dispatched`.
 const DISPATCH_TIMEOUT: Duration = Duration::from_secs(30);
 const SCHEDULE_EVERY: Duration = Duration::from_secs(2);
+/// A node never tells the hub a job ended, and the Tick polls only every 10 s, so the executor
+/// polls a job it just submitted after FOLLOW_FIRST, then on a doubling delay below FOLLOW_UNTIL.
+const FOLLOW_FIRST: Duration = Duration::from_millis(250);
+const FOLLOW_UNTIL: Duration = Duration::from_secs(10);
 const ARTIFACT_CAP: u64 = 64 << 20;
 /// Artifact bytes asked for per FetchArtifact.
 const ARTIFACT_FETCH: u64 = 4 << 20;
@@ -433,6 +437,7 @@ impl JobExec {
             client: None,
             epoch: String::new(),
             pending_status: None,
+            follow: Vec::new(),
         };
         match thread::Builder::new()
             .name(format!("pt-node-{}", node.0))
@@ -616,6 +621,8 @@ struct NodeExec {
     epoch: String,
     /// A status the node returned with a write, submitted after the write's outcome.
     pending_status: Option<(JobId, u32, JobReply)>,
+    /// Jobs just submitted here, with their next poll and the delay after it.
+    follow: Vec<(JobId, u32, Instant, Duration)>,
 }
 
 fn report(reply: &JobReply) -> JobReport {
@@ -642,8 +649,49 @@ fn report(reply: &JobReply) -> JobReport {
 
 impl NodeExec {
     fn run(mut self, rx: Receiver<Intent>) {
-        for intent in rx {
-            self.handle(intent);
+        loop {
+            let next = self.follow.iter().map(|f| f.2).min();
+            let got = match next {
+                Some(at) => rx.recv_timeout(at.saturating_duration_since(Instant::now())),
+                None => rx.recv().map_err(|_| RecvTimeoutError::Disconnected),
+            };
+            match got {
+                Ok(intent) => self.handle(intent),
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return,
+            }
+            self.follow_up();
+        }
+    }
+
+    /// Polls the followed jobs that are due while the core still has them on this node and
+    /// not yet ended (its Ack may not have landed yet).
+    fn follow_up(&mut self) {
+        let now = Instant::now();
+        if !self.follow.iter().any(|f| f.2 <= now) {
+            return;
+        }
+        let view = self.hub.view();
+        let (due, later) = std::mem::take(&mut self.follow)
+            .into_iter()
+            .partition(|f| f.2 <= now);
+        self.follow = later;
+        for (job, attempt, _, step) in due {
+            let live = view.state.jobs.get(&job).is_some_and(|j| {
+                j.attempt == attempt
+                    && j.node == Some(self.node)
+                    && matches!(
+                        j.state,
+                        JobState::Submitting | JobState::SubmitUncertain | JobState::Running
+                    )
+            });
+            if live {
+                self.poll(&view, job, attempt);
+                if step * 2 < FOLLOW_UNTIL {
+                    self.follow
+                        .push((job, attempt, Instant::now() + step, step * 2));
+                }
+            }
         }
     }
 
@@ -968,6 +1016,8 @@ impl NodeExec {
                 }
                 // The node journals before it answers: the submit is confirmed.
                 self.pending_status = Some((job, attempt, reply));
+                self.follow
+                    .push((job, attempt, Instant::now() + FOLLOW_FIRST, FOLLOW_FIRST));
                 Ok(())
             }
             Err(Fail::Node(r)) => {
