@@ -331,7 +331,9 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   It is not sent after a planned stop, a hub restart of an idle sleeve, or a manual resleeve (the
   brief is that continuation). A debt still held when recovery finds that incarnation already idle
   and armed is dropped, with `TurnNeedsPrompt`; a resume that is still booting keeps the debt.
-  When the prompt cannot be sent, the owner and the parent get `TurnNeedsPrompt` instead.
+  A `Continue` that cannot be delivered drops the debt and warns. A crash of an incarnation that
+  already reached idle does not carry the debt. When the prompt cannot be sent, the owner and
+  the parent get `TurnNeedsPrompt`.
 - **Testing:** each machine is a pure function with a fuzz target. The target checks invariants I1
   to I10 against a table-driven reference model and checks `replay(journal) == live`.
 

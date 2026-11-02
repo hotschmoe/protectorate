@@ -480,7 +480,24 @@ impl Core<'_> {
                     (None, _) if was == Activity::Booting => Cause::Guard(Guardrail::StartFailed),
                     (None, _) => Cause::Guard(Guardrail::Crash),
                 };
+                // Read before after_death: a new incarnation clears the desync flag.
+                let was_desync = self.st.sleeves[&sid].desync_during_turn;
                 self.after_death(sid, c);
+                // Idle (and anything past boot) does not carry a continuation into the next
+                // incarnation. Booting still does. A working crash may set a fresh debt below.
+                let reached_idle = matches!(
+                    was,
+                    Activity::Idle { .. }
+                        | Activity::Delivering { .. }
+                        | Activity::Working
+                        | Activity::Blocked { .. }
+                        | Activity::Interrupting
+                        | Activity::Compacting
+                ) || (was == Activity::Unknown && was_desync);
+                let had = self.st.sleeves[&sid].auto_continue;
+                if reached_idle && had.is_some() {
+                    self.sl(sid).auto_continue = None;
+                }
                 let s = &self.st.sleeves[&sid];
                 let resuming = interrupted_turn && s.guard.state == GuardState::Resuming;
                 let headless = s.target.mode == Mode::Headless;
@@ -495,6 +512,16 @@ impl Core<'_> {
                         }
                         _ => self.needs_prompt(sid),
                     }
+                }
+                // Warn only for a debt this crash did not replace. An interrupt already ended
+                // the turn, and a working crash warns from the match above when it must.
+                if reached_idle
+                    && had.is_some()
+                    && self.st.sleeves[&sid].auto_continue.is_none()
+                    && was != Activity::Interrupting
+                    && !interrupted_turn
+                {
+                    self.needs_prompt(sid);
                 }
             }
             Life::Provisioning | Life::Parked(_) | Life::Stopped | Life::Removed => {}
@@ -1341,8 +1368,9 @@ impl Core<'_> {
         }
     }
 
-    /// Applies a journaled `Continue`. One prompt for the owed owner turn, or a warning when
-    /// that prompt cannot be sent. A journal without this event allocates nothing.
+    /// Applies a journaled `Continue`. One prompt for the owed owner turn. If it cannot be
+    /// delivered, the debt is dropped and, unless the sleeve is being torn down, the owner is
+    /// warned. A journal without this event allocates nothing.
     pub(crate) fn continue_turn(&mut self, sid: SleeveId, text: &str) {
         let Some(s) = self.st.sleeves.get(&sid) else {
             return;
@@ -1363,12 +1391,12 @@ impl Core<'_> {
         }
         if !self.deliverable(sid) {
             let s = &self.st.sleeves[&sid];
+            // Compacting, probing, or booting can race the prompt. Keeping the debt would send
+            // it the next time this incarnation is idle, which may be long after the turn.
             let abandoned = !s.life.live() || matches!(s.life, Life::Parked(_) | Life::Resleeving);
-            if abandoned || self.frozen(sid) || s.target.mode != Mode::Headless {
-                self.sl(sid).auto_continue = None;
-                if !abandoned {
-                    self.needs_prompt(sid);
-                }
+            self.sl(sid).auto_continue = None;
+            if !abandoned {
+                self.needs_prompt(sid);
             }
             return;
         }

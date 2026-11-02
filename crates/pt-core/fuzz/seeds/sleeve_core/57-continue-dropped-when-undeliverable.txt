@@ -1,0 +1,34 @@
+#scenario 2164d782c40f7fe1
+# Continue during compaction cannot be delivered, so the debt is dropped and the owner is
+# warned. No prompt is sent. An incarnation that reached idle and then dies does not carry
+# its debt into the next one.
+spawn compact /w/c
+run
+obs compact ready
+send compact m1
+run
+expect compact activity=Working
+exit compact
+run
+obs compact ready
+compact compact
+step 1
+expect compact activity=Compacting
+expect-effect continue:* count=0
+expect-notice TurnNeedsPrompt count=1
+spawn idle /w/i
+run
+obs idle ready
+send idle m1
+run
+expect idle activity=Working
+exit idle
+run
+obs idle ready
+exit idle
+run
+obs idle ready
+run
+expect idle activity=Idle life=Running
+expect-effect continue:1:* count=0
+expect-notice TurnNeedsPrompt count=2
