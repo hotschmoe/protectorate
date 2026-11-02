@@ -10,26 +10,6 @@ A bump is a hand-picked change to this file and `Cargo.lock` in the same commit.
 |---|---|---|
 | libc | 0.2.191 | the system call interface on Unix (namespaces, prctl, signals, pty, statvfs, setpriority, ioprio) |
 
-## Rust (optional Verus feature, never enabled in the normal build)
-
-`vstd` is pinned exactly in both phase 1 crates. The remaining packages are its transitive
-dependencies, locked for the optional feature; the verifier itself provides its own `vstd`.
-
-| Crate | Version | Reason |
-|---|---|---|
-| vstd | 0.0.0-2026-10-25-0158 | specifications and ghost proof support for Verus |
-| verus_builtin | 0.0.0-2026-10-11-0230 | vstd dependency |
-| verus_builtin_macros | 0.0.0-2026-10-25-0158 | vstd dependency |
-| verus_state_machines_macros | 0.0.0-2026-10-25-0158 | vstd dependency |
-| verus_prettyplease | 0.0.0-2026-09-06-0133 | Verus macro dependency |
-| verus_syn | 0.0.0-2026-09-06-0133 | Verus macro dependency |
-| convert_case | 0.4.0 | Verus macro dependency |
-| synstructure | 0.13.2 | Verus macro dependency |
-| syn | 2.0.119 | Verus macro dependency |
-| indexmap | 2.14.2 | Verus state machine macro dependency |
-| equivalent | 1.0.3 | indexmap dependency |
-| hashbrown | 0.17.1 | indexmap dependency |
-
 ## Rust (dev-only: fuzz targets, never in a shipped binary)
 
 | Crate | Version | Reason |

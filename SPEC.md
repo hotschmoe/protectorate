@@ -62,7 +62,8 @@ CLI on the hub machine (section 3.1).
    owner's WireGuard. WAN access is a later, separate design.
 8. **Repo rules carry over** from `dev-hotschmoe` CLAUDE.md: no emojis, full migrations with no
    shims, real-binary e2e and fuzz tests only, no hand-edited generated code.
-9. **Verus in narrow scope** under the owner's eight rules (section 10).
+9. **No Verus** (D40, section 10). Tests are proportionate: real-binary e2e where behaviour broke
+   or is security-relevant, and fuzz seeds that earn their keep.
 10. **Threat model: outsiders, not our own agents** (owner, 2026-11-01; revisit as needed). The
     one fear is people outside the owner's network gaining access to it. Agents breaking things
     on the owner's machines (deleted directories, broken settings, a bad node job) is accepted:
@@ -428,7 +429,7 @@ backup that recovers a dead hub moves a live one.
 2. **Export:** `protectorate hub export`.
    - It quiesces every sleeve at a turn boundary (the resleeve machine's Quiescing, without the
      relaunch) and stops headscale.
-   - It writes a `.pbackup` (Verus-checked format), and pushes or bundles every workspace's
+   - It writes a `.pbackup`, and pushes or bundles every workspace's
      unpushed branches.
    - The old hub then writes a `migrated` tombstone and refuses to start headscale again. Two
      control servers with the same noise key would split the fleet.
@@ -554,30 +555,19 @@ quota each have their own screen. A taken-over terminal (xterm.dart) is reached 
 chat, never as the default view. The ten rules and an ASCII layout are in the
 nodes report section 7.
 
-## 10. Verus
+## 10. Verus (removed)
 
-The owner's rules apply as written (see the session doc), with one proposed deviation that needs
-the owner's approval (D19): FFI `unsafe` in the sandbox and presence crates.
+Phase 1 (D28) proved the journal codec, its torn-tail recovery rule, CRC-32C and the node frame
+codec. The proofs confirmed code that was already correct and found nothing the fuzz targets and
+e2e tests had not, so they were removed on 2026-11-02 (D40). The owner (verbatim): "we can also
+take it easy on the fuzz testing - were not building a rocket for nasa (this goes the same for
+verus, if we're not actually finding much we can just rip it out and update rust toolchain)".
 
-Verus is phased (D28), so its cost is measured before it spreads:
-
-| Phase | Modules | Why |
-|---|---|---|
-| 1 | journal codec and torn-tail recovery; node frame codec | the hub's durability rests on the first; the second is the only parser fed by hostile machines |
-| 2 | PTY ring and attach offsets; harness line framer; session-log tail reader with its UTF-8 clipping | offset arithmetic with no reference implementation |
-| 3, if phase 1 and 2 proofs stay cheap to maintain | `SHA256SUMS`/manifest parser; artifact `xfer` bounds; Connect streaming envelope; backup format | untrusted or long-lived bytes, but small and well fuzzed already |
-| dropped | presence window math; audit-chain walk; brief budget arithmetic | a `saturating_sub` or a loop over a list; fuzzing and overflow checks are enough |
-
-**Excluded:** the state machines (the tables are a perfect reference), per-harness JSON extractors
-(differential fuzzing against real logs instead), UI and glue.
-
-**Build shape:**
-- Specs go in `cfg_attr(verus_keep_ghost, verus_spec(..))`, with `vstd` an optional feature, so plain
-  cargo builds without Verus.
-- `verify.sh` runs a pinned Verus release at `--rlimit 20`, then again at `--rlimit 10`.
+What stays:
 - `overflow-checks = true` in release for the parser and writer crates.
-- `#![forbid(unsafe_code)]` everywhere except Verus-proved helpers and the explicitly exempted OS
-  FFI crates (sandbox, presence).
+- `#![forbid(unsafe_code)]` everywhere except the explicitly exempted OS FFI crates (sandbox,
+  presence; D19).
+- No pinned Rust toolchain: the workspace builds on the current stable release.
 
 ## 11. Salvage map
 
@@ -756,6 +746,7 @@ All decided. The owner's answers are recorded in `docs/sessions/2026-11-01-decis
 | D37 | Third-party dependencies | as few as possible, pinned exactly, forked and trimmed when large; listed in `DEPENDENCIES.md` |
 | D38 | Primary interface | chat with Envoy; sleeve chats next; terminal takeover is last resort |
 | D39 | Hub-to-node transport: headscale and member, or plain SSH | **headscale for now**; SSH logged in REVISIT.md (`serve --stdio` stays as a tested path) |
+| D40 | Keep Verus past phase 1 | **removed** 2026-11-02: the proofs found nothing fuzzing and e2e had not; frees the Rust toolchain |
 
 ## 14. Build order
 
@@ -773,8 +764,7 @@ nothing has to stay compatible with it.
 4. **Network:** the `go/` module, embedded headscale and member, Traefik routes, scan to join, and
    inventory and presence.
 5. **Jobs:** node jobs, cross-arch CI, `doctor`.
-6. **Hardening:** the first Verus modules (journal codec, node frame codec), the stdio
-   `mcp --envoy`, terminal takeover and the remaining harnesses.
+6. **Hardening:** the stdio `mcp --envoy`, terminal takeover and the remaining harnesses.
 
 ## 15. Implementation choices (2026-11-01)
 
@@ -797,13 +787,13 @@ shortcut is also in `REVISIT.md`.
   | `pt-json` | JSON value, parser, writer, `ToJson`/`FromJson`; insertion-ordered objects so output is deterministic |
   | `pt-hash` | SHA-1 (WebSocket handshake), SHA-256 (release sums), CRC-32C (journal) |
   | `pt-http` | HTTP/1.1 server on TCP and unix sockets, WebSocket server, a small blocking client for loopback and unix sockets |
-  | `pt-journal` | the append-only journal: length, CRC and payload frames, group-commit fsync, torn-tail recovery (Verus phase 1) |
+  | `pt-journal` | the append-only journal: length, CRC and payload frames, group-commit fsync, torn-tail recovery |
   | `pt-core` | the pure state machines and `apply`, with no I/O |
   | `pt-api` | API types and the method table, declared once in a macro; `pt-apigen` writes the Dart models from it |
   | `pt-drivers` | headless harness adapters (Claude stream-json, Codex app-server, Grok ACP, Pi rpc) into one event stream |
   | `pt-history` | the history index (3.7): native session logs and hub transcripts into checksummed segments with BM25, in place of SQLite FTS5 |
   | `pt-sandbox` | the bwrap argument builder and systemd scopes |
-  | `pt-frame` | the hub-node frame codec (Verus phase 1) |
+  | `pt-frame` | the hub-node frame codec |
   | `pt-node` | inventory, samples, presence and jobs (the node side) |
 
   Each is fuzzed against a reference where one exists: `serde_json`, `sha2` and `crc32c` are

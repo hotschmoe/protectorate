@@ -894,13 +894,6 @@ Each entry: where, what was done, what right looks like.
   and `pi_local_model` default to empty, and doctor marks `pi_local` ineligible
   until both are set, so the default `resleeve_to` (`["pi_local"]`) parks a sleeve that must
   resleeve. Right: offer the configured local model when there is one, or ask for it at setup.
-- **Verus phase 1 boundaries** (`pt-journal`, `pt-frame`): the journal frame, CRC logic and pure
-  recovery decision, and the node frame codec and sticky decoder errors, are verified. File I/O
-  in `open_segment`, the frame reader's I/O, and `pt-frame::msg`/`pt-json` message parsing are not.
-  The CRC proof covers the Castagnoli table and byte recurrence, not collision resistance. Verus
-  trusts its specifications for Rust's standard collections and slices, including allocation behavior.
-  Right: verify message parsing and model the file operations around the recovery decision, and
-  maintain the existing differential fuzzing.
 - **Incremental frame buffering can exceed one frame** (`pt-frame`, `Decoder::feed`): decoded
   payload length is capped at `MAX_PAYLOAD`, but a caller may feed an arbitrarily large slice,
   and the decoder copies all of it before parsing. `FrameReader` reads in 64 KiB chunks and drains

@@ -1,10 +1,6 @@
 //! CRC-32C (Castagnoli): reflected polynomial 0x82F63B78, init and final xor 0xFFFFFFFF.
 
-#[cfg(verus_keep_ghost)]
-use vstd::prelude::*;
-
 // The 256 remainders for the reflected Castagnoli polynomial.
-#[cfg_attr(verus_keep_ghost, verus_verify)]
 const TABLE: [u32; 256] = [
     0x00000000, 0xF26B8303, 0xE13B70F7, 0x1350F3F4, 0xC79A971F, 0x35F1141C, 0x26A1E7E8, 0xD4CA64EB,
     0x8AD958CF, 0x78B2DBCC, 0x6BE22838, 0x9989AB3B, 0x4D43CFD0, 0xBF284CD3, 0xAC78BF27, 0x5E133C24,
@@ -40,83 +36,16 @@ const TABLE: [u32; 256] = [
     0x79B737BA, 0x8BDCB4B9, 0x988C474D, 0x6AE7C44E, 0xBE2DA0A5, 0x4C4623A6, 0x5F16D052, 0xAD7D5351,
 ];
 
-#[cfg(verus_keep_ghost)]
-verus! {
-    spec fn polynomial_steps(c: u32, count: nat) -> u32
-        decreases count
-    {
-        if count == 0 {
-            c
-        } else {
-            polynomial_steps(if c & 1 != 0 { (c >> 1) ^ 0x82F6_3B78 } else { c >> 1 },
-                (count - 1) as nat)
-        }
-    }
-
-    spec fn table_matches_polynomial(count: nat) -> bool
-        recommends count <= 256
-        decreases count
-    {
-        if count == 0 {
-            true
-        } else {
-            TABLE@[(count - 1) as int] == polynomial_steps((count - 1) as u32, 8)
-                && table_matches_polynomial((count - 1) as nat)
-        }
-    }
-
-    proof fn lemma_table_matches_polynomial()
-        ensures table_matches_polynomial(256)
-    {
-        assert(table_matches_polynomial(256)) by (compute);
-    }
-
-    pub closed spec fn crc_step(c: u32, byte: u8) -> u32 {
-        TABLE@[((c ^ byte as u32) & 0xFF) as int] ^ (c >> 8)
-    }
-
-    pub closed spec fn crc_fold(data: Seq<u8>, count: nat, initial: u32) -> u32
-        recommends count <= data.len()
-        decreases count
-    {
-        if count == 0 {
-            initial
-        } else {
-            crc_step(crc_fold(data, (count - 1) as nat, initial), data[(count - 1) as int])
-        }
-    }
-
-    pub closed spec fn spec_crc32c(data: Seq<u8>) -> u32 {
-        !crc_fold(data, data.len(), !0u32)
-    }
-}
-
 /// CRC-32C of `data`.
-#[cfg_attr(verus_keep_ghost, verus_spec(result => ensures result == spec_crc32c(data@)))]
 pub fn crc32c(data: &[u8]) -> u32 {
     crc32c_append(0, data)
 }
 
 /// Continues `crc` (a finished CRC-32C of earlier bytes) over `data`.
-#[cfg_attr(verus_keep_ghost, verus_spec(result =>
-    ensures result == !crc_fold(data@, data.len() as nat, !crc),
-))]
 pub fn crc32c_append(crc: u32, data: &[u8]) -> u32 {
     let mut c = !crc;
-    let mut i = 0;
-    #[cfg_attr(verus_keep_ghost, verus_spec(invariant
-        i <= data.len(),
-        c == crc_fold(data@, i as nat, !crc),
-        decreases data.len() - i,
-    ))]
-    while i < data.len() {
-        let b = data[i];
-        #[cfg(verus_keep_ghost)]
-        proof! {
-            assert(((c ^ b as u32) & 0xFF) <= 255) by (bit_vector);
-        }
+    for &b in data {
         c = TABLE[((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8);
-        i += 1;
     }
     !c
 }
