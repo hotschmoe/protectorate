@@ -75,20 +75,23 @@ impl Registration {
     }
 }
 
-/// A tailnet DNS label: lowercase letters, digits and inner hyphens, at most 63 bytes.
+/// A tailnet DNS label: lowercase letters, digits and inner hyphens, at most 63 bytes, and not
+/// digits alone, which would read as a node id.
 pub fn valid_name(name: &str) -> Result<()> {
     let ok = !name.is_empty()
         && name.len() <= 63
         && name
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !name.bytes().all(|b| b.is_ascii_digit())
         && !name.starts_with('-')
         && !name.ends_with('-');
     if ok {
         Ok(())
     } else {
         Err(Error::new(format!(
-            "node name {name:?}: use 1 to 63 lowercase letters, digits and inner hyphens"
+            "node name {name:?}: use 1 to 63 lowercase letters, digits and inner hyphens, \
+             not digits alone (that reads as a node id)"
         )))
     }
 }
@@ -171,6 +174,8 @@ impl Fleet {
         valid_name(name)?;
         valid_fingerprint(expected_fingerprint)?;
         let ctx = |e: Error| e.context(format!("approving {name}"));
+        // Held across headscale's steps too, so a rename or removal cannot slip in between.
+        let _g = self.enroll_lock();
         let served = self.control_fingerprint().map_err(ctx)?;
         if !served.eq_ignore_ascii_case(expected_fingerprint) {
             return Err(ctx(Error::new(format!(
@@ -197,7 +202,6 @@ impl Fleet {
         } else {
             admin.rename(node.id, name).map_err(ctx)?
         };
-        let _g = self.enroll_lock();
         let mut enrolled: Vec<Enrolled> = read_list(&enrolled_path(self))?;
         enrolled.retain(|e| e.id != node.id);
         enrolled.push(Enrolled {
@@ -221,11 +225,6 @@ impl Fleet {
     pub fn rename_node(&self, id: u64, to: &str) -> Result<HsNode> {
         valid_name(to)?;
         let ctx = |e: Error| e.context(format!("renaming node {id} to {to}"));
-        if to.bytes().all(|b| b.is_ascii_digit()) {
-            return Err(ctx(Error::new(
-                "a name of digits alone reads as a node id; add a letter",
-            )));
-        }
         let _g = self.enroll_lock();
         let admin = self.admin();
         let nodes = admin.nodes().map_err(ctx)?;
@@ -233,9 +232,6 @@ impl Fleet {
             .iter()
             .find(|n| n.id == id && n.has_tag(TAG_NODE))
             .ok_or_else(|| ctx(Error::new(format!("headscale has no node {id}"))))?;
-        if node.name == to {
-            return Ok(node.clone());
-        }
         if let Some(other) = nodes.iter().find(|n| n.id != id && n.name == to) {
             return Err(ctx(Error::new(format!(
                 "a node named {to} already exists (headscale node {})",
@@ -244,7 +240,12 @@ impl Fleet {
         }
         let path = enrolled_path(self);
         let mut enrolled: Vec<Enrolled> = read_list(&path).map_err(ctx)?;
-        let renamed = admin.rename(id, to).map_err(ctx)?;
+        // Headscale may hold the name already: an earlier rename stopped before its record.
+        let renamed = if node.name == to {
+            node.clone()
+        } else {
+            admin.rename(id, to).map_err(ctx)?
+        };
         if renamed.name != to {
             return Err(ctx(Error::new(format!(
                 "headscale named it {:?} instead",
@@ -252,7 +253,7 @@ impl Fleet {
             ))));
         }
         let mut changed = false;
-        for e in enrolled.iter_mut().filter(|e| e.id == id) {
+        for e in enrolled.iter_mut().filter(|e| e.id == id && e.name != to) {
             e.name = to.to_string();
             changed = true;
         }
@@ -260,6 +261,9 @@ impl Fleet {
             return Ok(renamed);
         }
         if let Err(e) = write_list(&path, &enrolled) {
+            if node.name == to {
+                return Err(ctx(e.context("updating the enrollment record")));
+            }
             return Err(ctx(match admin.rename(id, &node.name) {
                 Ok(_) => e.context(format!(
                     "updating the enrollment record failed, so headscale's name is back to {}",
@@ -303,10 +307,10 @@ impl Fleet {
         enrolled.retain(|e| e.id != id);
         if enrolled.len() != before {
             write_list(&path, &enrolled).map_err(|e| {
-                ctx(e.context(
-                    "headscale no longer has it, but dropping its enrollment record failed; \
-                     remove it again to finish",
-                ))
+                ctx(e.context(format!(
+                    "headscale no longer has {name}, but dropping its enrollment record failed; \
+                     finish with: protectorate node rm {id}"
+                )))
             })?;
         }
         Ok(Removal {

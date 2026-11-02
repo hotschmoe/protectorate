@@ -31,7 +31,7 @@ fn sleeve(sim: &Sim, b: &mut Bytes) -> SleeveId {
 fn command(sim: &mut Sim, b: &mut Bytes) {
     use EventKind as E;
     let s = sleeve(sim, b);
-    let kind = match b.below(17) {
+    let kind = match b.below(18) {
         0 | 1 => {
             let parent = if b.below(3) == 0 {
                 None
@@ -136,6 +136,10 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
                 ..Ask::default()
             },
             timeout: [0, SECOND, 15 * MINUTE, 2 * HOUR, Millis::MAX][b.below(5) as usize],
+        },
+        16 => E::JobNodeRemoved {
+            job: JobId(b.below(sim.st.next_job + 1)),
+            node: NodeId(1 + b.below(3)),
         },
         _ => E::AbandonJob {
             job: JobId(b.below(sim.st.next_job + 1)),

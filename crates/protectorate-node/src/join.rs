@@ -254,13 +254,15 @@ fn check_name(name: &str) -> Result<(), String> {
         && name
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        && !name.bytes().all(|b| b.is_ascii_digit())
         && !name.starts_with('-')
         && !name.ends_with('-');
     if ok {
         Ok(())
     } else {
         Err(format!(
-            "--name {name:?}: use 1 to 63 lowercase letters, digits and inner hyphens"
+            "--name {name:?}: use 1 to 63 lowercase letters, digits and inner hyphens, \
+             not digits alone (that reads as a node id)"
         ))
     }
 }

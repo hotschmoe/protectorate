@@ -220,6 +220,12 @@ pub enum EventKind {
         node: NodeId,
         epoch: u64,
     },
+    /// The node a queued job is pinned to is gone from the fleet; a job in any other state is
+    /// left alone.
+    JobNodeRemoved {
+        job: JobId,
+        node: NodeId,
+    },
     /// `node` is the node that answered: a report from any node but the job's current one is
     /// stale and dropped.
     JobStatus {

@@ -209,13 +209,17 @@ fn job_line(j: &api::Job) -> String {
         (None, api::JobTarget::Node { node_id }) => format!("for node {node_id}"),
         (None, api::JobTarget::Arch { arch }) => format!("for any {arch} node"),
     };
-    format!(
+    let mut s = format!(
         "{} {} {place} by {}: {}",
         j.id,
         j.state,
         j.requested_by,
         j.argv.join(" ")
-    )
+    );
+    if let Some(e) = &j.error {
+        s.push_str(&format!(" ({e})"));
+    }
+    s
 }
 
 /// Long enough for a download of every asset on a slow link.
@@ -659,8 +663,12 @@ fn node_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                         n.name, n.node_id
                     );
                 }
-                if !n.cancelled_jobs.is_empty() {
-                    println!("cancelled queued jobs {}", n.cancelled_jobs.join(", "));
+                if !n.failed_jobs.is_empty() {
+                    println!(
+                        "queued jobs {} fail: node {} was removed",
+                        n.failed_jobs.join(", "),
+                        n.node_id
+                    );
                 }
                 if !n.orphaned_jobs.is_empty() {
                     println!(

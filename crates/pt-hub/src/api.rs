@@ -656,11 +656,21 @@ fn list_nodes(c: &Ctx<'_>, _: api::Empty) -> Result<api::NodeList> {
     })
 }
 
+/// Whether `s` names the node `(id, name)`: digits are an id (no name is digits alone), anything
+/// else a name.
+fn names(s: &str, id: &str, name: &str) -> bool {
+    if s.bytes().all(|b| b.is_ascii_digit()) {
+        s == id
+    } else {
+        s == name
+    }
+}
+
 fn find_node(up: &Up, s: &str) -> Result<pt_fleet::NodeView> {
     up.poller
         .nodes()
         .into_iter()
-        .find(|v| v.node.id == s || v.node.name == s)
+        .find(|v| names(s, &v.node.id, &v.node.name))
         .ok_or_else(|| err(ErrorCode::NotFound, format!("no node {s:?}")))
 }
 
@@ -675,7 +685,7 @@ fn resolve_node(up: &Up, s: &str, records: bool) -> Result<(u64, String)> {
     if let Some(n) = listed
         .into_iter()
         .filter(|n| n.has_tag(pt_fleet::TAG_NODE))
-        .find(|n| n.id.to_string() == s || n.name == s)
+        .find(|n| names(s, &n.id.to_string(), &n.name))
     {
         return Ok((n.id, n.name));
     }
@@ -685,7 +695,7 @@ fn resolve_node(up: &Up, s: &str, records: bool) -> Result<(u64, String)> {
             .enrolled()
             .map_err(internal)?
             .into_iter()
-            .find(|e| e.id.to_string() == s || e.name == s)
+            .find(|e| names(s, &e.id.to_string(), &e.name))
     {
         return Ok((e.id, e.name));
     }
@@ -843,8 +853,8 @@ fn remove_node(c: &Ctx<'_>, r: api::RemoveNodeRequest) -> Result<api::RemovedNod
             ));
         }
     }
-    let removal = up.poller.remove(id);
-    if viewed.is_some() && up.poller.node(&key).is_none() {
+    let (removal, forgotten) = up.poller.remove(id);
+    if forgotten {
         crate::fleet::removed(c.hub, id);
     }
     let removal = removal.map_err(|e| {
@@ -862,16 +872,26 @@ fn remove_node(c: &Ctx<'_>, r: api::RemoveNodeRequest) -> Result<api::RemovedNod
             fleet_err(e)
         }
     })?;
-    let mut cancelled = Vec::new();
-    for j in view.state.jobs.values().filter(|j| pinned_to(j, &key)) {
-        match command(c.hub, EventKind::CancelJob { job: j.id }) {
-            Ok(_) => cancelled.push(j.id.0.to_string()),
-            Err(e) => info!("node {name} removed; job {} not cancelled: {e}", j.id.0),
-        }
+    // The scheduler fails the same jobs on its own (a crash here, a job queued while its
+    // approval was pending); this only makes it immediate.
+    let mut failed = Vec::new();
+    for j in c
+        .hub
+        .view()
+        .state
+        .jobs
+        .values()
+        .filter(|j| pinned_to(j, &key))
+    {
+        c.hub.submit(EventKind::JobNodeRemoved {
+            job: j.id,
+            node: pt_core::NodeId(id),
+        });
+        failed.push(j.id.0.to_string());
     }
     let mut text = format!("node {name} removed");
-    if !cancelled.is_empty() {
-        text.push_str(&format!("; cancelled queued jobs {}", cancelled.join(", ")));
+    if !failed.is_empty() {
+        text.push_str(&format!("; queued jobs {} fail", failed.join(", ")));
     }
     if !in_flight.is_empty() {
         text.push_str(&format!("; jobs {} were in flight", in_flight.join(", ")));
@@ -887,7 +907,7 @@ fn remove_node(c: &Ctx<'_>, r: api::RemoveNodeRequest) -> Result<api::RemovedNod
     Ok(api::RemovedNode {
         node_id: key,
         name: removal.name,
-        cancelled_jobs: cancelled,
+        failed_jobs: failed,
         orphaned_jobs: in_flight,
         record_only: removal.record_only,
     })

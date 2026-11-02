@@ -2985,6 +2985,7 @@ final class Job {
     this.startedAt,
     this.endedAt,
     this.exitCode,
+    this.error,
     this.logBytes = 0,
     this.cwd,
     this.artifacts = const <JobArtifact>[],
@@ -3017,6 +3018,7 @@ final class Job {
       ),
       endedAt: _opt(j['ended_at_ms'], (e0) => _time(e0, 'Job.ended_at_ms')),
       exitCode: _opt(j['exit_code'], (e0) => _int(e0, 'Job.exit_code')),
+      error: _opt(j['error'], (e0) => _string(e0, 'Job.error')),
       logBytes: _or(j['log_bytes'], 0, (e0) => _int(e0, 'Job.log_bytes')),
       cwd: _opt(j['cwd'], (e0) => _string(e0, 'Job.cwd')),
       artifacts: _or(
@@ -3058,6 +3060,9 @@ final class Job {
 
   final int? exitCode;
 
+  /// Why the hub ended it when no node did, such as `node 4 was removed`.
+  final String? error;
+
   /// Bytes of log the hub holds.
   final int logBytes;
 
@@ -3082,6 +3087,7 @@ final class Job {
     if (startedAt case final v?) 'started_at_ms': v.millisecondsSinceEpoch,
     if (endedAt case final v?) 'ended_at_ms': v.millisecondsSinceEpoch,
     if (exitCode case final v?) 'exit_code': v,
+    if (error case final v?) 'error': v,
     'log_bytes': logBytes,
     if (cwd case final v?) 'cwd': v,
     'artifacts': [for (final e0 in artifacts) e0.toJson()],
@@ -4081,7 +4087,7 @@ final class RemovedNode {
   const RemovedNode({
     required this.nodeId,
     required this.name,
-    this.cancelledJobs = const <String>[],
+    this.failedJobs = const <String>[],
     this.orphanedJobs = const <String>[],
     this.recordOnly = false,
   });
@@ -4091,13 +4097,13 @@ final class RemovedNode {
     return RemovedNode(
       nodeId: _string(j['node_id'], 'RemovedNode.node_id'),
       name: _string(j['name'], 'RemovedNode.name'),
-      cancelledJobs: _or(
-        j['cancelled_jobs'],
+      failedJobs: _or(
+        j['failed_jobs'],
         const <String>[],
         (e0) => _list(
           e0,
-          'RemovedNode.cancelled_jobs',
-          (e1) => _string(e1, 'RemovedNode.cancelled_jobs[]'),
+          'RemovedNode.failed_jobs',
+          (e1) => _string(e1, 'RemovedNode.failed_jobs[]'),
         ),
       ),
       orphanedJobs: _or(
@@ -4121,8 +4127,9 @@ final class RemovedNode {
 
   final String name;
 
-  /// Queued jobs that could run only on this node, cancelled.
-  final List<String> cancelledJobs;
+  /// Queued jobs that could run only on this node: failed, `node N was removed`. One
+  /// queued later (an approval was pending) fails the same way when the hub schedules it.
+  final List<String> failedJobs;
 
   /// Jobs it had in flight (`force`), left to the lease: they go lost, then abandoned.
   final List<String> orphanedJobs;
@@ -4133,7 +4140,7 @@ final class RemovedNode {
   Map<String, Object?> toJson() => {
     'node_id': nodeId,
     'name': name,
-    'cancelled_jobs': cancelledJobs,
+    'failed_jobs': failedJobs,
     'orphaned_jobs': orphanedJobs,
     'record_only': recordOnly,
   };
@@ -5415,8 +5422,8 @@ final class HubApi {
       _call('ApproveNode', request.toJson(), ApprovedNode.fromJson);
 
   /// Deletes the node from headscale, which revokes its tailnet key, and drops its
-  /// enrollment record. Queued jobs pinned to it are cancelled. An online node, or one with
-  /// jobs in flight, needs `force`.
+  /// enrollment record. Queued jobs pinned to it fail. An online node, or one with jobs in
+  /// flight, needs `force`. After a partial removal, retry by id.
   ///
   /// `POST /api/RemoveNode`, scope `owner`.
   Future<RemovedNode> removeNode(RemoveNodeRequest request) =>

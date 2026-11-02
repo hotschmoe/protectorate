@@ -88,6 +88,7 @@ impl Core<'_> {
             E::CancelJob { job } => self.cancel_job(*job),
             E::AbandonJob { job } => self.abandon_job(*job),
             E::RequeueJob { job } => self.requeue_job(*job),
+            E::JobNodeRemoved { job, node } => self.job_node_removed(*job, *node),
 
             E::Dispatched { effect, attempt } => {
                 // The answer lets an executor that asks write only what is still released.

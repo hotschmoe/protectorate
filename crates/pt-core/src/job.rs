@@ -426,6 +426,18 @@ impl Core<'_> {
         self.reply(Reply::Accepted);
     }
 
+    pub(crate) fn job_node_removed(&mut self, id: JobId, node: NodeId) {
+        if self.st.jobs.get(&id).map(|j| j.state) != Some(JobState::Queued) {
+            return;
+        }
+        self.set_job(id, JobState::Failed(JobFailure::NodeRemoved(node)));
+        self.notify(
+            Party::Owner,
+            None,
+            Notice::JobFinished { job: id, ok: false },
+        );
+    }
+
     /// An explicit new attempt: the only way a job runs again.
     pub(crate) fn requeue_job(&mut self, id: JobId) {
         let Some(j) = self.st.jobs.get(&id) else {

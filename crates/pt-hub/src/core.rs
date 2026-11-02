@@ -260,7 +260,12 @@ fn notice_text(view: &View, n: &Notice) -> (Kind, Level, String) {
         Notice::JobFinished { job, ok } => (
             Kind::Job,
             if *ok { Level::Info } else { Level::Warn },
-            format!("job {} {}", job.0, if *ok { "succeeded" } else { "failed" }),
+            match view.state.jobs.get(job).map(|j| j.state) {
+                Some(pt_core::JobState::Failed(pt_core::JobFailure::NodeRemoved(n))) => {
+                    format!("job {} failed: node {} was removed", job.0, n.0)
+                }
+                _ => format!("job {} {}", job.0, if *ok { "succeeded" } else { "failed" }),
+            },
         ),
     }
 }

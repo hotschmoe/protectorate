@@ -104,7 +104,7 @@ pub fn event(b: &mut Bytes) -> Event {
     let j = |b: &mut Bytes| JobId(b.u64());
     let a = |b: &mut Bytes| b.u64() as u32;
     use EventKind as E;
-    let kind = match b.below(31) {
+    let kind = match b.below(32) {
         0 => E::Spawn(SpawnSpec {
             request_id: b.string(),
             name: b.string(),
@@ -238,6 +238,10 @@ pub fn event(b: &mut Bytes) -> Event {
         },
         28 => E::Tick,
         29 => E::HubRecovered,
+        30 => E::JobNodeRemoved {
+            job: j(b),
+            node: NodeId(b.u64()),
+        },
         _ => E::RequestApproval {
             sleeve: s(b),
             ask: ask(b),
