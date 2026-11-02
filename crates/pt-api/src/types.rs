@@ -285,6 +285,7 @@ api_records! {
         pub role: SleeveRole,
         pub lifecycle: Lifecycle,
         /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed or `g<N>`.
+        /// A flap after a rejected login is `flapping (<harness> login rejected)`.
         pub park_reason: Option<String>,
         /// The directory the incarnation works in (a child's worktree, a root's claim).
         pub path: String = String::new(),
@@ -462,6 +463,8 @@ api_records! {
         pub label: String,
         pub used_pct: Option<f64>,
         pub resets_at_ms: Option<EpochMs>,
+        /// Vendor window length in milliseconds, when the reading named one.
+        pub length_ms: Option<u64>,
     }
 
     pub struct Quota {

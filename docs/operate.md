@@ -93,7 +93,9 @@ A sleeve is named by its id or its name.
 
 Guardrails in code interrupt, resume, resleeve or park a sleeve that fails (quota exhausted,
 crash, silent, looping and so on). A third resleeve within an hour parks it; `sleeve list` shows
-the park reason.
+the park reason. When that trip is a rejected login, the reason names that login
+(`flapping (claude login rejected)` and the same for the other harnesses). Any other flap stays
+`flapping`.
 
 ## Approvals and D9
 
@@ -201,11 +203,45 @@ One row per subscription (Claude, Codex, Grok, the local endpoint): the reading,
 percent used, and a note. The readers are read-only: they use the hub's harness logins (below)
 and never refresh or print a token, so a harness no sleeve has run for a while can read `login
 expired` until one does. They run every `quota_poll_secs` (60; 0 turns them off); a reading is
-refreshed after 5 minutes and becomes stale after 10. A response with a malformed usage window,
+refreshed after 5 minutes and becomes stale after 10. A read that finishes after its deadline
+is kept, and ages from when it finished. A response with a malformed usage window,
 or with no window at all, is reported as an error.
 Resleeve targets are weighted by fresh readings; known-exhausted candidates are skipped, and the
-sleeve parks if all eligible candidates are exhausted. When a reading is unavailable, an unknown
-candidate can still be selected. A local endpoint may use HTTPS or loopback HTTP; other HTTP
+sleeve parks if all eligible candidates are exhausted. A stale reading keeps its last windows:
+under the usable minimum it counts as exhausted, and with spare left the fallback may still
+choose it. One that is exhausted and names no reset stops blocking after its own length, or
+after five hours when that length is unknown, and may then be spent as a candidate with no
+reading. The local endpoint has no such windows: a stale reading is not spent, the same as
+a failed one, while one that was never read still may be. A candidate with no reading
+(`unknown`: no login, an expired login, or not read yet) can still be selected. For Claude,
+Codex, and Grok, a rejected OAuth login (HTTP 401) or a login that lacks the usage scope is
+the same. The scope case is the provider's structured error (`insufficient_scope`,
+`invalid_scope`, or an error object whose type or code is `permission_error`), not a 403 that
+only mentions permission. A wrong key on the local endpoint stays a failed reading. A failed
+reading (`error`: a body that did not parse, another HTTP status, or a timeout) cannot. The park reason names a failed reading, a stale row that is
+short of quota, or a local endpoint whose last reading is stale or failed. A fresh row
+under the minimum still says it is short of fresh quota. A window whose reset time has already passed still blocks while it is over that
+line. The block lasts the same ten minutes a reading stays fresh. Taken before the reset,
+it lasts that long after the reset. Taken with the reset already a few seconds behind, it
+lasts that long after the reading. A stamp that was
+already long past, and a window once that grace has ended, count as reset, and the fallback
+may spend the row for that reason. It is not a missing reading. A reset at or before the
+epoch is ignored and the percent still counts.
+A model-scoped Claude window (the weekly Sonnet or Opus cap, shown as `wk <name>`) gates a
+resleeve of the same family, ignoring case and version, so `Sonnet 4.5` gates `sonnet` and
+`claude-sonnet-4-5`. `opusplan` is gated by both the Opus and the Sonnet cap. A candidate
+with no model, and the model `default`, are not blocked by a model cap. A cap under the usable
+minimum only ranks that candidate below an otherwise equal one, and the chosen or parked
+reason names the cap (`; wk sonnet under the minimum`, and the same for the other labels).
+A scope that is not opus, sonnet, or haiku still gates when its name is at least three letters
+and the model name contains it. A row that only reports
+other models' caps may be spent, as a candidate with no reading for that
+model. The account windows always count. Pi with a vendor login and
+Antigravity have no meter and are never chosen. A resleeve list that is only those is not
+reported as short of quota. A Codex window keeps the length the vendor
+reported, which the dispatch weight uses.
+The label can be coarser (`119` seconds shows as `1m`). A local
+endpoint may use HTTPS or loopback HTTP; other HTTP
 endpoints are reported as misconfigured and are not contacted.
 
 ## History

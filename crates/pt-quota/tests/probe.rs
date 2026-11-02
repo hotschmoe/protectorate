@@ -34,6 +34,12 @@ fn line_of<'a>(out: &'a str, name: &str) -> &'a str {
         .unwrap_or_else(|| panic!("no {name} line in:\n{out}"))
 }
 
+fn target_of(out: &str) -> &str {
+    out.lines()
+        .find(|l| l.starts_with("target "))
+        .unwrap_or_else(|| panic!("no target line in:\n{out}"))
+}
+
 fn state_of(line: &str) -> &str {
     let state = line.split(' ').nth(1).unwrap_or("");
     assert!(STATES.contains(&state), "bad state in {line:?}");
@@ -81,14 +87,18 @@ fn write(path: &Path, text: &str) {
 
 /// Serves canned bodies by path and records each request's Authorization header. A path under
 /// a `guarded` prefix answers 401 unless the request carries that bearer token.
-fn serve(routes: Vec<(&'static str, &'static str)>) -> (u16, Arc<Mutex<Vec<String>>>) {
+fn serve<S: Into<String>>(routes: Vec<(&'static str, S)>) -> (u16, Arc<Mutex<Vec<String>>>) {
     serve_guarded(routes, &[])
 }
 
-fn serve_guarded(
-    routes: Vec<(&'static str, &'static str)>,
+fn serve_guarded<S: Into<String>>(
+    routes: Vec<(&'static str, S)>,
     guarded: &'static [(&'static str, &'static str)],
 ) -> (u16, Arc<Mutex<Vec<String>>>) {
+    let routes: Vec<(&'static str, String)> = routes
+        .into_iter()
+        .map(|(path, body)| (path, body.into()))
+        .collect();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -120,16 +130,23 @@ fn serve_guarded(
             let body = routes
                 .iter()
                 .find(|(p, _)| path.starts_with(p))
-                .map(|(_, b)| *b);
+                .map(|(_, b)| b.clone());
             let reply = match body {
                 _ if denied => {
                     "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                         .to_string()
                 }
-                Some(b) => format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}",
-                    b.len()
-                ),
+                // A body "HTTP <code>\n<payload>" answers with that status. Anything else is 200.
+                Some(b) => {
+                    let (code, payload) = b
+                        .strip_prefix("HTTP ")
+                        .and_then(|rest| rest.split_once('\n'))
+                        .unwrap_or(("200 OK", b.as_str()));
+                    format!(
+                        "HTTP/1.1 {code}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+                        payload.len()
+                    )
+                }
                 None => "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                     .to_string(),
             };
@@ -140,8 +157,8 @@ fn serve_guarded(
 }
 
 /// Fixture logins and a fake provider on a real socket: each reader reads its login file, sends
-/// the bearer token over curl, and parses the response; an expired login, a missing login and a
-/// dead endpoint are reported as error and unknown; no token is ever printed.
+/// the bearer token over curl, and parses the response; an expired login is unknown, a missing
+/// login is unknown, and a dead endpoint is an error; no token is ever printed.
 #[test]
 fn fixture_readers_over_real_curl() {
     let home = scratch("fixture-home");
@@ -237,7 +254,7 @@ fn fixture_readers_over_real_curl() {
     ]);
     println!("{out}");
     let claude = line_of(&out, "claude");
-    assert_eq!(state_of(claude), "error");
+    assert_eq!(state_of(claude), "unknown", "{claude}");
     assert!(claude.contains("expired"), "{claude}");
     assert_eq!(state_of(line_of(&out, "local")), "error");
     assert!(!out.contains("secret-token"));
@@ -245,7 +262,8 @@ fn fixture_readers_over_real_curl() {
 
 /// The local endpoint behind a bearer token, as the owner's is: the reader finds the key and the
 /// base URL in a fixture `~/.pi/agent/models.json` (provider named by `--pi-provider`), sends the
-/// key over curl, and gets a fresh reading; a wrong key is a 401 error; an `apiKey` naming a set
+/// key over curl, and gets a fresh reading; a wrong key is a 401 and stays a failed read, because
+/// the local endpoint does not refresh a login; an `apiKey` naming a set
 /// environment variable sends that variable's value; a `!command` key is never run. No key is
 /// ever printed.
 #[test]
@@ -283,6 +301,22 @@ fn local_reader_sends_the_pi_provider_key() {
     let local = run(&home, &[]);
     assert_eq!(state_of(&local), "error", "{local}");
     assert!(local.contains("401"), "{local}");
+    let parked = probe(&[
+        "--home",
+        home.to_str().unwrap(),
+        "--pi-provider",
+        "lab",
+        "--allow",
+        "pi_local",
+    ]);
+    assert!(
+        parked.contains("target none: the local endpoint's last reading is stale or failed"),
+        "{parked}"
+    );
+    assert!(
+        !parked.contains("without a fresh quota reading"),
+        "{parked}"
+    );
 
     models(&home, "PT_E2E_LOCAL_KEY");
     let local = run(&home, &[("PT_E2E_LOCAL_KEY", "local-secret-key")]);
@@ -371,8 +405,11 @@ fn partial_responses_and_exhausted_selection() {
     ]);
     let mixed = format!("http://127.0.0.1:{mixed_port}");
     let out = run(args(&mixed));
+    assert_eq!(state_of(line_of(&out, "codex")), "error", "{out}");
     assert!(
-        out.contains("target Codex: first eligible in resleeve_to without a fresh quota reading"),
+        out.contains(
+            "target none: every eligible resleeve target is short of quota, stale, or failed"
+        ),
         "{out}"
     );
 
@@ -401,7 +438,7 @@ fn partial_responses_and_exhausted_selection() {
         assert!(line.contains(reason), "{line}");
     }
     assert!(
-        out.contains("target Claude: first eligible in resleeve_to without a fresh quota reading"),
+        out.contains("target none: all eligible resleeve targets have a failed quota reading"),
         "{out}"
     );
 }
@@ -515,5 +552,648 @@ fn cache_uses_monotonic_time_for_ttl_backoff_and_age() {
         seen.iter().filter(|s| s.contains("/v1/billing")).count(),
         2,
         "{seen:?}"
+    );
+}
+
+/// A stale row keeps the windows of its last good read. Under the usable minimum the fallback
+/// does not spend it; at or above the minimum it still may, instead of parking.
+#[test]
+#[cfg(debug_assertions)]
+fn stale_windows_still_gate_the_fallback() {
+    let home = scratch(&format!("stale-windows-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"stale-claude"}}"#,
+    );
+    let home_s = home.to_str().unwrap();
+    let run = |body: &'static str| {
+        let (port, _) = serve(vec![("/api/oauth/usage", body)]);
+        let base = format!("http://127.0.0.1:{port}");
+        probe(&[
+            "--home",
+            home_s,
+            "--claude-url",
+            &base,
+            "--allow",
+            "claude",
+            "--test-cache-ms",
+            "150",
+        ])
+    };
+    let exhausted = run(
+        r#"{"five_hour":{"utilization":99,"resets_at":"2100-01-01T00:00:00Z"},"seven_day":{"utilization":10,"resets_at":"2100-01-08T00:00:00Z"}}"#,
+    );
+    assert!(
+        exhausted.contains("aged claude stale") && exhausted.contains("99%"),
+        "{exhausted}"
+    );
+    assert!(
+        exhausted.contains(
+            "aged target none: all eligible resleeve targets are stale and short of quota"
+        ),
+        "{exhausted}"
+    );
+    assert!(
+        !exhausted.contains("without a fresh quota reading"),
+        "{exhausted}"
+    );
+
+    let spare = run(
+        r#"{"five_hour":{"utilization":0,"resets_at":"2100-01-01T00:00:00Z"},"seven_day":{"utilization":10,"resets_at":"2100-01-08T00:00:00Z"}}"#,
+    );
+    assert!(spare.contains("aged claude stale"), "{spare}");
+    assert!(
+        spare.contains(
+            "aged target Claude: first eligible in resleeve_to whose last reading still has spare quota"
+        ),
+        "{spare}"
+    );
+}
+
+/// A Codex `reset_at` of 0 is not a reset, so a full window still blocks. A reset a few
+/// seconds behind the clock blocks on a fresh read, with no backdated cache. A stamp from
+/// 1970 was already long past at fetch time, so the window counts as reset. A stamp that
+/// has passed with room left is the same.
+#[test]
+fn a_reset_just_behind_blocks_and_an_ancient_one_counts_as_reset() {
+    let home = scratch(&format!("passed-reset-{}", std::process::id()));
+    write(
+        &home.join(".codex/auth.json"),
+        r#"{"tokens":{"access_token":"passed-codex"}}"#,
+    );
+    let home_s = home.to_str().unwrap();
+    let run = |body: &str| {
+        let (port, _) = serve(vec![("/wham/usage", body.to_string())]);
+        let base = format!("http://127.0.0.1:{port}");
+        probe(&["--home", home_s, "--codex-url", &base, "--allow", "codex"])
+    };
+    let now_s = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let behind = run(&format!(
+        r#"{{"plan_type":"plus","rate_limit":{{"primary_window":{{"used_percent":100,"limit_window_seconds":18000,"reset_at":{secs}}}}}}}"#,
+        secs = now_s.saturating_sub(5)
+    ));
+    let line = line_of(&behind, "codex");
+    assert_eq!(state_of(line), "fresh", "{behind}");
+    assert!(line.contains("reset passed"), "{line}");
+    assert!(
+        behind.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{behind}"
+    );
+    assert!(
+        !behind.contains("whose quota windows have reset"),
+        "{behind}"
+    );
+
+    let zero = run(
+        r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":100,"limit_window_seconds":18000,"reset_at":0}}}"#,
+    );
+    let line = line_of(&zero, "codex");
+    assert_eq!(state_of(line), "fresh", "{zero}");
+    assert!(
+        line.contains("[5h 100%]") && !line.contains("reset passed"),
+        "{line}"
+    );
+    assert!(
+        zero.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{zero}"
+    );
+
+    let passed = run(
+        r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":100,"limit_window_seconds":18000,"reset_at":1}}}"#,
+    );
+    let line = line_of(&passed, "codex");
+    assert!(line.contains("reset passed"), "{line}");
+    assert!(
+        passed
+            .contains("target Codex: first eligible in resleeve_to whose quota windows have reset"),
+        "{passed}"
+    );
+
+    let room = run(
+        r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":18000,"reset_at":1}}}"#,
+    );
+    assert!(
+        room.contains("target Codex: first eligible in resleeve_to whose quota windows have reset"),
+        "{room}"
+    );
+    assert!(!room.contains("without a fresh quota reading"), "{room}");
+}
+
+/// A stale row fetched before the reset still blocks inside the ten-minute grace, and counts
+/// as reset once that grace has passed.
+#[test]
+#[cfg(debug_assertions)]
+fn a_passed_reset_blocks_only_inside_the_grace() {
+    let home = scratch(&format!("reset-grace-{}", std::process::id()));
+    write(
+        &home.join(".codex/auth.json"),
+        r#"{"tokens":{"access_token":"grace-codex"}}"#,
+    );
+    let now_s = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs();
+    let home_s = home.to_str().unwrap();
+    let run = |reset_at: u64| {
+        let body = format!(
+            r#"{{"plan_type":"plus","rate_limit":{{"primary_window":{{"used_percent":100,"limit_window_seconds":18000,"reset_at":{reset_at}}}}}}}"#
+        );
+        let (port, _) = serve(vec![("/wham/usage", body)]);
+        let base = format!("http://127.0.0.1:{port}");
+        probe(&[
+            "--home",
+            home_s,
+            "--codex-url",
+            &base,
+            "--allow",
+            "codex",
+            "--test-cache-ms",
+            "150",
+        ])
+    };
+    let inside = run(now_s.saturating_sub(120));
+    assert!(
+        inside.contains(
+            "aged target none: all eligible resleeve targets are stale and short of quota"
+        ),
+        "{inside}"
+    );
+    let outside = run(now_s.saturating_sub(30 * 60));
+    assert!(
+        outside.contains(
+            "aged target Codex: first eligible in resleeve_to whose quota windows have reset"
+        ),
+        "{outside}"
+    );
+}
+
+/// A local endpoint that answered, then went stale, is not spent. It has no percent windows
+/// to fall back on.
+#[test]
+#[cfg(debug_assertions)]
+fn a_stale_local_reading_is_not_spent() {
+    let home = scratch(&format!("stale-local-{}", std::process::id()));
+    let (port, _) = serve(vec![("/v1/models", r#"{"data":[{"id":"local-model"}]}"#)]);
+    let base = format!("http://127.0.0.1:{port}");
+    let out = probe(&[
+        "--home",
+        home.to_str().unwrap(),
+        "--local",
+        &base,
+        "--allow",
+        "pi_local",
+        "--test-cache-ms",
+        "150",
+    ]);
+    assert!(
+        out.contains("local fresh") && out.contains("local-model"),
+        "{out}"
+    );
+    assert!(out.contains("target PiLocal:"), "{out}");
+    assert!(out.contains("aged local stale"), "{out}");
+    assert!(
+        out.contains("aged target none: the local endpoint's last reading is stale or failed"),
+        "{out}"
+    );
+    assert!(!out.contains("without a fresh quota reading"), "{out}");
+}
+
+/// A stale exhausted window with no reset stops blocking after its length. Five hours is that
+/// length for a `5h` label. The backdated row is a day old, so the aged candidate may be spent.
+#[test]
+#[cfg(debug_assertions)]
+fn a_stale_exhausted_window_with_no_reset_becomes_unknown() {
+    let home = scratch(&format!("stale-no-reset-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"stale-no-reset"}}"#,
+    );
+    let (port, _) = serve(vec![(
+        "/api/oauth/usage",
+        r#"{"five_hour":{"utilization":100}}"#,
+    )]);
+    let base = format!("http://127.0.0.1:{port}");
+    let out = probe(&[
+        "--home",
+        home.to_str().unwrap(),
+        "--claude-url",
+        &base,
+        "--allow",
+        "claude",
+        "--test-cache-ms",
+        "150",
+    ]);
+    assert_eq!(state_of(line_of(&out, "claude")), "fresh", "{out}");
+    assert!(
+        out.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{out}"
+    );
+    assert!(
+        out.contains("aged claude stale") && out.contains("100%"),
+        "{out}"
+    );
+    assert!(
+        out.contains(
+            "aged target Claude: first eligible in resleeve_to without a fresh quota reading"
+        ),
+        "{out}"
+    );
+    assert!(!out.contains("failed quota reading"), "{out}");
+}
+
+/// A 401 or a scope rejection is not a failed window. The harness may launch so its CLI can
+/// refresh the login, the same as an expired one.
+#[test]
+fn a_rejected_or_unscoped_login_is_unknown() {
+    let home = scratch(&format!("rejected-login-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"rejected-claude"}}"#,
+    );
+    let home_s = home.to_str().unwrap();
+    let run = |body: &str| {
+        let (port, _) = serve(vec![("/api/oauth/usage", body.to_string())]);
+        let base = format!("http://127.0.0.1:{port}");
+        probe(&["--home", home_s, "--claude-url", &base, "--allow", "claude"])
+    };
+    let denied = run("HTTP 401 Unauthorized\n");
+    let line = line_of(&denied, "claude");
+    assert_eq!(state_of(line), "unknown", "{denied}");
+    assert!(line.contains("401"), "{line}");
+    assert!(
+        denied
+            .contains("target Claude: first eligible in resleeve_to without a fresh quota reading"),
+        "{denied}"
+    );
+    assert!(!denied.contains("insufficient fresh quota"), "{denied}");
+    assert!(!denied.contains("failed quota reading"), "{denied}");
+
+    let scope = run("HTTP 403 Forbidden\n{\"error\":\"insufficient_scope\"}");
+    let line = line_of(&scope, "claude");
+    assert_eq!(state_of(line), "unknown", "{scope}");
+    assert!(line.contains("scope"), "{line}");
+    assert!(
+        scope
+            .contains("target Claude: first eligible in resleeve_to without a fresh quota reading"),
+        "{scope}"
+    );
+
+    let typed = run(
+        "HTTP 403 Forbidden\n{\"error\":{\"type\":\"permission_error\",\"message\":\"permission denied\"}}",
+    );
+    assert_eq!(state_of(line_of(&typed, "claude")), "unknown", "{typed}");
+    assert!(
+        typed
+            .contains("target Claude: first eligible in resleeve_to without a fresh quota reading"),
+        "{typed}"
+    );
+
+    let noise = run("HTTP 403 Forbidden\n{\"message\":\"permission denied for this resource\"}");
+    assert_eq!(state_of(line_of(&noise, "claude")), "error", "{noise}");
+    assert!(
+        noise.contains("target none: all eligible resleeve targets have a failed quota reading"),
+        "{noise}"
+    );
+    assert!(!noise.contains("without a fresh quota reading"), "{noise}");
+}
+
+/// A weekly Sonnet cap is shown on the row. It does not exhaust an Opus candidate while the
+/// account window has room, and the local model is not chosen ahead of that. A candidate
+/// with no model is not blocked by the cap; the chosen reason names it.
+#[test]
+fn a_model_scoped_window_does_not_exhaust_the_subscription() {
+    let home = scratch(&format!("scoped-window-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"scoped-claude"}}"#,
+    );
+    let (port, _) = serve(vec![
+        (
+            "/api/oauth/usage",
+            r#"{"five_hour":{"utilization":0,"resets_at":"2100-01-01T00:00:00Z"},"seven_day_sonnet":{"utilization":100,"resets_at":"2100-01-08T00:00:00Z"}}"#,
+        ),
+        ("/v1/models", r#"{"data":[{"id":"local-model"}]}"#),
+    ]);
+    let base = format!("http://127.0.0.1:{port}");
+    let home_s = home.to_str().unwrap();
+    let run = |allow: &str| {
+        probe(&[
+            "--home",
+            home_s,
+            "--claude-url",
+            &base,
+            "--local",
+            &base,
+            "--allow",
+            allow,
+        ])
+    };
+    let both = run("claude:opus,pi_local");
+    let claude = line_of(&both, "claude");
+    assert_eq!(state_of(claude), "fresh", "{both}");
+    assert!(
+        claude.contains("[5h 0%") && claude.contains("sonnet") && claude.contains("100%"),
+        "{claude}"
+    );
+    assert!(
+        both.contains("target Claude:") && both.contains("5h"),
+        "{both}"
+    );
+    assert!(!both.contains("target PiLocal"), "{both}");
+
+    let bare = run("claude");
+    let chosen = target_of(&bare);
+    assert!(
+        chosen.starts_with("target Claude:") && chosen.contains("; wk sonnet under the minimum"),
+        "{bare}"
+    );
+    assert!(!bare.contains("target none:"), "{bare}");
+}
+
+/// `Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus. A candidate
+/// with no model is not blocked; the chosen reason names that cap.
+#[test]
+fn a_versioned_cap_gates_its_model_family() {
+    let home = scratch(&format!("versioned-cap-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"versioned-claude"}}"#,
+    );
+    let (port, _) = serve(vec![(
+        "/api/oauth/usage",
+        r#"{"five_hour":{"utilization":0,"resets_at":"2100-01-01T00:00:00Z"},"limits":[{"kind":"weekly_scoped","percent":100,"resets_at":"2100-01-08T00:00:00Z","scope":{"model":{"display_name":"Sonnet 4.5"}}}]}"#,
+    )]);
+    let base = format!("http://127.0.0.1:{port}");
+    let home_s = home.to_str().unwrap();
+    let run = |allow: &str| probe(&["--home", home_s, "--claude-url", &base, "--allow", allow]);
+    let shown = run("claude:opus");
+    let line = line_of(&shown, "claude");
+    assert!(line.contains("sonnet") && line.contains("100%"), "{line}");
+    for model in ["claude:sonnet", "claude:claude-sonnet-4-5"] {
+        let out = run(model);
+        assert!(
+            out.contains(
+                "target none: all eligible resleeve targets have insufficient fresh quota"
+            ),
+            "{model}: {out}"
+        );
+        assert!(!out.contains("target Claude:"), "{model}: {out}");
+    }
+    let bare_out = run("claude");
+    let bare = target_of(&bare_out);
+    assert!(
+        bare.starts_with("target Claude:") && bare.contains("; wk sonnet 4.5 under the minimum"),
+        "{bare}"
+    );
+    assert!(
+        shown.contains("target Claude:") && shown.contains("5h"),
+        "{shown}"
+    );
+}
+
+/// The Opus weekly cap gates a Claude candidate whose model is Opus, and does not gate Sonnet
+/// while the account window has room. A row that only has that cap, full or empty, is a
+/// candidate with no reading for Sonnet.
+#[test]
+fn a_model_cap_gates_the_candidate_that_runs_that_model() {
+    let home = scratch(&format!("model-cap-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"model-cap-claude"}}"#,
+    );
+    let (port, _) = serve(vec![(
+        "/api/oauth/usage",
+        r#"{"five_hour":{"utilization":0,"resets_at":"2100-01-01T00:00:00Z"},"seven_day_opus":{"utilization":100,"resets_at":"2100-01-08T00:00:00Z"}}"#,
+    )]);
+    let base = format!("http://127.0.0.1:{port}");
+    let home_s = home.to_str().unwrap();
+    let run = |allow: &str| probe(&["--home", home_s, "--claude-url", &base, "--allow", allow]);
+    let opus = run("claude:claude-opus-4-6");
+    assert!(
+        opus.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{opus}"
+    );
+    assert!(!opus.contains("target Claude:"), "{opus}");
+    let line = line_of(&opus, "claude");
+    assert!(line.contains("opus") && line.contains("100%"), "{line}");
+
+    let sonnet = run("claude:sonnet");
+    assert!(
+        sonnet.contains("target Claude:") && sonnet.contains("5h"),
+        "{sonnet}"
+    );
+
+    for (pct, label) in [(0, "open"), (100, "full")] {
+        let body = format!(
+            r#"{{"seven_day_opus":{{"utilization":{pct},"resets_at":"2100-01-08T00:00:00Z"}}}}"#
+        );
+        let (port, _) = serve(vec![("/api/oauth/usage", body)]);
+        let base = format!("http://127.0.0.1:{port}");
+        let only = probe(&[
+            "--home",
+            home_s,
+            "--claude-url",
+            &base,
+            "--allow",
+            "claude:sonnet",
+        ]);
+        assert_eq!(
+            state_of(line_of(&only, "claude")),
+            "fresh",
+            "{label}: {only}"
+        );
+        assert!(
+            only.contains(
+                "target Claude: first eligible in resleeve_to without a fresh quota reading"
+            ),
+            "{label}: {only}"
+        );
+        assert!(
+            !only.contains("insufficient fresh quota"),
+            "{label}: {only}"
+        );
+    }
+}
+
+/// No model and `default` stay eligible under a full cap, and rank below an equal candidate
+/// that the cap does not touch. `opusplan` is gated by either cap. A better account window
+/// still beats a worse one. A bare candidate that is also short of the account window parks,
+/// and that reason names the cap.
+#[test]
+fn an_unspecified_model_ranks_below_a_cap() {
+    let home = scratch(&format!("rank-cap-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"rank-claude"}}"#,
+    );
+    write(
+        &home.join(".codex/auth.json"),
+        r#"{"tokens":{"access_token":"rank-codex"}}"#,
+    );
+    let sonnet_body = r#"{"five_hour":{"utilization":0,"resets_at":"2100-01-01T00:00:00Z"},"seven_day_sonnet":{"utilization":100,"resets_at":"2100-01-08T00:00:00Z"}}"#;
+    let (port, _) = serve(vec![
+        ("/api/oauth/usage", sonnet_body.to_string()),
+        (
+            "/wham/usage",
+            r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":80,"limit_window_seconds":18000,"reset_at":4102444800}}}"#
+                .to_string(),
+        ),
+    ]);
+    let base = format!("http://127.0.0.1:{port}");
+    let home_s = home.to_str().unwrap();
+    let run = |allow: &str| {
+        probe(&[
+            "--home",
+            home_s,
+            "--claude-url",
+            &base,
+            "--codex-url",
+            &base,
+            "--allow",
+            allow,
+        ])
+    };
+
+    let ranked_out = run("claude,claude:opus");
+    let ranked = target_of(&ranked_out);
+    assert!(
+        ranked.contains("[opus]") && !ranked.contains("under the minimum"),
+        "{ranked}"
+    );
+
+    let bare_out = run("claude");
+    let bare = target_of(&bare_out);
+    assert!(
+        bare.starts_with("target Claude:") && bare.contains("; wk sonnet under the minimum"),
+        "{bare}"
+    );
+    let fallback_out = run("claude:default");
+    let fallback = target_of(&fallback_out);
+    assert!(
+        fallback.contains("[default]") && fallback.contains("; wk sonnet under the minimum"),
+        "{fallback}"
+    );
+
+    let plan = run("claude:opusplan");
+    assert!(
+        plan.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{plan}"
+    );
+    assert!(!plan.contains("target Claude:"), "{plan}");
+
+    let better_out = run("claude,codex");
+    let better = target_of(&better_out);
+    assert!(
+        better.starts_with("target Claude:")
+            && better.contains("; wk sonnet under the minimum")
+            && !better.contains("target Codex:"),
+        "{better}"
+    );
+
+    let (port, _) = serve(vec![(
+        "/api/oauth/usage",
+        r#"{"five_hour":{"utilization":0,"resets_at":"2100-01-01T00:00:00Z"},"seven_day_opus":{"utilization":100,"resets_at":"2100-01-08T00:00:00Z"}}"#,
+    )]);
+    let base = format!("http://127.0.0.1:{port}");
+    let opus = probe(&[
+        "--home",
+        home_s,
+        "--claude-url",
+        &base,
+        "--allow",
+        "claude:opusplan",
+    ]);
+    assert!(
+        opus.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{opus}"
+    );
+
+    let (port, _) = serve(vec![(
+        "/api/oauth/usage",
+        r#"{"five_hour":{"utilization":99,"resets_at":"2100-01-01T00:00:00Z"},"seven_day_sonnet":{"utilization":100,"resets_at":"2100-01-08T00:00:00Z"}}"#,
+    )]);
+    let base = format!("http://127.0.0.1:{port}");
+    let parked = probe(&["--home", home_s, "--claude-url", &base, "--allow", "claude"]);
+    let line = target_of(&parked);
+    assert!(
+        line.contains("insufficient fresh quota") && line.contains("; wk sonnet under the minimum"),
+        "{parked}"
+    );
+}
+
+/// Pi with a vendor login has no quota reader. A missing reading is not "unknown", so the
+/// fallback does not spend it once the subscribed account is under the usable minimum.
+#[test]
+fn an_unmetered_harness_is_not_spent_when_its_reading_is_missing() {
+    let home = scratch(&format!("unmetered-{}", std::process::id()));
+    write(
+        &home.join(".claude/.credentials.json"),
+        r#"{"claudeAiOauth":{"accessToken":"unmetered-claude"}}"#,
+    );
+    let (port, _) = serve(vec![(
+        "/api/oauth/usage",
+        r#"{"five_hour":{"utilization":99,"resets_at":"2100-01-01T00:00:00Z"}}"#,
+    )]);
+    let base = format!("http://127.0.0.1:{port}");
+    let home_s = home.to_str().unwrap();
+    let out = probe(&[
+        "--home",
+        home_s,
+        "--claude-url",
+        &base,
+        "--allow",
+        "claude,pi_vendor",
+    ]);
+    assert_eq!(state_of(line_of(&out, "claude")), "fresh", "{out}");
+    assert!(
+        out.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        "{out}"
+    );
+    assert!(!out.contains("target PiVendor"), "{out}");
+
+    let alone = probe(&["--home", home_s, "--allow", "pi_vendor"]);
+    assert!(
+        alone.contains("target none: no eligible resleeve target has a quota meter"),
+        "{alone}"
+    );
+    assert!(!alone.contains("insufficient fresh quota"), "{alone}");
+}
+
+/// Codex reports a window length in seconds. The label keeps whole minutes, so 119 seconds
+/// is shown as `1m`, and the pace uses the stored length rather than that minute.
+#[test]
+fn a_codex_window_keeps_its_length_for_the_pace() {
+    let home = scratch(&format!("window-length-{}", std::process::id()));
+    write(
+        &home.join(".codex/auth.json"),
+        r#"{"tokens":{"access_token":"length-codex"}}"#,
+    );
+    let reset_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs()
+        + 90;
+    let body = format!(
+        r#"{{"plan_type":"plus","rate_limit":{{"primary_window":{{"used_percent":50,"limit_window_seconds":119,"reset_at":{reset_at}}}}}}}"#
+    );
+    let (port, _) = serve(vec![("/wham/usage", body)]);
+    let base = format!("http://127.0.0.1:{port}");
+    let out = probe(&[
+        "--home",
+        home.to_str().unwrap(),
+        "--codex-url",
+        &base,
+        "--allow",
+        "codex",
+    ]);
+    let line = line_of(&out, "codex");
+    assert_eq!(state_of(line), "fresh", "{out}");
+    assert!(line.contains("[1m 50%"), "{line}");
+    assert!(
+        out.contains("target Codex:") && out.contains("~0% expiring unused, 50% usable now"),
+        "{out}"
     );
 }

@@ -233,7 +233,11 @@ impl Core<'_> {
         let s = self.sl(sid);
         if cause != Cause::Manual {
             if recent(&mut s.guard.resleeves, now, RESLEEVE_WINDOW) >= RESLEEVE_LIMIT {
-                return self.park(sid, ParkReason::Flapping);
+                let login = match cause {
+                    Cause::Guard(Guardrail::AuthFailed) => Some(s.target.harness),
+                    _ => None,
+                };
+                return self.park(sid, ParkReason::Flapping(login));
             }
             s.guard.resleeves.push(now);
         }

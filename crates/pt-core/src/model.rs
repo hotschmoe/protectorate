@@ -253,7 +253,8 @@ pub enum ParkReason {
     Provision,
     NoTarget,
     Launch,
-    Flapping,
+    /// `Some` is the login rejected when the flap was an auth failure. Other flaps carry `None`.
+    Flapping(Option<Harness>),
     BriefUnconfirmed,
     Guard(Guardrail),
 }

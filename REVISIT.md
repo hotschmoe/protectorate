@@ -401,10 +401,13 @@ Each entry: where, what was done, what right looks like.
   told). Right: `deliverable` is false while `probing`, so the message waits in the queue.
 - **Resleeve selection is quota-weighted only among `resleeve_to`** (`pt-hub`, select.rs): the
   candidates that are headless, not excluded, installed and not `ineligible` in `doctor.json` go
-  to quota selection with task size Medium and no health list; when a reading is unavailable the
-  first unknown candidate in the owner's order can win, while known-exhausted candidates cannot.
-  A new sleeve always names its harness (`SpawnSleeve.harness` is
-  required), so nothing else is chosen by quota, and G1 does not read quota yet. Right: the task
+  to quota selection with task size Medium and no health list. A candidate with no reading
+  (`unknown`: no login, reader off, or not read yet) can win, in the owner's order, after any
+  stale row that still has spare. A failed reading (`error`) cannot win, and neither can a row
+  whose windows are under the usable minimum. Readings are not journaled, so a restart spends
+  on `unknown` until the first refresh. A new sleeve always names its harness
+  (`SpawnSleeve.harness` is required), so nothing else is chosen by quota, and G1 does not read
+  quota yet. Right: the task
   size from the sleeve's history (D27), node and probe health, and an optional harness on spawn.
 - **FetchArtifact reads one file at a time and hashes it twice** (`pt-node` `read_artifact`,
   `pt-hub` `fetch_artifact`): the hub asks 4 MiB slices; at the end the node re-reads the whole
@@ -678,8 +681,10 @@ Each entry: where, what was done, what right looks like.
   restart must keep dispatch weighting.
 - **A stuck quota read can leave one worker behind** (`pt-quota`, cache.rs): publication has a
   deadline and cached rows age monotonically, but an OS-blocked file read cannot be cancelled;
-  the cache allows at most one such worker per reader and retries only after it returns. Right:
-  use a killable helper process if network filesystems make this a practical problem.
+  the cache allows at most one such worker per reader and retries only after it returns. A read
+  that does finish after the deadline is applied on the next refresh, and each curl in the read
+  gets only the time still left. Right: use a killable helper process if network filesystems
+  make this a practical problem.
 - **The web app embedded is about 17.7 MB** (`crates/protectorate/build.rs`; the bundled Inter fonts
   added about 1 MB on 2026-11-02): the release binary
   is 19.4 MB with it and 1.7 MB without; with gzipped headscale and member too (25 MB) the
@@ -712,7 +717,13 @@ Each entry: where, what was done, what right looks like.
   from real dispatch history once a workspace has any.
 - **`select_target` takes `now_ms`** (`pt-quota`): the pure function needs a clock for time to
   reset, so it is the first argument. Pi with a vendor login (`PiVendor`) and Antigravity are never
-  selected (no quota subscription behind them).
+  selected, including by the resleeve fallback (no quota subscription behind them).
+- **A late quota read has no deterministic probe** (`pt-quota` cache.rs): a body that arrives
+  after the deadline is kept, stamped when the read finished, and aged from that finish rather
+  than from the refresh that collects it. A late error does not add a second backoff. Showing
+  that needs the read to outlive the deadline without a test-only flag, and the timed probe
+  flaked under load. Right: a deterministic e2e if one can be had without hooks; until then the
+  behavior is this paragraph.
 - **Quota fuzz runs wrote corpus into `fuzz/seeds`** (`pt-quota`): `cargo fuzz run <t> seeds/<t>`
   adds new inputs to the seed dir; only the hand-written seeds (named, not hex) are committed.
   Right: run with `corpus` as first dir and seeds as the second.

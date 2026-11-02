@@ -109,7 +109,8 @@ pub fn park_wire(r: ParkReason) -> String {
         ParkReason::Provision => "provision".into(),
         ParkReason::NoTarget => "no_target".into(),
         ParkReason::Launch => "launch".into(),
-        ParkReason::Flapping => "flapping".into(),
+        ParkReason::Flapping(Some(h)) => format!("flapping ({} login rejected)", h.as_str()),
+        ParkReason::Flapping(None) => "flapping".into(),
         ParkReason::BriefUnconfirmed => "brief_unconfirmed".into(),
         ParkReason::Guard(g) => format!("g{}", g.number()),
     }

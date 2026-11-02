@@ -3996,7 +3996,12 @@ enum QuotaReading {
 }
 
 final class QuotaWindow {
-  const QuotaWindow({required this.label, this.usedPct, this.resetsAt});
+  const QuotaWindow({
+    required this.label,
+    this.usedPct,
+    this.resetsAt,
+    this.lengthMs,
+  });
 
   factory QuotaWindow.fromJson(Object? json) {
     final j = _object(json, 'QuotaWindow');
@@ -4007,6 +4012,7 @@ final class QuotaWindow {
         j['resets_at_ms'],
         (e0) => _time(e0, 'QuotaWindow.resets_at_ms'),
       ),
+      lengthMs: _opt(j['length_ms'], (e0) => _int(e0, 'QuotaWindow.length_ms')),
     );
   }
 
@@ -4017,10 +4023,14 @@ final class QuotaWindow {
 
   final DateTime? resetsAt;
 
+  /// Vendor window length in milliseconds, when the reading named one.
+  final int? lengthMs;
+
   Map<String, Object?> toJson() => {
     'label': label,
     if (usedPct case final v?) 'used_pct': v,
     if (resetsAt case final v?) 'resets_at_ms': v.millisecondsSinceEpoch,
+    if (lengthMs case final v?) 'length_ms': v,
   };
 }
 
@@ -4585,6 +4595,7 @@ final class Sleeve {
   final Lifecycle lifecycle;
 
   /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed or `g<N>`.
+  /// A flap after a rejected login is `flapping (<harness> login rejected)`.
   final String? parkReason;
 
   /// The directory the incarnation works in (a child's worktree, a root's claim).

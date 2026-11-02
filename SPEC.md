@@ -342,7 +342,9 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   - interrupt unresponsive, protocol desync.
 - **Guardrail actions:** interrupt, resume (at most twice in 10 min), resleeve, or park. Automatic
   resleeves go to headless mode, walking the sleeve's ordered `resleeve_to` list (default
-  `[pi_local]`). A third resleeve within an hour parks the sleeve.
+  `[pi_local]`). A third resleeve within an hour parks the sleeve. When that trip is an auth
+  failure, the park reason names the login that was rejected (`flapping (<harness> login rejected)`).
+  Any other flap stays `flapping`. The hourly limit itself is unchanged.
 - **Testing:** each machine is a pure function with a fuzz target. The target checks invariants I1
   to I10 against a table-driven reference model and checks `replay(journal) == live`.
 
@@ -463,6 +465,61 @@ quota, health)` is pure code, using fresh data only. It weighs projected unused 
 48 h urgency half-life and falls back to the local model. "Dispatch by quota" is this function,
 called at spawn and at guardrail time. Code derives the task-size class, Envoy may nudge it one
 class, and code clamps it (D27).
+
+A stale reading keeps the windows of its last good fetch. The resleeve fallback treats those
+windows like a fresh reading's: under the task's usable minimum the subscription is exhausted,
+and at or above it the fallback may still choose that harness, ahead of a candidate with no
+reading. A stale window that is under the minimum and names no reset stops blocking once the
+row is older than that window's length, or five hours when the length is unknown. It is then
+an unknown reading and may be spent. `select_target` itself stays on fresh rows. The local endpoint has no percent
+windows. A fresh reading may be chosen; a stale or failed one may not. A local row that was
+never read may still be spent.
+
+A candidate with no reading may still be spent. That is `unknown`: no login file, the reader
+is not running, the login is expired, or the hub has not read yet (including just after a
+restart; readings are not journaled). For a Claude, Codex, or Grok OAuth login, a rejection
+(HTTP 401) or a missing usage scope is the same, because that CLI refreshes the login and can
+only do so if a sleeve launches. The scope case is the provider's structured error: `error`
+is `insufficient_scope` or `invalid_scope`, or `error` is an object whose `type` or `code` is
+`permission_error`, `insufficient_scope`, or `invalid_scope`. A 403 whose text merely says
+permission is a failed reading, and so is a wrong key on the local endpoint. The harness CLI
+refreshes the token; the reader does not. A
+failed reading may not. That is `error`: the body did not parse, some other HTTP status came
+back, or the
+read timed out and left no earlier windows. The park reason names what blocks: a failed
+reading, a stale row that is short of quota, or a local endpoint whose last reading is stale
+or failed. A fresh row under the minimum still says it is short of fresh quota. A window whose reset time has passed still blocks while its
+remaining percent is under the task minimum. That grace is the cache's stale window, ten
+minutes, and it is the only such constant. Fetched before the reset, it lasts that long
+after the reset. Fetched with the reset already behind, but by less than that, it
+lasts that long after the fetch: a body that says the window is full and the reset was a few
+seconds ago is still that limit. A stamp already long past when the row was fetched counts as
+reset, and so does a window once the grace has ended. The fallback may then spend the row
+because its windows have reset. That is not a missing reading. A reset at or before the epoch
+is no reset time, and the percent still counts. Model-scoped Claude windows (`wk <name>`) stay on the quota row
+and gate a candidate of the same family (opus, sonnet, haiku), ignoring case and version
+(`Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus). `opusplan`
+counts as both Opus and Sonnet, so that model is gated by either cap, and a cap whose name
+contains `opusplan` gates either model. A candidate with no model, and a candidate whose
+model is `default`, are not blocked by a model cap. On the fresh pick, a cap under the usable
+minimum only ranks that candidate below an otherwise equal one that is not under it. When that
+candidate is chosen or parked, the reason names the tightest such cap as `; <label> under the minimum`.
+A scope that is not one of those families still gates when its name is at least three letters
+and the model name contains it. The account windows always gate
+(`5h`, `wk`), as does the single credit or rate-limit window of the other subscriptions. A
+row whose only windows are caps for other models is an unknown reading for that candidate
+and may be spent. `pi_vendor` and Antigravity have no
+meter and are never chosen on this path. A candidate list that is only those is not reported
+as short of quota. The pace projection uses a vendor window length when
+the reading included one (Codex stores `limit_window_seconds`). The label stays what is shown
+and can be coarser (`119` seconds is `1m`). A minute label is still a length when the reading
+did not name one.
+
+A read that finishes after its deadline is kept and published on the next refresh, stamped
+with the time the read finished. Its age counts from that finish, not from the refresh that
+collects it, so a late body does not look new. A late failure does not count again toward the backoff. Each
+request inside that read gets only the time still left, so a follow-up call cannot discard a
+body that already arrived.
 
 **Spare quota (PROBLEMS P6).** A code rule triggers: projected unused capacity at reset is above X%
 and no high-priority work is queued. When it fires, the next backlog item goes to that harness.
