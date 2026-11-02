@@ -76,17 +76,30 @@ pub fn is_repo(dir: &Path) -> bool {
 }
 
 /// `git init -b <branch>` and one empty commit, in a directory this hub just created.
-pub fn init_empty(dir: &Path, branch: &str, message: &str) -> Result<(), String> {
+/// The commit uses the owner's git identity, or `protectorate` when a field is unset.
+/// Returns the commit id.
+pub fn init_empty(dir: &Path, branch: &str, message: &str) -> Result<String, String> {
     if !branch_ok(branch) {
         return Err(format!("bad branch name {branch}"));
     }
     let mut c = git(dir);
     c.args(["init", "-q", "-b", branch]);
     run(c, "init")?;
+    let (name, email) = crate::toolchain::git_user();
+    let name = name.unwrap_or_else(|| "protectorate".into());
+    let email = email.unwrap_or_else(|| "protectorate@localhost".into());
     let mut c = git(dir);
-    c.args(["commit", "--allow-empty", "-qm", message]);
+    c.env("GIT_AUTHOR_NAME", &name)
+        .env("GIT_AUTHOR_EMAIL", &email)
+        .env("GIT_COMMITTER_NAME", &name)
+        .env("GIT_COMMITTER_EMAIL", &email)
+        .args(["commit", "--allow-empty", "-qm", message]);
     run(c, "commit")?;
-    Ok(())
+    rev_parse(dir, &["HEAD"])
+}
+
+pub(crate) fn head_commit(dir: &Path) -> Option<String> {
+    head(dir)
 }
 
 fn branch_ok(branch: &str) -> bool {

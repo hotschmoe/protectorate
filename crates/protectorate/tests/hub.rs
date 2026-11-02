@@ -1103,14 +1103,33 @@ exec '{real_pi}' "$@""#
 }
 
 /// A new project root is created only under `projects_dir`, as an empty repo a child can branch
-/// from. An overlap names the claim, and a path the hub cannot see says so.
+/// from. An overlap names the claim, and a path the hub cannot see says so. The stand-in claude
+/// is the one the doctor tests use: `--version` succeeds, and it stays up so a sleeve can idle.
 #[test]
 fn new_project_root() {
-    if !have_runtime() {
-        return;
+    for tool in ["bwrap", "systemd-run", "git"] {
+        if !on_path(tool) {
+            eprintln!("SKIP: {tool} is not installed");
+            return;
+        }
     }
+    let fakes = unique("claude-fake");
+    std::fs::create_dir_all(&fakes).unwrap();
+    let claude = fakes.join("claude");
+    write_script(
+        &claude,
+        "if [ \"$1\" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi\nsleep 3600",
+    );
+    let program = claude.to_str().unwrap();
     {
-        let off = Hub::start("noproj");
+        let off = Hub::start_config(
+            "noproj",
+            "claude",
+            &[("claude_program", program.into())],
+            &[],
+            &[],
+        );
+        claude_ready(&off);
         let r = off.cli(&[
             "sleeve",
             "spawn",
@@ -1118,7 +1137,7 @@ fn new_project_root() {
             "--new-path",
             "x",
             "--harness",
-            "pi_local",
+            "claude",
         ]);
         assert_ne!(r.status, 0, "{}", r.stderr);
         assert!(r.stderr.contains("projects_dir is not set"), "{}", r.stderr);
@@ -1129,11 +1148,15 @@ fn new_project_root() {
     let proj = projects.to_str().unwrap();
     let hub = Hub::start_config(
         "newproj",
-        "pi_local",
-        &[("projects_dir", proj.into())],
+        "claude",
+        &[
+            ("projects_dir", proj.into()),
+            ("claude_program", program.into()),
+        ],
         &[],
         &[],
     );
+    claude_ready(&hub);
     let both = hub.cli(&[
         "sleeve",
         "spawn",
@@ -1143,7 +1166,7 @@ fn new_project_root() {
         "--new-path",
         "x",
         "--harness",
-        "pi_local",
+        "claude",
     ]);
     assert_eq!(both.status, 2, "{}", both.stderr);
     assert!(
@@ -1160,7 +1183,7 @@ fn new_project_root() {
         "--path",
         missing.to_str().unwrap(),
         "--harness",
-        "pi_local",
+        "claude",
     ]);
     assert!(
         gone.stderr
@@ -1178,7 +1201,7 @@ fn new_project_root() {
             "--new-path",
             "voice",
             "--harness",
-            "pi_local",
+            "claude",
         ])
         .json();
     hub.wait("voice", "idle", 120);
@@ -1192,11 +1215,34 @@ fn new_project_root() {
         git_out(&path, &["log", "-1", "--format=%s"]),
         "Initial commit"
     );
+    let (author_name, author_email) = owner_git();
     assert_eq!(
         git_out(&path, &["log", "-1", "--format=%an <%ae>"]),
-        "protectorate <protectorate@localhost>"
+        format!("{author_name} <{author_email}>")
     );
     assert!(git_out(&path, &["ls-tree", "HEAD"]).is_empty());
+
+    // A name already in use is refused before the directory is created. The live root stays.
+    let taken = hub.cli(&[
+        "sleeve",
+        "spawn",
+        "voice",
+        "--new-path",
+        "voice-again",
+        "--harness",
+        "claude",
+    ]);
+    assert_ne!(taken.status, 0, "{}", taken.stderr);
+    assert!(
+        taken.stderr.contains("a sleeve has that name"),
+        "{}",
+        taken.stderr
+    );
+    assert!(!projects.join("voice-again").exists(), "{}", taken.stderr);
+    assert_eq!(
+        git_out(&path, &["log", "-1", "--format=%s"]),
+        "Initial commit"
+    );
 
     let kid = hub
         .cli(&[
@@ -1207,7 +1253,7 @@ fn new_project_root() {
             "--parent",
             "voice",
             "--harness",
-            "pi_local",
+            "claude",
         ])
         .json();
     hub.wait("voice-kid", "idle", 120);
@@ -1225,7 +1271,7 @@ fn new_project_root() {
         "--path",
         path.to_str().unwrap(),
         "--harness",
-        "pi_local",
+        "claude",
     ]);
     assert!(again.stderr.contains("409"), "{}", again.stderr);
     assert!(
@@ -1242,7 +1288,7 @@ fn new_project_root() {
         "--new-path",
         "voice",
         "--harness",
-        "pi_local",
+        "claude",
     ]);
     assert!(
         exists.stderr.contains("already exists"),
@@ -1257,7 +1303,7 @@ fn new_project_root() {
         "--new-path",
         "voice/nested",
         "--harness",
-        "pi_local",
+        "claude",
     ]);
     assert!(
         nested.stderr.contains("overlaps sleeve voice"),
@@ -1278,7 +1324,7 @@ fn new_project_root() {
         "--new-path",
         &trick_rel,
         "--harness",
-        "pi_local",
+        "claude",
     ]);
     assert_ne!(trick.status, 0, "{}", trick.stderr);
     assert!(!escaped.exists(), "a .. path was created: {}", trick.stderr);
@@ -1293,7 +1339,7 @@ fn new_project_root() {
         "--new-path",
         "link/evil",
         "--harness",
-        "pi_local",
+        "claude",
     ]);
     assert!(sym.stderr.contains("symlink"), "{}", sym.stderr);
     assert!(!elsewhere.join("evil").exists());
@@ -1305,7 +1351,7 @@ fn new_project_root() {
         "--new-path",
         "/etc/protectorate-not-a-project",
         "--harness",
-        "pi_local",
+        "claude",
     ]);
     assert!(
         outside.stderr.contains("outside projects_dir"),
@@ -1331,7 +1377,7 @@ fn new_project_root() {
                 "--new-path",
                 "envoy-made",
                 "--harness",
-                "pi_local",
+                "claude",
             ],
         )
         .json();
@@ -1353,16 +1399,50 @@ fn new_project_root() {
             "--new-path",
             "sneak",
             "--harness",
-            "pi_local",
+            "claude",
         ],
     );
     assert_eq!(sneaky.status, 4, "{}", sneaky.stderr);
     assert!(
-        sneaky.stderr.contains("only the owner or Envoy"),
+        sneaky
+            .stderr
+            .contains("only the owner, a paired device or Envoy"),
         "{}",
         sneaky.stderr
     );
     assert!(!projects.join("sneak").exists());
+}
+
+/// The owner's git identity, with the same fallback the hub uses for a new project's commit.
+fn owner_git() -> (String, String) {
+    let get = |key: &str| {
+        let out = std::process::Command::new("git")
+            .args(["config", "--global", "--get", key])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        (!v.is_empty() && !v.contains('\n')).then_some(v)
+    };
+    (
+        get("user.name").unwrap_or_else(|| "protectorate".into()),
+        get("user.email").unwrap_or_else(|| "protectorate@localhost".into()),
+    )
+}
+
+fn claude_ready(hub: &Hub) {
+    let dir = hub.home.join("logins/.claude");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(".credentials.json"), "{}\n").unwrap();
+    let d = hub.cli(&["--json", "doctor", "--refresh"]).json();
+    let ok = d["harnesses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|h| h["name"].as_str() == Some("claude") && h["eligible"].as_bool() == Some(true));
+    assert!(ok, "claude ineligible: {d}");
 }
 
 /// The pid of the `serve` running on `home`.

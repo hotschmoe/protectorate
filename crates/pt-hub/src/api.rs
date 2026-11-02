@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use pt_api::{self as api, ApiError, ErrorCode, Method, Scope, method as m};
 use pt_core::{
     Claim, Code, EventKind, Layout, Life, MsgState, Party, Reply, SendMode, SleeveId, SpawnSpec,
-    State, Target, path_ok, path_within, paths_overlap,
+    State, Target, overlap_refusal, path_ok, path_within,
 };
 use pt_drivers::Entry;
 use pt_json::{FromJson, ToJson, Value};
@@ -387,25 +387,17 @@ const NEW_PROJECT_BRANCH: &str = "main";
 
 /// The outermost root or writable claim that overlaps `path`, for the 409.
 fn overlap_claim(st: &State, path: &str) -> Option<String> {
-    let hit = st
-        .sleeves
+    overlap_refusal(
+        st.sleeves.values().filter(|s| s.life != Life::Removed),
+        path,
+        "directory",
+    )
+}
+
+fn name_taken(st: &State, name: &str) -> bool {
+    st.sleeves
         .values()
-        .filter(|s| {
-            s.life != Life::Removed
-                && (s.claim.writable || s.parent.is_none())
-                && paths_overlap(&s.claim.path, path)
-        })
-        .min_by(|a, b| {
-            (a.claim.path.len(), a.claim.path.as_str(), a.name.as_str()).cmp(&(
-                b.claim.path.len(),
-                b.claim.path.as_str(),
-                b.name.as_str(),
-            ))
-        })?;
-    Some(format!(
-        "the directory overlaps sleeve {} ({})",
-        hit.name, hit.claim.path
-    ))
+        .any(|s| s.life != Life::Removed && s.name == name)
 }
 
 /// The absolute directory a new project will occupy, or why it will not.
@@ -434,7 +426,7 @@ fn resolve_new_project(hub: &Hub, given: &str) -> Result<String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return Err(err(
                 ErrorCode::Invalid,
-                format!("the hub cannot see {configured}"),
+                format!("the hub cannot see projects_dir {configured}"),
             ));
         }
         Err(e) => {
@@ -457,8 +449,18 @@ fn resolve_new_project(hub: &Hub, given: &str) -> Result<String> {
             format!("new_path {given} is not a normalized path"),
         ));
     }
+    // An absolute path may name the configured spelling when `projects_dir` is a symlink.
+    // The claim is still the canonical directory.
     let full = if given.starts_with('/') {
-        given.to_string()
+        if path_ok(configured)
+            && configured != root_s
+            && path_within(given, configured)
+            && given != configured
+        {
+            format!("{root_s}{}", &given[configured.len()..])
+        } else {
+            given.to_string()
+        }
     } else {
         format!("{root_s}/{given}")
     };
@@ -471,7 +473,7 @@ fn resolve_new_project(hub: &Hub, given: &str) -> Result<String> {
     if !path_within(&full, root_s) || full == root_s {
         return Err(err(
             ErrorCode::Invalid,
-            format!("{given} is outside projects_dir"),
+            format!("{given} is outside projects_dir ({root_s})"),
         ));
     }
     if let Ok(home) = std::fs::canonicalize(&hub.home.root)
@@ -504,7 +506,10 @@ fn resolve_new_project(hub: &Hub, given: &str) -> Result<String> {
             Ok(_) if last => {
                 return Err(err(
                     ErrorCode::Conflict,
-                    format!("{} already exists", next.display()),
+                    format!(
+                        "{} already exists; sleeve spawn --path adopts it",
+                        next.display()
+                    ),
                 ));
             }
             Ok(m) if m.is_dir() => cur = next,
@@ -523,7 +528,7 @@ fn resolve_new_project(hub: &Hub, given: &str) -> Result<String> {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 return Err(err(
                     ErrorCode::Invalid,
-                    format!("the hub cannot see {}", next.display()),
+                    format!("the hub cannot see the parent {}", next.display()),
                 ));
             }
             Err(e) => {
@@ -537,12 +542,15 @@ fn resolve_new_project(hub: &Hub, given: &str) -> Result<String> {
     Err(err(ErrorCode::Invalid, "new_path names no directory"))
 }
 
-fn create_project(path: &Path) -> Result<()> {
+fn create_project(hub: &Hub, path: &Path) -> Result<String> {
     if let Err(e) = std::fs::create_dir(path) {
         return Err(if e.kind() == std::io::ErrorKind::AlreadyExists {
             err(
                 ErrorCode::Conflict,
-                format!("{} already exists", path.display()),
+                format!(
+                    "{} already exists; sleeve spawn --path adopts it",
+                    path.display()
+                ),
             )
         } else {
             err(
@@ -551,25 +559,131 @@ fn create_project(path: &Path) -> Result<()> {
             )
         });
     }
-    if let Err(e) = crate::git::init_empty(path, NEW_PROJECT_BRANCH, "Initial commit") {
-        discard_new_project(path);
+    if let Err(why) = same_real_path(path) {
         return Err(err(
-            ErrorCode::Internal,
-            format!("git init {}: {e}", path.display()),
+            ErrorCode::Invalid,
+            format!("kept {}: {why}", path.display()),
         ));
     }
-    Ok(())
+    match crate::git::init_empty(path, NEW_PROJECT_BRANCH, "Initial commit") {
+        Ok(commit) => Ok(commit),
+        Err(e) => {
+            let kept = !remove_failed_init(hub, path);
+            let extra = if kept { "; kept the directory" } else { "" };
+            Err(err(
+                ErrorCode::Internal,
+                format!("git init {}: {e}{extra}", path.display()),
+            ))
+        }
+    }
 }
 
-/// Removes a repo this call created after the spawn was refused. A symlink is left alone.
-fn discard_new_project(path: &Path) {
-    let Ok(meta) = std::fs::symlink_metadata(path) else {
-        return;
-    };
-    if meta.file_type().is_symlink() || !meta.is_dir() || !path.join(".git").is_dir() {
-        return;
+/// True when `path` canonicalizes to itself. A symlink planted under it must not be followed.
+fn same_real_path(path: &Path) -> std::result::Result<(), String> {
+    match std::fs::canonicalize(path) {
+        Ok(c) if c.as_path() == path => Ok(()),
+        Ok(c) => Err(format!("it resolves to {}", c.display())),
+        Err(e) => Err(e.to_string()),
     }
-    let _ = std::fs::remove_dir_all(path);
+}
+
+/// Removes a directory whose `git init` failed, so a retry is not blocked by an empty dir.
+/// A symlink, a claimed path, or anything that does not canonicalize to `path` is left alone.
+fn remove_failed_init(hub: &Hub, path: &Path) -> bool {
+    if same_real_path(path).is_err() || claimed(hub, path) || !plain_dir(path) {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return false;
+    };
+    for ent in entries {
+        let Ok(ent) = ent else {
+            return false;
+        };
+        if ent.file_name() != ".git" || !plain_dir(&ent.path()) {
+            return false;
+        }
+    }
+    if claimed(hub, path) {
+        return false;
+    }
+    std::fs::remove_dir_all(path).is_ok()
+}
+
+fn plain_dir(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| !m.file_type().is_symlink() && m.is_dir())
+}
+
+fn claimed(hub: &Hub, path: &Path) -> bool {
+    let Some(path) = path.to_str() else {
+        return true;
+    };
+    overlap_claim(&hub.view().state, path).is_some()
+}
+
+enum Kept {
+    Gone,
+    Still(String),
+}
+
+/// Drops a repo this call made after the spawn was refused. Keeps it when a live claim overlaps
+/// it, it no longer canonicalizes to itself, or it is no longer that empty commit.
+fn settle_new_project(hub: &Hub, path: &str, commit: &str) -> Kept {
+    if let Some(why) = overlap_claim(&hub.view().state, path) {
+        return Kept::Still(why);
+    }
+    let p = Path::new(path);
+    if let Err(why) = same_real_path(p) {
+        return Kept::Still(why);
+    }
+    if !plain_dir(p) || !repo_still_ours(p, commit) {
+        return Kept::Still("it is no longer the empty repository this call made".into());
+    }
+    // A claim can land between the check above and the delete.
+    if let Some(why) = overlap_claim(&hub.view().state, path) {
+        return Kept::Still(why);
+    }
+    match std::fs::remove_dir_all(p) {
+        Ok(()) => Kept::Gone,
+        Err(e) => Kept::Still(e.to_string()),
+    }
+}
+
+fn repo_still_ours(path: &Path, commit: &str) -> bool {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return false;
+    };
+    let mut git = false;
+    for ent in entries {
+        let Ok(ent) = ent else {
+            return false;
+        };
+        if ent.file_name() != ".git" || !plain_dir(&ent.path()) {
+            return false;
+        }
+        git = true;
+    }
+    git && crate::git::head_commit(path).as_deref() == Some(commit)
+}
+
+fn with_kept(e: ApiError, path: &str, kept: Kept) -> ApiError {
+    match kept {
+        Kept::Gone => e,
+        Kept::Still(why) => err(e.code, format!("{}; kept {path} ({why})", e.message)),
+    }
+}
+
+/// A timeout or a lost reply may mean the core already journaled the spawn. Any other refusal
+/// removes the directory only when it is still the empty repository this call made and no live
+/// claim overlaps it.
+fn after_create(hub: &Hub, path: &str, commit: Option<&str>, e: ApiError) -> ApiError {
+    let Some(commit) = commit else {
+        return e;
+    };
+    if matches!(e.code, ErrorCode::Timeout | ErrorCode::Unavailable) {
+        return err(e.code, format!("{}; kept {path}", e.message));
+    }
+    with_kept(e, path, settle_new_project(hub, path, commit))
 }
 
 fn targets(hub: &Hub, list: &[api::Harness]) -> Vec<Target> {
@@ -602,7 +716,7 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         Some(_) if !c.who.full() => {
             return Err(err(
                 ErrorCode::Forbidden,
-                "only the owner or Envoy creates a project",
+                "only the owner, a paired device or Envoy creates a project",
             ));
         }
         Some(_) if r.path.is_some() || r.parent_id.is_some() || r.view.is_some() => {
@@ -636,6 +750,9 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         .and_then(|p| st.sleeve(p))
         .map(|p| p.claim.path.clone());
     let given = r.path.as_deref().unwrap_or("");
+    if creating.is_some() && name_taken(st, &r.name) {
+        return Err(err(ErrorCode::Conflict, "a sleeve has that name"));
+    }
     let path = if let Some(given) = creating {
         resolve_new_project(hub, given)?
     } else {
@@ -685,14 +802,25 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
     }
     let request_id = new_id("spawn:")?;
     rule::gate(hub, c.who, Guarded::Spawn(&r.name))?;
-    let made = if creating.is_some() {
-        if let Some(why) = overlap_claim(&hub.view().state, &path) {
+    // The gate can block for minutes. Re-check the name and the path, then create.
+    let commit = if let Some(given) = creating {
+        let fresh = hub.view();
+        if name_taken(&fresh.state, &r.name) {
+            return Err(err(ErrorCode::Conflict, "a sleeve has that name"));
+        }
+        let again = resolve_new_project(hub, given)?;
+        if again != path {
+            return Err(err(
+                ErrorCode::Invalid,
+                format!("new_path {given} now resolves to {again}"),
+            ));
+        }
+        if let Some(why) = overlap_claim(&fresh.state, &path) {
             return Err(err(ErrorCode::Conflict, why));
         }
-        create_project(Path::new(&path))?;
-        true
+        Some(create_project(hub, Path::new(&path))?)
     } else {
-        false
+        None
     };
     let spec = SpawnSpec {
         request_id,
@@ -712,18 +840,14 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
     let id = match command(hub, EventKind::Spawn(spec)) {
         Ok(Reply::Spawned(id)) => id,
         Ok(other) => {
-            if made {
-                discard_new_project(Path::new(&path));
-            }
-            return Err(internal(format!("unexpected reply {other:?}")));
+            return Err(after_create(
+                hub,
+                &path,
+                commit.as_deref(),
+                internal(format!("unexpected reply {other:?}")),
+            ));
         }
-        Err(e) => {
-            // A timeout means the core may already have claimed the directory.
-            if made && e.code != ErrorCode::Timeout {
-                discard_new_project(Path::new(&path));
-            }
-            return Err(e);
-        }
+        Err(e) => return Err(after_create(hub, &path, commit.as_deref(), e)),
     };
     if let Some(text) = r.message.filter(|t| !t.is_empty()) {
         command(

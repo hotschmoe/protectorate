@@ -61,13 +61,19 @@ A sleeve is named by its id or its name.
   `--new-path DIR` the owner, a paired device or Envoy (not a sleeve) creates a root that does
   not exist yet. `projects_dir` in `config.json` is the absolute directory this is allowed under;
   empty, the default, turns it off, and `/` is refused. `DIR` is a relative path under that
-  directory or an absolute path strictly inside it. The hub creates it and `git init`s it on
-  branch `main` with one empty commit (author `protectorate`), then claims it, so a child
+  directory or an absolute path strictly inside it. An absolute path may use the configured
+  `projects_dir` spelling when that path is a symlink; the claim is the canonical directory, and
+  a refusal names that directory. The hub creates it and `git init`s it on branch `main` with
+  one empty commit, as the owner's `user.name` and `user.email` (or
+  `protectorate <protectorate@localhost>` when a field is unset), then claims it, so a child
   worktree has a commit to branch from. A `.` or `..` component, a symlink, a path outside
-  `projects_dir`, a path inside the hub's home, or a path that already exists is refused. A
-  crash, or a spawn the core does not answer, after the directory is created and before the
-  sleeve is claimed leaves the directory; remove it before trying the same path again. With `--parent SLEEVE` it makes a child of that root: its own git worktree and branch
-  by default, or a read-only view of the root with `--readonly`. A root has at most 8 live
+  `projects_dir`, a path inside the hub's home, or a path that already exists is refused.
+  `--path DIR` adopts a repository that already exists. A name already in use is refused before
+  the directory is created. A crash, a spawn the core does not answer or whose reply is lost,
+  or a refusal that finds the directory claimed or no longer the empty repository this call
+  made, leaves the directory and says so; remove it before trying the same path again.
+  With `--parent SLEEVE` it makes a child of that root: its own git worktree and branch by
+  default, or a read-only view of the root with `--readonly`. A root has at most 8 live
   children. `--harness` defaults to `claude`. `--resleeve-to` is the ordered list automatic
   resleeves walk (default `pi_local`). `--message` is the first prompt.
 - **send** queues a message, delivered at the next turn boundary; `--steer` sends it into the

@@ -175,11 +175,17 @@ crash, every incarnation goes to Recovering and resumes natively.
   - **New project roots.** The owner, a paired device and Envoy may
     `sleeve spawn <name> --new-path DIR`. A sleeve may not (it spawns only its own children), and
     a vendor agent cannot call `SpawnSleeve`. The hub creates `DIR` and `git init`s it on branch
-    `main` with one empty commit, then claims it as a root. `DIR` must be a new path strictly
-    inside `projects_dir` (`config.json`; empty, the default, turns this off, and `/` is refused):
-    a relative path under that directory or an absolute path inside it, with no `.` or `..`
-    component and no symlink, and not inside the hub's home. A path the hub cannot see is refused
-    with `the hub cannot see DIR`. D9 still counts the spawn.
+    `main` with one empty commit (the owner's `user.name` and `user.email`, or `protectorate`
+    when a field is unset), then claims it as a root. `DIR` must be a new path strictly inside
+    `projects_dir` (`config.json`; empty, the default, turns this off, and `/` is refused): a
+    relative path under that directory, or an absolute path inside it, including one written
+    through the configured spelling when `projects_dir` is a symlink. No `.` or `..` component,
+    no symlink under it, and not inside the hub's home. A path the hub cannot see is refused
+    with `the hub cannot see DIR`. A directory that already exists is left for `--path` to adopt.
+    A name already in use is refused before anything is created. D9 still counts the spawn. A
+    refused spawn removes the directory only when no live claim overlaps it and it is still that
+    empty commit; otherwise the directory stays and the error says so. A spawn the core does not
+    answer, or whose reply is lost, keeps the directory without that check.
   - Stopping or removing the root stops every child in the same step. A root crash, resume,
     resleeve or park leaves the children running.
   - Native subagents run inside the incarnation, and we don't manage them.

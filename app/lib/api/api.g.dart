@@ -4747,7 +4747,7 @@ final class SpawnSleeveRequest {
   final String? path;
 
   /// Create this directory under `projects_dir` and claim it as a new root.
-  /// Takes no `path`, `parent_id` or `view`. The owner and Envoy only.
+  /// Takes no `path`, `parent_id` or `view`. The owner, a paired device and Envoy only.
   final String? newPath;
 
   /// Makes this a child of that root.
