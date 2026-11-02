@@ -88,7 +88,10 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   device list | device add <name> | device pair <code> | device revoke <id>
   mcp --envoy [--token-file PATH] [--as NAME]
 
-Harnesses: claude, codex, grok, pi_vendor, pi_local. --json prints the API's answer.";
+Harnesses: claude, codex, grok, pi_vendor, pi_local. --json prints the API's answer.
+
+job run --wait exits with the job's code, or 3 interrupted, 5 lost, and 6 when the
+hub stays unreachable for about 60 seconds.";
 
 pub struct Args {
     pub words: Vec<String>,

@@ -541,10 +541,10 @@ impl Core<'_> {
         for id in ids {
             let j = &self.st.jobs[&id];
             let (state, seen_at, state_at, lost_at) = (j.state, j.seen_at, j.state_at, j.lost_at);
-            // From the first loss, not the latest bounce back into Lost.
+            // From the first loss, not the latest bounce back into Lost. Entering Lost
+            // always records that stamp, so a Lost job without one does not start the window.
             let loss_for = match (state, lost_at) {
                 (JobState::Lost | JobState::Collecting, Some(t)) => Some(t),
-                (JobState::Lost, None) => Some(state_at),
                 _ => None,
             };
             if loss_for.is_some_and(|t| since(now, t) >= LOST_ABANDON) {
