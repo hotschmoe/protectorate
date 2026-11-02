@@ -313,16 +313,23 @@ fn notice_text(view: &View, n: &Notice) -> (Kind, Level, String) {
             (Kind::Job, Level::Warn, format!("job {} interrupted", job.0))
         }
         Notice::JobLost { job } => (Kind::Job, Level::Alarm, format!("job {} lost", job.0)),
-        Notice::JobFinished { job, ok } => (
-            Kind::Job,
-            if *ok { Level::Info } else { Level::Warn },
-            match view.state.jobs.get(job).map(|j| j.state) {
+        Notice::JobFinished { job, ok } => {
+            let state = view.state.jobs.get(job).map(|j| j.state);
+            let level = if *ok || state == Some(pt_core::JobState::Cancelled) {
+                Level::Info
+            } else {
+                Level::Warn
+            };
+            let text = match state {
                 Some(pt_core::JobState::Failed(pt_core::JobFailure::NodeRemoved(n))) => {
                     format!("job {} failed: node {} was removed", job.0, n.0)
                 }
+                Some(pt_core::JobState::Cancelled) => format!("job {} cancelled", job.0),
+                Some(pt_core::JobState::Abandoned) => format!("job {} abandoned", job.0),
                 _ => format!("job {} {}", job.0, if *ok { "succeeded" } else { "failed" }),
-            },
-        ),
+            };
+            (Kind::Job, level, text)
+        }
     }
 }
 

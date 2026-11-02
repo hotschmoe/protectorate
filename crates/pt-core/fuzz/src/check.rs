@@ -195,7 +195,10 @@ pub fn resleeves(prev: &State, sim: &mut Sim, idx: usize) {
 /// Checks after a Tick or HubRecovered: every waiting state has re-issued its I/O (12a item 7).
 pub fn timers(st: &State, tick: bool) {
     for j in st.jobs.values() {
-        if matches!(j.state, JobState::Submitting | JobState::SubmitUncertain) {
+        if matches!(
+            j.state,
+            JobState::Submitting | JobState::SubmitUncertain { .. }
+        ) {
             let submit = j.submit.map(|e| st.effects[&e].state);
             assert!(
                 submit.is_some_and(|s| !s.terminal()),
@@ -207,13 +210,13 @@ pub fn timers(st: &State, tick: bool) {
         // No state waits on a node past its lease (12a item 6), counting time the hub was down.
         let expired = match j.state {
             JobState::Cancelling => st.now.saturating_sub(j.state_at) >= LEASE,
-            JobState::Collecting => tick && st.now.saturating_sub(j.seen_at) >= LEASE,
+            JobState::Collecting { .. } => tick && st.now.saturating_sub(j.seen_at) >= LEASE,
             _ => false,
         };
         assert!(!expired, "job {:?} is {:?} past its lease", j.id, j.state);
         let cancel_wanted = matches!(
             j.state,
-            JobState::Cancelling | JobState::Lost | JobState::Abandoned
+            JobState::Cancelling | JobState::Lost { .. } | JobState::Abandoned
         );
         let stuck = st.effects.values().find(|e| {
             let ours = match e.kind {
@@ -282,6 +285,19 @@ pub fn timers(st: &State, tick: bool) {
 
 /// Checks after one apply: transitions against the reference tables, then I1-I10.
 pub fn step(prev: &State, st: &State, sim: &Sim) {
+    for j in st.jobs.values().filter(|j| j.state == JobState::Abandoned) {
+        if prev.jobs.get(&j.id).is_some_and(|p| p.state != j.state) {
+            for e in prev.effects.values() {
+                if matches!(
+                    e.kind,
+                    EffectKind::NodeCancel { job, attempt, .. }
+                        if job == j.id && attempt == j.attempt
+                ) {
+                    assert!(st.effects[&e.id].state.terminal());
+                }
+            }
+        }
+    }
     // Reference transitions, and I6 (generation only grows).
     for (id, s) in &st.sleeves {
         let before = prev.sleeves.get(id);
@@ -785,7 +801,7 @@ pub fn invariants(st: &State, sim: &Sim) {
     }
     // A job runs on the node that was sent its submit.
     for j in st.jobs.values() {
-        if matches!(j.state, JobState::Running | JobState::Collecting) {
+        if matches!(j.state, JobState::Running | JobState::Collecting { .. }) {
             let node = j.node.expect("a running job has a node");
             assert!(
                 sim.submitted.contains(&(j.id, j.attempt, node)),
@@ -794,6 +810,31 @@ pub fn invariants(st: &State, sim: &Sim) {
                 j.attempt,
                 j.state
             );
+        }
+        if matches!(
+            j.state,
+            JobState::Collecting { .. }
+                | JobState::Succeeded
+                | JobState::Failed(_)
+                | JobState::Interrupted
+                | JobState::Cancelled
+        ) {
+            for e in st.effects.values() {
+                if matches!(
+                    e.kind,
+                    EffectKind::NodeCancel { job, attempt, .. }
+                        if job == j.id && attempt == j.attempt
+                ) {
+                    assert!(
+                        e.state.terminal(),
+                        "job {:?} is {:?} with open cancel {} ({:?})",
+                        j.id,
+                        j.state,
+                        e.key,
+                        e.state
+                    );
+                }
+            }
         }
     }
     // An Unsafe write is issued once: no second approval response while one may apply (12b

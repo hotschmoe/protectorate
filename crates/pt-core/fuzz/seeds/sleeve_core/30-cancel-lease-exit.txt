@@ -1,0 +1,160 @@
+#scenario 86eecad1b50b1860
+# A cancel may be lost while the node finishes. Its terminal report closes every cancel,
+# including across recovery. After the lease, the node's own answer decides the outcome.
+job late-exit
+policy poll=0
+run
+expect-job 0 state=Running
+policy other=lost
+cancel-job 0
+run
+expect-effect cancel:0:1:* state=Probing count=1
+tick 6m
+expect-job 0 state=Lost cancelling=true
+step
+step
+expect-effect cancel:0:1:* state=Probing count=1
+job-report 0 exited=0
+expect-job 0 state=Collecting exit=0
+expect-effect cancel:0:1:* state=Confirmed count=1
+commit
+crash
+expect-effect cancel:0:1:* state=Confirmed count=1
+policy other=ack poll=1
+run
+expect-job 0 state=Succeeded exit=0
+expect-notice JobFinished count=1
+commit
+crash
+expect-effect cancel:0:1:* state=Confirmed count=1
+run
+
+# Before the lease, any answer that ends a cancelled job ends it as Cancelled and acknowledges
+# collection: journals replay this path, so it stays as it was.
+job early-exit
+policy poll=0
+run
+cancel-job 1
+job-report 1 exited=2
+expect-job 1 state=Cancelled
+expect-effect cancel:1:1:* state=Confirmed count=1
+expect-effect collected:1:1 state=Intent count=1
+expect-notice JobFinished count=2
+run
+
+# A node restart is an interruption, not proof that the cancel stopped the process.
+job late-interrupted
+run
+policy other=lost
+cancel-job 2
+run
+tick 6m
+expect-job 2 state=Lost cancelling=true
+job-report 2 interrupted
+expect-job 2 state=Interrupted
+expect-effect cancel:2:1:* state=Confirmed count=1
+expect-notice JobInterrupted count=1
+expect-notice JobFinished count=2
+commit
+crash
+expect-effect cancel:2:1:* state=Confirmed count=1
+policy other=ack
+run
+
+job late-cancelled
+run
+policy other=lost
+cancel-job 3
+run
+tick 6m
+expect-job 3 state=Lost cancelling=true
+job-report 3 cancelled
+expect-job 3 state=Cancelled
+expect-effect cancel:3:1:* state=Confirmed count=1
+expect-effect collected:3:1 state=Intent count=1
+expect-notice JobFinished count=3
+commit
+crash
+expect-effect cancel:3:1:* state=Confirmed count=1
+policy other=ack poll=8
+run
+expect-effect collected:3:1 state=Confirmed count=1
+
+# A confirmed write does not erase the owner's request if a lost job reports Running.
+job running-after-loss
+policy poll=0
+run
+cancel-job 4
+run
+expect-effect cancel:4:1:* state=Confirmed count=1
+tick 6m
+expect-job 4 state=Lost cancelling=true
+job-report 4 running
+expect-job 4 state=Cancelling
+
+# A refused submit leaves no epoch-change flag on a later uncertain submit.
+job uncertain-again
+policy other=lost poll=5
+run
+expect-job 5 state=SubmitUncertain epoch_changed=true
+job-report 5 refused=busy
+expect-job 5 state=Queued
+expect-effect job:5:1 state=Failed count=1
+step
+commit
+crash
+expect-job 5 state=SubmitUncertain epoch_changed=false
+requeue-job 5
+expect-reply only an interrupted, lost or unknowable job is requeued
+
+job early-interrupted
+policy other=ack poll=0
+run
+cancel-job 6
+job-report 6 interrupted
+expect-job 6 state=Cancelled
+expect-effect cancel:6:1:* state=Confirmed count=1
+expect-effect collected:6:1 state=Intent count=1
+expect-notice JobInterrupted count=1
+expect-notice JobFinished count=4
+run
+
+# Cancelling before a submit exists finishes without sending a node acknowledgement.
+job queued-cancel
+cancel-job 7
+expect-job 7 state=Cancelled
+expect-notice JobFinished count=5
+run
+
+# A second request after a loss creates another cancel; both are closed on the report.
+job multiple-cancels
+policy other=ack poll=0
+run
+policy other=lost
+cancel-job 8
+run
+tick 6m
+expect-job 8 state=Lost cancelling=true
+cancel-job 8
+job-report 8 cancelled
+expect-job 8 state=Cancelled
+expect-effect cancel:8:1:* state=Confirmed count=2
+expect-notice JobFinished count=6
+commit
+crash
+expect-effect cancel:8:1:* state=Confirmed count=2
+policy other=ack
+run
+
+# Abandoning stops waiting, but still asks the node to stop a possibly running job.
+job abandoned
+run
+policy other=lost
+cancel-job 9
+run
+tick 6m
+expect-job 9 state=Lost cancelling=true
+abandon-job 9
+expect-job 9 state=Abandoned
+expect-effect cancel:9:1:* state=Intent count=2
+expect-notice JobFinished count=7
