@@ -215,6 +215,9 @@ pt_json::record! {
         /// The history index (SPEC 3.7). It is derived and holds log text, so keep it private
         /// and out of backups. Empty means `<home>/history`.
         pub history_dir: String = String::new(),
+        /// Absolute directory new project roots may be created under
+        /// (`sleeve spawn --new-path`). Empty turns that off.
+        pub projects_dir: String = String::new(),
         pub envoy: TargetConf = TargetConf {
             harness: "claude".to_string(),
             provider: String::new(),

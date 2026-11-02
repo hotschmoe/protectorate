@@ -168,9 +168,30 @@ crash, every incarnation goes to Recovering and resumes natively.
   generation number `g`. Mode (pane or headless), harness, provider and model belong to the
   incarnation, so a resleeve can change all of them.
 - **Tree rules:**
-  - One root per directory, never two. Writable claims never overlap.
+  - One root per directory, never two. Writable claims never overlap. A spawn that overlaps one
+    is refused with the sleeve and the claim it overlaps.
   - Children are depth 1, at most 8 live per root. A child gets its own git worktree and branch by
     default, or a read-only view of the root.
+  - **New project roots.** The owner, a paired device and Envoy may
+    `sleeve spawn <name> --new-path DIR`. A sleeve may not (it spawns only its own children), and
+    a vendor agent cannot call `SpawnSleeve`. The hub creates `DIR` and `git init`s it on branch
+    `main` with one empty commit (the owner's `user.name` and `user.email`, or `protectorate`
+    when a field is unset), then claims it as a root. `DIR` must be a new path strictly inside
+    `projects_dir` (`config.json`; empty, the default, turns this off, and `/` is refused): a
+    relative path under that directory, or an absolute path inside it, including one written
+    through the configured spelling when `projects_dir` is a symlink. No `.` or `..` component,
+    no symlink under it, and not inside the hub's home. A trailing slash is accepted. A path
+    the hub cannot see is refused with `the hub cannot see DIR`. A directory a live root holds
+    is refused with that sleeve's name. A repository with no commit is refused and told to
+    remove it or to commit before `--path`, because `--path` would adopt a root that cannot
+    branch children. Any other directory that already exists is left for `--path` to adopt.
+    A name already in use, a name the core would refuse, or a harness with no headless mode,
+    is refused before the directory
+    is created and before the D9 gate, so that refusal does not count. A spawn that reaches
+    the gate does. A refused spawn removes the directory only when no live claim overlaps it
+    and it is still that
+    empty commit; otherwise the directory stays and the error says so. A spawn the core does not
+    answer, or whose reply is lost, keeps the directory without that check.
   - Stopping or removing the root stops every child in the same step. A root crash, resume,
     resleeve or park leaves the children running.
   - Native subagents run inside the incarnation, and we don't manage them.

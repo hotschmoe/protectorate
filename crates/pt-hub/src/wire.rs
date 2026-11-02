@@ -9,17 +9,6 @@ use crate::home::Config;
 use crate::hub::{Hub, View};
 use crate::transcript::Line;
 
-pub fn harness_wire(h: Harness) -> &'static str {
-    match h {
-        Harness::Claude => "claude",
-        Harness::Codex => "codex",
-        Harness::Grok => "grok",
-        Harness::Antigravity => "antigravity",
-        Harness::PiVendor => "pi_vendor",
-        Harness::PiLocal => "pi_local",
-    }
-}
-
 pub fn harness_from(s: &str) -> Option<Harness> {
     Some(match s {
         "claude" => Harness::Claude,

@@ -4689,6 +4689,7 @@ final class SpawnSleeveRequest {
     required this.name,
     required this.harness,
     this.path,
+    this.newPath,
     this.parentId,
     this.view,
     this.mode = Mode.headless,
@@ -4706,6 +4707,10 @@ final class SpawnSleeveRequest {
       name: _string(j['name'], 'SpawnSleeveRequest.name'),
       harness: Harness.fromJson(j['harness']),
       path: _opt(j['path'], (e0) => _string(e0, 'SpawnSleeveRequest.path')),
+      newPath: _opt(
+        j['new_path'],
+        (e0) => _string(e0, 'SpawnSleeveRequest.new_path'),
+      ),
       parentId: _opt(
         j['parent_id'],
         (e0) => _string(e0, 'SpawnSleeveRequest.parent_id'),
@@ -4741,6 +4746,10 @@ final class SpawnSleeveRequest {
   /// The directory a root claims; a child works in its parent's.
   final String? path;
 
+  /// Create this directory under `projects_dir` and claim it as a new root.
+  /// Takes no `path`, `parent_id` or `view`. The owner, a paired device and Envoy only.
+  final String? newPath;
+
   /// Makes this a child of that root.
   final String? parentId;
 
@@ -4769,6 +4778,7 @@ final class SpawnSleeveRequest {
     'name': name,
     'harness': harness.toJson(),
     if (path case final v?) 'path': v,
+    if (newPath case final v?) 'new_path': v,
     if (parentId case final v?) 'parent_id': v,
     if (view case final v?) 'view': v.toJson(),
     'mode': mode.toJson(),

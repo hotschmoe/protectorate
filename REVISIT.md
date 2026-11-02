@@ -947,3 +947,9 @@ Each entry: where, what was done, what right looks like.
   timeout with no reply is still G5's 60 s.
 - **pi_durable removed**: removed on 2026-11-02 before it was built. The owner wants to revisit
   it later; the design is in the git history.
+- **New-project cleanup races a concurrent claim** (`pt-hub` `settle_new_project`): after a
+  refused `--new-path`, the hub re-reads the view and checks that the directory is still the
+  empty commit it made, then `remove_dir_all`. A `--path` spawn that claims the directory in
+  that gap, or a symlink swapped in under `projects_dir`, can remove a live root. SPEC 2
+  principle 10 treats our own agents as trusted, so this is left. Right: delete through a
+  directory fd opened before the check, and hold the path against spawn until the delete ends.

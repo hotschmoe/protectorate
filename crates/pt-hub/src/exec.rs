@@ -861,7 +861,7 @@ impl SleeveExec {
         let harness =
             driver_harness(target.harness).ok_or("that harness has no headless driver")?;
         let mut program = program(&hub, target.harness)
-            .ok_or_else(|| format!("{} is not installed", wire::harness_wire(target.harness)))?;
+            .ok_or_else(|| format!("{} is not installed", target.harness.as_str()))?;
         let home = hub.home.sleeve_home(s.id);
         fs::create_dir_all(&home).map_err(|e| format!("{}: {e}", home.display()))?;
         let logins = crate::logins::prepare_all(&hub.home.logins(), &home)
@@ -964,7 +964,7 @@ impl SleeveExec {
         spec.effort = s.effort.clone();
         spec.resume = resume;
         spec.prefix = Some(prefix);
-        let name = wire::harness_wire(target.harness);
+        let name = target.harness.as_str();
         if hub.config.supervised.iter().any(|h| h == name) {
             spec.permission = pt_drivers::Permission::Supervised;
         }
@@ -985,7 +985,7 @@ impl SleeveExec {
             "sleeve {}: launched g{} ({}) in {scope}, pid {}",
             s.name,
             g.0,
-            wire::harness_wire(target.harness),
+            target.harness.as_str(),
             session.pid()
         );
         self.submit(EventKind::Launched {
