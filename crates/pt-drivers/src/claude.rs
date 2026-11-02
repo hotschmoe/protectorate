@@ -270,12 +270,23 @@ impl Claude {
     fn on_user(&mut self, msg: &Value, out: &mut Out) {
         let content = &msg["message"]["content"];
         if msg["isReplay"].as_bool() == Some(true) {
+            let uuid = msg["uuid"].as_str().unwrap_or_default();
+            let ours =
+                self.unechoed.iter().any(|(_, u)| u == uuid) || self.done.iter().any(|u| u == uuid);
+            // A background task's notification is input Claude queued itself.
+            if !ours && msg["origin"]["kind"].as_str() == Some("task-notification") {
+                out.notice(
+                    "harness_input",
+                    "claude queued its own task-notification message",
+                );
+                return;
+            }
             let is_prompt = content.as_str().is_some()
                 || content
                     .as_array()
                     .is_some_and(|parts| parts.iter().all(|p| p["type"].as_str() == Some("text")));
             if is_prompt {
-                self.on_echo(msg["uuid"].as_str().unwrap_or_default(), out);
+                self.on_echo(uuid, out);
             }
             return;
         }

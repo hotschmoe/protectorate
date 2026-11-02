@@ -26,6 +26,11 @@ pub fn install_term_handler() -> io::Result<TermFlag> {
     Err(crate::unsupported("termination signal handling"))
 }
 
+/// No SIGPIPE on this OS.
+pub fn default_sigpipe() -> io::Result<()> {
+    Ok(())
+}
+
 pub fn set_pdeathsig(_sig: i32) -> io::Result<()> {
     Err(crate::unsupported("PR_SET_PDEATHSIG"))
 }

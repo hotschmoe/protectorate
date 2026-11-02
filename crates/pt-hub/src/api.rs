@@ -959,12 +959,14 @@ fn list_quotas(c: &Ctx<'_>, _: api::Empty) -> Result<api::QuotaList> {
     })
 }
 
+/// From `from_seq` on, or without it the newest `limit` (500), oldest first either way.
 fn list_events(c: &Ctx<'_>, r: api::ListEventsRequest) -> Result<api::EventList> {
-    let from = r.from_seq.unwrap_or(0);
     let limit = r.limit.unwrap_or(500) as usize;
-    Ok(api::EventList {
-        events: c.hub.bus.events_from(from, limit),
-    })
+    let events = match r.from_seq {
+        Some(from) => c.hub.bus.events_from(from, limit),
+        None => c.hub.bus.events_latest(limit),
+    };
+    Ok(api::EventList { events })
 }
 
 fn mark_events_read(c: &Ctx<'_>, r: api::MarkEventsReadRequest) -> Result<api::Empty> {

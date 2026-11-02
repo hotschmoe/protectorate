@@ -340,10 +340,11 @@ Each entry: where, what was done, what right looks like.
   harness (Claude's access token lasts about 8 hours) its row shows `login expired` until a
   sleeve runs. The copies an earlier hub seeded into sleeve homes stay where they are, except the
   files a link now replaces at that harness's next launch.
-- **Grok's binary sits under the masked `~/.grok`** (`pt-hub`, exec.rs): the vendor installs
-  `grok` into `~/.grok/downloads/`, which every sandbox masks, so a Grok sleeve cannot start its
-  program. Right: bind the resolved harness program read-only (with what it needs beside it), or
-  mask only `~/.grok`'s login files.
+- **A harness program is bound by its resolved file only** (`pt-hub`, exec.rs): grok lives in
+  the masked `~/.grok/downloads/`, so a launch binds the resolved program read-only. That is
+  enough for grok, which fills an empty `~/.grok` itself (checked by hand, 1.0.70; no real Grok
+  sleeve has run in the e2e). A vendor program that needs files beside it under a masked dir
+  would not start. Right: fine until one does.
 - **Same-uid callers on the owner's socket are the owner** (`pt-hub`, http.rs): sleeves never
   see that socket (`run/api.sock`); they get `run/sleeves/api.sock`, which takes only a sleeve
   capability (checked against the caller's scope cgroup when it has one), so with `scopes` off a
@@ -663,8 +664,10 @@ Each entry: where, what was done, what right looks like.
   A sleeve removed in that window is not re-announced. Right: journal the stream position with
   each batch, or a single fsync for both.
 - **`supervised` is new and mostly untested in the hub** (`pt-hub`, exec.rs): config
-  `supervised: ["claude"]` starts those harnesses with their approval gate on; only Claude is
-  run end to end (`tool_approval_across_restart_paid`). Right: run Codex and Grok the same way.
+  `supervised: ["claude"]` starts those harnesses with their approval gate on; only Claude's
+  gate is run for real, by the driver (`supervised_approval`), and the hub's side of an approval
+  across a restart by `d9_approval_across_restart` and the core fuzz seeds. (The paid hub test
+  went away with per-hub logins: a suite hub has none.) Right: run Codex and Grok the same way.
 - **Quota readers run on one thread** (`pt-hub`, quota.rs): a `pt_quota::Cache` (5 min TTL,
   stale after 10 min, backoff from 30 s) over the readers of installed harnesses, refreshed every
   `quota_poll_secs` (default 60; 0 never reads, which the e2e suite uses so no test hub reads
@@ -845,9 +848,6 @@ Each entry: where, what was done, what right looks like.
   SYSTEM. Two agent attempts at the token code were cut off by a safety classifier. The same
   day the owner's threat model (SPEC 2, principle 10) made it unnecessary, so jobs stay
   LocalSystem inside a Job Object. Right: revisit with the threat model.
-- **An idle Pi sleeve that never had a turn does not resume after a hub restart** (`pt-hub`,
-  found by the durable agent): it fails to resume and parks. Right: resume (or freshly launch) a
-  Pi sleeve with no native session yet, as one whose session exists.
 - **Review coverage**: pt-core, pt-journal and pt-http have had an adversarial review, and pt-hub,
   pt-drivers and pt-sandbox one each by GPT-6.1-Terra (2026-11-01; its findings are being fixed).
   pt-quota, pt-history and pt-update have had none, and none of the fixes has been re-reviewed.

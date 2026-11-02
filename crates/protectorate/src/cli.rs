@@ -202,12 +202,17 @@ fn approval_rows(list: &[api::Approval]) {
     table(&["ID", "KIND", "STATE", "SLEEVE", "ASKED", "TITLE"], &rows);
 }
 
+/// The node it runs on, or before the scheduler picks one, the node or arch it asked for.
 fn job_line(j: &api::Job) -> String {
+    let place = match (&j.node_id, &j.target) {
+        (Some(n), _) => format!("on {n}"),
+        (None, api::JobTarget::Node { node_id }) => format!("for node {node_id}"),
+        (None, api::JobTarget::Arch { arch }) => format!("for any {arch} node"),
+    };
     format!(
-        "{} {} on {} by {}: {}",
+        "{} {} {place} by {}: {}",
         j.id,
         j.state,
-        opt(&j.node_id),
         j.requested_by,
         j.argv.join(" ")
     )

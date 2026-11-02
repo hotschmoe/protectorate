@@ -75,6 +75,7 @@ impl Core<'_> {
                 proc: Proc::Down,
                 receipt: None,
                 session: None,
+                turned: false,
                 activity: Activity::Ended,
                 turn: None,
                 queue: VecDeque::new(),
@@ -218,7 +219,7 @@ impl Core<'_> {
             return false;
         }
         let g = Gen(s.g.0 + 1);
-        let resume = if resume && s.target.harness == target.harness {
+        let resume = if resume && s.turned && s.target.harness == target.harness {
             s.session.clone()
         } else {
             None
@@ -971,6 +972,7 @@ impl Core<'_> {
         let s = self.sl(sid);
         s.activity = Activity::Working;
         s.turn = native;
+        s.turned = true;
         s.turn_at = now;
         s.progress_at = now;
         let ready = s.turn.is_some() && s.proc == Proc::Up;
@@ -1197,7 +1199,10 @@ impl Core<'_> {
         if s.activity != Activity::Booting {
             return;
         }
-        s.session = Some(session.to_string());
+        if s.session.as_deref() != Some(session) {
+            s.session = Some(session.to_string());
+            s.turned = false;
+        }
         s.activity = Activity::Idle { seen: true };
         match (s.life, s.guard.state) {
             (Life::Launching, g) => {

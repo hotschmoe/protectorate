@@ -107,7 +107,10 @@ What it does:
    `releases/current/protectorate --home <home> serve`;
 3. runs `loginctl enable-linger $USER`, so the hub starts at boot with nobody logged in (if that
    fails, run `sudo loginctl enable-linger $USER` yourself);
-4. enables and starts the unit.
+4. enables and starts the unit;
+5. links `~/.local/bin/protectorate` to `releases/current/protectorate`, unless something else is
+   already there (it then prints the `ln -sfn` that would replace it). With a `--home` other than
+   the default, set `PROTECTORATE_HOME` in your shell profile so the CLI finds the hub.
 
 It refuses to overwrite a unit it did not write. Logs: `journalctl --user -u protectorate.service`.
 

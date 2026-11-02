@@ -549,35 +549,6 @@ fn forced_resleeve_with_brief() {
     assert!(notices.contains("resleeved as g2"), "{notices}");
 }
 
-/// Envoy on its default harness, Claude Code headless. Spends a small Claude turn.
-#[test]
-fn envoy_on_claude_paid() {
-    if std::env::var_os("PT_E2E_PAID").is_none() {
-        eprintln!("SKIP claude: spends subscription quota; set PT_E2E_PAID=1");
-        return;
-    }
-    if !have_runtime() || !on_path("claude") {
-        return;
-    }
-    let hub = Hub::start_with("envoy-claude", "claude", &[], &[]);
-    hub.wait("envoy", "idle", 120);
-    let rid = hub
-        .cli(&[
-            "envoy",
-            "send",
-            "Reply with exactly the word PONG and nothing else.",
-        ])
-        .ok()
-        .trim()
-        .to_string();
-    let reply = hub.cli(&["envoy", "wait", &rid, "--timeout", "180"]);
-    assert!(
-        reply.ok().contains("PONG"),
-        "Envoy on Claude answered: {}",
-        reply.stdout
-    );
-}
-
 fn write_script(path: &std::path::Path, body: &str) {
     use std::os::unix::fs::PermissionsExt;
     std::fs::write(path, format!("#!/bin/sh\n{body}\n")).expect("write script");
@@ -821,7 +792,7 @@ exec '{real_git}' "$@""#,
 /// then runs the real one: not the owner's socket, nothing on the sleeves' socket without its
 /// capability (even with scopes off, where no cgroup names it), no write to the hub's `run/`,
 /// its own harness's shared hub login and no other, and never the owner's own logins. A token
-/// a sleeve refreshes lands in the shared login.
+/// a sleeve refreshes lands in the shared login. A harness program under a masked dir runs.
 #[test]
 fn sandbox_reaches_only_its_own() {
     if !have_runtime() {
@@ -865,9 +836,13 @@ exit 1"#,
             owner = owner.display()
         ),
     );
+    // The stand-in lives under a masked dir behind a link, as grok does (~/.grok/downloads).
     let fake = dir.join("pi");
+    let real_fake = owner.join(".grok/downloads/pi");
+    std::fs::create_dir_all(real_fake.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&real_fake, &fake).unwrap();
     write_script(
-        &fake,
+        &real_fake,
         &format!(
             r#"if [ "$1" != --version ]; then
   run="${{PROTECTORATE_SOCKET%%/run/*}}/run"

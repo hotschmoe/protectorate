@@ -48,6 +48,9 @@ pub struct Sleeve {
     pub receipt: Option<Receipt>,
     /// The native session of the latest incarnation, for native resume.
     pub session: Option<String>,
+    /// That session has had a turn. Before one, a harness may have no session to reopen, and a
+    /// fresh launch loses nothing.
+    pub turned: bool,
     pub activity: Activity,
     /// The native turn id bound by the current turn's prompt ack.
     pub turn: Option<String>,

@@ -306,6 +306,13 @@ impl Bus {
             .collect()
     }
 
+    /// The newest `limit` retained events, oldest first.
+    pub fn events_latest(&self, limit: usize) -> Vec<HubEvent> {
+        let r = lock(&self.ring);
+        let skip = r.events.len().saturating_sub(limit);
+        r.events.values().skip(skip).cloned().collect()
+    }
+
     /// Marks every event up to `seq` read; returns the ones that changed.
     pub fn mark_read(&self, seq: u64) -> Vec<HubEvent> {
         let mut r = lock(&self.ring);

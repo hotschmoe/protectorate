@@ -375,8 +375,20 @@ fn run(a: &Args) -> Result<(), Fail> {
 
 fn main() -> ExitCode {
     let mut raw: Vec<String> = std::env::args().skip(1).collect();
-    if raw.first().is_some_and(|a| a == "--version") {
-        raw[0] = "version".into();
+    // `--version` right after the global flags is the version command; after a command it is
+    // the flag that takes a tag (`hub update --version TAG`).
+    let mut first = 0;
+    while let Some(a) = raw.get(first) {
+        match a.as_str() {
+            "--home" | "--socket" => first += 2,
+            a if a == "--json" || a.starts_with("--home=") || a.starts_with("--socket=") => {
+                first += 1
+            }
+            _ => break,
+        }
+    }
+    if raw.get(first).is_some_and(|a| a == "--version") {
+        raw[first] = "version".into();
     }
     let args = match Args::parse(raw) {
         Ok(a) => a,
@@ -385,6 +397,9 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    if args.words.first().is_none_or(|w| w != "serve") {
+        let _ = pt_sys::default_sigpipe();
+    }
     if args.has("--help") || args.words.is_empty() {
         println!("{USAGE}");
         return ExitCode::SUCCESS;

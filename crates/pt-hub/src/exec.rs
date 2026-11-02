@@ -748,7 +748,7 @@ impl SleeveExec {
         crate::doctor::gate_launch(&hub, s.id, &s.name, target.harness)?;
         let harness =
             driver_harness(target.harness).ok_or("that harness has no headless driver")?;
-        let program = program(&hub, target.harness)
+        let mut program = program(&hub, target.harness)
             .ok_or_else(|| format!("{} is not installed", wire::harness_wire(target.harness)))?;
         let home = hub.home.sleeve_home(s.id);
         fs::create_dir_all(&home).map_err(|e| format!("{}: {e}", home.display()))?;
@@ -776,6 +776,12 @@ impl SleeveExec {
             sb.ro_paths.push(releases);
         } else if let Ok(cli) = fs::canonicalize(hub.home.bin().join("protectorate")) {
             sb.ro_paths.push(cli);
+        }
+        // A vendor may install its program under a masked dir (grok in ~/.grok/downloads), and
+        // a link on the way there may be masked too, so the sleeve runs the resolved file.
+        if let Ok(real) = fs::canonicalize(&program) {
+            sb.ro_paths.push(real.clone());
+            program = real;
         }
         let mut login_env = Vec::new();
         if let Some(shared) = login {

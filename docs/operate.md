@@ -178,8 +178,9 @@ event list [--from SEQ] [--limit N]
 event read <seq>
 ```
 
-Hub events: sleeve, job, node, approval, doctor and update news. `event read` marks everything up
-to that seq as read. Events live in memory (the last 500).
+Hub events: sleeve, job, node, approval, doctor and update news. `event list` prints the newest
+`--limit` (500), or with `--from` the ones from that seq on, oldest first. `event read` marks
+everything up to that seq as read. Events live in memory (the last 500).
 
 ## Doctor
 

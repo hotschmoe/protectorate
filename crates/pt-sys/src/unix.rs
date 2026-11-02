@@ -325,6 +325,13 @@ fn sigaction(sig: libc::c_int) -> io::Result<()> {
     cvt(unsafe { libc::sigaction(sig, &sa, std::ptr::null_mut()) }).map(drop)
 }
 
+/// Restores the default SIGPIPE, which Rust's runtime ignores, so a short-lived command whose
+/// output pipe closes (`| head`) ends quietly like other Unix tools instead of panicking in a
+/// print. Never for a server, which must keep getting EPIPE from a dead peer.
+pub fn default_sigpipe() -> io::Result<()> {
+    set_default(libc::SIGPIPE)
+}
+
 /// Restores the default action for `sig`. Async-signal-safe: it only calls sigaction(2).
 fn set_default(sig: libc::c_int) -> io::Result<()> {
     // SAFETY: sigaction is plain old data; all-zero is an empty mask, no flags and SIG_DFL.

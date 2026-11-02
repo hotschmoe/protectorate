@@ -111,6 +111,12 @@ fn stream_resumes_across_restart() {
         "the event from before the crash keeps its seq: {texts:?}"
     );
     assert!(texts.iter().any(|(_, t)| *t == "device tablet paired"));
+    let (_, newest) = post(port, "ListEvents", Some(&owner), r#"{"limit":1}"#);
+    assert_eq!(
+        newest["events"][0]["seq"].as_u64(),
+        texts.last().map(|(seq, _)| *seq),
+        "a limit without from_seq keeps the newest: {newest}"
+    );
     let mut s3 = ws(port, &auth, &[]).unwrap();
     let snap = next(&mut s3);
     assert!(
@@ -202,8 +208,10 @@ fn d9_approval_across_restart() {
     let again = hub.cli(&["approval", "decide", &id, "deny"]);
     assert_ne!(again.status, 0, "decided once: {}", again.stdout);
     assert!(again.stderr.contains("already"), "{}", again.stderr);
-    std::thread::sleep(Duration::from_secs(3));
-    kept(&hub);
+    // Its idle Pi session never had a turn, so it came back as a fresh launch.
+    hub.wait("victim", "idle", 120);
+    let life = hub.sleeve("victim")["lifecycle"].clone();
+    assert_eq!(life.as_str(), Some("running"), "the victim is {life}");
 
     // A deadline that passes while the hub is down ends the approval at recovery.
     // Envoy may still be on the agent's message it resumed after the crash.
@@ -232,8 +240,8 @@ fn d9_approval_across_restart() {
     kept(&hub);
 }
 
-/// The victim was never stopped or removed. (Its own restart may park it: an idle Pi session
-/// with no turn yet does not resume.)
+/// The victim was never stopped or removed. (A third restart within 10 minutes passes G3's
+/// resume limit, and with no other target the victim parks.)
 fn kept(hub: &Hub) {
     let life = hub.sleeve("victim")["lifecycle"].clone();
     assert!(
@@ -242,93 +250,6 @@ fn kept(hub: &Hub) {
             None | Some("stopping" | "stopped" | "removed")
         ),
         "the victim is {life}"
-    );
-}
-
-/// A supervised Claude sleeve's tool approval: decided while its incarnation lives, the answer
-/// reaches the harness; pending across a hub crash, it stays pending, and a decision after the
-/// restart is fenced and runs nothing. Spends two small Claude turns.
-#[test]
-fn tool_approval_across_restart_paid() {
-    if std::env::var_os("PT_E2E_PAID").is_none() {
-        eprintln!("SKIP claude: spends subscription quota; set PT_E2E_PAID=1");
-        return;
-    }
-    if !have_runtime() || !on_path("claude") {
-        return;
-    }
-    let mut hub = Hub::start_config(
-        "tool-restart",
-        "pi_local",
-        &[("supervised", Value::from(vec![Value::from("claude")]))],
-        &[],
-        &[],
-    );
-    let repo = temp_repo("tool-restart");
-    let s = hub
-        .cli(&[
-            "--json",
-            "sleeve",
-            "spawn",
-            "tooly",
-            "--path",
-            repo.to_str().unwrap(),
-            "--harness",
-            "claude",
-            "--model",
-            "haiku",
-        ])
-        .json();
-    let sid = s["id"].as_str().unwrap().to_string();
-    hub.wait("tooly", "idle", 120);
-    let touch = |f: &str| {
-        format!("Use the Bash tool to run exactly this command: touch {f}\nThen reply DONE.")
-    };
-    let tool = |a: &Value| {
-        a["kind"].as_str() == Some("tool") && a["sleeve_id"].as_str() == Some(sid.as_str())
-    };
-
-    hub.send("tooly", &touch("first.txt"));
-    let a1 = pending(&hub, tool);
-    let id1 = a1["id"].as_str().unwrap().to_string();
-    assert!(!repo.join("first.txt").exists());
-    let r = hub.cli(&["approval", "decide", &id1, "allow"]);
-    assert!(r.ok().contains("approved"), "{}", r.stdout);
-    eventually("the approved command ran", Duration::from_secs(120), || {
-        repo.join("first.txt").exists().then_some(())
-    });
-    hub.wait("tooly", "idle", 180);
-
-    hub.send("tooly", &touch("second.txt"));
-    let a2 = pending(&hub, |a| tool(a) && a["id"].as_str() != Some(id1.as_str()));
-    let id2 = a2["id"].as_str().unwrap().to_string();
-    hub.restart();
-    let a = eventually(
-        "the asking incarnation ended",
-        Duration::from_secs(60),
-        || {
-            let a = approval(&hub, &id2);
-            a["note"]
-                .as_str()
-                .is_some_and(|n| n.contains("ended before a decision"))
-                .then_some(a)
-        },
-    );
-    assert_eq!(a["state"].as_str(), Some("pending"), "{a}");
-    let r = hub.cli(&["approval", "decide", &id2, "allow"]);
-    assert!(r.ok().contains("fenced"), "{}", r.stdout);
-    let a = approval(&hub, &id2);
-    assert_eq!(a["state"].as_str(), Some("fenced"), "{a}");
-    assert!(
-        a["note"].as_str().unwrap().contains("nothing was sent"),
-        "{a}"
-    );
-    std::thread::sleep(Duration::from_secs(10));
-    hub.cli(&["sleeve", "stop", "tooly"]).ok();
-    hub.wait("tooly", "ended", 60);
-    assert!(
-        !repo.join("second.txt").exists(),
-        "a fenced decision ran nothing"
     );
 }
 

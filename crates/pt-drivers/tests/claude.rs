@@ -5,7 +5,7 @@ mod common;
 use std::time::Duration;
 
 use common::{Run, program, skip, spec, temp_repo};
-use pt_drivers::{Decision, Entry, Harness, Permission, SpawnSpec, Stop, ToolStatus};
+use pt_drivers::{Decision, Entry, ErrorClass, Harness, Permission, SpawnSpec, Stop, ToolStatus};
 
 fn haiku(spec: &mut SpawnSpec) {
     spec.model = Some("haiku".into());
@@ -65,5 +65,38 @@ fn supervised_approval() {
             by: None,
             ..
         }
+    )));
+}
+
+/// A background command that finishes mid-turn comes back as a replayed user message Claude
+/// queued itself (origin task-notification): a notice, not a protocol error.
+#[test]
+fn background_task_notification() {
+    let Some(program) = program(Harness::Claude) else {
+        return skip(Harness::Claude, "binary not found");
+    };
+    let repo = temp_repo("claude-bg");
+    let mut s = spec(Harness::Claude, &program, &repo);
+    haiku(&mut s);
+    let mut run = Run::start(s);
+    run.ready(Duration::from_secs(30)).expect("ready");
+    run.send(
+        "First run the shell command `sleep 2; echo bg` with run_in_background true. Then, in \
+         the foreground, run `sleep 8; echo fg`. Then reply DONE.",
+    );
+    let turn = run.collect(Duration::from_secs(180), |_, _| {});
+    if turn.auth_failed() {
+        run.stop();
+        return skip(Harness::Claude, "no usable login");
+    }
+    assert!(
+        !turn.errors.iter().any(|(c, _)| *c == ErrorClass::Protocol),
+        "{:?}",
+        turn.errors
+    );
+    let log = run.stop();
+    assert!(common::has(&log, |e| matches!(
+        e,
+        Entry::Notice { code: Some(c), .. } if c == "harness_input"
     )));
 }

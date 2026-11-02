@@ -4,7 +4,9 @@
 # release's SHA256SUMS before using it and checks that it reports that release with both
 # embedded, stages it in $PROTECTORATE_HOME/releases/<version>/ (the layout pt-update keeps), points releases/current at that version (releases/previous keeps the old
 # one), and runs the hub as a systemd user service with linger, so it starts at boot with no
-# login. The unit runs releases/current, which `protectorate hub update` switches on probation. It prints the plan first; --dry-run checks the release and stops there, writing nothing.
+# login. The unit runs releases/current, which `protectorate hub update` switches on probation, and
+# ~/.local/bin/protectorate links to it unless something else is there. It prints the plan first;
+# --dry-run checks the release and stops there, writing nothing.
 #
 # Fetch this script at a commit, never a tag (SPEC 12a item 9), and compare its sha256 with the
 # one in the release notes before running it:
@@ -156,6 +158,12 @@ main() {
 	fi
 
 	local old linger exec_path=$rel/current/protectorate
+	local bin_dir=$HOME/.local/bin link_cli=0 cli_other=''
+	local cli=$bin_dir/protectorate
+	if [ -L "$cli" ] && [ "$(readlink -- "$cli")" = "$exec_path" ]; then :
+	elif [ -L "$cli" ]; then cli_other="a link to $(readlink -- "$cli")"
+	elif [ -e "$cli" ]; then cli_other='a file'
+	else link_cli=1; fi
 	old=$(readlink -- "$rel/current" 2>/dev/null || true)
 	linger=$(loginctl show-user "$USER" --property=Linger --value 2>/dev/null || echo unknown)
 	say "Plan:"
@@ -166,6 +174,8 @@ main() {
 	say "  write    $unit"
 	say "           ExecStartPre=$rel/previous/protectorate --home $home hub probation"
 	say "           ExecStart=$exec_path --home $home serve"
+	if [ "$link_cli" = 1 ]; then say "  link     $cli -> $exec_path"
+	elif [ -n "$cli_other" ]; then say "  keep     $cli ($cli_other, not this hub's CLI)"; fi
 	[ "$linger" = yes ] || say "  run      loginctl enable-linger $USER (linger is $linger; a headless hub needs it)"
 	if [ "$start" = 1 ]; then say "  run      systemctl --user daemon-reload; systemctl --user enable $UNIT; (re)start it"
 	else say "  run      systemctl --user daemon-reload; systemctl --user enable $UNIT (not started: --no-start)"; fi
@@ -231,6 +241,18 @@ main() {
 	EOF
 	mv -f -- "$unit.tmp-$$" "$unit"
 	say "wrote $unit"
+	if [ "$link_cli" = 1 ]; then
+		if mkdir -p -- "$bin_dir" && ln -s -- "$exec_path" "$cli"; then
+			say "linked $cli"
+		else
+			say "warning: could not link $cli to $exec_path"
+		fi
+	elif [ -n "$cli_other" ]; then
+		say "warning: $cli is $cli_other; to use this hub's CLI: ln -sfn '$exec_path' '$cli'"
+	fi
+	case ":$PATH:" in *":$bin_dir:"*) ;; *) say "note: $bin_dir is not on PATH; add it to run protectorate" ;; esac
+	[ "$home" = "$HOME/.local/share/protectorate" ] ||
+		say "note: the CLI defaults to ~/.local/share/protectorate; set PROTECTORATE_HOME=$home in your shell profile"
 
 	if [ "$linger" != yes ]; then
 		loginctl enable-linger "$USER" 2>/dev/null && say "linger enabled for $USER" ||
