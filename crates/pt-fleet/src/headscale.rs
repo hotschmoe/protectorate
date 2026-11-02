@@ -303,7 +303,8 @@ impl Admin {
         HsNode::from_json(&v)
     }
 
-    /// Removes the node from headscale. Only for an owner's explicit removal through the API.
+    /// Removes the node from headscale: an owner's explicit removal through the API, or an
+    /// approval that failed after `register`.
     pub fn delete(&self, id: u64) -> Result<()> {
         self.cli(&["nodes", "delete", "-i", &id.to_string(), "--force"])
             .map(drop)

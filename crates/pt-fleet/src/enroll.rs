@@ -171,7 +171,8 @@ impl Fleet {
     }
 
     /// Approves a node: its fingerprint must match the key headscale serves, then headscale
-    /// registers it under the fleet user, tags it `tag:node` and renames it `name`.
+    /// registers it under the fleet user, tags it `tag:node` and renames it `name`. When a step
+    /// after the registration fails, headscale deletes the node again and the node joins anew.
     pub fn approve(&self, auth_id: &str, name: &str, expected_fingerprint: &str) -> Result<HsNode> {
         valid_name(name)?;
         valid_fingerprint(expected_fingerprint)?;
@@ -197,29 +198,45 @@ impl Fleet {
             ))));
         }
         let admin = self.admin();
-        let node = admin.register(auth_id).map_err(ctx)?;
-        let node = admin.tag(node.id, TAG_NODE).map_err(ctx)?;
-        let node = if node.name == name {
-            node
-        } else {
-            admin.rename(node.id, name).map_err(ctx)?
+        let id = admin.register(auth_id).map_err(ctx)?.id;
+        // The record goes last: until it is written, nothing but headscale knows the node.
+        let finish = || -> Result<HsNode> {
+            let node = admin.tag(id, TAG_NODE)?;
+            let node = if node.name == name {
+                node
+            } else {
+                admin.rename(id, name)?
+            };
+            let pending: Vec<Pending> = read_list::<Pending>(&pending_path(self))?
+                .into_iter()
+                .filter(|p| p.registration.auth_id != auth_id)
+                .collect();
+            write_list(&pending_path(self), &pending)?;
+            let mut enrolled: Vec<Enrolled> = read_list(&enrolled_path(self))?;
+            enrolled.retain(|e| e.id != id);
+            enrolled.push(Enrolled {
+                id,
+                name: name.to_string(),
+                control_key: served,
+                auth_id: auth_id.to_string(),
+                approved_at_ms: EpochMs::now().0,
+            });
+            write_list(&enrolled_path(self), &enrolled)?;
+            Ok(node)
         };
-        let mut enrolled: Vec<Enrolled> = read_list(&enrolled_path(self))?;
-        enrolled.retain(|e| e.id != node.id);
-        enrolled.push(Enrolled {
-            id: node.id,
-            name: name.to_string(),
-            control_key: served,
-            auth_id: auth_id.to_string(),
-            approved_at_ms: EpochMs::now().0,
-        });
-        write_list(&enrolled_path(self), &enrolled)?;
-        let pending: Vec<Pending> = read_list::<Pending>(&pending_path(self))?
-            .into_iter()
-            .filter(|p| p.registration.auth_id != auth_id)
-            .collect();
-        write_list(&pending_path(self), &pending)?;
-        Ok(node)
+        // A registered node that is not tagged and recorded is stuck: a retry fails at
+        // `register` and nothing lists it, so it is deleted again.
+        finish().map_err(|e| {
+            ctx(match admin.delete(id) {
+                Ok(()) => Error::new(format!(
+                    "{e}; headscale node {id} is deleted again: run protectorate-node join on \
+                     the node again"
+                )),
+                Err(del) => Error::new(format!(
+                    "{e}; deleting headscale node {id} again failed too: {del}"
+                )),
+            })
+        })
     }
 
     /// Renames node `id` in headscale, then in its enrollment record. When the record cannot be
