@@ -8,6 +8,10 @@
 
 #![forbid(unsafe_code)]
 
+pub fn journal_event_tag() -> u8 {
+    pt_core::codec::MAX_EVENT_TAG
+}
+
 mod api;
 mod approvals;
 mod brief;
@@ -42,7 +46,7 @@ pub use http::{Web, WebFile};
 pub use log::set_level as set_log_level;
 pub use logins::login as harness_login;
 pub use pt_fleet::Embedded;
-pub use serve::{Exit, ServeOptions, probation_prestart, serve};
+pub use serve::{Exit, ServeOptions, probation_prestart, retry_probation_restore, serve};
 pub use update::RESTART_CODE;
 
 /// `$PROTECTORATE_HOME`, else `~/.local/share/protectorate`.

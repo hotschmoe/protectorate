@@ -17,6 +17,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const CURRENT: &str = "current";
 const PREVIOUS: &str = "previous";
 const PROBATION: &str = "probation.json";
+const CONFIRMED: &str = "confirmed-probation.json";
 
 /// A name usable as `releases/<version>`: a tag such as `v1.2.3-dev.4`, never a pointer name.
 pub(crate) fn version_name(v: &str) -> bool {
@@ -52,12 +53,17 @@ record! {
     pub struct Probation {
         pub version: String,
         pub previous: String,
+        pub earlier_previous: Option<String>,
         pub switched_ms: u64,
         pub deadline_ms: u64,
         pub contacted_ms: Option<u64>,
         pub rolled_back_ms: Option<u64>,
         /// Headscale snapshot to restore before rolling back a hub release.
         pub headscale_snapshot: Option<String>,
+        pub journal_snapshot: Option<String>,
+        pub journal_snapshot_ms: Option<u64>,
+        pub manual_rollback: bool = false,
+        pub restore_failed: Option<String>,
         /// Starts counted by [`Store::start_attempt`].
         pub starts: u64 = 0,
         /// Why it was rolled back.
@@ -740,14 +746,16 @@ impl Store {
     /// the switch, under the same lock, so no crash leaves the new release current untried;
     /// one that names a release `current` does not is not open.
     pub fn switch_on_probation(&self, version: &str, window: Duration) -> Result<Switch> {
-        self.switch_on_probation_with_snapshot(version, window, None)
+        self.switch_on_probation_with_snapshots(version, window, None, None, None)
     }
 
-    pub fn switch_on_probation_with_snapshot(
+    pub fn switch_on_probation_with_snapshots(
         &self,
         version: &str,
         window: Duration,
         headscale_snapshot: Option<String>,
+        journal_snapshot: Option<String>,
+        journal_snapshot_ms: Option<u64>,
     ) -> Result<Switch> {
         self.require_version_dir(version)?;
         let _l = self.lock()?;
@@ -761,16 +769,27 @@ impl Store {
                 to: version.to_string(),
             });
         }
+        if let Some(p) = self
+            .probation()?
+            .filter(|p| p.version == from && p.contacted_ms.is_some() && p.rolled_back_ms.is_none())
+        {
+            self.write_record(CONFIRMED, &p)?;
+        }
         let now = now_ms();
         let window = u64::try_from(window.as_millis()).unwrap_or(u64::MAX);
         let p = Probation {
             version: version.to_string(),
             previous: from,
+            earlier_previous: self.previous()?,
             switched_ms: now,
             deadline_ms: now.saturating_add(window),
             contacted_ms: None,
             rolled_back_ms: None,
             headscale_snapshot,
+            journal_snapshot,
+            journal_snapshot_ms,
+            manual_rollback: false,
+            restore_failed: None,
             starts: 0,
             reason: None,
         };
@@ -780,7 +799,11 @@ impl Store {
     }
 
     pub fn probation(&self) -> Result<Option<Probation>> {
-        let path = self.dir.join(PROBATION);
+        self.read_record(PROBATION)
+    }
+
+    fn read_record(&self, name: &str) -> Result<Option<Probation>> {
+        let path = self.dir.join(name);
         let bytes = match fs::read(&path) {
             Ok(b) => b,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -792,9 +815,13 @@ impl Store {
     }
 
     fn write_probation(&self, p: &Probation) -> Result<()> {
+        self.write_record(PROBATION, p)
+    }
+
+    fn write_record(&self, name: &str, p: &Probation) -> Result<()> {
         let tmp = self.dir.join(unique("probation"));
         write_synced(&tmp, format!("{}\n", p.to_json()).as_bytes())?;
-        let dst = self.dir.join(PROBATION);
+        let dst = self.dir.join(name);
         fs::rename(&tmp, &dst).map_err(|e| {
             Error::io(
                 format!("renaming {} to {}", tmp.display(), dst.display()),
@@ -808,7 +835,7 @@ impl Store {
         let Some(p) = self.probation()? else {
             return Ok(None);
         };
-        let open = p.contacted_ms.is_none()
+        let open = (p.contacted_ms.is_none() || p.manual_rollback)
             && p.rolled_back_ms.is_none()
             && self.current()?.as_deref() == Some(p.version.as_str());
         Ok(open.then_some(p))
@@ -860,7 +887,83 @@ impl Store {
         mut restore: impl FnMut(&Probation) -> std::result::Result<(), String>,
     ) -> Result<Verdict> {
         let _l = self.lock()?;
-        self.judge(true, max_starts, &mut restore)
+        match self.judge(true, max_starts, &mut restore) {
+            Err(e) if e.message.starts_with("restoring before rollback:") => {
+                let mut p = self
+                    .probation()?
+                    .ok_or_else(|| store_err("probation disappeared"))?;
+                p.contacted_ms = Some(now_ms());
+                p.restore_failed = Some(e.message.clone());
+                p.reason = None;
+                p.manual_rollback = false;
+                self.write_probation(&p)?;
+                eprintln!(
+                    "update: {}; keeping the current release; repair the snapshot before retrying rollback",
+                    e.message
+                );
+                Ok(Verdict::Confirmed)
+            }
+            other => other,
+        }
+    }
+
+    pub fn request_manual_rollback(&self, fleet_off: bool) -> Result<Switch> {
+        let _l = self.lock()?;
+        let current = self.current()?;
+        let previous = self.previous()?;
+        let matches = |p: &Probation| {
+            current.as_deref() == Some(p.version.as_str())
+                && previous.as_deref() == Some(p.previous.as_str())
+                && p.rolled_back_ms.is_none()
+        };
+        let mut p = match self.probation()?.filter(matches) {
+            Some(p) => p,
+            None => self
+                .read_record(CONFIRMED)?
+                .filter(matches)
+                .ok_or_else(|| store_err("no snapshot for this rollback"))?,
+        };
+        if current.as_deref() != Some(p.version.as_str())
+            || previous.as_deref() != Some(p.previous.as_str())
+            || p.rolled_back_ms.is_some()
+            || p.journal_snapshot.is_none()
+        {
+            return Err(store_err(
+                "no matching journal snapshot for this rollback; keep the current release",
+            ));
+        }
+        if p.headscale_snapshot.is_none() && !fleet_off {
+            return Err(store_err(
+                "no headscale snapshot for this rollback; keep the current release",
+            ));
+        }
+        self.require_version_dir(&p.previous)?;
+        p.manual_rollback = true;
+        p.restore_failed = None;
+        p.reason = Some("manual rollback requested".into());
+        self.write_probation(&p)?;
+        Ok(Switch {
+            from: current,
+            to: p.previous,
+        })
+    }
+
+    pub fn retry_restore(&self) -> Result<()> {
+        let _l = self.lock()?;
+        let mut p = self
+            .probation()?
+            .ok_or_else(|| store_err("no failed restore to retry"))?;
+        if p.restore_failed.is_none()
+            || self.current()?.as_deref() != Some(p.version.as_str())
+            || self.previous()?.as_deref() != Some(p.previous.as_str())
+        {
+            return Err(store_err("no failed restore for the current release"));
+        }
+        p.contacted_ms = None;
+        p.manual_rollback = false;
+        p.reason = Some("retrying failed snapshot restore".into());
+        p.restore_failed = None;
+        self.write_probation(&p)
     }
 
     pub fn request_rollback(&self, reason: &str) -> Result<bool> {
@@ -892,7 +995,10 @@ impl Store {
         let Some(mut p) = self.probation()? else {
             return Ok(Verdict::Idle);
         };
-        if p.contacted_ms.is_some() {
+        if p.rolled_back_ms.is_some() {
+            return Ok(Verdict::Idle);
+        }
+        if p.contacted_ms.is_some() && !p.manual_rollback {
             return Ok(Verdict::Confirmed);
         }
         // A switch left half done would read as "trial not current", that is idle, and end the
@@ -905,7 +1011,19 @@ impl Store {
                 p.version
             )));
         }
-        if self.open_probation()?.is_none() {
+        if self.current()?.as_deref() == Some(p.previous.as_str()) {
+            if p.reason.is_some() {
+                self.finish_trial_rollback(&mut p)?;
+            } else if self.previous()?.as_deref() == Some(p.previous.as_str())
+                && let Some(earlier) = &p.earlier_previous
+                && self.require_version_dir(earlier).is_ok()
+            {
+                self.set_pointer(PREVIOUS, earlier)?;
+                sync_dir(&self.dir)?;
+            }
+            return Ok(Verdict::Idle);
+        }
+        if self.current()?.as_deref() != Some(p.version.as_str()) || p.rolled_back_ms.is_some() {
             return Ok(Verdict::Idle);
         }
         if let Some(reason) = p.reason.clone() {
@@ -952,11 +1070,9 @@ impl Store {
             )));
         }
         self.require_version_dir(&p.previous)?;
-        if p.reason.as_deref() != Some(reason) {
-            p.reason = Some(reason.to_string());
-            self.write_probation(p)?;
-        }
         restore(p).map_err(|e| store_err(format!("restoring before rollback: {e}")))?;
+        p.reason = Some(reason.to_string());
+        self.write_probation(p)?;
         self.set_pointer(CURRENT, &p.previous)?;
         sync_dir(&self.dir)?;
         crash_point("rollback-current");
@@ -964,16 +1080,29 @@ impl Store {
             from: Some(p.version.clone()),
             to: p.previous.clone(),
         };
-        p.rolled_back_ms = Some(now_ms());
-        p.reason = Some(reason.to_string());
-        self.write_probation(p)?;
+        self.finish_trial_rollback(p)?;
         Ok(sw)
+    }
+
+    fn finish_trial_rollback(&self, p: &mut Probation) -> Result<()> {
+        if let Some(previous) = &p.earlier_previous {
+            if self.require_version_dir(previous).is_ok() {
+                self.set_pointer(PREVIOUS, previous)?;
+                sync_dir(&self.dir)?;
+            } else {
+                eprintln!(
+                    "update: earlier previous release {previous} is missing; keeping the working pointer"
+                );
+            }
+        }
+        p.rolled_back_ms = Some(now_ms());
+        self.write_probation(p)
     }
 }
 
 fn no_snapshot(p: &Probation) -> std::result::Result<(), String> {
-    if p.headscale_snapshot.is_some() {
-        return Err("headscale restore requires hub probation before start".into());
+    if p.headscale_snapshot.is_some() || p.journal_snapshot.is_some() {
+        return Err("snapshot restore requires hub probation before start".into());
     }
     Ok(())
 }

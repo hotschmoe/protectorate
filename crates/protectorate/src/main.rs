@@ -53,7 +53,7 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   version | --version
   hub info | hub state
   hub update [--check] [--channel stable|dev] [--version TAG] | hub update --rollback
-  hub probation                     run by the unit before each start, without the API
+  hub probation [--retry-rollback]  run by the unit before each start, without the API
   doctor [--refresh]
   harness update [PROGRAM...]       claude, codex, grok, pi; none means every installed one
   harness login <claude|codex|grok|pi> [-- ARGS...]
@@ -107,6 +107,7 @@ const SWITCHES: &[&str] = &[
     "--envoy",
     "--check",
     "--rollback",
+    "--retry-rollback",
     "--refresh",
     "--all",
     "--no-wait",
@@ -325,10 +326,17 @@ fn run(a: &Args) -> Result<(), Fail> {
                 option_env!("PROTECTORATE_BUILD_VERSION").unwrap_or("dev")
             );
             println!("{}", net_line());
+            println!("journal-event-tag: {}", pt_hub::journal_event_tag());
+            println!("hub-rollback: 1");
             return Ok(());
         }
         "hub" if a.words.get(1).map(String::as_str) == Some("probation") => {
-            let line = pt_hub::probation_prestart(&home(a)).map_err(Fail::Other)?;
+            let line = if a.has("--retry-rollback") {
+                pt_hub::retry_probation_restore(&home(a))
+            } else {
+                pt_hub::probation_prestart(&home(a))
+            }
+            .map_err(Fail::Other)?;
             println!("protectorate hub probation: {line}");
             return Ok(());
         }

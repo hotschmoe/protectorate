@@ -71,6 +71,30 @@ pub struct Journal {
 }
 
 impl Journal {
+    pub fn copy_for_update(&self, dest: &Path) -> io::Result<()> {
+        self.check_poisoned()?;
+        let (snapshots, segments) = list(&self.dir)?;
+        if !snapshots.is_empty() || segments != [0] || self.seq != 0 {
+            return Err(invalid(
+                &self.dir,
+                "update snapshot requires a single segment".into(),
+            ));
+        }
+        let parent = dest
+            .parent()
+            .ok_or_else(|| invalid(dest, "snapshot has no parent directory".into()))?;
+        create_dir_durable(parent)?;
+        fs::create_dir(dest).map_err(|e| ctx(e, "create update snapshot", dest))?;
+        sync_dir(parent)?;
+        let source = self.dir.join(segment_name(0));
+        let target = dest.join(segment_name(0));
+        fs::copy(&source, &target).map_err(|e| ctx(e, "copy to", &target))?;
+        File::open(&target)
+            .and_then(|f| f.sync_all())
+            .map_err(|e| ctx(e, "sync", &target))?;
+        sync_dir(dest)
+    }
+
     /// Opens or creates the journal in `dir`, truncating a torn tail of the live segment to its
     /// last good frame. A frame that fails its CRC with an intact frame after it is corruption,
     /// not a torn append: open fails with `InvalidData` and leaves the file as it is.

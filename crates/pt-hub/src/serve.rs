@@ -98,14 +98,23 @@ pub fn probation_prestart(home: &Path) -> Result<String, String> {
     let store = pt_update::Store::open(home).map_err(|e| e.to_string())?;
     Ok(
         match store
-            .start_attempt_with_restore(
-                pt_update::MAX_TRIAL_STARTS,
-                crate::update::restore_headscale,
-            )
+            .start_attempt_with_restore(pt_update::MAX_TRIAL_STARTS, |p| {
+                crate::update::restore_snapshots(home, &store, p)
+            })
             .map_err(|e| e.to_string())?
         {
             pt_update::Verdict::Idle => "no release on trial".into(),
-            pt_update::Verdict::Confirmed => "the release on trial was confirmed".into(),
+            pt_update::Verdict::Confirmed => {
+                if store
+                    .probation()
+                    .map_err(|e| e.to_string())?
+                    .is_some_and(|p| p.restore_failed.is_some())
+                {
+                    "snapshot restore failed; keeping the current release".into()
+                } else {
+                    "the release on trial was confirmed".into()
+                }
+            }
             pt_update::Verdict::Waiting { remaining } => {
                 format!("on trial, {} s left", remaining.as_secs())
             }
@@ -116,6 +125,31 @@ pub fn probation_prestart(home: &Path) -> Result<String, String> {
             ),
         },
     )
+}
+
+pub fn retry_probation_restore(home: &Path) -> Result<String, String> {
+    let path = home.join("journal/lock");
+    let lock = fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .map_err(|e| format!("opening {}: {e}", path.display()))?;
+    lock.try_lock().map_err(|e| {
+        format!(
+            "stop the hub before retrying rollback ({}: {e})",
+            path.display()
+        )
+    })?;
+    let store = pt_update::Store::open(home).map_err(|e| e.to_string())?;
+    store.retry_restore().map_err(|e| e.to_string())?;
+    let result = probation_prestart(home)?;
+    if let Some(error) = store
+        .probation()
+        .map_err(|e| e.to_string())?
+        .and_then(|p| p.restore_failed)
+    {
+        return Err(error);
+    }
+    Ok(result)
 }
 
 pub fn serve(o: ServeOptions) -> Result<Exit, String> {
@@ -173,7 +207,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
 
     let (tx, rx) = mpsc::channel::<Input>();
     // HubRecovered is the first input, before any listener or timer can add one (README step 5).
-    tx.send(Input {
+    tx.send(Input::Event {
         kind: EventKind::HubRecovered,
         reply: None,
     })

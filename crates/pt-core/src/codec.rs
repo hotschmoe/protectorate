@@ -10,6 +10,8 @@ use crate::event::*;
 use crate::model::*;
 
 pub const FORMAT: u8 = 1;
+/// Highest event tag this binary reads. Any incompatible encoding must get a new event tag.
+pub const MAX_EVENT_TAG: u8 = 32;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -757,7 +759,7 @@ impl Wire for EventKind {
 
     fn get(r: &mut Reader) -> Result<Self, DecodeError> {
         use EventKind as E;
-        Ok(match r.tag("event", 32)? {
+        Ok(match r.tag("event", MAX_EVENT_TAG)? {
             0 => E::Spawn(Wire::get(r)?),
             1 => E::Send {
                 to: Wire::get(r)?,

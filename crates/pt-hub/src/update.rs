@@ -14,8 +14,8 @@
 //!   request from the new release.
 
 use std::cmp::Ordering;
-use std::fs::{self, File};
-use std::path::Path;
+use std::fs::{self, File, OpenOptions};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -126,9 +126,27 @@ pub fn update_hub(hub: &Hub, r: api::UpdateHubRequest) -> Result<api::HubUpdate,
         store
             .started_from_current("protectorate")
             .map_err(not_here)?;
-        let sw = store.rollback().map_err(update_err)?;
+        let previous = store
+            .previous()
+            .map_err(update_err)?
+            .ok_or_else(|| err(ErrorCode::Conflict, "no previous release"))?;
+        let version = store
+            .check_binary(&previous, "protectorate", "version")
+            .map_err(|e| err(ErrorCode::Conflict, e.message))?;
+        if !version.lines().any(|line| line == "hub-rollback: 1") {
+            return Err(err(
+                ErrorCode::Conflict,
+                format!(
+                    "previous release {previous} cannot run snapshot-aware probation; rollback refused"
+                ),
+            ));
+        }
+        let fleet_off = matches!(hub.fleet.status(), crate::fleet::Status::Off);
+        let sw = store
+            .request_manual_rollback(fleet_off)
+            .map_err(|e| err(ErrorCode::Conflict, e.message))?;
         let note = format!(
-            "rolled back from {} to {}; restarting",
+            "rollback from {} to {} requested; restarting for offline restore. Headscale changes after its snapshot are lost; journal events are kept only if the target can read them",
             sw.from.as_deref().unwrap_or("-"),
             sw.to
         );
@@ -193,15 +211,35 @@ pub fn update_hub(hub: &Hub, r: api::UpdateHubRequest) -> Result<api::HubUpdate,
     let staged = store
         .stage(&src, &rel, &pt_update::hub_picks(arch))
         .map_err(update_err)?;
-    store
+    let version_output = store
         .check_binary(&target, "protectorate", "version")
         .map_err(|e| err(ErrorCode::Invalid, e.message))?;
+    if !version_output.lines().any(|line| line == "hub-rollback: 1") {
+        return Err(err(
+            ErrorCode::Invalid,
+            format!(
+                "{target} does not support snapshot-aware hub rollback; install a release that does"
+            ),
+        ));
+    }
     let snapshot = match hub.fleet.status() {
         crate::fleet::Status::Up(up) => {
             let dir = up
                 .fleet
                 .snapshot_headscale(&format!("before-{target}"))
                 .map_err(|e| err(ErrorCode::Internal, e.to_string()))?;
+            if ["db.sqlite-wal", "db.sqlite-shm"]
+                .iter()
+                .any(|name| dir.join(name).exists())
+            {
+                return Err(err(
+                    ErrorCode::Internal,
+                    format!(
+                        "headscale snapshot {} has SQLite sidecars; cannot restore it atomically",
+                        dir.display()
+                    ),
+                ));
+            }
             info!("update: headscale snapshot in {}", dir.display());
             Some(
                 dir.to_str()
@@ -222,8 +260,34 @@ pub fn update_hub(hub: &Hub, r: api::UpdateHubRequest) -> Result<api::HubUpdate,
             ));
         }
     };
+    let journal_dir = match &snapshot {
+        Some(path) => Path::new(path).join("journal"),
+        None => hub
+            .home
+            .root
+            .join("update-snapshots")
+            .join(format!(
+                "{}-{}-before-{target}",
+                crate::home::now_ms(),
+                std::process::id()
+            ))
+            .join("journal"),
+    };
+    let journal_snapshot_ms = hub
+        .snapshot_journal(journal_dir.clone())
+        .map_err(|e| err(ErrorCode::Internal, format!("snapshotting journal: {e}")))?;
+    let journal_snapshot = journal_dir
+        .to_str()
+        .ok_or_else(|| err(ErrorCode::Internal, "journal snapshot path is not UTF-8"))?
+        .to_string();
     let sw = store
-        .switch_on_probation_with_snapshot(&target, HUB_HEALTH_WINDOW, snapshot)
+        .switch_on_probation_with_snapshots(
+            &target,
+            HUB_HEALTH_WINDOW,
+            snapshot,
+            Some(journal_snapshot),
+            Some(journal_snapshot_ms),
+        )
         .map_err(update_err)?;
     let note = format!(
         "switched from {} to {target}{}{}; restarting on probation",
@@ -281,7 +345,113 @@ pub fn failed_start(home: &Home, why: &str) -> String {
     }
 }
 
-pub fn restore_headscale(p: &Probation) -> Result<(), String> {
+const SEGMENT: &str = "segment-00000000000000000000";
+
+fn event_tags(path: &Path) -> Result<Vec<u8>, String> {
+    let bytes = fs::read(path).map_err(|e| format!("reading {}: {e}", path.display()))?;
+    if bytes.get(..12) != Some(b"PTJOURNL\x01\x00\x00\x00") {
+        return Err(format!("invalid journal header in {}", path.display()));
+    }
+    let decoded = pt_journal::codec::decode_frames(&bytes[12..]);
+    if decoded.stop.is_some() {
+        return Err(format!(
+            "incomplete or corrupt journal in {}",
+            path.display()
+        ));
+    }
+    decoded
+        .frames
+        .into_iter()
+        .map(|frame| {
+            pt_core::codec::decode(frame)
+                .map_err(|e| format!("invalid journal event in {}: {e}", path.display()))?;
+            frame
+                .get(9)
+                .copied()
+                .ok_or_else(|| format!("short event in {}", path.display()))
+        })
+        .collect()
+}
+
+fn target_reads_journal(home: &Path, store: &Store, p: &Probation) -> bool {
+    let Ok(version) = store.check_binary(&p.previous, "protectorate", "version") else {
+        return false;
+    };
+    let mut caps = version
+        .lines()
+        .filter_map(|line| line.strip_prefix("journal-event-tag: "));
+    let Some(cap) = caps.next().and_then(|v| v.parse::<u8>().ok()) else {
+        return false;
+    };
+    if caps.next().is_some() {
+        return false;
+    }
+    let dir = home.join("journal");
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return false;
+    };
+    for entry in entries {
+        let Ok(entry) = entry else { return false };
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("snapshot-") || (name.starts_with("segment-") && name != SEGMENT) {
+            return false;
+        }
+    }
+    event_tags(&dir.join(SEGMENT)).is_ok_and(|tags| tags.into_iter().all(|tag| tag <= cap))
+}
+
+fn stage_journal(home: &Path, snapshot: &str) -> Result<PathBuf, String> {
+    let source = Path::new(snapshot).join(SEGMENT);
+    event_tags(&source)?;
+    let dir = home.join("journal");
+    let tmp = dir.join(format!(
+        ".restore-{}-{}",
+        std::process::id(),
+        crate::home::now_ms()
+    ));
+    let mut src = File::open(&source).map_err(|e| format!("opening {}: {e}", source.display()))?;
+    let mut dst = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .map_err(|e| format!("creating {}: {e}", tmp.display()))?;
+    std::io::copy(&mut src, &mut dst)
+        .and_then(|_| dst.sync_all())
+        .map_err(|e| format!("copying {} to {}: {e}", source.display(), tmp.display()))?;
+    Ok(tmp)
+}
+
+pub fn restore_snapshots(home: &Path, store: &Store, p: &Probation) -> Result<(), String> {
+    let restore_journal = p
+        .journal_snapshot
+        .as_deref()
+        .filter(|_| !p.manual_rollback || !target_reads_journal(home, store, p));
+    let staged = restore_journal
+        .map(|snapshot| stage_journal(home, snapshot))
+        .transpose()?;
+    restore_headscale(p)?;
+    if let Some(tmp) = staged {
+        let dir = home.join("journal");
+        let target = dir.join(SEGMENT);
+        fs::rename(&tmp, &target)
+            .map_err(|e| format!("restoring {} to {}: {e}", tmp.display(), target.display()))?;
+        File::open(&dir)
+            .and_then(|f| f.sync_all())
+            .map_err(|e| format!("syncing {}: {e}", dir.display()))?;
+        eprintln!(
+            "update: restored journal snapshot from {}; events after the snapshot are lost (snapshot time: {} ms since epoch)",
+            restore_journal.unwrap_or_default(),
+            p.journal_snapshot_ms
+                .map_or_else(|| "unknown".into(), |ms| ms.to_string())
+        );
+    } else if p.journal_snapshot.is_some() {
+        eprintln!("update: kept the journal; the target release reads every event");
+    }
+    Ok(())
+}
+
+fn restore_headscale(p: &Probation) -> Result<(), String> {
     let Some(snapshot) = p.headscale_snapshot.as_deref() else {
         return Ok(());
     };
@@ -298,33 +468,69 @@ pub fn restore_headscale(p: &Probation) -> Result<(), String> {
             snapshot.display()
         ));
     }
-    let mut staged = Vec::new();
-    for name in ["db.sqlite", "db.sqlite-wal", "db.sqlite-shm"] {
-        let source = snapshot.join(name);
-        if source.exists() {
-            let tmp = dest.join(format!(".restore-{name}-{}", std::process::id()));
-            fs::copy(&source, &tmp)
-                .map_err(|e| format!("copying {} to {}: {e}", source.display(), tmp.display()))?;
-            File::open(&tmp)
-                .and_then(|f| f.sync_all())
-                .map_err(|e| format!("syncing {}: {e}", tmp.display()))?;
-            staged.push((tmp, dest.join(name)));
-        }
+    if ["db.sqlite-wal", "db.sqlite-shm"]
+        .iter()
+        .any(|name| snapshot.join(name).exists())
+    {
+        return Err(format!(
+            "headscale snapshot {} has SQLite sidecars; cannot restore it atomically",
+            snapshot.display()
+        ));
     }
+    let tmp = dest.join(format!(
+        ".restore-db.sqlite-{}-{}",
+        std::process::id(),
+        crate::home::now_ms()
+    ));
+    let mut src = File::open(&db).map_err(|e| format!("opening {}: {e}", db.display()))?;
+    let mut dst = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp)
+        .map_err(|e| format!("creating {}: {e}", tmp.display()))?;
+    std::io::copy(&mut src, &mut dst)
+        .and_then(|_| dst.sync_all())
+        .map_err(|e| format!("copying {} to {}: {e}", db.display(), tmp.display()))?;
+    let mut aside = Vec::new();
+    let put_back = |aside: &[(PathBuf, PathBuf)]| {
+        for (backup, original) in aside.iter().rev() {
+            if let Err(e) = fs::rename(backup, original) {
+                eprintln!(
+                    "update: could not put {} back from {}: {e}",
+                    original.display(),
+                    backup.display()
+                );
+            }
+        }
+    };
     for name in ["db.sqlite-wal", "db.sqlite-shm"] {
         let path = dest.join(name);
-        if let Err(e) = fs::remove_file(&path)
-            && e.kind() != std::io::ErrorKind::NotFound
-        {
-            return Err(format!("removing stale {}: {e}", path.display()));
+        let backup = dest.join(format!(
+            ".rollback-{name}-{}-{}",
+            std::process::id(),
+            crate::home::now_ms()
+        ));
+        match fs::rename(&path, &backup) {
+            Ok(()) => aside.push((backup, path)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                put_back(&aside);
+                return Err(format!("saving {} before restore: {e}", path.display()));
+            }
         }
     }
-    File::open(&dest)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| format!("syncing {}: {e}", dest.display()))?;
-    for (tmp, target) in staged {
-        fs::rename(&tmp, &target)
-            .map_err(|e| format!("restoring {} to {}: {e}", tmp.display(), target.display()))?;
+    if let Err(e) = File::open(&dest).and_then(|f| f.sync_all()) {
+        put_back(&aside);
+        return Err(format!("syncing {} before restore: {e}", dest.display()));
+    }
+    let target = dest.join("db.sqlite");
+    if let Err(e) = fs::rename(&tmp, &target) {
+        put_back(&aside);
+        return Err(format!(
+            "restoring {} to {}: {e}",
+            tmp.display(),
+            target.display()
+        ));
     }
     File::open(&dest)
         .and_then(|f| f.sync_all())

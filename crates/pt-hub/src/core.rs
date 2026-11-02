@@ -41,23 +41,36 @@ pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<I
         };
         let mut frames = Vec::with_capacity(inputs.len());
         let mut out = Vec::with_capacity(inputs.len());
+        let mut snapshots = Vec::new();
         for input in inputs {
-            let ev = Event {
-                at: now_ms(),
-                kind: input.kind,
+            let (kind, reply) = match input {
+                Input::Event { kind, reply } => (kind, reply),
+                Input::Snapshot { dir, reply } => {
+                    snapshots.push((dir, reply));
+                    continue;
+                }
             };
+            let ev = Event { at: now_ms(), kind };
             let intents = pt_core::apply(&mut state, &ev);
             if !matches!(ev.kind, pt_core::EventKind::Tick) || !intents.is_empty() {
                 debug!("apply {:?} -> {} intents", ev.kind, intents.len());
             }
             frames.push(codec::encode(&ev));
-            out.push((input.reply, intents));
+            out.push((reply, intents));
         }
         let refs: Vec<&[u8]> = frames.iter().map(Vec::as_slice).collect();
         if let Err(e) = journal.append_batch(&refs) {
             // Without durability no intent may leave: stop the hub (SPEC principle 5).
             error!("journal append failed, stopping: {e}");
             std::process::exit(70);
+        }
+        for (dir, reply) in snapshots {
+            let _ = reply.send(
+                journal
+                    .copy_for_update(&dir)
+                    .map(|()| now_ms())
+                    .map_err(|e| e.to_string()),
+            );
         }
         batch_n += 1;
         let now = now_ms();

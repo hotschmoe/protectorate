@@ -24,9 +24,16 @@ use crate::wire;
 pub const ENVOY: &str = "envoy";
 
 /// One input to the core thread. Commands carry the channel their `Intent::Reply` goes to.
-pub struct Input {
-    pub kind: EventKind,
-    pub reply: Option<Sender<Reply>>,
+#[allow(clippy::large_enum_variant)]
+pub enum Input {
+    Event {
+        kind: EventKind,
+        reply: Option<Sender<Reply>>,
+    },
+    Snapshot {
+        dir: PathBuf,
+        reply: Sender<Result<u64, String>>,
+    },
 }
 
 /// The read-only snapshot published after each journaled batch.
@@ -166,7 +173,7 @@ impl Hub {
 
     /// Feeds an event to the core without waiting for its effect.
     pub fn submit(&self, kind: EventKind) {
-        if self.input.send(Input { kind, reply: None }).is_err() {
+        if self.input.send(Input::Event { kind, reply: None }).is_err() {
             debug!("core is gone; dropped an event");
         }
     }
@@ -176,7 +183,7 @@ impl Hub {
     pub fn command(&self, kind: EventKind, timeout: Duration) -> Result<Reply, CommandError> {
         let (tx, rx) = mpsc::channel();
         self.input
-            .send(Input {
+            .send(Input::Event {
                 kind,
                 reply: Some(tx),
             })
@@ -185,6 +192,15 @@ impl Hub {
             mpsc::RecvTimeoutError::Timeout => CommandError::Timeout,
             mpsc::RecvTimeoutError::Disconnected => CommandError::Down,
         })
+    }
+
+    pub fn snapshot_journal(&self, dir: PathBuf) -> Result<u64, String> {
+        let (tx, rx) = mpsc::channel();
+        self.input
+            .send(Input::Snapshot { dir, reply: tx })
+            .map_err(|_| "core is down".to_string())?;
+        rx.recv()
+            .map_err(|_| "core stopped while snapshotting the journal".to_string())?
     }
 
     /// The scope unit name of incarnation `g` of a sleeve on this hub.
