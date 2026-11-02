@@ -131,7 +131,12 @@ impl Grok {
     }
 
     fn on_reply(&mut self, msg: &Value, out: &mut Out) {
-        let Some(rpc) = msg["id"].as_u64().and_then(|id| self.pending.remove(&id)) else {
+        // Our ids are numbers. Grok 1.0.70 also writes the reply to a request of its own,
+        // `"id": "skills-reload"`, right after it starts: noted, not a desync.
+        let Some(id) = msg["id"].as_u64() else {
+            return out.unmapped(&format!("reply to grok's own request {}", msg["id"]));
+        };
+        let Some(rpc) = self.pending.remove(&id) else {
             out.error(
                 ErrorClass::Protocol,
                 format!("grok replied to unknown request {}", msg["id"]),
