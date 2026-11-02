@@ -38,8 +38,6 @@ use crate::wire;
 
 const ACK_TIMEOUT: Duration = Duration::from_secs(30);
 const STOP_GRACE: Duration = Duration::from_secs(10);
-/// How long a pump waits on harness output before it looks for an executor report.
-const ORDER_POLL: Duration = Duration::from_millis(10);
 
 /// How long a confirmed prompt with no native turn id waits for the harness's turn start.
 const NATIVE_WAIT: Duration = Duration::from_secs(2);
@@ -56,7 +54,18 @@ enum Ordered {
     },
 }
 
-type Order = (Ordered, Sender<()>);
+/// A pump's one inbox: the driver's events and the executor's orders, in the order sent. An
+/// order is acknowledged on its sender once it is in.
+enum PumpIn {
+    Driver(pt_drivers::Event),
+    Order(Ordered, Sender<()>),
+}
+
+impl From<pt_drivers::Event> for PumpIn {
+    fn from(e: pt_drivers::Event) -> PumpIn {
+        PumpIn::Driver(e)
+    }
+}
 
 pub struct Executors {
     hub: Arc<Hub>,
@@ -167,7 +176,7 @@ fn spawn(name: String, f: impl FnOnce() + Send + 'static) -> Result<(), String> 
 struct Live {
     g: Gen,
     session: Arc<Session>,
-    order: Sender<Order>,
+    order: Sender<PumpIn>,
 }
 
 struct SleeveExec {
@@ -428,7 +437,7 @@ impl SleeveExec {
             let (tx, rx) = mpsc::channel();
             if live
                 .order
-                .send((Ordered::Report(Box::new(kind.clone())), tx))
+                .send(PumpIn::Order(Ordered::Report(Box::new(kind.clone())), tx))
                 .is_ok()
                 && rx.recv().is_ok()
             {
@@ -449,7 +458,7 @@ impl SleeveExec {
             effect,
             attempt,
         };
-        live.order.send((expect, tx)).is_ok() && rx.recv().is_ok()
+        live.order.send(PumpIn::Order(expect, tx)).is_ok() && rx.recv().is_ok()
     }
 
     fn handle(&mut self, intent: Intent) {
@@ -942,7 +951,8 @@ impl SleeveExec {
         if hub.config.supervised.iter().any(|h| h == name) {
             spec.permission = pt_drivers::Permission::Supervised;
         }
-        let (session, events) = pt_drivers::spawn(spec).map_err(|e| e.to_string())?;
+        let (order, inbox) = mpsc::channel();
+        let session = pt_drivers::spawn(spec, order.clone()).map_err(|e| e.to_string())?;
         let scope = hub.scope_name(s.id, g);
         let oom = if hub.config.scopes {
             match OomWatch::start(scope.clone()) {
@@ -969,7 +979,6 @@ impl SleeveExec {
             pid: session.pid(),
         });
         let session = Arc::new(session);
-        let (order, ordered) = mpsc::channel();
         self.live = Some(Live {
             g,
             session: session.clone(),
@@ -986,7 +995,7 @@ impl SleeveExec {
         };
         thread::Builder::new()
             .name(format!("pt-pump-{}-g{}", s.id.0, g.0))
-            .spawn(move || pump(&hub, &run, events, ordered))
+            .spawn(move || pump(&hub, &run, inbox))
             .map_err(|e| format!("spawn pump: {e}"))?;
         Ok(())
     }
@@ -1213,10 +1222,10 @@ fn input_text(input: &Option<pt_json::Value>) -> String {
 }
 
 /// Reads one incarnation's driver events: stores them in the transcript, turns them into
-/// observations for the core, and reports `Exited` once the scope is confirmed empty.
-/// Records each harness event and submits its observations; between events (and every
-/// `ORDER_POLL`) it submits the executor's reports after draining what it has received.
-fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Receiver<Order>) {
+/// observations for the core, and reports `Exited` once the scope is confirmed empty. The
+/// executor's orders come through the same inbox, so a report is submitted after every event
+/// the driver sent before it, and an `Expect` is in before its prompt's `UserMessage`.
+fn pump(hub: &Hub, run: &Run, inbox: Receiver<PumpIn>) {
     let mut p = Pump {
         last_error: None,
         ready: false,
@@ -1227,12 +1236,24 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Rece
         expects: HashMap::new(),
         held: None,
     };
-    'run: loop {
-        match events.recv_timeout(ORDER_POLL) {
-            Ok(ev) => {
+    loop {
+        let got = match &p.held {
+            Some(h) => {
+                inbox.recv_timeout((h.at + NATIVE_WAIT).saturating_duration_since(Instant::now()))
+            }
+            None => inbox
+                .recv()
+                .map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+        };
+        match got {
+            Ok(PumpIn::Driver(ev)) => {
                 if p.event(hub, run, ev) {
                     break;
                 }
+            }
+            Ok(PumpIn::Order(o, done)) => {
+                p.order(hub, o);
+                let _ = done.send(());
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
@@ -1243,25 +1264,16 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Rece
         {
             p.flush_held(hub, None);
         }
-        while let Ok((o, done)) = ordered.try_recv() {
-            while let Ok(ev) = events.try_recv() {
-                if p.event(hub, run, ev) {
-                    p.order(hub, o);
-                    let _ = done.send(());
-                    break 'run;
-                }
-            }
+    }
+    p.flush_held(hub, None);
+    // Reports still queued come after all of this incarnation's output; later ones go direct.
+    while let Ok(m) = inbox.try_recv() {
+        if let PumpIn::Order(o, done) = m {
             p.order(hub, o);
             let _ = done.send(());
         }
     }
-    p.flush_held(hub, None);
-    // Reports still queued come after all of this incarnation's output; later ones go direct.
-    while let Ok((o, done)) = ordered.try_recv() {
-        p.order(hub, o);
-        let _ = done.send(());
-    }
-    drop(ordered);
+    drop(inbox);
     let Run {
         ref name,
         id,

@@ -149,7 +149,8 @@ impl Turn {
 
 impl Run {
     pub fn start(spec: SpawnSpec) -> Run {
-        let (session, events) = pt_drivers::spawn(spec).expect("spawn harness");
+        let (tx, events) = std::sync::mpsc::channel();
+        let session = pt_drivers::spawn(spec, tx).expect("spawn harness");
         Run {
             session,
             events,
