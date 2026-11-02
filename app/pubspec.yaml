@@ -15,8 +15,16 @@ flutter:
   uses-material-design: false
   assets:
     - assets/logo.png
-    - assets/fonts/OFL.txt
+    - assets/fonts/Inter-OFL.txt
+    - assets/fonts/JetBrainsMono-OFL.txt
   fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
     - family: JetBrainsMono
       fonts:
         - asset: assets/fonts/JetBrainsMono-Regular.ttf
