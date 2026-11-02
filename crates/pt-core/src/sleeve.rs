@@ -12,7 +12,8 @@ use crate::state::*;
 const BRIEF_PROMPT: &str = "Continue from .protectorate/BRIEF.md: read it first, then carry on \
                             with the task it describes.";
 
-/// Sent once, by the core, after a native resume of a turn a crash or guardrail interrupted.
+/// Sent once, after a native resume of a headless turn a crash ended. Not after an interrupt,
+/// and not for a turn this prompt itself started.
 const CONTINUE_PROMPT: &str = "The previous turn was interrupted. Continue from where it stopped.";
 
 fn name_ok(name: &str) -> bool {
@@ -405,20 +406,23 @@ impl Core<'_> {
             return;
         }
         let delivery_sent = matches!(s.activity, Activity::Delivering { effect } if self.effect_state(effect) != Some(EffectState::Intent));
+        // The ack can lose the race with Exited: the watcher reports the scope empty before
+        // KillScope is confirmed. A guardrail kill is not HubRestart, so the parent still hears.
         let killed_by_recovery = s.kill_cause == Some(Cause::HubRestart)
-            && self.st.effects.values().any(|e| {
-                e.kind == EffectKind::KillScope { sleeve: sid, g }
-                    && e.state == EffectState::Confirmed
-            });
+            && self
+                .st
+                .effects
+                .values()
+                .any(|e| e.kind == EffectKind::KillScope { sleeve: sid, g });
         let s = self.st.sleeves.get_mut(&sid).expect("sleeve exists");
         let was = std::mem::replace(&mut s.activity, Activity::Ended);
-        let interrupted_turn = s.turn.is_some()
-            || s.desync_during_turn
-            || delivery_sent
-            || matches!(
-                was,
-                Activity::Working | Activity::Blocked { .. } | Activity::Interrupting
-            );
+        // An interrupt is the owner or a guardrail stopping the turn. `turn` stays set, so it
+        // must not count on its own: resuming would continue the turn they stopped.
+        let interrupted_turn = was != Activity::Interrupting
+            && (s.turn.is_some()
+                || s.desync_during_turn
+                || delivery_sent
+                || matches!(was, Activity::Working | Activity::Blocked { .. }));
         let old = std::mem::replace(&mut s.proc, Proc::Down);
         let stop_requested = s.stop_at.is_some();
         let kill_cause = s.kill_cause.take();
@@ -477,9 +481,12 @@ impl Core<'_> {
                 };
                 self.after_death(sid, c);
                 let s = &self.st.sleeves[&sid];
-                if interrupted_turn && s.guard.state == GuardState::Resuming {
-                    if s.target.mode == Mode::Headless {
-                        let g = s.g;
+                let resuming = interrupted_turn && s.guard.state == GuardState::Resuming;
+                let headless = s.target.mode == Mode::Headless;
+                if resuming {
+                    // One continuation per owner turn: a turn this prompt started is not continued.
+                    if headless && !self.continued_this_turn(sid, g) {
+                        let g = self.st.sleeves[&sid].g;
                         self.sl(sid).auto_continue = Some(g);
                     } else {
                         self.needs_prompt(sid);
@@ -587,6 +594,16 @@ impl Core<'_> {
     pub(crate) fn recover_sleeves(&mut self) {
         let ids: Vec<SleeveId> = self.st.sleeves.keys().copied().collect();
         for sid in ids {
+            let s = self.sl(sid);
+            // The resumed incarnation already reached Ready and is waiting. Keeping the debt
+            // would continue it on the next start, long after the turn.
+            if s.auto_continue.is_some()
+                && matches!(s.activity, Activity::Idle { .. })
+                && s.guard.state == GuardState::Armed
+            {
+                s.auto_continue = None;
+                self.needs_prompt(sid);
+            }
             let s = self.sl(sid);
             if s.proc == Proc::Up {
                 s.probing = true;
@@ -1265,6 +1282,15 @@ impl Core<'_> {
         }
     }
 
+    /// The dying generation's turn was started by a continuation prompt.
+    fn continued_this_turn(&self, sid: SleeveId, g: Gen) -> bool {
+        let key = format!("continue:{}:{}", sid.0, g.0);
+        matches!(
+            self.st.sleeves[&sid].messages.get(&key).map(|m| &m.state),
+            Some(MsgState::InFlight(_) | MsgState::Delivered | MsgState::MayHaveApplied)
+        )
+    }
+
     /// The owner, and the parent when there is one, hear that nobody continued the turn.
     fn needs_prompt(&mut self, sid: SleeveId) {
         let parent = self.st.sleeves[&sid].parent;
@@ -1333,6 +1359,8 @@ impl Core<'_> {
         self.sl(sid).messages.insert(
             key.clone(),
             Message {
+                // Party is owner, envoy, agent or sleeve. Envoy is that sleeve, not the hub, and a
+                // new party would change the codec. A rejected continuation also warns the owner.
                 from: Party::Owner,
                 text: text.to_string(),
                 mode: SendMode::Queue,

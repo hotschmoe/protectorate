@@ -1,0 +1,27 @@
+#scenario 26fafb6864a0a2dd
+# Exited can arrive before the recovery kill is acked. The KillScope record is enough
+# to suppress child-crash mail. A guardrail kill of a child still tells the parent.
+spawn root /w/a
+run
+obs root ready
+spawn kid /wt/kid parent=root
+run
+obs kid ready
+commit
+crash
+step 1
+exit kid
+expect-notice ChildCrashed count=0
+expect-effect kill:1:* count=1
+spawn root2 /w/c
+run
+obs root2 ready
+spawn kid2 /wt/kid2 parent=root2
+run
+obs kid2 ready
+send kid2 m1
+run
+interrupt kid2
+tick 31s
+exit kid2
+expect-notice ChildCrashed count=1

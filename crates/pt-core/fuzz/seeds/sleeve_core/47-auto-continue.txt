@@ -1,8 +1,9 @@
-#scenario 5833b641c74900e7
+#scenario 12bbc7793f4661de
 # One continuation after a native resume of an interrupted turn. A second journaled Continue
-# does nothing, and the next interruption owes one more. None after a planned stop, a hub
-# restart of an idle sleeve, or a manual resleeve. A pane warns instead. A rejected prompt
-# warns once. A restart before the prompt is journaled retargets the debt to the new generation.
+# does nothing, and a crash of the continued turn warns instead of sending another. None
+# after a planned stop, a hub restart of an idle sleeve, or a manual resleeve. A pane warns
+# instead. A rejected prompt warns once. A restart before the prompt is journaled retargets
+# the debt to the new generation.
 spawn root /w/a
 run
 obs root ready
@@ -23,9 +24,10 @@ exit root
 run
 obs root ready
 run
-expect root activity=Working
-expect-effect continue:* count=2
-expect-effect continue:0:3 state=Confirmed count=1
+expect root activity=Idle
+expect-effect continue:* count=1
+expect-effect continue:0:3 count=0
+expect-notice TurnNeedsPrompt count=1
 stop root
 run
 expect root life=Stopped
@@ -55,7 +57,7 @@ crash empty
 run
 obs idle ready
 run
-expect-notice TurnNeedsPrompt count=0
+expect-notice TurnNeedsPrompt count=1
 expect-effect continue:2:* count=0
 spawn stopme /w/c
 run
@@ -81,12 +83,12 @@ run
 obs pane1 ready
 obs pane1 screen=working
 exit pane1
-expect-notice TurnNeedsPrompt count=1
+expect-notice TurnNeedsPrompt count=2
 run
 obs pane1 ready
 run
 expect-effect continue:5:* count=0
-expect-notice TurnNeedsPrompt count=1
+expect-notice TurnNeedsPrompt count=2
 spawn nack /w/f
 run
 obs nack ready
@@ -100,4 +102,4 @@ obs nack ready
 run
 expect nack activity=Idle msg:continue:6:2=Rejected
 expect-effect continue:6:2 state=Rejected count=1
-expect-notice TurnNeedsPrompt count=2
+expect-notice TurnNeedsPrompt count=3

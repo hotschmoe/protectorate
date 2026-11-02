@@ -1,0 +1,22 @@
+#scenario 5d52e2ff41ec00fc
+# A continuation owed to a resume that already reached Ready is dropped when the
+# hub restarts. The sleeve is idle and armed, so it is warned instead of continued.
+spawn debt /w/debt
+run
+obs debt ready
+send debt m1
+run
+expect debt activity=Working
+exit debt
+run
+obs debt ready
+commit
+crash
+expect-notice TurnNeedsPrompt count=1
+expect-effect continue:* count=0
+run
+obs debt ready
+run
+expect debt activity=Idle life=Running
+expect-effect continue:* count=0
+expect-notice TurnNeedsPrompt count=1
