@@ -840,7 +840,8 @@ Each entry: where, what was done, what right looks like.
   when that sleeve is removed, when its sources are gone, or when a later start finds the
   total under a raised budget. A segment is rewritten when its dead bytes are at least its
   live bytes and some docs are still live. A sleeve at its
-  budget does not stop the others. There is no cap across all sleeves. The measured ratio is
+  budget does not stop the others. There is no cap across all sleeves. Streaming
+  reclaim, to avoid holding about 1 GiB, is not wanted. The measured ratio is
   1 GiB of logs to 11 MB of index.
   Right: raise the caps if a real log needs more of the index.
 - **One source per session, decided per hub run** (`pt-hub`, history.rs): a headless session

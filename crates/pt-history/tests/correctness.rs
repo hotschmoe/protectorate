@@ -200,7 +200,36 @@ fn commit_retries_preserve_documents_and_cursors() {
             "{stdout}"
         );
         assert!(stdout.contains("rebuild=identical"), "{stdout}");
+        assert_referenced_segments(&dir.join("index/a"));
+        assert_referenced_segments(&dir.join("index/b"));
     }
+}
+
+/// Every `seg-*` file is named by the manifest, and no partial rewrite is left behind.
+fn assert_referenced_segments(index: &Path) {
+    let manifest = fs::read_to_string(index.join("manifest")).expect("manifest");
+    let mut segs = 0;
+    for ent in fs::read_dir(index).unwrap() {
+        let name = ent.unwrap().file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.starts_with("seg-") {
+            continue;
+        }
+        assert!(
+            !name.ends_with(".tmp"),
+            "leftover {name} in {}",
+            index.display()
+        );
+        assert!(
+            manifest.contains(name),
+            "{name} is not in the manifest of {}",
+            index.display()
+        );
+        segs += 1;
+    }
+    assert!(segs > 0, "no segment files in {}", index.display());
 }
 
 #[test]
@@ -249,20 +278,36 @@ fn small_budget_keeps_the_newest_lines_across_two_sessions() {
     let new_path = root.join("b-new.jsonl");
     let tail_path = root.join("c-tail.jsonl");
     let old_text = format!("{} oldsessiondoc", "x".repeat(4000));
+    let small_text = "smalllivedoc";
     let new_text = "newsessiondoc";
     let tail_text = "tailsessiondoc";
     let old_charge = doc_charge(&old_text, "a-old", &old_path, sleeve);
+    let small_charge = doc_charge(small_text, "a-old", &old_path, sleeve);
     let new_charge = doc_charge(new_text, "b-new", &new_path, sleeve);
     let tail_charge = doc_charge(tail_text, "c-tail", &tail_path, sleeve);
-    // One byte over the old doc, so the second doc has to evict and the name does not
-    // depend on a charge that lands exactly on the budget.
-    let budget = old_charge + 1;
-    assert!(new_charge > 1, "the second doc has to push the sleeve over");
+    // The first file fits whole, so its large doc and three small docs are committed
+    // together. The next file evicts only the large doc. Its charge is at least the three
+    // small ones, and one dead doc is not half of four, so the segment is rewritten only
+    // when the threshold counts bytes.
+    let first = old_charge + 3 * small_charge;
+    let budget = first + 1;
     assert!(
-        new_charge + tail_charge < budget,
-        "the two newest docs have to fit once the old one is gone"
+        old_charge >= 3 * small_charge,
+        "the dead doc has to outweigh the three live ones"
     );
-    write(&old_path, &claude_user(&old_text));
+    assert!(
+        new_charge > 1,
+        "the second file has to push the sleeve over"
+    );
+    assert!(
+        3 * small_charge + new_charge + tail_charge < budget,
+        "the live docs have to fit once the old one is gone"
+    );
+    let mut old = claude_user(&old_text);
+    for _ in 0..3 {
+        old.push_str(&claude_user(small_text));
+    }
+    write(&old_path, &old);
     write(&new_path, &claude_user(new_text));
     write(&tail_path, &claude_user(tail_text));
     let index = dir.join("index");
@@ -281,6 +326,8 @@ fn small_budget_keeps_the_newest_lines_across_two_sessions() {
             "--query",
             "oldsessiondoc",
             "--query",
+            "smalllivedoc",
+            "--query",
             "newsessiondoc",
             "--query",
             "tailsessiondoc",
@@ -290,11 +337,13 @@ fn small_budget_keeps_the_newest_lines_across_two_sessions() {
     let stdout = String::from_utf8(out.stdout).unwrap();
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(out.status.success(), "stdout: {stdout}\nstderr: {stderr}");
-    assert!(stdout.contains("summary: files=3 docs=2"), "{stdout}");
+    assert!(stdout.contains("summary: files=3 docs=5 "), "{stdout}");
+    assert!(stdout.contains("rebuild=identical"), "{stdout}");
     assert!(
         stdout.contains("query \"oldsessiondoc\": top 0"),
         "{stdout}"
     );
+    assert!(stdout.contains("query \"smalllivedoc\": top 3"), "{stdout}");
     assert!(
         stdout.contains("query \"newsessiondoc\": top 1"),
         "{stdout}"
