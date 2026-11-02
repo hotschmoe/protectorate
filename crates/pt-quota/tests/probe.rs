@@ -615,7 +615,7 @@ fn a_passed_reset_still_blocks_an_exhausted_window() {
     assert!(line.contains("reset passed"), "{line}");
     assert!(
         passed
-            .contains("target Codex: first eligible in resleeve_to without a fresh quota reading"),
+            .contains("target Codex: first eligible in resleeve_to whose quota windows have reset"),
         "{passed}"
     );
 
@@ -623,9 +623,10 @@ fn a_passed_reset_still_blocks_an_exhausted_window() {
         r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":18000,"reset_at":1}}}"#,
     );
     assert!(
-        room.contains("target Codex: first eligible in resleeve_to without a fresh quota reading"),
+        room.contains("target Codex: first eligible in resleeve_to whose quota windows have reset"),
         "{room}"
     );
+    assert!(!room.contains("without a fresh quota reading"), "{room}");
 }
 
 /// A stale row fetched before the reset still blocks inside the ten-minute grace, and counts
@@ -670,7 +671,7 @@ fn a_passed_reset_blocks_only_inside_the_grace() {
     let outside = run(now_s.saturating_sub(30 * 60));
     assert!(
         outside.contains(
-            "aged target Codex: first eligible in resleeve_to without a fresh quota reading"
+            "aged target Codex: first eligible in resleeve_to whose quota windows have reset"
         ),
         "{outside}"
     );
@@ -840,6 +841,13 @@ fn an_unmetered_harness_is_not_spent_when_its_reading_is_missing() {
         "{out}"
     );
     assert!(!out.contains("target PiVendor"), "{out}");
+
+    let alone = probe(&["--home", home_s, "--allow", "pi_vendor"]);
+    assert!(
+        alone.contains("target none: no eligible resleeve target has a quota meter"),
+        "{alone}"
+    );
+    assert!(!alone.contains("insufficient fresh quota"), "{alone}");
 }
 
 /// Codex reports a window length in seconds. The label keeps whole minutes, so 119 seconds

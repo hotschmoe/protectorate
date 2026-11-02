@@ -230,15 +230,18 @@ enum Availability {
     Exhausted,
     /// No row, a row that was never a reading, or a row with nothing left to score.
     Unknown,
+    /// Every gating window's reset has passed, so the old percent no longer applies.
+    Reset,
     /// No quota reader exists for this harness, so it is not a fallback.
     Unmetered,
 }
 
 /// Whether a candidate has usable quota, insufficient quota, or no usable reading.
 ///
-/// A stale row keeps the windows of its last good read. Under the task minimum that is
-/// exhausted, the same as a fresh row; with spare it may still be chosen. Unknown is only a
-/// row with no scored window.
+/// A stale subscription keeps the windows of its last good read. Under the task minimum that
+/// is exhausted, the same as a fresh row; with spare it may still be chosen. A row whose
+/// gating windows have all reset is not a missing reading. Unknown is a row with nothing to
+/// score.
 fn availability(now_ms: u64, size: TaskSize, cand: &Candidate, quotas: &[Quota]) -> Availability {
     let harness = cand.harness;
     let model = cand.model.as_str();
@@ -277,15 +280,27 @@ fn availability(now_ms: u64, size: TaskSize, cand: &Candidate, quotas: &[Quota])
     match score(q, now_ms, model) {
         Some(s) if s.usable < size.min_usable_pct() => Availability::Exhausted,
         Some(_) => Availability::Available,
+        None if counted_reset(q, now_ms, model) => Availability::Reset,
         None => Availability::Unknown,
     }
 }
 
+/// A gating window whose reset has passed. Once it no longer blocks, the row is a reset,
+/// not a candidate with no reading.
+fn counted_reset(q: &Quota, now_ms: u64, model: &str) -> bool {
+    q.windows.iter().any(|w| {
+        gates(&w.label, model)
+            && w.used_pct.filter(|u| u.is_finite()).is_some()
+            && reset_at(w).is_some_and(|r| r <= now_ms)
+    })
+}
+
 /// Selects from already eligible candidates, retaining their order when readings are missing.
 ///
-/// Fresh spare wins through `select_target`. A stale row whose last windows still clear the
-/// minimum is next, ahead of a candidate with no reading, so an exhausted account is not
-/// spent and a subscription that still had room is not parked.
+/// Fresh spare wins through `select_target`. That includes a fresh local model, which beats a
+/// stale row with spare. A stale subscription whose last windows still clear the minimum is
+/// next, ahead of a candidate with no reading, so an exhausted account is not spent and a
+/// subscription that still had room is not parked.
 pub fn select_with_fallback(
     now_ms: u64,
     size: TaskSize,
@@ -311,15 +326,21 @@ pub fn select_with_fallback(
     }
     if let Some(idx) = candidates
         .iter()
-        .position(|cand| avail(cand) == Availability::Unknown)
+        .position(|cand| matches!(avail(cand), Availability::Unknown | Availability::Reset))
     {
-        return Ok((
-            idx,
-            "first eligible in resleeve_to without a fresh quota reading".into(),
-        ));
+        let reason = match avail(&candidates[idx]) {
+            Availability::Reset => "first eligible in resleeve_to whose quota windows have reset",
+            _ => "first eligible in resleeve_to without a fresh quota reading",
+        };
+        return Ok((idx, reason.into()));
     }
     if candidates.is_empty() {
         Err("no eligible resleeve target")
+    } else if candidates
+        .iter()
+        .all(|cand| avail(cand) == Availability::Unmetered)
+    {
+        Err("no eligible resleeve target has a quota meter")
     } else {
         Err("all eligible resleeve targets have insufficient fresh quota")
     }
