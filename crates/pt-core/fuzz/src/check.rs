@@ -1,4 +1,5 @@
-//! Invariants I1-I10, the auto-continue rule, and the table-driven reference transitions,
+//! Invariants I1-I10, the auto-continue rule, an owed-continuations reference kept by the
+//! sim, and the table-driven reference transitions,
 //! checked after every apply.
 //!
 //! The reference tables are the edges of the design doc's lifecycle and effect diagrams (with the
@@ -341,6 +342,7 @@ pub fn step(prev: &State, st: &State, sim: &Sim) {
     unsent_messages(prev, st);
     approval_steps(prev, st);
     continue_prompts(prev, st, sim);
+    owed_continuations(st, sim);
     invariants(st, sim);
 }
 
@@ -394,6 +396,13 @@ fn continue_prompts(prev: &State, st: &State, sim: &Sim) {
                 "continue for {:?} turn {seq} without a debt from an interrupted turn",
                 s.id
             );
+            assert_eq!(
+                sim.owed_before.get(&s.id).copied(),
+                Some(seq),
+                "continue for {:?} turn {seq} was not owed by the reference ({:?})",
+                s.id,
+                sim.last_kind
+            );
             assert_eq!(ps.target.mode, Mode::Headless);
             assert_eq!(
                 ps.life,
@@ -403,6 +412,26 @@ fn continue_prompts(prev: &State, st: &State, sim: &Sim) {
                 ps.life
             );
         }
+    }
+}
+
+/// The core's `auto_continue` matches the reference kept on `Sim`.
+fn owed_continuations(st: &State, sim: &Sim) {
+    for (id, s) in &st.sleeves {
+        assert_eq!(
+            s.auto_continue,
+            sim.owed.get(id).copied(),
+            "owed continuation for {id:?} after {}: core {:?} reference {:?}",
+            sim.last_kind,
+            s.auto_continue,
+            sim.owed.get(id).copied()
+        );
+    }
+    for id in sim.owed.keys() {
+        assert!(
+            st.sleeves.contains_key(id),
+            "reference owes a continuation for missing sleeve {id:?}"
+        );
     }
 }
 

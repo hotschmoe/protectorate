@@ -224,11 +224,15 @@ fn crash_mid_turn_recovers() {
         "the continuation prompt replaces the warning: {events}"
     );
     let child_entries = hub.transcript("two-child");
-    assert!(
-        of_type(&child_entries, "user_message").iter().any(|e| {
+    let continuations = of_type(&child_entries, "user_message")
+        .iter()
+        .filter(|e| {
             e["entry"]["text"].as_str()
                 == Some("The previous turn was interrupted. Continue from where it stopped.")
-        }),
+        })
+        .count();
+    assert_eq!(
+        continuations, 1,
         "the child got one continuation prompt: {child_entries:?}"
     );
     let s = hub.sleeve("two");
