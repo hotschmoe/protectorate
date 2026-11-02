@@ -90,7 +90,7 @@ fn wrapper(
         ""
     };
     let capability = if program == "protectorate" {
-        "echo 'journal-event-tag: 32'; echo 'hub-rollback: 1';"
+        "echo 'hub-rollback: 1';"
     } else {
         ""
     };
@@ -667,14 +667,53 @@ fn hub_rollbacks_restore_a_journal_the_previous_binary_cannot_read() {
             String::from_utf8_lossy(&refuses.stderr).contains("unknown event tag 33"),
             "{refuses:?}"
         );
+        let next = probation(&home)["next_sleeve"]
+            .as_u64()
+            .expect("probation records next_sleeve");
+        assert!(next >= 1, "envoy is sleeve 0");
+        let lower = next - 1;
+        plant_sleeve(&home, lower, false);
+        plant_sleeve(&home, next, true);
+        fs::write(
+            home.join("journal/segment-00000000000000000001"),
+            b"segment with no snapshot",
+        )
+        .unwrap();
+        let gitdir = home.join("repo/.git/worktrees").join(format!("wt-{next}"));
         let rollback = Command::new(&old).args(&prestart).output().unwrap();
         assert!(rollback.status.success(), "{rollback:?}");
+        let err = String::from_utf8_lossy(&rollback.stderr);
+        assert!(err.contains("events after the snapshot are lost"), "{err}");
         assert!(
-            String::from_utf8_lossy(&rollback.stderr)
-                .contains("events after the snapshot are lost"),
-            "{rollback:?}"
+            err.contains(&format!("moved trial sleeves at or above {next} to ")),
+            "{err}"
         );
         assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
+        assert!(home.join("sleeves").join(lower.to_string()).is_dir());
+        assert!(!home.join("sleeves").join(next.to_string()).exists());
+        assert!(!gitdir.exists());
+        let aside = fs::read_dir(home.join("update-aside"))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .find(|p| p.join("sleeves").join(next.to_string()).is_dir())
+            .expect("quarantine directory");
+        assert!(
+            aside
+                .join("sleeves")
+                .join(next.to_string())
+                .join("transcript.jsonl")
+                .is_file()
+        );
+        assert!(
+            aside
+                .join("gitdirs")
+                .join(next.to_string())
+                .join(format!("wt-{next}"))
+                .join("gitdir")
+                .is_file()
+        );
+        assert!(!home.join("journal/segment-00000000000000000001").exists());
+        assert!(err.contains(&aside.display().to_string()), "{err}");
         let sup = Supervisor::start(
             &home,
             "protectorate",
@@ -691,6 +730,36 @@ fn hub_rollbacks_restore_a_journal_the_previous_binary_cannot_read() {
         );
         drop(sup);
     }
+}
+
+/// A sleeve directory and, when `worktree` is set, a git worktree admin dir whose `.git` file
+/// points at `<home>/repo/.git/worktrees/wt-<id>`.
+fn plant_sleeve(home: &Path, id: u64, worktree: bool) {
+    let sleeve = home.join("sleeves").join(id.to_string());
+    fs::create_dir_all(&sleeve).unwrap();
+    fs::write(
+        sleeve.join("transcript.jsonl"),
+        format!("transcript {id}\n"),
+    )
+    .unwrap();
+    fs::write(sleeve.join("inbox.jsonl"), format!("inbox {id}\n")).unwrap();
+    let claim = home.join("claims").join(id.to_string());
+    fs::create_dir_all(&claim).unwrap();
+    if worktree {
+        let gitdir = home.join("repo/.git/worktrees").join(format!("wt-{id}"));
+        fs::create_dir_all(&gitdir).unwrap();
+        fs::write(gitdir.join("gitdir"), "claim\n").unwrap();
+        fs::write(
+            claim.join(".git"),
+            format!("gitdir: {}\n", gitdir.display()),
+        )
+        .unwrap();
+    }
+    fs::write(
+        sleeve.join("provisioned"),
+        claim.to_str().unwrap().as_bytes(),
+    )
+    .unwrap();
 }
 
 /// A hub killed at each step of a switch on probation, or of the rollback that ends one
@@ -828,7 +897,7 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
     fs::create_dir_all(home.join("releases/v0.0.1")).unwrap();
     write_exec(
         &home.join("releases/v0.0.1/protectorate"),
-        &String::from_utf8(wrapper(
+        std::str::from_utf8(&wrapper(
             "protectorate",
             "version",
             "v0.0.1",
@@ -836,8 +905,7 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
             "",
             false,
         ))
-        .unwrap()
-        .replace("echo 'journal-event-tag: 32';", ""),
+        .unwrap(),
     );
     std::os::unix::fs::symlink("v0.0.1", home.join("releases/previous")).unwrap();
     let fleet = root.join("fleet");
@@ -918,6 +986,21 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         Duration::from_secs(60),
         || hub_started_ms(&home),
     );
+    let info = cli(&home, &["--json", "hub", "info"]).json();
+    assert!(
+        info["restore_error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("has no database"),
+        "{info}"
+    );
+    assert!(
+        events(&home)
+            .iter()
+            .any(|e| e.contains("rollback restore failed")),
+        "{:?}",
+        events(&home)
+    );
     let online_retry = Command::new(home.join("releases/previous/protectorate"))
         .arg("--home")
         .arg(&home)
@@ -929,8 +1012,31 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         String::from_utf8_lossy(&online_retry.stderr).contains("stop the hub"),
         "{online_retry:?}"
     );
+    assert!(probation(&home)["reason"].is_null());
+    assert!(probation(&home)["restore_failed"].as_str().is_some());
     drop(sup);
-    let missing_journal = obj! { "version" => "v0.0.2", "previous" => "v0.0.1", "switched_ms" => 1u64, "deadline_ms" => 2u64, "contacted_ms" => now, "manual_rollback" => true, "reason" => "manual rollback requested", "headscale_snapshot" => snap.display().to_string(), "journal_snapshot" => fleet.join("snapshots/missing-journal").display().to_string() };
+    let segment = home.join("journal/segment-00000000000000000000");
+    let readable = fs::read(&segment).unwrap();
+    let (mut journal, _) = pt_journal::Journal::open(home.join("journal").as_path()).unwrap();
+    let mut event = pt_core::codec::encode(&pt_core::Event {
+        at: 1,
+        kind: pt_core::EventKind::Tick,
+    });
+    event[9] = 33;
+    journal.append(&event).unwrap();
+    drop(journal);
+    let missing_journal = obj! {
+        "version" => "v0.0.2",
+        "previous" => "v0.0.1",
+        "switched_ms" => 1u64,
+        "deadline_ms" => 2u64,
+        "contacted_ms" => now,
+        "manual_rollback" => true,
+        "reason" => "manual rollback requested",
+        "next_sleeve" => 9u64,
+        "headscale_snapshot" => snap.display().to_string(),
+        "journal_snapshot" => fleet.join("snapshots/missing-journal").display().to_string()
+    };
     fs::write(
         home.join("releases/probation.json"),
         missing_journal.to_string(),
@@ -948,17 +1054,20 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         "{failed:?}"
     );
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
+    assert!(
+        probation(&home)["manual_rollback"]
+            .as_bool()
+            .unwrap_or(false)
+    );
     assert_eq!(
         String::from_utf8_lossy(&sql("select name from nodes order by name;").stdout),
         "before\nduring-trial\n"
     );
+    // sqlite removes a stray WAL when it opens the database, so write it again after that read.
+    fs::write(dbdir.join("db.sqlite-wal"), "stale trial wal").unwrap();
     let repaired = fleet.join("snapshots/missing-journal");
     fs::create_dir_all(&repaired).unwrap();
-    fs::copy(
-        home.join("journal/segment-00000000000000000000"),
-        repaired.join("segment-00000000000000000000"),
-    )
-    .unwrap();
+    fs::write(repaired.join("segment-00000000000000000000"), &readable).unwrap();
     let out = Command::new(home.join("releases/previous/protectorate"))
         .arg("--home")
         .arg(&home)
@@ -966,15 +1075,74 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
+    let err = String::from_utf8_lossy(&out.stderr);
     assert!(
-        String::from_utf8_lossy(&out.stderr)
-            .contains("nodes enrolled after this snapshot are lost")
+        err.contains("nodes enrolled after this snapshot are lost"),
+        "{err}"
     );
+    assert!(err.contains("events after the snapshot are lost"), "{err}");
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
     assert_eq!(pointer(&home, "previous").as_deref(), Some("v0.0.1"));
     let out = sql("select name from nodes order by name;");
     assert!(out.status.success(), "{out:?}");
     assert_eq!(String::from_utf8_lossy(&out.stdout), "before\n");
+    assert!(!dbdir.join("db.sqlite-wal").exists());
+    assert!(fs::read_dir(&dbdir).unwrap().any(|e| {
+        e.unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with("rollback-aside-")
+    }));
+
+    // A readable journal, including a torn tail, is kept on a manual rollback. Headscale is
+    // still restored, and a sleeve at next_sleeve stays because the journal was not replaced.
+    let mut kept = fs::read(&segment).unwrap();
+    kept.extend_from_slice(&[0xff, 0x00, 0xff]);
+    fs::write(&segment, &kept).unwrap();
+    let other = fleet.join("snapshots/other-journal");
+    fs::create_dir_all(&other).unwrap();
+    fs::write(other.join("segment-00000000000000000000"), &readable).unwrap();
+    assert!(sql("insert into nodes values ('after');").status.success());
+    fs::write(dbdir.join("db.sqlite-wal"), "stale again").unwrap();
+    plant_sleeve(&home, 4, true);
+    let kept_gitdir = home.join("repo/.git/worktrees/wt-4");
+    let current = home.join("releases/current");
+    fs::remove_file(&current).unwrap();
+    std::os::unix::fs::symlink("v0.0.2", &current).unwrap();
+    let keep = obj! {
+        "version" => "v0.0.2",
+        "previous" => "v0.0.1",
+        "switched_ms" => 1u64,
+        "deadline_ms" => 2u64,
+        "manual_rollback" => true,
+        "reason" => "manual rollback requested",
+        "next_sleeve" => 4u64,
+        "journal_snapshot_ms" => 1u64,
+        "headscale_snapshot" => snap.display().to_string(),
+        "journal_snapshot" => other.display().to_string()
+    };
+    fs::write(home.join("releases/probation.json"), keep.to_string()).unwrap();
+    let out = Command::new(home.join("releases/previous/protectorate"))
+        .arg("--home")
+        .arg(&home)
+        .args(["hub", "probation"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("kept the journal"), "{err}");
+    assert!(
+        err.contains("nodes enrolled after this snapshot are lost"),
+        "{err}"
+    );
+    assert_eq!(fs::read(&segment).unwrap(), kept);
+    assert!(home.join("sleeves/4/transcript.jsonl").is_file());
+    assert!(kept_gitdir.join("gitdir").is_file());
+    assert!(!err.contains("moved trial sleeves"), "{err}");
+    let out = sql("select name from nodes order by name;");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "before\n");
+    assert!(!dbdir.join("db.sqlite-wal").exists());
+    assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
 }
 
 #[test]
