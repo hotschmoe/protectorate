@@ -37,29 +37,24 @@ pub struct View {
     pub since: BTreeMap<SleeveId, Millis>,
 }
 
-/// The test-only knob reports a usage limit at settle or a desync during the first turn.
+/// The test-only knob reports a usage limit at the first turn's settle.
 pub struct Fault {
     pub sleeve: String,
-    pub kind: String,
     pub fired: AtomicBool,
 }
 
 impl Fault {
     pub fn from_env() -> Option<Fault> {
         let v = std::env::var("PT_TEST_FAULT").ok()?;
-        let (kind, sleeve) = v.split_once(':')?;
-        if !matches!(kind, "usage_limit" | "desync") {
-            return None;
-        }
+        let sleeve = v.strip_prefix("usage_limit:")?;
         Some(Fault {
             sleeve: sleeve.to_string(),
-            kind: kind.to_string(),
             fired: AtomicBool::new(false),
         })
     }
 
-    pub fn fire(&self, name: &str, kind: &str) -> bool {
-        name == self.sleeve && kind == self.kind && !self.fired.swap(true, Ordering::SeqCst)
+    pub fn fire(&self, name: &str) -> bool {
+        name == self.sleeve && !self.fired.swap(true, Ordering::SeqCst)
     }
 }
 

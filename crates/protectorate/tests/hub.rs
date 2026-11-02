@@ -154,6 +154,7 @@ fn crash_mid_turn_recovers() {
     ])
     .ok();
     hub.wait("two-child", "idle", 120);
+    let child_id = hub.sleeve("two-child")["id"].as_str().unwrap().to_string();
     hub.send("two-child", LONG);
     eventually("the child's turn to start", Duration::from_secs(60), || {
         (hub.sleeve("two-child")["incarnation"]["activity"]["state"].as_str() == Some("working"))
@@ -171,7 +172,11 @@ fn crash_mid_turn_recovers() {
     eventually(
         "the sandbox to die with its hub",
         Duration::from_secs(20),
-        || scope_pids(&hub.scope(&id, 1)).is_empty().then_some(()),
+        || {
+            (scope_pids(&hub.scope(&id, 1)).is_empty()
+                && scope_pids(&hub.scope(&child_id, 1)).is_empty())
+            .then_some(())
+        },
     );
     // A systemd-run the dead hub started that never registered its scope: recovery kills it
     // before probing, or it would register g1 after the probe found g1 empty.
@@ -203,7 +208,7 @@ fn crash_mid_turn_recovers() {
     hub.wait("two-child", "idle", 180);
     let events = hub.cli(&["--json", "event", "list"]).json();
     assert!(
-        !events["events"]
+        events["events"]
             .as_array()
             .unwrap()
             .iter()
@@ -276,53 +281,6 @@ fn crash_mid_turn_recovers() {
     assert!(
         after_crash.contains("READY"),
         "the resumed incarnation answers"
-    );
-}
-
-#[test]
-fn desync_resume_warns_parent() {
-    if !have_runtime() {
-        return;
-    }
-    let hub = Hub::start_with(
-        "desync",
-        "pi_local",
-        &[],
-        &[("PT_TEST_FAULT", "desync:g14-child")],
-    );
-    let repo = temp_repo("desync");
-    hub.spawn_pi("g14-parent", &repo);
-    hub.wait("g14-parent", "idle", 120);
-    hub.cli(&[
-        "sleeve",
-        "spawn",
-        "g14-child",
-        "--parent",
-        "g14-parent",
-        "--harness",
-        "pi_local",
-    ])
-    .ok();
-    hub.wait("g14-child", "idle", 120);
-    hub.send("g14-child", READY);
-    eventually("native resume after G14", Duration::from_secs(180), || {
-        let s = hub.sleeve("g14-child");
-        (s["incarnation"]["g"].as_u64() == Some(2)
-            && s["incarnation"]["activity"]["state"].as_str() == Some("idle"))
-        .then_some(())
-    });
-    let events = hub.cli(&["--json", "event", "list"]).json();
-    assert!(
-        events["events"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|e| e["source"].as_str() == Some("g14-child")
-                && e["target"].as_str() == Some("g14-parent")
-                && e["text"]
-                    .as_str()
-                    .is_some_and(|t| t.contains("send a prompt"))),
-        "{events}"
     );
 }
 

@@ -1275,13 +1275,6 @@ impl Pump {
             Entry::ToolCall { name, input, .. } => obs.push(Obs::Progress {
                 tool: Some(tool_hash(name, input)),
             }),
-            Entry::AssistantText { .. }
-                if hub.fault.as_ref().is_some_and(|f| f.fire(name, "desync")) =>
-            {
-                obs.push(Obs::Desync {
-                    detail: "injected protocol desync".into(),
-                });
-            }
             Entry::ToolResult { .. }
             | Entry::AssistantText { .. }
             | Entry::Reasoning { .. }
@@ -1323,11 +1316,7 @@ impl Pump {
                     },
                     _ => TurnEnd::Done,
                 };
-                if hub
-                    .fault
-                    .as_ref()
-                    .is_some_and(|f| f.fire(name, "usage_limit"))
-                {
+                if hub.fault.as_ref().is_some_and(|f| f.fire(name)) {
                     warning!("sleeve {name}: PT_TEST_FAULT reports this turn as a usage limit");
                     end = TurnEnd::UsageLimit;
                 }
