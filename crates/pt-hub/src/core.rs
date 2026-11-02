@@ -13,9 +13,10 @@ use pt_journal::Journal;
 
 use crate::exec::Executors;
 use crate::home::now_ms;
-use crate::hub::{Hub, Input, JournalSnapshot, View};
+use crate::hub::{Hub, Input, JournalSnapshot};
 use crate::log::{debug, error, info};
 use crate::transcript::Note;
+use crate::view::View;
 use crate::wire;
 
 const MAX_BATCH: usize = 512;

@@ -19,8 +19,8 @@ use pt_json::record;
 
 use crate::home::{now_ms, write_private};
 use crate::hub::Hub;
+use crate::lock::lock;
 use crate::log::{info, warning};
-use crate::transcript::lock;
 use crate::wire;
 
 const RUN_TIMEOUT: Duration = Duration::from_secs(15 * 60);

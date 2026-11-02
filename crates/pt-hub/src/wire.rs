@@ -6,8 +6,9 @@ use pt_core::{Activity, Harness, Layout, Life, Mode, ParkReason, Sleeve, SleeveI
 use pt_drivers as drv;
 
 use crate::home::Config;
-use crate::hub::{Hub, View};
+use crate::hub::Hub;
 use crate::transcript::Line;
+use crate::view::View;
 
 pub fn harness_from(s: &str) -> Option<Harness> {
     Some(match s {
@@ -215,7 +216,7 @@ pub fn workspace(s: &Sleeve) -> api::Workspace {
 }
 
 pub fn hub_info(hub: &Hub) -> api::HubInfo {
-    let mut info = crate::transcript::lock(&hub.info).clone();
+    let mut info = crate::lock::lock(&hub.info).clone();
     info.history_capped = hub.history.capped_sleeves();
     info
 }

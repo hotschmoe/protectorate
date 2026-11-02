@@ -13,8 +13,8 @@ use pt_api::{self as api, EventKind as Kind, HubStreamMessage, Level};
 use pt_fleet::{Embedded, Fleet, FleetEvent, PollConfig, Poller};
 
 use crate::hub::Hub;
+use crate::lock::lock;
 use crate::log::{info, warning};
-use crate::transcript::lock;
 
 /// headscale and member as this binary carries them; `missing` says why one is absent.
 #[derive(Clone, Copy, Debug)]

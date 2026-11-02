@@ -33,8 +33,8 @@ use pt_update::{
 
 use crate::home::Home;
 use crate::hub::Hub;
+use crate::lock::lock;
 use crate::log::{info, warning};
-use crate::transcript::lock;
 
 /// The hub's exit status when it stops to be restarted on another release.
 pub const RESTART_CODE: u8 = 75;

@@ -25,6 +25,7 @@ mod home;
 mod http;
 mod hub;
 mod jobs;
+mod lock;
 mod log;
 mod logins;
 mod quota;
@@ -35,6 +36,7 @@ mod stream;
 mod toolchain;
 mod transcript;
 mod update;
+mod view;
 mod wire;
 
 pub use fleet::{FleetFlags, Net};

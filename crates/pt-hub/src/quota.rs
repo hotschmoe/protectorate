@@ -12,8 +12,8 @@ use pt_quota::{Cache, Options, Reader};
 
 use crate::exec::program;
 use crate::hub::Hub;
+use crate::lock::lock;
 use crate::log::{info, warning};
-use crate::transcript::lock;
 
 pub struct Quotas {
     last: Mutex<Published>,

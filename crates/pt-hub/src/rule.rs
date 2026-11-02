@@ -13,7 +13,7 @@ use pt_core::SleeveId;
 
 use crate::api::Principal;
 use crate::hub::Hub;
-use crate::transcript::lock;
+use crate::lock::lock;
 
 pub enum Guarded<'a> {
     Remove(&'a str),

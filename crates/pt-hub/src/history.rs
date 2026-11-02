@@ -21,8 +21,9 @@ use pt_history::{ContextUsage, Doc, Filters, Hit, Index, Query, Selector, Source
 
 use crate::home::now_ms;
 use crate::hub::Hub;
+use crate::lock::lock;
 use crate::log::{debug, info, warning};
-use crate::transcript::{Line, lock};
+use crate::transcript::Line;
 
 const POLL: Duration = Duration::from_secs(1);
 /// Longest wait after a failed commit before the next catch-up.

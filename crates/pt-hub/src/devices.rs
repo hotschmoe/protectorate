@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use pt_api::{Device, EpochMs};
 
 use crate::home::{Home, now_ms, random_bytes, random_hex, sha_hex, write_private};
-use crate::transcript::lock;
+use crate::lock::lock;
 
 pub const DEVICE_PREFIX: &str = "pd1.";
 const CODE_TTL_MS: u64 = 10 * 60 * 1000;

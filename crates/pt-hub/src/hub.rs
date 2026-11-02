@@ -1,7 +1,6 @@
 //! What every thread shares: the published view, the core's input channel, the transcripts, the
 //! event bus, devices and Envoy's current turn origin (D9).
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
@@ -9,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pt_api::{EpochMs, EventKind as ApiEventKind, HubEvent, HubStreamMessage, Level};
-use pt_core::{EventKind, Gen, Millis, Party, Reply, SleeveId, State};
+use pt_core::{EventKind, Gen, Party, Reply, SleeveId, State};
 use pt_drivers::Entry;
 
 use crate::bus::Bus;
@@ -17,8 +16,10 @@ use crate::devices::Devices;
 use crate::fleet::FleetSlot;
 use crate::home::{Config, Home, Tokens, now_ms};
 use crate::jobs::JobStore;
+use crate::lock::lock;
 use crate::log::{debug, warning};
-use crate::transcript::{Line, Note, Transcripts, lock};
+use crate::transcript::{Line, Note, Transcripts};
+use crate::view::View;
 use crate::wire;
 
 pub const ENVOY: &str = pt_core::ENVOY_NAME;
@@ -40,14 +41,6 @@ pub enum Input {
 pub struct JournalSnapshot {
     pub at_ms: u64,
     pub next_sleeve: u64,
-}
-
-/// The read-only snapshot published after each journaled batch.
-pub struct View {
-    pub state: State,
-    pub batch: u64,
-    /// When each sleeve's activity last changed kind.
-    pub since: BTreeMap<SleeveId, Millis>,
 }
 
 /// The test-only knob reports a usage limit at the first turn's settle.

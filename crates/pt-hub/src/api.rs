@@ -15,11 +15,12 @@ use pt_json::{FromJson, ToJson, Value};
 
 use crate::fleet::{Status as FleetStatus, Up};
 use crate::home::{now_ms, random_hex};
-use crate::hub::{CommandError, Hub, View};
+use crate::hub::{CommandError, Hub};
 use crate::jobs::JobRequest;
+use crate::lock::lock;
 use crate::log::info;
 use crate::rule::{self, Guarded};
-use crate::transcript::lock;
+use crate::view::View;
 use crate::wire;
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(15);

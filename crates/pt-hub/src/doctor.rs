@@ -18,8 +18,8 @@ use pt_json::FromJson;
 use crate::fleet::Net;
 use crate::home::now_ms;
 use crate::hub::{ENVOY, Hub};
+use crate::lock::lock;
 use crate::log::{info, warning};
-use crate::transcript::lock;
 use crate::wire;
 
 const EVERY: Duration = Duration::from_secs(6 * 3600);

@@ -32,9 +32,10 @@ use pt_frame::msg::{
 };
 use pt_json::ToJson;
 
-use crate::hub::{Hub, View};
+use crate::hub::Hub;
+use crate::lock::lock;
 use crate::log::{debug, error, info, warning};
-use crate::transcript::lock;
+use crate::view::View;
 
 /// Log bytes asked for per FetchLog.
 pub const LOG_FETCH: u64 = 1 << 20;
@@ -855,7 +856,7 @@ impl NodeExec {
                 attempt,
                 kind,
             } => {
-                if !crate::exec::fresh(&view, effect, attempt, &kind) {
+                if !view.fresh(effect, attempt, &kind) {
                     return debug!("node {}: dropped stale effect {}", self.node.0, effect.0);
                 }
                 // Asked, not told: a job cancelled before its submit left takes the submit back.

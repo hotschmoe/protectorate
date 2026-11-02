@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use pt_core::{
     Ask, Choice, EffectId, EffectKind, EffectState, EventKind, ExitCause, Gen, Harness, Intent,
-    Layout, Life, Obs, Party, ProbeResult, Proc, Sleeve, SleeveId, Target, TurnEnd,
+    Layout, Life, Obs, Party, ProbeResult, Sleeve, SleeveId, Target, TurnEnd,
 };
 use pt_drivers::{Ack, AckKind, Decision, Entry, ErrorClass, Session, Stop};
 use pt_json::obj;
@@ -29,9 +29,10 @@ use pt_json::obj;
 use crate::brief;
 use crate::git;
 use crate::home::now_ms;
-use crate::hub::{Hub, View};
+use crate::hub::Hub;
 use crate::log::{debug, error, info, warning};
 use crate::transcript::Note;
+use crate::view::View;
 use crate::wire;
 
 const ACK_TIMEOUT: Duration = Duration::from_secs(30);
@@ -280,28 +281,6 @@ fn other_claims(st: &pt_core::State, s: &Sleeve) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Whether the record is still exactly what this intent was released for.
-pub(crate) fn fresh(view: &View, effect: EffectId, attempt: u32, kind: &EffectKind) -> bool {
-    let st = &view.state;
-    let Some(e) = st.effects.get(&effect) else {
-        return false;
-    };
-    if e.attempt != attempt || e.state != EffectState::Intent {
-        return false;
-    }
-    if let Some((sid, g)) = kind.incarnation()
-        && st.sleeve(sid).is_none_or(|s| s.g != g)
-    {
-        return false;
-    }
-    if let EffectKind::StartIncarnation { sleeve, g, .. } = kind {
-        return st
-            .sleeve(*sleeve)
-            .is_some_and(|s| s.g == *g && s.proc == Proc::Starting(effect));
-    }
-    true
-}
-
 /// Polls until the scope has no tasks. A scope that will not empty is killed after 30 s.
 fn wait_scope_empty(scope: &str) {
     let start = Instant::now();
@@ -504,7 +483,7 @@ impl SleeveExec {
                 attempt,
                 kind,
             } => {
-                if !fresh(&view, effect, attempt, &kind) {
+                if !view.fresh(effect, attempt, &kind) {
                     return debug!("sleeve {}: dropped stale effect {}", self.id.0, effect.0);
                 }
                 if !matches!(
@@ -1155,7 +1134,7 @@ impl SleeveExec {
                 _ => false,
             });
         let origin = (from.starts_with("agent:") || marked).then(|| from.to_string());
-        let mut t = crate::transcript::lock(&self.hub.envoy_turn);
+        let mut t = crate::lock::lock(&self.hub.envoy_turn);
         // A resleeve brief has no message, so `from` is owner and `origin` is None. Keeping
         // the turn means leaving whatever the exit left, not writing that owner label in.
         let resumed = request_id.starts_with("continue:") || request_id.starts_with("resleeve:");
@@ -1581,7 +1560,7 @@ impl Pump {
         // An exit keeps the origin and the count. The continuation replaces the origin;
         // a resleeve brief is the owner's prompt and must not have to.
         if clear_envoy_turn && Hub::envoy_id(&hub.view().state) == Some(id) {
-            *crate::transcript::lock(&hub.envoy_turn) = Default::default();
+            *crate::lock::lock(&hub.envoy_turn) = Default::default();
         }
         let note = Note {
             harness: matches!(entry, Entry::SessionInfo { .. }).then_some(harness),

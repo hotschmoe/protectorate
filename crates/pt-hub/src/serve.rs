@@ -22,9 +22,10 @@ use crate::devices::Devices;
 use crate::fleet::{FleetFlags, Net};
 use crate::home::{Config, Home, Tokens, random_hex, write_private};
 use crate::http::{Listener, Web, handler};
-use crate::hub::{ENVOY, Hub, Input, View};
+use crate::hub::{ENVOY, Hub, Input};
 use crate::log::{info, warning};
 use crate::update::Stop;
+use crate::view::View;
 use crate::wire;
 
 pub struct ServeOptions {
@@ -364,7 +365,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
             Err(e) => warning!("waiting for signals: {e}"),
         })
         .map_err(ctx("spawn the signal thread"))?;
-    *crate::transcript::lock(&hub.stop) = Some(stop_tx);
+    *crate::lock::lock(&hub.stop) = Some(stop_tx);
     if let Some(v) = trial {
         crate::update::watch_probation(&hub, v);
     }

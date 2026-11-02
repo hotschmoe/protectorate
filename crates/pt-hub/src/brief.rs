@@ -10,8 +10,9 @@ use pt_core::{Cause, EffectId, EffectKind, Gen, Sleeve, SleeveId};
 use pt_drivers::{Entry, ToolStatus};
 
 use crate::git;
-use crate::hub::{Hub, View};
+use crate::hub::Hub;
 use crate::transcript::Line;
+use crate::view::View;
 use crate::wire;
 
 pub const FILE: &str = ".protectorate/BRIEF.md";
@@ -95,7 +96,7 @@ pub fn write(hub: &Hub, view: &View, workdir: &Path, spec: &Spec<'_>) -> Result<
     let entries: Vec<Line> = hub
         .transcripts
         .get(s.id)
-        .and_then(|t| crate::transcript::lock(&t).all())
+        .and_then(|t| crate::lock::lock(&t).all())
         .map_err(|e| format!("read transcript: {e}"))?;
     hub.history.catch_up(hub, Some(s.id));
     let text = build(hub, view, workdir, spec, &entries);

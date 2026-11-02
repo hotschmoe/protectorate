@@ -23,9 +23,9 @@ use pt_api::{HubEvent, HubStreamMessage};
 use pt_json::{FromJson, ToJson};
 
 use crate::home::now_ms;
+use crate::lock::lock;
 use crate::log::{error, info, warning};
 use crate::stream::{self, Log, Rec};
-use crate::transcript::lock;
 
 const RING: usize = 8192;
 /// Hub events a snapshot carries; `ListEvents` pages through every retained one.
