@@ -957,12 +957,13 @@ for line in sys.stdin:
     eventually("the foreign result", Duration::from_secs(30), || {
         (!of_type(&hub.transcript("envoy"), "turn_settled").is_empty()).then_some(())
     });
-    let early = hub
-        .cli_env(
-            &as_agent,
-            &["--json", "envoy", "wait", request, "--timeout", "1"],
-        )
-        .json();
+    // An unsettled wait prints its JSON and exits non-zero.
+    let early = hub.cli_env(
+        &as_agent,
+        &["--json", "envoy", "wait", request, "--timeout", "1"],
+    );
+    assert_ne!(early.status, 0, "{}", early.stdout);
+    let early = pt_json::parse(&early.stdout).unwrap();
     assert_eq!(early["settled"].as_bool(), Some(false), "{early}");
     assert!(
         !early["text"]
