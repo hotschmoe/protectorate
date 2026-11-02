@@ -61,7 +61,7 @@ type Order = (Ordered, Sender<()>);
 pub struct Executors {
     hub: Arc<Hub>,
     sleeves: HashMap<SleeveId, Sender<Intent>>,
-    jobs: crate::jobs::JobExec,
+    jobs: crate::job_exec::JobExec,
 }
 
 fn intent_sleeve(i: &Intent) -> Option<SleeveId> {
@@ -78,7 +78,7 @@ fn intent_sleeve(i: &Intent) -> Option<SleeveId> {
 impl Executors {
     pub fn new(hub: Arc<Hub>) -> Executors {
         Executors {
-            jobs: crate::jobs::JobExec::new(hub.clone()),
+            jobs: crate::job_exec::JobExec::new(hub.clone()),
             hub,
             sleeves: HashMap::new(),
         }

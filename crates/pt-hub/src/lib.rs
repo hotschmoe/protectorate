@@ -26,6 +26,7 @@ mod history;
 mod home;
 mod http;
 mod hub;
+mod job_exec;
 mod jobs;
 mod lock;
 mod log;
