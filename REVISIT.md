@@ -829,7 +829,8 @@ Each entry: where, what was done, what right looks like.
 - **Merges re-tokenize stored text** (`pt-history`, index.rs): merging two segments decodes their
   texts and builds a new one from scratch. Fast: a k-way merge of postings, if merge time shows up.
 - **History keeps a sleeve's newest lines** (`pt-history`, index.rs): each sleeve and each
-  source may keep 1 GiB of source text. Past a source's budget, that source's oldest docs go.
+  source may keep 1 GiB, counting each doc's source text plus its per-doc overhead. Past a
+  source's budget, that source's oldest docs go.
   Past a sleeve's budget, the oldest docs of that sleeve go, from any of its logs, so a new
   session still gets indexed. `doctor` / `hub info` report `history capped`. A sleeve at its
   budget does not stop the others. There is no cap across all sleeves. The measured ratio is
@@ -838,11 +839,13 @@ Each entry: where, what was done, what right looks like.
 - **One source per session, decided per hub run** (`pt-hub`, history.rs): a headless session
   is in both its native log and the transcript; the native log wins once found, the transcript
   covers a session that ended without one, and the transcript waits at a live session's
-  `session_info` until its log appears. The choice is per sleeve, and the cursor is per sleeve
-  plus path, so one sleeve's session id does not select another's log. Discover walks a
+  `session_info` until its log appears. The choice is per sleeve, and the cursor, the drop
+  watermark and the budget share one key of sleeve plus path, so one sleeve's session id
+  does not select another's log. Discover walks a
   harness's log root only while one of that sleeve's sessions is still undecided. A session
   already chosen as native is left out of the transcript even when that pass did not see the
-  file, and a discover that returns a different path replaces the old one and drops its docs.
+  file, and a discover that returns a different path replaces the old one only when
+  that path is gone, and then drops its docs.
   Decisions are not persisted, so a
   session indexed from the transcript whose log appears in a later run (a native resume of a
   session that had none) is indexed twice. Right: keep the choice per session in the index

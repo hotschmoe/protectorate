@@ -280,22 +280,28 @@ the same dispatch code. There are no external sources such as email, calendar or
   - What it does: a tokenizer for paths and identifiers (camelCase and snake_case parts),
     positional postings, BM25, all-terms and phrase queries, and filters by sleeve, harness,
     session, time and role. Ingest tails each log by byte offset; small segments are merged.
-    A source cursor is per sleeve, and a native session id selects a log only under that
-    sleeve's home. A sleeve credential searches and reads only docs tagged with its own
-    sleeve id (D26). Envoy and the owner are unrestricted. A parent still reads a child's
+    A source's cursor, drop watermark and budget share one key, the sleeve and the path.
+    An index that still uses an older key fails to open and is rebuilt from the logs. A
+    native session id selects a log only under that sleeve's home. A sleeve credential
+    searches and reads only docs tagged with its own sleeve id (D26). Envoy and the owner
+    are unrestricted. A parent still reads a child's
     live transcript (`get_transcript`, through `reaches`): that is supervision of a running
     child, separate from this history search.
     `history read` applies the caller's sleeve scope before it copies text, then stops at 200
     docs or 8 MiB of source text and says when the range was cut. The next page starts after
     the last doc id (`--after`). Tool paths are kept to the
-    same budget as tool text (512 bytes). Each sleeve has its own budget of 1 GiB of source
-    text, and so does each source. Past a source's budget, that source drops its oldest docs.
+    same budget as tool text (512 bytes). Each sleeve has its own budget of 1 GiB, and so
+    does each source. The budget counts each doc's source text plus a per-doc overhead (its
+    session, source, tool, paths, and a fixed header). Past a source's budget, that source
+    drops its oldest docs.
     Past a sleeve's budget, the oldest docs of that sleeve are dropped, whichever of its logs
     they came from, and the newest lines stay. A full sleeve does not stop the others.
     `doctor` and `hub info`
     report `history capped`. A commit removes a segment whose docs are all dead, and rewrites
     one that is at least half dead, in that same manifest update; the old files go after the
-    rename. Opening an index removes segment files the manifest does not name.
+    rename. A failed commit removes the segment files that attempt created, and the hub
+    retries it with backoff. Opening an index removes segment files the manifest does
+    not name.
   - Measured on this hub (2026-11-01, release build): 1 GiB of the newest real logs ingested
     in 1.9 s (540 MB/s, 48 MB peak RSS) into an 11 MB index; queries take 0.05 to 0.7 ms.
   - Fallback: `rusqlite` with FTS5, if our index proves insufficient (REVISIT.md).

@@ -202,10 +202,12 @@ transcripts. `--since` and `--until` take `7d`, `3h`, `30m`, `90s` or epoch mill
 owner can search everything; Envoy too; a sleeve only its own runs. `history read` returns at
 most 200 docs, or 8 MiB of their text. When the range continues, `--after` is the last doc id
 and the next page starts after it. The index is
-derived and rebuilt in the background if it fails to open. Catch-up commits bounded batches,
-and failed commits are retried. Below each configured root, discovery and reopening ignore
+derived and rebuilt in the background if it fails to open. Catch-up commits bounded batches.
+A failed commit removes the segment files that attempt wrote, and the hub retries it with
+backoff up to 30 seconds. Below each configured root, discovery and reopening ignore
 symbolic links and non-regular files. Tool paths in the index are clipped to 512 bytes.
-Each sleeve, and each log, may keep 1 GiB of source text. Past a sleeve's budget the index
+Each sleeve, and each log, may keep 1 GiB. That counts each doc's source text plus a
+per-doc overhead, so a flood of tiny docs stays inside the budget. Past a sleeve's budget the index
 keeps the newest lines across that sleeve's logs; past a log's own budget it keeps that
 log's newest lines. `hub info` and `doctor` report `history capped`. Other sleeves are
 unaffected. A commit removes a segment whose docs are all dead and rewrites one that is at least half
