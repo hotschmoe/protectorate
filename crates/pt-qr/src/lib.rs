@@ -63,11 +63,45 @@ pub fn max_bytes(ecc: Ecc) -> usize {
 }
 
 #[derive(Clone, PartialEq, Eq)]
+struct BitSet {
+    words: Vec<u64>,
+}
+
+impl BitSet {
+    fn new(len: usize) -> Self {
+        Self {
+            words: vec![0; len.div_ceil(64)],
+        }
+    }
+
+    fn get(&self, i: usize) -> bool {
+        self.words[i / 64] & (1u64 << (i % 64)) != 0
+    }
+
+    fn set(&mut self, i: usize, value: bool) {
+        let mask = 1u64 << (i % 64);
+        if value {
+            self.words[i / 64] |= mask;
+        } else {
+            self.words[i / 64] &= !mask;
+        }
+    }
+
+    fn toggle(&mut self, i: usize) {
+        self.words[i / 64] ^= 1u64 << (i % 64);
+    }
+
+    fn count_ones(&self) -> i32 {
+        self.words.iter().map(|word| word.count_ones() as i32).sum()
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
 pub struct QrCode {
     version: u8,
     size: i32,
     mask: u8,
-    modules: Vec<bool>,
+    modules: BitSet,
 }
 
 impl fmt::Debug for QrCode {
@@ -142,8 +176,8 @@ fn byte_count_bits(version: u8) -> u8 {
 
 struct Builder {
     size: i32,
-    modules: Vec<bool>,
-    function: Vec<bool>,
+    modules: BitSet,
+    function: BitSet,
 }
 
 impl QrCode {
@@ -152,8 +186,8 @@ impl QrCode {
         let cells = (size * size) as usize;
         let mut b = Builder {
             size,
-            modules: vec![false; cells],
-            function: vec![false; cells],
+            modules: BitSet::new(cells),
+            function: BitSet::new(cells),
         };
         b.draw_function_patterns(version, ecc);
         let all = add_ecc_and_interleave(version, ecc, data);
@@ -197,7 +231,7 @@ impl QrCode {
     pub fn dark(&self, x: i32, y: i32) -> bool {
         (0..self.size).contains(&x)
             && (0..self.size).contains(&y)
-            && self.modules[(y * self.size + x) as usize]
+            && self.modules.get((y * self.size + x) as usize)
     }
 
     /// The code with a `quiet`-module light border, two module rows per text line. Light modules
@@ -235,8 +269,8 @@ impl QrCode {
 impl Builder {
     fn set_function(&mut self, x: i32, y: i32, dark: bool) {
         let i = (y * self.size + x) as usize;
-        self.modules[i] = dark;
-        self.function[i] = true;
+        self.modules.set(i, dark);
+        self.function.set(i, true);
     }
 
     fn draw_function_patterns(&mut self, version: u8, ecc: Ecc) {
@@ -341,8 +375,9 @@ impl Builder {
                     let upward = (right + 1) & 2 == 0;
                     let y = if upward { size - 1 - vert } else { vert };
                     let idx = (y * size + x) as usize;
-                    if !self.function[idx] && i < data.len() * 8 {
-                        self.modules[idx] = bit(u32::from(data[i >> 3]), 7 - (i as i32 & 7));
+                    if !self.function.get(idx) && i < data.len() * 8 {
+                        self.modules
+                            .set(idx, bit(u32::from(data[i >> 3]), 7 - (i as i32 & 7)));
                         i += 1;
                     }
                 }
@@ -366,13 +401,15 @@ impl Builder {
                     _ => ((x + y) % 2 + x * y % 3) % 2 == 0,
                 };
                 let idx = (y * self.size + x) as usize;
-                self.modules[idx] ^= invert & !self.function[idx];
+                if invert && !self.function.get(idx) {
+                    self.modules.toggle(idx);
+                }
             }
         }
     }
 
     fn module(&self, x: i32, y: i32) -> bool {
-        self.modules[(y * self.size + x) as usize]
+        self.modules.get((y * self.size + x) as usize)
     }
 
     fn penalty_score(&self) -> i32 {
@@ -419,7 +456,7 @@ impl Builder {
                 }
             }
         }
-        let dark: i32 = self.modules.iter().map(|&m| i32::from(m)).sum();
+        let dark = self.modules.count_ones();
         let total = size * size;
         let k = ((dark * 20 - total * 10).abs() + total - 1) / total - 1;
         result + k * PENALTY_N4
