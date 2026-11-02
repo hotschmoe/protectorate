@@ -573,6 +573,9 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
     up("the hub after the failed start");
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
     assert_eq!(pointer(&home, "previous").as_deref(), Some("v0.0.1"));
+    let before_probation = fs::read(home.join("releases/probation.json")).unwrap();
+    let before_current = pointer(&home, "current");
+    let before_previous = pointer(&home, "previous");
     let not_from_releases = Command::new(bin())
         .args(["--home", &home_s, "hub", "probation"])
         .output()
@@ -582,6 +585,14 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
         String::from_utf8_lossy(&not_from_releases.stdout).contains("no release on trial"),
         "{not_from_releases:?}"
     );
+    assert_eq!(
+        fs::read(home.join("releases/probation.json")).unwrap(),
+        before_probation,
+        "hub probation under a live hub changed the probation record"
+    );
+    assert_eq!(pointer(&home, "current"), before_current);
+    assert_eq!(pointer(&home, "previous"), before_previous);
+    assert!(!home.join("releases/rollback-open").exists());
     let n = sup.starts().len();
     let rollback = cli(&home, &["--json", "hub", "update", "--rollback"]).json();
     assert_eq!(rollback["target"].as_str(), Some("v0.0.1"), "{rollback}");
@@ -787,9 +798,6 @@ fn plant_sleeve(home: &Path, id: u64, worktree: bool) {
     .unwrap();
 }
 
-/// Runs `hub probation` with `home/journal` bind-mounted onto itself. The rename that
-/// swaps the journal then fails with EBUSY, after staging and quarantine, which only
-/// need the home directory to be writable. A mode bit cannot single out that rename.
 fn can_mount_journal() -> bool {
     let ok = Command::new("unshare")
         .args(["-Ur", "-m", "--", "/bin/true"])
@@ -801,6 +809,9 @@ fn can_mount_journal() -> bool {
     ok
 }
 
+/// Runs `hub probation` with `home/journal` bind-mounted onto itself. The rename that
+/// swaps the journal then fails with EBUSY, after staging and quarantine, which only
+/// need the home directory to be writable. A mode bit cannot single out that rename.
 fn prestart_with_journal_mounted(home: &Path) -> std::process::Output {
     Command::new("unshare")
         .args(["-Ur", "-m", "--", "/bin/sh", "-c"])
@@ -1030,9 +1041,19 @@ fn partial_manual_rollback_does_not_keep_the_trial() {
     assert!(!home.join("sleeves/7").exists());
     assert!(home.join("sleeves/6/transcript.jsonl").is_file());
 
-    let second = prestart_with_journal_mounted(&home);
+    // The snapshot is gone, so this run fails in validation, before the marker would
+    // be written again. Staying incomplete depends on the marker from the first run.
+    let hidden = home.join("snapshots/journal-held");
+    fs::rename(&snapshot, &hidden).unwrap();
+    let second = Command::new(home.join("releases/previous/protectorate"))
+        .arg("--home")
+        .arg(&home)
+        .args(["hub", "probation"])
+        .output()
+        .unwrap();
     let err = String::from_utf8_lossy(&second.stderr);
     assert!(!second.status.success(), "{second:?}");
+    assert!(err.contains("reading journal snapshot"), "{err}");
     assert!(err.contains("incomplete"), "{err}");
     assert!(!err.contains("keeping the current release"), "{err}");
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
@@ -1045,9 +1066,16 @@ fn partial_manual_rollback_does_not_keep_the_trial() {
     );
     assert!(p["manual_rollback"].as_bool().unwrap_or(false), "{p}");
     assert_eq!(p["contacted_ms"].as_u64(), Some(5), "{p}");
-    assert!(p["restore_failed"].as_str().is_some(), "{p}");
+    assert!(
+        p["restore_failed"]
+            .as_str()
+            .unwrap_or("")
+            .contains("journal snapshot"),
+        "{p}"
+    );
     assert!(home.join("journal/TRIAL").is_file());
     assert!(!home.join("sleeves/7").exists());
+    fs::rename(&hidden, &snapshot).unwrap();
 
     let done = Command::new(home.join("releases/previous/protectorate"))
         .arg("--home")
