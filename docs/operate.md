@@ -44,7 +44,7 @@ always give it the token.
 
 ```
 sleeve list | sleeve show <sleeve>
-sleeve spawn <name> (--path DIR | --parent SLEEVE [--readonly]) [--harness H]
+sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
       [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
 sleeve send <sleeve> <text...> [--steer]
 sleeve interrupt|stop|rm|takeover <sleeve>
@@ -56,11 +56,31 @@ sleeve wait <sleeve> [--until idle|done|blocked|parked|ended] [--timeout SECS]
 
 A sleeve is named by its id or its name.
 
-- **spawn** with `--path DIR` makes a root sleeve on that directory (one root per directory). With
-  `--parent SLEEVE` it makes a child of that root: its own git worktree and branch by default, or
-  a read-only view of the root with `--readonly`. A root has at most 8 live children. `--harness`
-  defaults to `claude`. `--resleeve-to` is the ordered list automatic resleeves walk (default
-  `pi_local`). `--message` is the first prompt.
+- **spawn** with `--path DIR` makes a root sleeve on that directory (one root per directory). The
+  directory must already exist where the hub can see it; a missing one is `the hub cannot see
+  DIR`, and a path that overlaps a root or writable claim names that sleeve and its claim. With
+  `--new-path DIR` the owner, a paired device or Envoy (not a sleeve) creates a root that does
+  not exist yet. `projects_dir` in `config.json` is the absolute directory this is allowed under;
+  empty, the default, turns it off, and `/` is refused. `DIR` is a relative path under that
+  directory or an absolute path strictly inside it. A trailing slash is ignored. An absolute
+  path may use the configured `projects_dir` spelling when that path is a symlink; the claim is
+  the canonical directory, and a refusal names that directory. The hub creates it and `git init`s
+  it on branch `main` with one empty commit, as the owner's `user.name` and `user.email` (or
+  `protectorate <protectorate@localhost>` when a field is unset), then claims it, so a child
+  worktree has a commit to branch from. A `.` or `..` component, a symlink, a path outside
+  `projects_dir`, or a path inside the hub's home is refused. A directory a live root holds is
+  refused with that sleeve's name. A repository with no commit is refused and told to remove it
+  or to commit before `--path`. `--path DIR` adopts any other repository that already exists.
+  A name already in use, a name the core would refuse, or a harness with no headless mode,
+  is refused before the directory is
+  created and before D9 counts the spawn. A crash, a spawn the core does not answer or whose
+  reply is lost, or a refusal that finds the directory claimed or no longer the empty
+  repository this call made, leaves the directory and says so; remove it before trying the
+  same path again.
+  With `--parent SLEEVE` it makes a child of that root: its own git worktree and branch by
+  default, or a read-only view of the root with `--readonly`. A root has at most 8 live
+  children. `--harness` defaults to `claude`. `--resleeve-to` is the ordered list automatic
+  resleeves walk (default `pi_local`). `--message` is the first prompt.
 - **send** queues a message, delivered at the next turn boundary; `--steer` sends it into the
   current turn instead.
 - **interrupt** stops the current turn; **stop** ends the incarnation; **rm** removes the sleeve.
@@ -74,7 +94,9 @@ A sleeve is named by its id or its name.
 
 Guardrails in code interrupt, resume, resleeve or park a sleeve that fails (quota exhausted,
 crash, silent, looping and so on). A third resleeve within an hour parks it; `sleeve list` shows
-the park reason. After a native resume of a headless turn that a crash ended, the hub sends one
+the park reason. When that trip is a rejected login, the reason names that login
+(`flapping (claude login rejected)` and the same for the other harnesses). Any other flap stays
+`flapping`. After a native resume of a headless turn that a crash ended, the hub sends one
 short continuation prompt for that owner turn, including when a later generation is the one that
 sends it. A fresh session does not get that prompt: if the dead incarnation never acked one,
 the owner is warned instead. The prompt is sent as the party that opened that owner turn.
@@ -215,11 +237,45 @@ One row per subscription (Claude, Codex, Grok, the local endpoint): the reading,
 percent used, and a note. The readers are read-only: they use the hub's harness logins (below)
 and never refresh or print a token, so a harness no sleeve has run for a while can read `login
 expired` until one does. They run every `quota_poll_secs` (60; 0 turns them off); a reading is
-refreshed after 5 minutes and becomes stale after 10. A response with a malformed usage window,
+refreshed after 5 minutes and becomes stale after 10. A read that finishes after its deadline
+is kept, and ages from when it finished. A response with a malformed usage window,
 or with no window at all, is reported as an error.
 Resleeve targets are weighted by fresh readings; known-exhausted candidates are skipped, and the
-sleeve parks if all eligible candidates are exhausted. When a reading is unavailable, an unknown
-candidate can still be selected. A local endpoint may use HTTPS or loopback HTTP; other HTTP
+sleeve parks if all eligible candidates are exhausted. A stale reading keeps its last windows:
+under the usable minimum it counts as exhausted, and with spare left the fallback may still
+choose it. One that is exhausted and names no reset stops blocking after its own length, or
+after five hours when that length is unknown, and may then be spent as a candidate with no
+reading. The local endpoint has no such windows: a stale reading is not spent, the same as
+a failed one, while one that was never read still may be. A candidate with no reading
+(`unknown`: no login, an expired login, or not read yet) can still be selected. For Claude,
+Codex, and Grok, a rejected OAuth login (HTTP 401) or a login that lacks the usage scope is
+the same. The scope case is the provider's structured error (`insufficient_scope`,
+`invalid_scope`, or an error object whose type or code is `permission_error`), not a 403 that
+only mentions permission. A wrong key on the local endpoint stays a failed reading. A failed
+reading (`error`: a body that did not parse, another HTTP status, or a timeout) cannot. The park reason names a failed reading, a stale row that is
+short of quota, or a local endpoint whose last reading is stale or failed. A fresh row
+under the minimum still says it is short of fresh quota. A window whose reset time has already passed still blocks while it is over that
+line. The block lasts the same ten minutes a reading stays fresh. Taken before the reset,
+it lasts that long after the reset. Taken with the reset already a few seconds behind, it
+lasts that long after the reading. A stamp that was
+already long past, and a window once that grace has ended, count as reset, and the fallback
+may spend the row for that reason. It is not a missing reading. A reset at or before the
+epoch is ignored and the percent still counts.
+A model-scoped Claude window (the weekly Sonnet or Opus cap, shown as `wk <name>`) gates a
+resleeve of the same family, ignoring case and version, so `Sonnet 4.5` gates `sonnet` and
+`claude-sonnet-4-5`. `opusplan` is gated by both the Opus and the Sonnet cap. A candidate
+with no model, and the model `default`, are not blocked by a model cap. A cap under the usable
+minimum only ranks that candidate below an otherwise equal one, and the chosen or parked
+reason names the cap (`; wk sonnet under the minimum`, and the same for the other labels).
+A scope that is not opus, sonnet, or haiku still gates when its name is at least three letters
+and the model name contains it. A row that only reports
+other models' caps may be spent, as a candidate with no reading for that
+model. The account windows always count. Pi with a vendor login and
+Antigravity have no meter and are never chosen. A resleeve list that is only those is not
+reported as short of quota. A Codex window keeps the length the vendor
+reported, which the dispatch weight uses.
+The label can be coarser (`119` seconds shows as `1m`). A local
+endpoint may use HTTPS or loopback HTTP; other HTTP
 endpoints are reported as misconfigured and are not contacted.
 
 ## History
@@ -228,15 +284,36 @@ endpoints are reported as misconfigured and are not contacted.
 history search <query...> [--mode all|any|phrase] [--sleeve S]... [--harness H]
       [--session ID] [--role user|assistant|tool-call|tool-error|compaction]...
       [--since 7d|MS] [--until 7d|MS] [--limit N]
-history read --doc ID | history read <session> [--from TURN] [--to TURN]
+history read --doc ID | history read <session> [--from TURN] [--to TURN] [--after DOC]
 ```
 
 A keyword index over the native session logs of the sessions the hub launched, plus the hub's own
 transcripts. `--since` and `--until` take `7d`, `3h`, `30m`, `90s` or epoch milliseconds. The
-owner can search everything; Envoy too; a sleeve only its own runs. The index is derived and
-rebuilt in the background if it fails to open. Catch-up commits bounded batches, and failed
-commits are retried. Below each configured root, discovery and reopening ignore symbolic links
-and non-regular files.
+owner can search everything; Envoy too; a sleeve only its own runs. `history read` returns at
+most 200 docs, or 8 MiB of their text. When the range continues, `--after` is the last doc id
+and the next page starts after it. The index is
+derived and rebuilt in the background if it fails to open. Catch-up commits bounded batches.
+A failed commit removes the segment files that attempt wrote, and the hub retries it with
+backoff up to 30 seconds. Below each configured root, discovery and reopening ignore
+symbolic links and non-regular files. Tool paths in the index are clipped to 512 bytes.
+`history_budget_bytes` (default 1 GiB) is read when the hub starts. A value under 1 MiB,
+including 0, is a config error and the hub does not start. Exactly 1 MiB is allowed, and a
+missing key keeps the default. Each sleeve, and each
+log, may keep that many bytes. That counts each doc's source text plus a
+per-doc overhead, so a flood of tiny docs stays inside the budget. Past a sleeve's budget the index
+keeps the newest lines across that sleeve's logs. Newest means the order they were ingested.
+A rebuild reads each sleeve's files oldest first, by mtime. An unsleeved log still keeps its
+own newest lines once it is past the budget. `hub info` and `doctor` report `history capped: <sleeve id>` once eviction has dropped
+any of that sleeve's docs. The name stays while the sleeve is under the same budget, including
+across a restart. It leaves when that sleeve is removed, when its sources are gone, or when a
+later start finds the total under a raised budget. Other sleeves are unaffected. A commit writes the
+manifest when the index changed. It removes segments whose docs are all dead in their own
+manifest update, and deletes those files only after that rename. It then rewrites a segment
+whose dead bytes are at least its live bytes, with some docs still live, and deletes the old
+file after that rename. A rewrite failure leaves the dead-segment removal in place. Opening the index removes
+segment files the manifest does not name, warns when the manifest itself is missing, and
+warns and still opens when reclaim fails. A reclaim failure after a durable commit is the
+same warning, and the commit stands.
 
 ## Events
 
@@ -310,6 +387,14 @@ A sleeve builds with your toolchains, from a private home and a cleared environm
 
 Not available: the systemd user bus (`systemd-run --user` in a test) and long unix socket paths.
 
+## Sleeve devices
+
+`config.json` `sleeve_devices` lists host device paths bound into every sleeve with
+`--dev-bind` when the path exists, for example
+`"sleeve_devices": ["/dev/aipu", "/dev/mali0"]`. A path that is not there is skipped and
+the hub log says it was not bound; the sleeve still starts. The list is empty by default,
+so a sleeve sees only the sandbox's own `/dev`. A change applies to the next launch.
+
 ## Updates and rollback
 
 **Harnesses** update natively, through each program's own command (`claude update`, `codex
@@ -329,17 +414,63 @@ hub update --rollback
 ```
 
 `hub update` downloads the release from GitHub, checks it against `SHA256SUMS`, stages it in
-`<home>/releases/<version>/`, snapshots headscale's database, switches `releases/current` on
-probation and restarts. The new hub keeps the release once its health check passes within 2
+`<home>/releases/<version>/`, snapshots the journal and then headscale's database, switches
+`releases/current` on probation and restarts. The journal snapshot is taken first, so a node that
+enrolls between the two snapshots is in the restored headscale database and absent from the
+restored journal. The new hub keeps the release once its health check passes within 2
 minutes; a release that keeps failing to start is switched back by `hub probation`, which the
-unit runs before each start. Before the rollback it restores the headscale database snapshot;
-nodes enrolled after the snapshot, including during the failed trial, are lost and must be
-enrolled again. A configured fleet must be running so the database can be snapshotted. The service
+unit runs before each start. Automatic rollback restores both snapshots before switching back:
+the whole journal directory is replaced, so events after the journal snapshot are lost, and
+headscale changes after its snapshot are lost. This includes nodes enrolled after the headscale
+snapshot; enroll them again. Sleeve directories whose id is at or above `next_sleeve` from the
+journal snapshot are moved to `<home>/update-aside/<time>-<pid>/` and are not deleted.
+Worktree checkouts and their gitdirs stay; the prestart log names a sleeve that recorded
+its worktree. Remove a leftover checkout and run `git worktree prune` in the root
+repository. Until then the checkout holds `pt/<name>`, so a new worktree for that name is
+refused. The branch survives, and a new sleeve with the same name starts from those
+commits once the checkout is gone. A new worktree does not adopt a path that already
+exists. Prestart and the next hub start stop the systemd scopes of the quarantined sleeves.
+The prestart log names the quarantine directory.
+A configured fleet must be running so the database can be snapshotted. The service
 must run the snapshot-aware `hub probation` before each start and stop if it fails; regenerate an
 older unit with the current installer before relying on this rollback. `--check` only reports what
-it would do; `--rollback` goes back to `releases/previous`. The channel defaults to
+it would do. `--rollback` requests an offline switch to `releases/previous`, including during a
+trial. It restores the headscale snapshot, losing changes since that snapshot. It keeps the whole
+journal when the previous release can read every intact frame; a torn final frame does not force
+a restore. Otherwise it restores the journal snapshot, losing events after its recorded time.
+The prestart log reports which happened. The matching snapshot record and any snapshot needed for
+the restore must be available. The target must support snapshot-aware prestart; a release
+installed before journal snapshots were introduced cannot be rolled back this way. New updates
+require a target that supports this rollback protocol. The channel defaults to
 `release_channel` in `config.json` (`stable`).
 Sleeves do not survive the restart: they resume as after a crash.
+
+An update is refused if the stopped headscale snapshot still contains SQLite WAL or SHM files,
+or if the hub journal has more than its current single segment. A trial that later rotates the
+journal is still replaced as a whole directory on rollback. An update that fails before the
+probation record is written removes the snapshot directories it just created. A failure after
+that record is written keeps every snapshot directory the record names.
+
+If a snapshot cannot be restored before any live file is replaced, prestart reports the path and
+error, cancels the rollback, and keeps the trial release as `current`. The next start shows the
+error on `hub info` and records an alarm. Repair the named snapshot from backup, stop the hub,
+and run
+`<home>/releases/previous/protectorate --home <home> hub probation --retry-rollback`, then start
+the service. The retry keeps a manual rollback: it restores headscale, and restores the journal
+only when the previous release cannot read it. It refuses while the hub holds the journal or
+headscale still has the database or its socket open. While the hub holds the journal
+lock, `hub probation` prints the probation state and exits 0. It does not judge, restore,
+or count a start. Prestart takes the journal lock before it finishes an interrupted
+journal swap, when the journal directory is present, and before judging. A new trial is
+refused while `releases/rollback-open` exists. The marker applies while that probation
+names the current release. If a restore fails after a live file was
+replaced, prestart exits and the next prestart continues; it does not leave the trial serving
+half-restored data. `releases/rollback-open` records that open restore until the rollback
+finishes, so a later failure continues it too, including a validation failure that replaces
+nothing this time and a manual rollback of a release that was already confirmed. If the trial
+binary cannot start, the hub stays unavailable until the snapshot is repaired; do not point the old
+binary at an unreadable journal. The first update from a binary predating journal snapshots is not
+protected by this mechanism, because that binary takes the snapshot and runs prestart.
 
 **Nodes:**
 

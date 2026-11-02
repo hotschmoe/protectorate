@@ -157,7 +157,7 @@ fn api_surface() {
         "api",
         "pi_local",
         &["--listen", &listen, "--web-dir", web.to_str().unwrap()],
-        &[],
+        &[("PT_TEST_HUB_SAMPLE_MS", "1500")],
     );
     let owner = hub.printed("owner token (shown once): ");
     let agent = hub.printed("envoy-only token: ");
@@ -244,12 +244,54 @@ fn api_surface() {
     let start = snap["seq"].as_u64().unwrap();
     assert_eq!(snap["state"]["seq"].as_u64(), Some(start));
     assert_eq!(snap["state"]["hub"]["name"].as_str(), Some("protectorate"));
+    let info = eventually("hub inventory and sample", Duration::from_secs(40), || {
+        let (status, info) = post(port, "GetHubInfo", Some(&owner), "{}");
+        (status == 200
+            && info["inventory"]["cpu_count"].as_u64().is_some()
+            && info["sample"]["sampled_at_ms"].as_u64().is_some())
+        .then_some(info)
+    });
+    let inv = &info["inventory"];
+    let sample = &info["sample"];
+    assert!(!inv["cpu_model"].as_str().unwrap().is_empty(), "{inv}");
+    assert!(inv["cpu_count"].as_u64().unwrap() > 0, "{inv}");
+    assert!(inv["ram_bytes"].as_u64().unwrap() > 0, "{inv}");
+    assert!(!inv["disks"].as_array().unwrap().is_empty(), "{inv}");
+    assert!(sample["mem_avail_bytes"].as_u64().unwrap() > 0, "{sample}");
+    assert!(sample["swap_used_bytes"].as_u64().is_some(), "{sample}");
+    assert!(sample["load1"].as_f64().is_some(), "{sample}");
+    let sample_at = sample["sampled_at_ms"].as_u64().unwrap();
+    let updates = until(&mut s1, "hub", |m| {
+        m["hub"]["sample"]["sampled_at_ms"]
+            .as_u64()
+            .is_some_and(|at| at > sample_at)
+    });
+    let updated = &updates.last().unwrap()["hub"];
+    assert_eq!(updated["inventory"], *inv);
+    let cpu = updated["sample"]["cpu_pct"].as_f64().unwrap();
+    assert!((0.0..=100.0).contains(&cpu));
+    let state = hub.state();
+    assert_eq!(state["hub"]["inventory"], *inv);
+    assert!(state["hub"]["sample"]["sampled_at_ms"].as_u64().unwrap() >= sample_at);
+    let mut current = ws(port, &auth, &[]).unwrap();
+    let current = next(&mut current);
+    assert_eq!(current["type"].as_str(), Some("snapshot"));
+    assert_eq!(current["state"]["hub"]["inventory"], *inv);
+    assert!(
+        current["state"]["hub"]["sample"]["sampled_at_ms"]
+            .as_u64()
+            .unwrap()
+            >= sample_at
+    );
+    let update_seq = updates.last().unwrap()["seq"].as_u64().unwrap();
+    let mut resumed = ws(port, &format!("{auth}&from_seq={update_seq}"), &[]).unwrap();
+    assert_eq!(next(&mut resumed), *updates.last().unwrap());
     let phone = pair(port, &owner, "phone");
     let seen = until(&mut s1, "event", |m| {
         m["event"]["text"].as_str() == Some("device phone paired")
     });
     let mut last = start;
-    for m in &seen {
+    for m in updates.iter().chain(&seen) {
         let seq = m["seq"].as_u64().unwrap();
         let delta = m["type"].as_str() == Some("entry")
             && m["entry"]["entry"]["delta"].as_bool() == Some(true);

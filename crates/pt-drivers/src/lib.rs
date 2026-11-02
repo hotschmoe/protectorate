@@ -227,12 +227,12 @@ fn plan(
             if spec.permission == Permission::Supervised {
                 return Err(DriverError::Unsupported("Pi has no approval gate"));
             }
-            let new_id = match &spec.resume {
-                Some(_) => None,
-                None => Some(random(uuid)?),
+            let session_id = match &spec.resume {
+                Some(id) => id.clone(),
+                None => random(uuid)?,
             };
-            let p = pi::Pi::new(spec);
-            (p.argv(spec, new_id.as_deref()), Box::new(p))
+            let p = pi::Pi::new(spec, session_id);
+            (p.argv(spec), Box::new(p))
         }
     })
 }

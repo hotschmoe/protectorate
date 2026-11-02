@@ -20,8 +20,8 @@ import '../widgets.dart';
     ? ('Online', p.ok)
     : ('Offline ${span(now.difference(n.lastSeen))}', p.alarm);
 
-String gpuShort(Node n) {
-  final gpus = n.inventory?.gpus ?? const <Gpu>[];
+String gpuShort(Inventory? inventory) {
+  final gpus = inventory?.gpus ?? const <Gpu>[];
   if (gpus.isEmpty) return '-';
   final g = gpus.first;
   final vram = g.vramBytes == null ? '' : ' ${bytes(g.vramBytes)}';
@@ -44,16 +44,12 @@ class NodesScreen extends StatelessWidget {
     final p = pal(context);
     final phone = Look.of(context).phone;
     final nodes = [...app.state.nodes]..sort(nodeOrder);
-    if (nodes.isEmpty) {
-      return const EmptyState('No nodes yet', glyph: Glyph.nodes,
-          detail: 'Install protectorate-node on a machine to add it.');
-    }
     if (phone) {
       return Tick(builder: (c, now) => ListView.separated(
         padding: const EdgeInsets.only(bottom: 16),
-        itemCount: nodes.length,
+        itemCount: nodes.length + 1,
         separatorBuilder: (c, i) => const SizedBox(height: 8),
-        itemBuilder: (c, i) => _PhoneNodeCard(node: nodes[i], now: now),
+        itemBuilder: (c, i) => _PhoneNodeCard(node: i == 0 ? null : nodes[i - 1], now: now),
       ));
     }
     return Wide(
@@ -80,35 +76,41 @@ class NodesScreen extends StatelessWidget {
             ]),
             Expanded(
               child: Tick(builder: (c, now) => ListView.builder(
-                itemCount: nodes.length,
+                itemCount: nodes.length + 1,
                 itemBuilder: (c, i) {
-                  final n = nodes[i];
-                  final (pw, pc) = presenceWord(p, n.presence);
-                  final (ow, oc) = onlineWord(p, n, now);
-                  final inv = n.inventory;
+                  final n = i == 0 ? null : nodes[i - 1];
+                  final online = n?.online ?? app.hub.connected;
+                  final (pw, pc) = n == null ? ('-', p.faint) : presenceWord(p, n.presence);
+                  final (ow, oc) = n == null
+                      ? (online ? 'Online' : 'Offline', online ? p.ok : p.alarm)
+                      : onlineWord(p, n, now);
+                  final inv = n == null ? app.state.hub.inventory : n.inventory;
+                  final sample = n == null ? app.state.hub.sample : n.sample;
                   return ListRow(
                     height: 44,
-                    onTap: () => app.openNode(n.id),
+                    onTap: () => n == null ? app.go(Screen.hub) : app.openNode(n.id),
                     children: [
                       Expanded(child: Row(children: [
-                        Dot(n.online ? p.ok : p.alarm),
+                        Dot(online ? p.ok : p.alarm),
                         const SizedBox(width: 10),
-                        Flexible(child: T(n.name, weight: FontWeight.w500)),
+                        Flexible(child: T(n?.name ?? 'hub', weight: FontWeight.w500,
+                            color: n == null ? p.accent : null)),
                       ])),
                       Cell(70, child: T(inv?.arch ?? '-', mono: true, size: 12, color: p.dim)),
                       Cell(80, child: T(inv?.os ?? '-', color: p.dim)),
                       Cell(48, right: true, child: T(inv == null ? '-' : '${inv.cpuCount}', color: p.dim)),
                       Cell(64, right: true, child: T(inv == null ? '-' : bytes(inv.ramBytes), color: p.dim)),
                       const SizedBox(width: 20),
-                      Cell(170, child: T(gpuShort(n), color: p.dim)),
+                      Cell(170, child: T(gpuShort(inv), color: p.dim)),
                       Cell(140, child: Meter(
                           inv == null || inv.disks.isEmpty ? null : inv.disks.first.usedFraction, width: 90)),
                       const SizedBox(width: 16),
-                      Cell(140, child: Meter(cpuLoad(n), width: 90)),
+                      Cell(140, child: Meter(online && sample?.cpuPct != null
+                          ? sample!.cpuPct! / 100 : null, width: 90)),
                       const SizedBox(width: 16),
                       Cell(110, child: T(pw, color: pc)),
                       Cell(110, child: Align(alignment: Alignment.centerLeft,
-                          child: Pill(n.online ? ow : 'Offline', color: oc, dot: true))),
+                          child: Pill(online ? ow : 'Offline', color: oc, dot: true))),
                     ],
                   );
                 },
@@ -124,7 +126,7 @@ class NodesScreen extends StatelessWidget {
 class _PhoneNodeCard extends StatelessWidget {
   const _PhoneNodeCard({required this.node, required this.now});
 
-  final Node node;
+  final Node? node;
   final DateTime now;
 
   @override
@@ -132,10 +134,15 @@ class _PhoneNodeCard extends StatelessWidget {
     final app = AppScope.of(context);
     final p = pal(context);
     final n = node;
-    final (pw, pc) = presenceWord(p, n.presence);
-    final (ow, oc) = onlineWord(p, n, now);
+    final online = n?.online ?? app.hub.connected;
+    final inv = n == null ? app.state.hub.inventory : n.inventory;
+    final sample = n == null ? app.state.hub.sample : n.sample;
+    final (pw, pc) = n == null ? ('-', p.faint) : presenceWord(p, n.presence);
+    final (ow, oc) = n == null
+        ? (online ? 'Online' : 'Offline', online ? p.ok : p.alarm)
+        : onlineWord(p, n, now);
     return Hover(
-      onTap: () => app.openNode(n.id),
+      onTap: () => n == null ? app.go(Screen.hub) : app.openNode(n.id),
       builder: (c, hot, down, focus) => Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
@@ -145,18 +152,20 @@ class _PhoneNodeCard extends StatelessWidget {
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
-            Dot(n.online ? p.ok : p.alarm),
+            Dot(online ? p.ok : p.alarm),
             const SizedBox(width: 8),
             Expanded(child: Line([
-              sp(context, n.name, weight: FontWeight.w500),
-              sp(context, '  ${n.inventory?.arch ?? '-'} ${n.inventory?.os ?? ''}', color: p.faint, size: kSmall),
+              sp(context, n?.name ?? 'hub', weight: FontWeight.w500,
+                  color: n == null ? p.accent : null),
+              sp(context, '  ${inv?.arch ?? '-'} ${inv?.os ?? ''}', color: p.faint, size: kSmall),
             ])),
             T(ow, color: oc, size: kSmall),
           ]),
           const SizedBox(height: 10),
           Row(children: [
             const SizedBox(width: 40, child: Label('Load')),
-            Expanded(child: Meter(cpuLoad(n), width: null)),
+            Expanded(child: Meter(online && sample?.cpuPct != null
+                ? sample!.cpuPct! / 100 : null, width: null)),
             const SizedBox(width: 16),
             T(pw, color: pc, size: kSmall),
           ]),
@@ -209,24 +218,26 @@ class NodesMini extends StatelessWidget {
 }
 
 class NodeDetail extends StatelessWidget {
-  const NodeDetail({super.key, required this.nodeId});
+  const NodeDetail({super.key, this.nodeId});
 
-  final String nodeId;
+  final String? nodeId;
 
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     final p = pal(context);
     final phone = Look.of(context).phone;
-    final n = app.state.node(nodeId);
-    if (n == null) return EmptyState('No node $nodeId', glyph: Glyph.nodes);
-    final inv = n.inventory;
-    final jobs = app.state.jobs.where((j) => j.nodeId == n.id).toList()
+    final n = nodeId == null ? null : app.state.node(nodeId!);
+    if (nodeId != null && n == null) return EmptyState('No node $nodeId', glyph: Glyph.nodes);
+    final inv = n == null ? app.state.hub.inventory : n.inventory;
+    final current = n == null ? app.state.hub.sample : n.sample;
+    final online = n?.online ?? app.hub.connected;
+    final jobs = app.state.jobs.where((j) => n != null && j.nodeId == n.id).toList()
       ..sort((a, b) => b.queuedAt.compareTo(a.queuedAt));
     return Tick(builder: (c, now) {
-      final (pw, pc) = presenceWord(p, n.presence);
-      final (ow, oc) = onlineWord(p, n, now);
-      final pr = n.presence;
+      final (ow, oc) = n == null
+          ? (online ? 'Online' : 'Offline', online ? p.ok : p.alarm)
+          : onlineWord(p, n, now);
       final inventory = Panel(
         title: 'Inventory',
         trailing: inv == null ? null : T('collected ${span(now.difference(inv.collectedAt))} ago',
@@ -240,30 +251,33 @@ class NodeDetail extends StatelessWidget {
             KV('CPU', T('${inv.cpuModel}, ${inv.cpuCount} threads', maxLines: 2)),
             KV('Memory', T(bytes(inv.ramBytes))),
           ],
-          KV('Node', T(n.nodeVersion, mono: true, size: 12.5, color: p.dim)),
+          KV(n == null ? 'Hub' : 'Node', T(n?.nodeVersion ?? app.state.hub.version,
+              mono: true, size: 12.5, color: p.dim)),
           KV('State', T(ow, color: oc)),
         ]),
       );
       final sample = Panel(
         title: 'Now',
-        child: n.sample == null || !n.online
+        child: current == null || !online
             ? const EmptyState('No current sample', compact: true)
             : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                KV('CPU', Meter(cpuLoad(n), width: 160)),
-                KV('Load 1m', T(n.sample!.load1?.toStringAsFixed(2) ?? '-')),
+                KV('CPU', Meter(current.cpuPct == null ? null : current.cpuPct! / 100, width: 160)),
+                KV('Load 1m', T(current.load1?.toStringAsFixed(2) ?? '-')),
                 KV('Memory', Wrap(spacing: 12, crossAxisAlignment: WrapCrossAlignment.center, children: [
-                  Meter(n.memUsedFraction, width: 160),
-                  T('${bytes(n.sample!.memAvailBytes)} free of ${bytes(inv?.ramBytes)}', color: p.dim),
+                  Meter(current.memAvailBytes == null || inv == null || inv.ramBytes <= 0
+                      ? null : 1 - current.memAvailBytes! / inv.ramBytes, width: 160),
+                  T('${bytes(current.memAvailBytes)} free of ${bytes(inv?.ramBytes)}', color: p.dim),
                 ])),
+                KV('Swap used', T(bytes(current.swapUsedBytes), color: p.dim)),
               ]),
       );
-      final presence = Panel(
+      final presence = n == null ? null : Panel(
         title: 'Presence',
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          KV('State', T(pw, color: pc)),
-          KV('Locked', T(pr.locked == null ? 'unknown' : (pr.locked! ? 'yes' : 'no'))),
-          KV('Source', T(pr.source.isEmpty ? '-' : pr.source, mono: true, size: 12.5)),
-          KV('Jobs', T(switch (pr.state) {
+          KV('State', T(presenceWord(p, n.presence).$1, color: presenceWord(p, n.presence).$2)),
+          KV('Locked', T(n.presence.locked == null ? 'unknown' : (n.presence.locked! ? 'yes' : 'no'))),
+          KV('Source', T(n.presence.source.isEmpty ? '-' : n.presence.source, mono: true, size: 12.5)),
+          KV('Jobs', T(switch (n.presence.state) {
             PresenceState.away => 'Takes jobs',
             PresenceState.present => 'Refuses jobs (someone is at it)',
             PresenceState.unknown => 'Refuses jobs (unknown counts as present)',
@@ -289,7 +303,7 @@ class NodeDetail extends StatelessWidget {
             KV(g.driver.isEmpty ? '-' : g.driver.split(' ').first, Line([
               sp(context, g.name),
               if (g.vramBytes != null) sp(context, '   ${bytes(g.vramBytes)} VRAM', color: p.dim),
-              if (g.utilPct != null && n.online) sp(context, '   ${g.utilPct!.round()}% busy', color: p.dim),
+              if (g.utilPct != null && online) sp(context, '   ${g.utilPct!.round()}% busy', color: p.dim),
             ], maxLines: 2)),
         ]),
       );
@@ -335,11 +349,10 @@ class NodeDetail extends StatelessWidget {
         children: [
           pair(inventory, sample),
           const SizedBox(height: 12),
-          pair(presence, disks),
+          if (presence != null) pair(presence, disks) else disks,
           const SizedBox(height: 12),
           pair(gpus, tools),
-          const SizedBox(height: 12),
-          jobsPanel,
+          if (n != null) ...[const SizedBox(height: 12), jobsPanel],
         ],
       );
     });

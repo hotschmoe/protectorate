@@ -306,13 +306,6 @@ const HARNESSES: &[Spec] = &[
         files: &[".pi/agent/models.json"],
         checked: true,
     },
-    Spec {
-        name: "pi_durable",
-        program: "pi",
-        update: &["pi", "update", "self"],
-        files: &[".pi/agent/auth.json"],
-        checked: true,
-    },
 ];
 
 fn credentials(cfg: &Config, s: &Spec) -> Credentials {
@@ -329,7 +322,7 @@ fn credentials(cfg: &Config, s: &Spec) -> Credentials {
     }
 }
 
-fn harnesses(cfg: &Config, sandbox_ok: &[String], node: &Binary) -> Vec<Harness> {
+fn harnesses(cfg: &Config, sandbox_ok: &[String]) -> Vec<Harness> {
     let mut programs: Vec<(&str, Binary)> = Vec::new();
     std::thread::scope(|scope| {
         let mut seen = Vec::new();
@@ -378,9 +371,6 @@ fn harnesses(cfg: &Config, sandbox_ok: &[String], node: &Binary) -> Vec<Harness>
                     "no login found; run `protectorate harness login {}`",
                     s.program
                 ));
-            }
-            if s.name == "pi_durable" && !node.works() {
-                reasons.push("node (D14) not on PATH".into());
             }
             reasons.extend(
                 cfg.unconfigured
@@ -576,39 +566,37 @@ fn now_ms() -> u64 {
 /// asks GitHub, and `systemd-run --user --scope true` starts a scope.
 pub fn run(cfg: &Config) -> Report {
     let t = cfg.timeout;
-    let ((sandbox, gh, curl), (net, node, (disks, disk_problems), clock)) =
-        std::thread::scope(|s| {
-            let a = s.spawn(|| {
-                (
-                    sandbox(cfg),
-                    gh(cfg),
-                    probe::binary("curl", cfg.which("curl"), Some(&["-q", "--version"]), t),
-                )
-            });
-            let b = s.spawn(|| {
-                let net = Net {
-                    go: probe::binary("go", cfg.which("go"), Some(&["version"]), t),
-                    headscale: probe::binary(
-                        "headscale",
-                        cfg.beside_exe_or_path(&cfg.headscale, "headscale"),
-                        Some(&["version"]),
-                        t,
-                    ),
-                    member: probe::binary(
-                        "member",
-                        cfg.beside_exe_or_path(&cfg.member, "member"),
-                        None,
-                        t,
-                    ),
-                };
-                let node = probe::binary("node", cfg.which("node"), Some(&["--version"]), t);
-                (net, node, disks(cfg), clock(cfg))
-            });
+    let ((sandbox, gh, curl), (net, (disks, disk_problems), clock)) = std::thread::scope(|s| {
+        let a = s.spawn(|| {
             (
-                a.join().expect("probe thread"),
-                b.join().expect("probe thread"),
+                sandbox(cfg),
+                gh(cfg),
+                probe::binary("curl", cfg.which("curl"), Some(&["-q", "--version"]), t),
             )
         });
+        let b = s.spawn(|| {
+            let net = Net {
+                go: probe::binary("go", cfg.which("go"), Some(&["version"]), t),
+                headscale: probe::binary(
+                    "headscale",
+                    cfg.beside_exe_or_path(&cfg.headscale, "headscale"),
+                    Some(&["version"]),
+                    t,
+                ),
+                member: probe::binary(
+                    "member",
+                    cfg.beside_exe_or_path(&cfg.member, "member"),
+                    None,
+                    t,
+                ),
+            };
+            (net, disks(cfg), clock(cfg))
+        });
+        (
+            a.join().expect("probe thread"),
+            b.join().expect("probe thread"),
+        )
+    });
 
     let mut problems = Vec::new();
     let mut sandbox_reasons = Vec::new();
@@ -624,7 +612,7 @@ pub fn run(cfg: &Config) -> Report {
         }
     }
     let harnesses = if cfg.harnesses {
-        harnesses(cfg, &sandbox_reasons, &node)
+        harnesses(cfg, &sandbox_reasons)
     } else {
         Vec::new()
     };

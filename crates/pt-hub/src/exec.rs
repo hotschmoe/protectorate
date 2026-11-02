@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Seek, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -123,7 +123,33 @@ impl Executors {
     /// Lets a removed sleeve's executor finish what it was handed and end; later intents for it
     /// are answered here.
     pub fn release(&mut self, id: SleeveId) {
-        self.sleeves.remove(&id);
+        if self.sleeves.remove(&id).is_none() {
+            self.cleanup_removed([id]);
+        }
+    }
+
+    pub fn cleanup_removed(&self, ids: impl IntoIterator<Item = SleeveId>) {
+        let paths: Vec<_> = ids
+            .into_iter()
+            .map(|id| self.hub.home.sleeve_scratch(id))
+            .collect();
+        if !paths.is_empty()
+            && let Err(e) = spawn("pt-clean-scratch".into(), move || {
+                for path in paths {
+                    cleanup_scratch(&path);
+                }
+            })
+        {
+            warning!("{e}");
+        }
+    }
+}
+
+fn cleanup_scratch(path: &Path) {
+    if let Err(e) = fs::remove_dir_all(path)
+        && e.kind() != io::ErrorKind::NotFound
+    {
+        warning!("remove sleeve scratch {}: {e}", path.display());
     }
 }
 
@@ -204,7 +230,7 @@ pub fn driver_harness(h: Harness) -> Option<pt_drivers::Harness> {
         Harness::Claude => pt_drivers::Harness::Claude,
         Harness::Codex => pt_drivers::Harness::Codex,
         Harness::Grok => pt_drivers::Harness::Grok,
-        Harness::PiVendor | Harness::PiLocal | Harness::PiDurable => pt_drivers::Harness::Pi,
+        Harness::PiVendor | Harness::PiLocal => pt_drivers::Harness::Pi,
         Harness::Antigravity => return None,
     })
 }
@@ -306,6 +332,78 @@ fn wait_scope_empty(scope: &str) {
     }
 }
 
+fn oom_kills(file: &mut fs::File) -> Result<u64, String> {
+    file.rewind().map_err(|e| e.to_string())?;
+    let mut text = String::new();
+    file.read_to_string(&mut text).map_err(|e| e.to_string())?;
+    text.lines()
+        .find_map(|line| line.strip_prefix("oom_kill "))
+        .ok_or_else(|| "memory.events has no oom_kill counter".to_string())?
+        .trim()
+        .parse()
+        .map_err(|e| format!("invalid oom_kill counter: {e}"))
+}
+
+struct OomWatch {
+    stop: Sender<()>,
+    result: Receiver<Result<bool, String>>,
+}
+
+impl OomWatch {
+    fn start(scope: String) -> Result<Self, String> {
+        let (stop, stopped) = mpsc::channel();
+        let (result, received) = mpsc::channel();
+        spawn(format!("pt-oom-{scope}"), move || {
+            let outcome = watch_oom(&scope, &stopped);
+            let _ = result.send(outcome);
+        })?;
+        Ok(Self {
+            stop,
+            result: received,
+        })
+    }
+
+    fn finish(&self) -> Result<bool, String> {
+        let _ = self.stop.send(());
+        self.result
+            .recv_timeout(Duration::from_secs(3))
+            .map_err(|e| format!("OOM watcher: {e}"))?
+    }
+}
+
+fn watch_oom(scope: &str, stopped: &Receiver<()>) -> Result<bool, String> {
+    let mut last_error = None;
+    let mut file = loop {
+        match pt_sandbox::scope_cgroup(scope) {
+            Ok(Some(cg)) => match fs::File::open(cg.join("memory.events")) {
+                Ok(file) => break file,
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(format!("open memory.events: {e}")),
+            },
+            Ok(None) => {}
+            Err(e) => last_error = Some(e.to_string()),
+        }
+        if !matches!(
+            stopped.recv_timeout(Duration::from_millis(50)),
+            Err(mpsc::RecvTimeoutError::Timeout)
+        ) {
+            return Err(last_error.unwrap_or_else(|| {
+                "scope disappeared before memory.events could be opened".into()
+            }));
+        }
+    };
+    loop {
+        if oom_kills(&mut file)? > 0 {
+            return Ok(true);
+        }
+        if !matches!(stopped.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+            return Ok(false);
+        }
+        pt_sys::poll_priority(&file, Duration::from_millis(100))
+            .map_err(|e| format!("poll memory.events: {e}"))?;
+    }
+}
+
 /// Kills any `systemd-run` of ours still about to register `scope`, and returns once it is
 /// gone: one that an earlier hub started would register the scope after a probe found none.
 fn kill_unregistered(scope: &str) {
@@ -355,6 +453,15 @@ impl SleeveExec {
     fn run(mut self, rx: Receiver<Intent>) {
         for intent in rx {
             self.handle(intent);
+        }
+        if self
+            .hub
+            .view()
+            .state
+            .sleeve(self.id)
+            .is_some_and(|s| s.life == Life::Removed)
+        {
+            cleanup_scratch(&self.hub.home.sleeve_scratch(self.id));
         }
     }
 
@@ -469,7 +576,7 @@ impl SleeveExec {
                 let envoy_gated = Hub::envoy_id(&view.state) == Some(sleeve)
                     && hub.doctor.gated(sleeve).is_some();
                 let chosen = if envoy_gated {
-                    Err("Envoy's harness failed doctor")
+                    Err("Envoy's harness failed doctor".to_string())
                 } else {
                     crate::select::select_target(
                         now_ms(),
@@ -758,7 +865,7 @@ impl SleeveExec {
         let harness =
             driver_harness(target.harness).ok_or("that harness has no headless driver")?;
         let mut program = program(&hub, target.harness)
-            .ok_or_else(|| format!("{} is not installed", wire::harness_wire(target.harness)))?;
+            .ok_or_else(|| format!("{} is not installed", target.harness.as_str()))?;
         let home = hub.home.sleeve_home(s.id);
         fs::create_dir_all(&home).map_err(|e| format!("{}: {e}", home.display()))?;
         let logins = crate::logins::prepare_all(&hub.home.logins(), &home)
@@ -772,7 +879,32 @@ impl SleeveExec {
         )
         .map_err(|e| format!("prepare the toolchain environment: {e}"))?;
         let work = workdir(&hub, s);
-        let mut sb = pt_sandbox::SandboxSpec::new(&hub.scope_sleeve(s.id), g.0, work.clone(), home);
+        let scratch = hub.home.sleeve_scratch(s.id);
+        for dir in [scratch.join("target"), scratch.join("tmp")] {
+            fs::create_dir_all(&dir)
+                .map_err(|e| format!("create scratch {}: {e}", dir.display()))?;
+        }
+        if pt_sys::is_memory_filesystem(&scratch)
+            .map_err(|e| format!("check scratch filesystem {}: {e}", scratch.display()))?
+        {
+            return Err(format!(
+                "scratch {} is on a memory filesystem; use a disk-backed hub home",
+                scratch.display()
+            ));
+        }
+        let mut sb =
+            pt_sandbox::SandboxSpec::new(&hub.scope_sleeve(s.id), g.0, work.clone(), home, scratch);
+        for raw in &hub.config.sleeve_devices {
+            let path = PathBuf::from(raw);
+            if !path.is_absolute() {
+                return Err(format!("sleeve device {raw} is not an absolute path"));
+            }
+            if path.exists() {
+                sb.devices.push(path);
+            } else {
+                info!("sleeve {}: device {raw} is missing; not bound", s.name);
+            }
+        }
         sb.scope = hub.config.scopes;
         sb.masks = pt_sandbox::default_masks(&hub.owner_home);
         sb.masks.push(hub.home.root.clone());
@@ -836,17 +968,28 @@ impl SleeveExec {
         spec.effort = s.effort.clone();
         spec.resume = resume;
         spec.prefix = Some(prefix);
-        let name = wire::harness_wire(target.harness);
+        let name = target.harness.as_str();
         if hub.config.supervised.iter().any(|h| h == name) {
             spec.permission = pt_drivers::Permission::Supervised;
         }
         let (session, events) = pt_drivers::spawn(spec).map_err(|e| e.to_string())?;
         let scope = hub.scope_name(s.id, g);
+        let oom = if hub.config.scopes {
+            match OomWatch::start(scope.clone()) {
+                Ok(watch) => Some(watch),
+                Err(e) => {
+                    warning!("{scope}: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
         info!(
             "sleeve {}: launched g{} ({}) in {scope}, pid {}",
             s.name,
             g.0,
-            wire::harness_wire(target.harness),
+            target.harness.as_str(),
             session.pid()
         );
         self.submit(EventKind::Launched {
@@ -869,6 +1012,7 @@ impl SleeveExec {
             harness: wire::api_harness(target.harness),
             scope,
             scoped: hub.config.scopes,
+            oom,
         };
         thread::Builder::new()
             .name(format!("pt-pump-{}-g{}", s.id.0, g.0))
@@ -1026,6 +1170,7 @@ struct Run {
     harness: pt_api::Harness,
     scope: String,
     scoped: bool,
+    oom: Option<OomWatch>,
 }
 
 /// An answer the harness offers; its own "cancel" is not one the owner picks.
@@ -1057,6 +1202,7 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Rece
         refusal: None,
         prev_error: None,
         cause: ExitCause::Killed,
+        oom_exit: false,
         expects: HashMap::new(),
         held: None,
     };
@@ -1106,6 +1252,14 @@ fn pump(hub: &Hub, run: &Run, events: Receiver<pt_drivers::Event>, ordered: Rece
     if scoped {
         wait_scope_empty(scope);
     }
+    if let Some(watch) = &run.oom {
+        match watch.finish() {
+            Ok(true) if p.oom_exit => p.cause = ExitCause::Oom,
+            Ok(true) => {}
+            Ok(false) => {}
+            Err(e) => warning!("{scope}: OOM status unknown: {e}"),
+        }
+    }
     info!("sleeve {name}: g{} exited ({:?})", g.0, p.cause);
     hub.submit(EventKind::Exited {
         sleeve: id,
@@ -1124,6 +1278,7 @@ struct Pump {
     /// the driver writes right before `Exited`.
     prev_error: Option<ErrorClass>,
     cause: ExitCause,
+    oom_exit: bool,
     /// Prompts being written, by request id.
     expects: HashMap<String, Expect>,
     /// A confirmed prompt whose ack had no native turn id: the harness's turn start may.
@@ -1344,6 +1499,7 @@ impl Pump {
             }
             Entry::Compaction { .. } => obs.push(Obs::CompactDone),
             Entry::Exited { code, signal, .. } => {
+                self.oom_exit = *signal == Some(i64::from(pt_sys::SIGKILL)) || *code == Some(137);
                 self.cause = match (self.refusal.or(before), code, signal) {
                     (Some(ErrorClass::Auth), ..) => ExitCause::Auth,
                     (Some(ErrorClass::Quota), ..) => ExitCause::Quota,

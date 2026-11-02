@@ -45,7 +45,7 @@ fn layout(h: Harness) -> Option<Layout> {
             links: &[".grok/auth.json", ".grok/auth.json.lock"],
             seeds: &[],
         },
-        Harness::PiVendor | Harness::PiLocal | Harness::PiDurable => Layout {
+        Harness::PiVendor | Harness::PiLocal => Layout {
             dir: ".pi/agent",
             links: &[".pi/agent/auth.json", ".pi/agent/models.json"],
             seeds: &[".pi/agent/settings.json"],

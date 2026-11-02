@@ -50,7 +50,7 @@ Development started 2026-11-01. Against the build order in SPEC section 14:
 | 3. Resleeve | done: guardrails, history index, continuation brief, `pi_local`, forced resleeve end to end. The brief has no LLM summary yet |
 | 4. Network | mostly done: embedded headscale and member, join with a terminal QR code and approval from the CLI, inventory and presence. Headscale behind a real TLS proxy is untested |
 | 5. Jobs | mostly done: node jobs with artifacts, hub `doctor`, harness updates, hub and node self-update with probation. No cross-arch CI rule, no node `doctor` |
-| 6. Hardening | started: the stdio `mcp --envoy`. Not started: Verus proofs, terminal takeover, Antigravity, the Pi Durable experiment |
+| 6. Hardening | started: the stdio `mcp --envoy`. Not started: terminal takeover, Antigravity. Verus was tried and removed (SPEC D40) |
 
 **Covered by e2e tests** (`make test`, real binaries, real sockets, real sandboxes): sleeve
 lifecycle, crash mid-turn and recovery, the Envoy round trip, root stop stopping its children,
@@ -72,7 +72,7 @@ through the idle probe and a job through the service were checked by hand, not y
 - no GitHub release from `next` exists, so the installers have run only as dry runs or against
   local release assets (`--from`), and `hub update` and `node update` have run only against a
   stand-in release server;
-- terminal takeover, Antigravity, Pi Durable, Verus proofs, `protectorate git push`, hub export
+- terminal takeover, Antigravity, `protectorate git push`, hub export
   and import, sleeve-to-sleeve mail through the API, GPU leases, the backlog and spare-quota
   trigger (the function exists, nothing calls it), node `doctor`;
 - a hub update restarts the hub instead of re-executing it, so sleeves resume as after a crash;

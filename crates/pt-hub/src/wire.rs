@@ -9,18 +9,6 @@ use crate::home::Config;
 use crate::hub::{Hub, View};
 use crate::transcript::Line;
 
-pub fn harness_wire(h: Harness) -> &'static str {
-    match h {
-        Harness::Claude => "claude",
-        Harness::Codex => "codex",
-        Harness::Grok => "grok",
-        Harness::Antigravity => "antigravity",
-        Harness::PiVendor => "pi_vendor",
-        Harness::PiLocal => "pi_local",
-        Harness::PiDurable => "pi_durable",
-    }
-}
-
 pub fn harness_from(s: &str) -> Option<Harness> {
     Some(match s {
         "claude" => Harness::Claude,
@@ -29,12 +17,10 @@ pub fn harness_from(s: &str) -> Option<Harness> {
         "antigravity" => Harness::Antigravity,
         "pi_vendor" => Harness::PiVendor,
         "pi_local" => Harness::PiLocal,
-        "pi_durable" => Harness::PiDurable,
         _ => return None,
     })
 }
 
-/// The API has no `pi_durable` (an experiment on the local model): it shows as `pi_local`.
 pub fn api_harness(h: Harness) -> api::Harness {
     match h {
         Harness::Claude => api::Harness::Claude,
@@ -42,7 +28,7 @@ pub fn api_harness(h: Harness) -> api::Harness {
         Harness::Grok => api::Harness::Grok,
         Harness::Antigravity => api::Harness::Antigravity,
         Harness::PiVendor => api::Harness::PiVendor,
-        Harness::PiLocal | Harness::PiDurable => api::Harness::PiLocal,
+        Harness::PiLocal => api::Harness::PiLocal,
     }
 }
 
@@ -67,7 +53,7 @@ pub fn target(config: &Config, harness: Harness, provider: &str, model: &str) ->
             config.pi_vendor_provider.as_str(),
             config.pi_vendor_model.as_str(),
         ),
-        Harness::PiLocal | Harness::PiDurable => (
+        Harness::PiLocal => (
             config.pi_local_provider.as_str(),
             config.pi_local_model.as_str(),
         ),
@@ -123,7 +109,8 @@ pub fn park_wire(r: ParkReason) -> String {
         ParkReason::Provision => "provision".into(),
         ParkReason::NoTarget => "no_target".into(),
         ParkReason::Launch => "launch".into(),
-        ParkReason::Flapping => "flapping".into(),
+        ParkReason::Flapping(Some(h)) => format!("flapping ({} login rejected)", h.as_str()),
+        ParkReason::Flapping(None) => "flapping".into(),
         ParkReason::BriefUnconfirmed => "brief_unconfirmed".into(),
         ParkReason::Guard(g) => format!("g{}", g.number()),
     }
@@ -134,7 +121,7 @@ fn subscription(t: &Target) -> api::Subscription {
         Harness::Claude => api::Subscription::Claude,
         Harness::Codex => api::Subscription::Codex,
         Harness::Grok => api::Subscription::Grok,
-        Harness::PiLocal | Harness::PiDurable => api::Subscription::Local,
+        Harness::PiLocal => api::Subscription::Local,
         Harness::PiVendor | Harness::Antigravity => api::Subscription::Api,
     }
 }
@@ -227,11 +214,9 @@ pub fn workspace(s: &Sleeve) -> api::Workspace {
 }
 
 pub fn hub_info(hub: &Hub) -> api::HubInfo {
-    api::HubInfo {
-        name: "protectorate".into(),
-        version: pt_version::VERSION.into(),
-        started_at_ms: EpochMs(hub.started_ms),
-    }
+    let mut info = crate::transcript::lock(&hub.info).clone();
+    info.history_capped = hub.history.capped_sleeves();
+    info
 }
 
 /// What the poller last learned of every node; none while the fleet is off or down.

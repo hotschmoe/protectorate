@@ -400,45 +400,52 @@ pub(crate) fn copy_state(p: &Paths, dest_root: &Path, label: &str) -> Result<Pat
     let dest = dest_root.join(format!("{}-{label}", pt_api::EpochMs::now().0));
     crate::private_dir(dest_root)?;
     fs::create_dir(&dest).map_err(|e| Error::new(format!("creating {}: {e}", dest.display())))?;
-    let mut copied = Map::new();
-    for name in [
-        "db.sqlite",
-        "db.sqlite-wal",
-        "db.sqlite-shm",
-        "noise_private.key",
-        "derp_server_private.key",
-        "headscale.yaml",
-        "derp.yaml",
-        "policy.hujson",
-    ] {
-        let src = p.dir.join(name);
-        if !src.exists() {
-            continue;
+    let fill = (|| -> Result<()> {
+        let mut copied = Map::new();
+        for name in [
+            "db.sqlite",
+            "db.sqlite-wal",
+            "db.sqlite-shm",
+            "noise_private.key",
+            "derp_server_private.key",
+            "headscale.yaml",
+            "derp.yaml",
+            "policy.hujson",
+        ] {
+            let src = p.dir.join(name);
+            if !src.exists() {
+                continue;
+            }
+            let to = dest.join(name);
+            let n = fs::copy(&src, &to).map_err(|e| {
+                Error::new(format!(
+                    "copying {} to {}: {e}",
+                    src.display(),
+                    to.display()
+                ))
+            })?;
+            fs::File::open(&to)
+                .and_then(|f| f.sync_all())
+                .map_err(|e| Error::new(format!("syncing {}: {e}", to.display())))?;
+            copied.insert(name, n);
         }
-        let to = dest.join(name);
-        let n = fs::copy(&src, &to).map_err(|e| {
-            Error::new(format!(
-                "copying {} to {}: {e}",
-                src.display(),
-                to.display()
-            ))
-        })?;
-        fs::File::open(&to)
-            .and_then(|f| f.sync_all())
-            .map_err(|e| Error::new(format!("syncing {}: {e}", to.display())))?;
-        copied.insert(name, n);
-    }
-    if !copied.contains_key("db.sqlite") {
-        return Err(Error::new(format!("no database in {}", p.dir.display())));
-    }
-    crate::write_file(
-        &dest.join("snapshot.json"),
-        Value::Object(copied).to_string().as_bytes(),
-    )?;
-    for dir in [&dest, dest_root] {
-        fs::File::open(dir)
-            .and_then(|f| f.sync_all())
-            .map_err(|e| Error::new(format!("syncing {}: {e}", dir.display())))?;
+        if !copied.contains_key("db.sqlite") {
+            return Err(Error::new(format!("no database in {}", p.dir.display())));
+        }
+        crate::write_file(
+            &dest.join("snapshot.json"),
+            Value::Object(copied).to_string().as_bytes(),
+        )?;
+        for dir in [&dest, dest_root] {
+            fs::File::open(dir)
+                .and_then(|f| f.sync_all())
+                .map_err(|e| Error::new(format!("syncing {}: {e}", dir.display())))?;
+        }
+        Ok(())
+    })();
+    if let Err(e) = fill {
+        let _ = fs::remove_dir_all(&dest);
+        return Err(e);
     }
     Ok(dest)
 }

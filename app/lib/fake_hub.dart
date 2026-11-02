@@ -429,6 +429,12 @@ class FakeHub implements HubClient {
   }
 
   void _jitterNodes() {
+    final hubSample = _hub['sample'] as Json;
+    final hubCpu = (hubSample['cpu_pct'] as double) + (_rand.nextDouble() - 0.5) * 10;
+    hubSample['cpu_pct'] = hubCpu.clamp(2.0, 99.0);
+    hubSample['load1'] = (hubSample['cpu_pct'] as double) / 100 *
+        ((_hub['inventory'] as Json)['cpu_count'] as int);
+    hubSample['sampled_at_ms'] = _now;
     for (final n in _nodes) {
       if (n['online'] != true) continue;
       final s = n['sample'] as Json;
@@ -731,6 +737,16 @@ class FakeHub implements HubClient {
       'name': 'protectorate',
       'version': kVersion,
       'started_at_ms': _t0 - const Duration(days: 11, hours: 4, minutes: 12).inMilliseconds,
+      'inventory': {
+        'hostname': 'hub', 'os': 'linux', 'os_version': 'Linux', 'arch': 'x86_64',
+        'cpu_model': 'AMD Ryzen 9', 'cpu_count': 16, 'ram_bytes': 64 * _gib,
+        'disks': [{'mount': '/', 'size_bytes': 1000 * _gib, 'free_bytes': 620 * _gib}],
+        'collected_at_ms': _ago(const Duration(minutes: 2)),
+      },
+      'sample': {
+        'sampled_at_ms': _now, 'cpu_pct': 27.0, 'load1': 4.32,
+        'mem_avail_bytes': 42 * _gib, 'swap_used_bytes': 0,
+      },
     };
     _workspaces.addAll([
       {'id': 'w-envoy', 'name': 'envoy', 'path': '~/.local/share/protectorate/envoy'},

@@ -264,7 +264,13 @@ fn hub_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                     h.name,
                     h.version,
                     ago(h.started_at_ms)
-                )
+                );
+                if !h.history_capped.is_empty() {
+                    println!("history capped: {}", h.history_capped.join(", "));
+                }
+                if let Some(error) = &h.restore_error {
+                    println!("rollback restore failed: {error}");
+                }
             });
         }
         "state" => {
@@ -337,7 +343,21 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
         }
         "spawn" => {
             let harness_name = a.flag("--harness").unwrap_or("claude");
-            let path = a.flag("--path").map(|p| {
+            let path_flag = a.flag("--path");
+            let new_path = a.flag("--new-path");
+            if path_flag.is_some() && new_path.is_some() {
+                return Err(Fail::Usage(
+                    "--path and --new-path are mutually exclusive".into(),
+                ));
+            }
+            if new_path.is_some() && (a.flag("--parent").is_some() || a.has("--readonly")) {
+                return Err(Fail::Usage(
+                    "--new-path makes a root and takes no --parent or --readonly".into(),
+                ));
+            }
+            // A new directory does not exist yet, and the caller's view of it may not be the
+            // hub's, so the hub resolves `--new-path` itself.
+            let path = path_flag.map(|p| {
                 std::fs::canonicalize(p)
                     .map(|p| p.to_string_lossy().into_owned())
                     .unwrap_or_else(|_| p.to_string())
@@ -350,6 +370,7 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 name: a.word(2, "a sleeve name")?.to_string(),
                 harness: harness(harness_name)?,
                 path,
+                new_path: new_path.map(str::to_string),
                 parent_id: a.flag("--parent").map(str::to_string),
                 view: a.has("--readonly").then_some(api::WorkspaceView::Readonly),
                 mode: api::Mode::Headless,
@@ -1129,12 +1150,14 @@ fn history_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                     session: None,
                     from_turn: 0,
                     to_turn: None,
+                    after_doc: None,
                 },
                 None => api::ReadHistoryRequest {
                     doc_id: None,
                     session: Some(a.word(2, "a session id, or --doc ID")?.to_string()),
                     from_turn: a.num("--from")?.unwrap_or(0),
                     to_turn: a.num("--to")?,
+                    after_doc: a.num("--after")?,
                 },
             };
             let v = c.call::<m::ReadHistory>(&req)?;
@@ -1146,8 +1169,10 @@ fn history_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                     }
                     println!("{}\n", d.text);
                 }
-                if v.more {
-                    println!("[more: read on with --from <the last turn>]");
+                if v.more
+                    && let Some(last) = v.docs.last()
+                {
+                    println!("[more: read on with --after {}]", last.doc.doc_id);
                 }
             });
         }

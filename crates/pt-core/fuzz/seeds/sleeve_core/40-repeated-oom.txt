@@ -1,0 +1,10 @@
+#scenario 6ffea7af2427730f
+# A second OOM before the resumed incarnation is ready still parks it.
+spawn root /w/a
+run
+obs root ready
+exit root oom
+expect root life=Launching g=2 guard=Resuming
+run
+exit root oom
+expect root life=Parked guard=Parked g=2

@@ -94,18 +94,39 @@ pub enum Exit {
 
 /// `hub probation`, run by the unit before each start from `releases/previous`: counts the
 /// start of a release on trial and switches back after too many or once its window is over.
+/// The journal lock is taken before an interrupted swap is finished and before judging.
+/// While the hub holds that lock, the probation state is printed and this returns. It does
+/// not judge, restore, or count a start.
 pub fn probation_prestart(home: &Path) -> Result<String, String> {
+    probation_prestart_locked(home, false)
+}
+
+/// `held` means this process already holds the journal lock. A second exclusive flock fails.
+fn probation_prestart_locked(home: &Path, held: bool) -> Result<String, String> {
+    let _journal = match crate::update::prepare_prestart(home, held)? {
+        crate::update::Prestart::Busy => return crate::update::probation_report(home),
+        crate::update::Prestart::Ready(lock) => lock,
+    };
     let store = pt_update::Store::open(home).map_err(|e| e.to_string())?;
     Ok(
         match store
-            .start_attempt_with_restore(
-                pt_update::MAX_TRIAL_STARTS,
-                crate::update::restore_headscale,
-            )
+            .start_attempt_with_restore(pt_update::MAX_TRIAL_STARTS, |p| {
+                crate::update::restore_snapshots(home, &store, p)
+            })
             .map_err(|e| e.to_string())?
         {
             pt_update::Verdict::Idle => "no release on trial".into(),
-            pt_update::Verdict::Confirmed => "the release on trial was confirmed".into(),
+            pt_update::Verdict::Confirmed => {
+                if store
+                    .probation()
+                    .map_err(|e| e.to_string())?
+                    .is_some_and(|p| p.restore_failed.is_some())
+                {
+                    "snapshot restore failed; keeping the current release".into()
+                } else {
+                    "the release on trial was confirmed".into()
+                }
+            }
             pt_update::Verdict::Waiting { remaining } => {
                 format!("on trial, {} s left", remaining.as_secs())
             }
@@ -116,6 +137,22 @@ pub fn probation_prestart(home: &Path) -> Result<String, String> {
             ),
         },
     )
+}
+
+pub fn retry_probation_restore(home: &Path) -> Result<String, String> {
+    crate::update::ensure_headscale_stopped(home)?;
+    let _journal = crate::update::acquire_journal_lock(home)?;
+    let store = pt_update::Store::open(home).map_err(|e| e.to_string())?;
+    store.retry_restore().map_err(|e| e.to_string())?;
+    let result = probation_prestart_locked(home, true)?;
+    if let Some(error) = store
+        .probation()
+        .map_err(|e| e.to_string())?
+        .and_then(|p| p.restore_failed)
+    {
+        return Err(error);
+    }
+    Ok(result)
 }
 
 pub fn serve(o: ServeOptions) -> Result<Exit, String> {
@@ -146,6 +183,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
         events.push(codec::decode(f).map_err(|e| format!("journal frame {i}: {e}"))?);
     }
     let state = pt_core::replay(&events);
+    crate::update::stop_orphan_scopes(&tokens.hub_tag, state.next_sleeve);
     info!(
         "replayed {} events: {} sleeves, {} effects",
         events.len(),
@@ -173,7 +211,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
 
     let (tx, rx) = mpsc::channel::<Input>();
     // HubRecovered is the first input, before any listener or timer can add one (README step 5).
-    tx.send(Input {
+    tx.send(Input::Event {
         kind: EventKind::HubRecovered,
         reply: None,
     })
@@ -200,6 +238,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
         .name("pt-stream".into())
         .spawn(move || writer_hub.bus.write(stream_log))
         .map_err(ctx("spawn stream writer"))?;
+    crate::update::announce_restore_failure(&hub);
     if let Some(t) = new_owner {
         eprintln!("owner token (shown once): {t}");
         eprintln!("envoy-only token: {}", hub.tokens.envoy_only());
@@ -247,6 +286,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
     }
 
     crate::doctor::start(&hub, o.net);
+    crate::hardware::start(&hub);
     crate::harness_update::start(&hub);
     crate::fleet::start(&hub, o.fleet, o.net);
     crate::quota::start(&hub);

@@ -49,7 +49,18 @@ pub const SUBSCRIPTIONS: [Subscription; 5] = [
     Subscription::Api,
 ];
 
-const LABELS: [&str; 8] = ["5h", "wk", "day", "mo", "3d", "wk sonnet", "credits", "window"];
+const LABELS: [&str; 10] = [
+    "5h",
+    "wk",
+    "day",
+    "mo",
+    "3d",
+    "wk sonnet",
+    "credits",
+    "window",
+    "wk opus",
+    "wk sonnet 4.5",
+];
 
 fn pct(b: &mut Bytes) -> Option<f64> {
     match b.below(8) {
@@ -73,18 +84,34 @@ pub fn quota(b: &mut Bytes, now_ms: u64) -> Quota {
         .map(|_| QuotaWindow {
             label: LABELS[b.below(LABELS.len())].to_string(),
             used_pct: pct(b),
-            resets_at_ms: match b.below(4) {
+            resets_at_ms: match b.below(5) {
                 0 => None,
-                1 => Some(EpochMs(now_ms.saturating_sub(u64::from(b.u32())))),
+                // A stamp at the epoch is "no reset"; the percent still counts.
+                1 => Some(EpochMs(0)),
+                2 => Some(EpochMs(now_ms.saturating_sub(u64::from(b.u32())))),
                 _ => Some(EpochMs(now_ms.saturating_add(u64::from(b.u32()) * 1000))),
+            },
+            length_ms: match b.below(4) {
+                0 => None,
+                1 => Some(0),
+                _ => Some(u64::from(b.u32()).saturating_mul(1000)),
             },
         })
         .collect();
+    let subscription = SUBSCRIPTIONS[b.below(SUBSCRIPTIONS.len())];
+    // Bit 31 means the stamp is after now. The low 31 bits are the offset.
+    let raw = b.u32();
+    let offset = u64::from(raw & 0x7fff_ffff).saturating_mul(10);
+    let fetched = if raw & 0x8000_0000 != 0 {
+        now_ms.saturating_add(offset)
+    } else {
+        now_ms.saturating_sub(offset)
+    };
     Quota {
-        subscription: SUBSCRIPTIONS[b.below(SUBSCRIPTIONS.len())],
+        subscription,
         plan: String::new(),
         reading,
-        fetched_at_ms: EpochMs(now_ms.saturating_sub(u64::from(b.u32()) * 10)),
+        fetched_at_ms: EpochMs(fetched),
         windows,
         note: String::new(),
     }

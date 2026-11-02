@@ -1,4 +1,4 @@
-//! The hub-node link: the frame codec (`codec`, pure, Verus phase 1), blocking frame I/O
+//! The hub-node link: the frame codec (`codec`, pure), blocking frame I/O
 //! (`wire`) and the RPC messages (`msg`).
 
 #![forbid(unsafe_code)]

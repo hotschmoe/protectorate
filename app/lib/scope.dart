@@ -3,7 +3,7 @@ import 'package:flutter/widgets.dart';
 import 'hub.dart';
 import 'api/api.g.dart';
 
-enum Screen { envoy, sleeves, approvals, nodes, quota, events, settings, sleeve, node }
+enum Screen { envoy, sleeves, approvals, nodes, quota, events, settings, sleeve, node, hub }
 
 /// What every screen reaches for: the hub, navigation and the message line.
 class AppScope extends InheritedWidget {

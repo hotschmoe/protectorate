@@ -26,7 +26,10 @@ fn sub(base: &Path, name: &str) -> PathBuf {
 fn spec(sleeve: &str, base: &Path) -> SandboxSpec {
     let ws = sub(base, &format!("{sleeve}-ws"));
     let home = sub(base, &format!("{sleeve}-home"));
-    let mut s = SandboxSpec::new(sleeve, 1, ws, home);
+    let scratch = sub(base, &format!("{sleeve}-scratch"));
+    sub(&scratch, "target");
+    sub(&scratch, "tmp");
+    let mut s = SandboxSpec::new(sleeve, 1, ws, home, scratch);
     s.limits.memory_max_bytes = 512 << 20;
     s.tmp_size_bytes = 32 << 20;
     s
@@ -59,6 +62,85 @@ fn wait_for<T>(what: &str, mut f: impl FnMut() -> Option<T>) -> T {
         }
         assert!(Instant::now() < end, "timed out waiting for {what}");
         sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn disk_scratch_is_short_and_survives_incarnations() {
+    let base = fixture("scratch");
+    let mut a = spec("scratch-a", &base);
+    let mut b = spec("scratch-b", &base);
+    a.scope = false;
+    b.scope = false;
+    let script = "test \"$CARGO_TARGET_DIR\" = /tmp/pt/target && \
+        test \"$TMPDIR\" = /tmp/pt/tmp && \
+        echo target > \"$CARGO_TARGET_DIR/file\" && echo temp > \"$TMPDIR/file\" && \
+        df -T /tmp /tmp/pt | tail -2";
+    let first = sh(&a, script);
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let df = stdout(&first);
+    assert!(df.lines().next().unwrap().contains("tmpfs"), "{df}");
+    assert!(!df.lines().last().unwrap().contains("tmpfs"), "{df}");
+    assert_eq!(
+        fs::read_to_string(a.scratch.join("target/file"))
+            .unwrap()
+            .trim(),
+        "target"
+    );
+    a.generation += 1;
+    assert_eq!(stdout(&sh(&a, "cat $TMPDIR/file")), "temp");
+    assert!(sh(&b, "test ! -e $TMPDIR/file").status.success());
+}
+
+/// A configured node is bound over a mask. A path that is not on the host is left out
+/// and the sandbox still starts.
+#[test]
+fn configured_devices_are_bound_and_missing_ones_are_skipped() {
+    let base = fixture("devices");
+    let hidden = sub(&base, "hidden");
+    let node = hidden.join("node");
+    fs::write(&node, "NPU").unwrap();
+    let mut s = spec("devices", &base);
+    s.scope = false;
+    s.masks.push(hidden.clone());
+    s.devices = vec![node.clone(), hidden.join("absent")];
+    let out = sh(&s, &format!("cat {}", node.display()));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(stdout(&out), "NPU");
+}
+
+#[test]
+fn mask_and_runtime_tmpfs_have_small_limits() {
+    let base = fixture("mask-limits");
+    let mask = sub(&base, "masked");
+    let mut s = spec("mask-limits", &base);
+    s.scope = false;
+    s.masks.push(mask.clone());
+    let script = format!(
+        "for dir in '{}' \"$XDG_RUNTIME_DIR\"; do \
+         df -Pk \"$dir\" | tail -1; \
+         dd if=/dev/zero of=\"$dir/full\" bs=1048576 count=2 2>/dev/null \
+         && exit 1; done; true",
+        mask.display()
+    );
+    let out = sh(&s, &script);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = stdout(&out);
+    assert_eq!(text.lines().count(), 2, "{text}");
+    for line in text.lines() {
+        assert_eq!(line.split_whitespace().nth(1), Some("1024"), "{line}");
     }
 }
 
@@ -202,6 +284,20 @@ fn scope_limits_and_kill_reaches_double_forked_tree() {
     let cg = pt_sandbox::scope_cgroup(&name).unwrap().expect("cgroup");
     let max = fs::read_to_string(cg.join("memory.max")).unwrap();
     assert_eq!(max.trim(), (300u64 << 20).to_string());
+    let policy = Command::new("systemctl")
+        .args(["--user", "show", "-p", "OOMPolicy", "--value", &name])
+        .output()
+        .unwrap();
+    assert!(
+        policy.status.success(),
+        "{}",
+        String::from_utf8_lossy(&policy.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&policy.stdout).trim(),
+        "continue",
+        "a child OOM must leave the scope running"
+    );
     let tasks = fs::read_to_string(cg.join("pids.max")).unwrap();
     assert_eq!(tasks.trim(), "100");
     let cpu = fs::read_to_string(cg.join("cpu.max")).unwrap();
@@ -278,7 +374,8 @@ fn worktree_hooks_are_read_only() {
     let dirs = resolve_git_dirs(&wt, &main).unwrap();
     assert_eq!(dirs.len(), 2, "{dirs:?}");
 
-    let mut s = SandboxSpec::new("hooks", 1, wt.clone(), sub(&base, "home"));
+    let mut s = spec("hooks", &base);
+    s.workspace = wt.clone();
     s.tmp_size_bytes = 16 << 20;
     s.git_dirs = dirs.clone();
     let hooks_main = dirs[1].join("hooks");
@@ -318,7 +415,8 @@ fn a_rewritten_gitdir_never_reaches_the_next_launch() {
     let fake = sub(&base, "fake");
     fs::write(fake.join("commondir"), "..").unwrap();
 
-    let mut s = SandboxSpec::new("sbxgitdir", 1, wt.clone(), sub(&base, "home"));
+    let mut s = spec("sbxgitdir", &base);
+    s.workspace = wt.clone();
     s.tmp_size_bytes = 16 << 20;
     s.masks = default_masks(&owner);
     let probe = format!(
@@ -385,7 +483,9 @@ fn binds_never_undo_masks() {
     let home = sub(&state, "sleeves/1/home");
     let extra = sub(&base, "extra");
 
-    let mut s = SandboxSpec::new("sbxnested", 1, owner.clone(), home.clone());
+    let mut s = spec("sbxnested", &base);
+    s.workspace = owner.clone();
+    s.home = home.clone();
     s.tmp_size_bytes = 16 << 20;
     s.masks = default_masks(&owner);
     s.masks.push(state.clone());
@@ -407,7 +507,9 @@ fn binds_never_undo_masks() {
     }
     assert_eq!(fs::read_to_string(home.join("h")).unwrap().trim(), "h");
 
-    let mut root = SandboxSpec::new("sbxslash", 1, owner.clone(), home.clone());
+    let mut root = spec("sbxslash", &base);
+    root.workspace = owner.clone();
+    root.home = home.clone();
     root.rw_paths.push(PathBuf::from("/"));
     let refused = root.command().err().map(|e| e.to_string());
     assert!(refused.is_some(), "a writable / was accepted");
@@ -462,7 +564,8 @@ fn other_roots_are_masked_and_a_worktree_child_still_commits() {
     let (main, wt) = worktree(&base, "pt-roots-test");
     fs::write(main.join("root-file"), "ROOT").unwrap();
 
-    let mut s = SandboxSpec::new("sbxroots", 1, wt.clone(), sub(&base, "home"));
+    let mut s = spec("sbxroots", &base);
+    s.workspace = wt.clone();
     s.tmp_size_bytes = 16 << 20;
     s.git_dirs = resolve_git_dirs(&wt, &main).unwrap();
     s.masks = vec![other.clone()];

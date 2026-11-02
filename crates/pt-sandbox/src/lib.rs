@@ -23,6 +23,8 @@ impl std::error::Error for Error {}
 
 type Result<T> = std::result::Result<T, Error>;
 
+const MASK_SIZE_BYTES: u64 = 1 << 20;
+
 fn err<T>(msg: String) -> Result<T> {
     Err(Error(msg))
 }
@@ -44,6 +46,7 @@ pub struct SandboxSpec {
     pub workspace: PathBuf,
     /// Private home, writable. Becomes `$HOME` inside. The hub fills it; we never do.
     pub home: PathBuf,
+    pub scratch: PathBuf,
     pub ro_paths: Vec<PathBuf>,
     /// Never `/`. A writable path may hold masked paths; the masks still apply inside it.
     pub rw_paths: Vec<PathBuf>,
@@ -57,6 +60,8 @@ pub struct SandboxSpec {
     /// masked state dir) is still reachable. The host's runtime dir is always replaced by a
     /// private empty one.
     pub masks: Vec<PathBuf>,
+    /// Host device nodes bound at the same path when they exist. Missing paths are skipped.
+    pub devices: Vec<PathBuf>,
     /// Host variables copied in when set (the allowlist).
     pub env_allow: Vec<String>,
     /// Set after the allowlist, so these win.
@@ -65,7 +70,13 @@ pub struct SandboxSpec {
 }
 
 impl SandboxSpec {
-    pub fn new(sleeve: &str, generation: u64, workspace: PathBuf, home: PathBuf) -> SandboxSpec {
+    pub fn new(
+        sleeve: &str,
+        generation: u64,
+        workspace: PathBuf,
+        home: PathBuf,
+        scratch: PathBuf,
+    ) -> SandboxSpec {
         SandboxSpec {
             sleeve: sleeve.to_string(),
             generation,
@@ -77,11 +88,13 @@ impl SandboxSpec {
             },
             workspace,
             home,
+            scratch,
             ro_paths: Vec::new(),
             rw_paths: Vec::new(),
             git_dirs: Vec::new(),
             tmp_size_bytes: 1 << 30,
             masks: Vec::new(),
+            devices: Vec::new(),
             env_allow: default_env_allow(),
             env: Vec::new(),
             bwrap: PathBuf::from("bwrap"),
@@ -112,6 +125,9 @@ impl SandboxSpec {
             args.push("-p".into());
             args.push(format!("MemoryMax={}", self.limits.memory_max_bytes));
             args.extend(["-p".into(), "MemorySwapMax=0".into()]);
+            // The default stop policy SIGKILLs the whole scope after one child is OOM-killed,
+            // so a build dies with the harness and the guardrail cannot tell them apart.
+            args.extend(["-p".into(), "OOMPolicy=continue".into()]);
             args.push("-p".into());
             args.push(format!("CPUQuota={}%", self.limits.cpu_quota_percent));
             args.push("-p".into());
@@ -151,6 +167,13 @@ impl SandboxSpec {
         ]);
         a.extend(["--size".into(), self.tmp_size_bytes.to_string()]);
         a.extend(["--tmpfs".into(), "/tmp".into()]);
+        let scratch = existing(&self.scratch).ok_or_else(|| {
+            Error(format!(
+                "sandbox scratch {} does not exist",
+                self.scratch.display()
+            ))
+        })?;
+        bind(a, "--bind", &scratch, Path::new("/tmp/pt"));
 
         let runtime = existing(&runtime_dir());
         let mounts = self.mounts(runtime.as_deref())?;
@@ -159,12 +182,32 @@ impl SandboxSpec {
             match m.kind {
                 Kind::Ro => a.extend(["--ro-bind".into(), p.clone(), p]),
                 Kind::Rw => a.extend(["--bind".into(), p.clone(), p]),
-                Kind::MaskDir => a.extend(["--tmpfs".into(), p]),
+                Kind::MaskDir => a.extend([
+                    "--size".into(),
+                    MASK_SIZE_BYTES.to_string(),
+                    "--tmpfs".into(),
+                    p,
+                ]),
                 Kind::MaskFile => a.extend(["--ro-bind".into(), "/dev/null".into(), p]),
                 Kind::Runtime => {
-                    a.extend(["--perms".into(), "0700".into(), "--tmpfs".into(), p]);
+                    a.extend([
+                        "--perms".into(),
+                        "0700".into(),
+                        "--size".into(),
+                        MASK_SIZE_BYTES.to_string(),
+                        "--tmpfs".into(),
+                        p,
+                    ]);
                 }
             }
+        }
+        // After the fresh /dev and any mask, so a listed node stays visible.
+        for dev in &self.devices {
+            let p = path_arg(dev)?;
+            if !dev.exists() {
+                continue;
+            }
+            a.extend(["--dev-bind".into(), p.clone(), p]);
         }
 
         a.extend(["--chdir".into(), path_arg(&self.workspace)?]);
@@ -176,7 +219,8 @@ impl SandboxSpec {
             }
         }
         env.push(("HOME".into(), path_arg(&self.home)?));
-        env.push(("TMPDIR".into(), "/tmp".into()));
+        env.push(("TMPDIR".into(), "/tmp/pt/tmp".into()));
+        env.push(("CARGO_TARGET_DIR".into(), "/tmp/pt/target".into()));
         if let Some(rt) = &runtime {
             env.push(("XDG_RUNTIME_DIR".into(), path_arg(rt)?));
         }
@@ -355,9 +399,8 @@ pub fn default_masks(host_home: &Path) -> Vec<PathBuf> {
     .collect()
 }
 
-/// `pt-<sleeve>-g<generation>.scope` with every character outside `[A-Za-z0-9_-]` replaced.
-pub fn scope_name(sleeve: &str, generation: u64) -> String {
-    let clean: String = sleeve
+fn clean_scope(sleeve: &str) -> String {
+    sleeve
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
@@ -366,8 +409,57 @@ pub fn scope_name(sleeve: &str, generation: u64) -> String {
                 '_'
             }
         })
-        .collect();
-    format!("pt-{clean}-g{generation}.scope")
+        .collect()
+}
+
+/// `pt-<sleeve>-g<generation>.scope` with every character outside `[A-Za-z0-9_-]` replaced.
+pub fn scope_name(sleeve: &str, generation: u64) -> String {
+    format!("pt-{}-g{generation}.scope", clean_scope(sleeve))
+}
+
+/// Sleeve id in `pt-<tag>-<id>-g<generation>.scope` for this hub's `tag`.
+/// A job scope (`pt-<tag>-j<id>-gN.scope`) is not a sleeve.
+pub fn scope_sleeve_id(tag: &str, unit: &str) -> Option<u64> {
+    let rest = unit.strip_prefix("pt-")?.strip_suffix(".scope")?;
+    let (body, generation) = rest.rsplit_once("-g")?;
+    if generation.is_empty() || !generation.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let id = body.strip_prefix(&format!("{}-", clean_scope(tag)))?;
+    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    id.parse().ok()
+}
+
+/// Whether this user has a systemd bus. Scopes cannot exist without one.
+pub fn user_bus_ready() -> bool {
+    runtime_dir().join("bus").exists()
+}
+
+/// Loaded and inactive user scopes. The unit name is the first field.
+pub fn list_scope_units() -> Result<Vec<String>> {
+    let out = systemctl(&[
+        "list-units",
+        "--type=scope",
+        "--all",
+        "--no-legend",
+        "--plain",
+        "--no-pager",
+    ])?;
+    if !out.status.success() {
+        return err(format!(
+            "systemctl list-units: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let name = line.split_whitespace().next()?;
+            name.ends_with(".scope").then(|| name.to_string())
+        })
+        .collect())
 }
 
 /// The git dirs a worktree `workspace` of the repository at `repo` needs: its private gitdir and

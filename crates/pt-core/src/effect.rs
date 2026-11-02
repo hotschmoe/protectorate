@@ -23,16 +23,7 @@ impl Core<'_> {
     pub(crate) fn new_effect(&mut self, kind: EffectKind, key: String) -> EffectId {
         let id = EffectId(self.st.next_effect);
         self.st.next_effect += 1;
-        let class = match &kind {
-            EffectKind::SendPrompt { sleeve, .. } => {
-                let keyed = self
-                    .st
-                    .sleeve(*sleeve)
-                    .is_some_and(|s| s.target.harness.keyed_prompts());
-                if keyed { Class::Keyed } else { Class::Unsafe }
-            }
-            k => k.class(),
-        };
+        let class = kind.class();
         self.st.effects.insert(
             id,
             Effect {

@@ -25,6 +25,9 @@ impl Home {
     pub fn sleeve_home(&self, id: SleeveId) -> PathBuf {
         self.sleeve_dir(id).join("home")
     }
+    pub fn sleeve_scratch(&self, id: SleeveId) -> PathBuf {
+        self.sleeve_dir(id).join("scratch")
+    }
     pub fn transcript(&self, id: SleeveId) -> PathBuf {
         self.sleeve_dir(id).join("transcript.jsonl")
     }
@@ -200,8 +203,8 @@ pt_json::record! {
         pub pi_vendor_provider: String = String::new(),
         pub pi_vendor_model: String = String::new(),
         /// The local OpenAI-compatible endpoint, as a provider in Pi's own models.json, and the
-        /// model to ask it for. While either is empty, doctor finds `pi_local` (and `pi_durable`,
-        /// which uses the same model) ineligible, so nothing spawns or resleeves onto it.
+        /// model to ask it for. While either is empty, doctor finds `pi_local` ineligible, so
+        /// nothing spawns or resleeves onto it.
         pub pi_local_provider: String = String::new(),
         pub pi_local_model: String = String::new(),
         /// The same endpoint's base URL (with or without `/v1`), read for its health as the
@@ -212,6 +215,13 @@ pt_json::record! {
         /// The history index (SPEC 3.7). It is derived and holds log text, so keep it private
         /// and out of backups. Empty means `<home>/history`.
         pub history_dir: String = String::new(),
+        /// Absolute directory new project roots may be created under
+        /// (`sleeve spawn --new-path`). Empty turns that off.
+        pub projects_dir: String = String::new(),
+        /// Live indexed bytes one sleeve may keep, and one log may keep. Each doc counts its
+        /// source text plus per-doc overhead. Read once, when the hub starts. A value under
+        /// [`pt_history::MIN_BUDGET`] is a config error; exactly that floor is allowed.
+        pub history_budget_bytes: u64 = pt_history::DEFAULT_BUDGET,
         pub envoy: TargetConf = TargetConf {
             harness: "claude".to_string(),
             provider: String::new(),
@@ -226,6 +236,9 @@ pt_json::record! {
         /// them, for toolchains the hub service does not see (Go, Flutter). `~/.cargo/bin` is
         /// always considered.
         pub sleeve_path: Vec<String> = Vec::new(),
+        /// Host device nodes bound into every sleeve (`--dev-bind`) when the path exists.
+        /// A missing path is skipped and logged. Empty: only the sandbox's own `/dev`.
+        pub sleeve_devices: Vec<String> = Vec::new(),
         /// Run each incarnation in a systemd user scope (limits and cgroup.kill).
         pub scopes: bool = true,
         /// D9: sleeves Envoy may spawn in one turn an agent message started before each further
@@ -260,12 +273,25 @@ impl Config {
     pub fn load(home: &Home) -> io::Result<Config> {
         let path = home.config();
         match fs::read(&path) {
-            Ok(bytes) => pt_json::from_bytes(&bytes).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("{}: {e}", path.display()),
-                )
-            }),
+            Ok(bytes) => {
+                let c: Config = pt_json::from_bytes(&bytes).map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("{}: {e}", path.display()),
+                    )
+                })?;
+                if c.history_budget_bytes < pt_history::MIN_BUDGET {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "{}: history_budget_bytes must be at least {} bytes",
+                            path.display(),
+                            pt_history::MIN_BUDGET
+                        ),
+                    ));
+                }
+                Ok(c)
+            }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 let c: Config = pt_json::from_str("{}").expect("defaults parse");
                 let text = pt_json::ToJson::to_json(&c).to_string();

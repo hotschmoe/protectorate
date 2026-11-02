@@ -64,16 +64,12 @@ pub enum Harness {
     Antigravity,
     PiVendor,
     PiLocal,
-    PiDurable,
 }
 
 impl Harness {
     /// The headless protocol can add input to a running turn (Codex `turn/steer`, Pi `steer`).
     pub fn steers(self) -> bool {
-        matches!(
-            self,
-            Harness::Codex | Harness::PiVendor | Harness::PiLocal | Harness::PiDurable
-        )
+        matches!(self, Harness::Codex | Harness::PiVendor | Harness::PiLocal)
     }
 
     /// Antigravity is pane-only (D13).
@@ -81,9 +77,16 @@ impl Harness {
         self != Harness::Antigravity
     }
 
-    /// A prompt to pi_durable is keyed by its request id, so it may be probed and retried.
-    pub fn keyed_prompts(self) -> bool {
-        self == Harness::PiDurable
+    /// The CLI and API name.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Harness::Claude => "claude",
+            Harness::Codex => "codex",
+            Harness::Grok => "grok",
+            Harness::Antigravity => "antigravity",
+            Harness::PiVendor => "pi_vendor",
+            Harness::PiLocal => "pi_local",
+        }
     }
 }
 
@@ -105,6 +108,15 @@ pub struct Target {
 impl Target {
     pub fn valid(&self) -> bool {
         self.mode == Mode::Pane || self.harness.has_headless()
+    }
+
+    /// Why [`valid`](Self::valid) is false. The only reason is a headless harness that has none.
+    pub fn invalid_reason(&self) -> Option<String> {
+        if self.valid() {
+            None
+        } else {
+            Some(format!("{} has no headless mode", self.harness.as_str()))
+        }
     }
 }
 
@@ -241,7 +253,8 @@ pub enum ParkReason {
     Provision,
     NoTarget,
     Launch,
-    Flapping,
+    /// `Some` is the login rejected when the flap was an auth failure. Other flaps carry `None`.
+    Flapping(Option<Harness>),
     BriefUnconfirmed,
     Guard(Guardrail),
 }

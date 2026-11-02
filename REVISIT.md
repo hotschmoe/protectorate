@@ -392,18 +392,26 @@ Each entry: where, what was done, what right looks like.
   left Uncertain, because only Codex confirms an answer; the harness's `approval_decision` entry
   becomes `ApprovalResolved` for activity. Right: Acked on a confirmed decision (Codex) or the
   matching `tool_result`.
-- **No OOM exit cause**: `Exited` carries the exit code or Killed, so G4 never fires. Right: read
-  the scope's `memory.events` `oom_kill` before reporting the exit.
+- **OOM evidence can disappear with the scope** (`pt-hub`, exec.rs): an incarnation watches
+  `memory.events` for `oom_kill` while its scope exists, then checks it again at exit. A scope
+  collected before the watch attaches or before it can read an event leaves the cause unknown;
+  the hub logs that and uses the driver's exit cause rather than guessing OOM. A hub restart can
+  likewise lose evidence for an already-collected scope; a recovered scope without a driver has
+  no exit status. Right: preserve the scope counter until the hub records it.
+- **Exit 137 can be ambiguous**: a normal exit 137 after another scope process's OOM kill counts as OOM.
 - **A message sent during the post-restart probe is rejected** (pt-core `deliverable` ignores
   `Sleeve::probing`): a recovered Idle sleeve takes a `SendPrompt` before `ScopeProbed` answers,
   the executor holds no session for that g, and the Nack rejects the message (the sender is
   told). Right: `deliverable` is false while `probing`, so the message waits in the queue.
 - **Resleeve selection is quota-weighted only among `resleeve_to`** (`pt-hub`, select.rs): the
   candidates that are headless, not excluded, installed and not `ineligible` in `doctor.json` go
-  to quota selection with task size Medium and no health list; when a reading is unavailable the
-  first unknown candidate in the owner's order can win, while known-exhausted candidates cannot.
-  A new sleeve always names its harness (`SpawnSleeve.harness` is
-  required), so nothing else is chosen by quota, and G1 does not read quota yet. Right: the task
+  to quota selection with task size Medium and no health list. A candidate with no reading
+  (`unknown`: no login, reader off, or not read yet) can win, in the owner's order, after any
+  stale row that still has spare. A failed reading (`error`) cannot win, and neither can a row
+  whose windows are under the usable minimum. Readings are not journaled, so a restart spends
+  on `unknown` until the first refresh. A new sleeve always names its harness
+  (`SpawnSleeve.harness` is required), so nothing else is chosen by quota, and G1 does not read
+  quota yet. Right: the task
   size from the sleeve's history (D27), node and probe health, and an optional harness on spawn.
 - **FetchArtifact reads one file at a time and hashes it twice** (`pt-node` `read_artifact`,
   `pt-hub` `fetch_artifact`): the hub asks 4 MiB slices; at the end the node re-reads the whole
@@ -485,8 +493,8 @@ Each entry: where, what was done, what right looks like.
   tail in memory, and a full read for older ranges and for `EnvoyWait`. Fast: an offset index.
 - **Activity `since_ms` restarts with the hub**: it is tracked in the core thread, not journaled.
 - **The stale unix socket is unlinked at start** (`pt-hub`, serve.rs): only when the path is a
-  socket and the journal lock is held (no other hub can own it). This is the one file product
-  code deletes; the owner may prefer a fresh socket name per start.
+  socket and the journal lock is held (no other hub can own it). The owner may prefer a fresh
+  socket name per start.
 - **Wait and EnvoyWait hold a connection thread** for up to an hour, out of 256. Fine for a few
   clients; right if Envoy fans out: wait on the event stream instead. The idle keep-alive is
   pt-http's 60 s (a request being answered is not idle), so up to 256 idle clients can still hold
@@ -692,10 +700,10 @@ Each entry: where, what was done, what right looks like.
   restart must keep dispatch weighting.
 - **A stuck quota read can leave one worker behind** (`pt-quota`, cache.rs): publication has a
   deadline and cached rows age monotonically, but an OS-blocked file read cannot be cancelled;
-  the cache allows at most one such worker per reader and retries only after it returns. Right:
-  use a killable helper process if network filesystems make this a practical problem.
-- **pi_durable shows as pi_local in the API** (`pt-hub`, wire.rs): the experiment has no API
-  harness. Right: add one if it outlives the experiment.
+  the cache allows at most one such worker per reader and retries only after it returns. A read
+  that does finish after the deadline is applied on the next refresh, and each curl in the read
+  gets only the time still left. Right: use a killable helper process if network filesystems
+  make this a practical problem.
 - **The web app embedded is about 17.7 MB** (`crates/protectorate/build.rs`; the bundled Inter fonts
   added about 1 MB on 2026-11-02): the release binary
   is 19.4 MB with it and 1.7 MB without; with gzipped headscale and member too (25 MB) the
@@ -728,7 +736,13 @@ Each entry: where, what was done, what right looks like.
   from real dispatch history once a workspace has any.
 - **`select_target` takes `now_ms`** (`pt-quota`): the pure function needs a clock for time to
   reset, so it is the first argument. Pi with a vendor login (`PiVendor`) and Antigravity are never
-  selected (no quota subscription behind them).
+  selected, including by the resleeve fallback (no quota subscription behind them).
+- **A late quota read has no deterministic probe** (`pt-quota` cache.rs): a body that arrives
+  after the deadline is kept, stamped when the read finished, and aged from that finish rather
+  than from the refresh that collects it. A late error does not add a second backoff. Showing
+  that needs the read to outlive the deadline without a test-only flag, and the timed probe
+  flaked under load. Right: a deterministic e2e if one can be had without hooks; until then the
+  behavior is this paragraph.
 - **Quota fuzz runs wrote corpus into `fuzz/seeds`** (`pt-quota`): `cargo fuzz run <t> seeds/<t>`
   adds new inputs to the seed dir; only the hand-written seeds (named, not hex) are committed.
   Right: run with `corpus` as first dir and seeds as the second.
@@ -740,9 +754,16 @@ Each entry: where, what was done, what right looks like.
   fleet is up. Old `releases/<version>` directories are never pruned. Right: re-exec with the
   listeners and sandboxes handed over, and a health check that includes a fleet round trip.
 - **Release switches order their writes for crashes** (`pt-update` store.rs): probation and
-  `previous` are each synced before `current` changes. Trial rollback restores the snapshot,
-  syncs `current` back to the confirmed release, then records the outcome; `previous` stays
-  confirmed. Debug-only `PT_TEST_CRASH_AT` exercises selected crash points. Right: fine.
+  `previous` are each synced before `current` changes. Trial rollback restores the snapshots,
+  syncs `current` back to the confirmed release, restores the earlier `previous`, then records
+  the outcome. Debug-only `PT_TEST_CRASH_AT` exercises selected crash points. Right: fine.
+- **Hub update snapshots require the core's current single-segment journal** (`pt-journal`): the
+  core does not yet write journal snapshots or rotate segments. An update still refuses a journal
+  that already has more than one segment. Rollback replaces the whole journal directory, so a
+  trial release that rotates later is swapped out wholesale rather than segment by segment.
+  The readability check does not decode `snapshot-*` payloads until the core writes journal
+  snapshots.
+  Right: snapshot a rotating journal the same way once the core writes one.
 - **Starting a just-written binary can fail with ETXTBSY** (`pt-update`, the node supervisor):
   on Linux a file still open for writing anywhere, including a descriptor a concurrent fork
   inherited for a moment before exec, cannot be executed. The update e2e hit it once under load
@@ -849,16 +870,47 @@ Each entry: where, what was done, what right looks like.
   search needs a subagent's work.
 - **Merges re-tokenize stored text** (`pt-history`, index.rs): merging two segments decodes their
   texts and builds a new one from scratch. Fast: a k-way merge of postings, if merge time shows up.
-- **Leftover segments after a crash or failed commit** (`pt-history`, index.rs): a failure after a
-  segment is written, or a crash before obsolete merged segments are removed, can leave
-  unreferenced `seg-*` files.
-  Right: sweep unreferenced segment files at open.
+- **History keeps a sleeve's newest lines** (`pt-history`, index.rs): each sleeve and each
+  source may keep `history_budget_bytes` (default 1 GiB), counting each doc's source text
+  plus its per-doc overhead. The hub reads that key once, at start. A value under
+  1 MiB, including 0, is a config error. Exactly 1 MiB is allowed. An unsleeved
+  source drops its own oldest docs past the budget. A sleeved source does not.
+  Past a sleeve's budget, the oldest docs of that sleeve go, from any of its logs, so a new
+  session still gets indexed. Newest means ingest order. A rebuild ingests each sleeve's
+  files oldest first, by mtime. `doctor` / `hub info` name each capped sleeve (`history capped: <id>`)
+  once eviction has dropped any of its docs. The name stays under the same budget and leaves
+  when that sleeve is removed, when its sources are gone, or when a later start finds the
+  total under a raised budget. A segment is rewritten when its dead bytes are at least its
+  live bytes and some docs are still live. A sleeve at its
+  budget does not stop the others. There is no cap across all sleeves. Streaming
+  reclaim, to avoid holding about 1 GiB, is not wanted. The measured ratio is
+  1 GiB of logs to 11 MB of index.
+  Right: raise the caps if a real log needs more of the index.
 - **One source per session, decided per hub run** (`pt-hub`, history.rs): a headless session
   is in both its native log and the transcript; the native log wins once found, the transcript
   covers a session that ended without one, and the transcript waits at a live session's
-  `session_info` until its log appears. Decisions are not persisted, so a session indexed from
-  the transcript whose log appears in a later run (a native resume of a session that had none) is
-  indexed twice. Right: keep the choice per session in the index manifest.
+  `session_info` until its log appears. The choice is per sleeve, and the cursor, the drop
+  watermark and the budget share one key of sleeve plus path, so one sleeve's session id
+  does not select another's log. Discover walks a
+  harness's log root only while one of that sleeve's sessions is still undecided. A session
+  already chosen as native is left out of the transcript even when that pass did not see the
+  file, and a discover that returns a different path replaces the old one only when
+  that path is gone, and then drops its docs.
+  Decisions are not persisted, so a
+  session indexed from the transcript whose log appears in a later run (a native resume of a
+  session that had none) is indexed twice. Right: keep the choice per session in the index
+  manifest.
+- **A parent reads a child's live transcript** (`pt-hub`, api.rs `get_transcript`): `reaches`
+  is the sleeve itself or a direct child, so a parent still receives the child's full
+  transcript. That is supervision of a running child, and it is separate from history search,
+  which a sleeve credential limits to its own sleeve id (D26). Right: keep it.
+- **Pi must report the session id from argv** (`pt-drivers`, pi.rs): `get_state`'s `sessionId`
+  has to equal the id the hub passed (`--session` on resume, `--session-id` on a new session).
+  A different id is a protocol error. That becomes `Desync`, which trips G14
+  (`ProtocolDesync`, a kill). The death then follows G3: at most two resumes in ten minutes,
+  then a forced resleeve, and a third automatic resleeve within an hour parks the sleeve
+  (`ParkReason::Flapping`). A Pi that mints a new id on resume takes that path. Right: keep
+  the equality check.
 - **Native logs are found by session id under the sleeve's home** (`pt-hub`, history.rs): the
   drivers report the session id, not the log path, so the hub walks the harness's log root in the
   sleeve's private home (`pt_history::discover`), each second while a live session has no log
@@ -896,16 +948,9 @@ Each entry: where, what was done, what right looks like.
   pt-quota, pt-history and pt-update have had none, and none of the fixes has been re-reviewed.
   Right: review each before it is trusted with more than the owner's own machines.
 - **`pi_local` is unconfigured by default** (`pt-hub`, home.rs, doctor.rs): `pi_local_provider`
-  and `pi_local_model` default to empty, and doctor marks `pi_local` and `pi_durable` ineligible
+  and `pi_local_model` default to empty, and doctor marks `pi_local` ineligible
   until both are set, so the default `resleeve_to` (`["pi_local"]`) parks a sleeve that must
   resleeve. Right: offer the configured local model when there is one, or ask for it at setup.
-- **Verus phase 1 boundaries** (`pt-journal`, `pt-frame`): the journal frame, CRC logic and pure
-  recovery decision, and the node frame codec and sticky decoder errors, are verified. File I/O
-  in `open_segment`, the frame reader's I/O, and `pt-frame::msg`/`pt-json` message parsing are not.
-  The CRC proof covers the Castagnoli table and byte recurrence, not collision resistance. Verus
-  trusts its specifications for Rust's standard collections and slices, including allocation behavior.
-  Right: verify message parsing and model the file operations around the recovery decision, and
-  maintain the existing differential fuzzing.
 - **Incremental frame buffering can exceed one frame** (`pt-frame`, `Decoder::feed`): decoded
   payload length is capped at `MAX_PAYLOAD`, but a caller may feed an arbitrarily large slice,
   and the decoder copies all of it before parsing. `FrameReader` reads in 64 KiB chunks and drains
@@ -930,10 +975,6 @@ Each entry: where, what was done, what right looks like.
 - **Sleeves have no systemd user bus** (`pt-sandbox`): the runtime dir is a private empty tmpfs on
   purpose, so a project test that needs `systemd-run --user` fails inside a sleeve. Right: decide
   whether a sleeve gets its own user manager or a scope-local one, if such tests matter.
-- **Deep target dirs overflow the unix socket path limit** (sleeves, e2e tests): a sleeve's
-  workspace plus a test's own socket under `target/` can pass `sun_path` (107 bytes), so sleeves
-  pick short dirs by hand. Right: a short per-sleeve `CARGO_TARGET_DIR` or a socket dir under
-  `/tmp`, once a second case shows which.
 - **Sleeve toolchain env is guessed from the owner's home** (`pt-hub` `toolchain.rs`): PATH tail,
   cache dirs and the Flutter SDK come from conventional locations, the hub's env and
   `sleeve_path`; a cargo `rustup` auto-install, `cargo install` and a second Flutter SDK are
@@ -966,3 +1007,11 @@ Each entry: where, what was done, what right looks like.
   own process on an error reply to initialize, thread/session open or get_state, and the exit
   takes the normal unasked-exit path (StartFailed, or G2/G1 from the reply's class). A handshake
   timeout with no reply is still G5's 60 s.
+- **pi_durable removed**: removed on 2026-11-02 before it was built. The owner wants to revisit
+  it later; the design is in the git history.
+- **New-project cleanup races a concurrent claim** (`pt-hub` `settle_new_project`): after a
+  refused `--new-path`, the hub re-reads the view and checks that the directory is still the
+  empty commit it made, then `remove_dir_all`. A `--path` spawn that claims the directory in
+  that gap, or a symlink swapped in under `projects_dir`, can remove a live root. SPEC 2
+  principle 10 treats our own agents as trusted, so this is left. Right: delete through a
+  directory fd opened before the check, and hold the path against spawn until the delete ends.

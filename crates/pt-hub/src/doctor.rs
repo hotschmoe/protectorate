@@ -100,11 +100,9 @@ fn config(hub: &Hub, net: &Net) -> pt_doctor::Config {
             cfg.programs.push((name.to_string(), found));
         }
     }
-    for h in [Harness::PiLocal, Harness::PiDurable] {
-        if let Some(why) = unconfigured(hub, h) {
-            cfg.unconfigured
-                .push((wire::harness_wire(h).to_string(), why.to_string()));
-        }
+    if let Some(why) = unconfigured(hub, Harness::PiLocal) {
+        cfg.unconfigured
+            .push((Harness::PiLocal.as_str().to_string(), why.to_string()));
     }
     let (headscale, member) = lock(&hub.doctor.unpacked)
         .get_or_insert_with(|| {
@@ -183,7 +181,7 @@ fn unpark_envoy(hub: &Hub, report: &Report) {
     if s.life != Life::Parked(ParkReason::NoTarget) || hub.doctor.gated(id).is_none() {
         return;
     }
-    let name = wire::harness_wire(s.target.harness);
+    let name = s.target.harness.as_str();
     if !report.eligible(name) {
         return;
     }
@@ -245,15 +243,14 @@ pub fn refresh(hub: &Hub) {
     hub.doctor.wake.notify_all();
 }
 
-/// Why the config alone rules `h` out: the local model's harnesses need a provider and a model.
+/// Why the config alone rules `h` out: the local model needs a provider and a model.
 fn unconfigured(hub: &Hub, h: Harness) -> Option<&'static str> {
     let c = &hub.config;
-    (matches!(h, Harness::PiLocal | Harness::PiDurable)
-        && (c.pi_local_provider.is_empty() || c.pi_local_model.is_empty()))
-    .then_some(
-        "not configured: set pi_local_provider (a provider in Pi's models.json) and \
+    (h == Harness::PiLocal && (c.pi_local_provider.is_empty() || c.pi_local_model.is_empty()))
+        .then_some(
+            "not configured: set pi_local_provider (a provider in Pi's models.json) and \
          pi_local_model in config.json, then restart the hub",
-    )
+        )
 }
 
 /// Why `h` may not be used, from the report as it stands; a hub with no report yet allows a
@@ -262,14 +259,14 @@ pub fn check(hub: &Hub, h: Harness) -> Result<(), String> {
     match hub.doctor.report() {
         Some(r) => verdict(&r, h),
         None => match unconfigured(hub, h) {
-            Some(why) => Err(format!("harness {} is {why}", wire::harness_wire(h))),
+            Some(why) => Err(format!("harness {} is {why}", h.as_str())),
             None => Ok(()),
         },
     }
 }
 
 fn verdict(r: &Report, h: Harness) -> Result<(), String> {
-    let name = wire::harness_wire(h);
+    let name = h.as_str();
     let Some(entry) = r.harnesses.iter().find(|x| x.name == name) else {
         return Err(format!("doctor does not know the harness {name}"));
     };
@@ -396,6 +393,13 @@ pub fn api_report(hub: &Hub, r: Option<&Report>) -> api::DoctorReport {
         sandbox_ok: r.sandbox.bwrap.present
             && r.sandbox.bwrap.error.is_empty()
             && r.sandbox.systemd_run_user,
-        problems: r.problems.clone(),
+        problems: {
+            let mut problems = r.problems.clone();
+            let capped = hub.history.capped_sleeves();
+            if !capped.is_empty() {
+                problems.push(format!("history capped: {}", capped.join(", ")));
+            }
+            problems
+        },
     }
 }

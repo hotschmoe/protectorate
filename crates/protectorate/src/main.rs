@@ -53,13 +53,13 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   version | --version
   hub info | hub state
   hub update [--check] [--channel stable|dev] [--version TAG] | hub update --rollback
-  hub probation                     run by the unit before each start, without the API
+  hub probation [--retry-rollback]  run by the unit before each start, without the API
   doctor [--refresh]
   harness update [PROGRAM...]       claude, codex, grok, pi; none means every installed one
   harness login <claude|codex|grok|pi> [-- ARGS...]
                                     the sleeves' shared login, on this terminal, without the API
   sleeve list | sleeve show <sleeve>
-  sleeve spawn <name> (--path DIR | --parent SLEEVE [--readonly]) [--harness H]
+  sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
         [--provider P] [--model M] [--effort E] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
   sleeve send <sleeve> <text...> [--steer]
   sleeve interrupt|stop|rm|takeover <sleeve>
@@ -84,7 +84,7 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   history search <query...> [--mode all|any|phrase] [--sleeve S]... [--harness H]
         [--session ID] [--role user|assistant|tool-call|tool-error|compaction]...
         [--since 7d|MS] [--until 7d|MS] [--limit N]
-  history read --doc ID | history read <session> [--from TURN] [--to TURN]
+  history read --doc ID | history read <session> [--from TURN] [--to TURN] [--after DOC]
   device list | device add <name> | device pair <code> | device revoke <id>
   mcp --envoy [--token-file PATH] [--as NAME]
 
@@ -110,6 +110,7 @@ const SWITCHES: &[&str] = &[
     "--envoy",
     "--check",
     "--rollback",
+    "--retry-rollback",
     "--refresh",
     "--all",
     "--no-wait",
@@ -340,10 +341,16 @@ fn run(a: &Args) -> Result<(), Fail> {
                 option_env!("PROTECTORATE_BUILD_VERSION").unwrap_or("dev")
             );
             println!("{}", net_line());
+            println!("hub-rollback: 1");
             return Ok(());
         }
         "hub" if a.words.get(1).map(String::as_str) == Some("probation") => {
-            let line = pt_hub::probation_prestart(&home(a)).map_err(Fail::Other)?;
+            let line = if a.has("--retry-rollback") {
+                pt_hub::retry_probation_restore(&home(a))
+            } else {
+                pt_hub::probation_prestart(&home(a))
+            }
+            .map_err(Fail::Other)?;
             println!("protectorate hub probation: {line}");
             return Ok(());
         }

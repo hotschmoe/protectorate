@@ -55,14 +55,15 @@ CLI on the hub machine (section 3.1).
    - every one is pinned exactly (`=x.y.z`, a Go tag plus go.sum, an exact pubspec version), and
      nothing updates without a hand-picked bump;
    - where a dependency is large or only partly needed, we fork it under our control and trim it;
-   - no Python or Node in the product (the pi_durable experiment is the one exception, D14);
+   - no Python or Node in the product;
    - the allowed list and its reasons live in `DEPENDENCIES.md`, and `make check` fails on a crate
      that is not listed.
 7. **LAN only.** `protectorate.hotschmoe.com` resolves and answers only on the LAN and over the
    owner's WireGuard. WAN access is a later, separate design.
 8. **Repo rules carry over** from `dev-hotschmoe` CLAUDE.md: no emojis, full migrations with no
    shims, real-binary e2e and fuzz tests only, no hand-edited generated code.
-9. **Verus in narrow scope** under the owner's eight rules (section 10).
+9. **No Verus** (D40, section 10). Tests are proportionate: real-binary e2e where behaviour broke
+   or is security-relevant, and fuzz seeds that earn their keep.
 10. **Threat model: outsiders, not our own agents** (owner, 2026-11-01; revisit as needed). The
     one fear is people outside the owner's network gaining access to it. Agents breaking things
     on the owner's machines (deleted directories, broken settings, a bad node job) is accepted:
@@ -169,9 +170,30 @@ crash, every incarnation goes to Recovering and resumes natively.
   generation number `g`. Mode (pane or headless), harness, provider and model belong to the
   incarnation, so a resleeve can change all of them.
 - **Tree rules:**
-  - One root per directory, never two. Writable claims never overlap.
+  - One root per directory, never two. Writable claims never overlap. A spawn that overlaps one
+    is refused with the sleeve and the claim it overlaps.
   - Children are depth 1, at most 8 live per root. A child gets its own git worktree and branch by
     default, or a read-only view of the root.
+  - **New project roots.** The owner, a paired device and Envoy may
+    `sleeve spawn <name> --new-path DIR`. A sleeve may not (it spawns only its own children), and
+    a vendor agent cannot call `SpawnSleeve`. The hub creates `DIR` and `git init`s it on branch
+    `main` with one empty commit (the owner's `user.name` and `user.email`, or `protectorate`
+    when a field is unset), then claims it as a root. `DIR` must be a new path strictly inside
+    `projects_dir` (`config.json`; empty, the default, turns this off, and `/` is refused): a
+    relative path under that directory, or an absolute path inside it, including one written
+    through the configured spelling when `projects_dir` is a symlink. No `.` or `..` component,
+    no symlink under it, and not inside the hub's home. A trailing slash is accepted. A path
+    the hub cannot see is refused with `the hub cannot see DIR`. A directory a live root holds
+    is refused with that sleeve's name. A repository with no commit is refused and told to
+    remove it or to commit before `--path`, because `--path` would adopt a root that cannot
+    branch children. Any other directory that already exists is left for `--path` to adopt.
+    A name already in use, a name the core would refuse, or a harness with no headless mode,
+    is refused before the directory
+    is created and before the D9 gate, so that refusal does not count. A spawn that reaches
+    the gate does. A refused spawn removes the directory only when no live claim overlaps it
+    and it is still that
+    empty commit; otherwise the directory stays and the error says so. A spawn the core does not
+    answer, or whose reply is lost, keeps the directory without that check.
   - Stopping or removing the root stops every child in the same step. A root crash, resume,
     resleeve or park leaves the children running.
   - Native subagents run inside the incarnation, and we don't manage them.
@@ -179,11 +201,18 @@ crash, every incarnation goes to Recovering and resumes natively.
   agent):
   - user, mount, PID, IPC and UTS namespaces;
   - the host root bound read-only, with the workspace and a private home writable;
-  - a sized `/tmp`;
+  - a sized `/tmp`, with disk-backed per-sleeve build and temporary scratch under the hub home,
+    mounted at a short path and removed when the sleeve is removed; launch refuses scratch on
+    tmpfs or ramfs;
+  - host device nodes named in `sleeve_devices` (for example `/dev/aipu` and `/dev/mali0`)
+    bound with `--dev-bind` when the path exists; a missing path is skipped and logged, and
+    the sleeve still starts;
   - tmpfs masks over the hub's state, `~/.ssh` and the owner's own credentials; every
     harness's shared hub login (`<home>/logins/`) and the owner's cargo registry, Go and pub
     caches bound read-write;
-  - a systemd scope per incarnation with limits and `cgroup.kill`, plus the orphan reaper.
+  - a systemd scope per incarnation with limits, `OOMPolicy=continue` and `cgroup.kill`,
+    plus the orphan reaper. A child the kernel kills for memory does not stop the scope.
+    The guardrail requires a scope OOM kill and a launcher exit by SIGKILL or code 137.
 
   Cut from today's sandbox: the network namespace, the egress proxy, cache overlays, nested cgroup
   delegation and the pin-approval gate. Sleeves share the host network and the owner's download
@@ -197,7 +226,6 @@ crash, every incarnation goes to Recovering and resumes natively.
 | Grok Build | headless `grok agent stdio` (ACP, with `--always-approve` when unsupervised), or pane |
 | Antigravity CLI | replaces Gemini CLI, which is dropped (D35). Pane only, until approvals work headless and plan policy is clear. A standalone binary is required; if it only ships through npm, it waits |
 | Pi, two sleeve kinds | headless `pi --mode rpc`, run as the standalone binary so the hub needs no Node. **`pi_vendor`** offers any login or API key Pi supports, from Pi's own provider catalog: xAI, OpenAI (ChatGPT sign-in), DeepSeek, Kimi/Moonshot, GLM (Z.ai), MiniMax, Qwen, OpenRouter and more. The sleeve picks provider and model. **`pi_local`** points at a local OpenAI-compatible endpoint. Anthropic through Pi bills as extra usage and is labelled so. Gemini and Antigravity logins are not offered (removed upstream, ban risk) |
-| Pi Durable | a time-boxed experiment: a ~500-line TypeScript bridge on `pi/durable` (Node >= 22.19), adopted only if it passes the kill tests in the sleeves report 1.7 |
 
 - **Default tools:** none beyond what each harness ships, plus our CLI mounted in the sandbox.
   Native tools are not replaced.
@@ -217,8 +245,7 @@ crash, every incarnation goes to Recovering and resumes natively.
   `pi update self`. A harness without one is updated by its official installer, re-run.
 - **Pi is a standalone binary, not an npm package** (D34), updated with `pi update self`. If that
   command can't update a standalone install, the hub fetches Pi's GitHub release itself, verifies the
-  checksum and stages it beside the old one. Pi Durable is the one path that needs Node, and Node is
-  accepted for it (D14).
+  checksum and stages it beside the old one.
 - **Codex** runs as its standalone release binary, not through the npm wrapper.
 
 ### 3.5 Nodes
@@ -283,6 +310,41 @@ the same dispatch code. There are no external sources such as email, calendar or
   - What it does: a tokenizer for paths and identifiers (camelCase and snake_case parts),
     positional postings, BM25, all-terms and phrase queries, and filters by sleeve, harness,
     session, time and role. Ingest tails each log by byte offset; small segments are merged.
+    A source's cursor, drop watermark and budget share one key, the sleeve and the path.
+    An index that still uses an older key fails to open and is rebuilt from the logs. A
+    native session id selects a log only under that sleeve's home. A sleeve credential
+    searches and reads only docs tagged with its own sleeve id (D26). Envoy and the owner
+    are unrestricted. A parent still reads a child's
+    live transcript (`get_transcript`, through `reaches`): that is supervision of a running
+    child, separate from this history search.
+    `history read` applies the caller's sleeve scope before it copies text, then stops at 200
+    docs or 8 MiB of source text and says when the range was cut. The next page starts after
+    the last doc id (`--after`). Tool paths are kept to the
+    same budget as tool text (512 bytes). `history_budget_bytes` in the owner config
+    (default 1 GiB) is read when the hub starts. A value under 1 MiB, including 0, is
+    refused and the hub does not start. Exactly 1 MiB is allowed. A missing key keeps
+    the default. Each sleeve has that budget, and so
+    does each source. The budget counts each doc's source text plus a per-doc overhead (its
+    session, source, tool, paths, and a fixed header). An unsleeved source drops its own
+    oldest docs once it is past the budget. A sleeved source does not: past a sleeve's
+    budget, the oldest docs of that sleeve are dropped, whichever of its logs they came
+    from. Newest means ingest order. A rebuild ingests each sleeve's log files oldest
+    first, by mtime, so an older log is not ranked above a newer session. The transcript
+    counts as the newest file. A full sleeve does not
+    stop the others.
+    `doctor` and `hub info` report `history capped: <sleeve id>` once eviction has dropped
+    any of that sleeve's docs. The name stays while the sleeve is under the same budget.
+    It leaves when that sleeve is removed, when its sources are gone, or when a later start
+    finds the total under a raised budget. The set is filled when the index opens. A commit writes the manifest when the index changed. It removes
+    segments whose docs are all dead in their own manifest update, and deletes those files
+    only after that rename. It then rewrites a segment whose dead bytes are at least its
+    live bytes, and some docs are still live, in a later manifest update; the old file goes
+    after that rename. A rewrite failure leaves the
+    dead-segment removal in place. A failed commit removes the segment files that attempt
+    created, and the hub retries it with backoff. Opening an index removes segment files the
+    manifest does not name, warns when it does that because the manifest is missing, and
+    warns and still opens when reclaim fails. A reclaim failure after a durable commit is
+    the same warning, and the commit stands.
   - Measured on this hub (2026-11-01, release build): 1 GiB of the newest real logs ingested
     in 1.9 s (540 MB/s, 48 MB peak RSS) into an 11 MB index; queries take 0.05 to 0.7 ms.
   - Fallback: `rusqlite` with FTS5, if our index proves insufficient (REVISIT.md).
@@ -317,7 +379,9 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   - interrupt unresponsive, protocol desync.
 - **Guardrail actions:** interrupt, resume (at most twice in 10 min), resleeve, or park. Automatic
   resleeves go to headless mode, walking the sleeve's ordered `resleeve_to` list (default
-  `[pi_local]`). A third resleeve within an hour parks the sleeve.
+  `[pi_local]`). A third resleeve within an hour parks the sleeve. When that trip is an auth
+  failure, the park reason names the login that was rejected (`flapping (<harness> login rejected)`).
+  Any other flap stays `flapping`. The hourly limit itself is unchanged.
 - **Auto-continue:** after a native resume of a headless turn that a crash ended, the core sends
   one short continuation prompt, keyed to that owner turn. A relaunch that is a fresh session,
   because that incarnation never acked a prompt, does not continue: the owner and the parent
@@ -396,10 +460,46 @@ straight from GitHub releases, on the stable or dev channel, as today.
 - **Hub:**
   - `protectorate hub update [--version]`, or the app's UPDATE key, downloads the release and stages it
     in `releases/<version>/`.
-  - Headscale's database is snapshotted first, because its migrations are one-way.
+  - Before switching, the hub snapshots the journal at a durable batch boundary and then, if the
+    fleet is running, headscale's database. The journal snapshot is the earlier of the two: a
+    node that enrolls between them is in the restored headscale database and absent from the
+    restored journal. Headscale's migrations are one-way. The probation record stores
+    `next_sleeve` from that journal snapshot.
   - The hub re-execs in place (D17), so sleeves keep running. The previous release stays on disk.
-  - If the new hub fails its health check within 2 minutes, a supervisor wrapper switches the
-    `current` pointer back and restarts it.
+  - If the new hub fails its health check within 2 minutes, prestart (the previous release)
+    restores the snapshots before switching `current` back. The whole journal directory is
+    replaced. Journal events after the journal snapshot and headscale changes after its snapshot
+    are lost. Sleeve directories with an id at or above the recorded `next_sleeve` move to
+    `<home>/update-aside/<time>-<pid>/` and are not deleted. Worktree checkouts and gitdirs
+    stay; prestart lists a sleeve that recorded `worktree.path` and stops those sleeves'
+    scopes. Remove a leftover checkout and run `git worktree prune` in the root repository.
+    Until then the checkout holds `pt/<name>`, so a new worktree for that name is refused.
+    The branch survives, and a new sleeve with the same name starts from those commits once
+    the checkout is gone. A new worktree does not adopt a path that already exists.
+  - Manual `hub update --rollback` runs the restore offline before switching. It always restores
+    headscale when there is a snapshot. It keeps the journal when the previous release can decode
+    every intact frame; a torn final frame is ignored, the same way the journal opens. Otherwise
+    it restores the journal snapshot and loses events after that snapshot. There is no separate
+    event-tag declaration: the previous binary's codec is the decision, and prestart must be that
+    binary. A rollback without a matching journal or required headscale snapshot is refused. A
+    new update and a manual rollback both require snapshot-aware rollback in the target release,
+    which runs prestart.
+  - A restore that fails before any live file is replaced keeps the trial release. The next start
+    shows the error on `hub info` and raises an alarm. Repair the snapshot, stop the hub, and
+    retry with `hub probation --retry-rollback`. That retry keeps a manual rollback request.
+    A restore that fails after a live file was replaced does not keep the trial: prestart exits
+    and the next prestart continues the restore. Prestart writes `releases/rollback-open`,
+    synced, before that first change and removes it only when the rollback finishes. A later
+    failure while that file remains continues the restore, including a validation failure
+    that replaces nothing this time and a manual rollback of a release that was already
+    confirmed. The marker applies while that probation names the current release. A new
+    trial is refused while the marker exists. Prestart takes the journal lock before
+    finishing an interrupted journal swap, when the journal directory
+    is present, and before judging. While the hub holds that lock, `hub probation` prints
+    the probation state and exits 0. It does not judge, restore, or count a start.
+    `--retry-rollback` refuses while the hub holds the journal or headscale still has the
+    database or its socket open. If the trial binary itself cannot start, service needs the repair: neither an
+    unreadable journal nor a failed binary can serve.
 - **Nodes, triggered by the hub:**
   - The hub sends `Update(version)` over its own connection. The node downloads the release from
     GitHub itself: outbound to GitHub, not to the hub.
@@ -431,7 +531,7 @@ backup that recovers a dead hub moves a live one.
 2. **Export:** `protectorate hub export`.
    - It quiesces every sleeve at a turn boundary (the resleeve machine's Quiescing, without the
      relaunch) and stops headscale.
-   - It writes a `.pbackup` (Verus-checked format), and pushes or bundles every workspace's
+   - It writes a `.pbackup`, and pushes or bundles every workspace's
      unpushed branches.
    - The old hub then writes a `migrated` tombstone and refuses to start headscale again. Two
      control servers with the same noise key would split the fleet.
@@ -469,6 +569,61 @@ quota, health)` is pure code, using fresh data only. It weighs projected unused 
 called at spawn and at guardrail time. Code derives the task-size class, Envoy may nudge it one
 class, and code clamps it (D27).
 
+A stale reading keeps the windows of its last good fetch. The resleeve fallback treats those
+windows like a fresh reading's: under the task's usable minimum the subscription is exhausted,
+and at or above it the fallback may still choose that harness, ahead of a candidate with no
+reading. A stale window that is under the minimum and names no reset stops blocking once the
+row is older than that window's length, or five hours when the length is unknown. It is then
+an unknown reading and may be spent. `select_target` itself stays on fresh rows. The local endpoint has no percent
+windows. A fresh reading may be chosen; a stale or failed one may not. A local row that was
+never read may still be spent.
+
+A candidate with no reading may still be spent. That is `unknown`: no login file, the reader
+is not running, the login is expired, or the hub has not read yet (including just after a
+restart; readings are not journaled). For a Claude, Codex, or Grok OAuth login, a rejection
+(HTTP 401) or a missing usage scope is the same, because that CLI refreshes the login and can
+only do so if a sleeve launches. The scope case is the provider's structured error: `error`
+is `insufficient_scope` or `invalid_scope`, or `error` is an object whose `type` or `code` is
+`permission_error`, `insufficient_scope`, or `invalid_scope`. A 403 whose text merely says
+permission is a failed reading, and so is a wrong key on the local endpoint. The harness CLI
+refreshes the token; the reader does not. A
+failed reading may not. That is `error`: the body did not parse, some other HTTP status came
+back, or the
+read timed out and left no earlier windows. The park reason names what blocks: a failed
+reading, a stale row that is short of quota, or a local endpoint whose last reading is stale
+or failed. A fresh row under the minimum still says it is short of fresh quota. A window whose reset time has passed still blocks while its
+remaining percent is under the task minimum. That grace is the cache's stale window, ten
+minutes, and it is the only such constant. Fetched before the reset, it lasts that long
+after the reset. Fetched with the reset already behind, but by less than that, it
+lasts that long after the fetch: a body that says the window is full and the reset was a few
+seconds ago is still that limit. A stamp already long past when the row was fetched counts as
+reset, and so does a window once the grace has ended. The fallback may then spend the row
+because its windows have reset. That is not a missing reading. A reset at or before the epoch
+is no reset time, and the percent still counts. Model-scoped Claude windows (`wk <name>`) stay on the quota row
+and gate a candidate of the same family (opus, sonnet, haiku), ignoring case and version
+(`Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus). `opusplan`
+counts as both Opus and Sonnet, so that model is gated by either cap, and a cap whose name
+contains `opusplan` gates either model. A candidate with no model, and a candidate whose
+model is `default`, are not blocked by a model cap. On the fresh pick, a cap under the usable
+minimum only ranks that candidate below an otherwise equal one that is not under it. When that
+candidate is chosen or parked, the reason names the tightest such cap as `; <label> under the minimum`.
+A scope that is not one of those families still gates when its name is at least three letters
+and the model name contains it. The account windows always gate
+(`5h`, `wk`), as does the single credit or rate-limit window of the other subscriptions. A
+row whose only windows are caps for other models is an unknown reading for that candidate
+and may be spent. `pi_vendor` and Antigravity have no
+meter and are never chosen on this path. A candidate list that is only those is not reported
+as short of quota. The pace projection uses a vendor window length when
+the reading included one (Codex stores `limit_window_seconds`). The label stays what is shown
+and can be coarser (`119` seconds is `1m`). A minute label is still a length when the reading
+did not name one.
+
+A read that finishes after its deadline is kept and published on the next refresh, stamped
+with the time the read finished. Its age counts from that finish, not from the refresh that
+collects it, so a late body does not look new. A late failure does not count again toward the backoff. Each
+request inside that read gets only the time still left, so a follow-up call cannot discard a
+body that already arrived.
+
 **Spare quota (PROBLEMS P6).** A code rule triggers: projected unused capacity at reset is above X%
 and no high-priority work is queued. When it fires, the next backlog item goes to that harness.
 Envoy picks which item; code decides when and where. Work on public repos lands in a review inbox
@@ -502,30 +657,19 @@ quota each have their own screen. A taken-over terminal (xterm.dart) is reached 
 chat, never as the default view. The ten rules and an ASCII layout are in the
 nodes report section 7.
 
-## 10. Verus
+## 10. Verus (removed)
 
-The owner's rules apply as written (see the session doc), with one proposed deviation that needs
-the owner's approval (D19): FFI `unsafe` in the sandbox and presence crates.
+Phase 1 (D28) proved the journal codec, its torn-tail recovery rule, CRC-32C and the node frame
+codec. The proofs confirmed code that was already correct and found nothing the fuzz targets and
+e2e tests had not, so they were removed on 2026-11-02 (D40). The owner (verbatim): "we can also
+take it easy on the fuzz testing - were not building a rocket for nasa (this goes the same for
+verus, if we're not actually finding much we can just rip it out and update rust toolchain)".
 
-Verus is phased (D28), so its cost is measured before it spreads:
-
-| Phase | Modules | Why |
-|---|---|---|
-| 1 | journal codec and torn-tail recovery; node frame codec | the hub's durability rests on the first; the second is the only parser fed by hostile machines |
-| 2 | PTY ring and attach offsets; harness line framer; session-log tail reader with its UTF-8 clipping | offset arithmetic with no reference implementation |
-| 3, if phase 1 and 2 proofs stay cheap to maintain | `SHA256SUMS`/manifest parser; artifact `xfer` bounds; Connect streaming envelope; backup format | untrusted or long-lived bytes, but small and well fuzzed already |
-| dropped | presence window math; audit-chain walk; brief budget arithmetic | a `saturating_sub` or a loop over a list; fuzzing and overflow checks are enough |
-
-**Excluded:** the state machines (the tables are a perfect reference), per-harness JSON extractors
-(differential fuzzing against real logs instead), UI and glue.
-
-**Build shape:**
-- Specs go in `cfg_attr(verus_keep_ghost, verus_spec(..))`, with `vstd` an optional feature, so plain
-  cargo builds without Verus.
-- `verify.sh` runs a pinned Verus release at `--rlimit 20`, then again at `--rlimit 10`.
+What stays:
 - `overflow-checks = true` in release for the parser and writer crates.
-- `#![forbid(unsafe_code)]` everywhere except Verus-proved helpers and the explicitly exempted OS
-  FFI crates (sandbox, presence).
+- `#![forbid(unsafe_code)]` everywhere except the explicitly exempted OS FFI crates (sandbox,
+  presence; D19).
+- No pinned Rust toolchain: the workspace builds on the current stable release.
 
 ## 11. Salvage map
 
@@ -535,7 +679,7 @@ Verus is phased (D28), so its cost is measured before it spreads:
 | `4f199cc^` (before the fleet removal) | Rust node inventory and sample collectors, Windows runner account |
 | `bc9b87a^` (Go tree) | lessons only: tailnet supervisor, DERP cert fix, disco ping on start, headscale backup gate |
 | `references/herdr` | screen manifests (Apache-2.0), debounce, badges, the wait semantics, fd handoff on update |
-| `references/agent` | uncertain-effect states, record before dispatch, steer vs queue, the pi_durable bridge shape |
+| `references/agent` | uncertain-effect states, record before dispatch, steer vs queue |
 | `references/mainplane` | continue-by-retrieval as the future compaction model; fixed member UDP port |
 | upstream | headscale v0.29.7, tailscale.com via headscale's go.mod |
 | `references/dsh-superagent-prototype`, `references/autoresearch`, `references/rea` | nothing for now: reading material only (owner, 2026-11-01) |
@@ -599,8 +743,8 @@ These rules override the design reports wherever the reports say otherwise. The 
     LAN and write the shared download caches. The scoped PAT is limited to the repos that sleeve
     needs. If hostile code is ever in scope, D12 must be revisited before that work runs.
 12. **Count runtime processes as well as deliverables.** A running hub is three processes: hub,
-    headscale and member. A node is two: agent and member. The pi_durable experiment adds Node and
-    a bridge. Any further runtime process needs an explicit decision.
+    headscale and member. A node is two: agent and member. Any further runtime process needs an
+    explicit decision.
 
 ## 12b. Corrections from adversarial review (Grok, 2026-11-01)
 
@@ -682,7 +826,6 @@ All decided. The owner's answers are recorded in `docs/sessions/2026-11-01-decis
 | D11 | Windows node as LocalSystem plus runner account | yes |
 | D12 | Cut the sandbox network namespace and egress proxy | yes |
 | D13 | Antigravity pane-only until headless approvals work | yes |
-| D14 | Node.js on the hub for the pi_durable experiment | yes |
 | D15 | Resleeve target: ordered list per sleeve, default `[pi_local]` | yes |
 | D16 | Guardrail thresholds as listed; no auto-revert on forbidden-path edits | yes |
 | D17 | Hub updates by re-exec in place, keeping sleeves alive | yes |
@@ -708,6 +851,7 @@ All decided. The owner's answers are recorded in `docs/sessions/2026-11-01-decis
 | D37 | Third-party dependencies | as few as possible, pinned exactly, forked and trimmed when large; listed in `DEPENDENCIES.md` |
 | D38 | Primary interface | chat with Envoy; sleeve chats next; terminal takeover is last resort |
 | D39 | Hub-to-node transport: headscale and member, or plain SSH | **headscale for now**; SSH logged in REVISIT.md (`serve --stdio` stays as a tested path) |
+| D40 | Keep Verus past phase 1 | **removed** 2026-11-02: the proofs found nothing fuzzing and e2e had not; frees the Rust toolchain |
 
 ## 14. Build order
 
@@ -725,8 +869,7 @@ nothing has to stay compatible with it.
 4. **Network:** the `go/` module, embedded headscale and member, Traefik routes, scan to join, and
    inventory and presence.
 5. **Jobs:** node jobs, cross-arch CI, `doctor`.
-6. **Hardening:** the first Verus modules (journal codec, node frame codec), the stdio
-   `mcp --envoy`, terminal takeover, the remaining harnesses, and the pi_durable experiment.
+6. **Hardening:** the stdio `mcp --envoy`, terminal takeover and the remaining harnesses.
 
 ## 15. Implementation choices (2026-11-01)
 
@@ -749,13 +892,13 @@ shortcut is also in `REVISIT.md`.
   | `pt-json` | JSON value, parser, writer, `ToJson`/`FromJson`; insertion-ordered objects so output is deterministic |
   | `pt-hash` | SHA-1 (WebSocket handshake), SHA-256 (release sums), CRC-32C (journal) |
   | `pt-http` | HTTP/1.1 server on TCP and unix sockets, WebSocket server, a small blocking client for loopback and unix sockets |
-  | `pt-journal` | the append-only journal: length, CRC and payload frames, group-commit fsync, torn-tail recovery (Verus phase 1) |
+  | `pt-journal` | the append-only journal: length, CRC and payload frames, group-commit fsync, torn-tail recovery |
   | `pt-core` | the pure state machines and `apply`, with no I/O |
   | `pt-api` | API types and the method table, declared once in a macro; `pt-apigen` writes the Dart models from it |
   | `pt-drivers` | headless harness adapters (Claude stream-json, Codex app-server, Grok ACP, Pi rpc) into one event stream |
   | `pt-history` | the history index (3.7): native session logs and hub transcripts into checksummed segments with BM25, in place of SQLite FTS5 |
   | `pt-sandbox` | the bwrap argument builder and systemd scopes |
-  | `pt-frame` | the hub-node frame codec (Verus phase 1) |
+  | `pt-frame` | the hub-node frame codec |
   | `pt-node` | inventory, samples, presence and jobs (the node side) |
 
   Each is fuzzed against a reference where one exists: `serde_json`, `sha2` and `crc32c` are

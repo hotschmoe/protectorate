@@ -21,6 +21,7 @@ pt-history = { path = "../pt-history" }
 pt-http = { path = "../pt-http" }
 pt-journal = { path = "../pt-journal" }
 pt-json = { path = "../pt-json" }
+pt-node = { path = "../pt-node" }
 pt-quota = { path = "../pt-quota" }
 pt-sandbox = { path = "../pt-sandbox" }
 pt-sys = { path = "../pt-sys" }

@@ -24,9 +24,22 @@ use crate::wire;
 pub const ENVOY: &str = "envoy";
 
 /// One input to the core thread. Commands carry the channel their `Intent::Reply` goes to.
-pub struct Input {
-    pub kind: EventKind,
-    pub reply: Option<Sender<Reply>>,
+#[allow(clippy::large_enum_variant)]
+pub enum Input {
+    Event {
+        kind: EventKind,
+        reply: Option<Sender<Reply>>,
+    },
+    Snapshot {
+        dir: PathBuf,
+        reply: Sender<Result<JournalSnapshot, String>>,
+    },
+}
+
+/// A journal copied at a batch boundary, and the sleeve id the core would hand out next.
+pub struct JournalSnapshot {
+    pub at_ms: u64,
+    pub next_sleeve: u64,
 }
 
 /// The read-only snapshot published after each journaled batch.
@@ -77,6 +90,7 @@ pub struct Hub {
     pub envoy_turn: Mutex<EnvoyTurn>,
     pub uid: u32,
     pub started_ms: u64,
+    pub info: Mutex<pt_api::HubInfo>,
     pub owner_home: PathBuf,
     pub fault: Option<Fault>,
     pub bus: Bus,
@@ -118,11 +132,15 @@ impl Hub {
     ) -> Hub {
         let transcripts = Transcripts::new(home.clone());
         let jobs = JobStore::new(home.jobs());
-        let history = crate::history::History::open(&if config.history_dir.is_empty() {
-            home.history()
-        } else {
-            PathBuf::from(&config.history_dir)
-        });
+        let history = crate::history::History::open(
+            &if config.history_dir.is_empty() {
+                home.history()
+            } else {
+                PathBuf::from(&config.history_dir)
+            },
+            config.history_budget_bytes,
+        );
+        let started_ms = now_ms();
         Hub {
             home,
             config,
@@ -130,7 +148,16 @@ impl Hub {
             devices,
             envoy_turn: Mutex::new(EnvoyTurn::default()),
             uid,
-            started_ms: now_ms(),
+            started_ms,
+            info: Mutex::new(pt_api::HubInfo {
+                name: "protectorate".into(),
+                version: pt_version::VERSION.into(),
+                started_at_ms: pt_api::EpochMs(started_ms),
+                inventory: None,
+                sample: None,
+                history_capped: Vec::new(),
+                restore_error: None,
+            }),
             owner_home,
             fault: Fault::from_env(),
             bus,
@@ -158,7 +185,7 @@ impl Hub {
 
     /// Feeds an event to the core without waiting for its effect.
     pub fn submit(&self, kind: EventKind) {
-        if self.input.send(Input { kind, reply: None }).is_err() {
+        if self.input.send(Input::Event { kind, reply: None }).is_err() {
             debug!("core is gone; dropped an event");
         }
     }
@@ -168,7 +195,7 @@ impl Hub {
     pub fn command(&self, kind: EventKind, timeout: Duration) -> Result<Reply, CommandError> {
         let (tx, rx) = mpsc::channel();
         self.input
-            .send(Input {
+            .send(Input::Event {
                 kind,
                 reply: Some(tx),
             })
@@ -177,6 +204,15 @@ impl Hub {
             mpsc::RecvTimeoutError::Timeout => CommandError::Timeout,
             mpsc::RecvTimeoutError::Disconnected => CommandError::Down,
         })
+    }
+
+    pub fn snapshot_journal(&self, dir: PathBuf) -> Result<JournalSnapshot, String> {
+        let (tx, rx) = mpsc::channel();
+        self.input
+            .send(Input::Snapshot { dir, reply: tx })
+            .map_err(|_| "core is down".to_string())?;
+        rx.recv()
+            .map_err(|_| "core stopped while snapshotting the journal".to_string())?
     }
 
     /// The scope unit name of incarnation `g` of a sleeve on this hub.

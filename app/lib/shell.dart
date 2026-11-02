@@ -32,6 +32,7 @@ const _nav = <(Screen, String, Glyph, String, LogicalKeyboardKey)>[
 Screen _home(Screen s) => switch (s) {
   Screen.sleeve => Screen.sleeves,
   Screen.node => Screen.nodes,
+  Screen.hub => Screen.nodes,
   _ => s,
 };
 
@@ -206,6 +207,7 @@ class _ShellState extends State<Shell> {
         if (s != null) _openSleeve(s.id);
       case 'n' || 'node' || 'nodes':
         if (arg.isEmpty) return _go(Screen.nodes);
+        if (arg.toLowerCase() == 'hub') return _go(Screen.hub);
         final n = _match(_state.nodes, (x) => x.name, arg, 'node');
         if (n != null) _openNode(n.id);
       case 'a' || 'appr' || 'approvals':
@@ -294,6 +296,7 @@ class _ShellState extends State<Shell> {
               _go(switch (_screen) {
                 Screen.sleeve => Screen.sleeves,
                 Screen.node => Screen.nodes,
+                Screen.hub => Screen.nodes,
                 _ => Screen.envoy,
               });
             },
@@ -333,7 +336,7 @@ class _ShellState extends State<Shell> {
             children: [
               _PhoneBar(
                 title: _title(),
-                back: _screen == Screen.sleeve || _screen == Screen.node,
+                back: _screen == Screen.sleeve || _screen == Screen.node || _screen == Screen.hub,
                 onMenu: () => _scaffold.currentState?.openDrawer(),
                 onBack: () => _go(_screen == Screen.sleeve ? Screen.sleeves : Screen.nodes),
                 onCommand: () => _setPalette(true),
@@ -396,6 +399,7 @@ class _ShellState extends State<Shell> {
     Screen.approvals => 'Approvals',
     Screen.nodes => 'Nodes',
     Screen.node => _nodeId == null ? 'Node' : (_state.node(_nodeId!)?.name ?? 'Node'),
+    Screen.hub => 'hub',
     Screen.quota => 'Quota',
     Screen.events => 'Mail and events',
     Screen.settings => 'Settings',
@@ -455,6 +459,14 @@ class _ShellState extends State<Shell> {
               ? null
               : Pill(n.online ? 'Online' : 'Offline', color: n.online ? p.ok : p.alarm, dot: true),
           child: NodeDetail(nodeId: _nodeId ?? ''),
+        );
+      case Screen.hub:
+        return Pane(
+          title: 'hub',
+          back: () => _go(Screen.nodes),
+          status: Pill(widget.hub.connected ? 'Online' : 'Offline',
+              color: widget.hub.connected ? p.ok : p.alarm, dot: true),
+          child: const NodeDetail(),
         );
       case Screen.quota:
         final stale = _state.quotas.where((q) => q.reading != QuotaReading.ok).length;

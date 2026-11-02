@@ -15,7 +15,9 @@ use crate::event::{
 use crate::{DriverError, Protocol, SpawnSpec};
 
 pub(crate) struct Pi {
-    resume: Option<String>,
+    /// The id on argv (`--session` when resuming, `--session-id` otherwise).
+    session_id: String,
+    resume: bool,
     next_id: u64,
     pending: HashMap<String, Rpc>,
     ready: bool,
@@ -56,9 +58,10 @@ struct Turn {
 }
 
 impl Pi {
-    pub(crate) fn new(spec: &SpawnSpec) -> Pi {
+    pub(crate) fn new(spec: &SpawnSpec, session_id: String) -> Pi {
         Pi {
-            resume: spec.resume.clone(),
+            resume: spec.resume.is_some(),
+            session_id,
             next_id: 0,
             pending: HashMap::new(),
             ready: false,
@@ -69,7 +72,7 @@ impl Pi {
         }
     }
 
-    pub(crate) fn argv(&self, spec: &SpawnSpec, new_id: Option<&str>) -> Vec<String> {
+    pub(crate) fn argv(&self, spec: &SpawnSpec) -> Vec<String> {
         let mut a = vec!["--mode".to_owned(), "rpc".to_owned()];
         if let Some(provider) = &spec.provider {
             a.extend(["--provider".into(), provider.clone()]);
@@ -80,10 +83,10 @@ impl Pi {
         if let Some(effort) = &spec.effort {
             a.extend(["--thinking".into(), effort.clone()]);
         }
-        match (&self.resume, new_id) {
-            (Some(id), _) => a.extend(["--session".into(), id.clone()]),
-            (None, Some(id)) => a.extend(["--session-id".into(), id.to_owned()]),
-            (None, None) => {}
+        if self.resume {
+            a.extend(["--session".into(), self.session_id.clone()]);
+        } else {
+            a.extend(["--session-id".into(), self.session_id.clone()]);
         }
         a.extend(spec.extra_args.iter().cloned());
         a
@@ -172,12 +175,10 @@ impl Pi {
                     out.error(ErrorClass::Protocol, "pi get_state gave no session id");
                     return;
                 };
-                if let Some(want) = &self.resume
-                    && !id.starts_with(want.as_str())
-                {
+                if id != self.session_id {
                     out.error(
                         ErrorClass::Protocol,
-                        format!("pi opened session {id}, expected {want}"),
+                        format!("pi opened session {id}, expected {}", self.session_id),
                     );
                     return;
                 }

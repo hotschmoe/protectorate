@@ -24,6 +24,7 @@ pub use event::{
 pub use guard::limits;
 pub use intent::{Class, Code, EffectKind, Intent, Notice, Reply};
 pub use model::*;
+pub use sleeve::{name_ok, overlap_refusal};
 pub use state::*;
 
 /// Applies one event and returns the intents to execute once the event is durable.
@@ -186,8 +187,8 @@ impl Core<'_> {
         self.out.push(Intent::Reply(r));
     }
 
-    pub(crate) fn refuse(&mut self, code: Code, why: &'static str) {
-        self.reply(Reply::Refused(code, why));
+    pub(crate) fn refuse(&mut self, code: Code, why: impl Into<String>) {
+        self.reply(Reply::Refused(code, why.into()));
     }
 
     pub(crate) fn notify(&mut self, to: Party, sleeve: Option<SleeveId>, notice: Notice) {

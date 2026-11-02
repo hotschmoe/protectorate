@@ -188,6 +188,8 @@ Three findings in today's drivers, all fixed by this design:
 
 ### 1.7 Pi and pi_durable
 
+The harness was removed on 2026-11-02; this section is kept for the owner's revisit, and SPEC.md is current.
+
 **What pi_durable is** [V, under `pi/durable`]. An Experimental library with no `bin`
 (`README.md:3`). It commits before display: streamed partials at most every 100 ms
 (`src/harness/generation.ts:446-483`), and a tool-intent checkpoint before `execute()`

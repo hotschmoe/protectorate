@@ -712,7 +712,7 @@ final class DoctorHarness {
     );
   }
 
-  /// The hub's name for it, `pi_durable` included.
+  /// The hub's name for the harness.
   final String name;
 
   final bool present;
@@ -2198,7 +2198,7 @@ final class HistoryRead {
 
   final List<HistoryText> docs;
 
-  /// The hub cut the range short; read on from the last doc's turn.
+  /// The hub cut the range short. Pass the last doc's id as `after_doc` to read the next page.
   final bool more;
 
   Map<String, Object?> toJson() => {
@@ -2335,6 +2335,10 @@ final class HubInfo {
     required this.name,
     required this.version,
     required this.startedAt,
+    this.inventory,
+    this.sample,
+    this.historyCapped = const <String>[],
+    this.restoreError,
   });
 
   factory HubInfo.fromJson(Object? json) {
@@ -2343,6 +2347,21 @@ final class HubInfo {
       name: _string(j['name'], 'HubInfo.name'),
       version: _string(j['version'], 'HubInfo.version'),
       startedAt: _time(j['started_at_ms'], 'HubInfo.started_at_ms'),
+      inventory: _opt(j['inventory'], Inventory.fromJson),
+      sample: _opt(j['sample'], Sample.fromJson),
+      historyCapped: _or(
+        j['history_capped'],
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'HubInfo.history_capped',
+          (e1) => _string(e1, 'HubInfo.history_capped[]'),
+        ),
+      ),
+      restoreError: _opt(
+        j['restore_error'],
+        (e0) => _string(e0, 'HubInfo.restore_error'),
+      ),
     );
   }
 
@@ -2352,10 +2371,26 @@ final class HubInfo {
 
   final DateTime startedAt;
 
+  final Inventory? inventory;
+
+  final Sample? sample;
+
+  /// Sleeve ids whose history is at its text budget. Empty when every sleeve is under it.
+  /// `doctor` and `hub info` list these ids, and drop one when that sleeve is back under
+  /// the budget.
+  final List<String> historyCapped;
+
+  /// Set when a rollback restore failed and the trial release was kept.
+  final String? restoreError;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'version': version,
     'started_at_ms': startedAt.millisecondsSinceEpoch,
+    if (inventory case final v?) 'inventory': v.toJson(),
+    if (sample case final v?) 'sample': v.toJson(),
+    'history_capped': historyCapped,
+    if (restoreError case final v?) 'restore_error': v,
   };
 }
 
@@ -2464,6 +2499,7 @@ sealed class HubStreamMessage {
       'sleeve_removed' => HubStreamMessageSleeveRemoved._fromMap(j),
       'entry' => HubStreamMessageEntry._fromMap(j),
       'approval' => HubStreamMessageApproval._fromMap(j),
+      'hub' => HubStreamMessageHub._fromMap(j),
       'node' => HubStreamMessageNode._fromMap(j),
       'node_removed' => HubStreamMessageNodeRemoved._fromMap(j),
       'job' => HubStreamMessageJob._fromMap(j),
@@ -2615,6 +2651,28 @@ final class HubStreamMessageApproval extends HubStreamMessage {
     'type': 'approval',
     'seq': seq,
     'approval': approval.toJson(),
+  };
+}
+
+final class HubStreamMessageHub extends HubStreamMessage {
+  const HubStreamMessageHub({required this.seq, required this.hub});
+
+  factory HubStreamMessageHub._fromMap(Map<String, Object?> j) =>
+      HubStreamMessageHub(
+        seq: _int(j['seq'], 'HubStreamMessageHub.seq'),
+        hub: HubInfo.fromJson(j['hub']),
+      );
+
+  @override
+  final int seq;
+
+  final HubInfo hub;
+
+  @override
+  Map<String, Object?> toJson() => {
+    'type': 'hub',
+    'seq': seq,
+    'hub': hub.toJson(),
   };
 }
 
@@ -3968,7 +4026,12 @@ enum QuotaReading {
 }
 
 final class QuotaWindow {
-  const QuotaWindow({required this.label, this.usedPct, this.resetsAt});
+  const QuotaWindow({
+    required this.label,
+    this.usedPct,
+    this.resetsAt,
+    this.lengthMs,
+  });
 
   factory QuotaWindow.fromJson(Object? json) {
     final j = _object(json, 'QuotaWindow');
@@ -3979,6 +4042,7 @@ final class QuotaWindow {
         j['resets_at_ms'],
         (e0) => _time(e0, 'QuotaWindow.resets_at_ms'),
       ),
+      lengthMs: _opt(j['length_ms'], (e0) => _int(e0, 'QuotaWindow.length_ms')),
     );
   }
 
@@ -3989,10 +4053,14 @@ final class QuotaWindow {
 
   final DateTime? resetsAt;
 
+  /// Vendor window length in milliseconds, when the reading named one.
+  final int? lengthMs;
+
   Map<String, Object?> toJson() => {
     'label': label,
     if (usedPct case final v?) 'used_pct': v,
     if (resetsAt case final v?) 'resets_at_ms': v.millisecondsSinceEpoch,
+    if (lengthMs case final v?) 'length_ms': v,
   };
 }
 
@@ -4003,6 +4071,7 @@ final class ReadHistoryRequest {
     this.session,
     this.fromTurn = 0,
     this.toTurn,
+    this.afterDoc,
   });
 
   factory ReadHistoryRequest.fromJson(Object? json) {
@@ -4022,6 +4091,10 @@ final class ReadHistoryRequest {
         j['to_turn'],
         (e0) => _int(e0, 'ReadHistoryRequest.to_turn'),
       ),
+      afterDoc: _opt(
+        j['after_doc'],
+        (e0) => _int(e0, 'ReadHistoryRequest.after_doc'),
+      ),
     );
   }
 
@@ -4034,11 +4107,15 @@ final class ReadHistoryRequest {
   /// Absent: the session's last turn.
   final int? toTurn;
 
+  /// Skip this doc and every earlier one. A turn longer than one page continues from here.
+  final int? afterDoc;
+
   Map<String, Object?> toJson() => {
     if (docId case final v?) 'doc_id': v,
     if (session case final v?) 'session': v,
     'from_turn': fromTurn,
     if (toTurn case final v?) 'to_turn': v,
+    if (afterDoc case final v?) 'after_doc': v,
   };
 }
 
@@ -4419,7 +4496,8 @@ final class SearchHistoryRequest {
 
   final HistoryMode mode;
 
-  /// Sleeves by id or name, removed ones too. Empty means every sleeve the caller reaches.
+  /// Sleeves by id or name, removed ones too. Empty means every sleeve this caller may
+  /// read: its own, or every sleeve for Envoy and the owner (D26).
   final List<String> sleeves;
 
   /// `pi_local` and `pi_vendor` both match every Pi session.
@@ -4562,6 +4640,7 @@ final class Sleeve {
   final Lifecycle lifecycle;
 
   /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed or `g<N>`.
+  /// A flap after a rejected login is `flapping (<harness> login rejected)`.
   final String? parkReason;
 
   /// The directory the incarnation works in (a child's worktree, a root's claim).
@@ -4666,6 +4745,7 @@ final class SpawnSleeveRequest {
     required this.name,
     required this.harness,
     this.path,
+    this.newPath,
     this.parentId,
     this.view,
     this.mode = Mode.headless,
@@ -4683,6 +4763,10 @@ final class SpawnSleeveRequest {
       name: _string(j['name'], 'SpawnSleeveRequest.name'),
       harness: Harness.fromJson(j['harness']),
       path: _opt(j['path'], (e0) => _string(e0, 'SpawnSleeveRequest.path')),
+      newPath: _opt(
+        j['new_path'],
+        (e0) => _string(e0, 'SpawnSleeveRequest.new_path'),
+      ),
       parentId: _opt(
         j['parent_id'],
         (e0) => _string(e0, 'SpawnSleeveRequest.parent_id'),
@@ -4718,6 +4802,10 @@ final class SpawnSleeveRequest {
   /// The directory a root claims; a child works in its parent's.
   final String? path;
 
+  /// Create this directory under `projects_dir` and claim it as a new root.
+  /// Takes no `path`, `parent_id` or `view`. The owner, a paired device and Envoy only.
+  final String? newPath;
+
   /// Makes this a child of that root.
   final String? parentId;
 
@@ -4746,6 +4834,7 @@ final class SpawnSleeveRequest {
     'name': name,
     'harness': harness.toJson(),
     if (path case final v?) 'path': v,
+    if (newPath case final v?) 'new_path': v,
     if (parentId case final v?) 'parent_id': v,
     if (view case final v?) 'view': v.toJson(),
     'mode': mode.toJson(),
@@ -5023,7 +5112,7 @@ final class UpdateHubRequest {
   /// A release tag, in place of the channel's newest.
   final String? version;
 
-  /// Swap `releases/current` and `releases/previous`, then restart.
+  /// Restore the required snapshots and restart on `releases/previous`.
   final bool rollback;
 
   Map<String, Object?> toJson() => {

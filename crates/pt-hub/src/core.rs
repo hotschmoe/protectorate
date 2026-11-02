@@ -13,7 +13,7 @@ use pt_journal::Journal;
 
 use crate::exec::Executors;
 use crate::home::now_ms;
-use crate::hub::{Hub, Input, View};
+use crate::hub::{Hub, Input, JournalSnapshot, View};
 use crate::log::{debug, error, info};
 use crate::transcript::Note;
 use crate::wire;
@@ -22,6 +22,13 @@ const MAX_BATCH: usize = 512;
 
 pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<Input>) {
     let mut exec = Executors::new(hub.clone());
+    exec.cleanup_removed(
+        state
+            .sleeves
+            .values()
+            .filter(|s| s.life == Life::Removed)
+            .map(|s| s.id),
+    );
     let mut batch_n = hub.view().batch;
     let mut since: BTreeMap<SleeveId, (ActivityState, u64)> = BTreeMap::new();
     while let Ok(first) = rx.recv() {
@@ -41,23 +48,35 @@ pub fn run(hub: Arc<Hub>, mut state: State, mut journal: Journal, rx: Receiver<I
         };
         let mut frames = Vec::with_capacity(inputs.len());
         let mut out = Vec::with_capacity(inputs.len());
+        let mut snapshots = Vec::new();
         for input in inputs {
-            let ev = Event {
-                at: now_ms(),
-                kind: input.kind,
+            let (kind, reply) = match input {
+                Input::Event { kind, reply } => (kind, reply),
+                Input::Snapshot { dir, reply } => {
+                    snapshots.push((dir, reply));
+                    continue;
+                }
             };
+            let ev = Event { at: now_ms(), kind };
             let intents = pt_core::apply(&mut state, &ev);
             if !matches!(ev.kind, pt_core::EventKind::Tick) || !intents.is_empty() {
                 debug!("apply {:?} -> {} intents", ev.kind, intents.len());
             }
             frames.push(codec::encode(&ev));
-            out.push((input.reply, intents));
+            out.push((reply, intents));
         }
         let refs: Vec<&[u8]> = frames.iter().map(Vec::as_slice).collect();
         if let Err(e) = journal.append_batch(&refs) {
             // Without durability no intent may leave: stop the hub (SPEC principle 5).
             error!("journal append failed, stopping: {e}");
             std::process::exit(70);
+        }
+        for (dir, reply) in snapshots {
+            let copied = journal.copy_for_update(&dir).map(|()| JournalSnapshot {
+                at_ms: now_ms(),
+                next_sleeve: state.next_sleeve,
+            });
+            let _ = reply.send(copied.map_err(|e| e.to_string()));
         }
         batch_n += 1;
         let now = now_ms();
@@ -223,7 +242,11 @@ fn notice_text(view: &View, n: &Notice) -> (Kind, Level, String) {
         Notice::Tripped { guardrail } => (
             Kind::Guardrail,
             Level::Alarm,
-            format!("guardrail G{} tripped ({guardrail:?})", guardrail.number()),
+            if *guardrail == pt_core::Guardrail::Oom {
+                "guardrail G4 tripped: the memory limit killed a process".into()
+            } else {
+                format!("guardrail G{} tripped ({guardrail:?})", guardrail.number())
+            },
         ),
         Notice::Resumed { g } => (
             Kind::Sleeve,
@@ -247,6 +270,11 @@ fn notice_text(view: &View, n: &Notice) -> (Kind, Level, String) {
             Kind::Sleeve,
             Level::Warn,
             format!("child {} crashed", name(*child)),
+        ),
+        Notice::ChildOom { child } => (
+            Kind::Sleeve,
+            Level::Warn,
+            format!("child {} exited after a memory limit kill", name(*child)),
         ),
         Notice::ChildParked { child } => (
             Kind::Sleeve,

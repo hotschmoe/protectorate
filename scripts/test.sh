@@ -4,7 +4,7 @@
 # whose tests take turns on the local model (their source calls have_runtime or reads
 # PT_E2E_PI_*) run one at a time in a lane of their own: one endpoint serves them all, and
 # side by side their turns time out. A failing binary's output is printed; every log stays in
-# <target>/test-logs.
+# <target>/test-logs. The e2e tests' homes from the last run stay in <target>/tmp.
 #
 #   sh scripts/test.sh            PT_TEST_JOBS (default half the cores) binaries at once
 set -eu
@@ -16,6 +16,9 @@ times=$target/test-times
 mkdir -p "$logs"
 rm -f "$logs"/*.log "$logs"/failed "$logs"/times.new
 touch "$times" "$logs/failed" "$logs/times.new"
+# The e2e tests leave their homes in CARGO_TARGET_TMPDIR (<target>/tmp), about 20 GiB after a
+# week of runs. Each run clears the last one's before the build, which recreates the dir.
+rm -rf --one-file-system "$target/tmp"
 
 # Doctests are left out: the workspace has none, and building them costs a rustdoc per crate.
 PROTECTORATE_BUILD_VERSION=${PROTECTORATE_BUILD_VERSION:-dev} cargo test --locked --workspace \
