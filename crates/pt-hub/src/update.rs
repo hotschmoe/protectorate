@@ -32,9 +32,9 @@ use pt_update::{
 };
 
 use crate::home::Home;
-use crate::hub::Hub;
+use crate::hub::{Hub, Stop};
+use crate::lock::lock;
 use crate::log::{info, warning};
-use crate::transcript::lock;
 
 /// The hub's exit status when it stops to be restarted on another release.
 pub const RESTART_CODE: u8 = 75;
@@ -43,13 +43,6 @@ const NODE_CALL_TIMEOUT: Duration = Duration::from_secs(20 * 60);
 const NODE_BACK_SLACK: Duration = Duration::from_secs(120);
 /// The longest node probation an `UpdateNodes` may ask for: a day.
 const MAX_NODE_PROBATION: u64 = 86_400;
-
-/// Why `serve` returns.
-pub enum Stop {
-    Signal(i32),
-    /// Exit for the service manager to start `releases/current`.
-    Restart(String),
-}
 
 fn err(code: ErrorCode, m: impl Into<String>) -> ApiError {
     ApiError::new(code, m)
@@ -157,7 +150,7 @@ pub fn update_hub(hub: &Hub, r: api::UpdateHubRequest) -> Result<api::HubUpdate,
             sw.from.as_deref().unwrap_or("-"),
             sw.to
         );
-        hub.event(
+        hub.bus.event(
             Kind::Hub,
             Level::Warn,
             "update",
@@ -363,7 +356,7 @@ pub fn update_hub(hub: &Hub, r: api::UpdateHubRequest) -> Result<api::HubUpdate,
             ""
         }
     );
-    hub.event(
+    hub.bus.event(
         Kind::Hub,
         Level::Info,
         "update",
@@ -1434,7 +1427,7 @@ pub fn announce_restore_failure(hub: &crate::hub::Hub) {
         return;
     }
     lock(&hub.info).restore_error = Some(msg.clone());
-    hub.event(
+    hub.bus.event(
         Kind::Hub,
         Level::Alarm,
         "update",
@@ -1487,7 +1480,8 @@ pub fn watch_probation(hub: &Arc<Hub>, version: String) {
                             let text =
                                 format!("hub {version} passed its health check; the update stays");
                             info!("update: {text}");
-                            hub.event(Kind::Hub, Level::Info, "update", "owner", &text);
+                            hub.bus
+                                .event(Kind::Hub, Level::Info, "update", "owner", &text);
                             return;
                         }
                         Ok(false) => "confirmation refused".to_string(),
@@ -1501,7 +1495,8 @@ pub fn watch_probation(hub: &Arc<Hub>, version: String) {
                 let text =
                     format!("hub {version} {why}; restarting for offline probation rollback");
                 warning!("update: {text}");
-                hub.event(Kind::Hub, Level::Alarm, "update", "owner", &text);
+                hub.bus
+                    .event(Kind::Hub, Level::Alarm, "update", "owner", &text);
                 request_restart(&hub, text);
                 return;
             }
@@ -1668,7 +1663,7 @@ pub fn update_nodes(hub: &Hub, r: api::UpdateNodesRequest) -> Result<api::NodeUp
         } else {
             Level::Warn
         };
-        hub.event(Kind::Node, level, &t.name, "owner", &line);
+        hub.bus.event(Kind::Node, level, &t.name, "owner", &line);
         info!("update: {line}");
         match res {
             Ok(detail) => results.push(api::NodeUpdate {

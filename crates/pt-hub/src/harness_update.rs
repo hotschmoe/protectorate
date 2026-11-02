@@ -17,10 +17,12 @@ use pt_core::{Activity, Harness, Proc, Sleeve};
 use pt_doctor::Report;
 use pt_json::record;
 
-use crate::home::{now_ms, write_private};
-use crate::hub::Hub;
+use crate::bus::Bus;
+use crate::doctor::Doctor;
+use crate::home::{Home, now_ms, write_private};
+use crate::lock::lock;
 use crate::log::{info, warning};
-use crate::transcript::lock;
+use crate::view::View;
 use crate::wire;
 
 const RUN_TIMEOUT: Duration = Duration::from_secs(15 * 60);
@@ -54,6 +56,179 @@ pub struct Updater {
 impl Updater {
     pub fn last_runs(&self) -> BTreeMap<String, Run> {
         lock(&self.last).clone()
+    }
+
+    /// Loads the last run per program from `harness-updates.json`.
+    pub fn load(&self, home: &Home) {
+        if let Ok(bytes) = std::fs::read(home.harness_updates()) {
+            match pt_json::from_bytes::<BTreeMap<String, Run>>(&bytes) {
+                Ok(m) => *lock(&self.last) = m,
+                Err(e) => warning!(
+                    "harness update: ignoring {}: {e}",
+                    home.harness_updates().display()
+                ),
+            }
+        }
+    }
+
+    /// Sleeps after a round: until a program is asked for, or `nap`; only briefly while one
+    /// already waits for its sleeves.
+    pub fn nap(&self, nap: Duration) {
+        let wanted = lock(&self.wanted);
+        if wanted.is_empty() {
+            drop(self.wake.wait_timeout(wanted, nap));
+        } else {
+            drop(wanted);
+            thread::sleep(RETRY.min(nap));
+        }
+    }
+
+    /// `UpdateHarnesses`: queues the programs and says, per program, what happens now.
+    pub fn request(
+        &self,
+        doctor: &Doctor,
+        view: impl Fn() -> Arc<View>,
+        names: &[String],
+    ) -> Vec<api::HarnessUpdate> {
+        let report = doctor.report();
+        let known = report.as_deref().map(programs).unwrap_or_default();
+        let names: Vec<String> = if names.is_empty() {
+            known.iter().map(|p| p.name.clone()).collect()
+        } else {
+            names.to_vec()
+        };
+        let running = lock(&self.running).clone();
+        let mut out = Vec::new();
+        for n in names {
+            let (state, detail) = match known.iter().find(|p| p.name == n) {
+                None => (
+                    HarnessUpdateState::Skipped,
+                    "not installed, or it has no update command".to_string(),
+                ),
+                Some(_) if running.as_deref() == Some(n.as_str()) => {
+                    (HarnessUpdateState::Skipped, "already running".to_string())
+                }
+                Some(p) => {
+                    lock(&self.wanted).insert(n.clone());
+                    match busy_sleeve(&view(), &p.harnesses) {
+                        Some(s) => (
+                            HarnessUpdateState::Deferred,
+                            format!(
+                                "sleeve {s} is mid-turn; it runs once every {n} sleeve is idle"
+                            ),
+                        ),
+                        None => (HarnessUpdateState::Started, p.argv.join(" ")),
+                    }
+                }
+            };
+            out.push(api::HarnessUpdate {
+                program: n,
+                state,
+                detail,
+            });
+        }
+        self.wake.notify_all();
+        out
+    }
+
+    /// Runs every program that is due or asked for and idle; returns how long to sleep.
+    pub fn round(
+        &self,
+        doctor: &Doctor,
+        bus: &Bus,
+        home: &Home,
+        view: impl Fn() -> Arc<View>,
+        every: Duration,
+    ) -> Duration {
+        let Some(report) = doctor.wait_report(NAP) else {
+            return NAP;
+        };
+        let now = now_ms();
+        let every_ms = every.as_millis() as u64;
+        let mut next = NAP;
+        let mut ran = false;
+        for p in programs(&report) {
+            let last = lock(&self.last).get(&p.name).map(|r| r.at_ms);
+            let asked = lock(&self.wanted).contains(&p.name);
+            let due_at = match last {
+                _ if every.is_zero() => None,
+                None => Some(now),
+                Some(at) => Some(at.saturating_add(every_ms)),
+            };
+            let due = asked || due_at.is_some_and(|t| t <= now);
+            if !due {
+                if let Some(t) = due_at {
+                    next = next.min(Duration::from_millis(t - now));
+                }
+                continue;
+            }
+            if let Some(s) = busy_sleeve(&view(), &p.harnesses) {
+                info!(
+                    "harness update: {} waits for sleeve {s} to finish its turn",
+                    p.name
+                );
+                next = next.min(RETRY);
+                lock(&self.wanted).insert(p.name.clone());
+                continue;
+            }
+            lock(&self.wanted).remove(&p.name);
+            self.run(bus, home, &p);
+            ran = true;
+        }
+        if ran {
+            doctor.refresh();
+        }
+        next.max(Duration::from_millis(100))
+    }
+
+    fn run(&self, bus: &Bus, home: &Home, p: &Program) {
+        *lock(&self.running) = Some(p.name.clone());
+        let shown = {
+            let mut a = p.argv.clone();
+            a[0] = p.name.clone();
+            a.join(" ")
+        };
+        let from = version(&p.path);
+        info!("harness update: running {} ({from})", p.argv.join(" "));
+        let args: Vec<&str> = p.argv[1..].iter().map(String::as_str).collect();
+        let out = pt_doctor::run_program(Path::new(&p.argv[0]), &args, RUN_TIMEOUT);
+        let (ok, why) = match &out {
+            Ok(o) => {
+                for line in o.stdout.lines().chain(o.stderr.lines()) {
+                    if !line.trim().is_empty() {
+                        info!("harness update {}: {line}", p.name);
+                    }
+                }
+                (o.ok, if o.ok { String::new() } else { o.failure() })
+            }
+            Err(e) => (false, e.clone()),
+        };
+        let to = version(&p.path);
+        let note = match (ok, from == to) {
+            (true, true) => format!("{}: {to}, up to date ({shown})", p.name),
+            (true, false) => format!("{}: {from} -> {to} ({shown})", p.name),
+            (false, _) => format!("{}: {shown} failed: {why}; now {to}", p.name),
+        };
+        let level = if ok { Level::Info } else { Level::Warn };
+        bus.event(Kind::Hub, level, "harness-update", "owner", &note);
+        info!("harness update: {note}");
+        let r = Run {
+            at_ms: now_ms(),
+            ok,
+            from,
+            to,
+            note,
+        };
+        let all = {
+            let mut last = lock(&self.last);
+            last.insert(p.name.clone(), r);
+            last.clone()
+        };
+        let text = pt_json::ToJson::to_json(&all).to_string();
+        if let Err(e) = write_private(&home.harness_updates(), text.as_bytes()) {
+            warning!("harness update: {e}");
+        }
+        *lock(&self.running) = None;
     }
 }
 
@@ -97,8 +272,7 @@ fn busy(s: &Sleeve) -> bool {
 }
 
 /// The first live sleeve on one of `harnesses` that is mid-turn.
-fn busy_sleeve(hub: &Hub, harnesses: &[Harness]) -> Option<String> {
-    let view = hub.view();
+fn busy_sleeve(view: &View, harnesses: &[Harness]) -> Option<String> {
     view.state
         .sleeves
         .values()
@@ -112,174 +286,4 @@ fn version(path: &str) -> String {
         Ok(o) => format!("unknown ({})", o.failure()),
         Err(e) => format!("unknown ({e})"),
     }
-}
-
-fn run(hub: &Hub, p: &Program) {
-    *lock(&hub.harness_updates.running) = Some(p.name.clone());
-    let shown = {
-        let mut a = p.argv.clone();
-        a[0] = p.name.clone();
-        a.join(" ")
-    };
-    let from = version(&p.path);
-    info!("harness update: running {} ({from})", p.argv.join(" "));
-    let args: Vec<&str> = p.argv[1..].iter().map(String::as_str).collect();
-    let out = pt_doctor::run_program(Path::new(&p.argv[0]), &args, RUN_TIMEOUT);
-    let (ok, why) = match &out {
-        Ok(o) => {
-            for line in o.stdout.lines().chain(o.stderr.lines()) {
-                if !line.trim().is_empty() {
-                    info!("harness update {}: {line}", p.name);
-                }
-            }
-            (o.ok, if o.ok { String::new() } else { o.failure() })
-        }
-        Err(e) => (false, e.clone()),
-    };
-    let to = version(&p.path);
-    let note = match (ok, from == to) {
-        (true, true) => format!("{}: {to}, up to date ({shown})", p.name),
-        (true, false) => format!("{}: {from} -> {to} ({shown})", p.name),
-        (false, _) => format!("{}: {shown} failed: {why}; now {to}", p.name),
-    };
-    let level = if ok { Level::Info } else { Level::Warn };
-    hub.event(Kind::Hub, level, "harness-update", "owner", &note);
-    info!("harness update: {note}");
-    let r = Run {
-        at_ms: now_ms(),
-        ok,
-        from,
-        to,
-        note,
-    };
-    let all = {
-        let mut last = lock(&hub.harness_updates.last);
-        last.insert(p.name.clone(), r);
-        last.clone()
-    };
-    let text = pt_json::ToJson::to_json(&all).to_string();
-    if let Err(e) = write_private(&hub.home.harness_updates(), text.as_bytes()) {
-        warning!("harness update: {e}");
-    }
-    *lock(&hub.harness_updates.running) = None;
-}
-
-/// `UpdateHarnesses`: queues the programs and says, per program, what happens now.
-pub fn request(hub: &Hub, names: &[String]) -> Vec<api::HarnessUpdate> {
-    let report = hub.doctor.report();
-    let known = report.as_deref().map(programs).unwrap_or_default();
-    let names: Vec<String> = if names.is_empty() {
-        known.iter().map(|p| p.name.clone()).collect()
-    } else {
-        names.to_vec()
-    };
-    let running = lock(&hub.harness_updates.running).clone();
-    let mut out = Vec::new();
-    for n in names {
-        let (state, detail) = match known.iter().find(|p| p.name == n) {
-            None => (
-                HarnessUpdateState::Skipped,
-                "not installed, or it has no update command".to_string(),
-            ),
-            Some(_) if running.as_deref() == Some(n.as_str()) => {
-                (HarnessUpdateState::Skipped, "already running".to_string())
-            }
-            Some(p) => {
-                lock(&hub.harness_updates.wanted).insert(n.clone());
-                match busy_sleeve(hub, &p.harnesses) {
-                    Some(s) => (
-                        HarnessUpdateState::Deferred,
-                        format!("sleeve {s} is mid-turn; it runs once every {n} sleeve is idle"),
-                    ),
-                    None => (HarnessUpdateState::Started, p.argv.join(" ")),
-                }
-            }
-        };
-        out.push(api::HarnessUpdate {
-            program: n,
-            state,
-            detail,
-        });
-    }
-    hub.harness_updates.wake.notify_all();
-    out
-}
-
-/// Starts the update thread. With `harness_update_hours` 0 it runs only what is asked for.
-pub fn start(hub: &Arc<Hub>) {
-    if let Ok(bytes) = std::fs::read(hub.home.harness_updates()) {
-        match pt_json::from_bytes::<BTreeMap<String, Run>>(&bytes) {
-            Ok(m) => *lock(&hub.harness_updates.last) = m,
-            Err(e) => warning!(
-                "harness update: ignoring {}: {e}",
-                hub.home.harness_updates().display()
-            ),
-        }
-    }
-    let every = Duration::from_secs(hub.config.harness_update_hours.saturating_mul(3600));
-    let weak = Arc::downgrade(hub);
-    let spawned = thread::Builder::new()
-        .name("pt-harness-update".into())
-        .spawn(move || {
-            loop {
-                let Some(hub) = weak.upgrade() else { return };
-                let nap = round(&hub, every);
-                let u = &hub.harness_updates;
-                let wanted = lock(&u.wanted);
-                if wanted.is_empty() {
-                    drop(u.wake.wait_timeout(wanted, nap));
-                } else {
-                    drop(wanted);
-                    thread::sleep(RETRY.min(nap));
-                }
-            }
-        });
-    if let Err(e) = spawned {
-        warning!("harness update: starting its thread: {e}");
-    }
-}
-
-/// Runs every program that is due or asked for and idle; returns how long to sleep.
-fn round(hub: &Hub, every: Duration) -> Duration {
-    let Some(report) = hub.doctor.wait_report(NAP) else {
-        return NAP;
-    };
-    let now = now_ms();
-    let every_ms = every.as_millis() as u64;
-    let mut next = NAP;
-    let mut ran = false;
-    for p in programs(&report) {
-        let last = lock(&hub.harness_updates.last)
-            .get(&p.name)
-            .map(|r| r.at_ms);
-        let asked = lock(&hub.harness_updates.wanted).contains(&p.name);
-        let due_at = match last {
-            _ if every.is_zero() => None,
-            None => Some(now),
-            Some(at) => Some(at.saturating_add(every_ms)),
-        };
-        let due = asked || due_at.is_some_and(|t| t <= now);
-        if !due {
-            if let Some(t) = due_at {
-                next = next.min(Duration::from_millis(t - now));
-            }
-            continue;
-        }
-        if let Some(s) = busy_sleeve(hub, &p.harnesses) {
-            info!(
-                "harness update: {} waits for sleeve {s} to finish its turn",
-                p.name
-            );
-            next = next.min(RETRY);
-            lock(&hub.harness_updates.wanted).insert(p.name.clone());
-            continue;
-        }
-        lock(&hub.harness_updates.wanted).remove(&p.name);
-        run(hub, &p);
-        ran = true;
-    }
-    if ran {
-        crate::doctor::refresh(hub);
-    }
-    next.max(Duration::from_millis(100))
 }

@@ -1,6 +1,6 @@
-//! Executors: one serial thread per sleeve, plus node jobs' (`jobs.rs`). Each re-checks its intent
-//! against the latest published view right before acting, reports `Dispatched` before the
-//! write, and feeds the outcome back to the core as an event.
+//! Executors: one serial thread per sleeve, plus node jobs' (`job_exec.rs`). Each re-checks its
+//! intent against the latest published view right before acting, reports `Dispatched` before
+//! the write, and feeds the outcome back to the core as an event.
 //!
 //! A live incarnation's pump is the one ordered stream for its sleeve: the executor hands it
 //! its reports, and the pump submits each only after every harness event it has received, so
@@ -21,17 +21,19 @@ use std::time::{Duration, Instant};
 
 use pt_core::{
     Ask, Choice, EffectId, EffectKind, EffectState, EventKind, ExitCause, Gen, Harness, Intent,
-    Layout, Life, Obs, Party, ProbeResult, Proc, Sleeve, SleeveId, Target, TurnEnd,
+    Layout, Life, Obs, Party, ProbeResult, Sleeve, SleeveId, Target, TurnEnd,
 };
 use pt_drivers::{Ack, AckKind, Decision, Entry, ErrorClass, Session, Stop};
 use pt_json::obj;
 
 use crate::brief;
+use crate::envoy::{envoy_id, from_label};
 use crate::git;
 use crate::home::now_ms;
-use crate::hub::{Hub, View};
+use crate::hub::Hub;
 use crate::log::{debug, error, info, warning};
 use crate::transcript::Note;
+use crate::view::View;
 use crate::wire;
 
 const ACK_TIMEOUT: Duration = Duration::from_secs(30);
@@ -59,7 +61,7 @@ type Order = (Ordered, Sender<()>);
 pub struct Executors {
     hub: Arc<Hub>,
     sleeves: HashMap<SleeveId, Sender<Intent>>,
-    jobs: crate::jobs::JobExec,
+    jobs: crate::job_exec::JobExec,
 }
 
 fn intent_sleeve(i: &Intent) -> Option<SleeveId> {
@@ -76,7 +78,7 @@ fn intent_sleeve(i: &Intent) -> Option<SleeveId> {
 impl Executors {
     pub fn new(hub: Arc<Hub>) -> Executors {
         Executors {
-            jobs: crate::jobs::JobExec::new(hub.clone()),
+            jobs: crate::job_exec::JobExec::new(hub.clone()),
             hub,
             sleeves: HashMap::new(),
         }
@@ -97,7 +99,7 @@ impl Executors {
             .sleeve(id)
             .is_none_or(|s| s.life == Life::Removed)
         {
-            return refuse(&self.hub, intent, "the sleeve is removed");
+            return self.hub.refuse(intent, "the sleeve is removed");
         }
         let (tx, rx) = mpsc::channel();
         let exec = SleeveExec {
@@ -115,7 +117,7 @@ impl Executors {
             }
             Err(e) => {
                 error!("sleeve {}: spawn executor: {e}", id.0);
-                refuse(&self.hub, intent, &format!("spawn executor: {e}"));
+                self.hub.refuse(intent, &format!("spawn executor: {e}"));
             }
         }
     }
@@ -150,30 +152,6 @@ fn cleanup_scratch(path: &Path) {
         && e.kind() != io::ErrorKind::NotFound
     {
         warning!("remove sleeve scratch {}: {e}", path.display());
-    }
-}
-
-/// Answers an intent no executor will run: an effect is refused, a probe cannot tell.
-pub(crate) fn refuse(hub: &Hub, intent: Intent, why: &str) {
-    match intent {
-        Intent::Execute {
-            effect, attempt, ..
-        } => {
-            hub.submit(EventKind::Dispatched { effect, attempt });
-            hub.submit(EventKind::Nacked {
-                effect,
-                attempt,
-                reason: why.to_string(),
-            });
-        }
-        Intent::Probe {
-            effect, attempt, ..
-        } => hub.submit(EventKind::Probed {
-            effect,
-            attempt,
-            result: ProbeResult::Unknowable,
-        }),
-        other => debug!("dropped {other:?}: {why}"),
     }
 }
 
@@ -278,28 +256,6 @@ fn other_claims(st: &pt_core::State, s: &Sleeve) -> Vec<PathBuf> {
         .map(|o| PathBuf::from(&o.claim.path))
         .filter(|p| !own.starts_with(p) && parent.as_ref().is_none_or(|q| !q.starts_with(p)))
         .collect()
-}
-
-/// Whether the record is still exactly what this intent was released for.
-pub(crate) fn fresh(view: &View, effect: EffectId, attempt: u32, kind: &EffectKind) -> bool {
-    let st = &view.state;
-    let Some(e) = st.effects.get(&effect) else {
-        return false;
-    };
-    if e.attempt != attempt || e.state != EffectState::Intent {
-        return false;
-    }
-    if let Some((sid, g)) = kind.incarnation()
-        && st.sleeve(sid).is_none_or(|s| s.g != g)
-    {
-        return false;
-    }
-    if let EffectKind::StartIncarnation { sleeve, g, .. } = kind {
-        return st
-            .sleeve(*sleeve)
-            .is_some_and(|s| s.g == *g && s.proc == Proc::Starting(effect));
-    }
-    true
 }
 
 /// Polls until the scope has no tasks. A scope that will not empty is killed after 30 s.
@@ -504,7 +460,7 @@ impl SleeveExec {
                 attempt,
                 kind,
             } => {
-                if !fresh(&view, effect, attempt, &kind) {
+                if !view.fresh(effect, attempt, &kind) {
                     return debug!("sleeve {}: dropped stale effect {}", self.id.0, effect.0);
                 }
                 if !matches!(
@@ -569,12 +525,12 @@ impl SleeveExec {
                 let hub = &self.hub;
                 let eligible = |t: &Target| {
                     program(hub, t.harness).is_some()
-                        && crate::doctor::check(hub, t.harness).is_ok()
+                        && hub.doctor.check(&hub.config, t.harness).is_ok()
                 };
                 let quotas = hub.quotas.list();
                 // Envoy whose own harness doctor refused parks rather than moving elsewhere.
-                let envoy_gated = Hub::envoy_id(&view.state) == Some(sleeve)
-                    && hub.doctor.gated(sleeve).is_some();
+                let envoy_gated =
+                    envoy_id(&view.state) == Some(sleeve) && hub.doctor.gated(sleeve).is_some();
                 let chosen = if envoy_gated {
                     Err("Envoy's harness failed doctor".to_string())
                 } else {
@@ -861,7 +817,8 @@ impl SleeveExec {
         resume: Option<String>,
     ) -> Result<(), String> {
         let hub = self.hub.clone();
-        crate::doctor::gate_launch(&hub, s.id, &s.name, target.harness)?;
+        hub.doctor
+            .gate_launch(&hub.bus, s.id, &s.name, target.harness)?;
         let harness =
             driver_harness(target.harness).ok_or("that harness has no headless driver")?;
         let mut program = program(&hub, target.harness)
@@ -966,7 +923,7 @@ impl SleeveExec {
             sb.env.push(("PROTECTORATE_PARENT".into(), name));
         }
         sb.env
-            .push(("PROTECTORATE_ENVOY".into(), crate::hub::ENVOY.into()));
+            .push(("PROTECTORATE_ENVOY".into(), crate::envoy::ENVOY.into()));
         sb.env.push((
             "PROTECTORATE_MAIL".into(),
             "protectorate sleeve send <name> <text>".into(),
@@ -1081,8 +1038,8 @@ impl SleeveExec {
         if !self.expect(p.g, p.request_id, p.effect, p.attempt) {
             return ended();
         }
-        let from = Hub::from_label(&view.state, self.id, p.request_id);
-        if Hub::envoy_id(&view.state) == Some(self.id) {
+        let from = from_label(&view.state, self.id, p.request_id);
+        if envoy_id(&view.state) == Some(self.id) {
             self.note_envoy_origin(view, p.request_id, &from, p.steer.is_some());
         }
         let noted = self.mail_note(view, p.request_id, p.steer.is_some());
@@ -1121,10 +1078,10 @@ impl SleeveExec {
             return None;
         }
         let s = view.state.sleeve(self.id)?;
-        if s.turned || Hub::envoy_id(&view.state) == Some(self.id) {
+        if s.turned || envoy_id(&view.state) == Some(self.id) {
             return None;
         }
-        let envoy = crate::hub::ENVOY;
+        let envoy = crate::envoy::ENVOY;
         let parent = s
             .parent
             .and_then(|p| view.state.sleeve(p))
@@ -1155,7 +1112,7 @@ impl SleeveExec {
                 _ => false,
             });
         let origin = (from.starts_with("agent:") || marked).then(|| from.to_string());
-        let mut t = crate::transcript::lock(&self.hub.envoy_turn);
+        let mut t = crate::lock::lock(&self.hub.envoy_turn);
         // A resleeve brief has no message, so `from` is owner and `origin` is None. Keeping
         // the turn means leaving whatever the exit left, not writing that owner label in.
         let resumed = request_id.starts_with("continue:") || request_id.starts_with("resleeve:");
@@ -1178,7 +1135,7 @@ impl SleeveExec {
         let path = self.hub.home.sleeve_dir(self.id).join("inbox.jsonl");
         let line = obj! {
             "request_id" => request_id,
-            "from" => Hub::from_label(&view.state, self.id, request_id),
+            "from" => from_label(&view.state, self.id, request_id),
             "text" => text,
             "time_ms" => now_ms(),
         };
@@ -1580,8 +1537,8 @@ impl Pump {
         let exited = matches!(entry, Entry::Exited { .. });
         // An exit keeps the origin and the count. The continuation replaces the origin;
         // a resleeve brief is the owner's prompt and must not have to.
-        if clear_envoy_turn && Hub::envoy_id(&hub.view().state) == Some(id) {
-            *crate::transcript::lock(&hub.envoy_turn) = Default::default();
+        if clear_envoy_turn && envoy_id(&hub.view().state) == Some(id) {
+            *crate::lock::lock(&hub.envoy_turn) = Default::default();
         }
         let note = Note {
             harness: matches!(entry, Entry::SessionInfo { .. }).then_some(harness),

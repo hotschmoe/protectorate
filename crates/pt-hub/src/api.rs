@@ -1,145 +1,39 @@
-//! The handler layer: who is calling, what they may touch, and one function per method of
-//! pt-api's table. Commands become core events whose replies come back after the journal fsync;
-//! reads use the published view.
+//! The handler layer: what each caller (`principal.rs`) may touch, and one function per method
+//! of pt-api's table. Commands become core events whose replies come back after the journal
+//! fsync; reads use the published view.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use pt_api::{self as api, ApiError, ErrorCode, Method, Scope, method as m};
+use pt_api::{self as api, ApiError, ErrorCode, Method, method as m};
 use pt_core::{
-    Claim, Code, EventKind, Layout, Life, MsgState, Party, Reply, SendMode, SleeveId, SpawnSpec,
-    State, Target, name_ok, overlap_refusal, path_ok, path_within,
+    ApprovalState, Claim, EventKind, Layout, Life, MsgState, Party, Reply, SendMode, SleeveId,
+    Source, SpawnSpec, State, Target, name_ok, overlap_refusal, path_ok, path_within,
 };
 use pt_drivers::Entry;
 use pt_json::{FromJson, ToJson, Value};
 
+use crate::approvals;
+use crate::command::{command, err, wait_for};
+use crate::envoy::envoy_id;
 use crate::fleet::{Status as FleetStatus, Up};
 use crate::home::{now_ms, random_hex};
-use crate::hub::{CommandError, Hub, View};
+use crate::hub::Hub;
 use crate::jobs::JobRequest;
+use crate::lock::lock;
 use crate::log::info;
+use crate::principal::Principal;
 use crate::rule::{self, Guarded};
-use crate::transcript::lock;
+use crate::snapshot;
+use crate::transcript::Note;
+use crate::view::View;
 use crate::wire;
 
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_WAIT: Duration = Duration::from_secs(3600);
 const TRANSCRIPT_DEFAULT: u64 = 2000;
 const TRANSCRIPT_MAX: u64 = 10_000;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Principal {
-    /// The owner token, or the hub's own user on the unix socket.
-    Owner,
-    /// A paired app's `pd1.` token: the owner's scope.
-    Device(String),
-    /// Envoy's capability: sleeve scope, reaching every sleeve.
-    Envoy(SleeveId),
-    /// A sleeve's `pc1.` capability: itself and its children. Mail also reaches its parent and Envoy.
-    Sleeve(SleeveId),
-    /// Vendor general agents: the Envoy methods only (D9).
-    EnvoyOnly,
-    /// No credential: public methods only.
-    Anonymous,
-}
-
-impl Principal {
-    pub fn scope(&self) -> Scope {
-        match self {
-            Principal::Owner | Principal::Device(_) => Scope::Owner,
-            Principal::Envoy(_) | Principal::Sleeve(_) => Scope::Sleeve,
-            Principal::EnvoyOnly => Scope::EnvoyOnly,
-            Principal::Anonymous => Scope::Public,
-        }
-    }
-
-    fn party(&self) -> Party {
-        match self {
-            Principal::Owner | Principal::Device(_) | Principal::Anonymous => Party::Owner,
-            Principal::Envoy(_) => Party::Envoy,
-            Principal::Sleeve(x) => Party::Sleeve(*x),
-            Principal::EnvoyOnly => Party::Agent,
-        }
-    }
-
-    /// Reaches every sleeve.
-    fn full(&self) -> bool {
-        matches!(
-            self,
-            Principal::Owner | Principal::Device(_) | Principal::Envoy(_)
-        )
-    }
-}
-
-pub fn sleeve_principal(state: &State, id: SleeveId) -> Principal {
-    if Hub::envoy_id(state) == Some(id) {
-        Principal::Envoy(id)
-    } else {
-        Principal::Sleeve(id)
-    }
-}
-
-pub fn from_token(hub: &Hub, view: &View, token: &str) -> Option<Principal> {
-    if hub.tokens.is_owner(token) {
-        return Some(Principal::Owner);
-    }
-    if let Some(id) = hub.devices.check(token) {
-        return Some(Principal::Device(id));
-    }
-    if token == hub.tokens.envoy_only() {
-        return Some(Principal::EnvoyOnly);
-    }
-    view.state
-        .sleeves
-        .values()
-        .filter(|s| s.life != Life::Removed)
-        .find(|s| hub.tokens.sleeve(s.id) == token)
-        .map(|s| sleeve_principal(&view.state, s.id))
-}
-
-/// The cgroup of `pid` from `/proc/<pid>/cgroup`, or `None` when it cannot be read (the
-/// process is gone, or never was).
-pub fn peer_cgroup(pid: i32) -> Option<String> {
-    if pid <= 0 {
-        return None;
-    }
-    std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()
-}
-
-pub enum CgroupSleeve {
-    /// In no sleeve scope of this hub.
-    None,
-    Live(Principal),
-    /// In the scope of a sleeve that is removed or unknown: refused.
-    Gone,
-}
-
-/// The sleeve whose scope a cgroup is. A process inside a sleeve is that sleeve whatever token
-/// it presents.
-pub fn cgroup_sleeve(hub: &Hub, view: &View, cgroup: &str) -> CgroupSleeve {
-    let needle = format!("/pt-{}-", hub.tokens.hub_tag);
-    let Some(at) = cgroup.find(&needle).map(|i| i + needle.len()) else {
-        return CgroupSleeve::None;
-    };
-    let digits: String = cgroup[at..]
-        .chars()
-        .take_while(char::is_ascii_digit)
-        .collect();
-    let Ok(n) = digits.parse() else {
-        return CgroupSleeve::Gone;
-    };
-    let id = SleeveId(n);
-    match view.state.sleeve(id) {
-        Some(s) if s.life != Life::Removed => CgroupSleeve::Live(sleeve_principal(&view.state, id)),
-        _ => CgroupSleeve::Gone,
-    }
-}
-
 type Result<T> = std::result::Result<T, ApiError>;
-
-pub fn err(code: ErrorCode, m: impl Into<String>) -> ApiError {
-    ApiError::new(code, m)
-}
 
 fn internal(e: impl std::fmt::Display) -> ApiError {
     err(ErrorCode::Internal, e.to_string())
@@ -190,7 +84,7 @@ pub fn call(hub: &Hub, who: &Principal, name: &str, body: &Value) -> Result<Valu
             ),
         });
     }
-    crate::doctor::precheck(hub, name, body)?;
+    precheck(hub, name, body)?;
     let c = Ctx { hub, who };
     routes!(&c, name, body;
         GetState => get_state,
@@ -241,6 +135,46 @@ pub fn call(hub: &Hub, who: &Principal, name: &str, body: &Value) -> Result<Valu
     )
 }
 
+/// The API's gate: SpawnSleeve, StartSleeve and Resleeve onto an ineligible harness are refused
+/// before they reach the core. Bodies that do not parse are left to the handler.
+fn precheck(hub: &Hub, method: &str, body: &Value) -> Result<()> {
+    let harness = if method == m::SpawnSleeve::NAME {
+        api::SpawnSleeveRequest::from_json(body)
+            .ok()
+            .map(|r| wire::core_harness(r.harness))
+    } else if method == m::Resleeve::NAME {
+        api::ResleeveRequest::from_json(body)
+            .ok()
+            .map(|r| wire::core_harness(r.target))
+    } else if method == m::StartSleeve::NAME {
+        api::StartSleeveRequest::from_json(body)
+            .ok()
+            .and_then(|r| match r.target {
+                Some(t) => Some(wire::core_harness(t)),
+                None => {
+                    let view = hub.view();
+                    let st = &view.state;
+                    st.sleeves
+                        .values()
+                        .find(|s| {
+                            s.life != Life::Removed
+                                && (s.id.0.to_string() == r.sleeve_id || s.name == r.sleeve_id)
+                        })
+                        .map(|s| s.target.harness)
+                }
+            })
+    } else {
+        None
+    };
+    match harness {
+        Some(h) => hub
+            .doctor
+            .check(&hub.config, h)
+            .map_err(|why| ApiError::new(ErrorCode::Conflict, why)),
+        None => Ok(()),
+    }
+}
+
 // ---- access --------------------------------------------------------------------------------
 
 /// A sleeve credential reaches itself and its children; Envoy and the owner reach all.
@@ -278,27 +212,11 @@ fn target_sleeve(c: &Ctx<'_>, view: &View, s: &str) -> Result<SleeveId> {
     Ok(id)
 }
 
-pub(crate) fn command(hub: &Hub, kind: EventKind) -> Result<Reply> {
-    let r = hub.command(kind, COMMAND_TIMEOUT).map_err(|e| match e {
-        CommandError::Timeout => err(ErrorCode::Timeout, "the core did not answer"),
-        CommandError::Down => err(ErrorCode::Unavailable, "the core is stopped"),
-    })?;
-    if let Reply::Refused(code, why) = r {
-        let code = match code {
-            Code::InvalidArgument => ErrorCode::Invalid,
-            Code::NotFound => ErrorCode::NotFound,
-            Code::AlreadyExists | Code::FailedPrecondition => ErrorCode::Conflict,
-        };
-        return Err(err(code, why));
-    }
-    Ok(r)
-}
-
 fn sleeve_view(hub: &Hub, id: SleeveId) -> Result<api::Sleeve> {
     let view = hub.view();
     view.state
         .sleeve(id)
-        .map(|s| wire::sleeve(hub, &view, s))
+        .map(|s| wire::sleeve(&hub.transcripts, &view, s))
         .ok_or_else(|| err(ErrorCode::NotFound, format!("sleeve {} is gone", id.0)))
 }
 
@@ -315,7 +233,7 @@ fn timeout(ms: u64) -> Duration {
 fn get_state(c: &Ctx<'_>, _: api::Empty) -> Result<api::HubState> {
     let (seq, _) = c.hub.bus.mark();
     let view = c.hub.view();
-    Ok(wire::state(c.hub, &view, seq, &|_| true))
+    Ok(snapshot::state(c.hub, &view, seq, &|_| true))
 }
 
 fn list_sleeves(c: &Ctx<'_>, _: api::Empty) -> Result<api::SleeveList> {
@@ -326,7 +244,7 @@ fn list_sleeves(c: &Ctx<'_>, _: api::Empty) -> Result<api::SleeveList> {
             .sleeves
             .values()
             .filter(|s| s.life != Life::Removed && reaches(st, c.who, s.id))
-            .map(|s| wire::sleeve(c.hub, &view, s))
+            .map(|s| wire::sleeve(&c.hub.transcripts, &view, s))
             .collect(),
     })
 }
@@ -942,7 +860,7 @@ fn prefix(state: &State, who: &Principal, agent: &str, text: &str) -> String {
     }
 }
 
-/// A request id that names its sender's kind; `Hub::from_label` reads the agent name back.
+/// A request id that names its sender's kind; `envoy::from_label` reads the agent name back.
 fn new_request(c: &Ctx<'_>, agent: &str) -> Result<String> {
     let r = random_hex(16).map_err(internal)?;
     Ok(match c.who {
@@ -966,7 +884,7 @@ fn may_mail(state: &State, who: &Principal, id: SleeveId) -> bool {
     let Principal::Sleeve(me) = *who else {
         return false;
     };
-    Hub::envoy_id(state) == Some(id) || state.sleeve(me).and_then(|s| s.parent) == Some(id)
+    envoy_id(state) == Some(id) || state.sleeve(me).and_then(|s| s.parent) == Some(id)
 }
 
 fn send_message(c: &Ctx<'_>, r: api::SendMessageRequest) -> Result<api::Sent> {
@@ -1092,14 +1010,74 @@ fn list_approvals(c: &Ctx<'_>, r: api::ListApprovalsRequest) -> Result<api::Appr
             .state
             .approvals
             .values()
-            .filter(|a| !r.pending_only || a.state == pt_core::ApprovalState::Pending)
-            .map(crate::approvals::view)
+            .filter(|a| !r.pending_only || a.state == ApprovalState::Pending)
+            .map(approvals::view)
             .collect(),
     })
 }
 
 fn decide(c: &Ctx<'_>, r: api::DecideRequest) -> Result<api::Approval> {
-    crate::approvals::decide(c.hub, &r.approval_id, r.decision)
+    decide_approval(c.hub, &r.approval_id, r.decision)
+}
+
+/// The owner decides approval `id`. A tool decision reaches the incarnation that asked only
+/// while it is the sleeve's live one; the core records any other as fenced.
+fn decide_approval(hub: &Hub, id: &str, d: api::Decision) -> Result<api::Approval> {
+    let view = hub.view();
+    let a = view
+        .state
+        .approvals
+        .get(id)
+        .ok_or_else(|| err(ErrorCode::NotFound, format!("no approval {id}")))?;
+    if a.state != ApprovalState::Pending {
+        return Err(err(
+            ErrorCode::Conflict,
+            format!("approval {id} is already {}", approvals::state(a)),
+        ));
+    }
+    if a.source == Source::Action && d == api::Decision::AllowSession {
+        return Err(err(
+            ErrorCode::Invalid,
+            "an action approval is allow_once or deny",
+        ));
+    }
+    let allow = d != api::Decision::Deny;
+    let sleeve = a.sleeve;
+    command(
+        hub,
+        EventKind::RespondApproval {
+            sleeve,
+            approval: id.to_string(),
+            allow,
+            note: String::new(),
+        },
+    )?;
+    let view = hub.view();
+    let a = view
+        .state
+        .approvals
+        .get(id)
+        .ok_or_else(|| err(ErrorCode::Internal, format!("approval {id} vanished")))?;
+    if a.source == Source::Action && a.state == ApprovalState::Decided {
+        let g = view.state.sleeve(sleeve).map_or(0, |s| s.g.0);
+        hub.record(
+            sleeve,
+            g,
+            now_ms(),
+            Entry::ApprovalDecision {
+                id: id.to_string(),
+                decision: if allow {
+                    pt_drivers::Decision::AllowOnce
+                } else {
+                    pt_drivers::Decision::Deny
+                },
+                by: Some("owner".into()),
+                confirmed: true,
+            },
+            Note::default(),
+        );
+    }
+    Ok(approvals::view(a))
 }
 
 // ---- nodes and jobs ------------------------------------------------------------------------
@@ -1231,7 +1209,7 @@ fn add_node(c: &Ctx<'_>, r: api::AddNodeRequest) -> Result<api::PendingNode> {
         .find(|p| p.registration.auth_id == reg.auth_id)
         .ok_or_else(|| err(ErrorCode::Internal, "the registration was not recorded"))?;
     let shown = pending_node(&p, &fp);
-    c.hub.event(
+    c.hub.bus.event(
         api::EventKind::Node,
         api::Level::Info,
         &reg.name,
@@ -1281,7 +1259,7 @@ fn approve_node(c: &Ctx<'_>, r: api::ApproveNodeRequest) -> Result<api::Approved
         .approve(&r.auth_id, &name, &fingerprint)
         .map_err(fleet_err)?;
     info!("node {} approved as headscale node {}", n.name, n.id);
-    c.hub.event(
+    c.hub.bus.event(
         api::EventKind::Node,
         api::Level::Info,
         &n.name,
@@ -1341,12 +1319,12 @@ fn remove_node(c: &Ctx<'_>, r: api::RemoveNodeRequest) -> Result<api::RemovedNod
     }
     let (removal, forgotten) = up.poller.remove(id);
     if forgotten {
-        crate::fleet::removed(c.hub, id);
+        c.hub.fleet.removed(&c.hub.bus, id);
     }
     let removal = removal.map_err(|e| {
         let m = e.to_string();
         if m.contains("enrollment record") {
-            c.hub.event(
+            c.hub.bus.event(
                 api::EventKind::Node,
                 api::Level::Alarm,
                 &name,
@@ -1383,7 +1361,7 @@ fn remove_node(c: &Ctx<'_>, r: api::RemoveNodeRequest) -> Result<api::RemovedNod
         text.push_str(&format!("; jobs {} were in flight", in_flight.join(", ")));
     }
     info!("{text} (headscale node {id})");
-    c.hub.event(
+    c.hub.bus.event(
         api::EventKind::Node,
         api::Level::Info,
         &name,
@@ -1405,7 +1383,7 @@ fn rename_node(c: &Ctx<'_>, r: api::RenameNodeRequest) -> Result<api::RenamedNod
     let n = up.poller.rename(id, &r.name).map_err(|e| {
         let m = e.to_string();
         if m.contains("failed too") {
-            c.hub.event(
+            c.hub.bus.event(
                 api::EventKind::Node,
                 api::Level::Alarm,
                 &from,
@@ -1421,11 +1399,11 @@ fn rename_node(c: &Ctx<'_>, r: api::RenameNodeRequest) -> Result<api::RenamedNod
     })?;
     if n.name != from {
         if let Some(v) = up.poller.node(&id.to_string()) {
-            crate::fleet::renamed(c.hub, v.node);
+            c.hub.fleet.renamed(&c.hub.bus, v.node);
         }
         let text = format!("node {from} renamed {}", n.name);
         info!("{text} (headscale node {id})");
-        c.hub.event(
+        c.hub.bus.event(
             api::EventKind::Node,
             api::Level::Info,
             &n.name,
@@ -1474,7 +1452,7 @@ fn job_view(hub: &Hub, id: pt_core::JobId) -> Result<api::Job> {
     view.state
         .jobs
         .get(&id)
-        .map(|j| crate::jobs::view(hub, j))
+        .map(|j| crate::jobs::view(&hub.jobs, j))
         .ok_or_else(|| err(ErrorCode::NotFound, format!("job {} is gone", id.0)))
 }
 
@@ -1598,7 +1576,7 @@ fn list_jobs(c: &Ctx<'_>, r: api::ListJobsRequest) -> Result<api::JobList> {
         .filter(|j| node.is_none_or(|n| j.node.map(|x| x.0) == Some(n)))
         .filter(|j| job_visible(&view.state, c.who, JobRequest::of(&j.spec).as_ref()))
         .take(limit)
-        .map(|j| crate::jobs::view(c.hub, j))
+        .map(|j| crate::jobs::view(&c.hub.jobs, j))
         .collect();
     jobs.reverse();
     Ok(api::JobList {
@@ -1697,7 +1675,7 @@ fn mark_events_read(c: &Ctx<'_>, r: api::MarkEventsReadRequest) -> Result<api::E
 // ---- Envoy ---------------------------------------------------------------------------------
 
 fn envoy(view: &View) -> Result<SleeveId> {
-    Hub::envoy_id(&view.state).ok_or_else(|| err(ErrorCode::Unavailable, "Envoy is not running"))
+    envoy_id(&view.state).ok_or_else(|| err(ErrorCode::Unavailable, "Envoy is not running"))
 }
 
 fn envoy_send(c: &Ctx<'_>, r: api::EnvoySendRequest) -> Result<api::Sent> {
@@ -1920,26 +1898,6 @@ fn envoy_wait(c: &Ctx<'_>, r: api::EnvoyWaitRequest) -> Result<api::EnvoyReply> 
 
 // ---- wait ----------------------------------------------------------------------------------
 
-/// Re-evaluates `check` on every change until it answers or `deadline` passes. The bus position
-/// is read before the view, so a change between the two wakes the wait at once.
-pub(crate) fn wait_for<T>(
-    hub: &Hub,
-    deadline: Instant,
-    mut check: impl FnMut(&View) -> Option<T>,
-) -> Option<T> {
-    loop {
-        let pos = hub.bus.pos();
-        let view = hub.view();
-        if let Some(x) = check(&view) {
-            return Some(x);
-        }
-        if Instant::now() >= deadline {
-            return None;
-        }
-        hub.bus.wait_after(pos, deadline);
-    }
-}
-
 fn reached(state: &State, id: SleeveId, until: api::WaitUntil) -> bool {
     let Some(s) = state.sleeve(id) else {
         return false;
@@ -1988,7 +1946,7 @@ fn upward_report(
         dests.push(p);
     }
     if !parent_only
-        && let Some(e) = Hub::envoy_id(state)
+        && let Some(e) = envoy_id(state)
         && !dests.contains(&e)
     {
         dests.push(e);
@@ -2015,8 +1973,8 @@ fn wait(c: &Ctx<'_>, r: api::WaitRequest) -> Result<api::WaitResult> {
     if r.until == api::WaitUntil::Report {
         let view = c.hub.view();
         let resolved = find(&view.state, &r.sleeve_id).ok();
-        if r.sleeve_id == crate::hub::ENVOY
-            || resolved.is_some_and(|id| Hub::envoy_id(&view.state) == Some(id))
+        if r.sleeve_id == crate::envoy::ENVOY
+            || resolved.is_some_and(|id| envoy_id(&view.state) == Some(id))
         {
             return Err(err(
                 ErrorCode::Invalid,
@@ -2266,7 +2224,7 @@ fn read_history(c: &Ctx<'_>, r: api::ReadHistoryRequest) -> Result<api::HistoryR
 }
 
 fn get_hub_info(c: &Ctx<'_>, _: api::Empty) -> Result<api::HubInfo> {
-    Ok(wire::hub_info(c.hub))
+    Ok(snapshot::hub_info(c.hub))
 }
 
 // ---- devices -------------------------------------------------------------------------------
@@ -2293,7 +2251,7 @@ fn add_device(c: &Ctx<'_>, r: api::AddDeviceRequest) -> Result<api::PairingCode>
 fn pair_device(c: &Ctx<'_>, r: api::PairDeviceRequest) -> Result<api::PairedDevice> {
     match c.hub.devices.pair(&r.code).map_err(internal)? {
         Some((device, token)) => {
-            c.hub.event(
+            c.hub.bus.event(
                 api::EventKind::Hub,
                 api::Level::Info,
                 "hub",
@@ -2325,6 +2283,61 @@ fn revoke_device(c: &Ctx<'_>, r: api::DeviceRef) -> Result<api::Empty> {
 
 // ---- doctor and updates --------------------------------------------------------------------
 
+/// `GetDoctor`'s answer: the report compacted, with the hub's own harness update runs.
+fn doctor_report(hub: &Hub, r: Option<&pt_doctor::Report>) -> api::DoctorReport {
+    let Some(r) = r else {
+        return api::DoctorReport {
+            checked_at_ms: api::EpochMs(0),
+            os: std::env::consts::OS.into(),
+            arch: std::env::consts::ARCH.into(),
+            harnesses: Vec::new(),
+            gh_logged_in: false,
+            gh_account: String::new(),
+            sandbox_ok: false,
+            problems: vec!["doctor has not finished its first run".into()],
+        };
+    };
+    let runs = hub.harness_updates.last_runs();
+    api::DoctorReport {
+        checked_at_ms: api::EpochMs(r.checked_ms),
+        os: r.os.clone(),
+        arch: r.arch.clone(),
+        harnesses: r
+            .harnesses
+            .iter()
+            .map(|h| {
+                let last = runs.get(&h.binary.name);
+                api::DoctorHarness {
+                    name: h.name.clone(),
+                    present: h.binary.present,
+                    path: h.binary.path.clone(),
+                    version: h.binary.version.clone(),
+                    install: h.binary.install.as_str().into(),
+                    login: h.credentials.present,
+                    eligible: h.eligible,
+                    reasons: h.reasons.clone(),
+                    update: h.update.clone(),
+                    updated_at_ms: last.map(|l| api::EpochMs(l.at_ms)),
+                    update_note: last.map_or_else(String::new, |l| l.note.clone()),
+                }
+            })
+            .collect(),
+        gh_logged_in: r.gh.logged_in,
+        gh_account: r.gh.account.clone(),
+        sandbox_ok: r.sandbox.bwrap.present
+            && r.sandbox.bwrap.error.is_empty()
+            && r.sandbox.systemd_run_user,
+        problems: {
+            let mut problems = r.problems.clone();
+            let capped = hub.history.capped_sleeves();
+            if !capped.is_empty() {
+                problems.push(format!("history capped: {}", capped.join(", ")));
+            }
+            problems
+        },
+    }
+}
+
 fn get_doctor(c: &Ctx<'_>, r: api::GetDoctorRequest) -> Result<api::DoctorReport> {
     if matches!(c.who, Principal::Sleeve(_)) {
         return Err(err(
@@ -2333,16 +2346,19 @@ fn get_doctor(c: &Ctx<'_>, r: api::GetDoctorRequest) -> Result<api::DoctorReport
         ));
     }
     let report = if r.refresh {
-        Some(crate::doctor::run_now(c.hub))
+        Some(crate::workers::run_doctor(c.hub))
     } else {
         c.hub.doctor.report()
     };
-    Ok(crate::doctor::api_report(c.hub, report.as_deref()))
+    Ok(doctor_report(c.hub, report.as_deref()))
 }
 
 fn update_harnesses(c: &Ctx<'_>, r: api::UpdateHarnessesRequest) -> Result<api::HarnessUpdates> {
     Ok(api::HarnessUpdates {
-        programs: crate::harness_update::request(c.hub, &r.programs),
+        programs: c
+            .hub
+            .harness_updates
+            .request(&c.hub.doctor, || c.hub.view(), &r.programs),
     })
 }
 

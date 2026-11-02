@@ -1,27 +1,27 @@
 //! What every thread shares: the published view, the core's input channel, the transcripts, the
 //! event bus, devices and Envoy's current turn origin (D9).
 
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use pt_api::{EpochMs, EventKind as ApiEventKind, HubEvent, HubStreamMessage, Level};
-use pt_core::{EventKind, Gen, Millis, Party, Reply, SleeveId, State};
+use pt_api::HubStreamMessage;
+use pt_core::{EventKind, Gen, Intent, ProbeResult, Reply, SleeveId};
 use pt_drivers::Entry;
 
 use crate::bus::Bus;
 use crate::devices::Devices;
+use crate::envoy::EnvoyTurn;
 use crate::fleet::FleetSlot;
 use crate::home::{Config, Home, Tokens, now_ms};
 use crate::jobs::JobStore;
+use crate::lock::lock;
 use crate::log::{debug, warning};
-use crate::transcript::{Line, Note, Transcripts, lock};
+use crate::transcript::{Line, Note, Transcripts};
+use crate::view::View;
 use crate::wire;
-
-pub const ENVOY: &str = pt_core::ENVOY_NAME;
 
 /// One input to the core thread. Commands carry the channel their `Intent::Reply` goes to.
 #[allow(clippy::large_enum_variant)]
@@ -40,14 +40,6 @@ pub enum Input {
 pub struct JournalSnapshot {
     pub at_ms: u64,
     pub next_sleeve: u64,
-}
-
-/// The read-only snapshot published after each journaled batch.
-pub struct View {
-    pub state: State,
-    pub batch: u64,
-    /// When each sleeve's activity last changed kind.
-    pub since: BTreeMap<SleeveId, Millis>,
 }
 
 /// The test-only knob reports a usage limit at the first turn's settle.
@@ -71,17 +63,11 @@ impl Fault {
     }
 }
 
-/// D9: who started Envoy's current turn. `origin` is `agent:<name>` or `mail:<name>` when an
-/// agent message, or mail from a D9-marked sleeve, was written into it (as its prompt or a
-/// steer). A crash keeps the origin and the spawn count: the exit does not clear them, and
-/// the continuation replaces the origin. A usage-limit or auth settle keeps them too, because
-/// Envoy resleeves and that brief is sent as the owner, so it cannot put the origin back.
-/// A finished settle, or a prompt that is not a continuation or a resleeve brief, clears both.
-#[derive(Debug, Default)]
-pub struct EnvoyTurn {
-    pub origin: Option<String>,
-    /// Sleeves Envoy spawned in this turn.
-    pub spawns: u64,
+/// Why `serve` returns.
+pub enum Stop {
+    Signal(i32),
+    /// Exit for the service manager to start `releases/current`.
+    Restart(String),
 }
 
 pub struct Hub {
@@ -106,7 +92,7 @@ pub struct Hub {
     /// Hub and node updates, one at a time.
     pub update_lock: Mutex<()>,
     /// Where `serve` waits; an update sends `Stop::Restart` here.
-    pub stop: Mutex<Option<Sender<crate::update::Stop>>>,
+    pub stop: Mutex<Option<Sender<Stop>>>,
     input: Sender<Input>,
     view: Mutex<Arc<View>>,
 }
@@ -192,6 +178,30 @@ impl Hub {
         }
     }
 
+    /// Answers an intent no executor will run: an effect is refused, a probe cannot tell.
+    pub fn refuse(&self, intent: Intent, why: &str) {
+        match intent {
+            Intent::Execute {
+                effect, attempt, ..
+            } => {
+                self.submit(EventKind::Dispatched { effect, attempt });
+                self.submit(EventKind::Nacked {
+                    effect,
+                    attempt,
+                    reason: why.to_string(),
+                });
+            }
+            Intent::Probe {
+                effect, attempt, ..
+            } => self.submit(EventKind::Probed {
+                effect,
+                attempt,
+                result: ProbeResult::Unknowable,
+            }),
+            other => debug!("dropped {other:?}: {why}"),
+        }
+    }
+
     /// Feeds a command to the core and waits for its reply, which is released only after the
     /// command is journaled.
     pub fn command(&self, kind: EventKind, timeout: Duration) -> Result<Reply, CommandError> {
@@ -224,15 +234,6 @@ impl Hub {
 
     pub fn scope_sleeve(&self, id: SleeveId) -> String {
         format!("{}-{}", self.tokens.hub_tag, id.0)
-    }
-
-    /// The live (not removed) sleeve named `envoy` with no parent.
-    pub fn envoy_id(state: &State) -> Option<SleeveId> {
-        state
-            .sleeves
-            .values()
-            .find(|s| s.name == ENVOY && s.parent.is_none() && s.life != pt_core::Life::Removed)
-            .map(|s| s.id)
     }
 
     /// Stores a transcript entry and streams it. The stream message is pushed while the store
@@ -277,50 +278,5 @@ impl Hub {
             sleeve_id: id.0.to_string(),
             entry,
         });
-    }
-
-    /// Streams a line of the mail and events log.
-    pub fn event(&self, kind: ApiEventKind, level: Level, source: &str, target: &str, text: &str) {
-        let at = EpochMs(now_ms());
-        self.bus.push(|seq| HubStreamMessage::Event {
-            seq,
-            event: HubEvent {
-                seq,
-                at_ms: at,
-                kind,
-                source: source.to_string(),
-                target: Some(target.to_string()),
-                text: text.to_string(),
-                read: false,
-                level,
-            },
-        });
-    }
-
-    /// The `from` label a harness sees on a user message: owner, envoy, agent:<name>, or
-    /// mail:<name> from a sleeve. A resleeve brief is an effect, not a message, so it is
-    /// labeled owner. A continuation has no `ga:` name and uses the turn's recorded agent.
-    pub fn from_label(state: &State, to: SleeveId, request_id: &str) -> String {
-        let party = state
-            .sleeve(to)
-            .and_then(|s| s.messages.get(request_id))
-            .map(|m| m.from);
-        match party {
-            Some(Party::Owner) | None => "owner".into(),
-            Some(Party::Envoy) => "envoy".into(),
-            Some(Party::Agent) => match request_id.strip_prefix("ga:") {
-                Some(rest) => format!("agent:{}", rest.split(':').next().unwrap_or("")),
-                None if request_id.starts_with("continue:") => state
-                    .sleeve(to)
-                    .and_then(|s| s.turn_agent.clone())
-                    .map(|name| format!("agent:{name}"))
-                    // No recorded name still carries the prefix, so D9 fails closed.
-                    .unwrap_or_else(|| "agent:".into()),
-                None => "agent".into(),
-            },
-            Some(Party::Sleeve(x)) => state
-                .sleeve(x)
-                .map_or_else(|| format!("mail:{}", x.0), |s| format!("mail:{}", s.name)),
-        }
     }
 }

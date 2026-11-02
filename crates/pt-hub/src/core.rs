@@ -13,9 +13,10 @@ use pt_journal::Journal;
 
 use crate::exec::Executors;
 use crate::home::now_ms;
-use crate::hub::{Hub, Input, JournalSnapshot, View};
+use crate::hub::{Hub, Input, JournalSnapshot};
 use crate::log::{debug, error, info};
 use crate::transcript::Note;
+use crate::view::View;
 use crate::wire;
 
 const MAX_BATCH: usize = 512;
@@ -181,12 +182,12 @@ fn announce_changes(hub: &Hub, before: &View, after: &View) {
             hub.bus
                 .push(|seq| HubStreamMessage::Workspace { seq, workspace });
         }
-        let sleeve = wire::sleeve(hub, after, s);
+        let sleeve = wire::sleeve(&hub.transcripts, after, s);
         hub.bus.push(|seq| HubStreamMessage::Sleeve { seq, sleeve });
     }
     for j in after.state.jobs.values() {
         if before.state.jobs.get(&j.id) != Some(j) {
-            let job = crate::jobs::view(hub, j);
+            let job = crate::jobs::view(&hub.jobs, j);
             hub.bus.push(|seq| HubStreamMessage::Job { seq, job });
         }
     }
@@ -319,7 +320,7 @@ fn notify(hub: &Hub, view: &View, to: Party, sleeve: Option<SleeveId>, n: &Notic
         .and_then(|id| view.state.sleeve(id))
         .map_or_else(|| "hub".to_string(), |s| s.name.clone());
     info!("notice for {target} from {source}: {text}");
-    hub.event(kind, level, &source, &target, &text);
+    hub.bus.event(kind, level, &source, &target, &text);
     let at = now_ms();
     // Notices addressed to a parent about its child stay on the stream only.
     if let Some(id) = sleeve

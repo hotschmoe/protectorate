@@ -5,8 +5,8 @@ use std::time::Duration;
 use pt_api::HubStreamMessage;
 
 use crate::hub::Hub;
+use crate::lock::lock;
 use crate::log::warning;
-use crate::transcript::lock;
 
 pub fn start(hub: &Arc<Hub>) {
     let cadence = pt_fleet::PollConfig::default();

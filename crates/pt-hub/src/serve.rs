@@ -19,12 +19,13 @@ use pt_http::{Config as HttpConfig, Server, ShutdownHandle};
 use pt_journal::Journal;
 
 use crate::devices::Devices;
+use crate::envoy::{ENVOY, envoy_id};
 use crate::fleet::{FleetFlags, Net};
 use crate::home::{Config, Home, Tokens, random_hex, write_private};
 use crate::http::{Listener, Web, handler};
-use crate::hub::{ENVOY, Hub, Input, View};
+use crate::hub::{Hub, Input, Stop};
 use crate::log::{info, warning};
-use crate::update::Stop;
+use crate::view::View;
 use crate::wire;
 
 pub struct ServeOptions {
@@ -216,7 +217,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
         reply: None,
     })
     .map_err(|_| "core channel closed")?;
-    let envoy_missing = Hub::envoy_id(&state).is_none();
+    let envoy_missing = envoy_id(&state).is_none();
     let view = View {
         state: state.clone(),
         batch: 0,
@@ -286,12 +287,12 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
         }));
     }
 
-    crate::doctor::start(&hub, o.net);
+    crate::workers::start_doctor(&hub, o.net);
     crate::hardware::start(&hub);
-    crate::harness_update::start(&hub);
-    crate::fleet::start(&hub, o.fleet, o.net);
-    crate::quota::start(&hub);
-    crate::history::start(&hub);
+    crate::workers::start_harness_updates(&hub);
+    crate::workers::start_fleet(&hub, o.fleet, o.net);
+    crate::workers::start_quotas(&hub);
+    crate::workers::start_history(&hub);
 
     let tick_hub = hub.clone();
     thread::Builder::new()
@@ -364,7 +365,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<String>) -> Result<Exit, Strin
             Err(e) => warning!("waiting for signals: {e}"),
         })
         .map_err(ctx("spawn the signal thread"))?;
-    *crate::transcript::lock(&hub.stop) = Some(stop_tx);
+    *crate::lock::lock(&hub.stop) = Some(stop_tx);
     if let Some(v) = trial {
         crate::update::watch_probation(&hub, v);
     }

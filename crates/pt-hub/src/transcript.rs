@@ -6,7 +6,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use pt_api::{Harness, Level};
 use pt_core::SleeveId;
@@ -14,6 +14,7 @@ use pt_drivers::Entry;
 use pt_json::ToJson;
 
 use crate::home::Home;
+use crate::lock::lock;
 
 const TAIL: usize = 4096;
 
@@ -220,10 +221,6 @@ impl Store {
         }
         read_all(&self.path)
     }
-}
-
-pub fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 pub struct Transcripts {

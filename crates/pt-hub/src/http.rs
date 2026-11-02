@@ -13,11 +13,12 @@ use pt_api::{
 use pt_http::{Message, Peer, Request, Response};
 use pt_json::ToJson;
 
-use crate::api::{self, Principal, err};
+use crate::api;
 use crate::bus::{Resume, Since};
+use crate::command::err;
 use crate::hub::Hub;
 use crate::log::debug;
-use crate::wire;
+use crate::principal::{self, CgroupSleeve, Principal};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Listener {
@@ -73,7 +74,7 @@ fn principal(
 ) -> Result<Principal, ApiError> {
     let view = hub.view();
     let by_token = |t: &str| {
-        api::from_token(hub, &view, t)
+        principal::from_token(hub, &view, t)
             .ok_or_else(|| err(ErrorCode::Unauthenticated, "unknown token"))
     };
     let unknown = || err(ErrorCode::Forbidden, "cannot identify the calling process");
@@ -81,12 +82,12 @@ fn principal(
         (Listener::Unix | Listener::Sleeves, Peer::Unix(cred)) if cred.uid != hub.uid => {
             Err(err(ErrorCode::Forbidden, "not the hub's user"))
         }
-        (Listener::Unix, Peer::Unix(cred)) => match api::peer_cgroup(cred.pid) {
+        (Listener::Unix, Peer::Unix(cred)) => match principal::peer_cgroup(cred.pid) {
             None => Err(unknown()),
-            Some(cg) => match api::cgroup_sleeve(hub, &view, &cg) {
-                api::CgroupSleeve::Live(p) => Ok(p),
-                api::CgroupSleeve::Gone => Err(unknown()),
-                api::CgroupSleeve::None => match token {
+            Some(cg) => match principal::cgroup_sleeve(hub, &view, &cg) {
+                CgroupSleeve::Live(p) => Ok(p),
+                CgroupSleeve::Gone => Err(unknown()),
+                CgroupSleeve::None => match token {
                     Some(t) => by_token(t),
                     None => Ok(Principal::Owner),
                 },
@@ -106,12 +107,14 @@ fn principal(
                     "only a sleeve capability is taken on this socket",
                 ));
             }
-            match api::peer_cgroup(cred.pid).map(|cg| api::cgroup_sleeve(hub, &view, &cg)) {
-                Some(api::CgroupSleeve::Live(q)) if q != p => Err(err(
+            match principal::peer_cgroup(cred.pid)
+                .map(|cg| principal::cgroup_sleeve(hub, &view, &cg))
+            {
+                Some(CgroupSleeve::Live(q)) if q != p => Err(err(
                     ErrorCode::Forbidden,
                     "that capability belongs to another sleeve",
                 )),
-                Some(api::CgroupSleeve::Gone) => Err(unknown()),
+                Some(CgroupSleeve::Gone) => Err(unknown()),
                 _ => Ok(p),
             }
         }
@@ -252,7 +255,7 @@ fn static_file(req: &Request, web: &Web) -> Response {
 fn snapshot(hub: &Hub) -> (u64, String) {
     let (seq, pos) = hub.bus.mark();
     let view = hub.view();
-    let state = wire::state(hub, &view, seq, &|_| true);
+    let state = crate::snapshot::state(hub, &view, seq, &|_| true);
     let msg = HubStreamMessage::Snapshot { seq, state };
     (pos, msg.to_json().to_string())
 }
