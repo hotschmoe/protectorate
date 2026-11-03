@@ -19,6 +19,23 @@
 #   PT_RELEASE_WIN_DIR   the build's folder under %USERPROFILE% there (default pt-release)
 #   ZIG                  the zig binary for the glibc 2.31 amd64 build (default: zig on PATH)
 #   PT_RELEASE_REPO      OWNER/NAME of the GitHub repo (default: install.sh's REPO)
+#   PT_RELEASE_WIN_FLUTTER        Flutter's bin folder on the Windows host (C:\dev\flutter\bin)
+#   PT_RELEASE_APK_HOST  ssh destination of a Linux amd64 machine with Flutter and the Android
+#                        SDK that builds the APK; unset skips it
+#   PT_RELEASE_APK_SSH_KEY        an ssh identity for it (optional)
+#   PT_RELEASE_APK_PATH, PT_RELEASE_APK_ANDROID_HOME   Flutter's bin folder and the SDK there,
+#                        relative to its home (flutter/bin, Android/Sdk)
+#   PT_RELEASE_APK_SIGNING        the signing properties here: storeFile, keyAlias,
+#                        storePassword, keyPassword (~/.config/protectorate/android-release.properties)
+#   PT_RELEASE_APKSIGNER the apksigner binary here (default: apksigner on PATH)
+#   PT_RELEASE_ARM64_NODE         the fleet node (Windows arm64, Flutter, Visual Studio) that
+#                        builds the arm64 desktop app as a hub job; unset skips it
+#   PT_RELEASE_ARM64_DIR, PT_RELEASE_ARM64_PATH   its build folder (C:\dev\pt-release) and the
+#                        folders put first on PATH there (Flutter's bin and Git's cmd under C:\)
+#   PT_RELEASE_ARM64_TIMEOUT      the job's timeout in seconds (3600)
+#   PT_RELEASE_HUB_CLI   the hub CLI command that runs the job (default: protectorate)
+#   PT_RELEASE_SERVE_ADDR         an address of this machine the arm64 node can reach; the
+#                        job fetches the app sources from a one-time path there
 #
 # Steps of `assets`, overlapped where they use different machines or toolchains:
 #   go            scripts/net-build.sh: headscale and member for every target (skipped when
@@ -33,7 +50,14 @@
 # The hub assets embed the web build and that arch's headscale and member, and every node asset
 # embeds its target's member, so the cargo steps and windows wait for go (and the hub for web).
 # headscale and member are not release assets of their own.
-#   app           the Android APK and the Flutter desktop builds: later steps (REVISIT)
+#   app-src       the app's sources, as on disk, for the three app builds:
+#   apk           protectorate-android.apk: built on the APK host over ssh, signed here
+#   desktop-amd64 protectorate-desktop-windows-amd64.zip: built on the Windows host after its
+#                 node build
+#   desktop-arm64 protectorate-desktop-windows-arm64.zip: built on an arm64 fleet node as a
+#                 hub job (Flutter does not cross-build Windows arm64)
+# Each zip holds Flutter's runner\Release folder at its root. The app installs these itself
+# from its hub (SPEC 6a). The Linux desktop app is not built yet (REVISIT).
 # Every step reuses its caches (cargo target dirs, the Go build cache, the Windows target dir),
 # so a rebuild with no change is quick.
 set -euo pipefail
@@ -53,11 +77,28 @@ WIN_HOST=${PT_RELEASE_WIN_HOST:-}
 WIN_DIR=${PT_RELEASE_WIN_DIR:-pt-release}
 WEB_DIR=$ROOT/app/build/web
 export CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-4}
+APP_OUT=$TARGET/release-app/$VERSION
+APP_TAR=$APP_OUT/app-src.tar
+APP_FLAGS="--build-name=${BUILD_NAME:-} --build-number=${BUILD_NUMBER:-} --dart-define=PROTECTORATE_VERSION=$VERSION"
+APK_HOST=${PT_RELEASE_APK_HOST:-}
+APK_KEY=${PT_RELEASE_APK_SSH_KEY:-}
+APK_PATH=${PT_RELEASE_APK_PATH:-flutter/bin}
+APK_ANDROID_HOME=${PT_RELEASE_APK_ANDROID_HOME:-Android/Sdk}
+APK_SIGNING=${PT_RELEASE_APK_SIGNING:-$HOME/.config/protectorate/android-release.properties}
+APKSIGNER=${PT_RELEASE_APKSIGNER:-$(command -v apksigner || true)}
+WIN_FLUTTER=${PT_RELEASE_WIN_FLUTTER:-'C:\dev\flutter\bin'}
+ARM64_NODE=${PT_RELEASE_ARM64_NODE:-}
+ARM64_DIR=${PT_RELEASE_ARM64_DIR:-'C:\dev\pt-release'}
+ARM64_PATH=${PT_RELEASE_ARM64_PATH:-'C:\dev\flutter\bin;C:\Program Files\Git\cmd'}
+ARM64_TIMEOUT=${PT_RELEASE_ARM64_TIMEOUT:-3600}
+SERVE_ADDR=${PT_RELEASE_SERVE_ADDR:-}
+read -r -a HUB_CLI <<<"${PT_RELEASE_HUB_CLI:-protectorate}"
 
 ASSETS=(
 	protectorate-linux-arm64 protectorate-linux-amd64
 	protectorate-node-linux-arm64 protectorate-node-linux-amd64
 	protectorate-node-windows-amd64.exe protectorate-node-windows-arm64.exe
+	protectorate-android.apk protectorate-desktop-windows-amd64.zip protectorate-desktop-windows-arm64.zip
 	install.sh install-node.sh install-node.ps1
 	VERSION
 )
@@ -167,32 +208,161 @@ build_windows() {
 		"&& set \"CARGO_TARGET_DIR=%USERPROFILE%\\$WIN_DIR\\target\"" \
 		"&& cargo +stable build --locked --release -j $CARGO_BUILD_JOBS -p protectorate-node" \
 		"--target x86_64-pc-windows-msvc --target aarch64-pc-windows-msvc"
-	local triple arch remote want got out
+	local triple arch
 	for arch in amd64 arm64; do
 		triple=$([ $arch = amd64 ] && echo x86_64 || echo aarch64)-pc-windows-msvc
-		remote="%USERPROFILE%\\$WIN_DIR\\target\\$triple\\release\\protectorate-node.exe"
-		out=$TARGET/release-windows/protectorate-node-windows-$arch.exe
-		mkdir -p "$(dirname "$out")"
-		want=$(win "powershell -NoProfile -NonInteractive -Command (Get-FileHash -Algorithm SHA256 '$remote').Hash" |
-			tr -d '\r\n' | tr 'A-F' 'a-f')
-		[[ "$want" =~ ^[0-9a-f]{64}$ ]] || die "no sha256 for $remote on $WIN_HOST"
-		if [ -f "$out" ] && [ "$(sha256sum <"$out" | cut -d' ' -f1)" = "$want" ]; then
-			echo "$out is current ($want)"
-			continue
-		fi
-		win "powershell -NoProfile -NonInteractive -Command [Console]::Out.Write([Convert]::ToBase64String([IO.File]::ReadAllBytes('$remote')))" |
-			tr -d '\r\n' | base64 -d >"$out.part"
-		got=$(sha256sum <"$out.part" | cut -d' ' -f1)
-		[ "$got" = "$want" ] || die "pulled $out.part has sha256 $got, $WIN_HOST has $want"
-		mv -f "$out.part" "$out"
-		echo "pulled $out ($want)"
+		win_pull "%USERPROFILE%\\$WIN_DIR\\target\\$triple\\release\\protectorate-node.exe" \
+			"$TARGET/release-windows/protectorate-node-windows-$arch.exe"
 	done
 }
 
-skip_app() {
-	echo "skipped: the Android APK (protectorate-android.apk) and the Flutter desktop builds"
-	echo "(protectorate-desktop-*) are later steps; see REVISIT. APP=1 would fail here."
-	[ "${APP:-0}" = 0 ]
+# win_pull REMOTE OUT: copies the file REMOTE on the Windows host to OUT, as base64 over ssh
+# (scp pulls truncate), checked by sha256 against the remote copy. A current OUT is kept.
+win_pull() {
+	local remote=$1 out=$2 want got
+	mkdir -p "$(dirname "$out")"
+	want=$(win "powershell -NoProfile -NonInteractive -Command (Get-FileHash -Algorithm SHA256 '$remote').Hash" |
+		tr -d '\r\n' | tr 'A-F' 'a-f')
+	[[ "$want" =~ ^[0-9a-f]{64}$ ]] || die "no sha256 for $remote on $WIN_HOST"
+	if [ -f "$out" ] && [ "$(sha256sum <"$out" | cut -d' ' -f1)" = "$want" ]; then
+		echo "$out is current ($want)"
+		return 0
+	fi
+	win "powershell -NoProfile -NonInteractive -Command [Console]::Out.Write([Convert]::ToBase64String([IO.File]::ReadAllBytes('$remote')))" |
+		tr -d '\r\n' | base64 -d >"$out.part"
+	got=$(sha256sum <"$out.part" | cut -d' ' -f1)
+	[ "$got" = "$want" ] || die "pulled $out.part has sha256 $got, $WIN_HOST has $want"
+	mv -f "$out.part" "$out"
+	echo "pulled $out ($want)"
+}
+
+# The app's sources as they are on disk, for the three app builds on other machines.
+app_src() {
+	mkdir -p "$APP_OUT"
+	git ls-files -z --cached --others --exclude-standard -- app |
+		tar --null --ignore-failed-read -cf "$APP_TAR" -T -
+}
+
+apk_ssh() { ssh -o BatchMode=yes ${APK_KEY:+-i "$APK_KEY" -o IdentitiesOnly=yes} "$APK_HOST" "$@"; }
+
+# On the APK host, then signed here: the key never leaves this machine.
+build_apk() {
+	local out=$APP_OUT/protectorate-android.apk ks alias
+	[ -f "$APK_SIGNING" ] || die "no signing properties at $APK_SIGNING (PT_RELEASE_APK_SIGNING)"
+	[ -x "$APKSIGNER" ] || die "no apksigner at $APKSIGNER (PT_RELEASE_APKSIGNER)"
+	apk_ssh "mkdir -p pt-release"
+	scp -q -o BatchMode=yes ${APK_KEY:+-i "$APK_KEY" -o IdentitiesOnly=yes} "$APP_TAR" "$APK_HOST:pt-release/app.tar"
+	apk_ssh "cd pt-release && tar -xf app.tar && cd app" \
+		"&& export ANDROID_HOME=\"\$HOME/$APK_ANDROID_HOME\" PATH=\"\$HOME/$APK_PATH:\$PATH\"" \
+		"&& flutter build apk --release $APP_FLAGS"
+	scp -q -o BatchMode=yes ${APK_KEY:+-i "$APK_KEY" -o IdentitiesOnly=yes} \
+		"$APK_HOST:pt-release/app/build/app/outputs/flutter-apk/app-release.apk" "$out.unsigned"
+	ks=$(sed -n 's/^storeFile=//p' "$APK_SIGNING")
+	alias=$(sed -n 's/^keyAlias=//p' "$APK_SIGNING")
+	KS_PASS=$(sed -n 's/^storePassword=//p' "$APK_SIGNING") KEY_PASS=$(sed -n 's/^keyPassword=//p' "$APK_SIGNING") \
+		"$APKSIGNER" sign --v4-signing-enabled false --ks "$ks" --ks-key-alias "$alias" --ks-pass env:KS_PASS --key-pass env:KEY_PASS \
+		--out "$out.part" "$out.unsigned"
+	"$APKSIGNER" verify --print-certs "$out.part" | grep 'SHA-256'
+	mv -f "$out.part" "$out"
+	rm -f "$out.unsigned"
+}
+
+desktop_zip() { echo "protectorate-desktop-windows-$1.zip"; }
+
+build_desktop_amd64() {
+	local zip
+	zip=$(desktop_zip amd64)
+	win "if not exist %USERPROFILE%\\$WIN_DIR mkdir %USERPROFILE%\\$WIN_DIR"
+	scp -q -o BatchMode=yes "$APP_TAR" "$WIN_HOST:$WIN_DIR/app.tar"
+	win "cd /d %USERPROFILE%\\$WIN_DIR && tar -xf app.tar && cd app" \
+		"&& set \"PATH=$WIN_FLUTTER;%PATH%\"" \
+		"&& call flutter build windows --release $APP_FLAGS" \
+		"&& powershell -NoProfile -NonInteractive -Command Compress-Archive -Force" \
+		"-Path build\\windows\\x64\\runner\\Release\\* -DestinationPath %USERPROFILE%\\$WIN_DIR\\$zip"
+	win_pull "%USERPROFILE%\\$WIN_DIR\\$zip" "$APP_OUT/$zip"
+}
+
+# Flutter does not cross-build Windows arm64, so it builds natively on an arm64 fleet node, as a
+# hub job. The job fetches the app's sources from this machine, by a one-time path.
+build_desktop_arm64() {
+	local zip remote sum nonce srv port='' i id='' state='' ps want got
+	zip=$(desktop_zip arm64)
+	remote="$ARM64_DIR\\$zip"
+	sum=$(sha256sum <"$APP_TAR" | cut -d' ' -f1)
+	"${HUB_CLI[@]}" --json node show "$ARM64_NODE" | grep -q '"online":true' ||
+		die "arm64 node $ARM64_NODE is offline"
+	nonce=$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')
+	python3 -I -c '
+import http.server, sys
+addr, path, file = sys.argv[1], sys.argv[2], sys.argv[3]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path != path:
+            self.send_response(404); self.end_headers(); return
+        data = open(file, "rb").read()
+        self.send_response(200); self.send_header("content-length", str(len(data))); self.end_headers()
+        self.wfile.write(data)
+    def log_message(self, *a): pass
+s = http.server.HTTPServer((addr, 0), H)
+print(s.server_address[1], flush=True)
+s.serve_forever()' "$SERVE_ADDR" "/$nonce/app.tar" "$APP_TAR" >"$LOGS/arm64-serve.port" &
+	srv=$!
+	for i in $(seq 50); do
+		port=$(cat "$LOGS/arm64-serve.port")
+		[ -n "$port" ] && break
+		sleep 0.1
+	done
+	[ -n "$port" ] || { kill "$srv"; die "the source server did not start on $SERVE_ADDR"; }
+	ps=$(cat <<EOF
+\$ProgressPreference = 'SilentlyContinue'
+\$env:PATH = '$ARM64_PATH;' + \$env:PATH
+\$env:PUB_CACHE = '$ARM64_DIR\\pub-cache'
+\$env:HOME = \$env:USERPROFILE
+New-Item -ItemType Directory -Force '$ARM64_DIR' | Out-Null
+Set-Location '$ARM64_DIR'
+curl.exe -fsS -o app.tar 'http://$SERVE_ADDR:$port/$nonce/app.tar'
+if (\$LASTEXITCODE) { "fetching app.tar failed (\$LASTEXITCODE)"; exit 1 }
+if ((Get-FileHash app.tar).Hash -ne '$sum') { 'app.tar does not match its sha256'; exit 1 }
+tar -xf app.tar
+if (\$LASTEXITCODE) { "tar failed (\$LASTEXITCODE)"; exit 1 }
+Set-Location app
+flutter build windows --release $APP_FLAGS 2>&1 | Out-String -Stream
+if (\$LASTEXITCODE) { "flutter build failed (\$LASTEXITCODE)"; exit 2 }
+Compress-Archive -Force -Path 'build\\windows\\arm64\\runner\\Release\\*' -DestinationPath '$remote'
+(Get-FileHash '$remote').Hash
+EOF
+)
+	id=$("${HUB_CLI[@]}" --json job run --node "$ARM64_NODE" --even-if-present --timeout "$ARM64_TIMEOUT" \
+		--artifact "$remote" -- powershell -NoProfile -NonInteractive -EncodedCommand \
+		"$(printf '%s' "$ps" | iconv -f utf-8 -t utf-16le | base64 -w0)" |
+		sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -n1) || true
+	if [ -z "$id" ]; then
+		kill "$srv"
+		die "the arm64 job did not start on node $ARM64_NODE"
+	fi
+	echo "arm64 build: job $id on node $ARM64_NODE"
+	for i in $(seq $((ARM64_TIMEOUT / 10 + 6))); do
+		state=$("${HUB_CLI[@]}" --json job show "$id" | sed -n 's/.*"state":"\([^"]*\)".*/\1/p' | head -n1)
+		case $state in succeeded | failed | interrupted | lost | cancelled | abandoned) break ;; esac
+		sleep 10
+	done
+	kill "$srv"
+	"${HUB_CLI[@]}" job log "$id" | tail -n 20
+	case $state in
+	succeeded) ;;
+	failed | interrupted | lost | cancelled | abandoned) die "the arm64 job $id ended $state" ;;
+	*)
+		"${HUB_CLI[@]}" job cancel "$id" || true
+		die "the arm64 job $id was still $state after ${ARM64_TIMEOUT}s; cancelled it"
+		;;
+	esac
+	want=$("${HUB_CLI[@]}" job log "$id" | tr -d '\r' | grep -E '^[0-9A-F]{64}$' | tail -n1 | tr 'A-F' 'a-f')
+	[ -n "$want" ] || die "the arm64 job $id printed no sha256 for $zip"
+	"${HUB_CLI[@]}" job artifact "$id" "$remote" --out "$APP_OUT/$zip.part"
+	got=$(sha256sum <"$APP_OUT/$zip.part" | cut -d' ' -f1)
+	[ "$got" = "$want" ] || die "fetched $zip has sha256 $got, the node built $want"
+	mv -f "$APP_OUT/$zip.part" "$APP_OUT/$zip"
+	echo "fetched $APP_OUT/$zip ($want)"
 }
 
 collect() {
@@ -205,6 +375,9 @@ collect() {
 	if [ -n "$WIN_HOST" ]; then
 		install -m 755 "$TARGET"/release-windows/protectorate-node-windows-{amd64,arm64}.exe "$DIST/"
 	fi
+	for f in protectorate-android.apk "$(desktop_zip amd64)" "$(desktop_zip arm64)"; do
+		if [ -f "$APP_OUT/$f" ]; then install -m 644 "$APP_OUT/$f" "$DIST/$f"; fi
+	done
 	for f in install.sh install-node.sh install-node.ps1; do install -m 644 "scripts/$f" "$DIST/$f"; done
 	printf '%s\n' "$VERSION" >"$DIST/VERSION"
 	local present=()
@@ -262,12 +435,35 @@ assets() {
 		release_version
 	fi
 	mkdir -p "$DIST" "$LOGS"
-	local t0 win_pid='' go_pid='' web_pid='' f
+	local t0 win_pid='' go_pid='' web_pid='' apk_pid='' arm_pid='' f
 	t0=$(now_ms)
 	say "release $VERSION into $DIST (logs in $LOGS)"
 	for f in cargo cargo-zigbuild go flutter gzip git sha256sum; do command -v "$f" >/dev/null || die "$f is required"; done
 	if [ -n "$WIN_HOST" ]; then
 		win "ver" >/dev/null || die "cannot reach $WIN_HOST over ssh (unset PT_RELEASE_WIN_HOST to skip the Windows assets)"
+	fi
+	if [ -n "$APK_HOST$WIN_HOST$ARM64_NODE" ]; then
+		[ -n "${BUILD_NAME:-}" ] && [ -n "${BUILD_NUMBER:-}" ] || die "BUILD_NAME and BUILD_NUMBER are not set; run this through make"
+	fi
+	if [ -n "$APK_HOST" ]; then
+		apk_ssh true || die "cannot reach $APK_HOST over ssh (unset PT_RELEASE_APK_HOST to skip the APK)"
+	fi
+	if [ -n "$ARM64_NODE" ]; then
+		[ -n "$SERVE_ADDR" ] || die "PT_RELEASE_SERVE_ADDR is not set: the address node $ARM64_NODE fetches the app sources from"
+		for f in python3 iconv "${HUB_CLI[0]}"; do command -v "$f" >/dev/null || die "$f is required for the arm64 app"; done
+	fi
+	step app-src app_src
+	if [ -n "$APK_HOST" ]; then
+		step apk build_apk &
+		apk_pid=$!
+	else
+		echo "   apk          skipped: PT_RELEASE_APK_HOST is not set, so no Android APK"
+	fi
+	if [ -n "$ARM64_NODE" ]; then
+		step desktop-arm64 build_desktop_arm64 &
+		arm_pid=$!
+	else
+		echo "   desktop-arm64 skipped: PT_RELEASE_ARM64_NODE is not set, so no Windows arm64 app"
 	fi
 	step go build_go &
 	go_pid=$!
@@ -275,7 +471,7 @@ assets() {
 	web_pid=$!
 	wait "$go_pid" || die "the go step failed"
 	if [ -n "$WIN_HOST" ]; then
-		step windows build_windows &
+		{ step windows build_windows && step desktop-amd64 build_desktop_amd64; } &
 		win_pid=$!
 	else
 		echo "   windows      skipped: PT_RELEASE_WIN_HOST is not set, so no Windows node assets"
@@ -284,8 +480,9 @@ assets() {
 	step linux-arm64 build_linux_arm64
 	check_embedded
 	step linux-amd64 build_linux_amd64
-	[ -z "$win_pid" ] || wait "$win_pid" || die "the windows step failed"
-	step app skip_app
+	[ -z "$win_pid" ] || wait "$win_pid" || die "the windows or desktop-amd64 step failed"
+	[ -z "$apk_pid" ] || wait "$apk_pid" || die "the apk step failed"
+	[ -z "$arm_pid" ] || wait "$arm_pid" || die "the desktop-arm64 step failed"
 	step collect collect
 	local total=$(($(now_ms) - t0))
 
@@ -294,7 +491,7 @@ assets() {
 		if [ -f "$DIST/$f" ]; then printf '   %-38s %10s bytes\n' "$f" "$(wc -c <"$DIST/$f")"; fi
 	done
 	say "wall time per step (go and web overlap each other; windows overlaps everything after go)"
-	for f in windows go web linux-arm64 linux-amd64 app collect; do
+	for f in app-src apk desktop-arm64 windows desktop-amd64 go web linux-arm64 linux-amd64 collect; do
 		if [ -f "$LOGS/$f.ms" ]; then printf '   %-12s %8s s\n' "$f" "$(secs "$(cat "$LOGS/$f.ms")")"; fi
 	done
 	printf '   %-12s %8s s\n' total "$(secs $total)"
