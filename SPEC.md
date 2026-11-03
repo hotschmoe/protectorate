@@ -136,6 +136,15 @@ CLI on the hub machine (section 3.1).
   sleeve. A newly spawned sleeve's first prompt names `$PROTECTORATE_PARENT` (when it has one),
   `$PROTECTORATE_ENVOY` and `$PROTECTORATE_MAIL`, and a resleeve repeats them in the continuation
   brief.
+- **Turn reports.** When a sleeve settles an owner turn that Envoy or its parent opened, the core
+  asks for a report and the hub journals it (`Report`), queued to that party as mail from the
+  sleeve with request id `report:<sleeve>:<turn>`, once per turn. Code writes it from the
+  transcript and git, with no model: how the turn ended, tokens and context, branch, head and
+  uncommitted files, commits and diffstat since the task's base commit (the workspace's HEAD at
+  the sleeve's first launch), the turn's last test command and its result, notices, and the final
+  message clipped at 2000 bytes with the transcript range for the rest. It skips the mail bound,
+  since the recipient opened the turn, and carries the D9 mark like any mail from the sleeve. A
+  usage-limit or auth settle reports after its continuation. Envoy reports to no one.
 - The web build is embedded in the hub binary and served from the same origin.
 
 ### 3.2 Network

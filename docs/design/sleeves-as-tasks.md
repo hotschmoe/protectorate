@@ -149,8 +149,13 @@ since replay already freezes every reducer change.
 ## 8. Order of work
 
 1. Task reports and the recorded base commit (5.2 item 1), with Envoy's instructions (item 7).
-   They work with today's tree, so the biggest saving does not wait on the migration.
-2. Envoy's context threshold and fresh-session brief (item 2), then measure (5.4).
+   They work with today's tree, so the biggest saving does not wait on the migration. Done
+   2026-11-03 (SPEC "Turn reports"): reports are pushed as mail from the sleeve, not returned by
+   `wait`.
+2. Envoy's context ceiling (item 2), then measure (5.4). Owner decision 2026-11-03: 500k tokens
+   at most. The harness may compact earlier on its own; when Envoy reaches 500k and its harness
+   has not compacted, the hub sends the harness's own `/compact` (the existing Compact command),
+   not a fresh session.
 3. The journal snapshot (section 7).
 4. Workspaces, task sleeves and the tree removal (sections 2, 3, 6), with `workspace merge`
    (section 4) and the 20-minute idle stop.
@@ -162,5 +167,5 @@ since replay already freezes every reducer change.
 - The workspace check command: per workspace config, or found by convention (`make check`)?
 - How long a finished, unmerged sleeve stays resumable before the hub asks Envoy to merge or drop
   it.
-- Envoy's context threshold: 150k or 250k tokens, and whether a fresh session waits for Envoy to
-  be idle for some minutes, so a conversation with the owner is not cut mid-thread.
+- Per-sleeve token budgets are on hold (owner, 2026-11-03): a sleeve is not sized or budgeted at
+  spawn, and one that hits its quota resleeves as today.
