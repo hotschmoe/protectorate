@@ -235,9 +235,14 @@ fn fixture_readers_over_real_curl() {
     assert!(seen.contains("codex-secret-token"), "{seen}");
 
     // Expired Claude login: the reader refuses and does not call out; a dead local endpoint errors.
+    // An expired grok key with a refresh token is idle, not logged out: its CLI renews it.
     write(
         &home.join(".claude/.credentials.json"),
         r#"{"claudeAiOauth":{"accessToken":"claude-secret-token","expiresAt":1000,"subscriptionType":"max"}}"#,
+    );
+    write(
+        &home.join(".grok/auth.json"),
+        r#"{"https://auth.x.ai::fixture":{"key":"grok-secret-token","refresh_token":"r","expires_at":"2001-01-01T00:00:00Z"}}"#,
     );
     let dead = TcpListener::bind("127.0.0.1:0").unwrap();
     let dead_url = format!("http://127.0.0.1:{}", dead.local_addr().unwrap().port());
@@ -255,7 +260,10 @@ fn fixture_readers_over_real_curl() {
     println!("{out}");
     let claude = line_of(&out, "claude");
     assert_eq!(state_of(claude), "unknown", "{claude}");
-    assert!(claude.contains("expired"), "{claude}");
+    assert!(claude.contains("log in again"), "{claude}");
+    let grok = line_of(&out, "grok");
+    assert_eq!(state_of(grok), "unknown", "{grok}");
+    assert!(grok.contains("renews when its CLI next runs"), "{grok}");
     assert_eq!(state_of(line_of(&out, "local")), "error");
     assert!(!out.contains("secret-token"));
 }

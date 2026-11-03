@@ -336,9 +336,12 @@ Each entry: where, what was done, what right looks like.
   same token at once. That has not been seen to conflict, and the old Rust hub ran this way; it
   is not tested against the real CLIs. Codex and Grok follow a symlink from the sleeve's home to the store when they rewrite
   their login; a harness that replaced the file by rename would fork it again (not seen yet).
-  Quota reads that same login and never refreshes it, so after a quiet spell with no sleeve on a
-  harness (Claude's access token lasts about 8 hours) its row shows `login expired` until a
-  sleeve runs. The copies an earlier hub seeded into sleeve homes stay where they are, except the
+  Quota reads that same login and never refreshes it. An idle-expired grok key (it lasts about
+  6 hours) is renewed by the hub running the CLI's own `grok models` at most every 10 minutes
+  (logins.rs `renew_grok`), and the row says the key renews rather than asking for a login.
+  Claude (about 8 hours) and Codex logins can idle-expire the same way when no sleeve of theirs
+  runs for hours: their rows still say `login expired; log in again` until a sleeve runs. Right:
+  the same renewal through each CLI's own non-chat command, once one is found. The copies an earlier hub seeded into sleeve homes stay where they are, except the
   files a link now replaces at that harness's next launch.
 - **A harness program is bound by its resolved file only** (`pt-hub`, exec.rs): grok lives in
   the masked `~/.grok/downloads/`, so a launch binds the resolved program read-only. That is

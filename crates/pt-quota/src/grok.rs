@@ -23,6 +23,8 @@ pub struct Grok {
 pub struct Login {
     key: String,
     pub expires_at_ms: Option<u64>,
+    /// The CLI renews an expired key with it on its next run.
+    pub refreshable: bool,
 }
 
 /// Picks the entry the Grok CLI wrote, preferring the auth.x.ai account.
@@ -44,6 +46,10 @@ pub fn pick_login(raw: &[u8]) -> Result<Login> {
                         .get("expires_at")
                         .and_then(Value::as_str)
                         .and_then(parse_rfc3339),
+                    refreshable: entry
+                        .get("refresh_token")
+                        .and_then(Value::as_str)
+                        .is_some_and(|t| !t.is_empty()),
                 });
             }
         }
@@ -127,7 +133,9 @@ impl Reader for Grok {
         let home = home_dir(self.home.as_deref())?;
         let login = pick_login(&read_login(&home.join(".grok").join("auth.json"))?)?;
         if login.expires_at_ms.is_some_and(|e| now_ms >= e) {
-            return Err(Error::Expired);
+            return Err(Error::Expired {
+                renewable: login.refreshable,
+            });
         }
         let base = self
             .base_url

@@ -134,7 +134,7 @@ impl Reader for Codex {
         let home = home_dir(self.home.as_deref())?;
         let login = parse_login(&read_login(&home.join(".codex").join("auth.json"))?)?;
         if jwt_expiry_ms(&login.token).is_some_and(|e| now_ms >= e) {
-            return Err(Error::Expired);
+            return Err(Error::Expired { renewable: false });
         }
         let base = self
             .base_url

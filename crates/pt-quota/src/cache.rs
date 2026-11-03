@@ -120,6 +120,24 @@ impl Cache {
         });
     }
 
+    /// The subscriptions whose last read found an expired login that its CLI can renew.
+    pub fn renewable(&self) -> Vec<Subscription> {
+        self.slots
+            .iter()
+            .filter(|s| s.last_err == Some(Error::Expired { renewable: true }))
+            .map(|s| s.reader.subscription())
+            .collect()
+    }
+
+    /// Makes `sub` due at the next refresh, as after its login was renewed.
+    pub fn reread(&mut self, sub: Subscription) {
+        for s in &mut self.slots {
+            if s.reader.subscription() == sub && s.pending.is_none() {
+                s.last_attempt = None;
+            }
+        }
+    }
+
     pub fn quotas(&self) -> Vec<Quota> {
         self.quotas_with_age().into_iter().map(|(q, _)| q).collect()
     }
@@ -144,6 +162,13 @@ impl Slot {
                 self.good = Some((snap, now_ms, at));
                 self.failures = 0;
                 self.last_err = None;
+            }
+            // An expired login is a local check with no request made, so it waits out the TTL
+            // like a good reading instead of backing off.
+            Err(e @ Error::Expired { .. }) => {
+                self.last_attempt = Some(at);
+                self.failures = 0;
+                self.last_err = Some(e);
             }
             Err(e) => {
                 if count_failure {
@@ -179,7 +204,7 @@ impl Slot {
             );
             let (reading, note) = match &self.last_err {
                 Some(Error::Unavailable(d)) => (QuotaReading::Unknown, d.to_string()),
-                Some(Error::Expired) => (QuotaReading::Unknown, Error::Expired.to_string()),
+                Some(e @ Error::Expired { .. }) => (QuotaReading::Unknown, e.to_string()),
                 Some(Error::Unauthorized) if vendor => {
                     (QuotaReading::Unknown, Error::Unauthorized.to_string())
                 }

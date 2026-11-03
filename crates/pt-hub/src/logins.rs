@@ -10,7 +10,9 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use pt_core::Harness;
 
@@ -191,6 +193,44 @@ pub fn login(root: &Path, harness: &str, args: &[String]) -> Result<String, Stri
         "{harness}: logged in for the hub's sleeves in {}; `protectorate doctor --refresh` rechecks",
         store.display()
     ))
+}
+
+/// How long a renewal may hold the quota thread.
+const RENEW_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Renews the store's idle-expired grok login through the CLI's own `grok models`, which
+/// refreshes and rewrites `.grok/auth.json` under its own lock before it lists the models. The
+/// hub never touches the token itself.
+pub fn renew_grok(store: &Path, program: &Path) -> Result<(), String> {
+    let mut child = Command::new(program)
+        .arg("models")
+        .env("GROK_HOME", store.join(".grok"))
+        .current_dir(store)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("run {} models: {e}", program.display()))?;
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return Ok(()),
+            Ok(Some(status)) => {
+                return Err(format!("{} models exited with {status}", program.display()));
+            }
+            Ok(None) if started.elapsed() >= RENEW_TIMEOUT => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "{} models still running after {}s; killed it",
+                    program.display(),
+                    RENEW_TIMEOUT.as_secs()
+                ));
+            }
+            Ok(None) => thread::sleep(Duration::from_millis(100)),
+            Err(e) => return Err(format!("wait for {} models: {e}", program.display())),
+        }
+    }
 }
 
 fn import_pi(store: &Path) -> Result<String, String> {
