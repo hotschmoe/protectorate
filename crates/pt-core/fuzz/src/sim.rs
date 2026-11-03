@@ -509,6 +509,16 @@ impl Sim {
             Intent::AutoContinue { sleeve, text } => {
                 self.apply(EventKind::Continue { sleeve, text });
             }
+            Intent::Report {
+                sleeve, turn, to, ..
+            } => {
+                self.apply(EventKind::Report {
+                    sleeve,
+                    to,
+                    turn,
+                    text: "turn report".into(),
+                });
+            }
         }
     }
 

@@ -292,6 +292,14 @@ pub enum EventKind {
         sleeve: SleeveId,
         text: String,
     },
+    /// The hub's report of owner turn `turn` of `sleeve`, for `to`, the party that opened that
+    /// turn (Envoy or the parent). The hub journals it when the core asks.
+    Report {
+        sleeve: SleeveId,
+        to: SleeveId,
+        turn: u64,
+        text: String,
+    },
 }
 
 /// What target selection answered.

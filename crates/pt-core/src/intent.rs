@@ -316,4 +316,12 @@ pub enum Intent {
         sleeve: SleeveId,
         text: String,
     },
+    /// Build the report of owner turn `turn`, which incarnation `g` just settled, and journal it
+    /// as a `Report` event for `to`.
+    Report {
+        sleeve: SleeveId,
+        g: Gen,
+        turn: u64,
+        to: SleeveId,
+    },
 }

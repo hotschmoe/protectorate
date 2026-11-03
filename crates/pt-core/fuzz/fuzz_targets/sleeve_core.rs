@@ -30,7 +30,7 @@ fn sleeve(sim: &Sim, b: &mut Bytes) -> SleeveId {
 fn command(sim: &mut Sim, b: &mut Bytes) {
     use EventKind as E;
     let s = sleeve(sim, b);
-    let kind = match b.below(19) {
+    let kind = match b.below(20) {
         0 | 1 => {
             let parent = if b.below(3) == 0 {
                 None
@@ -65,9 +65,10 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
             })
         }
         2 | 3 => {
-            let (from, agent) = match b.below(3) {
+            let (from, agent) = match b.below(4) {
                 0 => (Party::Owner, None),
                 1 => (Party::Agent, Some(format!("a{}", b.below(2)))),
+                2 => (Party::Envoy, None),
                 _ => (Party::Sleeve(sleeve(sim, b)), None),
             };
             E::Send {
@@ -153,6 +154,12 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
         17 => E::Continue {
             sleeve: s,
             text: "The previous turn was interrupted. Continue from where it stopped.".into(),
+        },
+        18 => E::Report {
+            sleeve: s,
+            to: sleeve(sim, b),
+            turn: b.below(4),
+            text: "turn report".into(),
         },
         _ => E::AbandonJob {
             job: JobId(b.below(sim.st.next_job + 1)),

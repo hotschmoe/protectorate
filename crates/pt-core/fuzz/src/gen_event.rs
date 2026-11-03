@@ -107,7 +107,7 @@ pub fn event(b: &mut Bytes) -> Event {
     let j = |b: &mut Bytes| JobId(b.u64());
     let a = |b: &mut Bytes| b.u64() as u32;
     use EventKind as E;
-    let kind = match b.below(35) {
+    let kind = match b.below(36) {
         0 => E::Spawn(SpawnSpec {
             request_id: b.string(),
             name: b.string(),
@@ -279,6 +279,12 @@ pub fn event(b: &mut Bytes) -> Event {
                 })
                 .collect(),
             incomplete: opt(b, |b| b.string()),
+        },
+        34 => E::Report {
+            sleeve: s(b),
+            to: s(b),
+            turn: b.u64(),
+            text: b.string(),
         },
         _ => E::Unwritten {
             effect: e(b),

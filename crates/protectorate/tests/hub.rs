@@ -1587,6 +1587,121 @@ exec sleep 300"#,
     );
 }
 
+/// A turn Envoy asked for ends with the hub's turn report in Envoy's queue, written from the
+/// transcript and git; a turn the owner asked for reports to no one.
+#[test]
+fn turn_report_reaches_envoy() {
+    if !on_path("bwrap") || !on_path("python3") || !on_path("git") {
+        return;
+    }
+    let dir = unique("report");
+    let home = dir.join("home");
+    let fake = dir.join("claude");
+    std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
+    std::fs::write(home.join("logins/.claude/.credentials.json"), "{}").unwrap();
+    write_script(
+        &fake,
+        r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi
+exec python3 -u -c '
+import json, subprocess, sys
+def emit(msg): print(json.dumps(msg), flush=True)
+g = ["git", "-c", "user.name=t", "-c", "user.email=t@t"]
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("type") != "user": continue
+    msg["isReplay"] = True
+    emit(msg)
+    if "do the work" in line:
+        open("a.txt", "w").write("a\n")
+        subprocess.run(g + ["add", "a.txt"], check=True)
+        subprocess.run(g + ["commit", "-qm", "add a"], check=True)
+        open("b.txt", "w").write("b\n")
+        emit({"type":"assistant", "message":{"id":"t", "content":[{"type":"tool_use", "id":"tu1", "name":"Bash", "input":{"command":"cargo test -q"}}]}})
+        emit({"type":"user", "message":{"content":[{"type":"tool_result", "tool_use_id":"tu1", "content":"test result: ok", "is_error":False}]}})
+    emit({"type":"assistant", "message":{"id":"r", "content":[{"type":"text", "text":"all done"}]}})
+    emit({"type":"result", "subtype":"success", "is_error":False, "stop_reason":"end_turn"})
+' "$@""#,
+    );
+    write_script(&dir.join("systemd-run"), "exit 0");
+    let config = pt_json::obj! {
+        "envoy" => pt_json::obj! { "harness" => "claude" },
+        "claude_program" => fake.to_str().unwrap(),
+        "scopes" => false,
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+    };
+    std::fs::write(home.join("config.json"), config.to_string()).unwrap();
+    let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
+    let hub = Hub::open(home, &[], &[("PATH", &path)]);
+    let repo = temp_repo("report");
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "worker",
+        "--path",
+        repo.to_str().unwrap(),
+        "--harness",
+        "claude",
+    ])
+    .ok();
+    for name in ["envoy", "worker"] {
+        eventually("the sleeve to run", Duration::from_secs(90), || {
+            (hub.sleeve(name)["lifecycle"].as_str() == Some("running")).then_some(())
+        });
+        hub.wait(name, "idle", 90);
+    }
+    let socket = hub
+        .home
+        .join("run/sleeves/api.sock")
+        .to_string_lossy()
+        .into_owned();
+    let envoy_token = env_get(&sleeve_process_env(&socket, "envoy"), "PROTECTORATE_TOKEN")
+        .unwrap()
+        .to_string();
+    let as_envoy = [("PROTECTORATE_TOKEN", envoy_token.as_str())];
+    let reports = || -> Vec<(String, String)> {
+        of_type(&hub.transcript("envoy"), "user_message")
+            .iter()
+            .filter_map(|e| Some((e["entry"]["from"].as_str()?, e["entry"]["text"].as_str()?)))
+            .filter(|(_, t)| t.contains("Turn report for worker"))
+            .map(|(f, t)| (f.to_string(), t.to_string()))
+            .collect()
+    };
+
+    hub.cli_env(&as_envoy, &["sleeve", "send", "worker", "do the work"])
+        .ok();
+    let (from, report) = eventually("the turn report", Duration::from_secs(60), || {
+        reports().pop()
+    });
+    assert!(
+        from.contains("worker"),
+        "the report is mail from the worker: {from}"
+    );
+    for want in [
+        "turn 1",
+        "Ended: ",
+        "1 uncommitted files",
+        "1 commits since the task began",
+        "add a",
+        "a.txt",
+        "b.txt",
+        "Last test command this turn: `",
+        "cargo test",
+        "Final message:\n> all done",
+    ] {
+        assert!(report.contains(want), "missing {want:?} in:\n{report}");
+    }
+
+    hub.send("worker", "an owner question");
+    eventually(
+        "the owner's turn to settle",
+        Duration::from_secs(60),
+        || (of_type(&hub.transcript("worker"), "turn_settled").len() == 2).then_some(()),
+    );
+    hub.wait("envoy", "idle", 60);
+    assert_eq!(reports().len(), 1, "the owner's turn reported to Envoy");
+}
+
 /// A D9-origin turn that spawns a sleeve marks it. Mail from that sleeve marks its parent, and
 /// the parent's later mail starts an Envoy turn that cannot remove a sleeve until the owner
 /// decides. Mail from an unmarked sleeve does not.

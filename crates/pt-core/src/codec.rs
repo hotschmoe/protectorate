@@ -19,7 +19,7 @@ use crate::model::*;
 
 pub const FORMAT: u8 = 1;
 /// Highest event tag this binary reads. Any incompatible encoding must get a new event tag.
-pub const MAX_EVENT_TAG: u8 = 42;
+pub const MAX_EVENT_TAG: u8 = 43;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -871,6 +871,18 @@ impl Wire for EventKind {
                 sleeve.put(w);
                 text.put(w);
             }
+            E::Report {
+                sleeve,
+                to,
+                turn,
+                text,
+            } => {
+                w.push(43);
+                sleeve.put(w);
+                to.put(w);
+                turn.put(w);
+                text.put(w);
+            }
         }
     }
 
@@ -1076,6 +1088,12 @@ impl Wire for EventKind {
             42 => E::Unwritten {
                 effect: Wire::get(r)?,
                 attempt: Wire::get(r)?,
+            },
+            43 => E::Report {
+                sleeve: Wire::get(r)?,
+                to: Wire::get(r)?,
+                turn: Wire::get(r)?,
+                text: Wire::get(r)?,
             },
             _ => return Err(DecodeError::UnknownTag { what: "event", tag }),
         })

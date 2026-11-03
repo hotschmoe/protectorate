@@ -886,6 +886,7 @@ impl Core<'_> {
         text: &str,
         mode: SendMode,
         d9: bool,
+        bounded: bool,
     ) {
         if !self.existing(to) {
             return;
@@ -946,7 +947,7 @@ impl Core<'_> {
             if mode == SendMode::Steer {
                 return self.refuse(Code::FailedPrecondition, "a pane cannot be steered");
             }
-            if !self.mail_ok(to, from, d9) {
+            if !self.mail_ok(to, from, d9, bounded) {
                 return;
             }
             insert(self, MsgState::Queued);
@@ -959,7 +960,7 @@ impl Core<'_> {
         }
         match mode {
             SendMode::Steer if steers && working => {
-                if !self.mail_ok(to, from, d9) {
+                if !self.mail_ok(to, from, d9, bounded) {
                     return;
                 }
                 insert(self, MsgState::Queued);
@@ -967,7 +968,7 @@ impl Core<'_> {
                 self.reply(Reply::Steering);
             }
             SendMode::Steer if steers && delivering => {
-                if !self.mail_ok(to, from, d9) {
+                if !self.mail_ok(to, from, d9, bounded) {
                     return;
                 }
                 insert(self, MsgState::SteerHeld);
@@ -983,7 +984,7 @@ impl Core<'_> {
                 "the sleeve has no steerable turn ready; omit --steer to queue the message for its next turn",
             ),
             _ => {
-                if !self.mail_ok(to, from, d9) {
+                if !self.mail_ok(to, from, d9, bounded) {
                     return;
                 }
                 insert(self, MsgState::Queued);
@@ -1053,8 +1054,9 @@ impl Core<'_> {
     /// Mail to Envoy spends the sender's tree budget, kept on the root. Mail to a parent
     /// who is not Envoy spends that sender's own budget. A `d9` send marks the recipient,
     /// and so does a send from a sleeve that is already marked, so a relay cannot wash the mark.
-    fn mail_ok(&mut self, to: SleeveId, from: Party, d9: bool) -> bool {
-        if !self.within_mail_bound(to, from) {
+    /// An unbounded send (a turn report) skips only the budget.
+    fn mail_ok(&mut self, to: SleeveId, from: Party, d9: bool, bounded: bool) -> bool {
+        if bounded && !self.within_mail_bound(to, from) {
             return false;
         }
         let from_marked =
@@ -1140,6 +1142,57 @@ impl Core<'_> {
                 self.sl(k).d9 = true;
             }
         }
+    }
+
+    /// Who gets the report of the turn `sid` just settled: Envoy or the parent, when that party
+    /// opened the turn. Envoy reports to no one.
+    fn report_to(&self, sid: SleeveId) -> Option<SleeveId> {
+        if self.is_envoy(sid) {
+            return None;
+        }
+        let s = &self.st.sleeves[&sid];
+        match s.turn_from {
+            Party::Envoy => self
+                .st
+                .sleeves
+                .keys()
+                .copied()
+                .find(|&id| self.is_envoy(id)),
+            Party::Sleeve(p) if s.parent == Some(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    /// Queues the hub's turn report as mail from `sid`, once per turn. It skips the mail bound,
+    /// since the recipient opened that turn, and marks like any mail from the sleeve.
+    pub(crate) fn report_cmd(&mut self, sid: SleeveId, to: SleeveId, turn: u64, text: &str) {
+        let Some(s) = self.st.sleeve(sid) else {
+            return;
+        };
+        if s.life == Life::Removed
+            || self.is_envoy(sid)
+            || !(self.is_envoy(to) || s.parent == Some(to))
+        {
+            return;
+        }
+        let request_id = format!("report:{}:{turn}", sid.0);
+        if self
+            .st
+            .sleeve(to)
+            .is_some_and(|t| t.messages.contains_key(&request_id))
+        {
+            return;
+        }
+        self.send(
+            to,
+            &request_id,
+            Party::Sleeve(sid),
+            None,
+            text,
+            SendMode::Queue,
+            false,
+            false,
+        );
     }
 
     fn is_envoy(&self, id: SleeveId) -> bool {
@@ -1658,6 +1711,18 @@ impl Core<'_> {
                     s.guard.state = GuardState::Armed;
                 }
                 self.out.push(Intent::Checkpoint { sleeve: sid, g });
+                // A usage limit or a rejected login resleeves, and the continuation reports.
+                if !matches!(end, TurnEnd::UsageLimit | TurnEnd::AuthFailed)
+                    && let Some(to) = self.report_to(sid)
+                {
+                    let turn = self.st.sleeves[&sid].turn_seq;
+                    self.out.push(Intent::Report {
+                        sleeve: sid,
+                        g,
+                        turn,
+                        to,
+                    });
+                }
                 self.return_steer(sid);
                 match end {
                     TurnEnd::UsageLimit => self.trip(sid, Guardrail::QuotaExhausted),

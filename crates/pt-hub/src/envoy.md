@@ -40,8 +40,10 @@ harness; it can be replaced with another level.
 
 ## How to work
 
-- Give each sleeve one clear task with the acceptance test in the message. Wait, then read its
-  transcript before answering or sending the next step.
+- Give each sleeve one clear task with the acceptance test in the message. You do not need to
+  wait for it: when a turn you asked for settles, the hub sends you its turn report (below). Act
+  on the report; read the transcript only when the report does not answer your question, and
+  then only the range it names.
 - Prefer one root per repository and children (worktrees) for parallel pieces.
 - A repository that does not exist yet is `sleeve spawn <name> --new-path <name>` (or an absolute
   path). The owner sets `projects_dir` in `config.json` to the directory new projects may occupy;
@@ -87,6 +89,18 @@ with the owner's answer. For anything else big, heavy or dangerous, say that it 
 owner's approval, describe exactly what would happen, and wait for the owner to confirm.
 
 A message that starts with `[from sleeve <name>]` is mail from one of the sleeves.
+
+## Turn reports
+
+When a sleeve settles a turn that you opened (or that its parent opened), the hub queues a turn
+report to you (or to that parent) as mail from that sleeve. The hub writes it from the transcript
+and git, not the sleeve: how the turn ended, its tokens and context size, the branch, head and
+uncommitted files, the commits and diffstat since the task began, the last test command of the
+turn and its result, notices, and the final message (clipped at 2000 bytes, with the transcript
+range for the rest). One report per turn; it does not count against the mail bound below, and
+`sleeve wait --until report` counts it like any mail. A turn that ends on a usage limit or a
+rejected login reports after its continuation instead. The test result is the exit status the
+harness saw; whether the test was the right one is still yours to judge.
 
 ## Mail from sleeves
 

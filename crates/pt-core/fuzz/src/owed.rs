@@ -20,6 +20,12 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
             mode,
             ..
         } => on_send(owed, prev, *to, request_id, *from, text, *mode),
+        E::Report {
+            sleeve,
+            to,
+            turn,
+            text,
+        } => on_report(owed, prev, *sleeve, *to, *turn, text),
         E::Stop { sleeve } => on_stop(owed, prev, *sleeve, false),
         E::Remove { sleeve } => on_stop(owed, prev, *sleeve, true),
         E::Start { sleeve, target, .. } => on_start_cmd(owed, prev, *sleeve, target.as_ref()),
@@ -414,6 +420,37 @@ fn on_send(
         },
     );
     note_dequeue(owed, prev, &queued);
+}
+
+/// A turn report is a queued send from the reporting sleeve to Envoy or its parent, once per turn.
+fn on_report(
+    owed: &mut BTreeMap<SleeveId, u64>,
+    prev: &State,
+    sid: SleeveId,
+    to: SleeveId,
+    turn: u64,
+    text: &str,
+) {
+    let Some(s) = prev.sleeve(sid) else {
+        return;
+    };
+    let envoy = |id: SleeveId| {
+        prev.sleeve(id)
+            .is_some_and(|t| t.name == ENVOY_NAME && t.parent.is_none() && t.life != Life::Removed)
+    };
+    if s.life == Life::Removed || envoy(sid) || !(envoy(to) || s.parent == Some(to)) {
+        return;
+    }
+    let request_id = format!("report:{}:{turn}", sid.0);
+    on_send(
+        owed,
+        prev,
+        to,
+        &request_id,
+        Party::Sleeve(sid),
+        text,
+        SendMode::Queue,
+    );
 }
 
 fn on_stop(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, sid: SleeveId, remove: bool) {
