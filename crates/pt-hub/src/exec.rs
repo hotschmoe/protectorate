@@ -969,7 +969,10 @@ impl SleeveExec {
         ));
         sb.env.extend(tools.env);
         sb.env.extend(logins.env);
-        let prefix = sb.command().map_err(|e| e.to_string())?;
+        let mut prefix = sb.command().map_err(|e| e.to_string())?;
+        // bwrap --die-with-parent arms itself only once bwrap runs; a hub that dies before then
+        // would leave the sandbox behind.
+        pt_sys::pdeathsig_on_spawn(&mut prefix, pt_sys::SIGKILL).map_err(|e| e.to_string())?;
         let mut spec = pt_drivers::SpawnSpec::new(harness, program, work);
         spec.g = g.0;
         spec.model = Some(target.model.clone()).filter(|m| !m.is_empty());
