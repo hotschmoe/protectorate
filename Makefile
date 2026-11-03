@@ -20,7 +20,8 @@ CARGO_VERSION := PROTECTORATE_BUILD_VERSION='$(VERSION)'
 # VAR=value` beats both). The tests skip, and the scripts say what to set, without them:
 #   PT_E2E_PI_PROVIDER, PT_E2E_PI_MODEL   Pi provider and model of a local OpenAI-compatible
 #                                         endpoint (the pi_local e2e tests, scripts/app-e2e.sh)
-#   PT_RELEASE_WIN_HOST, PT_RELEASE_WIN_DIR, ZIG, PT_RELEASE_REPO   scripts/release.sh
+#   PT_RELEASE_WIN_HOST, PT_RELEASE_WIN_DIR, ZIG, PT_RELEASE_REPO, PT_RELEASE_APK_*,
+#   PT_RELEASE_ARM64_*, PT_RELEASE_HUB_CLI, PT_RELEASE_SERVE_ADDR   scripts/release.sh
 #   PT_NET_BIND, PT_NET_LINUX_HOST, PT_NET_LINUX_KEY, PT_NET_WIN_HOST   scripts/net-remote.sh
 -include .env.e2e
 export PT_E2E_PI_PROVIDER PT_E2E_PI_MODEL PT_RELEASE_WIN_HOST PT_RELEASE_WIN_DIR ZIG PT_RELEASE_REPO
@@ -55,10 +56,10 @@ app-check:
 # over ssh (SPEC 6). Only from a clean vX.Y.Z[-PRE] tag on HEAD; release-snapshot builds any
 # VERSION, for trying the build.
 release-assets:
-	VERSION='$(VERSION)' bash scripts/release.sh assets
+	VERSION='$(VERSION)' BUILD_NAME='$(BUILD_NAME)' BUILD_NUMBER='$(BUILD_NUMBER)' bash scripts/release.sh assets
 
 release-snapshot:
-	VERSION='$(VERSION)' bash scripts/release.sh assets --snapshot
+	VERSION='$(VERSION)' BUILD_NAME='$(BUILD_NAME)' BUILD_NUMBER='$(BUILD_NUMBER)' bash scripts/release.sh assets --snapshot
 
 # gh release create with dist/<version>/; a dry run unless PUBLISH=1.
 release-publish:

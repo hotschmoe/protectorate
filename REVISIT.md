@@ -816,14 +816,12 @@ Each entry: where, what was done, what right looks like.
   native arm64 build needs glibc 2.34 (it links on the dev hub's Debian 12); amd64 is built by cargo-zigbuild
   for glibc 2.31. Right: `aarch64-unknown-linux-gnu.2.31` through zigbuild too, if an older arm64
   box ever runs the hub or a node.
-- **APK, desktop and Android-node assets are hooks only** (`scripts/release.sh` step `app`):
-  `protectorate-android.apk`, `protectorate-desktop-{linux,windows}-{amd64,arm64}` and
-  `protectorate-node-android-arm64` (SPEC 6) are not built; the step says so, and `APP=1` fails.
-  The hub assets do embed the web build (step `web`) and their arch's headscale and member, and
-  every node asset its target's member.
-  Right: `flutter build apk` with the existing signing recipe, the desktop bundles (the Linux one
-  needs cmake, ninja and GTK 3 on the build host), and the node once `pt-node` has Android code
-  paths.
+- **Linux desktop and Android-node assets are not built** (`scripts/release.sh`): the release
+  carries `protectorate-android.apk` and `protectorate-desktop-windows-{amd64,arm64}.zip`, but
+  not `protectorate-desktop-linux-{amd64,arm64}` or `protectorate-node-android-arm64` (SPEC 6).
+  The arm64 Windows build runs as a hub job on an arm64 Windows node, so a release waits for
+  that node to be online. Right: the Linux bundles (cmake, ninja and GTK 3 on the build host),
+  and the Android node once `pt-node` has Android code paths.
 - **Release publishing is untried** (`make release-publish`): it stops at a dry run unless
   `PUBLISH=1`, refuses a dirty tree, an untagged HEAD and a tag missing on origin, and uses
   `gh release create --verify-tag`; no release has been created from `next`. GitHub immutable

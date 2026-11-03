@@ -25,10 +25,15 @@ an e2e test, run on a real machine, or only dry-run.
 Releases are built locally, not in CI (SPEC 6). `make release-assets` writes `dist/<version>/`:
 `protectorate-linux-{amd64,arm64}` (the hub, with the web app, headscale and member embedded),
 `protectorate-node-linux-{amd64,arm64}`, `protectorate-node-windows-{amd64,arm64}.exe` (each with
-member embedded), the three installers, `VERSION` and `SHA256SUMS`. The Windows assets are built
-natively on a Windows machine over ssh (`PT_RELEASE_WIN_HOST`; unset, they are skipped), and the
-glibc 2.31 amd64 build needs `zig` on PATH or `ZIG`. `make release-publish` uploads them with
-`gh release create`; it is a dry run unless `PUBLISH=1`. It has never been run.
+member embedded), the client builds `protectorate-android.apk` and
+`protectorate-desktop-windows-{amd64,arm64}.zip`, the three installers, `VERSION` and
+`SHA256SUMS`. The Windows node assets and the x64 desktop app are built natively on a Windows
+machine over ssh (`PT_RELEASE_WIN_HOST`), the APK on a Linux amd64 machine with the Android SDK
+over ssh and signed here (`PT_RELEASE_APK_HOST`), and the arm64 desktop app as a hub job on an
+arm64 Windows node (`PT_RELEASE_ARM64_NODE`, which must be online); each is skipped while its
+setting is unset. The glibc 2.31 amd64 build needs `zig` on PATH or `ZIG`. The hub serves its
+release's client builds to the owner's devices, which offer to update themselves (SPEC 6a).
+`make release-publish` uploads them with `gh release create`; it is a dry run unless `PUBLISH=1`.
 
 ### Versioning
 
@@ -51,8 +56,8 @@ make release-publish          # dry run; PUBLISH=1 make release-publish uploads
 ```
 
 `make release-snapshot` builds the same assets from any commit, for trying the build; never
-publish one. Machine-specific release settings (`PT_RELEASE_WIN_HOST`, `PT_RELEASE_WIN_DIR`,
-`ZIG`, `PT_RELEASE_REPO`) go in the environment or the gitignored `.env.e2e` (see the Makefile).
+publish one. Machine-specific release settings (`PT_RELEASE_*` and `ZIG`, listed at the top of
+`scripts/release.sh`) go in the environment or the gitignored `.env.e2e`.
 The default release repo is `hotschmoe/protectorate`; installers take `--repo` (`-Repo`), the hub
 `release_repo` in `config.json`.
 
