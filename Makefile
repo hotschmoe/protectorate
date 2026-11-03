@@ -56,10 +56,10 @@ app-check:
 # over ssh (SPEC 6). Only from a clean vX.Y.Z[-PRE] tag on HEAD; release-snapshot builds any
 # VERSION, for trying the build.
 release-assets:
-	VERSION='$(VERSION)' BUILD_NAME='$(BUILD_NAME)' BUILD_NUMBER='$(BUILD_NUMBER)' bash scripts/release.sh assets
+	VERSION='$(VERSION)' APP_VERSION_FLAGS='$(APP_VERSION_FLAGS)' bash scripts/release.sh assets
 
 release-snapshot:
-	VERSION='$(VERSION)' BUILD_NAME='$(BUILD_NAME)' BUILD_NUMBER='$(BUILD_NUMBER)' bash scripts/release.sh assets --snapshot
+	VERSION='$(VERSION)' APP_VERSION_FLAGS='$(APP_VERSION_FLAGS)' bash scripts/release.sh assets --snapshot
 
 # gh release create with dist/<version>/; a dry run unless PUBLISH=1.
 release-publish:

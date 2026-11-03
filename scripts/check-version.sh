@@ -5,7 +5,8 @@
 #   - Cargo.toml's workspace version stays the placeholder 0.0.0 and every crate inherits it;
 #   - app/pubspec.yaml stays the placeholder 0.0.0+0;
 #   - every Makefile target that runs `flutter build` passes --build-name, --build-number and
-#     --dart-define=PROTECTORATE_VERSION, and no script runs `flutter build` itself;
+#     --dart-define=PROTECTORATE_VERSION, and a script runs `flutter build` only with the
+#     Makefile's APP_VERSION_FLAGS (release.sh, whose app builds run on other machines);
 #   - every cargo build, test or clippy in the Makefile and the scripts sets
 #     PROTECTORATE_BUILD_VERSION;
 #   - the app reads its version only from PROTECTORATE_VERSION, and go/, scripts/ and app/ hold
@@ -50,7 +51,11 @@ done
 
 for f in scripts/*.sh scripts/*.ps1; do
 	[ "$f" = scripts/check-version.sh ] && continue
-	grep -n 'flutter build' "$f" >&2 && bad "$f: build the app through make (make web) so the version is applied"
+	grep -n 'flutter build' "$f" | grep -v 'flutter build [a-z]* --release \$APP_FLAGS' >&2 &&
+		bad "$f: build the app through make (make web) so the version is applied"
+	if grep -q 'flutter build' "$f"; then
+		grep -qx 'APP_FLAGS=${APP_VERSION_FLAGS:-}' "$f" || bad "$f: APP_FLAGS must be the Makefile's APP_VERSION_FLAGS"
+	fi
 	# One logical line per backslash-continued command.
 	awk '{ if (sub(/\\$/, "")) { acc = acc $0 " "; next } print acc $0; acc = "" }' "$f" |
 		grep -vE '^[[:space:]]*#' | grep -E '(^|[ ;&"(])cargo (\+[^ ]+ )?("?\$sub"?|build|zigbuild|test|clippy)( |$)' |

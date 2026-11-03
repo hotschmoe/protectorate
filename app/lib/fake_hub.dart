@@ -737,7 +737,7 @@ class FakeHub implements HubClient {
   void _seed() {
     _hub = {
       'name': 'protectorate',
-      'version': update ? 'v99.0.0-fake' : kVersion,
+      'version': update ? '$kVersion+fake-update' : kVersion,
       if (update)
         'clients': [
           'protectorate-android.apk',

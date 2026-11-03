@@ -79,7 +79,8 @@ WEB_DIR=$ROOT/app/build/web
 export CARGO_BUILD_JOBS=${CARGO_BUILD_JOBS:-4}
 APP_OUT=$TARGET/release-app/$VERSION
 APP_TAR=$APP_OUT/app-src.tar
-APP_FLAGS="--build-name=${BUILD_NAME:-} --build-number=${BUILD_NUMBER:-} --dart-define=PROTECTORATE_VERSION=$VERSION"
+# The Makefile's --build-name, --build-number and PROTECTORATE_VERSION, so the app builds carry the tag.
+APP_FLAGS=${APP_VERSION_FLAGS:-}
 APK_HOST=${PT_RELEASE_APK_HOST:-}
 APK_KEY=${PT_RELEASE_APK_SSH_KEY:-}
 APK_PATH=${PT_RELEASE_APK_PATH:-flutter/bin}
@@ -327,7 +328,7 @@ tar -xf app.tar
 if (\$LASTEXITCODE) { "tar failed (\$LASTEXITCODE)"; exit 1 }
 Set-Location app
 flutter build windows --release $APP_FLAGS 2>&1 | Out-String -Stream
-if (\$LASTEXITCODE) { "flutter build failed (\$LASTEXITCODE)"; exit 2 }
+if (\$LASTEXITCODE) { "flutter exited \$LASTEXITCODE"; exit 2 }
 Compress-Archive -Force -Path 'build\\windows\\arm64\\runner\\Release\\*' -DestinationPath '$remote'
 (Get-FileHash '$remote').Hash
 EOF
@@ -443,7 +444,7 @@ assets() {
 		win "ver" >/dev/null || die "cannot reach $WIN_HOST over ssh (unset PT_RELEASE_WIN_HOST to skip the Windows assets)"
 	fi
 	if [ -n "$APK_HOST$WIN_HOST$ARM64_NODE" ]; then
-		[ -n "${BUILD_NAME:-}" ] && [ -n "${BUILD_NUMBER:-}" ] || die "BUILD_NAME and BUILD_NUMBER are not set; run this through make"
+		[ -n "$APP_FLAGS" ] || die "APP_VERSION_FLAGS is not set; run this through make"
 	fi
 	if [ -n "$APK_HOST" ]; then
 		apk_ssh true || die "cannot reach $APK_HOST over ssh (unset PT_RELEASE_APK_HOST to skip the APK)"
