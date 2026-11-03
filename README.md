@@ -6,7 +6,7 @@ running untouched in a light sandbox and bound to one directory. The hub also re
 untrusted machines (nodes) to inventory them and run build, test and maintenance jobs across
 architectures. It is a software factory only: no email, calendar or errand agent.
 
-This branch, `next`, is a ground-up rewrite. [SPEC.md](SPEC.md) is the design;
+Protectorate v0.7 is a ground-up rewrite of the v0.6 hub. [SPEC.md](SPEC.md) is the design;
 [REVISIT.md](REVISIT.md) lists every shortcut taken so far and what "right" would be;
 [DEPENDENCIES.md](DEPENDENCIES.md) lists every third-party package and why it is there.
 
