@@ -1,6 +1,8 @@
 //! Node jobs (2.e with 12a items 5 and 6, 12b item 9). Nodes never initiate: every report here
 //! answers a hub request, and a job never re-runs by itself.
 
+use std::collections::BTreeSet;
+
 use crate::Core;
 use crate::effect::Report;
 use crate::event::{JobReport, JobSpec};
@@ -579,6 +581,19 @@ impl Core<'_> {
     pub(crate) fn tick_jobs(&mut self) {
         let now = self.now;
         let ids: Vec<JobId> = self.st.jobs.keys().copied().collect();
+        // Only an Uncertain or Probing write is re-sent, and nothing on this path makes one,
+        // so one pass finds every job with work instead of a scan of all effects per job.
+        let resend: BTreeSet<JobId> =
+            self.st
+                .effects
+                .values()
+                .filter(|e| matches!(e.state, EffectState::Uncertain | EffectState::Probing))
+                .filter_map(|e| match e.kind {
+                    EffectKind::NodeCancel { job, .. }
+                    | EffectKind::NodeAckCollected { job, .. } => Some(job),
+                    _ => None,
+                })
+                .collect();
         for id in ids {
             let j = &self.st.jobs[&id];
             let (state, seen_at, state_at, lost_at) = (j.state, j.seen_at, j.state_at, j.lost_at);
@@ -609,7 +624,9 @@ impl Core<'_> {
                     _ => {}
                 }
             }
-            self.resend_node_writes(id);
+            if resend.contains(&id) {
+                self.resend_node_writes(id);
+            }
         }
     }
 
