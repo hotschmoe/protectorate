@@ -1018,3 +1018,13 @@ Each entry: where, what was done, what right looks like.
   that gap, or a symlink swapped in under `projects_dir`, can remove a live root. SPEC 2
   principle 10 treats our own agents as trusted, so this is left. Right: delete through a
   directory fd opened before the check, and hold the path against spawn until the delete ends.
+- **App self-update is simple and partly untried** (`pt-hub` `clients.rs`, `app/lib/client_update_io.dart`,
+  `MainActivity.kt`): `GET /api/client/<name>` has no Range support, so an interrupted download
+  starts over; one lock serializes every first fetch, whichever build it is. The Windows script
+  copies the new files over the old ones with robocopy, so a copy that fails midway can leave a
+  mixed install (the old exe is started again and the error goes to
+  `%TEMP%\protectorate-update.log`); files the new build dropped stay. Android reports a failed
+  install only as a toast, and the app learns nothing of the outcome. Neither installer has run
+  on a real device yet. Right: try both on the laptop and the phone; then a staged side-by-side
+  install with a pointer swap on Windows, and the session status back over the channel on
+  Android, if failures show up.

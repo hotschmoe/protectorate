@@ -556,8 +556,18 @@ straight from GitHub releases, on the stable or dev channel, as today.
 - **Order:** hub first, then one canary node per OS and arch, then the rest. Headscale accepts
   clients up to 10 minor versions old, and `member` shares headscale's `tailscale.com` version
   through one go.mod, so a fleet mid-rollout keeps working.
-- **Desktop and Android apps** are not updated by the hub. The app shows "hub is vX, app is vY"
-  and links to the release.
+- **Apps, from the hub's release:** `HubInfo.clients` lists the client builds the running
+  release's `SHA256SUMS` names (`protectorate-android.apk`,
+  `protectorate-desktop-windows-{amd64,arm64}.zip`); a hub not started from `releases/current`
+  lists none. `GET /api/client/<name>` serves one to the owner and paired devices only. The hub
+  fetches it from its own release on the first request, checks it against the local
+  `SHA256SUMS` and keeps it in `<home>/clients/<version>/`, dropping older versions' builds.
+  When the hub's version differs from the app's and lists the app's build, the app shows a
+  banner: Install downloads it with the device token and installs it (Android through
+  PackageInstaller, which asks the owner to confirm; Windows through a detached script that
+  replaces the files beside the exe once the app exits, elevated only when that directory needs
+  it, and starts the app again). On web the hub serves the app, so the banner offers Reload. A
+  dismissal lasts until the app restarts or the hub's version changes.
 
 ### 6b. Moving the hub to a new machine
 

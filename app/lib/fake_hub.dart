@@ -12,14 +12,16 @@ const _gib = 1024 * 1024 * 1024;
 /// would send and hands it out through the generated `fromJson`, so the JSON shapes are
 /// exercised too. Transcripts are append-only like the hub's: a tool result is a new entry, and
 /// a streaming text is one delta entry that turns whole at the end. A 250 ms tick streams text,
-/// moves activity and jitters node samples.
+/// moves activity and jitters node samples. With [update] it runs a newer release than the app
+/// and lists every client build, so the update banner shows.
 class FakeHub implements HubClient {
-  FakeHub() : _t0 = DateTime.now().millisecondsSinceEpoch {
+  FakeHub({this.update = false}) : _t0 = DateTime.now().millisecondsSinceEpoch {
     _seed();
     _state = HubState.fromJson(_snapshot());
     _timer = Timer.periodic(const Duration(milliseconds: 250), (_) => _onTick());
   }
 
+  final bool update;
   final int _t0;
   final _rand = Random(7);
   late final Timer _timer;
@@ -735,7 +737,13 @@ class FakeHub implements HubClient {
   void _seed() {
     _hub = {
       'name': 'protectorate',
-      'version': kVersion,
+      'version': update ? 'v99.0.0-fake' : kVersion,
+      if (update)
+        'clients': [
+          'protectorate-android.apk',
+          'protectorate-desktop-windows-amd64.zip',
+          'protectorate-desktop-windows-arm64.zip',
+        ],
       'started_at_ms': _t0 - const Duration(days: 11, hours: 4, minutes: 12).inMilliseconds,
       'inventory': {
         'hostname': 'hub', 'os': 'linux', 'os_version': 'Linux', 'arch': 'x86_64',

@@ -25,6 +25,7 @@ enum Glyph {
   close,
   menu,
   alert,
+  download,
 }
 
 class Icon16 extends StatelessWidget {
@@ -188,6 +189,11 @@ class _GlyphPainter extends CustomPainter {
             close: true);
         line(8, 6.5, 8, 9.25);
         canvas.drawCircle(const Offset(8, 11.25), 0.85, f);
+      case Glyph.download:
+        line(8, 2.25, 8, 10);
+        poly([const Offset(4.5, 6.75), const Offset(8, 10.25), const Offset(11.5, 6.75)]);
+        poly([const Offset(2.5, 11), const Offset(2.5, 13.5), const Offset(13.5, 13.5),
+            const Offset(13.5, 11)]);
     }
   }
 
