@@ -4,9 +4,9 @@
 
 use std::sync::{Arc, Weak};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use pt_api::{EventKind as Kind, Level};
+use pt_api::{EventKind as Kind, Level, Subscription};
 use pt_core::{EventKind, Harness, Life, ParkReason};
 use pt_doctor::Report;
 use pt_fleet::{Fleet, PollConfig};
@@ -17,8 +17,11 @@ use crate::exec::program;
 use crate::fleet::{self, FleetFlags, Net, Up};
 use crate::hub::Hub;
 use crate::log::{info, warning};
+use crate::logins;
 
 const DOCTOR_EVERY: Duration = Duration::from_secs(6 * 3600);
+/// The fewest seconds between two renewals of an idle-expired grok login.
+const GROK_RENEW_EVERY: Duration = Duration::from_secs(600);
 /// How often the history ingest catches up.
 const HISTORY_POLL: Duration = Duration::from_secs(1);
 /// Longest wait after a failed history commit before the next catch-up.
@@ -153,10 +156,25 @@ pub fn start_quotas(hub: &Arc<Hub>) {
     let started = thread::Builder::new()
         .name("pt-quota".into())
         .spawn(move || {
+            let mut renewed: Option<Instant> = None;
             loop {
                 let Some(hub) = weak.upgrade() else { return };
                 let now = pt_quota::now_ms();
                 cache.refresh(now, false);
+                if cache.renewable().contains(&Subscription::Grok)
+                    && renewed.is_none_or(|t| t.elapsed() >= GROK_RENEW_EVERY)
+                    && let Some(grok) = program(&hub, Harness::Grok)
+                {
+                    renewed = Some(Instant::now());
+                    match logins::renew_grok(&hub.home.logins(), &grok) {
+                        Ok(()) => {
+                            info!("quota: renewed the idle grok login with `grok models`");
+                            cache.reread(Subscription::Grok);
+                            cache.refresh(pt_quota::now_ms(), false);
+                        }
+                        Err(e) => warning!("quota: renewing the idle grok login: {e}"),
+                    }
+                }
                 hub.quotas
                     .publish(&hub.bus, cache.quotas_with_age(), opts.stale_after);
                 drop(hub);

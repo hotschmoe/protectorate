@@ -115,7 +115,7 @@ impl Reader for Claude {
             &home.join(".claude").join(".credentials.json"),
         )?)?;
         if login.expires_at_ms.is_some_and(|e| now_ms >= e) {
-            return Err(Error::Expired);
+            return Err(Error::Expired { renewable: false });
         }
         let base = self
             .base_url

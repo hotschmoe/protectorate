@@ -5,7 +5,10 @@ pub enum Error {
     /// Not logged in, not configured or not installed: there is no data to read.
     Unavailable(String),
     /// The stored login is past its expiry; its CLI must refresh it. Readers never do.
-    Expired,
+    /// `renewable`: the login holds a refresh token, so the CLI's next run renews it unaided.
+    Expired {
+        renewable: bool,
+    },
     Unauthorized,
     /// The login lacks the scope usage queries need.
     Scope,
@@ -28,7 +31,12 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Unavailable(d) => f.write_str(d),
-            Error::Expired => f.write_str("login expired; log in again with the provider CLI"),
+            Error::Expired { renewable: true } => {
+                f.write_str("access token idle-expired; renews when its CLI next runs")
+            }
+            Error::Expired { renewable: false } => {
+                f.write_str("login expired; log in again with the provider CLI")
+            }
             Error::Unauthorized => f.write_str("login rejected (HTTP 401)"),
             Error::Scope => f.write_str("login lacks the scope required for usage queries"),
             Error::Http(s) => write!(f, "unexpected HTTP status {s}"),
