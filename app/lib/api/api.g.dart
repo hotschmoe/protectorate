@@ -2339,6 +2339,7 @@ final class HubInfo {
     this.sample,
     this.historyCapped = const <String>[],
     this.restoreError,
+    this.clients = const <String>[],
   });
 
   factory HubInfo.fromJson(Object? json) {
@@ -2362,6 +2363,15 @@ final class HubInfo {
         j['restore_error'],
         (e0) => _string(e0, 'HubInfo.restore_error'),
       ),
+      clients: _or(
+        j['clients'],
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'HubInfo.clients',
+          (e1) => _string(e1, 'HubInfo.clients[]'),
+        ),
+      ),
     );
   }
 
@@ -2383,6 +2393,12 @@ final class HubInfo {
   /// Set when a rollback restore failed and the trial release was kept.
   final String? restoreError;
 
+  /// The client builds of the release this hub runs, as named in its `SHA256SUMS`
+  /// (`protectorate-android.apk`, `protectorate-desktop-windows-{amd64,arm64}.zip`), each
+  /// served at `GET /api/client/<name>`. Empty for a hub not started from
+  /// `releases/current`.
+  final List<String> clients;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'version': version,
@@ -2391,6 +2407,7 @@ final class HubInfo {
     if (sample case final v?) 'sample': v.toJson(),
     'history_capped': historyCapped,
     if (restoreError case final v?) 'restore_error': v,
+    'clients': clients,
   };
 }
 
@@ -5429,7 +5446,8 @@ ApiException _error(int status, String body) {
   }
 }
 
-/// The hub API: `POST /api/<Method>` per method and the `GET /api/events` WebSocket.
+/// The hub API: `POST /api/<Method>` per method, the `GET /api/events` WebSocket and the
+/// `GET /api/client/<name>` downloads.
 /// `baseUrl` is the hub's origin, such as `https://hub.example.lan`; `token` a
 /// `pd1.` device token or another bearer credential.
 final class HubApi {
@@ -5461,6 +5479,10 @@ final class HubApi {
     _url('/api/events', {if (fromSeq != null) 'from_seq': '$fromSeq'}),
     token,
   ).map((text) => HubStreamMessage.fromJson(jsonDecode(text)));
+
+  /// A client build of the hub's release, one of `HubInfo.clients`: `GET /api/client/<name>`
+  /// with this token as the bearer.
+  Uri clientUrl(String name) => _url('/api/client/$name');
 
   /// The full snapshot.
   ///

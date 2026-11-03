@@ -71,7 +71,8 @@ ApiException _error(int status, String body) {
   }
 }
 
-/// The hub API: `POST /api/<Method>` per method and the `GET /api/events` WebSocket.
+/// The hub API: `POST /api/<Method>` per method, the `GET /api/events` WebSocket and the
+/// `GET /api/client/<name>` downloads.
 /// `baseUrl` is the hub's origin, such as `https://hub.example.lan`; `token` a
 /// `pd1.` device token or another bearer credential.
 final class HubApi {
@@ -99,6 +100,10 @@ final class HubApi {
     _url('/api/events', {if (fromSeq != null) 'from_seq': '$fromSeq'}),
     token,
   ).map((text) => HubStreamMessage.fromJson(jsonDecode(text)));
+
+  /// A client build of the hub's release, one of `HubInfo.clients`: `GET /api/client/<name>`
+  /// with this token as the bearer.
+  Uri clientUrl(String name) => _url('/api/client/$name');
 "#;
 
 const DART_RESERVED: &[&str] = &[

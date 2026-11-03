@@ -80,6 +80,7 @@ pub struct Hub {
     pub uid: u32,
     pub started_ms: u64,
     pub info: Mutex<pt_api::HubInfo>,
+    pub clients: crate::clients::Clients,
     pub owner_home: PathBuf,
     pub fault: Option<Fault>,
     pub bus: Bus,
@@ -120,6 +121,7 @@ impl Hub {
         input: Sender<Input>,
         view: View,
         bus: Bus,
+        clients: crate::clients::Clients,
     ) -> Hub {
         let transcripts = Transcripts::new(home.clone());
         let jobs = JobStore::new(home.jobs());
@@ -148,7 +150,9 @@ impl Hub {
                 sample: None,
                 history_capped: Vec::new(),
                 restore_error: None,
+                clients: clients.names(),
             }),
+            clients,
             owner_home,
             fault: Fault::from_env(),
             bus,

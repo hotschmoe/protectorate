@@ -16,6 +16,10 @@
 //!   24 h loop runs each once (and not again after a restart), and `harness update pi` waits for a
 //!   pi sleeve mid-turn.
 //!
+//! - Client builds: a hub started from a release lists the client builds its SHA256SUMS names,
+//!   fetches one from the release on first request, checks it and serves it to the owner and
+//!   paired devices only.
+//!
 //! Release "binaries" are bash wrappers: they print their tag for the version check, else exec
 //! the real binary under the wrapper's own argv[0], as systemd would start it.
 
@@ -33,7 +37,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
-use common::{Hub, LONG, Run, bin, eventually, free_port, tail, temp_repo};
+use common::{Hub, LONG, Run, bin, eventually, free_port, pair, post, tail, temp_repo};
 use pt_http::{Config, Request, Response, Server, ShutdownHandle};
 use pt_json::{Value, obj};
 
@@ -2877,4 +2881,191 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
         (!hung_alive()).then_some(())
     });
     assert_eq!(starts(&sup), before, "{}", sup.log_text());
+}
+
+fn get_client(port: u16, name: &str, token: Option<&str>) -> pt_http::ClientResponse {
+    let auth = token.map(|t| format!("Bearer {t}"));
+    let headers: Vec<(&str, &str)> = auth.iter().map(|a| ("Authorization", a.as_str())).collect();
+    pt_http::Client::tcp(std::net::SocketAddr::from(([127, 0, 0, 1], port)))
+        .read_timeout(Some(Duration::from_secs(60)))
+        .request("GET", &format!("/api/client/{name}"), &headers, b"")
+        .expect("GET a client build")
+}
+
+fn error_text(r: &pt_http::ClientResponse) -> String {
+    let v = pt_json::parse_bytes(&r.body).unwrap_or(Value::Null);
+    format!(
+        "{} {}",
+        r.status,
+        v["error"]["message"].as_str().unwrap_or("")
+    )
+}
+
+#[test]
+fn hub_serves_its_release_client_builds_to_the_owner_and_devices() {
+    let real = PathBuf::from(bin());
+    let apk = "protectorate-android.apk";
+    let zip = "protectorate-desktop-windows-amd64.zip";
+    let apk_bytes: Vec<u8> = (0..300_000u32).map(|i| (i * 7 % 251) as u8).collect();
+    let hub_bin = wrapper("protectorate", "version", "v0.0.1", &real, "", false);
+    let mut rel = release(
+        "v0.0.1",
+        vec![
+            (format!("protectorate-linux-{}", arch()), hub_bin.clone()),
+            (apk.into(), apk_bytes.clone()),
+            (zip.into(), b"the real zip".to_vec()),
+        ],
+    );
+    // GitHub hands out bytes that SHA256SUMS does not name.
+    rel.assets.insert(zip.into(), b"a tampered zip".to_vec());
+    let sums = rel.assets["SHA256SUMS"].clone();
+    let fake = serve_releases(vec![rel]);
+
+    let home = dir("clients").join("home");
+    fs::create_dir_all(&home).unwrap();
+    let config = obj! {
+        "envoy" => obj! { "harness" => "claude" },
+        "claude_program" => "/nonexistent/program",
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+        "release_api" => fake.url.as_str(),
+        "release_repo" => "o/r",
+    };
+    fs::write(home.join("config.json"), config.to_string()).unwrap();
+    install(&home, "v0.0.1", "protectorate", &hub_bin);
+    fs::write(home.join("releases/v0.0.1/SHA256SUMS"), &sums).unwrap();
+    let stale = home.join("clients/v0.0.0");
+    fs::create_dir_all(&stale).unwrap();
+    fs::write(stale.join(apk), b"an older build").unwrap();
+
+    let port = free_port();
+    let home_s = home.display().to_string();
+    let sup = Supervisor::start(
+        &home,
+        "protectorate",
+        Vec::new(),
+        vec![
+            "--home".into(),
+            home_s,
+            "serve".into(),
+            "--listen".into(),
+            format!("127.0.0.1:{port}"),
+        ],
+        Vec::new(),
+        Duration::from_millis(300),
+    );
+    let owner = eventually("the owner token", Duration::from_secs(60), || {
+        sup.log_text().lines().find_map(|l| {
+            l.strip_prefix("owner token (shown once): ")
+                .map(|t| t.trim().to_string())
+        })
+    });
+    let agent = eventually("the envoy-only token", Duration::from_secs(10), || {
+        sup.log_text().lines().find_map(|l| {
+            l.strip_prefix("envoy-only token: ")
+                .map(|t| t.trim().to_string())
+        })
+    });
+    let info = eventually("the hub's info", Duration::from_secs(60), || {
+        let (s, v) = post(port, "GetHubInfo", Some(&owner), "{}");
+        (s == 200).then_some(v)
+    });
+    assert_eq!(
+        info["clients"],
+        Value::from(vec![Value::from(apk), Value::from(zip)]),
+        "only the builds SHA256SUMS names: {info}"
+    );
+
+    // Envoy's capability, as the hub derives it, is a sleeve's: refused like any sleeve.
+    let envoy = eventually("the Envoy sleeve", Duration::from_secs(30), || {
+        let (_, v) = post(port, "ListSleeves", Some(&owner), "{}");
+        v["sleeves"]
+            .as_array()?
+            .iter()
+            .find(|s| s["name"].as_str() == Some("envoy"))
+            .and_then(|s| s["id"].as_str())
+            .map(str::to_string)
+    });
+    let secret =
+        pt_json::parse(&fs::read_to_string(home.join("tokens")).unwrap()).unwrap()["secret"]
+            .as_str()
+            .unwrap()
+            .to_string();
+    let hex = pt_hash::to_hex(&pt_hash::sha256(
+        format!("{secret}:sleeve:{envoy}").as_bytes(),
+    ));
+    let sleeve = format!("pc1.{}", &hex[..48]);
+    assert_eq!(post(port, "ListSleeves", Some(&sleeve), "{}").0, 200);
+    assert_eq!(get_client(port, apk, None).status, 401);
+    assert_eq!(get_client(port, apk, Some(&agent)).status, 403);
+    assert_eq!(get_client(port, apk, Some(&sleeve)).status, 403);
+    assert!(
+        !home.join("clients/v0.0.1").exists(),
+        "nothing fetched for a refused caller"
+    );
+
+    // Concurrent first requests: one download, and each gets the whole checked file.
+    let device = pair(port, &owner, "phone");
+    let firsts: Vec<_> = [owner.clone(), device.clone(), owner.clone()]
+        .into_iter()
+        .map(|t| thread::spawn(move || get_client(port, apk, Some(&t))))
+        .collect();
+    for h in firsts {
+        let r = h.join().unwrap();
+        assert_eq!(r.status, 200, "{}", error_text(&r));
+        assert!(r.body == apk_bytes, "{} bytes", r.body.len());
+        assert_eq!(
+            r.headers.get("Content-Type"),
+            Some("application/vnd.android.package-archive")
+        );
+        assert_eq!(
+            r.headers.get("Content-Disposition"),
+            Some("attachment; filename=\"protectorate-android.apk\"")
+        );
+    }
+    assert_eq!(
+        fs::read(home.join("clients/v0.0.1").join(apk)).unwrap(),
+        apk_bytes
+    );
+    assert!(!stale.exists(), "an older release's builds are removed");
+    let names: Vec<String> = fs::read_dir(home.join("clients/v0.0.1"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        names,
+        vec![apk.to_string()],
+        "one file, no partial download"
+    );
+    assert!(
+        sup.log_text().matches("fetched client build").count() == 1,
+        "{}",
+        sup.log_text()
+    );
+
+    // A download that does not match SHA256SUMS is refused and leaves nothing behind.
+    let r = get_client(port, zip, Some(&device));
+    assert_eq!(r.status, 500, "{}", error_text(&r));
+    assert!(
+        error_text(&r).contains("does not match SHA256SUMS"),
+        "{}",
+        error_text(&r)
+    );
+    assert!(!home.join("clients/v0.0.1").join(zip).exists());
+    assert!(
+        !home
+            .join("clients/v0.0.1")
+            .join(format!(".{zip}.part"))
+            .exists()
+    );
+
+    for name in [
+        "protectorate-desktop-windows-arm64.zip",
+        "tokens",
+        "..%2Ftokens",
+    ] {
+        let r = get_client(port, name, Some(&owner));
+        assert_eq!(r.status, 404, "{name}: {}", error_text(&r));
+    }
+    drop(sup);
 }

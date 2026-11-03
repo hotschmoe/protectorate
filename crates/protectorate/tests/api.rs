@@ -262,6 +262,15 @@ fn api_surface() {
             && info["sample"]["sampled_at_ms"].as_u64().is_some())
         .then_some(info)
     });
+    // A hub not started from releases/current has no client builds to offer.
+    assert_eq!(info["clients"], Value::from(Vec::<Value>::new()), "{info}");
+    let bearer = format!("Bearer {owner}");
+    let apk = get(
+        port,
+        "/api/client/protectorate-android.apk",
+        &[("Authorization", &bearer)],
+    );
+    assert_eq!(apk.status, 404);
     let inv = &info["inventory"];
     let sample = &info["sample"];
     assert!(!inv["cpu_model"].as_str().unwrap().is_empty(), "{inv}");

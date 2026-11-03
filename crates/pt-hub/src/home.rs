@@ -93,6 +93,10 @@ impl Home {
     pub fn logins(&self) -> PathBuf {
         self.root.join("logins")
     }
+    /// The running release's client builds, fetched on first request (`clients.rs`).
+    pub fn clients(&self) -> PathBuf {
+        self.root.join("clients")
+    }
     /// The last run of each harness's own update command.
     pub fn harness_updates(&self) -> PathBuf {
         self.root.join("harness-updates.json")

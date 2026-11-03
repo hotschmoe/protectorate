@@ -273,6 +273,9 @@ fn hub_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 if let Some(error) = &h.restore_error {
                     println!("rollback restore failed: {error}");
                 }
+                if !h.clients.is_empty() {
+                    println!("client builds: {}", h.clients.join(", "));
+                }
             });
         }
         "state" => {

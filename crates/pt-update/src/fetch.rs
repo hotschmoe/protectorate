@@ -10,7 +10,7 @@ use std::time::Duration;
 pub(crate) const MAX_LISTING: u64 = 16 << 20;
 pub(crate) const MAX_SUMS: u64 = 1 << 20;
 pub(crate) const MAX_VERSION: u64 = 1024;
-pub(crate) const MAX_ASSET: u64 = 1 << 30;
+const MAX_ASSET: u64 = 1 << 30;
 const USER_AGENT: &str = "protectorate-update";
 
 /// Where releases come from: an API base (`https://api.github.com`, or a loopback `http://` URL
@@ -275,7 +275,7 @@ impl Source {
     }
 
     /// An asset into `dest` (created or replaced), at most `max` bytes. Returns its length.
-    pub(crate) fn download(&self, url: &str, max: u64, dest: &Path) -> Result<u64> {
+    fn download(&self, url: &str, max: u64, dest: &Path) -> Result<u64> {
         let mut c = self.curl(url, self.asset_timeout, max)?;
         c.arg("--output").arg(dest).arg(url);
         self.run(c, url)?;
@@ -284,6 +284,19 @@ impl Source {
             .len();
         if len > max {
             return Err(fetch_err(format!("{url}: body over {max} bytes")));
+        }
+        Ok(len)
+    }
+
+    /// A release asset into `dest` (created or replaced), checked against the size GitHub
+    /// reports; its sha256 is the caller's to check. Returns its length.
+    pub fn download_asset(&self, a: &Asset, dest: &Path) -> Result<u64> {
+        let len = self.download(&a.url, MAX_ASSET, dest)?;
+        if a.size != 0 && len != a.size {
+            return Err(Error::new(
+                ErrorKind::Verify,
+                format!("{}: got {len} bytes, the release says {}", a.name, a.size),
+            ));
         }
         Ok(len)
     }
