@@ -284,11 +284,12 @@ build_desktop_amd64() {
 }
 
 # Flutter does not cross-build Windows arm64, so it builds natively on an arm64 fleet node, as a
-# hub job. The job fetches the app's sources from this machine, by a one-time path.
+# hub job. The job fetches the app's sources from this machine, by a one-time path, and builds in
+# ARM64_DIR so Flutter's caches last; the zip goes in the job's own directory, the only place a
+# node serves an artifact from.
 build_desktop_arm64() {
-	local zip remote sum nonce srv port='' i id='' state='' ps want got
+	local zip sum nonce srv port='' i id='' state='' ps want got
 	zip=$(desktop_zip arm64)
-	remote="$ARM64_DIR\\$zip"
 	sum=$(sha256sum <"$APP_TAR" | cut -d' ' -f1)
 	"${HUB_CLI[@]}" --json node show "$ARM64_NODE" | grep -q '"online":true' ||
 		die "arm64 node $ARM64_NODE is offline"
@@ -316,6 +317,7 @@ s.serve_forever()' "$SERVE_ADDR" "/$nonce/app.tar" "$APP_TAR" >"$LOGS/arm64-serv
 	[ -n "$port" ] || { kill "$srv"; die "the source server did not start on $SERVE_ADDR"; }
 	ps=$(cat <<EOF
 \$ProgressPreference = 'SilentlyContinue'
+\$job = Join-Path (Get-Location).Path '$zip'
 \$env:PATH = '$ARM64_PATH;' + \$env:PATH
 \$env:PUB_CACHE = '$ARM64_DIR\\pub-cache'
 \$env:HOME = \$env:USERPROFILE
@@ -329,12 +331,12 @@ if (\$LASTEXITCODE) { "tar failed (\$LASTEXITCODE)"; exit 1 }
 Set-Location app
 flutter build windows --release $APP_FLAGS 2>&1 | Out-String -Stream
 if (\$LASTEXITCODE) { "flutter exited \$LASTEXITCODE"; exit 2 }
-Compress-Archive -Force -Path 'build\\windows\\arm64\\runner\\Release\\*' -DestinationPath '$remote'
-(Get-FileHash '$remote').Hash
+Compress-Archive -Force -Path 'build\\windows\\arm64\\runner\\Release\\*' -DestinationPath \$job
+(Get-FileHash \$job).Hash
 EOF
 )
 	id=$("${HUB_CLI[@]}" --json job run --node "$ARM64_NODE" --even-if-present --timeout "$ARM64_TIMEOUT" \
-		--artifact "$remote" -- powershell -NoProfile -NonInteractive -EncodedCommand \
+		--artifact "$zip" -- powershell -NoProfile -NonInteractive -EncodedCommand \
 		"$(printf '%s' "$ps" | iconv -f utf-8 -t utf-16le | base64 -w0)" |
 		sed -n 's/.*"id":"\([^"]*\)".*/\1/p' | head -n1) || true
 	if [ -z "$id" ]; then
@@ -359,7 +361,7 @@ EOF
 	esac
 	want=$("${HUB_CLI[@]}" job log "$id" | tr -d '\r' | grep -E '^[0-9A-F]{64}$' | tail -n1 | tr 'A-F' 'a-f')
 	[ -n "$want" ] || die "the arm64 job $id printed no sha256 for $zip"
-	"${HUB_CLI[@]}" job artifact "$id" "$remote" --out "$APP_OUT/$zip.part"
+	"${HUB_CLI[@]}" job artifact "$id" "$zip" --out "$APP_OUT/$zip.part"
 	got=$(sha256sum <"$APP_OUT/$zip.part" | cut -d' ' -f1)
 	[ "$got" = "$want" ] || die "fetched $zip has sha256 $got, the node built $want"
 	mv -f "$APP_OUT/$zip.part" "$APP_OUT/$zip"
