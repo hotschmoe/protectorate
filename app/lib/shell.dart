@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'chat.dart';
+import 'client_update.dart';
 import 'hub.dart';
 import 'api/api.g.dart';
 import 'derived.dart';
@@ -83,6 +84,9 @@ class _ShellState extends State<Shell> {
   Level _msgLevel = Level.info;
   Timer? _msgTimer;
 
+  /// The hub version whose update offer was dismissed, until the app restarts.
+  static String? _dismissedUpdate;
+
   @override
   void initState() {
     super.initState();
@@ -159,6 +163,20 @@ class _ShellState extends State<Shell> {
     _msgTimer = Timer(const Duration(seconds: 8), () {
       if (mounted) setState(() => _msg = null);
     });
+  }
+
+  /// The offer when the hub runs another release: its build of this app, or a reload on web.
+  Widget? _update() {
+    final h = _state.hub;
+    if (!widget.hub.connected || h.version == kVersion || h.version == _dismissedUpdate) return null;
+    final asset = clientAsset();
+    if (!reloadsFromHub && (asset == null || !h.clients.contains(asset))) return null;
+    return _UpdateBanner(
+      key: ValueKey(h.version),
+      version: h.version,
+      asset: asset,
+      onDismiss: () => setState(() => _dismissedUpdate = h.version),
+    );
   }
 
   String? get _currentSleeve => switch (_screen) {
@@ -330,6 +348,7 @@ class _ShellState extends State<Shell> {
       hubLabel: widget.hub.label,
       connected: widget.hub.connected,
     );
+    final update = _update();
     final body = phone
         ? Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -341,6 +360,7 @@ class _ShellState extends State<Shell> {
                 onBack: () => _go(_screen == Screen.sleeve ? Screen.sleeves : Screen.nodes),
                 onCommand: () => _setPalette(true),
               ),
+              ?update,
               Expanded(child: _main(context, phone, box.maxWidth)),
             ],
           )
@@ -348,7 +368,15 @@ class _ShellState extends State<Shell> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               SizedBox(width: kSidebar, child: side),
-              Expanded(child: _main(context, phone, box.maxWidth - kSidebar)),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    ?update,
+                    Expanded(child: _main(context, phone, box.maxWidth - kSidebar)),
+                  ],
+                ),
+              ),
             ],
           );
     return Scaffold(
@@ -965,6 +993,118 @@ class _PaletteRow extends StatelessWidget {
           Expanded(child: T(v, color: hot ? p.fg : p.dim)),
         ]),
       ),
+    );
+  }
+}
+
+/// A bar above the screen while the hub runs another release than this app. One click downloads
+/// this platform's build from the hub and starts its installer; on web it reloads the page,
+/// which the hub serves from its own release.
+class _UpdateBanner extends StatefulWidget {
+  const _UpdateBanner({super.key, required this.version, required this.asset, required this.onDismiss});
+
+  final String version;
+  final String? asset;
+  final VoidCallback onDismiss;
+
+  @override
+  State<_UpdateBanner> createState() => _UpdateBannerState();
+}
+
+class _UpdateBannerState extends State<_UpdateBanner> {
+  bool _busy = false;
+  int _got = 0;
+  int _total = 0;
+  String? _note;
+  String? _error;
+
+  Future<void> _install(AppScope app) async {
+    setState(() {
+      _busy = true;
+      _got = _total = 0;
+      _note = _error = null;
+    });
+    try {
+      if (app.hubUrl.isEmpty) throw StateError('no hub URL to download from');
+      final url = HubApi(Uri.parse(app.hubUrl)).clientUrl(widget.asset!);
+      final path = await downloadClient(url, app.hubToken.isEmpty ? null : app.hubToken, (got, total) {
+        final step = total > 0 && (got * 100 ~/ total != _got * 100 ~/ total || total != _total);
+        if (mounted && step) {
+          setState(() {
+            _got = got;
+            _total = total;
+          });
+        }
+      });
+      if (!mounted) return;
+      setState(() => _note = 'Installing ${widget.version}');
+      final next = await installClient(path);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _note = next;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _note = null;
+          _error = switch (e) {
+            StateError(:final message) => message,
+            PlatformException(:final message, :final code) => message ?? code,
+            _ => '$e',
+          };
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final app = AppScope.of(context);
+    final p = pal(context);
+    final phone = Look.of(context).phone;
+    final error = _error;
+    final color = error == null ? p.accent : p.alarm;
+    final String text;
+    final Widget action;
+    if (reloadsFromHub) {
+      text = 'The hub was updated to ${widget.version}; this page runs $kVersion';
+      action = const Btn('Reload', kind: BtnKind.primary, dense: true, onTap: reloadPage);
+    } else if (_busy && _note == null) {
+      text = _total == 0
+          ? 'Downloading ${widget.version}'
+          : 'Downloading ${widget.version}, ${bytes(_got)} of ${bytes(_total)}';
+      action = Meter(_total == 0 ? null : _got / _total, width: phone ? 64 : 140);
+    } else {
+      text = error != null
+          ? 'Update to ${widget.version} failed: $error'
+          : _note ?? 'The hub runs ${widget.version}; this app is $kVersion';
+      action = Btn(
+        error != null ? 'Retry' : 'Install update',
+        kind: BtnKind.primary,
+        dense: true,
+        glyph: Glyph.download,
+        onTap: _busy ? null : () => unawaited(_install(app)),
+      );
+    }
+    return Container(
+      padding: EdgeInsets.fromLTRB(phone ? 16 : 24, 7, phone ? 8 : 16, 7),
+      decoration: BoxDecoration(
+        color: Color.alphaBlend(p.tint(color, 0.08), p.bg),
+        border: Border(bottom: BorderSide(color: color.withValues(alpha: 0.35))),
+      ),
+      child: Row(children: [
+        Icon16(error == null ? Glyph.download : Glyph.alert, color: color, size: 14),
+        const SizedBox(width: 10),
+        Expanded(child: T(text, maxLines: 2)),
+        const SizedBox(width: 12),
+        action,
+        const SizedBox(width: 6),
+        IconBtn(Glyph.close, tooltip: 'Dismiss until the hub changes version', size: 26,
+            onTap: _busy ? null : widget.onDismiss),
+      ]),
     );
   }
 }

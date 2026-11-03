@@ -226,6 +226,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<crate::update::Trial>) -> Resu
         tx,
         view,
         bus,
+        crate::clients::Clients::open(&home, &store),
     ));
     // HubRecovered is the first input, before any listener or timer can add one (README step 5).
     hub.submit(EventKind::HubRecovered);

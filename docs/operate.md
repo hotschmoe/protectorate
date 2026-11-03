@@ -540,6 +540,27 @@ real fleet: `hub update` from v0.7.0-dev.1 to dev.2 and dev.3, `node update` fro
 The Windows supervisor loop and its pointer switch are tested end to end on Linux
 (`supervise` with `PT_TEST_POINTER_ASIDE=1`); on a real Windows node they have not run yet.
 
+**Apps:**
+
+The hub offers its own release's builds of the app. `hub info` lists them as client builds: those
+the release's `SHA256SUMS` names out of `protectorate-android.apk` and
+`protectorate-desktop-windows-{amd64,arm64}.zip`, none for a hub not started from
+`releases/current`. A paired app whose version differs from the hub's shows a banner; Install
+downloads `GET /api/client/<name>` with its device token (the owner token works too; sleeves and
+the envoy-only token are refused). The hub fetches each build from its release on the first
+request, checks it against `SHA256SUMS` and keeps it in `<home>/clients/<version>/`.
+
+- Android installs through the system installer, which asks to confirm. The first time, Android
+  asks to allow installs from Protectorate; allow it and press Install again. Every release must
+  be signed with the same key as the installed app.
+- Windows: the app exits, a script waits for it, copies the new files over the install
+  directory and starts the app again. Under `C:\Program Files` the copy asks UAC once. A failure
+  is logged to `%TEMP%\protectorate-update.log` and the old app starts again; the settings in
+  `%APPDATA%\protectorate` are untouched.
+- The web app is served by the hub, so its banner offers Reload.
+
+Neither installer has run on a real device yet.
+
 ## Devices
 
 ```
@@ -569,6 +590,7 @@ The hub owns one root, `<home>` (default `~/.local/share/protectorate`, mode 070
 | `tailnet/` | headscale's database and keys, the hub member's state, `enrolled.json`, `pending.json` |
 | `net/` | the embedded headscale and member, unpacked by SHA-256 |
 | `releases/` | staged hub releases and the `current` and `previous` links |
+| `clients/<version>/` | the release's app builds, fetched on first download |
 | `run/` | `api.sock` and `bin/`, bound into every sandbox |
 
 Workspaces stay in your own directories; nothing is written into a worked-on repo.

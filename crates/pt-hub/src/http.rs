@@ -1,4 +1,5 @@
-//! Routes, authentication per listener, the `/api/events` WebSocket and the web build.
+//! Routes, authentication per listener, the `/api/events` WebSocket, the client builds and the
+//! web build.
 
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -184,6 +185,9 @@ pub fn handler(
             let still = move || principal(&h, l, token.as_deref(), &peer).is_ok_and(|p| p == who);
             return events(hub.clone(), from, still);
         }
+        if let Some(name) = path.strip_prefix(pt_api::CLIENT_PATH) {
+            return client(&hub, &who, req, name);
+        }
         if req.method() != "POST" {
             return Response::method_not_allowed("POST");
         }
@@ -202,6 +206,50 @@ pub fn handler(
             Ok(v) => Response::json(200, v.to_string()),
             Err(e) => error(&e),
         }
+    }
+}
+
+/// `GET /api/client/<name>`: a client build of the hub's release, for the owner's devices.
+/// Without Range support: an interrupted download starts over.
+fn client(hub: &Hub, who: &Principal, req: &Request, name: &str) -> Response {
+    if !matches!(req.method(), "GET" | "HEAD") {
+        return Response::method_not_allowed("GET, HEAD");
+    }
+    match who {
+        Principal::Owner | Principal::Device(_) => {}
+        Principal::Anonymous => {
+            return error(&err(
+                ErrorCode::Unauthenticated,
+                "a bearer token is required",
+            ));
+        }
+        _ => {
+            return error(&err(
+                ErrorCode::Forbidden,
+                "client builds are for the owner",
+            ));
+        }
+    }
+    let path = match hub.clients.path(name, &hub.config) {
+        Ok(p) => p,
+        Err(e) => return error(&e),
+    };
+    let kind = if name.ends_with(".apk") {
+        "application/vnd.android.package-archive"
+    } else {
+        "application/zip"
+    };
+    match Response::file(req, &path) {
+        Ok(mut r) => {
+            r.headers.remove("Content-Type");
+            r.header("Content-Type", kind)
+                .header(
+                    "Content-Disposition",
+                    &format!("attachment; filename=\"{name}\""),
+                )
+                .header("Cache-Control", "no-cache")
+        }
+        Err(e) => error(&err(ErrorCode::Internal, e.to_string())),
     }
 }
 

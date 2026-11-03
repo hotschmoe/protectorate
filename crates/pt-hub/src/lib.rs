@@ -12,6 +12,7 @@ mod api;
 mod approvals;
 mod brief;
 mod bus;
+mod clients;
 mod command;
 mod core;
 mod devices;

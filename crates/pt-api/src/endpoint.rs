@@ -2,6 +2,14 @@ use crate::schema::{Described, TypeDef};
 
 pub const API_PREFIX: &str = "/api/";
 pub const EVENTS_PATH: &str = "/api/events";
+/// `GET /api/client/<name>`: one of [`CLIENT_ASSETS`] from the hub's own release.
+pub const CLIENT_PATH: &str = "/api/client/";
+/// Every client build a release can carry.
+pub const CLIENT_ASSETS: &[&str] = &[
+    "protectorate-android.apk",
+    "protectorate-desktop-windows-amd64.zip",
+    "protectorate-desktop-windows-arm64.zip",
+];
 pub const FROM_SEQ_PARAM: &str = "from_seq";
 pub const ACCESS_TOKEN_PARAM: &str = "access_token";
 

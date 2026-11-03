@@ -6,6 +6,7 @@
 //!   [`ErrorBody`] with [`ErrorCode::http_status`].
 //! - `GET /api/events` upgrades to a WebSocket of [`HubStreamMessage`] text frames; resume with
 //!   `?from_seq=<n>`.
+//! - `GET /api/client/<name>` downloads a client build of the hub's release (owner and devices).
 //! - Credentials go in `Authorization: Bearer <token>`. A browser cannot set that header on a
 //!   WebSocket, so the web client passes `?access_token=<token>` on `/api/events` instead.
 
@@ -19,8 +20,8 @@ mod methods;
 mod types;
 
 pub use endpoint::{
-    ACCESS_TOKEN_PARAM, API_PREFIX, EVENTS_PATH, FROM_SEQ_PARAM, Method, MethodDef, MethodVisitor,
-    Scope,
+    ACCESS_TOKEN_PARAM, API_PREFIX, CLIENT_ASSETS, CLIENT_PATH, EVENTS_PATH, FROM_SEQ_PARAM,
+    Method, MethodDef, MethodVisitor, Scope,
 };
 pub use methods::*;
 pub use schema::{

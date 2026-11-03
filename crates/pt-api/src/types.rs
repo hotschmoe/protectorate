@@ -228,6 +228,11 @@ api_records! {
         pub history_capped: Vec<String> = Vec::new(),
         /// Set when a rollback restore failed and the trial release was kept.
         pub restore_error: Option<String>,
+        /// The client builds of the release this hub runs, as named in its `SHA256SUMS`
+        /// (`protectorate-android.apk`, `protectorate-desktop-windows-{amd64,arm64}.zip`), each
+        /// served at `GET /api/client/<name>`. Empty for a hub not started from
+        /// `releases/current`.
+        pub clients: Vec<String> = Vec::new(),
     }
 
     /// One full snapshot. `GET /api/events` starts with it and then streams changes.

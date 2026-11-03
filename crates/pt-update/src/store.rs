@@ -2,7 +2,7 @@
 //! `probation.json` and the `.lock` file that serialises changes.
 
 use crate::error::{Error, ErrorKind, Result};
-use crate::fetch::{MAX_ASSET, MAX_SUMS, MAX_VERSION};
+use crate::fetch::{MAX_SUMS, MAX_VERSION};
 use crate::pick::Pick;
 use crate::sums::plain_name;
 use crate::version::{CURRENT, PREVIOUS, version_name};
@@ -718,13 +718,7 @@ impl Store {
         let fill = || -> Result<bool> {
             for (p, a) in &assets {
                 let dest = staging.join(&p.install_as);
-                let len = src.download(&a.url, MAX_ASSET, &dest)?;
-                if a.size != 0 && len != a.size {
-                    return Err(Error::new(
-                        ErrorKind::Verify,
-                        format!("{}: got {len} bytes, the release says {}", p.asset, a.size),
-                    ));
-                }
+                src.download_asset(a, &dest)?;
                 sums.verify_file(&p.asset, &dest)?;
                 let ioctx = |e| Error::io(format!("finishing {}", dest.display()), e);
                 if p.executable {

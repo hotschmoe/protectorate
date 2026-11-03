@@ -27,7 +27,8 @@ Future<void> main() async {
 
 /// Deep links (`?screen=nodes&theme=light`, `?sleeve=la/app`, `?node=build-arm64`) open a screen
 /// directly; on desktop and Android the query is empty. On web the app talks to the hub that
-/// served it unless `?hub=<url>` names another or `?hub=fake` asks for the scripted FakeHub;
+/// served it unless `?hub=<url>` names another or `?hub=fake` asks for the scripted FakeHub
+/// (`&update=1` makes it a newer release, for the update banner);
 /// `?pair=<code>` pairs this browser with a code from `protectorate device add`.
 class App extends StatefulWidget {
   const App({super.key});
@@ -45,8 +46,9 @@ class _AppState extends State<App> {
   late String _token = _q['hub'] == 'fake' ? '' : (loadSetting('device_token') ?? '');
   late HubClient _hub = _open(_url, _token);
 
-  static HubClient _open(String url, String token) =>
-      url.isEmpty ? FakeHub() : RealHub(url, token: token.isEmpty ? null : token);
+  HubClient _open(String url, String token) => url.isEmpty
+      ? FakeHub(update: _q['update'] == '1')
+      : RealHub(url, token: token.isEmpty ? null : token);
 
   @override
   void initState() {
