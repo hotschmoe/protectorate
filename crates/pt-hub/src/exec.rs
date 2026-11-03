@@ -80,6 +80,7 @@ fn intent_sleeve(i: &Intent) -> Option<SleeveId> {
         Intent::ProbeScope { sleeve, .. }
         | Intent::SelectTarget { sleeve, .. }
         | Intent::Checkpoint { sleeve, .. }
+        | Intent::Report { sleeve, .. }
         | Intent::AutoContinue { sleeve, .. } => Some(*sleeve),
         _ => None,
     }
@@ -601,6 +602,19 @@ impl SleeveExec {
             Intent::AutoContinue { sleeve, text } => {
                 self.submit(EventKind::Continue { sleeve, text });
             }
+            Intent::Report {
+                sleeve, turn, to, ..
+            } => {
+                if let Some(s) = view.state.sleeve(sleeve) {
+                    let text = crate::brief::report(&self.hub, s, &workdir(&self.hub, s), turn);
+                    self.hub.submit(EventKind::Report {
+                        sleeve,
+                        to,
+                        turn,
+                        text,
+                    });
+                }
+            }
             other => debug!("sleeve {}: ignored {other:?}", self.id.0),
         }
     }
@@ -877,6 +891,14 @@ impl SleeveExec {
         )
         .map_err(|e| format!("prepare the toolchain environment: {e}"))?;
         let work = workdir(&hub, s);
+        // The task's base for its turn reports: the workspace's HEAD before its first turn.
+        let base = hub.home.sleeve_dir(s.id).join(crate::brief::BASE_FILE);
+        if !base.exists()
+            && let Some(head) = crate::git::head(&work)
+            && let Err(e) = fs::write(&base, head)
+        {
+            warning!("sleeve {}: {}: {e}", s.name, base.display());
+        }
         let scratch = hub.home.sleeve_scratch(s.id);
         for dir in [scratch.join("target"), scratch.join("tmp")] {
             fs::create_dir_all(&dir)

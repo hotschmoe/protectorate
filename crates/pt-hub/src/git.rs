@@ -1,5 +1,5 @@
-//! The git the hub runs itself: child worktrees, checkpoints, the facts for a brief, and the
-//! empty repository of a new project root. Nothing here writes into a repository a sleeve
+//! The git the hub runs itself: child worktrees, checkpoints, the facts for a brief or a turn
+//! report, and the empty repository of a new project root. Nothing here writes into a repository a sleeve
 //! already controls.
 //!
 //! A sleeve controls its workspace and, for a child, the shared git dir, so it controls the
@@ -331,6 +331,50 @@ pub fn checkpoint(workspace: &Path, state_dir: &Path, message: &str) -> Result<S
         args.extend(["-p", h.as_str()]);
     }
     shadow.run(&args)
+}
+
+/// What a sleeve changed since its task's base commit.
+pub struct Since {
+    /// `--oneline` for the newest commits from the base to HEAD, at most `SINCE_COMMITS`.
+    pub commits: Vec<String>,
+    /// How many commits from the base to HEAD are not listed.
+    pub more: usize,
+    /// `--stat` from the base to the working tree, committed or not.
+    pub stat: String,
+}
+
+const SINCE_COMMITS: usize = 10;
+
+/// The commits from `base` to HEAD and the diff from `base` to the working tree, read through
+/// the shadow like the brief's facts.
+pub fn since(workspace: &Path, state_dir: &Path, base: &str) -> Result<Since, String> {
+    let (shadow, head) = snapshot(workspace, state_dir)?;
+    let mut out = Since {
+        commits: Vec::new(),
+        more: 0,
+        stat: String::new(),
+    };
+    if let Some(h) = head.as_deref().filter(|h| *h != base) {
+        let range = format!("{base}..{h}");
+        let count: usize = shadow
+            .run(&["rev-list", "--count", &range])?
+            .trim()
+            .parse()
+            .map_err(|e| format!("git rev-list --count: {e}"))?;
+        let n = SINCE_COMMITS.to_string();
+        let log = shadow.run(&["log", "--oneline", "--no-decorate", "-n", &n, &range])?;
+        out.commits = log.lines().map(str::to_string).collect();
+        out.more = count.saturating_sub(out.commits.len());
+    }
+    out.stat = shadow.run(&[
+        "diff",
+        "--cached",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--stat",
+        base,
+    ])?;
+    Ok(out)
 }
 
 #[derive(Default)]
