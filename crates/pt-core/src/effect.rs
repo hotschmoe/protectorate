@@ -85,6 +85,43 @@ impl Core<'_> {
         }
     }
 
+    pub(crate) fn unwritten(&mut self, id: EffectId, attempt: u32) {
+        let Some(e) = self.st.effects.get(&id) else {
+            return;
+        };
+        if e.attempt != attempt || e.state != EffectState::Intent {
+            return;
+        }
+        let Some(sid) = e.kind.sleeve() else {
+            return;
+        };
+        if !matches!(
+            e.kind,
+            EffectKind::SendPrompt { .. } | EffectKind::Steer { .. }
+        ) {
+            return;
+        }
+        if self.st.sleeves[&sid].guard.state == (GuardState::Briefing { effect: id }) {
+            self.sl(sid).retry_unwritten = true;
+            return;
+        }
+        let prompt = match &e.kind {
+            EffectKind::SendPrompt {
+                request_id,
+                kind: MsgKind::Prompt,
+                ..
+            } => Some(request_id.clone()),
+            _ => None,
+        };
+        if self.return_unsent(id) {
+            if let Some(request_id) = prompt {
+                self.sl(sid).unwritten_prompts.insert(request_id);
+            }
+            self.set_effect(id, EffectState::Abandoned);
+            self.retry_unwritten(sid, id);
+        }
+    }
+
     /// Confirms a non-terminal effect from evidence other than its own ack (a harness that
     /// started working on the prompt, a scope that has tasks).
     pub(crate) fn evidence(&mut self, id: EffectId) {

@@ -85,6 +85,7 @@ const EFFECT_EDGES: &[(EffectState, EffectState)] = {
         (Intent, Uncertain),
         (Intent, Fenced),
         (Intent, Confirmed),
+        (Intent, Abandoned),
         (Sent, Confirmed),
         (Sent, Rejected),
         (Sent, Uncertain),

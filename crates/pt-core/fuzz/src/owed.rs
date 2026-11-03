@@ -77,6 +77,7 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
         | E::AbandonJob { .. }
         | E::RequeueJob { .. }
         | E::Dispatched { .. }
+        | E::Unwritten { .. }
         | E::Launched { .. }
         | E::NodeChosen { .. }
         | E::JobNodeRemoved { .. }
@@ -234,10 +235,14 @@ fn on_exit(
     if s.g != g || s.proc == Proc::Down {
         return;
     }
-    let was = &s.activity;
+    let was = s.foreign.as_ref().map_or(&s.activity, |f| &f.previous);
+    let turn = s
+        .foreign
+        .as_ref()
+        .map_or(s.turn.as_ref(), |f| f.native.as_ref());
     let delivery_sent = matches!(was, Activity::Delivering { effect } if prev.effects.get(effect).map(|e| e.state) != Some(EffectState::Intent));
     let interrupted = *was != Activity::Interrupting
-        && (s.turn.is_some()
+        && (turn.is_some()
             || s.desync_during_turn
             || delivery_sent
             || matches!(was, Activity::Working | Activity::Blocked { .. }));
@@ -267,7 +272,14 @@ fn on_exit(
         clear(owed, sid);
     }
     if resumes && interrupted {
-        let seq = s.turn_seq;
+        let seq = if s.foreign.is_some()
+            && matches!(was, Activity::Delivering { effect } if prev.effects.get(effect).is_some_and(|e|
+                e.state != EffectState::Intent && matches!(e.kind, EffectKind::SendPrompt { kind: MsgKind::Prompt, .. })))
+        {
+            s.turn_seq + 1
+        } else {
+            s.turn_seq
+        };
         let state = continue_state(s, seq);
         // Same test as `start_incarnation`: a resume id is kept only after a turn was
         // acked (`turned`) and the session is known. A fresh session is not continued.
@@ -328,6 +340,9 @@ fn on_continue(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, sid: SleeveId, 
     let Some(s) = prev.sleeves.get(&sid) else {
         return;
     };
+    if s.foreign.is_some() || s.retry_unwritten {
+        return;
+    }
     let Some(&seq) = owed.get(&sid) else {
         return;
     };
@@ -547,6 +562,9 @@ fn on_ready(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, s: &Sleeve) {
 /// After Ready of a resume: a queue, an in-flight prompt, or a sleeve that cannot be prompted
 /// drops the debt. A deliverable idle sleeve keeps it until `Continue`.
 fn on_offer(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, s: &Sleeve) {
+    if s.foreign.is_some() || s.retry_unwritten {
+        return;
+    }
     let Some(&seq) = owed.get(&s.id) else {
         return;
     };

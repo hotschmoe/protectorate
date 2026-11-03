@@ -15,7 +15,7 @@
 //! approve NAME ID allow|deny [g=N]  ID: the harness's id, or action:N   abandon KEY
 //! ask NAME [timeout=DURATION]       a code rule asks the owner (D9)
 //! obs NAME WHAT [g=N] [noask]       WHAT: ready progress[=H] approval=ID resolved=ID
-//!                                         settled[=usage|auth|interrupted|error] compactdone
+//!                                         began foreign-settled settled[=usage|auth|interrupted|error] compactdone
 //!                                         desync screen=V usage=N disk=N forbidden
 //! exit NAME [oom|auth|quota] [code=N]  the incarnation's process tree dies
 //! tick DURATION                     e.g. 30s 16m 2h
@@ -360,6 +360,8 @@ impl Runner {
                         }),
                     },
                     "resolved" => Obs::ApprovalResolved { id: v.into() },
+                    "began" => Obs::TurnBegan,
+                    "foreign-settled" => Obs::ForeignTurnSettled { end: TurnEnd::Done },
                     "settled" => Obs::TurnSettled {
                         end: match v {
                             "" | "done" => TurnEnd::Done,
@@ -424,7 +426,8 @@ impl Runner {
                     match k {
                         "start" => p.start = pick(&["ok", "fail", "lostreceipt", "lost"])?,
                         "prompt" => {
-                            p.prompt = pick(&["ack", "nack", "lost", "none", "ack-no-turn"])?
+                            p.prompt =
+                                pick(&["ack", "nack", "lost", "none", "ack-no-turn", "busy"])?
                         }
                         "stop" => p.stop = pick(&["exit", "linger"])?,
                         "other" => p.other = pick(&["ack", "nack", "lost"])?,
@@ -442,6 +445,15 @@ impl Runner {
                     sleeve,
                     text: "The previous turn was interrupted. Continue from where it stopped."
                         .into(),
+                });
+            }
+            "ack" => {
+                let effect = self.effect(arg(1)?)?;
+                let attempt = self.sim.st.effects[&effect].attempt;
+                self.sim.apply(E::Acked {
+                    effect,
+                    attempt,
+                    native: Some(format!("turn-{}", effect.0)),
                 });
             }
             "run" => self.sim.run(&self.policy),
@@ -717,6 +729,8 @@ impl Runner {
                 "guard" => variant(&s.guard.state),
                 "harness" => format!("{:?}", s.target.harness).to_lowercase(),
                 "queue" => s.queue.len().to_string(),
+                "turn_seq" => s.turn_seq.to_string(),
+                "auto_continue" => s.auto_continue.map_or("none".into(), |n| n.to_string()),
                 "effort" => s.effort.clone().unwrap_or("none".into()),
                 "agent" => s.turn_agent.clone().unwrap_or_else(|| "none".into()),
                 "d9" => s.d9.to_string(),

@@ -58,7 +58,7 @@ fn obs(b: &mut Bytes) -> Obs {
         Verdict::Blocked,
         Verdict::NoMatch,
     ];
-    match b.below(11) {
+    match b.below(13) {
         0 => Obs::Ready {
             session: b.string(),
         },
@@ -78,7 +78,11 @@ fn obs(b: &mut Bytes) -> Obs {
         7 => Obs::Screen(V[b.below(4) as usize]),
         8 => Obs::Usage { tokens: b.u64() },
         9 => Obs::Disk { bytes: b.u64() },
-        _ => Obs::ForbiddenPath { path: b.string() },
+        10 => Obs::ForbiddenPath { path: b.string() },
+        11 => Obs::TurnBegan,
+        _ => Obs::ForeignTurnSettled {
+            end: ENDS[b.below(5) as usize],
+        },
     }
 }
 
@@ -103,7 +107,7 @@ pub fn event(b: &mut Bytes) -> Event {
     let j = |b: &mut Bytes| JobId(b.u64());
     let a = |b: &mut Bytes| b.u64() as u32;
     use EventKind as E;
-    let kind = match b.below(34) {
+    let kind = match b.below(35) {
         0 => E::Spawn(SpawnSpec {
             request_id: b.string(),
             name: b.string(),
@@ -265,7 +269,7 @@ pub fn event(b: &mut Bytes) -> Event {
             sleeve: s(b),
             text: b.string(),
         },
-        _ => E::ArtifactCollection {
+        33 => E::ArtifactCollection {
             job: j(b),
             attempt: a(b),
             refusals: (0..b.below(3))
@@ -275,6 +279,10 @@ pub fn event(b: &mut Bytes) -> Event {
                 })
                 .collect(),
             incomplete: opt(b, |b| b.string()),
+        },
+        _ => E::Unwritten {
+            effect: e(b),
+            attempt: a(b),
         },
     };
     Event { at, kind }

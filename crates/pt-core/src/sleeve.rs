@@ -114,6 +114,10 @@ impl Core<'_> {
                 turn_agent: None,
                 auto_continue: None,
                 d9_turn: None,
+                foreign: None,
+                delivery: None,
+                retry_unwritten: false,
+                unwritten_prompts: Default::default(),
                 queue: VecDeque::new(),
                 steer_slot: None,
                 messages: Default::default(),
@@ -275,6 +279,9 @@ impl Core<'_> {
         s.target = target.clone();
         s.receipt = None;
         s.turn = None;
+        s.foreign = None;
+        s.delivery = None;
+        s.retry_unwritten = false;
         s.desync_during_turn = false;
         s.desync_while_idle = false;
         s.activity = Activity::Booting;
@@ -439,6 +446,19 @@ impl Core<'_> {
         if s.g != g || s.proc == Proc::Down {
             return;
         }
+        if let Some(foreign) = s.foreign.clone() {
+            let pending = s.delivery.as_ref().filter(|d| !d.applied).map(|d| d.effect);
+            if let Some(effect) = pending
+                && self.effect_state(effect) != Some(EffectState::Intent)
+            {
+                self.account_prompt(sid, effect);
+            }
+            let s = self.sl(sid);
+            s.foreign = None;
+            s.activity = foreign.previous;
+            s.turn = foreign.native;
+        }
+        let s = &self.st.sleeves[&sid];
         let delivery_sent = matches!(s.activity, Activity::Delivering { effect } if self.effect_state(effect) != Some(EffectState::Intent));
         // The ack can lose the race with Exited: the watcher reports the scope empty before
         // KillScope is confirmed. A guardrail kill is not HubRestart, so the parent still hears.
@@ -1135,6 +1155,7 @@ impl Core<'_> {
         s.life == Life::Running
             && s.proc == Proc::Up
             && !s.probing
+            && !s.retry_unwritten
             && matches!(s.activity, Activity::Idle { .. })
             && s.target.mode == Mode::Headless
             && matches!(
@@ -1184,22 +1205,99 @@ impl Core<'_> {
         let s = self.sl(sid);
         let m = s.messages.get_mut(&r).expect("queued message");
         m.state = MsgState::InFlight(eff);
-        let (from, agent) = (m.from, m.agent.clone());
         s.activity = Activity::Delivering { effect: eff };
         // A continuation belongs to the turn already begun. Any other prompt starts the next one
         // and supersedes a continuation that turn still owed.
         match msg_kind {
-            MsgKind::Prompt => {
-                let d9 = self.d9_origin(sid, from, agent.clone());
-                let s = self.sl(sid);
-                s.turn_seq += 1;
-                s.auto_continue = None;
-                s.turn_from = from;
-                s.turn_agent = agent;
-                s.d9_turn = d9;
+            MsgKind::Prompt => self.account_prompt(sid, eff),
+            MsgKind::Continuation { .. } => {
+                let m = &self.st.sleeves[&sid].messages[&r];
+                self.taint_d9(sid, m.from, m.agent.clone());
             }
-            MsgKind::Continuation { .. } => self.taint_d9(sid, from, agent),
             MsgKind::Brief => {}
+        }
+    }
+
+    fn account_prompt(&mut self, sid: SleeveId, effect: EffectId) {
+        let s = &self.st.sleeves[&sid];
+        let m = &s.messages[&self.st.effects[&effect].key];
+        let (from, agent) = (m.from, m.agent.clone());
+        let saved = Delivery {
+            effect,
+            applied: true,
+            turn_seq: s.turn_seq,
+            auto_continue: s.auto_continue,
+            turn_from: s.turn_from,
+            turn_agent: s.turn_agent.clone(),
+            d9_turn: s.d9_turn.clone(),
+        };
+        let d9 = self.d9_origin(sid, from, agent.clone());
+        let s = self.sl(sid);
+        s.delivery = Some(saved);
+        s.turn_seq += 1;
+        s.auto_continue = None;
+        s.turn_from = from;
+        s.turn_agent = agent;
+        s.d9_turn = d9;
+    }
+
+    pub(crate) fn unaccount_prompt(&mut self, sid: SleeveId, effect: EffectId) {
+        let s = self.sl(sid);
+        let Some(saved) = s
+            .delivery
+            .as_mut()
+            .filter(|d| d.effect == effect && d.applied)
+        else {
+            return;
+        };
+        s.turn_seq = saved.turn_seq;
+        s.auto_continue = saved.auto_continue;
+        s.turn_from = saved.turn_from;
+        s.turn_agent.clone_from(&saved.turn_agent);
+        s.d9_turn.clone_from(&saved.d9_turn);
+        saved.applied = false;
+    }
+
+    pub(crate) fn retry_unwritten(&mut self, sid: SleeveId, effect: EffectId) {
+        self.unaccount_prompt(sid, effect);
+        let s = self.sl(sid);
+        if s.delivery.as_ref().is_some_and(|d| d.effect == effect) {
+            s.delivery = None;
+        }
+        if let Some(foreign) = &mut s.foreign {
+            if foreign.previous == (Activity::Delivering { effect }) {
+                foreign.previous = Activity::Idle { seen: true };
+            }
+        } else if s.activity == (Activity::Delivering { effect }) {
+            s.activity = Activity::Idle { seen: true };
+        }
+        s.retry_unwritten = true;
+    }
+
+    pub(crate) fn tick_unwritten(&mut self) {
+        let ids: Vec<_> = self
+            .st
+            .sleeves
+            .values()
+            .filter(|s| s.retry_unwritten && s.foreign.is_none())
+            .map(|s| s.id)
+            .collect();
+        for sid in ids {
+            self.sl(sid).retry_unwritten = false;
+            let s = &self.st.sleeves[&sid];
+            if let GuardState::Briefing { effect } = s.guard.state
+                && s.activity == (Activity::Delivering { effect })
+                && let Some(e) = self.st.effects.get(&effect)
+                && e.state == EffectState::Intent
+            {
+                self.out.push(Intent::Execute {
+                    effect,
+                    attempt: e.attempt,
+                    kind: e.kind.clone(),
+                });
+            } else {
+                self.deliver_next(sid);
+            }
         }
     }
 
@@ -1258,6 +1356,18 @@ impl Core<'_> {
         {
             return false;
         }
+        if matches!(
+            self.st.effects[&id].kind,
+            EffectKind::SendPrompt {
+                kind: MsgKind::Prompt,
+                ..
+            }
+        ) && self.st.sleeves[&sleeve]
+            .unwritten_prompts
+            .contains(&request_id)
+        {
+            self.unaccount_prompt(sleeve, id);
+        }
         // A steer held for this prompt's turn keeps its place behind it.
         self.return_steer(sleeve);
         let s = self.sl(sleeve);
@@ -1288,6 +1398,15 @@ impl Core<'_> {
             }
         );
         let state = self.effect_state(id).expect("effect exists");
+        if state.terminal()
+            && (state != EffectState::Abandoned
+                || self.st.sleeves[&sid]
+                    .messages
+                    .get(&request_id)
+                    .is_none_or(|m| m.state != MsgState::Queued))
+        {
+            self.sl(sid).unwritten_prompts.remove(&request_id);
+        }
         if let Some(m) = self.sl(sid).messages.get_mut(&request_id)
             && m.state == MsgState::InFlight(id)
         {
@@ -1313,6 +1432,30 @@ impl Core<'_> {
         }
         if continued && matches!(state, EffectState::Rejected | EffectState::Failed) {
             self.needs_prompt(sid);
+        }
+        if let Some(foreign) = &mut self.sl(sid).foreign
+            && foreign.previous == (Activity::Delivering { effect: id })
+        {
+            match state {
+                EffectState::Confirmed => {
+                    foreign.previous = Activity::Working;
+                    foreign.native = native;
+                }
+                s if s.terminal() => foreign.previous = Activity::Idle { seen: true },
+                _ => {}
+            }
+            if state.terminal() && state != EffectState::Confirmed {
+                self.sl(sid).delivery = None;
+            }
+            return;
+        }
+        if state.terminal()
+            && self.st.sleeves[&sid]
+                .delivery
+                .as_ref()
+                .is_some_and(|d| d.effect == id)
+        {
+            self.sl(sid).delivery = None;
         }
         // Activity follows the effect's resolution (12a item 3), message or not.
         if self.st.sleeves[&sid].activity != (Activity::Delivering { effect: id }) {
@@ -1365,6 +1508,12 @@ impl Core<'_> {
                 s.guard.cause = None;
                 let g = s.g;
                 let delivering = s.activity == Activity::Delivering { effect: id };
+                if let Some(foreign) = &mut s.foreign
+                    && foreign.previous == (Activity::Delivering { effect: id })
+                {
+                    foreign.previous = Activity::Working;
+                    foreign.native = native.clone();
+                }
                 if delivering {
                     self.begin_turn(sid, native);
                 }
@@ -1427,6 +1576,8 @@ impl Core<'_> {
         let now = self.now;
         match obs {
             Obs::Ready { session } => self.ready(sid, session),
+            Obs::TurnBegan => self.foreign_began(sid),
+            Obs::ForeignTurnSettled { end } => self.foreign_settled(sid, g, *end),
             Obs::Progress { tool } => {
                 self.prompt_evidence(sid);
                 let s = self.sl(sid);
@@ -1548,10 +1699,11 @@ impl Core<'_> {
                 // would continue the turn the owner stopped. `turn` is cleared for the
                 // same reason: it stays set across the interrupt.
                 let interrupting = s.activity == Activity::Interrupting;
-                let idle = matches!(s.activity, Activity::Idle { .. });
+                let owner_activity = s.foreign.as_ref().map_or(&s.activity, |f| &f.previous);
+                let idle = matches!(owner_activity, Activity::Idle { .. });
                 let active = !interrupting
-                    && (matches!(s.activity, Activity::Working | Activity::Blocked { .. })
-                        || matches!(s.activity, Activity::Delivering { effect } if self.effect_state(effect) != Some(EffectState::Intent)));
+                    && (matches!(owner_activity, Activity::Working | Activity::Blocked { .. })
+                        || matches!(owner_activity, Activity::Delivering { effect } if self.effect_state(*effect) != Some(EffectState::Intent)));
                 let s = self.sl(sid);
                 s.desync_during_turn |= active;
                 // Separate from the mid-turn flag: resume must not treat this as interrupted
@@ -1576,6 +1728,59 @@ impl Core<'_> {
                 }
             }
             Obs::ForbiddenPath { .. } => self.trip(sid, Guardrail::ForbiddenPath),
+        }
+    }
+
+    fn foreign_began(&mut self, sid: SleeveId) {
+        if self.st.sleeves[&sid].foreign.is_some() {
+            return;
+        }
+        if let Activity::Delivering { effect } = self.st.sleeves[&sid].activity {
+            self.unaccount_prompt(sid, effect);
+        }
+        let now = self.now;
+        let s = self.sl(sid);
+        let previous = std::mem::replace(&mut s.activity, Activity::Working);
+        let native = s.turn.take();
+        s.foreign = Some(ForeignTurn { previous, native });
+        s.turned = true;
+        s.turn_at = now;
+        s.progress_at = now;
+    }
+
+    fn foreign_settled(&mut self, sid: SleeveId, g: Gen, end: TurnEnd) {
+        let Some(foreign) = self.sl(sid).foreign.take() else {
+            return;
+        };
+        self.withdraw_tool_approvals(sid, g);
+        let delivery = self.st.sleeves[&sid]
+            .delivery
+            .as_ref()
+            .filter(|d| !d.applied)
+            .map(|d| d.effect);
+        if let Some(effect) = delivery {
+            self.account_prompt(sid, effect);
+        }
+        let working = foreign.previous == Activity::Working && delivery.is_some();
+        let s = self.sl(sid);
+        s.activity = foreign.previous;
+        s.turn = foreign.native.clone();
+        if s.guard.state == GuardState::Interrupting {
+            s.guard.state = GuardState::Armed;
+        }
+        self.out.push(Intent::Checkpoint { sleeve: sid, g });
+        if working {
+            self.sl(sid).delivery = None;
+            self.begin_turn(sid, foreign.native);
+        }
+        match end {
+            TurnEnd::UsageLimit => self.trip(sid, Guardrail::QuotaExhausted),
+            TurnEnd::AuthFailed => self.trip(sid, Guardrail::AuthFailed),
+            _ => {}
+        }
+        if matches!(self.st.sleeves[&sid].activity, Activity::Idle { .. }) {
+            self.settled(sid);
+            self.offer_auto_continue(sid);
         }
     }
 
@@ -1671,6 +1876,9 @@ impl Core<'_> {
     /// can still go out. Allocates nothing; the effect belongs to that later event.
     fn offer_auto_continue(&mut self, sid: SleeveId) {
         let s = &self.st.sleeves[&sid];
+        if s.foreign.is_some() || s.retry_unwritten {
+            return;
+        }
         if s.auto_continue != Some(s.turn_seq) {
             return;
         }
@@ -1699,6 +1907,9 @@ impl Core<'_> {
         let Some(s) = self.st.sleeves.get(&sid) else {
             return;
         };
+        if s.foreign.is_some() || s.retry_unwritten {
+            return;
+        }
         let Some(seq) = s.auto_continue else {
             return;
         };

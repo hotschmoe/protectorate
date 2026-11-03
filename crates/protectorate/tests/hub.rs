@@ -815,6 +815,176 @@ for line in sys.stdin:
 }
 
 #[test]
+fn claude_self_started_turn_does_not_answer_the_queued_prompt() {
+    if !on_path("bwrap") || !on_path("python3") || !on_path("git") {
+        return;
+    }
+    let dir = unique("claude-foreign-turn");
+    std::fs::create_dir_all(&dir).unwrap();
+    let fake = dir.join("claude");
+    write_script(&dir.join("systemd-run"), "exit 0");
+    write_script(
+        &fake,
+        r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit; fi
+exec python3 -u -c '
+import json, os, sys, time
+def emit(msg): print(json.dumps(msg), flush=True)
+while not os.path.exists("wake-foreign"): time.sleep(0.05)
+emit({"type":"stream_event", "event":{"type":"message_start", "message":{"id":"foreign"}}})
+emit({"type":"assistant", "message":{"id":"foreign", "content":[{"type":"text", "text":"background answer"}]}})
+while not os.path.exists("release-foreign"): time.sleep(0.05)
+emit({"type":"result", "subtype":"success", "is_error":False, "stop_reason":"end_turn"})
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("type") != "user": continue
+    msg["isReplay"] = True
+    emit(msg)
+    emit({"type":"assistant", "message":{"id":"ours", "content":[{"type":"text", "text":"answer to queued prompt"}]}})
+    emit({"type":"result", "subtype":"success", "is_error":False, "stop_reason":"end_turn"})
+' "$@""#,
+    );
+    let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
+    let hub = Hub::start_config(
+        "claude-foreign-turn",
+        "claude",
+        &[
+            ("scopes", false.into()),
+            ("claude_program", fake.to_str().unwrap().into()),
+        ],
+        &[],
+        &[("PATH", &path)],
+    );
+    let login = hub.home.join("logins/.claude/.credentials.json");
+    std::fs::create_dir_all(login.parent().unwrap()).unwrap();
+    std::fs::write(login, "test").unwrap();
+    hub.cli(&["doctor", "--refresh"]).ok();
+    let repo = temp_repo("claude-foreign-turn");
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "worker",
+        "--path",
+        repo.to_str().unwrap(),
+        "--harness",
+        "claude",
+    ])
+    .ok();
+    hub.wait("worker", "idle", 60);
+    std::fs::write(repo.join("wake-foreign"), "wake").unwrap();
+    eventually("the self-started turn", Duration::from_secs(30), || {
+        let entries = hub.transcript("worker");
+        of_type(&entries, "turn_started")
+            .iter()
+            .any(|e| e["entry"]["request_id"].is_null())
+            .then_some(())
+    });
+    let request = hub.send("worker", "answer this prompt");
+    assert_eq!(hub.sleeve("worker")["queued"].as_u64(), Some(1));
+    assert!(of_type(&hub.transcript("worker"), "user_message").is_empty());
+    std::fs::write(repo.join("release-foreign"), "release").unwrap();
+    hub.wait("worker", "idle", 60);
+    let entries = hub.transcript("worker");
+    let pos = |kind: &str, value: Option<&str>| {
+        entries
+            .iter()
+            .position(|e| {
+                e["entry"]["type"].as_str() == Some(kind)
+                    && value.is_none_or(|v| e["entry"]["request_id"].as_str() == Some(v))
+            })
+            .unwrap()
+    };
+    let first_settle = pos("turn_settled", None);
+    let user = pos("user_message", Some(&request));
+    let answer = entries
+        .iter()
+        .position(|e| e["entry"]["text"].as_str() == Some("answer to queued prompt"))
+        .unwrap();
+    let settles = of_type(&entries, "turn_settled");
+    assert_eq!(settles.len(), 2, "{entries:?}");
+    assert!(first_settle < user && user < answer, "{entries:?}");
+}
+
+#[test]
+fn envoy_wait_ignores_a_foreign_result_before_the_prompt_echo() {
+    if !on_path("bwrap") || !on_path("python3") || !on_path("git") {
+        return;
+    }
+    let dir = unique("envoy-foreign-turn");
+    let home = dir.join("home");
+    let fake = dir.join("claude");
+    std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
+    std::fs::write(home.join("logins/.claude/.credentials.json"), "test").unwrap();
+    write_script(&dir.join("systemd-run"), "exit 0");
+    write_script(
+        &fake,
+        r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit; fi
+exec python3 -u -c '
+import json, os, sys, time
+def emit(msg): print(json.dumps(msg), flush=True)
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("type") != "user": continue
+    emit({"type":"stream_event", "event":{"type":"message_start", "message":{"id":"foreign"}}})
+    emit({"type":"assistant", "message":{"id":"foreign", "content":[{"type":"text", "text":"private background answer"}]}})
+    emit({"type":"result", "subtype":"success", "is_error":False, "stop_reason":"end_turn"})
+    while not os.path.exists("release-echo"): time.sleep(0.05)
+    msg["isReplay"] = True
+    emit(msg)
+    emit({"type":"assistant", "message":{"id":"ours", "content":[{"type":"text", "text":"answer to agent"}]}})
+    emit({"type":"result", "subtype":"success", "is_error":False, "stop_reason":"end_turn"})
+' "$@""#,
+    );
+    let config = pt_json::obj! {
+        "envoy" => pt_json::obj! { "harness" => "claude" },
+        "claude_program" => fake.to_str().unwrap(),
+        "scopes" => false,
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+    };
+    std::fs::write(home.join("config.json"), config.to_string()).unwrap();
+    let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
+    let hub = Hub::open(home, &[], &[("PATH", &path)]);
+    hub.wait("envoy", "idle", 60);
+    let token = hub.printed("envoy-only token: ");
+    let as_agent = [("PROTECTORATE_TOKEN", token.as_str())];
+    let sent = hub
+        .cli_env(
+            &as_agent,
+            &["--json", "envoy", "send", "--as", "grokbot", "answer me"],
+        )
+        .json();
+    let request = sent["request_id"].as_str().unwrap();
+    eventually("the foreign result", Duration::from_secs(30), || {
+        (!of_type(&hub.transcript("envoy"), "turn_settled").is_empty()).then_some(())
+    });
+    // An unsettled wait prints its JSON and exits non-zero.
+    let early = hub.cli_env(
+        &as_agent,
+        &["--json", "envoy", "wait", request, "--timeout", "1"],
+    );
+    assert_ne!(early.status, 0, "{}", early.stdout);
+    let early = pt_json::parse(&early.stdout).unwrap();
+    assert_eq!(early["settled"].as_bool(), Some(false), "{early}");
+    assert!(
+        !early["text"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("private background answer")
+    );
+    let read = hub.cli_env(&as_agent, &["envoy", "read"]);
+    assert!(!read.ok().contains("private background answer"));
+    std::fs::write(hub.home.join("envoy/release-echo"), "release").unwrap();
+    let reply = hub
+        .cli_env(
+            &as_agent,
+            &["--json", "envoy", "wait", request, "--timeout", "30"],
+        )
+        .json();
+    assert_eq!(reply["settled"].as_bool(), Some(true), "{reply}");
+    assert_eq!(reply["text"].as_str(), Some("answer to agent"));
+}
+
+#[test]
 fn scratch_survives_a_restart_and_is_removed_with_the_sleeve() {
     let dir = unique("scratch");
     let home = dir.join("home");

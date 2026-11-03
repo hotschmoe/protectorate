@@ -1,0 +1,11 @@
+# resume=11111111-1111-4111-8111-111111111111 check=559029f5c9a6ff7f
+!send A
+!wrote
+{"type":"system","subtype":"background_tasks_changed","tasks":[]}
+{"type":"system","subtype":"task_updated","task_id":"t1","patch":{"status":"completed"}}
+{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","session_id":"11111111-1111-4111-8111-111111111111","usage":{}}
+!expect foreign-settled
+{"type":"user","message":{"role":"user","content":"A"},"uuid":"00000000-0000-4000-8000-000000000001","isReplay":true}
+!expect prompt-confirmed
+{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","session_id":"11111111-1111-4111-8111-111111111111","usage":{}}
+!expect own-settled

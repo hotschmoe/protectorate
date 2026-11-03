@@ -8,7 +8,7 @@
 //! is reported by the pump itself: `Dispatched` when the driver's entry for the write comes
 //! through (output read before it is the previous turn's) and the verdict when its ack does.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs;
 use std::io::{self, Read, Seek, Write};
 use std::os::unix::fs::MetadataExt;
@@ -209,6 +209,7 @@ struct Prompt<'a> {
 enum Outcome {
     Acked(Option<String>),
     Nacked(String),
+    Unwritten,
     Lost,
     /// The write's evidence comes another way (the launch receipt).
     Reported,
@@ -508,6 +509,7 @@ impl SleeveExec {
                         }
                     }
                     Outcome::Lost => EventKind::Lost { effect, attempt },
+                    Outcome::Unwritten => EventKind::Unwritten { effect, attempt },
                     Outcome::Reported => return,
                 });
             }
@@ -1096,6 +1098,9 @@ impl SleeveExec {
         match sent {
             Ok(()) => {}
             Err(pt_drivers::DriverError::Ended) => return ended(),
+            Err(pt_drivers::DriverError::Busy | pt_drivers::DriverError::TurnEnded) => {
+                return Outcome::Unwritten;
+            }
             Err(e) => {
                 self.submit(EventKind::Dispatched {
                     effect: p.effect,
@@ -1230,6 +1235,7 @@ fn pump(hub: &Hub, run: &Run, inbox: Receiver<PumpIn>) {
         oom_exit: false,
         expects: HashMap::new(),
         held: None,
+        turns: VecDeque::new(),
     };
     loop {
         let got = match &p.held {
@@ -1311,6 +1317,8 @@ struct Pump {
     expects: HashMap<String, Expect>,
     /// A confirmed prompt whose ack had no native turn id: the harness's turn start may.
     held: Option<Held>,
+    /// Starts are ordered by the driver; results close them in the same order.
+    turns: VecDeque<bool>,
 }
 
 struct Expect {
@@ -1330,7 +1338,9 @@ impl Pump {
     fn order(&mut self, hub: &Hub, o: Ordered) {
         match o {
             Ordered::Report(kind) => {
-                if let EventKind::Nacked { effect, .. } = &*kind {
+                if let EventKind::Nacked { effect, .. } | EventKind::Unwritten { effect, .. } =
+                    &*kind
+                {
                     self.expects.retain(|_, e| e.effect != *effect);
                 }
                 hub.submit(*kind);
@@ -1469,9 +1479,15 @@ impl Pump {
             | Entry::AssistantText { .. }
             | Entry::Reasoning { .. }
             | Entry::FileChange { .. } => obs.push(Obs::Progress { tool: None }),
-            Entry::TurnStarted { .. } => {
+            Entry::TurnStarted { request_id, .. } => {
                 self.last_error = None;
-                obs.push(Obs::Progress { tool: None });
+                let foreign = request_id.is_none();
+                self.turns.push_back(foreign);
+                obs.push(if foreign {
+                    Obs::TurnBegan
+                } else {
+                    Obs::Progress { tool: None }
+                });
             }
             Entry::ApprovalRequest {
                 id: native,
@@ -1511,7 +1527,11 @@ impl Pump {
                     end = TurnEnd::UsageLimit;
                 }
                 self.last_error = None;
-                obs.push(Obs::TurnSettled { end });
+                obs.push(if self.turns.pop_front().unwrap_or(false) {
+                    Obs::ForeignTurnSettled { end }
+                } else {
+                    Obs::TurnSettled { end }
+                });
             }
             Entry::Error { class, text } => {
                 self.last_error = Some(*class);

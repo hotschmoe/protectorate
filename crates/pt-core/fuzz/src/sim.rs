@@ -21,7 +21,7 @@ use crate::check;
 pub struct Policy {
     /// StartIncarnation: 0 spawned, 1 spawn failed, 2 spawned but receipt lost, 3 lost, not spawned.
     pub start: u8,
-    /// SendPrompt, Steer, RespondApproval, Compact: 0 ack, 1 nack, 2 lost, 3 no answer.
+    /// SendPrompt, Steer, RespondApproval, Compact: 0 ack, 1 nack, 2 lost, 3 no answer, 5 unwritten.
     pub prompt: u8,
     /// Stop and Kill: 0 the scope empties, 1 acked but lingering.
     pub stop: u8,
@@ -67,6 +67,10 @@ pub struct Sim {
     /// `Sleeve::auto_continue`. Snapshotted at commit so a crash rolls it back with the journal.
     pub owed: BTreeMap<SleeveId, u64>,
     owed_committed: BTreeMap<SleeveId, u64>,
+    prompt_debts: BTreeMap<EffectId, Option<u64>>,
+    prompt_debts_committed: BTreeMap<EffectId, Option<u64>>,
+    foreign_prompts: BTreeSet<EffectId>,
+    foreign_prompts_committed: BTreeSet<EffectId>,
     /// `owed` before the event just applied. A new continuation effect must name one of these,
     /// unless it is the re-delivery of a prompt that was still queued.
     pub owed_before: BTreeMap<SleeveId, u64>,
@@ -102,6 +106,10 @@ impl Sim {
             steps: 0,
             owed: BTreeMap::new(),
             owed_committed: BTreeMap::new(),
+            prompt_debts: BTreeMap::new(),
+            prompt_debts_committed: BTreeMap::new(),
+            foreign_prompts: BTreeSet::new(),
+            foreign_prompts_committed: BTreeSet::new(),
             owed_before: BTreeMap::new(),
             last_kind: String::new(),
         }
@@ -118,9 +126,10 @@ impl Sim {
         let prev = self.st.clone();
         let owed_before = self.owed.clone();
         let out = apply(&mut self.st, &e);
-        self.owed_before = owed_before;
+        self.owed_before = owed_before.clone();
         self.last_kind = format!("{:?}", e.kind);
         crate::owed::note(&mut self.owed, &prev, &e.kind, e.at.max(prev.now));
+        self.note_prompt_debts(&prev, &e.kind, &owed_before, &out);
         self.notices.extend(out.iter().filter_map(|i| match i {
             Intent::Notify { notice, .. } => Some(notice.clone()),
             _ => None,
@@ -145,6 +154,130 @@ impl Sim {
         out
     }
 
+    fn restore_prompt_debt(&mut self, sid: SleeveId, effect: EffectId) {
+        if let Some(saved) = self.prompt_debts.get(&effect) {
+            match saved {
+                Some(seq) => {
+                    self.owed.insert(sid, *seq);
+                }
+                None => {
+                    self.owed.remove(&sid);
+                }
+            }
+        }
+    }
+
+    fn note_prompt_debts(
+        &mut self,
+        prev: &State,
+        kind: &EventKind,
+        before: &BTreeMap<SleeveId, u64>,
+        out: &[Intent],
+    ) {
+        match kind {
+            EventKind::Unwritten { effect, .. }
+                if prev
+                    .effects
+                    .get(effect)
+                    .is_some_and(|e| e.state == EffectState::Intent)
+                    && self
+                        .st
+                        .effects
+                        .get(effect)
+                        .is_some_and(|e| e.state == EffectState::Abandoned) =>
+            {
+                if let Some(sid) = prev.effects[effect].kind.sleeve()
+                    && !self.foreign_prompts.remove(effect)
+                {
+                    self.restore_prompt_debt(sid, *effect);
+                }
+                self.prompt_debts.remove(effect);
+            }
+            EventKind::Observed {
+                sleeve,
+                g,
+                obs: Obs::TurnBegan,
+            } if prev
+                .sleeves
+                .get(sleeve)
+                .is_some_and(|s| s.g == *g && s.foreign.is_none()) =>
+            {
+                if let Activity::Delivering { effect } = prev.sleeves[sleeve].activity
+                    && self.prompt_debts.contains_key(&effect)
+                {
+                    self.restore_prompt_debt(*sleeve, effect);
+                    self.foreign_prompts.insert(effect);
+                }
+            }
+            EventKind::Observed {
+                sleeve,
+                g,
+                obs: Obs::ForeignTurnSettled { .. },
+            } if prev
+                .sleeves
+                .get(sleeve)
+                .is_some_and(|s| s.g == *g && s.foreign.is_some()) =>
+            {
+                let effects: Vec<_> = self
+                    .foreign_prompts
+                    .iter()
+                    .copied()
+                    .filter(|id| {
+                        prev.effects.get(id).and_then(|e| e.kind.sleeve()) == Some(*sleeve)
+                    })
+                    .collect();
+                for effect in effects {
+                    self.prompt_debts
+                        .insert(effect, self.owed.get(sleeve).copied());
+                    self.owed.remove(sleeve);
+                    self.foreign_prompts.remove(&effect);
+                }
+            }
+            _ => {}
+        }
+        for intent in out {
+            if let Intent::Execute {
+                effect,
+                kind:
+                    EffectKind::SendPrompt {
+                        sleeve,
+                        kind: MsgKind::Prompt,
+                        ..
+                    },
+                ..
+            } = intent
+                && !prev.effects.contains_key(effect)
+            {
+                let saved = if matches!(
+                    kind,
+                    EventKind::Send { .. }
+                        | EventKind::Observed {
+                            obs: Obs::Ready { .. },
+                            ..
+                        }
+                ) {
+                    before.get(sleeve).copied()
+                } else {
+                    self.owed.get(sleeve).copied()
+                };
+                self.prompt_debts.insert(*effect, saved);
+                self.owed.remove(sleeve);
+            }
+        }
+        self.foreign_prompts.retain(|id| {
+            self.st
+                .effects
+                .get(id)
+                .and_then(|e| e.kind.sleeve())
+                .and_then(|sid| self.st.sleeves.get(&sid))
+                .is_some_and(|s| s.foreign.is_some())
+        });
+        self.prompt_debts.retain(|id, _| {
+            self.foreign_prompts.contains(id)
+                || self.st.effects.get(id).is_some_and(|e| !e.state.terminal())
+        });
+    }
+
     pub fn tick(&mut self, by: Millis) {
         self.now = self.now.saturating_add(by);
         self.apply(EventKind::Tick);
@@ -154,6 +287,8 @@ impl Sim {
         self.committed = self.log.len();
         self.committed_state = self.st.clone();
         self.owed_committed = self.owed.clone();
+        self.prompt_debts_committed = self.prompt_debts.clone();
+        self.foreign_prompts_committed = self.foreign_prompts.clone();
         self.pending.extend(self.held.drain(..));
     }
 
@@ -172,6 +307,8 @@ impl Sim {
         );
         self.st = replayed;
         self.owed = self.owed_committed.clone();
+        self.prompt_debts = self.prompt_debts_committed.clone();
+        self.foreign_prompts = self.foreign_prompts_committed.clone();
         self.held.clear();
         self.pending.clear();
         let committed = self.committed;
@@ -232,6 +369,15 @@ impl Sim {
                 if let Some((s, g)) = kind.incarnation()
                     && self.st.sleeves[&s].g != g
                 {
+                    return;
+                }
+                if p.prompt == 5
+                    && matches!(
+                        kind,
+                        EffectKind::SendPrompt { .. } | EffectKind::Steer { .. }
+                    )
+                {
+                    self.apply(EventKind::Unwritten { effect, attempt });
                     return;
                 }
                 let out = self.apply(EventKind::Dispatched { effect, attempt });

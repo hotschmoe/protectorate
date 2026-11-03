@@ -1,0 +1,23 @@
+#scenario cd35c4e9383c1f56
+# A foreign settle can reach the reducer before the executor reports Busy. The tick retry must
+# still deliver, and another send cannot make the unwritten prompt spin before that tick.
+spawn root /w/a
+run
+obs root ready
+send root m1
+obs root began
+obs root foreign-settled
+policy prompt=busy
+run
+expect root activity=Idle msg:m1=Queued queue=1 turn_seq=0
+send root m2
+run
+expect root msg:m1=Queued msg:m2=Queued queue=2 turn_seq=0
+expect-effect m1 count=1
+policy prompt=ack
+tick 10s
+run
+expect root activity=Working msg:m1=Delivered msg:m2=Queued queue=1 turn_seq=1
+obs root settled
+run
+expect root activity=Working msg:m2=Delivered turn_seq=2

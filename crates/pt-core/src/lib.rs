@@ -122,6 +122,7 @@ impl Core<'_> {
             E::Nacked {
                 effect, attempt, ..
             } => self.effect_report(*effect, *attempt, effect::Report::Nacked),
+            E::Unwritten { effect, attempt } => self.unwritten(*effect, *attempt),
             E::Lost { effect, attempt } => {
                 self.effect_report(*effect, *attempt, effect::Report::Lost)
             }
@@ -167,6 +168,7 @@ impl Core<'_> {
             E::Tick => {
                 self.tick_effects();
                 self.tick_sleeves();
+                self.tick_unwritten();
                 self.tick_jobs();
                 self.tick_approvals();
             }

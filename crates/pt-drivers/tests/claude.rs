@@ -2,10 +2,94 @@
 
 mod common;
 
-use std::time::Duration;
+use std::os::unix::fs::PermissionsExt;
+use std::time::{Duration, Instant};
 
 use common::{Run, program, skip, spec, temp_repo};
-use pt_drivers::{Decision, Entry, ErrorClass, Harness, Permission, SpawnSpec, Stop, ToolStatus};
+use pt_drivers::{
+    Ack, Decision, DriverError, Entry, ErrorClass, Harness, Permission, PromptKind, SpawnSpec,
+    Stop, ToolStatus,
+};
+
+#[test]
+fn foreign_result_does_not_retire_a_written_prompt() {
+    if common::on_path("python3").is_none() {
+        return;
+    }
+    let repo = temp_repo("claude-foreign");
+    let fake = repo.join("claude");
+    std::fs::write(
+        &fake,
+        r#"#!/usr/bin/env python3
+import json, os, sys, time
+def emit(msg): print(json.dumps(msg), flush=True)
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("type") != "user": continue
+    emit({"type":"assistant", "message":{"id":"foreign", "content":[{"type":"text", "text":"background answer"}]}})
+    while not os.path.exists("release-result"): time.sleep(0.01)
+    emit({"type":"result", "subtype":"success", "is_error":False, "stop_reason":"end_turn"})
+    while not os.path.exists("release-echo"): time.sleep(0.01)
+    msg["isReplay"] = True
+    emit(msg)
+    emit({"type":"assistant", "message":{"id":"ours", "content":[{"type":"text", "text":"own answer"}]}})
+    emit({"type":"result", "subtype":"success", "is_error":False, "stop_reason":"end_turn"})
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut run = Run::start(spec(Harness::Claude, &fake, &repo));
+    run.ready(Duration::from_secs(5)).expect("ready");
+    let request = run.send("A");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        match run.next(deadline) {
+            Some(Entry::TurnStarted {
+                request_id: None, ..
+            }) => break,
+            Some(_) => {}
+            None => panic!("the foreign turn did not start"),
+        }
+    }
+    assert!(matches!(
+        run.session
+            .send_user("next", "owner", PromptKind::Prompt, "B"),
+        Err(DriverError::Busy)
+    ));
+    assert!(matches!(
+        run.session.steer("steer", "owner", "change", "turn"),
+        Err(DriverError::Unsupported(_))
+    ));
+    std::fs::write(repo.join("release-result"), "release").unwrap();
+    let foreign = run.collect(Duration::from_secs(5), |_, _| {});
+    assert_eq!(foreign.text, "background answer");
+    assert_eq!(foreign.settled.map(|s| s.0), Some(Stop::EndTurn));
+    assert_eq!(run.session.wait_ack(&request, Duration::ZERO), Ack::Pending);
+    assert!(common::has(&run.log, |e| matches!(
+        e,
+        Entry::TurnStarted {
+            request_id: None,
+            ..
+        }
+    )));
+    std::fs::write(repo.join("release-echo"), "release").unwrap();
+    let ours = run.collect(Duration::from_secs(5), |_, _| {});
+    assert_eq!(ours.text, "own answer");
+    assert_eq!(ours.settled.map(|s| s.0), Some(Stop::EndTurn));
+    assert!(matches!(
+        run.session.wait_ack(&request, Duration::from_secs(1)),
+        Ack::Confirmed { .. }
+    ));
+    let log = run.stop();
+    assert!(common::has(
+        &log,
+        |e| matches!(e, Entry::TurnStarted { request_id: Some(r), .. } if *r == request)
+    ));
+    assert!(!common::has(
+        &log,
+        |e| matches!(e, Entry::Notice { code: Some(c), .. } if c == "unechoed" || c == "stale_echo")
+    ));
+}
 
 fn haiku(spec: &mut SpawnSpec) {
     spec.model = Some("haiku".into());

@@ -1,0 +1,24 @@
+#scenario 31c84012298b0d34
+# A foreign turn discovered after a prompt was written restores the preceding continuation
+# debt and D9 spawn count until that prompt actually gets its own turn.
+spawn envoy /w/e
+run
+obs envoy ready
+send envoy m1 from=agent:duet
+run
+spawn kid /w/k by-envoy
+run
+exit envoy
+run
+obs envoy ready
+expect envoy turn_seq=1 auto_continue=1 d9turn=Agent/1
+policy prompt=none
+send envoy m2 from=agent:grokbot
+run
+expect envoy turn_seq=2 auto_continue=none d9turn=Agent/0
+obs envoy began
+expect envoy turn_seq=1 auto_continue=1 d9turn=Agent/1 msg:m2=InFlight
+obs envoy foreign-settled
+expect envoy turn_seq=2 auto_continue=none d9turn=Agent/0 msg:m2=InFlight
+ack m2
+expect envoy activity=Working msg:m2=Delivered
