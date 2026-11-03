@@ -614,6 +614,11 @@ impl Session {
         self.with_core(|core| core.proto.interrupt(&mut core.out))
     }
 
+    /// Asks an idle harness to compact its context; see `Protocol::compact`.
+    pub fn compact(&self) -> Result<(), DriverError> {
+        self.with_core(|core| core.proto.compact(&mut core.out))
+    }
+
     /// Closes stdin, waits up to `grace` for the harness to exit, then kills it, and returns
     /// once the exit is reported.
     pub fn shutdown(&self, grace: Duration) {

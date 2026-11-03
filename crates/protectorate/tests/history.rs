@@ -156,21 +156,34 @@ fn history_search_scope_and_rebuild() {
         &format!("Remember the code word {CHILD_WORD}. Reply with exactly OK."),
     );
     hub.wait("tern", "idle", 180);
+    // The child may mail its parent the word (its first prompt names $PROTECTORATE_PARENT);
+    // that mail is the parent's own history.
     let child_hits = found(&hub, CHILD_WORD, 30);
     assert!(
-        child_hits
-            .iter()
-            .all(|x| x["doc"]["sleeve"].as_str() == Some("tern")),
+        child_hits.iter().all(|x| {
+            x["doc"]["sleeve"].as_str() == Some("tern")
+                || x["snippet"]
+                    .as_str()
+                    .is_some_and(|s| s.starts_with("[from sleeve tern]"))
+        }),
         "{child_hits:?}"
     );
     assert!(
-        hits(&as_alpha(&["--json", "history", "search", CHILD_WORD]).json()).is_empty(),
+        hits(&as_alpha(&["--json", "history", "search", CHILD_WORD]).json())
+            .iter()
+            .all(|x| x["doc"]["sleeve"].as_str() == Some("alpha")),
         "a parent does not see its child's history"
     );
     let r = as_alpha(&["history", "search", "--sleeve", "tern", CHILD_WORD]);
     assert_ne!(r.status, 0);
     assert!(r.stderr.contains("outside this capability"), "{}", r.stderr);
-    let child_doc = child_hits[0]["doc"]["doc_id"].as_u64().unwrap().to_string();
+    let child_doc = child_hits
+        .iter()
+        .find(|x| x["doc"]["sleeve"].as_str() == Some("tern"))
+        .expect("a hit in the child's history")["doc"]["doc_id"]
+        .as_u64()
+        .unwrap()
+        .to_string();
     let r = as_alpha(&["history", "read", "--doc", &child_doc]);
     assert_ne!(r.status, 0);
     assert!(r.stderr.contains("no history doc"), "{}", r.stderr);

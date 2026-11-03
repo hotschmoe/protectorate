@@ -145,6 +145,12 @@ CLI on the hub machine (section 3.1).
   message clipped at 2000 bytes with the transcript range for the rest. It skips the mail bound,
   since the recipient opened the turn, and carries the D9 mark like any mail from the sleeve. A
   usage-limit or auth settle reports after its continuation. Envoy reports to no one.
+- **Envoy's context ceiling.** When an Envoy turn settles with its context at 500k tokens or
+  more, the hub sends the core a `Compact` for Envoy; the core takes it once Envoy is idle with
+  nothing queued, and the driver sends the harness's own compaction (`/compact` for Claude Code).
+  The harness may compact earlier on its own. The compaction is not a turn: it ends in a
+  compaction entry, or a `compaction_failed` notice when the harness kept its context, and either
+  returns Envoy to idle.
 - The web build is embedded in the hub binary and served from the same origin.
 
 ### 3.2 Network

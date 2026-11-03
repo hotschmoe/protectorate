@@ -1577,8 +1577,15 @@ impl Core<'_> {
             | EffectState::Abandoned
             | EffectState::Uncertain => {
                 let s = self.sl(sid);
-                if s.activity == (Activity::Delivering { effect: id }) && state.terminal() {
-                    s.activity = Activity::Idle { seen: true };
+                if state.terminal() {
+                    if s.activity == (Activity::Delivering { effect: id }) {
+                        s.activity = Activity::Idle { seen: true };
+                    }
+                    if let Some(foreign) = &mut s.foreign
+                        && foreign.previous == (Activity::Delivering { effect: id })
+                    {
+                        foreign.previous = Activity::Idle { seen: true };
+                    }
                 }
                 self.park(sid, ParkReason::BriefUnconfirmed)
             }

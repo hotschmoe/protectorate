@@ -1702,6 +1702,87 @@ for line in sys.stdin:
     assert_eq!(reports().len(), 1, "the owner's turn reported to Envoy");
 }
 
+/// An Envoy turn that settles past the context ceiling gets the harness's own `/compact`
+/// once Envoy is idle; the compaction shows in the transcript and Envoy takes the next prompt.
+#[test]
+fn envoy_compacts_past_its_context_ceiling() {
+    if !on_path("bwrap") || !on_path("python3") {
+        return;
+    }
+    let dir = unique("compact");
+    let home = dir.join("home");
+    let fake = dir.join("claude");
+    std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
+    std::fs::write(home.join("logins/.claude/.credentials.json"), "{}").unwrap();
+    write_script(
+        &fake,
+        r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi
+exec python3 -u -c '
+import json, sys
+def emit(msg): print(json.dumps(msg), flush=True)
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("type") != "user": continue
+    if msg["message"]["content"] == "/compact":
+        emit({"type":"system", "subtype":"status", "status":"compacting"})
+        emit({"type":"system", "subtype":"compact_boundary", "compact_metadata":{"trigger":"manual", "pre_tokens":600000, "post_tokens":40000}})
+        emit({"type":"user", "isSynthetic":True, "uuid":"s1", "message":{"role":"user", "content":"This session is being continued from a previous conversation."}})
+        emit({"type":"user", "isReplay":True, "uuid":"c1", "message":{"role":"user", "content":"<local-command-stdout>Compacted </local-command-stdout>"}})
+        emit({"type":"result", "subtype":"success", "is_error":False, "num_turns":0, "stop_reason":None})
+        continue
+    msg["isReplay"] = True
+    emit(msg)
+    big = 600000 if "big" in line else 1000
+    emit({"type":"assistant", "message":{"id":"m", "content":[{"type":"text", "text":"ok"}], "usage":{"input_tokens":2, "cache_read_input_tokens":big, "cache_creation_input_tokens":0, "output_tokens":1}}})
+    emit({"type":"result", "subtype":"success", "is_error":False, "stop_reason":"end_turn"})
+' "$@""#,
+    );
+    write_script(&dir.join("systemd-run"), "exit 0");
+    let config = pt_json::obj! {
+        "envoy" => pt_json::obj! { "harness" => "claude" },
+        "claude_program" => fake.to_str().unwrap(),
+        "scopes" => false,
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+    };
+    std::fs::write(home.join("config.json"), config.to_string()).unwrap();
+    let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
+    let hub = Hub::open(home, &[], &[("PATH", &path)]);
+    eventually("Envoy to run", Duration::from_secs(90), || {
+        (hub.sleeve("envoy")["lifecycle"].as_str() == Some("running")).then_some(())
+    });
+    hub.wait("envoy", "idle", 90);
+    let settled = |n: usize| {
+        eventually("the turn to settle", Duration::from_secs(60), || {
+            (of_type(&hub.transcript("envoy"), "turn_settled").len() >= n).then_some(())
+        })
+    };
+
+    hub.send("envoy", "a small question");
+    settled(1);
+    hub.wait("envoy", "idle", 60);
+    assert!(of_type(&hub.transcript("envoy"), "compaction").is_empty());
+
+    hub.send("envoy", "a big question");
+    let compaction = eventually("the compaction", Duration::from_secs(60), || {
+        of_type(&hub.transcript("envoy"), "compaction")
+            .pop()
+            .cloned()
+    });
+    assert_eq!(compaction["entry"]["tokens_after"].as_u64(), Some(40000));
+    hub.wait("envoy", "idle", 60);
+    assert_eq!(
+        of_type(&hub.transcript("envoy"), "turn_settled").len(),
+        2,
+        "the compaction is not a turn"
+    );
+
+    hub.send("envoy", "a small question again");
+    settled(3);
+    hub.wait("envoy", "idle", 60);
+    assert_eq!(of_type(&hub.transcript("envoy"), "compaction").len(), 1);
+}
+
 /// A D9-origin turn that spawns a sleeve marks it. Mail from that sleeve marks its parent, and
 /// the parent's later mail starts an Envoy turn that cannot remove a sleeve until the owner
 /// decides. Mail from an unmarked sleeve does not.

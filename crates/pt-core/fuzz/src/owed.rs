@@ -278,9 +278,17 @@ fn on_exit(
         clear(owed, sid);
     }
     if resumes && interrupted {
+        // A prompt sent under a foreign turn is counted at the exit, still Delivering or
+        // already acked (the ack turns `previous` to Working).
+        let sent = |effect: &EffectId| {
+            prev.effects.get(effect).is_some_and(|e| {
+                e.state != EffectState::Intent
+                    && matches!(e.kind, EffectKind::SendPrompt { kind: MsgKind::Prompt, .. })
+            })
+        };
         let seq = if s.foreign.is_some()
-            && matches!(was, Activity::Delivering { effect } if prev.effects.get(effect).is_some_and(|e|
-                e.state != EffectState::Intent && matches!(e.kind, EffectKind::SendPrompt { kind: MsgKind::Prompt, .. })))
+            && (matches!(was, Activity::Delivering { effect } if sent(effect))
+                || s.delivery.as_ref().is_some_and(|d| !d.applied && sent(&d.effect)))
         {
             s.turn_seq + 1
         } else {

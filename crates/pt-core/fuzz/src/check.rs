@@ -262,7 +262,10 @@ pub fn timers(st: &State, tick: bool) {
             "orphaned approval {} pending past its deadline",
             a.id
         );
+        // A tick that just sent a kill (a stop or kill resend) skips the guardrails; the next
+        // tick, or the exit, settles the approval.
         let g9 = s.g == *g
+            && s.kill_at != Some(st.now)
             && s.life == Life::Running
             && s.target.mode == Mode::Headless
             && matches!(&s.activity, Activity::Blocked { approvals } if approvals.contains(native));

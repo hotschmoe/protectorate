@@ -13,7 +13,7 @@ use crate::spec::{Permission, SpawnSpec};
 /// Drives a protocol mapper with arbitrary input. An optional first line `#` with
 /// `resume=<id>` and `supervised` sets the spawn options. Lines starting with `!` are calls:
 /// `!send [text]`, `!steer <turn>`, `!approve <id>`, `!session <id>`, `!deny <id>`,
-/// `!cancel <id>`, `!interrupt`, and `!wrote`, which completes every stdin write so far
+/// `!cancel <id>`, `!interrupt`, `!compact`, and `!wrote`, which completes every stdin write so far
 /// (until then a user message waits as the session's writer thread makes it wait). Every
 /// other line goes through the same path as the harness's stdout. UUIDs are
 /// `00000000-0000-4000-8000-000000000000`, so Claude's message n is `...-00000000000n`
@@ -76,6 +76,7 @@ pub fn fuzz_feed(harness: Harness, input: &[u8]) -> usize {
                 "deny" => answer(p, &mut out, arg, Decision::Deny),
                 "cancel" => answer(p, &mut out, arg, Decision::Cancel),
                 "interrupt" => p.interrupt(&mut out).is_ok(),
+                "compact" => p.compact(&mut out).is_ok(),
                 "wrote" => {
                     for r in inflight.drain(..) {
                         out.written(&r);

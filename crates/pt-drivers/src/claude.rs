@@ -37,6 +37,8 @@ pub(crate) struct Claude {
     blocks_in_msg: usize,
     context_tokens: Option<u64>,
     next_control: u64,
+    /// A `/compact` we sent is running; true once its boundary arrived.
+    compacting: Option<bool>,
 }
 
 struct Pending {
@@ -89,6 +91,7 @@ impl Claude {
             blocks_in_msg: 0,
             context_tokens: None,
             next_control: 0,
+            compacting: None,
         }
     }
 
@@ -170,6 +173,12 @@ impl Claude {
                 let meta = &msg["compact_metadata"];
                 let tokens_before = out.count("pre_tokens", &meta["pre_tokens"]);
                 let tokens_after = out.count("post_tokens", &meta["post_tokens"]);
+                if let Some(seen) = &mut self.compacting {
+                    *seen = true;
+                }
+                if tokens_after.is_some() {
+                    self.context_tokens = tokens_after;
+                }
                 out.emit(Entry::Compaction {
                     trigger: opt_str(&meta["trigger"]),
                     tokens_before,
@@ -293,6 +302,10 @@ impl Claude {
             let uuid = msg["uuid"].as_str().unwrap_or_default();
             let ours =
                 self.unechoed.iter().any(|p| p.uuid == uuid) || self.done.iter().any(|u| u == uuid);
+            // `/compact` echoes its local command output, not the command.
+            if !ours && self.compacting.is_some() {
+                return;
+            }
             // A background task's notification is input Claude queued itself.
             if !ours && msg["origin"]["kind"].as_str() == Some("task-notification") {
                 out.notice(
@@ -541,6 +554,16 @@ impl Claude {
 
     fn on_result(&mut self, msg: &Value, out: &mut Out) {
         self.check_session(msg, out);
+        if self.running.is_empty()
+            && let Some(seen) = self.compacting.take()
+        {
+            if !seen {
+                let text = opt_str(&msg["result"])
+                    .unwrap_or_else(|| "claude finished /compact without compacting".into());
+                out.notice("compaction_failed", text);
+            }
+            return;
+        }
         if self.running.is_empty() {
             self.foreign_run(out);
         }
@@ -649,7 +672,7 @@ impl Protocol for Claude {
                 "Claude cannot steer a running turn",
             ));
         }
-        if !self.running.is_empty() || !self.unechoed.is_empty() {
+        if !self.running.is_empty() || !self.unechoed.is_empty() || self.compacting.is_some() {
             return Err(DriverError::Busy);
         }
         self.sent += 1;
@@ -674,6 +697,18 @@ impl Protocol for Claude {
         out: &mut Out,
     ) -> Result<(), DriverError> {
         self.answer(id, decision, None, out)
+    }
+
+    fn compact(&mut self, out: &mut Out) -> Result<(), DriverError> {
+        if !self.running.is_empty() || !self.unechoed.is_empty() || self.compacting.is_some() {
+            return Err(DriverError::Busy);
+        }
+        out.write(obj! {
+            "type" => "user",
+            "message" => obj! { "role" => "user", "content" => "/compact" },
+        });
+        self.compacting = Some(false);
+        Ok(())
     }
 
     fn interrupt(&mut self, out: &mut Out) -> Result<(), DriverError> {
