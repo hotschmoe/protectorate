@@ -11,3 +11,4 @@
 /crates/*/fuzz/coverage/
 /.e2e/
 /.env.e2e
+/references/

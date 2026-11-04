@@ -20,8 +20,8 @@ use crate::log::{info, warning};
 use crate::logins;
 
 const DOCTOR_EVERY: Duration = Duration::from_secs(6 * 3600);
-/// The fewest seconds between two renewals of an idle-expired grok login.
-const GROK_RENEW_EVERY: Duration = Duration::from_secs(600);
+/// The fewest seconds between two renewal attempts for one idle harness login.
+const LOGIN_RENEW_EVERY: Duration = Duration::from_secs(600);
 /// How often the history ingest catches up.
 const HISTORY_POLL: Duration = Duration::from_secs(1);
 /// Longest wait after a failed history commit before the next catch-up.
@@ -156,23 +156,38 @@ pub fn start_quotas(hub: &Arc<Hub>) {
     let started = thread::Builder::new()
         .name("pt-quota".into())
         .spawn(move || {
-            let mut renewed: Option<Instant> = None;
+            let mut renewed: [Option<Instant>; 2] = [None, None];
             loop {
                 let Some(hub) = weak.upgrade() else { return };
                 let now = pt_quota::now_ms();
                 cache.refresh(now, false);
-                if cache.renewable().contains(&Subscription::Grok)
-                    && renewed.is_none_or(|t| t.elapsed() >= GROK_RENEW_EVERY)
-                    && let Some(grok) = program(&hub, Harness::Grok)
+                for ((sub, harness), last) in [
+                    (Subscription::Grok, Harness::Grok),
+                    (Subscription::Codex, Harness::Codex),
+                ]
+                .into_iter()
+                .zip(renewed.iter_mut())
                 {
-                    renewed = Some(Instant::now());
-                    match logins::renew_grok(&hub.home.logins(), &grok) {
+                    if !cache.renewable().contains(&sub)
+                        || last.is_some_and(|t| t.elapsed() < LOGIN_RENEW_EVERY)
+                    {
+                        continue;
+                    }
+                    let Some(cli) = program(&hub, harness) else {
+                        continue;
+                    };
+                    *last = Some(Instant::now());
+                    let result = match sub {
+                        Subscription::Codex => logins::renew_codex(&hub.home.logins(), &cli),
+                        _ => logins::renew_grok(&hub.home.logins(), &cli),
+                    };
+                    match result {
                         Ok(()) => {
-                            info!("quota: renewed the idle grok login with `grok models`");
-                            cache.reread(Subscription::Grok);
+                            info!("quota: renewed the idle {sub:?} login through its CLI");
+                            cache.reread(sub);
                             cache.refresh(pt_quota::now_ms(), false);
                         }
-                        Err(e) => warning!("quota: renewing the idle grok login: {e}"),
+                        Err(e) => warning!("quota: renewing the idle {sub:?} login: {e}"),
                     }
                 }
                 hub.quotas

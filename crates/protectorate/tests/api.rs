@@ -858,6 +858,77 @@ fn mcp_envoy_round_trip() {
 /// nothing), a stand-in OpenAI-compatible endpoint makes the local row fresh, on ListQuotas and
 /// as a `quota` stream message.
 #[test]
+fn idle_codex_login_renews_through_app_server_without_a_turn() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = unique("codex-renew");
+    std::fs::create_dir_all(&dir).unwrap();
+    let cli = dir.join("codex");
+    std::fs::write(
+        &cli,
+        r#"#!/usr/bin/python3
+import json, os, sys
+if sys.argv[1:] != ['app-server']:
+    print('codex-cli 0.166.0')
+    sys.exit(0)
+for line in sys.stdin:
+    v = json.loads(line)
+    with open(os.path.join(os.environ['CODEX_HOME'], 'renewal.calls'), 'a') as f:
+        f.write(json.dumps(v) + '\n')
+    if v['method'] == 'initialize':
+        print(json.dumps({'id': v['id'], 'result': {}}), flush=True)
+    elif v['method'] == 'account/read':
+        assert v['params']['refreshToken'] is True
+        print(json.dumps({'id': v['id'], 'result': {'account': {'type': 'chatgpt'}}}), flush=True)
+    elif v['method'] != 'initialized':
+        raise RuntimeError('quota renewal must not open a model thread or turn')
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let hub = Hub::start_config(
+        "codex-renew",
+        "pi_local",
+        &[
+            ("quota_poll_secs", 1u64.into()),
+            ("codex_program", cli.to_str().unwrap().into()),
+            ("claude_program", "/nonexistent/program".into()),
+            ("grok_program", "/nonexistent/program".into()),
+        ],
+        &[],
+        &[],
+    );
+    let login = hub.home.join("logins/.codex");
+    std::fs::create_dir_all(&login).unwrap();
+    std::fs::write(
+        login.join("auth.json"),
+        r#"{"tokens":{"access_token":"e30.eyJleHAiOjF9.sig","refresh_token":"refresh-secret"}}"#,
+    )
+    .unwrap();
+    // Restart the test hub so the first poll sees the expired store immediately.
+    let mut hub = hub;
+    hub.restart();
+    eventually("Codex renewal", Duration::from_secs(20), || {
+        hub.log_text()
+            .contains("renewed the idle Codex login")
+            .then_some(())
+    });
+    std::thread::sleep(Duration::from_secs(3));
+    let calls = std::fs::read_to_string(login.join("renewal.calls")).unwrap();
+    let methods: Vec<String> = calls
+        .lines()
+        .map(|s| {
+            pt_json::parse(s).unwrap()["method"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(methods, ["initialize", "initialized", "account/read"]);
+    assert!(!hub.log_text().contains("refresh-secret"));
+    hub.cli(&["quota", "list"]).ok();
+}
+
+#[test]
 fn quota_readers_run() {
     let models = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let models_port = models.local_addr().unwrap().port();

@@ -1032,7 +1032,22 @@ Each entry: where, what was done, what right looks like.
   copies the new files over the old ones with robocopy, so a copy that fails midway can leave a
   mixed install (the old exe is started again and the error goes to
   `%TEMP%\protectorate-update.log`); files the new build dropped stay. Android reports a failed
-  install only as a toast, and the app learns nothing of the outcome. Neither installer has run
-  on a real device yet. Right: try both on the laptop and the phone; then a staged side-by-side
+  install only as a toast, and the app learns nothing of the outcome. Windows was exercised on
+  the Snapdragon laptop on 2026-11-04: detached PowerShell never ran; a normal launch with a
+  startup marker fixes that, and the downloaded dev.12 archive was installed manually and its
+  executable hash verified. Android remains untried. Right: try the phone; then a staged side-by-side
   install with a pointer swap on Windows, and the session status back over the channel on
   Android, if failures show up.
+- **Only Claude compacts on request** (`pt-drivers`, `Protocol::compact`; `pt-hub` exec.rs): the
+  Claude driver writes `/compact` and reads its boundary and the `num_turns: 0` result as the
+  compaction, not a turn. Codex (`thread/compact/start`), Grok and Pi refuse it, and the hub's
+  500k Envoy ceiling only fires on Claude. Right: map each harness's own compaction, checked
+  against the real CLI, then drop the harness gate.
+- **A compaction that never reports stays Compacting** (`pt-core`, `pt-drivers` claude.rs): the
+  sleeve leaves Compacting on the compaction entry or a `compaction_failed` notice, which the
+  driver emits on the result after `/compact`; no guardrail covers a harness that sends neither.
+  Right: a G6-like timeout for Compacting.
+- **The Envoy context ceiling counts the last model call's prompt** (`pt-hub` exec.rs): Claude's
+  input plus cache reads and writes of the turn's last assistant message, checked at each settle.
+  A turn that grows past 500k mid-turn compacts only after it settles, unless the harness's own
+  auto-compaction runs first. Right: fine while the harness auto-compacts below its window.

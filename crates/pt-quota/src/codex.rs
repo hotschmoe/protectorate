@@ -24,6 +24,7 @@ pub struct Codex {
 pub struct Login {
     token: String,
     account_id: String,
+    renewable: bool,
 }
 
 pub fn parse_login(raw: &[u8]) -> Result<Login> {
@@ -40,6 +41,7 @@ pub fn parse_login(raw: &[u8]) -> Result<Login> {
     Ok(Login {
         token: token.to_string(),
         account_id: text("account_id").to_string(),
+        renewable: !text("refresh_token").is_empty(),
     })
 }
 
@@ -134,7 +136,9 @@ impl Reader for Codex {
         let home = home_dir(self.home.as_deref())?;
         let login = parse_login(&read_login(&home.join(".codex").join("auth.json"))?)?;
         if jwt_expiry_ms(&login.token).is_some_and(|e| now_ms >= e) {
-            return Err(Error::Expired { renewable: false });
+            return Err(Error::Expired {
+                renewable: login.renewable,
+            });
         }
         let base = self
             .base_url

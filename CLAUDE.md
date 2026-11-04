@@ -1,8 +1,18 @@
 # CLAUDE.md
 
-Guidance for agents working on branch `next`. Read SPEC.md first; it is the design and wins over
-everything in `docs/design/`. Shortcuts taken to make something work go in REVISIT.md. Reference
-clones are in `/home/hotschmoe/github/protectorate/references/` (read-only).
+Guidance for agents working on this repository. Read SPEC.md first; it is the design and wins
+over everything in `docs/design/`. Shortcuts taken to make something work go in REVISIT.md.
+Reference clones are in `/home/hotschmoe/github/protectorate/references/` (read-only, gitignored).
+
+## Branches and releases
+
+- Work happens on `dev-hotschmoe` (or a short-lived branch from it, merged back). It reaches
+  `master` by a pull request. Never force-push either branch.
+- `master` is what is released: every release tag (`vX.Y.Z` or `vX.Y.Z-PRE`, the one version
+  source) is on a `master` commit. After a pull request merges, fast-forward `dev-hotschmoe` to
+  `master` (`git pull --ff-only origin master`) before new work.
+- A release is cut on `master`, locally: tag HEAD, `make release-assets`, `make release-publish`
+  (`PUBLISH=1`). No CI builds or tags: the signing key and the arm64 build node are here.
 
 ## RULE 1 - ABSOLUTE (DO NOT EVER VIOLATE THIS)
 
@@ -60,7 +70,7 @@ make gen         # writes app/lib/api/api.g.dart from crates/pt-api (never hand-
 
 ## Build hygiene (this machine: 12 cores, 30 GiB RAM, no swap)
 
-- Use your own target dir, never another agent's: `export CARGO_TARGET_DIR=/home/hotschmoe/github/protectorate/target/next-<task>` (a 10 GiB tmpfs shared by all agents; keep it small).
+- Use your own target dir, never another agent's: `export CARGO_TARGET_DIR=/home/hotschmoe/github/protectorate/target/<task>` (a 10 GiB tmpfs shared by all agents; keep it small).
 - `export CARGO_BUILD_JOBS=4` so parallel agents don't starve each other.
 - Build with `--workspace` (never `-p`), debug unless you are measuring.
 - Don't run `flutter build` or `go build` of headscale in loops; one at a time.

@@ -1,0 +1,18 @@
+{"type":"system","subtype":"init","cwd":"/work","session_id":"00000000-0000-4000-8000-000000000000","model":"claude-haiku-5-5"}
+!send Reply with the single word: hello
+!wrote
+{"type":"user","message":{"role":"user","content":"Reply with the single word: hello"},"session_id":"00000000-0000-4000-8000-000000000000","parent_tool_use_id":null,"uuid":"00000000-0000-4000-8000-000000000001","isReplay":true}
+{"type":"assistant","message":{"id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"hello"}],"usage":{"input_tokens":2,"cache_creation_input_tokens":10343,"cache_read_input_tokens":11384,"output_tokens":4}},"session_id":"00000000-0000-4000-8000-000000000000"}
+{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","session_id":"00000000-0000-4000-8000-000000000000","usage":{"input_tokens":2,"cache_creation_input_tokens":10343,"cache_read_input_tokens":11384,"output_tokens":4}}
+!compact
+{"type":"system","subtype":"status","status":"compacting","session_id":"00000000-0000-4000-8000-000000000000"}
+{"type":"system","subtype":"status","status":null,"compact_result":"success","session_id":"00000000-0000-4000-8000-000000000000"}
+{"type":"system","subtype":"init","cwd":"/work","session_id":"00000000-0000-4000-8000-000000000000","model":"claude-haiku-5-5"}
+{"type":"system","subtype":"compact_boundary","session_id":"00000000-0000-4000-8000-000000000000","compact_metadata":{"trigger":"manual","pre_tokens":21733,"post_tokens":6177}}
+{"type":"user","message":{"role":"user","content":"This session is being continued from a previous conversation."},"session_id":"00000000-0000-4000-8000-000000000000","uuid":"332ef133-753b-4b6f-a463-0bb301abc96e","isReplay":false,"isSynthetic":true}
+{"type":"user","message":{"role":"user","content":"<local-command-stdout>Compacted </local-command-stdout>"},"session_id":"00000000-0000-4000-8000-000000000000","uuid":"29f99aec-a3bc-4233-9a2e-f4f268406fc9","isReplay":true}
+{"type":"result","subtype":"success","is_error":false,"num_turns":0,"stop_reason":null,"session_id":"00000000-0000-4000-8000-000000000000","usage":{"input_tokens":0,"output_tokens":0}}
+!send next
+!compact
+{"type":"system","subtype":"status","status":"compacting","session_id":"00000000-0000-4000-8000-000000000000"}
+{"type":"result","subtype":"success","is_error":false,"num_turns":0,"session_id":"00000000-0000-4000-8000-000000000000"}

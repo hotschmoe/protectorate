@@ -155,7 +155,8 @@ since replay already freezes every reducer change.
 2. Envoy's context ceiling (item 2), then measure (5.4). Owner decision 2026-11-03: 500k tokens
    at most. The harness may compact earlier on its own; when Envoy reaches 500k and its harness
    has not compacted, the hub sends the harness's own `/compact` (the existing Compact command),
-   not a fresh session.
+   not a fresh session. Done 2026-11-03 for Claude Code (SPEC "Envoy's context ceiling"); the other
+   drivers refuse a compaction until they map theirs (REVISIT).
 3. The journal snapshot (section 7).
 4. Workspaces, task sleeves and the tree removal (sections 2, 3, 6), with `workspace merge`
    (section 4) and the 20-minute idle stop.

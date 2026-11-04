@@ -7,7 +7,7 @@
 //! copy out. The owner's own logins are never used.
 
 use std::fs;
-use std::io;
+use std::io::{self, BufRead, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -197,6 +197,81 @@ pub fn login(root: &Path, harness: &str, args: &[String]) -> Result<String, Stri
 
 /// How long a renewal may hold the quota thread.
 const RENEW_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Lets Codex renew its own shared login without opening a thread or spending a model turn.
+pub fn renew_codex(store: &Path, program: &Path) -> Result<(), String> {
+    let mut child = Command::new(program)
+        .arg("app-server")
+        .env("CODEX_HOME", store.join(".codex"))
+        .current_dir(store)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("run {} app-server: {e}", program.display()))?;
+    let mut input = child.stdin.take().expect("piped stdin");
+    let output = child.stdout.take().expect("piped stdout");
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = thread::spawn(move || {
+        let result = (|| -> Result<(), String> {
+            writeln!(
+                input,
+                "{}",
+                pt_json::obj! {
+                    "id" => 1, "method" => "initialize",
+                    "params" => pt_json::obj! { "clientInfo" => pt_json::obj! {
+                        "name" => "protectorate-quota", "version" => "1"
+                    }}
+                }
+            )
+            .map_err(|e| format!("initialize Codex: {e}"))?;
+            // Bound the entire exchange, including unsolicited notifications.
+            for line in io::BufReader::new(output.take(256 * 1024)).lines() {
+                let line = line.map_err(|e| format!("read Codex login renewal: {e}"))?;
+                let v = pt_json::parse(&line).map_err(|_| "invalid Codex login renewal reply")?;
+                match v["id"].as_u64() {
+                    Some(1) => {
+                        if v.get("error").is_some() {
+                            return Err("Codex refused quota initialization".into());
+                        }
+                        writeln!(input, "{}", pt_json::obj! { "method" => "initialized" })
+                            .map_err(|e| format!("initialize Codex: {e}"))?;
+                        writeln!(
+                            input,
+                            "{}",
+                            pt_json::obj! {
+                                "id" => 2, "method" => "account/read",
+                                "params" => pt_json::obj! { "refreshToken" => true }
+                            }
+                        )
+                        .map_err(|e| format!("request Codex login renewal: {e}"))?;
+                    }
+                    Some(2) => {
+                        // Do not put account details or vendor error payloads in the hub log.
+                        return if v.get("error").is_none()
+                            && v.pointer("/result/account").is_some_and(|a| !a.is_null())
+                        {
+                            Ok(())
+                        } else {
+                            Err("Codex could not renew its login; run `protectorate harness login codex`".into())
+                        };
+                    }
+                    _ => {}
+                }
+            }
+            Err("Codex ended the login renewal exchange without an account reply".into())
+        })();
+        let _ = tx.send(result);
+    });
+    let result = rx
+        .recv_timeout(RENEW_TIMEOUT)
+        .map_err(|_| "Codex login renewal did not finish within 20 seconds".to_string())
+        .and_then(|r| r);
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = worker.join();
+    result
+}
 
 /// Renews the store's idle-expired grok login through the CLI's own `grok models`, which
 /// refreshes and rewrites `.grok/auth.json` under its own lock before it lists the models. The

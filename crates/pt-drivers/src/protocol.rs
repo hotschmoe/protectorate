@@ -24,4 +24,9 @@ pub(crate) trait Protocol: Send {
         out: &mut Out,
     ) -> Result<(), DriverError>;
     fn interrupt(&mut self, out: &mut Out) -> Result<(), DriverError>;
+    /// Compacts an idle session with the harness's own command. It ends in `Entry::Compaction`,
+    /// or in a `compaction_failed` notice when the harness kept its context.
+    fn compact(&mut self, _out: &mut Out) -> Result<(), DriverError> {
+        Err(DriverError::Unsupported("compaction"))
+    }
 }

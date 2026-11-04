@@ -38,6 +38,8 @@ use crate::view::View;
 use crate::wire;
 
 const ACK_TIMEOUT: Duration = Duration::from_secs(30);
+/// Envoy's context ceiling: past it, an idle Envoy gets its harness's own compaction.
+const ENVOY_CONTEXT_CEILING: u64 = 500_000;
 const STOP_GRACE: Duration = Duration::from_secs(10);
 
 /// How long a confirmed prompt with no native turn id waits for the harness's turn start.
@@ -747,9 +749,14 @@ impl SleeveExec {
                 }
                 None => Outcome::Nacked("no live session for that generation".into()),
             },
-            EffectKind::Compact { .. } => {
-                Outcome::Nacked("explicit compaction is not exposed by the drivers".into())
-            }
+            // Written, the sleeve stays Compacting until the pump reports the compaction over.
+            EffectKind::Compact { g, .. } => match self.live_for(g) {
+                Some(session) => match session.compact() {
+                    Ok(()) => Outcome::Acked(None),
+                    Err(e) => Outcome::Nacked(e.to_string()),
+                },
+                None => Outcome::Nacked("no live session for that generation".into()),
+            },
             EffectKind::MailDeliver {
                 request_id, text, ..
             } => match self.inbox(view, &request_id, &text) {
@@ -1487,6 +1494,7 @@ impl Pump {
         self.prompt_reports(hub, &entry);
         let before = self.prev_error.take();
         let mut obs = Vec::new();
+        let mut compact = false;
         match &entry {
             Entry::SessionInfo { native_id, .. } => {
                 self.ready = true;
@@ -1531,6 +1539,12 @@ impl Pump {
                 obs.push(Obs::ApprovalResolved { id: native.clone() })
             }
             Entry::TurnSettled { stop, usage, .. } => {
+                // Only the Claude driver compacts on request so far (REVISIT).
+                compact = harness == pt_api::Harness::Claude
+                    && usage
+                        .context_tokens
+                        .is_some_and(|c| c >= ENVOY_CONTEXT_CEILING)
+                    && envoy_id(&hub.view().state) == Some(id);
                 let tokens = usage.input + usage.output;
                 if tokens > 0 {
                     obs.push(Obs::Usage { tokens });
@@ -1568,6 +1582,9 @@ impl Pump {
                 }
             }
             Entry::Compaction { .. } => obs.push(Obs::CompactDone),
+            Entry::Notice {
+                code: Some(code), ..
+            } if code == "compaction_failed" => obs.push(Obs::CompactDone),
             Entry::Exited { code, signal, .. } => {
                 self.oom_exit = *signal == Some(i64::from(pt_sys::SIGKILL)) || *code == Some(137);
                 self.cause = match (self.refusal.or(before), code, signal) {
@@ -1592,6 +1609,11 @@ impl Pump {
                 g,
                 obs: o,
             });
+        }
+        // Applied after the settle: the core compacts only an idle sleeve with nothing queued.
+        if compact {
+            info!("sleeve {name}: context passed {ENVOY_CONTEXT_CEILING} tokens; compacting");
+            hub.submit(EventKind::Compact { sleeve: id });
         }
         exited
     }
