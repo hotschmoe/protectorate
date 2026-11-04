@@ -120,11 +120,15 @@ impl Cache {
         });
     }
 
-    /// The subscriptions whose last read found an expired login that its CLI can renew.
+    /// Logins their CLI can renew, including a Codex token rejected before its local expiry.
     pub fn renewable(&self) -> Vec<Subscription> {
         self.slots
             .iter()
-            .filter(|s| s.last_err == Some(Error::Expired { renewable: true }))
+            .filter(|s| {
+                s.last_err == Some(Error::Expired { renewable: true })
+                    || (s.reader.subscription() == Subscription::Codex
+                        && s.last_err == Some(Error::Unauthorized))
+            })
             .map(|s| s.reader.subscription())
             .collect()
     }

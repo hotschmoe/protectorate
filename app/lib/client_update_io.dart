@@ -34,7 +34,11 @@ String _failure(int status, String body) {
 
 /// Into the cache directory (Android) or %TEMP%, through a `.part` file renamed once the whole
 /// Content-Length arrived.
-Future<String> downloadClient(Uri url, String? token, void Function(int got, int total) progress) async {
+Future<String> downloadClient(
+  Uri url,
+  String? token,
+  void Function(int got, int total) progress,
+) async {
   final base = Platform.isAndroid
       ? await _channel.invokeMethod<String>('cacheDir')
       : Directory.systemTemp.path;
@@ -45,10 +49,14 @@ Future<String> downloadClient(Uri url, String? token, void Function(int got, int
   try {
     final req = await client.getUrl(url);
     req.headers.set(HttpHeaders.acceptEncodingHeader, 'identity');
-    if (token != null) req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+    if (token != null) {
+      req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+    }
     final resp = await req.close();
     if (resp.statusCode != 200) {
-      throw StateError(_failure(resp.statusCode, await resp.transform(utf8.decoder).join()));
+      throw StateError(
+        _failure(resp.statusCode, await resp.transform(utf8.decoder).join()),
+      );
     }
     final total = resp.contentLength;
     if (total < 0) throw StateError('the hub sent no Content-Length');
@@ -63,7 +71,9 @@ Future<String> downloadClient(Uri url, String? token, void Function(int got, int
     } finally {
       await sink.close();
     }
-    if (got != total) throw StateError('the download stopped at $got of $total bytes');
+    if (got != total) {
+      throw StateError('the download stopped at $got of $total bytes');
+    }
     return (await part.rename(file.path)).path;
   } finally {
     client.close(force: true);
@@ -95,15 +105,20 @@ Future<void> _installWindows(String zip) async {
   final exe = Platform.resolvedExecutable;
   final dir = File(exe).parent.path;
   final stage = '$tmp\\protectorate-update';
-  final copy = 'robocopy ${_ps(stage)} ${_ps(dir)} /E /IS /R:10 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null; '
+  final copy =
+      'robocopy ${_ps(stage)} ${_ps(dir)} /E /IS /R:10 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null; '
       'exit [int](\$LASTEXITCODE -ge 8)';
   final encoded = base64Encode([
     for (final u in copy.codeUnits) ...[u & 0xff, u >> 8],
   ]);
   final script = File('$tmp\\protectorate-update.ps1');
+  final ready = File(
+    '$tmp\\protectorate-update-$pid-${DateTime.now().microsecondsSinceEpoch}.ready',
+  );
   // The BOM makes Windows PowerShell 5.1 read the script as UTF-8, not the ANSI code page.
   await script.writeAsString('''\uFEFF
 \$ErrorActionPreference = 'Stop'
+[IO.File]::WriteAllText(${_ps(ready.path)}, 'ready')
 \$dest = ${_ps(dir)}
 \$stage = ${_ps(stage)}
 \$copy = @('-NoProfile', '-NonInteractive', '-EncodedCommand', '$encoded')
@@ -127,9 +142,37 @@ try {
 }
 Start-Process -FilePath ${_ps(exe)}
 ''');
-  await Process.start(
-    'powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script.path],
-    mode: ProcessStartMode.detached,
+  // Windows PowerShell exits before running the script with detached mode's missing handles.
+  final process = await Process.start('powershell.exe', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-WindowStyle',
+    'Hidden',
+    '-File',
+    script.path,
+  ], mode: ProcessStartMode.normal);
+  final errors = StringBuffer();
+  unawaited(process.stdout.drain<void>());
+  process.stderr.transform(utf8.decoder).listen(errors.write);
+  int? exitCode;
+  unawaited(
+    process.exitCode.then((code) {
+      exitCode = code;
+    }),
   );
+  final deadline = DateTime.now().add(const Duration(seconds: 10));
+  while (!await ready.exists()) {
+    if (exitCode != null) {
+      throw StateError('the Windows updater exited ($exitCode): $errors');
+    }
+    if (DateTime.now().isAfter(deadline)) {
+      process.kill();
+      throw StateError(
+        'the Windows updater did not start within 10 seconds: $errors',
+      );
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+  }
 }

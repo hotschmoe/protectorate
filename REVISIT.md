@@ -1032,8 +1032,10 @@ Each entry: where, what was done, what right looks like.
   copies the new files over the old ones with robocopy, so a copy that fails midway can leave a
   mixed install (the old exe is started again and the error goes to
   `%TEMP%\protectorate-update.log`); files the new build dropped stay. Android reports a failed
-  install only as a toast, and the app learns nothing of the outcome. Neither installer has run
-  on a real device yet. Right: try both on the laptop and the phone; then a staged side-by-side
+  install only as a toast, and the app learns nothing of the outcome. Windows was exercised on
+  the Snapdragon laptop on 2026-11-04: detached PowerShell never ran; a normal launch with a
+  startup marker fixes that, and the downloaded dev.12 archive was installed manually and its
+  executable hash verified. Android remains untried. Right: try the phone; then a staged side-by-side
   install with a pointer swap on Windows, and the session status back over the channel on
   Android, if failures show up.
 - **Only Claude compacts on request** (`pt-drivers`, `Protocol::compact`; `pt-hub` exec.rs): the
