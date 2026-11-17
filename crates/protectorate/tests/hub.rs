@@ -617,6 +617,10 @@ fn forced_resleeve_with_brief() {
             "the brief has {section:?}:\n{brief}"
         );
     }
+    assert!(
+        brief.contains(&format!("First request:\n> {READY}")),
+        "first request includes hub preamble: {brief}"
+    );
     assert_eq!(
         git_out(&repo, &["status", "--porcelain"]),
         "",
@@ -1541,6 +1545,17 @@ exec sleep 300"#,
                 .then_some(())
         },
     );
+    eventually(
+        "the unmodified request in the transcript",
+        Duration::from_secs(30),
+        || {
+            let entries = hub.transcript("leaf");
+            of_type(&entries, "user_message")
+                .iter()
+                .any(|e| e["entry"]["text"].as_str() == Some("do the task"))
+                .then_some(())
+        },
+    );
     let early = report(&[], "2");
     assert_ne!(
         early.status, 0,
@@ -1636,6 +1651,10 @@ exec sleep 300"#,
             },
         );
         if id == &envoy_id {
+            assert!(
+                !saw.contains("Scopes are disabled; no memory limit is enforced"),
+                "Envoy received a memory preamble: {saw}"
+            );
             assert!(
                 !saw.contains("Mail Envoy ($PROTECTORATE_ENVOY"),
                 "Envoy received its own mail rules: {saw}"

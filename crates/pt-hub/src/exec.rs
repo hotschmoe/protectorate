@@ -54,6 +54,7 @@ enum Ordered {
         request_id: String,
         effect: EffectId,
         attempt: u32,
+        text: String,
     },
 }
 
@@ -465,7 +466,7 @@ impl SleeveExec {
     }
 
     /// Tells incarnation `g`'s pump of a prompt about to be written; false when it has ended.
-    fn expect(&self, g: Gen, request_id: &str, effect: EffectId, attempt: u32) -> bool {
+    fn expect(&self, g: Gen, request_id: &str, effect: EffectId, attempt: u32, text: &str) -> bool {
         let Some(live) = self.live.as_ref().filter(|l| l.g == g) else {
             return false;
         };
@@ -474,6 +475,7 @@ impl SleeveExec {
             request_id: request_id.to_string(),
             effect,
             attempt,
+            text: text.to_string(),
         };
         live.order.send(PumpIn::Order(expect, tx)).is_ok() && rx.recv().is_ok()
     }
@@ -1115,7 +1117,7 @@ impl SleeveExec {
         let Some(session) = self.live_for(p.g) else {
             return ended();
         };
-        if !self.expect(p.g, p.request_id, p.effect, p.attempt) {
+        if !self.expect(p.g, p.request_id, p.effect, p.attempt, p.text) {
             return ended();
         }
         let from = from_label(&view.state, self.id, p.request_id);
@@ -1164,6 +1166,9 @@ impl SleeveExec {
             return None;
         }
         let s = view.state.sleeve(self.id)?;
+        if envoy_id(&view.state) == Some(self.id) {
+            return None;
+        }
         if s.turned
             && s.guard
                 .ooms
@@ -1192,9 +1197,6 @@ impl SleeveExec {
         } else {
             "Scopes are disabled; no memory limit is enforced.\n\n".to_string()
         };
-        if envoy_id(&view.state) == Some(self.id) {
-            return Some(memory);
-        }
         Some(
             memory
                 + &match parent {
@@ -1393,6 +1395,7 @@ struct Expect {
     effect: EffectId,
     attempt: u32,
     dispatched: bool,
+    text: String,
 }
 
 struct Held {
@@ -1417,11 +1420,13 @@ impl Pump {
                 request_id,
                 effect,
                 attempt,
+                text,
             } => {
                 let e = Expect {
                     effect,
                     attempt,
                     dispatched: false,
+                    text,
                 };
                 self.expects.insert(request_id, e);
             }
@@ -1523,7 +1528,14 @@ impl Pump {
             harness,
             ..
         } = *run;
-        let entry = ev.entry;
+        let mut entry = ev.entry;
+        if let Entry::UserMessage {
+            request_id, text, ..
+        } = &mut entry
+            && let Some(expected) = self.expects.get(request_id)
+        {
+            *text = expected.text.clone();
+        }
         if let Entry::AssistantText { r#final: false, .. }
         | Entry::Reasoning { r#final: false, .. } = entry
         {

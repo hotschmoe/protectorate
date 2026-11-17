@@ -268,9 +268,11 @@ crash, every incarnation goes to Recovering and resumes natively.
     disabled and build parallelism follows the CPU quota. Configuration is read at hub start
     and applied at launch. A later sleeve with the same name gets the same override.
     `sleeve show` exposes the incarnation limit in bytes, and `PROTECTORATE_MEMORY_MAX`
-    gives the configured value inside the sandbox. The first prompt reports the limit and
-    tells sleeves needing more to ask Envoy; the owner raises `sleeve_memory_max_overrides`.
-    Scope OOM notices and the next prompt name the limit and override key. With scopes
+    gives the configured value inside the sandbox. A new non-Envoy sleeve’s first prompt
+    reports the limit and tells sleeves needing more to ask Envoy; the owner raises `sleeve_memory_max_overrides`.
+    Scope OOM notices and the next non-Envoy prompt name the limit and override key.
+    The hub transcript and continuation brief retain the request text without the hub’s
+    prompt preamble, which is still sent to the harness. With scopes
     disabled no limit is enforced. The scope uses `OOMPolicy=continue` and `cgroup.kill`,
     plus the orphan reaper. A child the kernel kills for memory does not stop the scope.
     The guardrail requires a scope OOM kill and a launcher exit by SIGKILL or code 137.
