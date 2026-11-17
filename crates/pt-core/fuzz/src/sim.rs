@@ -641,7 +641,7 @@ impl Sim {
                 self.apply(EventKind::ArtifactsChecked {
                     job,
                     attempt,
-                    result: if p.fetch % 2 == 0 {
+                    result: if p.fetch.is_multiple_of(2) {
                         ArtifactCheck::Verified
                     } else {
                         ArtifactCheck::Retryable
@@ -706,7 +706,7 @@ impl Sim {
             },
             EffectKind::StopIncarnation { sleeve, g } | EffectKind::KillScope { sleeve, g } => {
                 self.apply(ack(None));
-                if p.stop % 2 == 0 && self.alive.remove(&(*sleeve, *g)) {
+                if p.stop.is_multiple_of(2) && self.alive.remove(&(*sleeve, *g)) {
                     self.apply(EventKind::Exited {
                         sleeve: *sleeve,
                         g: *g,

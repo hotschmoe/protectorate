@@ -58,7 +58,7 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
                 target: target(b),
                 resleeve_to: (0..b.below(3)).map(|_| target(b)).collect(),
                 budget: b.bool().then(|| 1000 + b.below(4000)),
-                disk_limit: b.bool().then(|| 1 << 30),
+                disk_limit: b.bool().then_some(1 << 30),
                 effort: b.bool().then(|| "high".into()),
                 d9: b.bool(),
                 by_envoy: b.bool(),
