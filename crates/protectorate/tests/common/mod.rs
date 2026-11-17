@@ -6,6 +6,7 @@
 //! `.env.e2e` when it exists. Harnesses that spend subscription quota run only under
 //! `PT_E2E_PAID=1`.
 
+use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
@@ -19,6 +20,55 @@ pub const LONG: &str =
     "Write the numbers from 1 to 400 as words, one per line, with no other text.";
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+thread_local! {
+    static HUBS: RefCell<Vec<PathBuf>> = const { RefCell::new(Vec::new()) };
+}
+
+fn diagnostic(home: &Path) -> String {
+    let events = cli_command()
+        .arg("--home")
+        .arg(home)
+        .args(["--json", "event", "list"])
+        .output()
+        .ok()
+        .and_then(|o| pt_json::parse_bytes(&o.stdout).ok());
+    if let Some(events) = events
+        && let Some(text) = events["events"].as_array().and_then(|events| {
+            events
+                .iter()
+                .rev()
+                .filter_map(|e| e["text"].as_str())
+                .find(|text| text.contains("launch refused:"))
+        })
+    {
+        return format!(": {text}");
+    }
+    if let Ok(bytes) = fs::read(home.join("doctor.json"))
+        && let Ok(report) = pt_json::parse_bytes(&bytes)
+        && let Some(problem) = report["problems"]
+            .as_array()
+            .and_then(|problems| problems.iter().rev().find_map(Value::as_str))
+    {
+        return format!(": doctor: {problem}");
+    }
+    String::new()
+}
+
+fn current_diagnostic() -> String {
+    HUBS.with(|hubs| {
+        let hubs = hubs.borrow();
+        if hubs.len() == 1 {
+            return diagnostic(&hubs[0]);
+        }
+        hubs.iter()
+            .filter_map(|home| {
+                let reason = diagnostic(home);
+                (!reason.is_empty()).then(|| format!("; hub {}{reason}", home.display()))
+            })
+            .collect()
+    })
+}
 
 pub fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_protectorate")
@@ -133,7 +183,11 @@ pub fn eventually<T>(what: &str, timeout: Duration, mut f: impl FnMut() -> Optio
         if let Some(v) = f() {
             return v;
         }
-        assert!(Instant::now() < end, "timed out waiting for {what}");
+        assert!(
+            Instant::now() < end,
+            "timed out waiting for {what}{}",
+            current_diagnostic()
+        );
         std::thread::sleep(Duration::from_millis(200));
     }
 }
@@ -275,6 +329,12 @@ impl Hub {
             cmd.env(k, v);
         }
         self.child = Some(cmd.spawn().expect("start protectorate serve"));
+        HUBS.with(|hubs| {
+            let mut hubs = hubs.borrow_mut();
+            if !hubs.contains(&self.home) {
+                hubs.push(self.home.clone());
+            }
+        });
         eventually("the hub to answer", Duration::from_secs(20), || {
             (self.cli(&["--json", "hub", "state"]).status == 0).then_some(())
         });
@@ -382,7 +442,8 @@ impl Hub {
         assert_eq!(
             r.status,
             0,
-            "wait {sleeve} until {until}: {} {}\n--- hub log tail ---\n{}",
+            "wait {sleeve} until {until}{}: {} {}\n--- hub log tail ---\n{}",
+            diagnostic(&self.home),
             r.stdout,
             r.stderr,
             tail(&self.log_text(), 40)
@@ -442,6 +503,7 @@ impl Hub {
 
 impl Drop for Hub {
     fn drop(&mut self) {
+        HUBS.with(|hubs| hubs.borrow_mut().retain(|home| home != &self.home));
         self.kill9();
         if let Ok(bytes) = fs::read(self.home.join("tokens"))
             && let Ok(tokens) = pt_json::from_bytes::<Value>(&bytes)
@@ -494,8 +556,15 @@ pub fn ws(port: u16, query: &str, headers: &[(&str, &str)]) -> std::io::Result<p
 }
 
 pub fn next(ws: &mut pt_http::WebSocket) -> Value {
+    next_for(ws, "a stream message")
+}
+
+fn next_for(ws: &mut pt_http::WebSocket, what: &str) -> Value {
     loop {
-        match ws.recv().expect("a stream message") {
+        match ws
+            .recv()
+            .unwrap_or_else(|e| panic!("waiting for {what}: {e}{}", current_diagnostic()))
+        {
             pt_http::Message::Text(t) => return pt_json::parse(&t).expect("stream JSON"),
             pt_http::Message::Close(c, r) => panic!("stream closed: {c} {r}"),
             _ => {}
@@ -510,9 +579,10 @@ pub fn until(ws: &mut pt_http::WebSocket, kind: &str, pick: impl Fn(&Value) -> b
     loop {
         assert!(
             Instant::now() < end,
-            "timed out waiting for a {kind} message"
+            "timed out waiting for a {kind} message{}",
+            current_diagnostic()
         );
-        let m = next(ws);
+        let m = next_for(ws, &format!("a {kind} message"));
         let hit = m["type"].as_str() == Some(kind) && pick(&m);
         seen.push(m);
         if hit {
