@@ -19,7 +19,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use common::{Hub, Run, bin, eventually, tail};
+use common::{Hub, Run, bin, cli_command, eventually, tail};
 use pt_json::{Value, obj};
 
 struct Kill(Child);
@@ -90,8 +90,8 @@ fn start_node(
 
 #[test]
 fn version_flag_matches_version_command() {
-    let command = Command::new(bin()).arg("version").output().unwrap();
-    let flag = Command::new(bin()).arg("--version").output().unwrap();
+    let command = cli_command().arg("version").output().unwrap();
+    let flag = cli_command().arg("--version").output().unwrap();
     assert!(command.status.success());
     assert!(
         flag.status.success(),
@@ -205,7 +205,7 @@ fn log_text(hub: &Hub, id: &str, offset: u64) -> String {
 
 #[test]
 fn hub_runs_the_fleet_and_node_jobs() {
-    let version = Command::new(bin()).arg("version").output().unwrap();
+    let version = cli_command().arg("version").output().unwrap();
     let version = String::from_utf8_lossy(&version.stdout).into_owned();
     if version.contains("missing") {
         eprintln!("SKIP: this protectorate does not embed headscale and member: {version}");
@@ -985,7 +985,7 @@ fn hub_runs_the_fleet_and_node_jobs() {
         .json();
     let arch_id = arch_job["id"].as_str().unwrap();
     assert!(hub.cli(&["job", "show", arch_id]).stdout.contains(&reason));
-    let waiting = Command::new(bin())
+    let waiting = cli_command()
         .arg("--home")
         .arg(&hub.home)
         .env_remove("PROTECTORATE_SOCKET")
@@ -1029,6 +1029,23 @@ fn hub_runs_the_fleet_and_node_jobs() {
     let done = wait_job(&hub, arch_id, &["succeeded", "failed"], 90);
     assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
     assert!(log_text(&hub, &gated, 0).contains("gated"));
+
+    fs::write(&presence, "UNKNOWN").unwrap();
+    eventually("the node UNKNOWN", Duration::from_secs(30), || {
+        let v = hub.cli(&["--json", "node", "show", &node_id]).json();
+        (v["presence"]["state"].as_str() == Some("unknown")).then_some(())
+    });
+    let unknown = run_job(&hub, &[], &["echo", "unknown-held"]);
+    let reason = format!(
+        "held: node {node_id} has unknown presence; --even-if-present runs it now, --on-present idle|kill chooses"
+    );
+    assert!(hub.cli(&["job", "show", &unknown]).stdout.contains(&reason));
+    let override_job = run_job(&hub, &["--even-if-present"], &["echo", "unknown-override"]);
+    let done = wait_job(&hub, &override_job, &["succeeded", "failed"], 90);
+    assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
+    fs::write(&presence, "AWAY").unwrap();
+    let done = wait_job(&hub, &unknown, &["succeeded", "failed"], 90);
+    assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
 
     // A long job, cancelled.
     let long = run_job(&hub, &[], &["sleep", "600"]);

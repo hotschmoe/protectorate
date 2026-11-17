@@ -337,7 +337,7 @@ fn history_budget_under_a_mebibyte_is_refused() {
     let home = unique("hbudget").join("home");
     fs::create_dir_all(&home).unwrap();
     fs::write(home.join("config.json"), r#"{"history_budget_bytes":0}"#).unwrap();
-    let out = Command::new(bin())
+    let out = cli_command()
         .args(["--home", home.to_str().unwrap(), "serve", "--listen", "off"])
         .output()
         .expect("run serve");

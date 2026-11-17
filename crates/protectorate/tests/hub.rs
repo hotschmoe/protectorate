@@ -2063,7 +2063,7 @@ for line in sys.stdin:
     let (tx, rx) = std::sync::mpsc::channel();
     let (home, token) = (hub.home.clone(), envoy_token.clone());
     std::thread::spawn(move || {
-        let out = std::process::Command::new(bin())
+        let out = cli_command()
             .arg("--home")
             .arg(home)
             .args(["sleeve", "rm", "victim"])
@@ -2159,7 +2159,7 @@ fn ask_remove(hub: &Hub, token: &str, envoy_id: &str) {
     let (tx, rx) = std::sync::mpsc::channel();
     let (home, token) = (hub.home.clone(), token.to_string());
     std::thread::spawn(move || {
-        let out = std::process::Command::new(bin())
+        let out = cli_command()
             .arg("--home")
             .arg(home)
             .args(["sleeve", "rm", "victim"])
@@ -2417,7 +2417,7 @@ fn d9_spawn_limit_holds_across_a_hub_restart() {
             .chain(["--harness".into(), "claude".into()])
             .collect();
         std::thread::spawn(move || {
-            let out = std::process::Command::new(bin())
+            let out = cli_command()
                 .arg("--home")
                 .arg(home)
                 .args(&args)

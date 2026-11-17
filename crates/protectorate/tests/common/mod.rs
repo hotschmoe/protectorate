@@ -24,6 +24,18 @@ pub fn bin() -> &'static str {
     env!("CARGO_BIN_EXE_protectorate")
 }
 
+pub fn cli_command() -> Command {
+    protectorate_command(bin())
+}
+
+pub fn protectorate_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut command = Command::new(program);
+    command
+        .env_remove("PROTECTORATE_SOCKET")
+        .env_remove("PROTECTORATE_TOKEN");
+    command
+}
+
 /// Short on purpose: the hub's socket path must fit in a sockaddr_un (108 bytes).
 pub fn unique(name: &str) -> PathBuf {
     let n = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -176,7 +188,7 @@ impl Hub {
         let config = config_obj;
         fs::write(home.join("config.json"), config.to_string()).expect("write config");
         // The sleeves' Pi login, copied from this machine's own Pi config where it has one.
-        let _ = Command::new(bin())
+        let _ = cli_command()
             .args(["--home", home.to_str().unwrap(), "harness", "login", "pi"])
             .output();
         let mut hub = Hub {
@@ -224,7 +236,7 @@ impl Hub {
                 c.args(rest).arg(bin());
                 c
             }
-            None => Command::new(bin()),
+            None => cli_command(),
         };
         cmd.arg("--home")
             .arg(&self.home)
@@ -291,7 +303,7 @@ impl Hub {
     }
 
     pub fn cli_env(&self, env: &[(&str, &str)], args: &[&str]) -> Run {
-        let mut cmd = Command::new(bin());
+        let mut cmd = cli_command();
         cmd.arg("--home").arg(&self.home).args(args);
         cmd.env_remove("PROTECTORATE_TOKEN")
             .env_remove("PROTECTORATE_SOCKET");
