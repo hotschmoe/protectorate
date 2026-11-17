@@ -1310,11 +1310,7 @@ exec sleep 300"#,
 
 #[test]
 fn child_oom_then_harness_exit_does_not_trip_g4() {
-    let bus = std::process::Command::new("systemctl")
-        .args(["--user", "show-environment"])
-        .output();
-    if !bus.is_ok_and(|o| o.status.success()) {
-        eprintln!("SKIP: no systemd user bus for scope OOM test");
+    if !have_user_bus() {
         return;
     }
     let dir = unique("oom");
@@ -2760,11 +2756,7 @@ fn d9_origin_survives_a_hub_restart_before_the_brief() {
 
 #[test]
 fn repeated_scope_oom_parks_and_reports_the_memory_limit() {
-    let bus = std::process::Command::new("systemctl")
-        .args(["--user", "show-environment"])
-        .output();
-    if !bus.is_ok_and(|o| o.status.success()) {
-        eprintln!("SKIP: no systemd user bus for scope OOM test");
+    if !have_user_bus() {
         return;
     }
     let dir = unique("oom-kill");
@@ -3395,6 +3387,9 @@ exec '{real_pi}' "$@""#
 /// is the one the doctor tests use: `--version` succeeds, and it stays up so a sleeve can idle.
 #[test]
 fn new_project_root() {
+    if !have_user_bus() {
+        return;
+    }
     for tool in ["bwrap", "systemd-run", "git"] {
         if !on_path(tool) {
             eprintln!("SKIP: {tool} is not installed");
@@ -3418,6 +3413,14 @@ fn new_project_root() {
             &[],
         );
         claude_ready(&off);
+        let tokens = std::fs::read(off.home.join("tokens")).unwrap();
+        let tokens: pt_json::Value = pt_json::from_bytes(&tokens).unwrap();
+        let tag = tokens["hub_tag"].as_str().unwrap().to_string();
+        let unit = pt_sandbox::list_scope_units()
+            .unwrap()
+            .into_iter()
+            .find(|unit| pt_sandbox::scope_sleeve_id(&tag, unit).is_some())
+            .unwrap();
         let r = off.cli(&[
             "sleeve",
             "spawn",
@@ -3429,6 +3432,14 @@ fn new_project_root() {
         ]);
         assert_ne!(r.status, 0, "{}", r.stderr);
         assert!(r.stderr.contains("projects_dir is not set"), "{}", r.stderr);
+        drop(off);
+        assert!(
+            !std::process::Command::new("systemctl")
+                .args(["--user", "is-active", "--quiet", &unit])
+                .status()
+                .unwrap()
+                .success()
+        );
     }
     let projects = unique("projects");
     std::fs::create_dir_all(&projects).unwrap();
@@ -3899,4 +3910,43 @@ fn transcript_pages_skip_torn_and_corrupt_lines() {
         .collect();
     assert_eq!(seqs, [asked, answered], "{v}");
     assert_eq!(v["more"].as_bool(), Some(true), "{v}");
+}
+
+#[test]
+fn gate_reports_all_failures_and_replays_seeds_after_e2e_failure() {
+    let dir = unique("gate");
+    std::fs::create_dir_all(dir.join("scripts")).unwrap();
+    std::fs::copy(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/../../Makefile"),
+        dir.join("Makefile"),
+    )
+    .unwrap();
+    std::fs::write(dir.join("scripts/test.sh"), "echo e2e-ran; exit 1\n").unwrap();
+    std::fs::write(
+        dir.join("scripts/replay-seeds.sh"),
+        "echo seeds-ran; exit 1\n",
+    )
+    .unwrap();
+    std::fs::write(dir.join("overrides.mk"), "fmt-check clippy check-fuzz check-deps check-levels check-gen app-check check-version:\n\t@echo ran-$@; false\n").unwrap();
+    let output = std::process::Command::new("make")
+        .current_dir(&dir)
+        .args([
+            "-f",
+            "Makefile",
+            "-f",
+            "overrides.mk",
+            "MAKE=make -f Makefile -f overrides.mk",
+            "check",
+        ])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!output.status.success(), "{stdout}");
+    assert!(
+        stdout.contains("e2e-ran") && stdout.contains("seeds-ran"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("test failed: e2e seeds"), "{stdout}");
+    assert!(stdout.contains("ran-check-version"), "{stdout}");
+    assert!(stdout.contains("check failed: fmt-check clippy check-fuzz test check-deps check-levels check-gen app-check check-version"), "{stdout}");
 }

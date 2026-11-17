@@ -2288,6 +2288,9 @@ fn fake_claude(dir: &Path) -> PathBuf {
 
 #[test]
 fn doctor_refuses_an_ineligible_harness_and_envoy_waits_for_it() {
+    if !common::have_user_bus() {
+        return;
+    }
     for tool in ["bwrap", "systemd-run", "git"] {
         if !common::on_path(tool) {
             eprintln!("SKIP: {tool} is not installed");
