@@ -268,6 +268,10 @@ impl Sim {
             self.st.recoverable_jobs, recover_jobs,
             "recoverable jobs differ from scan"
         );
+        for ((sid, g, native), ids) in &self.st.approval_effects {
+            let want: BTreeSet<_> = self.st.effects.values().filter(|e| matches!(&e.kind, EffectKind::RespondApproval { sleeve, g: eg, approval, .. } if sleeve == sid && eg == g && approval == native) && !matches!(e.state, EffectState::Rejected | EffectState::Abandoned | EffectState::Failed)).map(|e| e.id).collect();
+            assert_eq!(*ids, want, "approval effects differ from scan");
+        }
         self.owed_before = owed_before.clone();
         self.last_kind = format!("{:?}", e.kind);
         crate::owed::note(&mut self.owed, &prev, &e.kind, e.at.max(prev.now));

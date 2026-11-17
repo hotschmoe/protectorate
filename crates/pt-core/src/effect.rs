@@ -108,6 +108,27 @@ impl Core<'_> {
                 reportable.remove(&id);
             }
         }
+        if let EffectKind::RespondApproval {
+            sleeve,
+            g,
+            approval,
+            ..
+        } = kind
+        {
+            let ids = self
+                .st
+                .approval_effects
+                .entry((*sleeve, *g, approval.clone()))
+                .or_default();
+            if matches!(
+                state,
+                EffectState::Rejected | EffectState::Abandoned | EffectState::Failed
+            ) {
+                ids.remove(&id);
+            } else {
+                ids.insert(id);
+            }
+        }
         if let EffectKind::NodeSubmit { job, .. }
         | EffectKind::NodeCancel { job, .. }
         | EffectKind::NodeAckCollected { job, .. } = kind
