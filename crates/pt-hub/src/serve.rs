@@ -230,6 +230,9 @@ fn run(o: ServeOptions, home: Home, trial: Option<crate::update::Trial>) -> Resu
     ));
     // HubRecovered is the first input, before any listener or timer can add one (README step 5).
     hub.submit(EventKind::HubRecovered);
+    if !state.mail_batching {
+        hub.submit(EventKind::MailBatching);
+    }
     let writer_hub = hub.clone();
     thread::Builder::new()
         .name("pt-stream".into())

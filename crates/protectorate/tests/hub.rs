@@ -946,16 +946,16 @@ fn envoy_wait_ignores_a_foreign_result_before_the_prompt_echo() {
 exec python3 -u -c '
 import json, os, sys, time
 def emit(msg): print(json.dumps(msg), flush=True)
-for line in sys.stdin:
+for number, line in enumerate(sys.stdin):
     msg = json.loads(line)
     if msg.get("type") != "user": continue
-    emit({"type":"stream_event", "event":{"type":"message_start", "message":{"id":"foreign"}}})
-    emit({"type":"assistant", "message":{"id":"foreign", "content":[{"type":"text", "text":"private background answer"}]}})
+    emit({"type":"stream_event", "event":{"type":"message_start", "message":{"id":"foreign"+str(number)}}})
+    emit({"type":"assistant", "message":{"id":"foreign"+str(number), "content":[{"type":"text", "text":"private background answer"}]}})
     emit({"type":"result", "subtype":"success", "is_error":False, "stop_reason":"end_turn"})
     while not os.path.exists("release-echo"): time.sleep(0.05)
     msg["isReplay"] = True
     emit(msg)
-    emit({"type":"assistant", "message":{"id":"ours", "content":[{"type":"text", "text":"answer to agent"}]}})
+    emit({"type":"assistant", "message":{"id":"ours"+str(number), "content":[{"type":"text", "text":"answer to agent"}]}})
     emit({"type":"result", "subtype":"success", "is_error":False, "stop_reason":"end_turn"})
 ' "$@""#,
     );
@@ -1008,6 +1008,26 @@ for line in sys.stdin:
     );
     let read = hub.cli_env(&as_agent, &["envoy", "read"]);
     assert!(!read.ok().contains("private background answer"));
+    let first = hub
+        .cli_env(&as_agent, &["--json", "envoy", "send", "batch one"])
+        .json()["request_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let second = hub
+        .cli_env(&as_agent, &["--json", "envoy", "send", "batch two"])
+        .json()["request_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    hub.cli(&["sleeve", "send", "envoy", "owner private message"])
+        .ok();
+    let third = hub
+        .cli_env(&as_agent, &["--json", "envoy", "send", "batch three"])
+        .json()["request_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     std::fs::write(hub.home.join("envoy/release-echo"), "release").unwrap();
     let reply = hub
         .cli_env(
@@ -1017,6 +1037,34 @@ for line in sys.stdin:
         .json();
     assert_eq!(reply["settled"].as_bool(), Some(true), "{reply}");
     assert_eq!(reply["text"].as_str(), Some("answer to agent"));
+    for id in [&first, &second] {
+        let reply = hub
+            .cli_env(
+                &as_agent,
+                &["--json", "envoy", "wait", id, "--timeout", "30"],
+            )
+            .json();
+        assert_eq!(reply["settled"].as_bool(), Some(true), "{reply}");
+        assert_eq!(reply["text"].as_str(), Some("answer to agent"));
+    }
+    let third_reply = hub
+        .cli_env(
+            &as_agent,
+            &["--json", "envoy", "wait", &third, "--timeout", "30"],
+        )
+        .json();
+    assert_eq!(
+        third_reply["settled"].as_bool(),
+        Some(true),
+        "{third_reply}"
+    );
+    let latest = hub
+        .cli_env(&as_agent, &["--json", "envoy", "wait", "--timeout", "30"])
+        .json();
+    assert_eq!(latest["request_id"].as_str(), Some(third.as_str()));
+    let read = hub.cli_env(&as_agent, &["envoy", "read"]);
+    assert!(!read.ok().contains("private background answer"));
+    assert!(!read.stdout.contains("owner private message"));
     assert!(
         hub.cli_env(&as_agent, &["envoy", "read"])
             .ok()
@@ -1421,6 +1469,14 @@ exit 2"#,
 /// The environment of this hub's sandboxed process for `name`. The socket keeps a parallel
 /// test hub's sleeve of the same name from matching.
 fn sleeve_process_env(socket: &str, name: &str) -> Vec<(String, String)> {
+    eventually(
+        &format!("a process for sleeve {name} on {socket} carrying PROTECTORATE_TOKEN"),
+        Duration::from_secs(30),
+        || find_sleeve_process_env(socket, name),
+    )
+}
+
+fn find_sleeve_process_env(socket: &str, name: &str) -> Option<Vec<(String, String)>> {
     for ent in std::fs::read_dir("/proc").unwrap().flatten() {
         let pid = ent.file_name();
         let pid = pid.to_string_lossy();
@@ -1446,10 +1502,10 @@ fn sleeve_process_env(socket: &str, name: &str) -> Vec<(String, String)> {
                 .any(|(k, v)| k == "PROTECTORATE_SOCKET" && v == socket)
             && vars.iter().any(|(k, _)| k == "PROTECTORATE_TOKEN")
         {
-            return vars;
+            return Some(vars);
         }
     }
-    panic!("no process for sleeve {name} on {socket} carries PROTECTORATE_TOKEN");
+    None
 }
 
 fn env_get<'a>(vars: &'a [(String, String)], key: &str) -> Option<&'a str> {

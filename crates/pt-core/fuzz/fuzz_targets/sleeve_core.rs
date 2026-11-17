@@ -30,7 +30,7 @@ fn sleeve(sim: &Sim, b: &mut Bytes) -> SleeveId {
 fn command(sim: &mut Sim, b: &mut Bytes) {
     use EventKind as E;
     let s = sleeve(sim, b);
-    let kind = match b.below(22) {
+    let kind = match b.below(23) {
         0 | 1 => {
             let parent = if b.below(3) == 0 {
                 None
@@ -172,7 +172,7 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
                 Party::Sleeve(sleeve(sim, b))
             },
         },
-        _ => E::Supersede {
+        21 => E::Supersede {
             to: s,
             request_id: format!("m{}", b.below(12)),
             from: if b.bool() {
@@ -183,6 +183,7 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
             text: "replacement".into(),
             d9: b.bool(),
         },
+        _ => E::MailBatching,
     };
     sim.apply(kind);
 }

@@ -1,0 +1,37 @@
+#scenario f366be9db774dae9
+# Agent and owner prompts cannot share Envoy's vendor-visible transcript.
+mail-batching
+spawn envoy /w/e
+run
+obs envoy ready
+spawn kid /wt/k parent=envoy d9
+run
+obs kid ready
+send envoy active
+run
+send envoy agent1 from=agent:vendor
+send envoy private
+send envoy agent2 from=agent:vendor
+obs envoy settled
+expect-batch agent1 agent1
+expect envoy msg:private=Queued msg:agent2=Queued d9turn=Agent/0
+run
+obs envoy settled
+expect-batch private private
+run
+obs envoy settled
+expect-batch agent2 agent2
+run
+obs envoy settled
+send envoy active2
+run
+send envoy normal
+send envoy marked from=kid
+obs envoy settled
+expect-batch normal normal marked
+expect envoy d9turn=Sleeve/0
+run
+expect envoy msg:normal=Delivered msg:marked=Delivered
+commit
+crash
+expect envoy msg:normal=Delivered msg:marked=Delivered
