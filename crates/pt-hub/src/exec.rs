@@ -1210,10 +1210,10 @@ impl SleeveExec {
         };
         note.push_str(&match parent {
                     Some(name) => format!(
-                        "Mail your parent ({name}, $PROTECTORATE_PARENT) or Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`). A sleeve may send to itself, its children, its parent, and Envoy; reach a sibling through the parent. Use `--message-file FILE` (or `-` for stdin) for long or code-bearing text. `sleeve inbox <name>` shows your queued messages to a reachable sleeve; use `--drop` to remove them or `sleeve send <name> --supersede <text>` to replace them.\n\n"
+                        "Mail your parent ({name}, $PROTECTORATE_PARENT) or Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`). A sleeve may send to itself, its children, its parent, and Envoy; reach a sibling through the parent. Queued prompts at a turn boundary are delivered together in order, except across Envoy's vendor-agent privacy boundary. Use `--message-file FILE` (or `-` for stdin) for long or code-bearing text. `sleeve inbox <name>` shows your queued messages to a reachable sleeve; use `--drop` to remove them or `sleeve send <name> --supersede <text>` to replace them.\n\n"
                     ),
                     None => format!(
-                        "Mail Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`). A sleeve may send to itself, its children, its parent, and Envoy; reach a sibling through the parent. Use `--message-file FILE` (or `-` for stdin) for long or code-bearing text. `sleeve inbox <name>` shows your queued messages to a reachable sleeve; use `--drop` to remove them or `sleeve send <name> --supersede <text>` to replace them.\n\n"
+                        "Mail Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`). A sleeve may send to itself, its children, its parent, and Envoy; reach a sibling through the parent. Queued prompts at a turn boundary are delivered together in order, except across Envoy's vendor-agent privacy boundary. Use `--message-file FILE` (or `-` for stdin) for long or code-bearing text. `sleeve inbox <name>` shows your queued messages to a reachable sleeve; use `--drop` to remove them or `sleeve send <name> --supersede <text>` to replace them.\n\n"
                     ),
                 });
         if let Some(live) = &self.live

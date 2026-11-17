@@ -126,7 +126,18 @@ CLI on the hub machine (section 3.1).
   removal of the caller's queued prompts. `sleeve send <sleeve> --supersede` atomically
   replaces those prompts with the new send; a refusal drops nothing. Neither affects other
   senders, in-flight messages or continuations, and supersede cannot steer.
-  Queued messages still deliver at a turn boundary.
+  At a headless turn boundary, consecutive queued prompts are delivered in FIFO order as one
+  prompt, separated by blank lines and retaining their normal sender headers. A non-prompt
+  continuation ends the batch. For Envoy, a change between vendor-agent and other senders
+  also ends the batch, preserving the vendor-agent transcript's privacy boundary.
+  Every batched message shares the delivery effect's outcome;
+  an unwritten retry keeps the batch. Steers still enter the running turn. The origin is the
+  last sender in the strictest applicable class: D9-origin senders first, then the sleeve's
+  parent or Envoy, then other senders. D9 restrictions apply when any sender has D9 origin;
+  a parent or Envoy selected as origin receives the normal turn report. A journaled `MailBatching` marker
+  enables this behavior once on upgrade; replay before the marker uses the former single-message
+  delivery. Future delivery-semantics changes likewise need a journaled marker so older
+  events retain their original effect allocations.
   One tree may land at most 8 messages on Envoy in 10 minutes, counted on the tree's root. Upward
   mail to a parent who is not Envoy has the same bound per sender. Mail to Envoy spends only the
   tree's budget. The core journals the events and replay rebuilds the times. A refusal says when

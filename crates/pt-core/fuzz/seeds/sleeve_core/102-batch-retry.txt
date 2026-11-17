@@ -1,0 +1,30 @@
+#scenario 8a8e17ed0cc0c1e2
+# A busy batch retries unchanged; a later message waits. A Nack rejects every batch member.
+mail-batching
+spawn root /w/a
+run
+obs root ready
+send root active
+run
+send root a
+send root b
+policy prompt=busy
+obs root settled
+expect-batch a a b
+run
+expect root msg:a=Queued msg:b=Queued
+send root later
+policy prompt=ack
+tick 1s
+expect-batch a a b
+run
+expect root msg:a=Delivered msg:b=Delivered msg:later=Queued
+send root last
+policy prompt=nack
+obs root settled
+expect-batch later later last
+run
+expect root msg:later=Rejected msg:last=Rejected
+commit
+crash
+expect root msg:a=Delivered msg:b=Delivered msg:later=Rejected msg:last=Rejected

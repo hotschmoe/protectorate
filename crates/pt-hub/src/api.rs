@@ -10,8 +10,9 @@ use std::time::{Duration, Instant};
 
 use pt_api::{self as api, ApiError, ErrorCode, Method, method as m};
 use pt_core::{
-    ApprovalState, Claim, EventKind, Layout, Life, MsgKind, MsgState, Party, Reply, SendMode,
-    SleeveId, Source, SpawnSpec, State, Target, name_ok, overlap_refusal, path_ok, path_within,
+    ApprovalState, Claim, EffectKind, EffectState, EventKind, Layout, Life, MsgKind, MsgState,
+    Party, Reply, SendMode, SleeveId, Source, SpawnSpec, State, Target, name_ok, overlap_refusal,
+    path_ok, path_within,
 };
 use pt_drivers::{Entry, PromptKind};
 use pt_json::{FromJson, ToJson, Value};
@@ -2022,6 +2023,28 @@ fn answer(hub: &Hub, id: SleeveId, request_id: &str, idle: bool) -> Option<(Stri
     result.or_else(|| (seen && idle).then(|| (text.join("\n"), seq)))
 }
 
+fn batch_lead<'a>(state: &'a State, id: SleeveId, request_id: &'a str) -> &'a str {
+    state
+        .effects
+        .values()
+        .rev()
+        .find_map(|effect| match &effect.kind {
+            EffectKind::SendPrompt {
+                sleeve,
+                request_ids,
+                request_id: lead,
+                ..
+            } if *sleeve == id
+                && effect.state != EffectState::Abandoned
+                && request_ids.iter().any(|r| r == request_id) =>
+            {
+                Some(lead.as_str())
+            }
+            _ => None,
+        })
+        .unwrap_or(request_id)
+}
+
 /// The latest message from `party` to Envoy: queued, then being sent, then in the transcript.
 fn latest_from(hub: &Hub, view: &View, id: SleeveId, party: Party) -> Result<String> {
     let s = view
@@ -2032,11 +2055,25 @@ fn latest_from(hub: &Hub, view: &View, id: SleeveId, party: Party) -> Result<Str
     if let Some(r) = s.queue.iter().rfind(|r| mine(r)) {
         return Ok(r.clone());
     }
-    let sending = s.messages.iter().find(|(_, m)| {
-        m.from == party && matches!(m.state, MsgState::InFlight(_) | MsgState::SteerHeld)
-    });
+    let sending = s
+        .messages
+        .iter()
+        .filter(|(_, m)| {
+            m.from == party && matches!(m.state, MsgState::InFlight(_) | MsgState::SteerHeld)
+        })
+        .max_by_key(|(_, m)| m.seq);
     if let Some((r, _)) = sending {
         return Ok(r.clone());
+    }
+    if let Some((id, _)) = s
+        .messages
+        .iter()
+        .filter(|(_, m)| {
+            m.from == party && m.kind == MsgKind::Prompt && m.state == MsgState::Delivered
+        })
+        .max_by_key(|(_, m)| m.seq)
+    {
+        return Ok(id.clone());
     }
     let mut from_log = None;
     hub.transcripts
@@ -2088,7 +2125,13 @@ fn envoy_wait(c: &Ctx<'_>, r: api::EnvoyWaitRequest) -> Result<api::EnvoyReply> 
                 ErrorCode::Conflict,
                 format!("message {request_id} may or may not have reached Envoy"),
             ))),
-            MsgState::Delivered => answer(hub, id, &request_id, s.settled_idle()).map(Ok),
+            MsgState::Delivered => answer(
+                hub,
+                id,
+                batch_lead(&v.state, id, &request_id),
+                s.settled_idle(),
+            )
+            .map(Ok),
             _ => None,
         }
     });
@@ -2101,7 +2144,9 @@ fn envoy_wait(c: &Ctx<'_>, r: api::EnvoyWaitRequest) -> Result<api::EnvoyReply> 
         }),
         Some(Err(e)) => Err(e),
         None => {
-            let (text, seq) = answer(hub, id, &request_id, true).unwrap_or_default();
+            let view = hub.view();
+            let (text, seq) =
+                answer(hub, id, batch_lead(&view.state, id, &request_id), true).unwrap_or_default();
             Ok(api::EnvoyReply {
                 request_id,
                 settled: false,

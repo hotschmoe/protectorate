@@ -914,7 +914,10 @@ fn i9(st: &State, s: &Sleeve) {
                     !e.state.terminal(),
                     "I9: {r} in flight on a finished record"
                 );
-                assert_eq!(&e.key, r);
+                match &e.kind {
+                    EffectKind::SendPrompt { request_ids, .. } => assert!(request_ids.contains(r)),
+                    _ => assert_eq!(&e.key, r),
+                }
             }
             _ => {}
         }

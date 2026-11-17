@@ -120,6 +120,7 @@ pub enum Obs {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EventKind {
+    MailBatching,
     // Commands from the API (owner, Envoy, agents, sleeves).
     Spawn(SpawnSpec),
     Send {

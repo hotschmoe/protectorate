@@ -223,6 +223,9 @@ impl Runner {
         let arg = |i: usize| words.get(i).copied().ok_or("missing argument".to_string());
         use EventKind as E;
         match words[0] {
+            "mail-batching" => {
+                self.sim.apply(E::MailBatching);
+            }
             "spawn" => {
                 let parent = kv("parent").map(|p| self.id(p)).transpose()?;
                 let view = flag("view");
@@ -613,6 +616,18 @@ impl Runner {
                     return Err(format!("reply is {got:?}, expected {want:?}"));
                 }
             }
+            "expect-batch" if self.checked => {
+                let effect = self.effect(arg(1)?)?;
+                let ids = match &self.sim.st.effects[&effect].kind {
+                    EffectKind::SendPrompt { request_ids, .. } => request_ids,
+                    _ => return Err("not a prompt".into()),
+                };
+                let expected: Vec<String> =
+                    words.iter().skip(2).map(|s| (*s).to_string()).collect();
+                if *ids != expected {
+                    return Err(format!("batch {ids:?}, expected {expected:?}"));
+                }
+            }
             "expect-effect" if self.checked => {
                 let key = arg(1)?;
                 let all: Vec<&Effect> = self
@@ -676,8 +691,8 @@ impl Runner {
                 }
             }
             "expect-approval" if self.checked => self.expect_approval(&words)?,
-            "expect" | "expect-effect" | "expect-job" | "expect-none" | "expect-approval"
-            | "expect-notice" | "expect-reply" => {}
+            "expect" | "expect-batch" | "expect-effect" | "expect-job" | "expect-none"
+            | "expect-approval" | "expect-notice" | "expect-reply" => {}
             w => return Err(format!("unknown command {w}")),
         }
         Ok(())
@@ -750,6 +765,7 @@ impl Runner {
                 "harness" => format!("{:?}", s.target.harness).to_lowercase(),
                 "queue" => s.queue.len().to_string(),
                 "turn_seq" => s.turn_seq.to_string(),
+                "turn_from" => variant(&s.turn_from),
                 "auto_continue" => s.auto_continue.map_or("none".into(), |n| n.to_string()),
                 "effort" => s.effort.clone().unwrap_or("none".into()),
                 "agent" => s.turn_agent.clone().unwrap_or_else(|| "none".into()),

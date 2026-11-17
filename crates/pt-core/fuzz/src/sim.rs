@@ -128,6 +128,108 @@ impl Sim {
         let mut reference = prev.clone();
         let expected = apply_reference(&mut reference, &e);
         let out = apply(&mut self.st, &e);
+        for intent in &out {
+            if let Intent::Execute {
+                effect,
+                kind:
+                    EffectKind::SendPrompt {
+                        sleeve,
+                        request_ids,
+                        text,
+                        kind: MsgKind::Prompt,
+                        ..
+                    },
+                ..
+            } = intent
+                && !prev.effects.contains_key(effect)
+            {
+                let after = &self.st.sleeves[sleeve];
+                if let Some(before) = prev.sleeves.get(sleeve) {
+                    let candidates: Vec<_> = before
+                        .queue
+                        .iter()
+                        .filter(|id| {
+                            let m = &before.messages[*id];
+                            match &e.kind {
+                                EventKind::Supersede { to, from, .. }
+                                | EventKind::DropQueued { to, from }
+                                    if to == sleeve =>
+                                {
+                                    !(m.from == *from && m.kind == MsgKind::Prompt)
+                                }
+                                _ => true,
+                            }
+                        })
+                        .collect();
+                    if candidates
+                        .first()
+                        .is_some_and(|id| Some(*id) == request_ids.first())
+                    {
+                        let first = &before.messages[candidates[0]];
+                        let retry = before.unwritten_prompts.contains(candidates[0]);
+                        let is_envoy = before.name == ENVOY_NAME && before.parent.is_none();
+                        let expected: Vec<_> = candidates
+                            .into_iter()
+                            .take_while(|id| {
+                                let m = &before.messages[*id];
+                                m.kind == MsgKind::Prompt
+                                    && before.unwritten_prompts.contains(*id) == retry
+                                    && (!is_envoy
+                                        || (m.from == Party::Agent) == (first.from == Party::Agent))
+                            })
+                            .take(if prev.mail_batching { usize::MAX } else { 1 })
+                            .cloned()
+                            .collect();
+                        assert!(
+                            request_ids.starts_with(&expected),
+                            "batch differs from independent queue prediction"
+                        );
+                    }
+                }
+                let mut reference: Vec<String> = prev
+                    .sleeves
+                    .get(sleeve)
+                    .map(|s| {
+                        s.queue
+                            .iter()
+                            .filter(|id| {
+                                after
+                                    .messages
+                                    .get(*id)
+                                    .is_some_and(|m| m.state == MsgState::InFlight(*effect))
+                            })
+                            .cloned()
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let mut new: Vec<_> = after
+                    .messages
+                    .iter()
+                    .filter(|(id, m)| {
+                        !prev
+                            .sleeves
+                            .get(sleeve)
+                            .is_some_and(|s| s.messages.contains_key(*id))
+                            && m.state == MsgState::InFlight(*effect)
+                    })
+                    .map(|(id, m)| (m.seq, id.clone()))
+                    .collect();
+                new.sort();
+                reference.extend(new.into_iter().map(|(_, id)| id));
+                assert_eq!(
+                    *request_ids, reference,
+                    "batch ids differ from queue reference"
+                );
+                assert_eq!(
+                    *text,
+                    reference
+                        .iter()
+                        .map(|id| after.messages[id].text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n\n")
+                );
+            }
+        }
         let (target, sender, accepted) = match &e.kind {
             EventKind::DropQueued { to, from } => (
                 Some(*to),

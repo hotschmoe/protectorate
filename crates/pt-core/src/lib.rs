@@ -70,6 +70,7 @@ impl Core<'_> {
     fn handle(&mut self, kind: &EventKind) {
         use EventKind as E;
         match kind {
+            E::MailBatching => self.st.mail_batching = true,
             E::Spawn(spec) => self.spawn(spec),
             E::Send {
                 to,
