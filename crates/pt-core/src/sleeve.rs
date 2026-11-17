@@ -929,9 +929,11 @@ impl Core<'_> {
         let insert = |core: &mut Self, state| {
             let seq = core.st.next_msg;
             core.st.next_msg += 1;
+            let queued_at = core.now;
             core.sl(to).messages.insert(
                 request_id.to_string(),
                 Message {
+                    queued_at,
                     from,
                     agent: agent.map(str::to_string),
                     kind: MsgKind::Prompt,
@@ -953,10 +955,16 @@ impl Core<'_> {
             insert(self, MsgState::Queued);
             if self.frozen(to) {
                 self.sl(to).queue.push_back(request_id.to_string());
-                return self.reply(Reply::Queued);
+                return self.reply(Reply::Sent {
+                    queued: true,
+                    count: self.st.sleeves[&to].queue.len() as u64,
+                });
             }
             self.inbox(to, request_id);
-            return self.reply(Reply::Inboxed);
+            return self.reply(Reply::Sent {
+                queued: false,
+                count: self.st.sleeves[&to].queue.len() as u64,
+            });
         }
         match mode {
             SendMode::Steer if steers && working => {
@@ -965,7 +973,7 @@ impl Core<'_> {
                 }
                 insert(self, MsgState::Queued);
                 self.steer(to, request_id);
-                self.reply(Reply::Steering);
+                self.reply(Reply::Sent { queued: false, count: self.st.sleeves[&to].queue.len() as u64 });
             }
             SendMode::Steer if steers && delivering => {
                 if !self.mail_ok(to, from, d9, bounded) {
@@ -973,7 +981,7 @@ impl Core<'_> {
                 }
                 insert(self, MsgState::SteerHeld);
                 self.sl(to).steer_slot = Some(request_id.to_string());
-                self.reply(Reply::Steering);
+                self.reply(Reply::Sent { queued: false, count: self.st.sleeves[&to].queue.len() as u64 });
             }
             SendMode::Steer if !s.target.harness.steers() && !(self.deliverable(to) && queue_empty) => self.refuse(
                 Code::FailedPrecondition,
@@ -994,11 +1002,7 @@ impl Core<'_> {
                     self.st.sleeves[&to].messages[request_id].state,
                     MsgState::InFlight(_)
                 );
-                self.reply(if sent {
-                    Reply::Delivering
-                } else {
-                    Reply::Queued
-                });
+                self.reply(Reply::Sent { queued: !sent, count: self.st.sleeves[&to].queue.len() as u64 });
             }
         }
     }
@@ -2010,9 +2014,11 @@ impl Core<'_> {
         }
         let msg_seq = self.st.next_msg;
         self.st.next_msg += 1;
+        let queued_at = self.now;
         self.sl(sid).messages.insert(
             key.clone(),
             Message {
+                queued_at,
                 // The party that opened this owner turn (an agent steer, or mail from a marked
                 // sleeve, replaces it), so the continued turn keeps that origin and a rejection
                 // is reported to that party. A rejected continuation still warns the owner.

@@ -43,9 +43,9 @@ always give it the token.
 ## Sleeves
 
 ```
-sleeve list | sleeve show <sleeve>
+sleeve list | sleeve show <sleeve> | sleeve inbox [<sleeve>]
 sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
-      [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
+      [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT | --message-file FILE]
 sleeve send <sleeve> <text...> [--steer]
 sleeve interrupt|stop|rm|takeover <sleeve>
 sleeve start <sleeve> [--harness H] [--provider P] [--model M]
@@ -54,7 +54,17 @@ sleeve transcript <sleeve> [--from SEQ] [--limit N]
 sleeve wait <sleeve> [--until idle|done|blocked|parked|ended|report] [--timeout SECS]
 ```
 
+For `sleeve send` and `envoy send`, `--message-file FILE` replaces the text arguments;
+for `sleeve spawn` it replaces `--message`. Use `-` for stdin. This avoids shell expansion
+of long or code-bearing messages. A sleeve reaches a sibling through its parent.
+
 A sleeve is named by its id or its name.
+
+List and show include the oldest queued message's age beside the queue count. `sleeve send`
+reports whether the message was queued or sent for delivery and the queue length at acceptance.
+Queued messages wait for a turn boundary. `sleeve inbox` peeks at the FIFO, showing sender,
+age and text without consuming or reordering it. A sleeve credential can inspect only its own
+queue and can omit the name; the owner supplies a name and can inspect any queue.
 
 - **spawn** with `--path DIR` makes a root sleeve on that directory (one root per directory). The
   directory must already exist where the hub can see it; a missing one is `the hub cannot see
@@ -422,7 +432,12 @@ Not available: the systemd user bus (`systemd-run --user` in a test) and long un
 be positive. The hub reads config at startup; changes apply on the next sleeve launch
 after a hub restart. Names include `envoy`, and an override applies to a new sleeve
 with the same name too. With scopes disabled no memory limit is enforced. Swap remains
-disabled in scopes; build parallelism continues to follow the CPU quota.
+disabled in scopes; build parallelism continues to follow the CPU quota. `sleeve show` reports
+the incarnation limit in bytes (including JSON); `PROTECTORATE_MEMORY_MAX` supplies the
+configured value inside the sleeve. A non-Envoy sleeve’s first prompt reports the limit and
+directs a sleeve that needs more to ask Envoy; the owner raises `sleeve_memory_max_overrides`. A scope OOM
+notice and the next non-Envoy prompt name the limit and override key. The transcript and
+continuation brief show the original request, without the hub’s prompt preamble.
 
 ## Sleeve devices
 

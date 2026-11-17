@@ -278,6 +278,13 @@ pt_json::record! {
 }
 
 impl Config {
+    pub fn sleeve_memory_limit(&self, name: &str) -> u64 {
+        self.sleeve_memory_max_overrides
+            .get(name)
+            .copied()
+            .unwrap_or(self.sleeve_memory_max)
+    }
+
     /// Reads `config.json`, writing the defaults first when it does not exist.
     pub fn load(home: &Home) -> io::Result<Config> {
         let path = home.config();

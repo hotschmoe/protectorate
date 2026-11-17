@@ -54,7 +54,7 @@ pub fn state(
             .collect(),
         sleeves: shown
             .iter()
-            .map(|s| wire::sleeve(&hub.transcripts, view, s))
+            .map(|s| wire::sleeve(&hub.config, &hub.transcripts, view, s))
             .collect(),
         approvals,
         nodes: nodes(hub),

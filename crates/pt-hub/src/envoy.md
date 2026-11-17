@@ -104,12 +104,13 @@ harness saw; whether the test was the right one is still yours to judge.
 
 ## Mail from sleeves
 
-A sleeve may mail its parent and you, and nothing else (not a sibling, not another tree, not the
-owner's methods). It runs `protectorate sleeve send <parent> <text>` or
+A sleeve may mail itself, its children, its parent and you; it reaches a sibling through its
+parent. It runs `protectorate sleeve send <parent> <text>` or
 `protectorate sleeve send envoy <text>`. A newly spawned sleeve's first prompt names how: its
 parent's name is `$PROTECTORATE_PARENT` when it has one, your name is `$PROTECTORATE_ENVOY`, and
 `$PROTECTORATE_MAIL` is the command. Tell a sleeve it can ask you that way for help or for a
 design recommendation.
+For long or code-bearing text, use `--message-file FILE` or `--message-file -` for stdin.
 
 The message is an ordinary send: it is queued for your next turn (or steered into the running
 one) and arrives marked `[from sleeve <name>]`. One tree can land at most 8 messages on you per

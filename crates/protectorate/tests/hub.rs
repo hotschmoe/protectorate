@@ -539,9 +539,13 @@ fn forced_resleeve_with_brief() {
     if !have_runtime() {
         return;
     }
-    let hub = Hub::start_with(
+    let hub = Hub::start_config(
         "resleeve",
         "pi_local",
+        &[(
+            "sleeve_devices",
+            pt_json::Value::from(vec![pt_json::Value::from("/dev/zero")]),
+        )],
         &[],
         &[("PT_TEST_FAULT", "usage_limit:six")],
     );
@@ -617,6 +621,11 @@ fn forced_resleeve_with_brief() {
             "the brief has {section:?}:\n{brief}"
         );
     }
+    assert!(
+        brief.contains(&format!("First request:\n> {READY}")),
+        "first request includes hub preamble: {brief}"
+    );
+    assert!(!brief.contains("Device bound: /dev/zero"), "{brief}");
     assert_eq!(
         git_out(&repo, &["status", "--porcelain"]),
         "",
@@ -880,9 +889,25 @@ for line in sys.stdin:
     });
     let request = hub.send("worker", "answer this prompt");
     assert_eq!(hub.sleeve("worker")["queued"].as_u64(), Some(1));
+    let peek = hub.cli(&["--json", "sleeve", "inbox", "worker"]).json();
+    assert_eq!(peek["messages"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        peek["messages"][0]["text"].as_str(),
+        Some("answer this prompt")
+    );
+    assert_eq!(
+        peek,
+        hub.cli(&["--json", "sleeve", "inbox", "worker"]).json()
+    );
     assert!(of_type(&hub.transcript("worker"), "user_message").is_empty());
     std::fs::write(repo.join("release-foreign"), "release").unwrap();
     hub.wait("worker", "idle", 60);
+    assert!(
+        hub.cli(&["--json", "sleeve", "inbox", "worker"]).json()["messages"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     let entries = hub.transcript("worker");
     let pos = |kind: &str, value: Option<&str>| {
         entries
@@ -947,10 +972,20 @@ for line in sys.stdin:
     hub.wait("envoy", "idle", 60);
     let token = hub.printed("envoy-only token: ");
     let as_agent = [("PROTECTORATE_TOKEN", token.as_str())];
+    let message_file = dir.join("envoy-message.txt");
+    std::fs::write(&message_file, "answer `me` $(literally)").unwrap();
     let sent = hub
         .cli_env(
             &as_agent,
-            &["--json", "envoy", "send", "--as", "grokbot", "answer me"],
+            &[
+                "--json",
+                "envoy",
+                "send",
+                "--as",
+                "grokbot",
+                "--message-file",
+                message_file.to_str().unwrap(),
+            ],
         )
         .json();
     let request = sent["request_id"].as_str().unwrap();
@@ -982,6 +1017,11 @@ for line in sys.stdin:
         .json();
     assert_eq!(reply["settled"].as_bool(), Some(true), "{reply}");
     assert_eq!(reply["text"].as_str(), Some("answer to agent"));
+    assert!(
+        hub.cli_env(&as_agent, &["envoy", "read"])
+            .ok()
+            .contains("answer `me` $(literally)")
+    );
 }
 
 #[test]
@@ -1105,6 +1145,7 @@ fn sleeve_devices_are_bound_and_missing_ones_are_logged() {
         &format!(
             r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi
 cat '{}' > "$CARGO_TARGET_DIR/saw"
+printf '%s' "$PROTECTORATE_MEMORY_MAX" > "$CARGO_TARGET_DIR/memory"
 test -c '{}' || exit 1
 exec 3<>'{}'
 IFS= read -r prompt
@@ -1126,7 +1167,7 @@ exec sleep 300"#,
         "envoy" => pt_json::obj! { "harness" => "claude" },
         "claude_program" => fake.to_str().unwrap(),
         "scopes" => true,
-        "sleeve_memory_max" => 8589934592u64,
+        "sleeve_memory_max" => 1611137024u64,
         "sleeve_memory_max_overrides" => pt_json::obj! { "devices" => 17179869184u64 },
         "quota_poll_secs" => 0u64,
         "harness_update_hours" => 0u64,
@@ -1167,11 +1208,18 @@ exec sleep 300"#,
         .json();
     let id = s["id"].as_str().unwrap();
     let scratch = hub.home.join(format!("sleeves/{id}/scratch"));
-    let saw = eventually(
-        "the bound device to be readable",
-        Duration::from_secs(60),
-        || std::fs::read_to_string(scratch.join("target/saw")).ok(),
-    );
+    let end = std::time::Instant::now() + Duration::from_secs(60);
+    let saw = loop {
+        if let Ok(saw) = std::fs::read_to_string(scratch.join("target/saw")) {
+            break saw;
+        }
+        assert!(
+            std::time::Instant::now() < end,
+            "timed out waiting for the bound device; hub log:\n{}",
+            tail(&hub.log_text(), 80)
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    };
     assert_eq!(saw.trim(), "NPU");
     let doctor_after = hub.cli(&["doctor"]).stdout;
     let device_line = doctor_after
@@ -1197,9 +1245,29 @@ exec sleep 300"#,
         prompt.contains(&format!("holder: pid {} sleep", holder.id())),
         "{prompt}"
     );
+    eventually(
+        "the sandbox memory environment",
+        Duration::from_secs(10),
+        || {
+            (std::fs::read_to_string(scratch.join("target/memory"))
+                .ok()?
+                .trim()
+                == "17179869184")
+                .then_some(())
+        },
+    );
     let args = std::fs::read_to_string(dir.join("scope-args")).unwrap();
     assert!(args.contains("MemoryMax=17179869184"), "{args}");
     assert!(args.contains("MemorySwapMax=0"), "{args}");
+    assert_eq!(
+        hub.sleeve("devices")["incarnation"]["memory_max_bytes"].as_u64(),
+        Some(17179869184)
+    );
+    assert!(
+        hub.cli(&["sleeve", "show", "devices"])
+            .ok()
+            .contains("16 GiB (17179869184 bytes)")
+    );
     let repo2 = temp_repo("memory-default");
     hub.cli(&[
         "--json",
@@ -1214,8 +1282,18 @@ exec sleep 300"#,
     .json();
     eventually("default memory scope", Duration::from_secs(60), || {
         let args = std::fs::read_to_string(dir.join("scope-args")).ok()?;
-        args.contains("MemoryMax=8589934592").then_some(())
+        args.contains("MemoryMax=1611137024").then_some(())
     });
+    eventually(
+        "formatted default memory limit",
+        Duration::from_secs(30),
+        || {
+            hub.cli(&["sleeve", "show", "memory-default"])
+                .ok()
+                .contains("1536.50 MiB (1611137024 bytes)")
+                .then_some(())
+        },
+    );
     assert!(
         hub.log_text()
             .contains(&format!("device {}: missing", missing.display())),
@@ -1395,7 +1473,16 @@ fn upward_mail() {
     write_script(
         &fake,
         r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi
-while IFS= read -r line; do printf '%s\n' "$line" >> "$CARGO_TARGET_DIR/in"; done
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$CARGO_TARGET_DIR/in"
+  if [ "$PROTECTORATE_SLEEVE" = leaf ]; then
+    case "$line" in *'do the task'*) while [ ! -e "$CARGO_TARGET_DIR/finish" ]; do sleep 0.1; done ;; esac
+    if [ -e "$CARGO_TARGET_DIR/finish" ]; then
+      printf '%s\n' "$line" | sed 's/^{/{"isReplay":true,/'
+      printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn"}'
+    fi
+  fi
+done
 exec sleep 300"#,
     );
     write_script(&dir.join("systemd-run"), "exit 0");
@@ -1405,12 +1492,15 @@ exec sleep 300"#,
         "scopes" => false,
         "quota_poll_secs" => 0u64,
         "harness_update_hours" => 0u64,
+        "sleeve_devices" => vec![pt_json::Value::from("/dev/zero")],
     };
     std::fs::write(home.join("config.json"), config.to_string()).unwrap();
     let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
     let hub = Hub::open(home, &[], &[("PATH", &path)]);
     let repo = temp_repo("up");
     let other_repo = temp_repo("up-other");
+    let spawn_file = dir.join("spawn-message.txt");
+    std::fs::write(&spawn_file, "spawn literal $(code)").unwrap();
     let spawn = |args: &[&str]| hub.cli(args).json()["id"].as_str().unwrap().to_string();
     let tree = spawn(&[
         "--json",
@@ -1442,7 +1532,7 @@ exec sleep 300"#,
         "--harness",
         "claude",
     ]);
-    let _other = spawn(&[
+    let other = spawn(&[
         "--json",
         "sleeve",
         "spawn",
@@ -1451,6 +1541,8 @@ exec sleep 300"#,
         other_repo.to_str().unwrap(),
         "--harness",
         "claude",
+        "--message-file",
+        spawn_file.to_str().unwrap(),
     ]);
     for name in ["envoy", "tree", "leaf", "sib", "other"] {
         let end = std::time::Instant::now() + Duration::from_secs(90);
@@ -1467,6 +1559,13 @@ exec sleep 300"#,
             std::thread::sleep(Duration::from_millis(200));
         }
     }
+    let other_input = eventually("spawn file prompt", Duration::from_secs(30), || {
+        std::fs::read_to_string(hub.home.join(format!("sleeves/{other}/scratch/target/in"))).ok()
+    });
+    assert!(
+        other_input.contains("spawn literal $(code)"),
+        "{other_input}"
+    );
 
     let socket = hub
         .home
@@ -1478,6 +1577,10 @@ exec sleep 300"#,
         .unwrap()
         .to_string();
     assert!(token.starts_with("pc1."), "{token}");
+    assert_eq!(
+        env_get(&leaf_env, "PROTECTORATE_MEMORY_MAX"),
+        Some("4294967296")
+    );
     assert_eq!(env_get(&leaf_env, "PROTECTORATE_PARENT"), Some("tree"));
     assert_eq!(env_get(&leaf_env, "PROTECTORATE_ENVOY"), Some("envoy"));
     assert_eq!(
@@ -1511,6 +1614,28 @@ exec sleep 300"#,
         assert_eq!(r.status, 4, "{args:?}: {} {}", r.stdout, r.stderr);
     };
     denied(&["sleeve", "send", "sib", "no"]);
+    let refusal = hub.cli_env(&as_leaf, &["sleeve", "send", "sib", "no"]);
+    assert!(
+        refusal
+            .stderr
+            .contains("reach a sibling through the parent"),
+        "{}",
+        refusal.stderr
+    );
+    let mail_file = dir.join("mail.txt");
+    std::fs::write(&mail_file, "literal `backticks` and $(command)\n").unwrap();
+    let conflict = hub.cli_env(
+        &as_leaf,
+        &[
+            "sleeve",
+            "send",
+            "tree",
+            "text",
+            "--message-file",
+            mail_file.to_str().unwrap(),
+        ],
+    );
+    assert_ne!(conflict.status, 0);
     denied(&["sleeve", "send", "other", "no"]);
     denied(&["envoy", "send", "no"]);
     denied(&["sleeve", "transcript", "tree"]);
@@ -1539,8 +1664,107 @@ exec sleep 300"#,
             ],
         )
     };
-    sent("tree", "before the task");
+    hub.cli_env(
+        &as_leaf,
+        &[
+            "sleeve",
+            "send",
+            "tree",
+            "--message-file",
+            mail_file.to_str().unwrap(),
+        ],
+    )
+    .ok();
     hub.cli(&["sleeve", "send", "leaf", "do the task"]).ok();
+    let input = eventually(
+        "the first prompt memory note",
+        Duration::from_secs(30),
+        || {
+            let input =
+                std::fs::read_to_string(hub.home.join(format!("sleeves/{leaf}/scratch/target/in")))
+                    .ok()?;
+            input.contains("Device bound: /dev/zero").then_some(input)
+        },
+    );
+    let memory = input
+        .find("Scopes are disabled; no memory limit is enforced")
+        .unwrap();
+    let mail = input
+        .find("A sleeve may send to itself, its children, its parent, and Envoy")
+        .unwrap();
+    let device = input.find("Device bound: /dev/zero").unwrap();
+    assert!(memory < mail && mail < device, "{input}");
+    eventually(
+        "the unmodified request in the transcript",
+        Duration::from_secs(30),
+        || {
+            let entries = hub.transcript("leaf");
+            of_type(&entries, "user_message")
+                .iter()
+                .any(|e| e["entry"]["text"].as_str() == Some("do the task"))
+                .then_some(())
+        },
+    );
+    let queued = hub
+        .cli(&["--json", "sleeve", "send", "leaf", "waiting in queue"])
+        .json();
+    assert_eq!(queued["queued"].as_bool(), Some(true));
+    assert!(queued["queue_length"].as_u64().unwrap() >= 1);
+    {
+        use std::io::Write;
+        use std::process::Stdio;
+        let mut child = cli_command()
+            .arg("--home")
+            .arg(&hub.home)
+            .args(["sleeve", "send", "leaf", "--message-file", "-"])
+            .env_remove("PROTECTORATE_TOKEN")
+            .env_remove("PROTECTORATE_SOCKET")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"stdin `literal` $(code)")
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains("queued: leaf"));
+    }
+    let inbox = hub.cli_env(&as_leaf, &["--json", "sleeve", "inbox"]).json();
+    assert!(
+        inbox["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["text"].as_str() == Some("stdin `literal` $(code)"))
+    );
+    assert!(
+        inbox["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["text"].as_str() == Some("waiting in queue")
+                && m["sender"].as_str() == Some("owner"))
+    );
+    assert_eq!(
+        inbox,
+        hub.cli(&["--json", "sleeve", "inbox", "leaf"]).json()
+    );
+    assert_eq!(
+        inbox,
+        hub.cli_env(&as_leaf, &["--json", "sleeve", "inbox"]).json()
+    );
+    assert!(hub.sleeve("leaf")["oldest_queued_at_ms"].as_u64().is_some());
+    let result = hub.cli(&["sleeve", "show", "leaf"]);
+    let show = result.ok();
+    assert!(show.contains("QUEUED") && show.contains(" ("), "{show}");
+    assert_eq!(
+        hub.cli_env(&as_leaf, &["sleeve", "inbox", "tree"]).status,
+        4
+    );
     let early = report(&[], "2");
     assert_ne!(
         early.status, 0,
@@ -1624,7 +1848,7 @@ exec sleep 300"#,
 
     let envoy_id = hub.sleeve("envoy")["id"].as_str().unwrap().to_string();
     for (id, marker) in [
-        (&tree, "before the task"),
+        (&tree, "literal `backticks` and $(command)"),
         (&envoy_id, "need a design recommendation"),
     ] {
         let saw = eventually(
@@ -1635,6 +1859,16 @@ exec sleep 300"#,
                     .ok()
             },
         );
+        if id == &envoy_id {
+            assert!(
+                !saw.contains("Scopes are disabled; no memory limit is enforced"),
+                "Envoy received a memory preamble: {saw}"
+            );
+            assert!(
+                !saw.contains("Mail Envoy ($PROTECTORATE_ENVOY"),
+                "Envoy received its own mail rules: {saw}"
+            );
+        }
         assert!(
             saw.contains("[from sleeve leaf]") && saw.contains(marker),
             "prompt for {id}: {saw}"
@@ -1666,6 +1900,27 @@ exec sleep 300"#,
         "{}",
         capped.stderr
     );
+    let leaf_path = std::path::PathBuf::from(hub.sleeve("leaf")["path"].as_str().unwrap());
+    std::fs::write(
+        hub.home
+            .join(format!("sleeves/{leaf}/scratch/target/finish")),
+        "",
+    )
+    .unwrap();
+    hub.wait("leaf", "idle", 90);
+    hub.cli(&["sleeve", "resleeve", "leaf", "--harness", "claude"])
+        .ok();
+    let brief = eventually(
+        "the leaf continuation brief",
+        Duration::from_secs(120),
+        || {
+            std::fs::read_to_string(leaf_path.join(".protectorate/BRIEF.md"))
+                .ok()
+                .filter(|text| text.contains("First request:"))
+        },
+    );
+    assert!(brief.contains("First request:\n> do the task"), "{brief}");
+    assert!(!brief.contains("Device bound: /dev/zero"), "{brief}");
 }
 
 /// A turn Envoy asked for ends with the hub's turn report in Envoy's queue, written from the
@@ -2531,6 +2786,7 @@ while True: a.append(bytearray(4*1024*1024))'"#,
     let config = pt_json::obj! {
         "envoy" => pt_json::obj! { "harness" => "claude" },
         "claude_program" => fake.to_str().unwrap(),
+        "sleeve_memory_max" => 100663296u64,
         "quota_poll_secs" => 0u64,
         "harness_update_hours" => 0u64,
     };
@@ -2558,18 +2814,6 @@ while True: a.append(bytearray(4*1024*1024))'"#,
                 .exists()
                 .then_some(())
         });
-        let scope = hub.scope(id, g);
-        let status = std::process::Command::new("systemctl")
-            .args([
-                "--user",
-                "set-property",
-                "--runtime",
-                &scope,
-                "MemoryMax=96M",
-            ])
-            .status()
-            .unwrap();
-        assert!(status.success(), "set memory limit on {scope}");
         std::thread::sleep(Duration::from_secs(1));
         std::fs::write(scratch.join(format!("tmp/go{g}")), "go").unwrap();
     }
@@ -2586,7 +2830,7 @@ while True: a.append(bytearray(4*1024*1024))'"#,
             .collect::<Vec<_>>()
             .join("\n");
         (notices
-            .matches("guardrail G4 tripped: the memory limit")
+            .matches("scope memory limit 100663296 bytes was hit; raise sleeve_memory_max_overrides for oom")
             .count()
             == 2)
             .then_some(())

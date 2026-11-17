@@ -269,6 +269,8 @@ api_records! {
     /// One harness process tree with generation `g`.
     pub struct Incarnation {
         pub g: u64,
+        /// Scope memory limit in bytes; absent when scopes are disabled.
+        pub memory_max_bytes: Option<u64>,
         pub mode: Mode,
         pub harness: Harness,
         pub subscription: Subscription,
@@ -310,6 +312,7 @@ api_records! {
         pub incarnation: Option<Incarnation>,
         /// Messages waiting for the turn to settle.
         pub queued: u64 = 0,
+        pub oldest_queued_at_ms: Option<EpochMs>,
         /// Tokens.
         pub budget_used: Option<u64>,
         pub budget_limit: Option<u64>,

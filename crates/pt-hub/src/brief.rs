@@ -216,6 +216,14 @@ fn build(hub: &Hub, view: &View, workdir: &Path, spec: &Spec<'_>, entries: &[Lin
         cause_text(spec.cause),
         if spec.forced { " (forced)" } else { "" }
     );
+    if spec.cause == Cause::Guard(pt_core::Guardrail::Oom) {
+        let _ = writeln!(
+            b,
+            "The scope memory limit of {} bytes was hit. Ask Envoy; the owner can raise sleeve_memory_max_overrides for {}.",
+            hub.config.sleeve_memory_limit(&s.name),
+            s.name
+        );
+    }
     let _ = writeln!(
         b,
         "Sleeve {}, workspace {}, was {} (g{}), continues as g{}.\n",
@@ -420,6 +428,8 @@ fn build(hub: &Hub, view: &View, workdir: &Path, spec: &Spec<'_>, entries: &[Lin
     }
     b.push_str(
         "Envoy's name is `envoy` (`$PROTECTORATE_ENVOY`). `$PROTECTORATE_MAIL` is the command. \
+         A sleeve may send to itself, its children, its parent, and Envoy; reach a sibling through the parent. \
+         Use `--message-file FILE` (or `-` for stdin) for long or code-bearing text. \
          The hub marks the message as mail from this sleeve.\n\n",
     );
 

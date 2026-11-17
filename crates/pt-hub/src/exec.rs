@@ -54,6 +54,7 @@ enum Ordered {
         request_id: String,
         effect: EffectId,
         attempt: u32,
+        text: String,
     },
 }
 
@@ -119,6 +120,7 @@ impl Executors {
             hub: self.hub.clone(),
             id,
             live: None,
+            oom_noted: std::cell::Cell::new(None),
         };
         match thread::Builder::new()
             .name(format!("pt-exec-{}", id.0))
@@ -197,6 +199,7 @@ struct SleeveExec {
     hub: Arc<Hub>,
     id: SleeveId,
     live: Option<Live>,
+    oom_noted: std::cell::Cell<Option<u64>>,
 }
 
 struct Prompt<'a> {
@@ -464,7 +467,7 @@ impl SleeveExec {
     }
 
     /// Tells incarnation `g`'s pump of a prompt about to be written; false when it has ended.
-    fn expect(&self, g: Gen, request_id: &str, effect: EffectId, attempt: u32) -> bool {
+    fn expect(&self, g: Gen, request_id: &str, effect: EffectId, attempt: u32, text: &str) -> bool {
         let Some(live) = self.live.as_ref().filter(|l| l.g == g) else {
             return false;
         };
@@ -473,6 +476,7 @@ impl SleeveExec {
             request_id: request_id.to_string(),
             effect,
             attempt,
+            text: text.to_string(),
         };
         live.order.send(PumpIn::Order(expect, tx)).is_ok() && rx.recv().is_ok()
     }
@@ -922,12 +926,7 @@ impl SleeveExec {
         }
         let mut sb =
             pt_sandbox::SandboxSpec::new(&hub.scope_sleeve(s.id), g.0, work.clone(), home, scratch);
-        sb.limits.memory_max_bytes = hub
-            .config
-            .sleeve_memory_max_overrides
-            .get(&s.name)
-            .copied()
-            .unwrap_or(hub.config.sleeve_memory_max);
+        sb.limits.memory_max_bytes = hub.config.sleeve_memory_limit(&s.name);
         let devices = crate::sleeve_devices::inspect(&hub);
         let mut device_note = String::new();
         for device in devices {
@@ -999,6 +998,10 @@ impl SleeveExec {
                 hub.home.sleeve_socket().to_string_lossy().into_owned(),
             ),
             ("PROTECTORATE_SLEEVE".into(), s.name.clone()),
+            (
+                "PROTECTORATE_MEMORY_MAX".into(),
+                sb.limits.memory_max_bytes.to_string(),
+            ),
             ("PATH".into(), tools.path),
         ];
         if let Some(name) = s
@@ -1125,7 +1128,7 @@ impl SleeveExec {
         let Some(session) = self.live_for(p.g) else {
             return ended();
         };
-        if !self.expect(p.g, p.request_id, p.effect, p.attempt) {
+        if !self.expect(p.g, p.request_id, p.effect, p.attempt, p.text) {
             return ended();
         }
         let from = from_label(&view.state, self.id, p.request_id);
@@ -1142,7 +1145,14 @@ impl SleeveExec {
             None => session.send_user(p.request_id, &from, prompt_kind(p.kind), text),
         };
         match sent {
-            Ok(()) => {}
+            Ok(()) => {
+                if noted.is_some()
+                    && let Some(s) = view.state.sleeve(self.id)
+                    && let Some(&at) = s.guard.ooms.last()
+                {
+                    self.oom_noted.set(Some(at));
+                }
+            }
             Err(pt_drivers::DriverError::Ended) => return ended(),
             Err(pt_drivers::DriverError::Busy | pt_drivers::DriverError::TurnEnded) => {
                 return Outcome::Unwritten;
@@ -1161,14 +1171,28 @@ impl SleeveExec {
         }
     }
 
-    /// The first prompt of a new sleeve names the mail variables. Envoy already has them in
-    /// its instructions, and a resleeve brief repeats them.
+    /// Add launch and OOM context to prompts.
     fn mail_note(&self, view: &View, kind: MsgKind, steer: bool) -> Option<String> {
         if steer || kind == MsgKind::Brief {
             return None;
         }
         let s = view.state.sleeve(self.id)?;
-        if s.turned || envoy_id(&view.state) == Some(self.id) {
+        if envoy_id(&view.state) == Some(self.id) {
+            return None;
+        }
+        if s.turned
+            && s.guard
+                .ooms
+                .last()
+                .is_some_and(|at| Some(*at) != self.oom_noted.get())
+        {
+            return Some(format!(
+                "The scope memory limit of {} bytes was hit. Ask Envoy; the owner can raise sleeve_memory_max_overrides for {}.\n\n",
+                self.hub.config.sleeve_memory_limit(&s.name),
+                s.name
+            ));
+        }
+        if s.turned {
             return None;
         }
         let envoy = crate::envoy::ENVOY;
@@ -1176,14 +1200,22 @@ impl SleeveExec {
             .parent
             .and_then(|p| view.state.sleeve(p))
             .map(|p| p.name.as_str());
-        let mut note = match parent {
-            Some(name) => format!(
-                "Mail your parent ({name}, $PROTECTORATE_PARENT) or Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`).\n\n"
-            ),
-            None => format!(
-                "Mail Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`).\n\n"
-            ),
+        let mut note = if self.hub.config.scopes {
+            format!(
+                "Memory limit: {} bytes. If a build needs more, ask Envoy; the owner can raise sleeve_memory_max_overrides.\n\n",
+                self.hub.config.sleeve_memory_limit(&s.name)
+            )
+        } else {
+            "Scopes are disabled; no memory limit is enforced.\n\n".to_string()
         };
+        note.push_str(&match parent {
+                    Some(name) => format!(
+                        "Mail your parent ({name}, $PROTECTORATE_PARENT) or Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`). A sleeve may send to itself, its children, its parent, and Envoy; reach a sibling through the parent. Use `--message-file FILE` (or `-` for stdin) for long or code-bearing text.\n\n"
+                    ),
+                    None => format!(
+                        "Mail Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`). A sleeve may send to itself, its children, its parent, and Envoy; reach a sibling through the parent. Use `--message-file FILE` (or `-` for stdin) for long or code-bearing text.\n\n"
+                    ),
+                });
         if let Some(live) = &self.live
             && !live.device_note.is_empty()
         {
@@ -1378,6 +1410,7 @@ struct Expect {
     effect: EffectId,
     attempt: u32,
     dispatched: bool,
+    text: String,
 }
 
 struct Held {
@@ -1402,11 +1435,13 @@ impl Pump {
                 request_id,
                 effect,
                 attempt,
+                text,
             } => {
                 let e = Expect {
                     effect,
                     attempt,
                     dispatched: false,
+                    text,
                 };
                 self.expects.insert(request_id, e);
             }
@@ -1508,7 +1543,14 @@ impl Pump {
             harness,
             ..
         } = *run;
-        let entry = ev.entry;
+        let mut entry = ev.entry;
+        if let Entry::UserMessage {
+            request_id, text, ..
+        } = &mut entry
+            && let Some(expected) = self.expects.get(request_id)
+        {
+            *text = expected.text.clone();
+        }
         if let Entry::AssistantText { r#final: false, .. }
         | Entry::Reasoning { r#final: false, .. } = entry
         {

@@ -112,9 +112,17 @@ CLI on the hub machine (section 3.1).
 - **Who may mail whom.** A sleeve may send to itself, its children, its parent, and Envoy, and to
   nothing else: not a sibling, not another tree, and not an owner-only method. The command is
   `protectorate sleeve send <name> <text>` (`envoy` is Envoy's name; the parent's name is
-  `$PROTECTORATE_PARENT`). `envoy send` is the vendor-agent door and refuses a sleeve. Mail is an
-  ordinary `Send` (queue or steer; a pane gets `MailDeliver`) with the same marking as any sleeve
+  `$PROTECTORATE_PARENT`). `envoy send` is the vendor-agent door and refuses a sleeve.
+  A sibling is reached through the parent. `sleeve send`, `envoy send`, and `sleeve spawn`
+  accept `--message-file FILE` (or `-` for stdin) for long or code-bearing messages; it
+  replaces the text arguments or spawn's `--message`. Mail is an ordinary `Send` (queue or steer;
+  a pane gets `MailDeliver`) with the same marking as any sleeve
   message: the text starts with `[from sleeve <name>]` and the request id is `mail:<id>:...`.
+  Send answers whether delivery began or the message was queued, and the queue length at
+  acceptance. List and show display the oldest queue age. `sleeve inbox [<sleeve>]` reads
+  queued messages in order, with sender, enqueue time and text, without consuming them; a
+  sleeve credential can inspect only its own queue, while the owner can inspect any queue.
+  Queued messages still deliver at a turn boundary.
   One tree may land at most 8 messages on Envoy in 10 minutes, counted on the tree's root. Upward
   mail to a parent who is not Envoy has the same bound per sender. Mail to Envoy spends only the
   tree's budget. The core journals the events and replay rebuilds the times. A refusal says when
@@ -270,7 +278,14 @@ crash, every incarnation goes to Recovering and resumes natively.
   - a systemd scope per incarnation with a memory limit in bytes from `sleeve_memory_max`
     (default 4 GiB), overridden by sleeve name in `sleeve_memory_max_overrides`; swap is
     disabled and build parallelism follows the CPU quota. Configuration is read at hub start
-    and applied at launch. The scope uses `OOMPolicy=continue` and `cgroup.kill`,
+    and applied at launch. A later sleeve with the same name gets the same override.
+    `sleeve show` exposes the incarnation limit in bytes, and `PROTECTORATE_MEMORY_MAX`
+    gives the configured value inside the sandbox. A new non-Envoy sleeve’s first prompt
+    reports the limit and tells sleeves needing more to ask Envoy; the owner raises `sleeve_memory_max_overrides`.
+    Scope OOM notices and the next non-Envoy prompt name the limit and override key.
+    The hub transcript and continuation brief retain the request text without the hub’s
+    prompt preamble, which is still sent to the harness. With scopes
+    disabled no limit is enforced. The scope uses `OOMPolicy=continue` and `cgroup.kill`,
     plus the orphan reaper. A child the kernel kills for memory does not stop the scope.
     The guardrail requires a scope OOM kill and a launcher exit by SIGKILL or code 137.
 

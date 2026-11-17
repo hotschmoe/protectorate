@@ -227,6 +227,7 @@ pub enum Activity {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Message {
+    pub queued_at: Millis,
     pub from: Party,
     /// The vendor agent's name when `from` is an agent. A continuation carries the turn's.
     pub agent: Option<String>,

@@ -91,6 +91,7 @@ pub fn call(hub: &Hub, who: &Principal, name: &str, body: &Value) -> Result<Valu
     routes!(&c, name, body;
         GetState => get_state,
         ListSleeves => list_sleeves,
+        GetInbox => get_inbox,
         GetTranscript => get_transcript,
         SpawnSleeve => spawn,
         SendMessage => send_message,
@@ -218,7 +219,7 @@ fn sleeve_view(hub: &Hub, id: SleeveId) -> Result<api::Sleeve> {
     let view = hub.view();
     view.state
         .sleeve(id)
-        .map(|s| wire::sleeve(&hub.transcripts, &view, s))
+        .map(|s| wire::sleeve(&hub.config, &hub.transcripts, &view, s))
         .ok_or_else(|| err(ErrorCode::NotFound, format!("sleeve {} is gone", id.0)))
 }
 
@@ -246,9 +247,65 @@ fn list_sleeves(c: &Ctx<'_>, _: api::Empty) -> Result<api::SleeveList> {
             .sleeves
             .values()
             .filter(|s| s.life != Life::Removed && reaches(st, c.who, s.id))
-            .map(|s| wire::sleeve(&c.hub.transcripts, &view, s))
+            .map(|s| wire::sleeve(&c.hub.config, &c.hub.transcripts, &view, s))
             .collect(),
     })
+}
+
+fn get_inbox(c: &Ctx<'_>, r: api::InboxRequest) -> Result<api::Inbox> {
+    let view = c.hub.view();
+    let own = match c.who {
+        Principal::Sleeve(id) | Principal::Envoy(id) => Some(*id),
+        _ => None,
+    };
+    let id = match r.sleeve_id {
+        Some(name) => find(&view.state, &name)?,
+        None => own.ok_or_else(|| err(ErrorCode::Invalid, "a sleeve is required"))?,
+    };
+    if own.is_some_and(|me| me != id) {
+        return Err(err(
+            ErrorCode::Forbidden,
+            "a sleeve may peek only at its own queue",
+        ));
+    }
+    let s = view
+        .state
+        .sleeve(id)
+        .ok_or_else(|| err(ErrorCode::NotFound, "no such sleeve"))?;
+    Ok(api::Inbox {
+        messages: s
+            .queue
+            .iter()
+            .filter_map(|key| s.messages.get(key))
+            .map(|m| {
+                let sender = match m.from {
+                    Party::Owner => "owner".to_string(),
+                    Party::Envoy => "envoy".to_string(),
+                    Party::Agent => m.agent.clone().unwrap_or_else(|| "agent".into()),
+                    Party::Sleeve(id) => view
+                        .state
+                        .sleeve(id)
+                        .map_or_else(|| format!("sleeve {}", id.0), |s| s.name.clone()),
+                };
+                api::QueuedMessage {
+                    sender,
+                    queued_at_ms: api::EpochMs(m.queued_at),
+                    text: m.text.clone(),
+                }
+            })
+            .collect(),
+    })
+}
+
+fn sent(request_id: String, reply: Reply) -> Result<api::Sent> {
+    match reply {
+        Reply::Sent { queued, count } => Ok(api::Sent {
+            request_id,
+            queued,
+            queue_length: count,
+        }),
+        other => Err(internal(format!("unexpected send reply: {other:?}"))),
+    }
 }
 
 fn transcript(
@@ -905,7 +962,7 @@ fn send_message(c: &Ctx<'_>, r: api::SendMessageRequest) -> Result<api::Sent> {
     if !may_mail(&view.state, c.who, id) {
         return Err(err(
             ErrorCode::Forbidden,
-            "that sleeve is outside this capability",
+            "a sleeve may send to itself, its children, its parent, and Envoy; reach a sibling through the parent",
         ));
     }
     if r.text.is_empty() {
@@ -915,7 +972,7 @@ fn send_message(c: &Ctx<'_>, r: api::SendMessageRequest) -> Result<api::Sent> {
     let from = c.who.party();
     let sender_marked =
         matches!(from, Party::Sleeve(id) if view.state.sleeve(id).is_some_and(|s| s.d9));
-    command(
+    let reply = command(
         c.hub,
         EventKind::Send {
             to: id,
@@ -930,7 +987,7 @@ fn send_message(c: &Ctx<'_>, r: api::SendMessageRequest) -> Result<api::Sent> {
             d9: marks_d9(c.hub, c.who) || sender_marked,
         },
     )?;
-    Ok(api::Sent { request_id })
+    sent(request_id, reply)
 }
 
 fn interrupt(c: &Ctx<'_>, r: api::SleeveRef) -> Result<api::Empty> {
@@ -1737,7 +1794,7 @@ fn envoy_send(c: &Ctx<'_>, r: api::EnvoySendRequest) -> Result<api::Sent> {
         return Err(err(ErrorCode::Invalid, "text is required"));
     }
     let request_id = new_request(c, agent)?;
-    command(
+    let reply = command(
         c.hub,
         EventKind::Send {
             to: id,
@@ -1749,7 +1806,7 @@ fn envoy_send(c: &Ctx<'_>, r: api::EnvoySendRequest) -> Result<api::Sent> {
             d9: false,
         },
     )?;
-    Ok(api::Sent { request_id })
+    sent(request_id, reply)
 }
 
 /// The owner's scope reads Envoy's whole transcript; vendor agents read only their own
