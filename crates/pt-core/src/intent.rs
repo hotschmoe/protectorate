@@ -168,13 +168,10 @@ pub enum Reply {
     ApprovalOpened(String),
     /// Accepted; the result arrives as state changes and notices.
     Accepted,
-    Queued,
-    /// Sent to the harness as the next prompt.
-    Delivering,
-    /// Bound to the running turn as a steer.
-    Steering,
-    /// Written to the sleeve's inbox (pane sleeves).
-    Inboxed,
+    Sent {
+        queued: bool,
+        count: u64,
+    },
     /// The same request id was seen before with the same content.
     Duplicate,
     Refused(Code, String),

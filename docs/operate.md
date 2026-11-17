@@ -43,9 +43,9 @@ always give it the token.
 ## Sleeves
 
 ```
-sleeve list | sleeve show <sleeve>
+sleeve list | sleeve show <sleeve> | sleeve inbox [<sleeve>]
 sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
-      [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
+      [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT | --message-file FILE]
 sleeve send <sleeve> <text...> [--steer]
 sleeve interrupt|stop|rm|takeover <sleeve>
 sleeve start <sleeve> [--harness H] [--provider P] [--model M]
@@ -54,7 +54,17 @@ sleeve transcript <sleeve> [--from SEQ] [--limit N]
 sleeve wait <sleeve> [--until idle|done|blocked|parked|ended|report] [--timeout SECS]
 ```
 
+For `sleeve send` and `envoy send`, `--message-file FILE` replaces the text arguments;
+for `sleeve spawn` it replaces `--message`. Use `-` for stdin. This avoids shell expansion
+of long or code-bearing messages. A sleeve reaches a sibling through its parent.
+
 A sleeve is named by its id or its name.
+
+List and show include the oldest queued message's age beside the queue count. `sleeve send`
+reports whether the message was queued or sent for delivery and the queue length at acceptance.
+Queued messages wait for a turn boundary. `sleeve inbox` peeks at the FIFO, showing sender,
+age and text without consuming or reordering it. A sleeve credential can inspect only its own
+queue and can omit the name; the owner supplies a name and can inspect any queue.
 
 - **spawn** with `--path DIR` makes a root sleeve on that directory (one root per directory). The
   directory must already exist where the hub can see it; a missing one is `the hub cannot see

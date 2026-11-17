@@ -884,9 +884,25 @@ for line in sys.stdin:
     });
     let request = hub.send("worker", "answer this prompt");
     assert_eq!(hub.sleeve("worker")["queued"].as_u64(), Some(1));
+    let peek = hub.cli(&["--json", "sleeve", "inbox", "worker"]).json();
+    assert_eq!(peek["messages"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        peek["messages"][0]["text"].as_str(),
+        Some("answer this prompt")
+    );
+    assert_eq!(
+        peek,
+        hub.cli(&["--json", "sleeve", "inbox", "worker"]).json()
+    );
     assert!(of_type(&hub.transcript("worker"), "user_message").is_empty());
     std::fs::write(repo.join("release-foreign"), "release").unwrap();
     hub.wait("worker", "idle", 60);
+    assert!(
+        hub.cli(&["--json", "sleeve", "inbox", "worker"]).json()["messages"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
     let entries = hub.transcript("worker");
     let pos = |kind: &str, value: Option<&str>| {
         entries
@@ -951,10 +967,20 @@ for line in sys.stdin:
     hub.wait("envoy", "idle", 60);
     let token = hub.printed("envoy-only token: ");
     let as_agent = [("PROTECTORATE_TOKEN", token.as_str())];
+    let message_file = dir.join("envoy-message.txt");
+    std::fs::write(&message_file, "answer `me` $(literally)").unwrap();
     let sent = hub
         .cli_env(
             &as_agent,
-            &["--json", "envoy", "send", "--as", "grokbot", "answer me"],
+            &[
+                "--json",
+                "envoy",
+                "send",
+                "--as",
+                "grokbot",
+                "--message-file",
+                message_file.to_str().unwrap(),
+            ],
         )
         .json();
     let request = sent["request_id"].as_str().unwrap();
@@ -986,6 +1012,11 @@ for line in sys.stdin:
         .json();
     assert_eq!(reply["settled"].as_bool(), Some(true), "{reply}");
     assert_eq!(reply["text"].as_str(), Some("answer to agent"));
+    assert!(
+        hub.cli_env(&as_agent, &["envoy", "read"])
+            .ok()
+            .contains("answer `me` $(literally)")
+    );
 }
 
 #[test]
@@ -1399,6 +1430,8 @@ exec sleep 300"#,
     let hub = Hub::open(home, &[], &[("PATH", &path)]);
     let repo = temp_repo("up");
     let other_repo = temp_repo("up-other");
+    let spawn_file = dir.join("spawn-message.txt");
+    std::fs::write(&spawn_file, "spawn literal $(code)").unwrap();
     let spawn = |args: &[&str]| hub.cli(args).json()["id"].as_str().unwrap().to_string();
     let tree = spawn(&[
         "--json",
@@ -1430,7 +1463,7 @@ exec sleep 300"#,
         "--harness",
         "claude",
     ]);
-    let _other = spawn(&[
+    let other = spawn(&[
         "--json",
         "sleeve",
         "spawn",
@@ -1439,6 +1472,8 @@ exec sleep 300"#,
         other_repo.to_str().unwrap(),
         "--harness",
         "claude",
+        "--message-file",
+        spawn_file.to_str().unwrap(),
     ]);
     for name in ["envoy", "tree", "leaf", "sib", "other"] {
         let end = std::time::Instant::now() + Duration::from_secs(90);
@@ -1455,6 +1490,13 @@ exec sleep 300"#,
             std::thread::sleep(Duration::from_millis(200));
         }
     }
+    let other_input = eventually("spawn file prompt", Duration::from_secs(30), || {
+        std::fs::read_to_string(hub.home.join(format!("sleeves/{other}/scratch/target/in"))).ok()
+    });
+    assert!(
+        other_input.contains("spawn literal $(code)"),
+        "{other_input}"
+    );
 
     let socket = hub
         .home
@@ -1503,6 +1545,28 @@ exec sleep 300"#,
         assert_eq!(r.status, 4, "{args:?}: {} {}", r.stdout, r.stderr);
     };
     denied(&["sleeve", "send", "sib", "no"]);
+    let refusal = hub.cli_env(&as_leaf, &["sleeve", "send", "sib", "no"]);
+    assert!(
+        refusal
+            .stderr
+            .contains("reach a sibling through the parent"),
+        "{}",
+        refusal.stderr
+    );
+    let mail_file = dir.join("mail.txt");
+    std::fs::write(&mail_file, "literal `backticks` and $(command)\n").unwrap();
+    let conflict = hub.cli_env(
+        &as_leaf,
+        &[
+            "sleeve",
+            "send",
+            "tree",
+            "text",
+            "--message-file",
+            mail_file.to_str().unwrap(),
+        ],
+    );
+    assert_ne!(conflict.status, 0);
     denied(&["sleeve", "send", "other", "no"]);
     denied(&["envoy", "send", "no"]);
     denied(&["sleeve", "transcript", "tree"]);
@@ -1531,7 +1595,17 @@ exec sleep 300"#,
             ],
         )
     };
-    sent("tree", "before the task");
+    hub.cli_env(
+        &as_leaf,
+        &[
+            "sleeve",
+            "send",
+            "tree",
+            "--message-file",
+            mail_file.to_str().unwrap(),
+        ],
+    )
+    .ok();
     hub.cli(&["sleeve", "send", "leaf", "do the task"]).ok();
     eventually(
         "the first prompt memory note",
@@ -1555,6 +1629,66 @@ exec sleep 300"#,
                 .any(|e| e["entry"]["text"].as_str() == Some("do the task"))
                 .then_some(())
         },
+    );
+    let queued = hub
+        .cli(&["--json", "sleeve", "send", "leaf", "waiting in queue"])
+        .json();
+    assert_eq!(queued["queued"].as_bool(), Some(true));
+    assert!(queued["queue_length"].as_u64().unwrap() >= 1);
+    {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+        let mut child = Command::new(bin())
+            .arg("--home")
+            .arg(&hub.home)
+            .args(["sleeve", "send", "leaf", "--message-file", "-"])
+            .env_remove("PROTECTORATE_TOKEN")
+            .env_remove("PROTECTORATE_SOCKET")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(b"stdin `literal` $(code)")
+            .unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains("queued: leaf"));
+    }
+    let inbox = hub.cli_env(&as_leaf, &["--json", "sleeve", "inbox"]).json();
+    assert!(
+        inbox["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["text"].as_str() == Some("stdin `literal` $(code)"))
+    );
+    assert!(
+        inbox["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["text"].as_str() == Some("waiting in queue")
+                && m["sender"].as_str() == Some("owner"))
+    );
+    assert_eq!(
+        inbox,
+        hub.cli(&["--json", "sleeve", "inbox", "leaf"]).json()
+    );
+    assert_eq!(
+        inbox,
+        hub.cli_env(&as_leaf, &["--json", "sleeve", "inbox"]).json()
+    );
+    assert!(hub.sleeve("leaf")["oldest_queued_at_ms"].as_u64().is_some());
+    let result = hub.cli(&["sleeve", "show", "leaf"]);
+    let show = result.ok();
+    assert!(show.contains("QUEUED") && show.contains(" ("), "{show}");
+    assert_eq!(
+        hub.cli_env(&as_leaf, &["sleeve", "inbox", "tree"]).status,
+        4
     );
     let early = report(&[], "2");
     assert_ne!(
@@ -1639,7 +1773,7 @@ exec sleep 300"#,
 
     let envoy_id = hub.sleeve("envoy")["id"].as_str().unwrap().to_string();
     for (id, marker) in [
-        (&tree, "before the task"),
+        (&tree, "literal `backticks` and $(command)"),
         (&envoy_id, "need a design recommendation"),
     ] {
         let saw = eventually(

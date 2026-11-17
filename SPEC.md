@@ -112,9 +112,17 @@ CLI on the hub machine (section 3.1).
 - **Who may mail whom.** A sleeve may send to itself, its children, its parent, and Envoy, and to
   nothing else: not a sibling, not another tree, and not an owner-only method. The command is
   `protectorate sleeve send <name> <text>` (`envoy` is Envoy's name; the parent's name is
-  `$PROTECTORATE_PARENT`). `envoy send` is the vendor-agent door and refuses a sleeve. Mail is an
-  ordinary `Send` (queue or steer; a pane gets `MailDeliver`) with the same marking as any sleeve
+  `$PROTECTORATE_PARENT`). `envoy send` is the vendor-agent door and refuses a sleeve.
+  A sibling is reached through the parent. `sleeve send`, `envoy send`, and `sleeve spawn`
+  accept `--message-file FILE` (or `-` for stdin) for long or code-bearing messages; it
+  replaces the text arguments or spawn's `--message`. Mail is an ordinary `Send` (queue or steer;
+  a pane gets `MailDeliver`) with the same marking as any sleeve
   message: the text starts with `[from sleeve <name>]` and the request id is `mail:<id>:...`.
+  Send answers whether delivery began or the message was queued, and the queue length at
+  acceptance. List and show display the oldest queue age. `sleeve inbox [<sleeve>]` reads
+  queued messages in order, with sender, enqueue time and text, without consuming them; a
+  sleeve credential can inspect only its own queue, while the owner can inspect any queue.
+  Queued messages still deliver at a turn boundary.
   One tree may land at most 8 messages on Envoy in 10 minutes, counted on the tree's root. Upward
   mail to a parent who is not Envoy has the same bound per sender. Mail to Envoy spends only the
   tree's budget. The core journals the events and replay rebuilds the times. A refusal says when

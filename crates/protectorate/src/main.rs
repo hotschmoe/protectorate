@@ -65,9 +65,11 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
                                     the sleeves' shared login, on this terminal, without the API
   sleeve list | sleeve show <sleeve>  (includes scope memory limit)
   sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
-        [--provider P] [--model M] [--effort E] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
-  sleeve send <sleeve> <text...> [--steer]
+        [--provider P] [--model M] [--effort E] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT | --message-file FILE]
+  sleeve send <sleeve> (<text...> | --message-file FILE) [--steer]
         a sleeve may send to itself, its children, its parent, or envoy
+  sleeve inbox [<sleeve>]
+        --message-file accepts - for stdin
   sleeve interrupt|stop|rm|takeover <sleeve>
   sleeve start <sleeve> [--harness H] [--provider P] [--model M] [--effort E]
   sleeve resleeve <sleeve> --harness H [--provider P] [--model M] [--effort E]
@@ -86,7 +88,7 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   job artifact <job> <path> [--out FILE]
   quota list
   event list [--from SEQ] [--limit N] | event read <seq>
-  envoy send <text...> [--as NAME] | envoy wait [REQUEST_ID] [--timeout SECS]
+  envoy send (<text...> | --message-file FILE) [--as NAME] | envoy wait [REQUEST_ID] [--timeout SECS]
   envoy read [--from SEQ] | envoy token
   history search <query...> [--mode all|any|phrase] [--sleeve S]... [--harness H]
         [--session ID] [--role user|assistant|tool-call|tool-error|compaction]...
