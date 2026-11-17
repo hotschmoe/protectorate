@@ -207,15 +207,15 @@ impl Core<'_> {
         }
         let prompt = match &e.kind {
             EffectKind::SendPrompt {
-                request_id,
+                request_ids,
                 kind: MsgKind::Prompt,
                 ..
-            } => Some(request_id.clone()),
+            } => Some(request_ids.clone()),
             _ => None,
         };
         if self.return_unsent(id) {
-            if let Some(request_id) = prompt {
-                self.sl(sid).unwritten_prompts.insert(request_id);
+            if let Some(request_ids) = prompt {
+                self.sl(sid).unwritten_prompts.extend(request_ids);
             }
             self.set_effect(id, EffectState::Abandoned);
             self.retry_unwritten(sid, id);

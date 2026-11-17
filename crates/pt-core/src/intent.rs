@@ -35,6 +35,7 @@ pub enum EffectKind {
         sleeve: SleeveId,
         g: Gen,
         request_id: String,
+        request_ids: Vec<String>,
         kind: MsgKind,
         text: String,
     },

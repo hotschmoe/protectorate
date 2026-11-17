@@ -9,6 +9,7 @@ use crate::model::*;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct State {
+    pub mail_batching: bool,
     /// The latest event time seen.
     pub now: Millis,
     pub next_sleeve: u64,

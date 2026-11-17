@@ -62,7 +62,12 @@ A sleeve is named by its id or its name.
 
 List and show include the oldest queued message's age beside the queue count. `sleeve send`
 reports whether the message was queued or sent for delivery and the queue length at acceptance.
-Queued messages wait for a turn boundary. `sleeve inbox` peeks at the FIFO, showing sender,
+Queued messages wait for a turn boundary. At a headless turn start, consecutive queued prompts
+are delivered together in FIFO order, with their normal sender headers; a continuation ends
+the batch. For Envoy, a switch between vendor-agent and other senders also ends the batch,
+so vendor agents cannot read other parties' prompts. The batch shares one delivery outcome.
+Steers still enter the running turn.
+`sleeve inbox` peeks at the FIFO, showing sender,
 age and text without consuming or reordering it. A sleeve credential can inspect only its own
 queue and can omit the name. For another reachable sleeve it sees only messages it sent;
 the owner supplies a name and can inspect any queue. `sleeve inbox <sleeve> --drop`

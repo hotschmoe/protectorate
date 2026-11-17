@@ -1017,6 +1017,7 @@ impl Core<'_> {
     }
 
     fn drop_queued_from(&mut self, to: SleeveId, from: Party) {
+        let batching = self.st.mail_batching;
         let s = self.sl(to);
         let keys: Vec<_> = s
             .queue
@@ -1030,6 +1031,9 @@ impl Core<'_> {
             .collect();
         s.queue.retain(|id| !keys.contains(id));
         for id in keys {
+            if batching {
+                s.unwritten_prompts.remove(&id);
+            }
             if let Some(m) = s.messages.get_mut(&id) {
                 m.state = MsgState::Rejected;
             }
@@ -1287,6 +1291,22 @@ impl Core<'_> {
         let Some(r) = self.sl(sid).queue.pop_front() else {
             return;
         };
+        let mut ids = vec![r.clone()];
+        let retry = self.st.sleeves[&sid].unwritten_prompts.contains(&r);
+        let agent_scope = self
+            .is_envoy(sid)
+            .then_some(self.st.sleeves[&sid].messages[&r].from == Party::Agent);
+        if self.st.mail_batching && self.st.sleeves[&sid].messages[&r].kind == MsgKind::Prompt {
+            while self.st.sleeves[&sid].queue.front().is_some_and(|key| {
+                self.st.sleeves[&sid].messages[key].kind == MsgKind::Prompt
+                    && self.st.sleeves[&sid].unwritten_prompts.contains(key) == retry
+                    && agent_scope.is_none_or(|agent| {
+                        (self.st.sleeves[&sid].messages[key].from == Party::Agent) == agent
+                    })
+            }) {
+                ids.push(self.sl(sid).queue.pop_front().expect("queue head"));
+            }
+        }
         let s = &self.st.sleeves[&sid];
         let m = &s.messages[&r];
         let msg_kind = m.kind;
@@ -1294,13 +1314,19 @@ impl Core<'_> {
             sleeve: sid,
             g: s.g,
             request_id: r.clone(),
+            request_ids: ids.clone(),
             kind: msg_kind,
-            text: m.text.clone(),
+            text: ids
+                .iter()
+                .map(|id| s.messages[id].text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n\n"),
         };
         let eff = self.new_effect(kind, r.clone());
         let s = self.sl(sid);
-        let m = s.messages.get_mut(&r).expect("queued message");
-        m.state = MsgState::InFlight(eff);
+        for id in &ids {
+            s.messages.get_mut(id).expect("queued message").state = MsgState::InFlight(eff);
+        }
         s.activity = Activity::Delivering { effect: eff };
         // A continuation belongs to the turn already begun. Any other prompt starts the next one
         // and supersedes a continuation that turn still owed.
@@ -1316,8 +1342,26 @@ impl Core<'_> {
 
     fn account_prompt(&mut self, sid: SleeveId, effect: EffectId) {
         let s = &self.st.sleeves[&sid];
-        let m = &s.messages[&self.st.effects[&effect].key];
-        let (from, agent) = (m.from, m.agent.clone());
+        let ids = match &self.st.effects[&effect].kind {
+            EffectKind::SendPrompt { request_ids, .. } => request_ids,
+            _ => unreachable!("prompt accounting requires a prompt effect"),
+        };
+        let (from, agent) = ids
+            .iter()
+            .map(|id| &s.messages[id])
+            .max_by_key(|m| {
+                if self.d9_origin(sid, m.from, m.agent.clone()).is_some() {
+                    2
+                } else if m.from == Party::Envoy
+                    || matches!(m.from, Party::Sleeve(p) if s.parent == Some(p))
+                {
+                    1
+                } else {
+                    0
+                }
+            })
+            .map(|m| (m.from, m.agent.clone()))
+            .expect("prompt has a message");
         let saved = Delivery {
             effect,
             applied: true,
@@ -1429,18 +1473,21 @@ impl Core<'_> {
     /// The message of a prompt or steer record that was never dispatched goes back to the head
     /// of its queue, for the next incarnation; true when there was one.
     pub(crate) fn return_unsent(&mut self, id: EffectId) -> bool {
-        let (EffectKind::SendPrompt {
-            sleeve, request_id, ..
-        }
-        | EffectKind::Steer {
-            sleeve, request_id, ..
-        }) = self.st.effects[&id].kind.clone()
-        else {
-            return false;
+        let (sleeve, request_ids) = match self.st.effects[&id].kind.clone() {
+            EffectKind::SendPrompt {
+                sleeve,
+                request_ids,
+                ..
+            } => (sleeve, request_ids),
+            EffectKind::Steer {
+                sleeve, request_id, ..
+            } => (sleeve, vec![request_id]),
+            _ => return false,
         };
+        let request_id = &request_ids[0];
         if self.st.sleeves[&sleeve]
             .messages
-            .get(&request_id)
+            .get(request_id)
             .map(|m| m.state)
             != Some(MsgState::InFlight(id))
         {
@@ -1454,15 +1501,17 @@ impl Core<'_> {
             }
         ) && self.st.sleeves[&sleeve]
             .unwritten_prompts
-            .contains(&request_id)
+            .contains(request_id)
         {
             self.unaccount_prompt(sleeve, id);
         }
         // A steer held for this prompt's turn keeps its place behind it.
         self.return_steer(sleeve);
         let s = self.sl(sleeve);
-        s.messages.get_mut(&request_id).expect("message").state = MsgState::Queued;
-        s.queue.push_front(request_id);
+        for request_id in request_ids.into_iter().rev() {
+            s.messages.get_mut(&request_id).expect("message").state = MsgState::Queued;
+            s.queue.push_front(request_id);
+        }
         true
     }
 
@@ -1479,7 +1528,10 @@ impl Core<'_> {
         if self.st.sleeves[&sid].guard.state == (GuardState::Briefing { effect: id }) {
             return self.on_brief_prompt(sid, id, native);
         }
-        let request_id = self.st.effects[&id].key.clone();
+        let request_ids = match &self.st.effects[&id].kind {
+            EffectKind::SendPrompt { request_ids, .. } => request_ids.clone(),
+            _ => return,
+        };
         let continued = matches!(
             self.st.effects[&id].kind,
             EffectKind::SendPrompt {
@@ -1488,36 +1540,38 @@ impl Core<'_> {
             }
         );
         let state = self.effect_state(id).expect("effect exists");
-        if state.terminal()
-            && (state != EffectState::Abandoned
-                || self.st.sleeves[&sid]
-                    .messages
-                    .get(&request_id)
-                    .is_none_or(|m| m.state != MsgState::Queued))
-        {
-            self.sl(sid).unwritten_prompts.remove(&request_id);
-        }
-        if let Some(m) = self.sl(sid).messages.get_mut(&request_id)
-            && m.state == MsgState::InFlight(id)
-        {
-            let from = m.from;
-            let notice = match state {
-                EffectState::Confirmed => {
-                    m.state = MsgState::Delivered;
-                    None
+        for request_id in request_ids {
+            if state.terminal()
+                && (state != EffectState::Abandoned
+                    || self.st.sleeves[&sid]
+                        .messages
+                        .get(&request_id)
+                        .is_none_or(|m| m.state != MsgState::Queued))
+            {
+                self.sl(sid).unwritten_prompts.remove(&request_id);
+            }
+            if let Some(m) = self.sl(sid).messages.get_mut(&request_id)
+                && m.state == MsgState::InFlight(id)
+            {
+                let from = m.from;
+                let notice = match state {
+                    EffectState::Confirmed => {
+                        m.state = MsgState::Delivered;
+                        None
+                    }
+                    EffectState::Rejected | EffectState::Failed => {
+                        m.state = MsgState::Rejected;
+                        Some(Notice::MessageRejected { request_id })
+                    }
+                    EffectState::Fenced | EffectState::Abandoned => {
+                        m.state = MsgState::MayHaveApplied;
+                        Some(Notice::MessageMayHaveApplied { request_id })
+                    }
+                    _ => None,
+                };
+                if let Some(n) = notice {
+                    self.notify(from, Some(sid), n);
                 }
-                EffectState::Rejected | EffectState::Failed => {
-                    m.state = MsgState::Rejected;
-                    Some(Notice::MessageRejected { request_id })
-                }
-                EffectState::Fenced | EffectState::Abandoned => {
-                    m.state = MsgState::MayHaveApplied;
-                    Some(Notice::MessageMayHaveApplied { request_id })
-                }
-                _ => None,
-            };
-            if let Some(n) = notice {
-                self.notify(from, Some(sid), n);
             }
         }
         if continued && matches!(state, EffectState::Rejected | EffectState::Failed) {
@@ -2086,6 +2140,7 @@ impl Core<'_> {
                     sleeve: sid,
                     g,
                     request_id: key.clone(),
+                    request_ids: vec![key.clone()],
                     kind: MsgKind::Brief,
                     text: BRIEF_PROMPT.to_string(),
                 };

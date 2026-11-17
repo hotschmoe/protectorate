@@ -107,7 +107,7 @@ pub fn event(b: &mut Bytes) -> Event {
     let j = |b: &mut Bytes| JobId(b.u64());
     let a = |b: &mut Bytes| b.u64() as u32;
     use EventKind as E;
-    let kind = match b.below(36) {
+    let kind = match b.below(37) {
         0 => E::Spawn(SpawnSpec {
             request_id: b.string(),
             name: b.string(),
@@ -286,10 +286,11 @@ pub fn event(b: &mut Bytes) -> Event {
             turn: b.u64(),
             text: b.string(),
         },
-        _ => E::Unwritten {
+        35 => E::Unwritten {
             effect: e(b),
             attempt: a(b),
         },
+        _ => E::MailBatching,
     };
     Event { at, kind }
 }
