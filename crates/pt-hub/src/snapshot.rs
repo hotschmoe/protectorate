@@ -61,7 +61,7 @@ pub fn state(
         jobs: st
             .jobs
             .values()
-            .map(|j| crate::api::job_status(hub, j))
+            .map(|j| crate::jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes()))
             .collect(),
         quotas: hub.quotas.list(),
         events: hub.bus.recent_events(SNAPSHOT_EVENTS),

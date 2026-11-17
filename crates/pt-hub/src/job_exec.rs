@@ -30,7 +30,7 @@ use pt_frame::msg::{
 };
 
 use crate::hub::Hub;
-use crate::jobs::{Fetched, JobRequest};
+use crate::jobs::{self, Fetched, JobRequest};
 use crate::log::{debug, error, info, warning};
 use crate::view::View;
 /// Log bytes asked for per FetchLog.
@@ -72,18 +72,10 @@ fn epoch(s: &str) -> u64 {
     u64::from_be_bytes(b)
 }
 
-pub(crate) fn arch(a: &str) -> &str {
-    match a {
-        "aarch64" | "arm64" => "arm64",
-        "x86_64" | "amd64" | "x64" => "amd64",
-        other => other,
-    }
-}
-
 fn stream(hub: &Hub, job: JobId) {
     let v = hub.view();
     if let Some(j) = v.state.jobs.get(&job) {
-        let job = crate::api::job_status(hub, j);
+        let job = jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes());
         hub.bus.push(|seq| HubStreamMessage::Job { seq, job });
     }
 }
@@ -181,14 +173,10 @@ fn choose(
 ) -> Option<(NodeId, u64)> {
     nodes
         .iter()
-        .filter(|v| v.node.online && v.error.is_none())
+        .filter(|v| jobs::matches_target(v, &req.target))
         .filter_map(|v| Some((v, v.node.id.parse::<u64>().ok()?, v.hello.as_ref()?)))
         .filter(|(_, id, _)| !exclude.contains(&NodeId(*id)))
-        .filter(|(v, _, h)| match &req.target {
-            api::JobTarget::Node { node_id } => v.node.id == *node_id,
-            api::JobTarget::Arch { arch: want } => arch(&h.arch) == arch(want),
-        })
-        .filter(|(v, ..)| even_if_present || v.node.presence.state == api::PresenceState::Away)
+        .filter(|(v, ..)| !jobs::held_for_presence(v.node.presence.state, even_if_present))
         .min_by(|a, b| {
             let load = |v: &pt_fleet::NodeView| {
                 v.node

@@ -231,7 +231,7 @@ job artifact <job> <path> [--out FILE]
   kill` kills it instead.
 - `--timeout` defaults to 1 hour; a log is capped at 64 MiB. A job never re-runs by itself.
 - Each artifact is capped by the hub's `job_artifact_max_bytes` config (default 67108864 bytes); restart the hub after changing it. Cancelling a finished job reports its state and exit code.
-- `hub info` shows the effective artifact cap. A job queued for a present node reports the hold in `job show`; `job run --wait` prints it once to stderr.
+- `hub info` shows the effective artifact cap. A job queued for a present node or one with unknown presence reports the hold in `job show`; `job run --wait` prints it once to stderr. Unknown presence is held by the scheduler just like present.
 - Without `--cwd` a job runs in its own directory on the node. `--cwd` is an absolute path in
   the node's OS (`/srv/x`, `C:\dev\x` or `C:/dev/x`); the hub checks it when `--node` names a
   node it has met, otherwise (`--arch`) the node does and the job fails there.

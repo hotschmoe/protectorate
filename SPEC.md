@@ -333,8 +333,8 @@ crash, every incarnation goes to Recovering and resumes natively.
   - each fetched artifact is capped by `job_artifact_max_bytes` on the hub (default 64 MiB),
     and a refused artifact reports the effective cap;
   - cancelling a finished job reports its state and exit code;
-  - `hub info` reports the effective artifact cap; a presence-held job reports the reason in
-    `job show` and once on stderr for `job run --wait`;
+  - `hub info` reports the effective artifact cap; a job held for present or unknown presence
+    reports the reason in `job show` and once on stderr for `job run --wait`;
   - a job never re-runs by itself;
   - scheduling, which is code, weighs arch, toolchain, load and warm cache, and only among nodes
     that are AWAY;
