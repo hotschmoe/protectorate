@@ -1469,6 +1469,14 @@ exit 2"#,
 /// The environment of this hub's sandboxed process for `name`. The socket keeps a parallel
 /// test hub's sleeve of the same name from matching.
 fn sleeve_process_env(socket: &str, name: &str) -> Vec<(String, String)> {
+    eventually(
+        &format!("a process for sleeve {name} on {socket} carrying PROTECTORATE_TOKEN"),
+        Duration::from_secs(30),
+        || find_sleeve_process_env(socket, name),
+    )
+}
+
+fn find_sleeve_process_env(socket: &str, name: &str) -> Option<Vec<(String, String)>> {
     for ent in std::fs::read_dir("/proc").unwrap().flatten() {
         let pid = ent.file_name();
         let pid = pid.to_string_lossy();
@@ -1494,10 +1502,10 @@ fn sleeve_process_env(socket: &str, name: &str) -> Vec<(String, String)> {
                 .any(|(k, v)| k == "PROTECTORATE_SOCKET" && v == socket)
             && vars.iter().any(|(k, _)| k == "PROTECTORATE_TOKEN")
         {
-            return vars;
+            return Some(vars);
         }
     }
-    panic!("no process for sleeve {name} on {socket} carries PROTECTORATE_TOKEN");
+    None
 }
 
 fn env_get<'a>(vars: &'a [(String, String)], key: &str) -> Option<&'a str> {
