@@ -412,6 +412,16 @@ A sleeve builds with your toolchains, from a private home and a cleared environm
 
 Not available: the systemd user bus (`systemd-run --user` in a test) and long unix socket paths.
 
+## Sleeve memory
+
+`config.json` sets `sleeve_memory_max` in bytes (default 4294967296, 4 GiB).
+`sleeve_memory_max_overrides` is an object keyed by sleeve name, for example
+`"sleeve_memory_max_overrides": {"zig": 17179869184}` for 16 GiB. Values must
+be positive. The hub reads config at startup; changes apply on the next sleeve launch
+after a hub restart. Names include `envoy`, and an override applies to a new sleeve
+with the same name too. With scopes disabled no memory limit is enforced. Swap remains
+disabled in scopes; build parallelism continues to follow the CPU quota.
+
 ## Sleeve devices
 
 `config.json` `sleeve_devices` lists host device paths bound into every sleeve with

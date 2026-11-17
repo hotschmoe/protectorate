@@ -1,5 +1,6 @@
 //! `$PROTECTORATE_HOME`: the one root the hub owns (SPEC 6b), its config and its tokens.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -243,6 +244,9 @@ pt_json::record! {
         /// Host device nodes bound into every sleeve (`--dev-bind`) when the path exists.
         /// A missing path is skipped and logged. Empty: only the sandbox's own `/dev`.
         pub sleeve_devices: Vec<String> = Vec::new(),
+        /// Default and per-name scope memory limits, in bytes.
+        pub sleeve_memory_max: u64 = 4 << 30,
+        pub sleeve_memory_max_overrides: BTreeMap<String, u64> = BTreeMap::new(),
         /// Run each incarnation in a systemd user scope (limits and cgroup.kill).
         pub scopes: bool = true,
         /// D9: sleeves Envoy may spawn in one turn an agent message started before each further
@@ -292,6 +296,14 @@ impl Config {
                             path.display(),
                             pt_history::MIN_BUDGET
                         ),
+                    ));
+                }
+                if c.sleeve_memory_max == 0
+                    || c.sleeve_memory_max_overrides.values().any(|&v| v == 0)
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("{}: sleeve memory limits must be positive", path.display()),
                     ));
                 }
                 Ok(c)
