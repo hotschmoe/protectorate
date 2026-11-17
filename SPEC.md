@@ -199,6 +199,7 @@ CLI on the hub machine (section 3.1).
 
 One Linux machine, one `protectorate` process plus its headscale and member children. It holds:
 
+- Tick processing tracks Uncertain and Probing effects, active jobs, eligible sleeves and pending approvals in id order; replay rebuilds these derived indexes from the same state transitions. Terminal records remain available, including finished jobs with retryable node writes.
 - **The journal and state:** sleeves, incarnations, activity, queues, effects, guardrails, jobs,
   nodes and approvals. These are all owned by the core task.
 - **Headless first, panes on demand.** Every sleeve runs headless by default, through the

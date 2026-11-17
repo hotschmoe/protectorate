@@ -9,4 +9,7 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+fuzz-reference = []
+
 [dependencies]
