@@ -311,6 +311,7 @@ pub fn view(store: &JobStore, j: &Job) -> api::Job {
         even_if_present: j.spec.even_if_present,
         on_present: req.as_ref().map_or(api::OnPresent::Idle, |r| r.on_present),
         approval_id: req.as_ref().and_then(|r| r.approval_id.clone()),
+        held_reason: None,
         queued_at_ms: EpochMs(req.as_ref().map_or(0, |r| r.queued_at_ms)),
         started_at_ms: store.started(j.id, j.attempt).map(EpochMs),
         ended_at_ms: ended(j.state).then_some(EpochMs(j.state_at)),

@@ -766,6 +766,7 @@ final class DoctorReport {
     required this.ghLoggedIn,
     required this.ghAccount,
     required this.sandboxOk,
+    this.sleeveDevices = const <String>[],
     this.problems = const <String>[],
   });
 
@@ -783,6 +784,15 @@ final class DoctorReport {
       ghLoggedIn: _bool(j['gh_logged_in'], 'DoctorReport.gh_logged_in'),
       ghAccount: _string(j['gh_account'], 'DoctorReport.gh_account'),
       sandboxOk: _bool(j['sandbox_ok'], 'DoctorReport.sandbox_ok'),
+      sleeveDevices: _or(
+        j['sleeve_devices'],
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'DoctorReport.sleeve_devices',
+          (e1) => _string(e1, 'DoctorReport.sleeve_devices[]'),
+        ),
+      ),
       problems: _or(
         j['problems'],
         const <String>[],
@@ -810,6 +820,8 @@ final class DoctorReport {
 
   final bool sandboxOk;
 
+  final List<String> sleeveDevices;
+
   /// Everything that needs the owner, one line each.
   final List<String> problems;
 
@@ -821,6 +833,7 @@ final class DoctorReport {
     'gh_logged_in': ghLoggedIn,
     'gh_account': ghAccount,
     'sandbox_ok': sandboxOk,
+    'sleeve_devices': sleeveDevices,
     'problems': problems,
   };
 }
@@ -2340,6 +2353,7 @@ final class HubInfo {
     this.historyCapped = const <String>[],
     this.restoreError,
     this.clients = const <String>[],
+    this.jobArtifactMaxBytes = 67108864,
   });
 
   factory HubInfo.fromJson(Object? json) {
@@ -2372,6 +2386,11 @@ final class HubInfo {
           (e1) => _string(e1, 'HubInfo.clients[]'),
         ),
       ),
+      jobArtifactMaxBytes: _or(
+        j['job_artifact_max_bytes'],
+        67108864,
+        (e0) => _int(e0, 'HubInfo.job_artifact_max_bytes'),
+      ),
     );
   }
 
@@ -2399,6 +2418,8 @@ final class HubInfo {
   /// `releases/current`.
   final List<String> clients;
 
+  final int jobArtifactMaxBytes;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'version': version,
@@ -2408,6 +2429,7 @@ final class HubInfo {
     'history_capped': historyCapped,
     if (restoreError case final v?) 'restore_error': v,
     'clients': clients,
+    'job_artifact_max_bytes': jobArtifactMaxBytes,
   };
 }
 
@@ -3061,6 +3083,7 @@ final class Job {
     this.endedAt,
     this.exitCode,
     this.error,
+    this.heldReason,
     this.logBytes = 0,
     this.cwd,
     this.artifacts = const <JobArtifact>[],
@@ -3094,6 +3117,10 @@ final class Job {
       endedAt: _opt(j['ended_at_ms'], (e0) => _time(e0, 'Job.ended_at_ms')),
       exitCode: _opt(j['exit_code'], (e0) => _int(e0, 'Job.exit_code')),
       error: _opt(j['error'], (e0) => _string(e0, 'Job.error')),
+      heldReason: _opt(
+        j['held_reason'],
+        (e0) => _string(e0, 'Job.held_reason'),
+      ),
       logBytes: _or(j['log_bytes'], 0, (e0) => _int(e0, 'Job.log_bytes')),
       cwd: _opt(j['cwd'], (e0) => _string(e0, 'Job.cwd')),
       artifacts: _or(
@@ -3138,6 +3165,8 @@ final class Job {
   /// Why the hub ended it when no node did, such as `node 4 was removed`.
   final String? error;
 
+  final String? heldReason;
+
   /// Bytes of log the hub holds.
   final int logBytes;
 
@@ -3163,6 +3192,7 @@ final class Job {
     if (endedAt case final v?) 'ended_at_ms': v.millisecondsSinceEpoch,
     if (exitCode case final v?) 'exit_code': v,
     if (error case final v?) 'error': v,
+    if (heldReason case final v?) 'held_reason': v,
     'log_bytes': logBytes,
     if (cwd case final v?) 'cwd': v,
     'artifacts': [for (final e0 in artifacts) e0.toJson()],

@@ -1465,8 +1465,53 @@ fn job_view(hub: &Hub, id: pt_core::JobId) -> Result<api::Job> {
     view.state
         .jobs
         .get(&id)
-        .map(|j| crate::jobs::view(&hub.jobs, j))
+        .map(|j| job_status(hub, j))
         .ok_or_else(|| err(ErrorCode::NotFound, format!("job {} is gone", id.0)))
+}
+
+pub(crate) fn job_status(hub: &Hub, j: &pt_core::Job) -> api::Job {
+    let mut job = crate::jobs::view(&hub.jobs, j);
+    if job.state == api::JobState::Queued
+        && !job.even_if_present
+        && let Ok(up) = fleet(hub)
+        && let Some(node) = {
+            let candidates: Vec<_> = up
+                .poller
+                .nodes()
+                .into_iter()
+                .filter(|n| {
+                    n.node.online
+                        && n.error.is_none()
+                        && n.hello.as_ref().is_some_and(|h| match &job.target {
+                            api::JobTarget::Node { node_id } => n.node.id == *node_id,
+                            api::JobTarget::Arch { arch } => {
+                                crate::job_exec::arch(&h.arch) == crate::job_exec::arch(arch)
+                            }
+                        })
+                })
+                .collect();
+            if candidates
+                .iter()
+                .any(|n| n.node.presence.state == api::PresenceState::Away)
+            {
+                None
+            } else {
+                candidates.into_iter().next()
+            }
+        }
+        && node.node.presence.state != api::PresenceState::Away
+    {
+        let node_id = &node.node.id;
+        let presence = if node.node.presence.state == api::PresenceState::Present {
+            "is present"
+        } else {
+            "has unknown presence"
+        };
+        job.held_reason = Some(format!(
+            "node {node_id} {presence}; --even-if-present runs it now, --on-present idle|kill chooses"
+        ));
+    }
+    job
 }
 
 /// A cwd is judged by the target node's OS. For `--arch` the node is not chosen yet, and a node
@@ -1589,7 +1634,7 @@ fn list_jobs(c: &Ctx<'_>, r: api::ListJobsRequest) -> Result<api::JobList> {
         .filter(|j| node.is_none_or(|n| j.node.map(|x| x.0) == Some(n)))
         .filter(|j| job_visible(&view.state, c.who, JobRequest::of(&j.spec).as_ref()))
         .take(limit)
-        .map(|j| crate::jobs::view(&c.hub.jobs, j))
+        .map(|j| job_status(c.hub, j))
         .collect();
     jobs.reverse();
     Ok(api::JobList {
@@ -2413,6 +2458,10 @@ fn doctor_report(hub: &Hub, r: Option<&pt_doctor::Report>) -> api::DoctorReport 
             gh_logged_in: false,
             gh_account: String::new(),
             sandbox_ok: false,
+            sleeve_devices: crate::sleeve_devices::inspect(hub)
+                .into_iter()
+                .map(|d| d.description())
+                .collect(),
             problems: vec!["doctor has not finished its first run".into()],
         };
     };
@@ -2446,6 +2495,10 @@ fn doctor_report(hub: &Hub, r: Option<&pt_doctor::Report>) -> api::DoctorReport 
         sandbox_ok: r.sandbox.bwrap.present
             && r.sandbox.bwrap.error.is_empty()
             && r.sandbox.systemd_run_user,
+        sleeve_devices: crate::sleeve_devices::inspect(hub)
+            .into_iter()
+            .map(|d| d.description())
+            .collect(),
         problems: {
             let mut problems = r.problems.clone();
             let capped = hub.history.capped_sleeves();

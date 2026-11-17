@@ -239,6 +239,11 @@ fn hub_runs_the_fleet_and_node_jobs() {
         &[],
         &[("PROTECTORATE_FLEET_TEST_MEMBER_TIMEOUT_MS", "1000")],
     );
+    assert!(
+        hub.cli(&["hub", "info"])
+            .stdout
+            .contains("job artifact cap: 4000000 bytes")
+    );
     let enrollment = eventually("the fleet to come up", Duration::from_secs(120), || {
         let r = hub.cli(&["--json", "node", "add"]);
         (r.status == 0).then(|| r.json())
@@ -962,11 +967,66 @@ fn hub_runs_the_fleet_and_node_jobs() {
     let gated = run_job(&hub, &[], &["echo", "gated"]);
     std::thread::sleep(Duration::from_secs(6));
     assert_eq!(job_json(&hub, &gated)["state"].as_str(), Some("queued"));
+    let reason = format!(
+        "held: node {node_id} is present; --even-if-present runs it now, --on-present idle|kill chooses"
+    );
+    assert!(hub.cli(&["job", "show", &gated]).stdout.contains(&reason));
+    let arch_job = hub
+        .cli(&[
+            "--json",
+            "job",
+            "run",
+            "--arch",
+            std::env::consts::ARCH,
+            "--",
+            "echo",
+            "arch-held",
+        ])
+        .json();
+    let arch_id = arch_job["id"].as_str().unwrap();
+    assert!(hub.cli(&["job", "show", arch_id]).stdout.contains(&reason));
+    let waiting = Command::new(bin())
+        .arg("--home")
+        .arg(&hub.home)
+        .env_remove("PROTECTORATE_SOCKET")
+        .env_remove("PROTECTORATE_TOKEN")
+        .args([
+            "job",
+            "run",
+            "--node",
+            &node_id,
+            "--wait",
+            "--",
+            "echo",
+            "waited-held",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    eventually("waiting job to be queued", Duration::from_secs(30), || {
+        let jobs = hub.cli(&["--json", "job", "ls"]).json();
+        jobs["jobs"]
+            .as_array()?
+            .iter()
+            .any(|j| {
+                j["state"].as_str() == Some("queued")
+                    && j["argv"].to_string().contains("waited-held")
+            })
+            .then_some(())
+    });
+    std::thread::sleep(Duration::from_secs(1));
     let urgent = run_job(&hub, &["--even-if-present"], &["echo", "urgent"]);
     let done = wait_job(&hub, &urgent, &["succeeded", "failed"], 90);
     assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
     fs::write(&presence, "AWAY").unwrap();
+    let waited = waiting.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&waited.stderr);
+    assert!(waited.status.success(), "{stderr}");
+    assert_eq!(stderr.matches(&reason).count(), 1, "{stderr}");
     let done = wait_job(&hub, &gated, &["succeeded", "failed"], 90);
+    assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
+    let done = wait_job(&hub, arch_id, &["succeeded", "failed"], 90);
     assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
     assert!(log_text(&hub, &gated, 0).contains("gated"));
 

@@ -1092,6 +1092,12 @@ fn sleeve_devices_are_bound_and_missing_ones_are_logged() {
     std::fs::write(&node, "NPU").unwrap();
     let node = std::fs::canonicalize(&node).unwrap();
     let missing = home.join("no-such-device");
+    let alias = home.join("serial-by-id");
+    std::os::unix::fs::symlink("/dev/zero", &alias).unwrap();
+    let mut holder = std::process::Command::new("sh")
+        .args(["-c", "exec 3<>/dev/zero; exec sleep 300"])
+        .spawn()
+        .unwrap();
     std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
     std::fs::write(home.join("logins/.claude/.credentials.json"), "{}").unwrap();
     write_script(
@@ -1099,8 +1105,14 @@ fn sleeve_devices_are_bound_and_missing_ones_are_logged() {
         &format!(
             r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi
 cat '{}' > "$CARGO_TARGET_DIR/saw"
+test -c '{}' || exit 1
+exec 3<>'{}'
+IFS= read -r prompt
+printf '%s\n' "$prompt" > "$CARGO_TARGET_DIR/prompt"
 exec sleep 300"#,
-            node.display()
+            node.display(),
+            alias.display(),
+            alias.display()
         ),
     );
     write_script(
@@ -1121,11 +1133,25 @@ exec sleep 300"#,
         "sleeve_devices" => vec![
             pt_json::Value::from(node.to_str().unwrap()),
             pt_json::Value::from(missing.to_str().unwrap()),
+            pt_json::Value::from(alias.to_str().unwrap()),
         ],
     };
     std::fs::write(home.join("config.json"), config.to_string()).unwrap();
     let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
     let hub = Hub::open(home, &[], &[("PATH", &path)]);
+    let doctor = hub.cli(&["doctor"]).stdout;
+    assert!(
+        doctor.contains(&format!("{}: /dev/zero, owner", alias.display())),
+        "{doctor}"
+    );
+    assert!(
+        doctor.contains(&format!("holder pid {} sleep", holder.id())),
+        "{doctor}"
+    );
+    assert!(
+        doctor.contains(&format!("{}: missing", missing.display())),
+        "{doctor}"
+    );
     let repo = temp_repo("devices");
     let s = hub
         .cli(&[
@@ -1147,6 +1173,30 @@ exec sleep 300"#,
         || std::fs::read_to_string(scratch.join("target/saw")).ok(),
     );
     assert_eq!(saw.trim(), "NPU");
+    let doctor_after = hub.cli(&["doctor"]).stdout;
+    let device_line = doctor_after
+        .lines()
+        .find(|line| line.contains(&format!("{}: /dev/zero", alias.display())))
+        .unwrap();
+    assert!(
+        device_line.contains(&format!("holder pid {} sleep", holder.id())),
+        "{device_line}"
+    );
+    assert!(!device_line.contains(" claude"), "{device_line}");
+    hub.send("devices", "hello");
+    let prompt = eventually("the first prompt", Duration::from_secs(30), || {
+        std::fs::read_to_string(scratch.join("target/prompt"))
+            .ok()
+            .filter(|p| !p.is_empty())
+    });
+    assert!(
+        prompt.contains(&format!("Device bound: {}", alias.display())),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains(&format!("holder: pid {} sleep", holder.id())),
+        "{prompt}"
+    );
     let args = std::fs::read_to_string(dir.join("scope-args")).unwrap();
     assert!(args.contains("MemoryMax=17179869184"), "{args}");
     assert!(args.contains("MemorySwapMax=0"), "{args}");
@@ -1167,13 +1217,17 @@ exec sleep 300"#,
         args.contains("MemoryMax=8589934592").then_some(())
     });
     assert!(
-        hub.log_text().contains(&format!(
-            "device {} is missing; not bound",
-            missing.display()
-        )),
+        hub.log_text()
+            .contains(&format!("device {}: missing", missing.display())),
         "{}",
         tail(&hub.log_text(), 40)
     );
+    assert!(
+        hub.log_text()
+            .contains(&format!("holder pid {} sleep", holder.id()))
+    );
+    holder.kill().unwrap();
+    holder.wait().unwrap();
 }
 
 #[test]

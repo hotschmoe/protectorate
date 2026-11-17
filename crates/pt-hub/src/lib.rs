@@ -37,6 +37,7 @@ mod quota;
 mod rule;
 mod select;
 mod serve;
+mod sleeve_devices;
 mod snapshot;
 mod stream;
 mod toolchain;

@@ -30,7 +30,7 @@ use pt_frame::msg::{
 };
 
 use crate::hub::Hub;
-use crate::jobs::{self, Fetched, JobRequest};
+use crate::jobs::{Fetched, JobRequest};
 use crate::log::{debug, error, info, warning};
 use crate::view::View;
 /// Log bytes asked for per FetchLog.
@@ -72,7 +72,7 @@ fn epoch(s: &str) -> u64 {
     u64::from_be_bytes(b)
 }
 
-fn arch(a: &str) -> &str {
+pub(crate) fn arch(a: &str) -> &str {
     match a {
         "aarch64" | "arm64" => "arm64",
         "x86_64" | "amd64" | "x64" => "amd64",
@@ -83,7 +83,7 @@ fn arch(a: &str) -> &str {
 fn stream(hub: &Hub, job: JobId) {
     let v = hub.view();
     if let Some(j) = v.state.jobs.get(&job) {
-        let job = jobs::view(&hub.jobs, j);
+        let job = crate::api::job_status(hub, j);
         hub.bus.push(|seq| HubStreamMessage::Job { seq, job });
     }
 }

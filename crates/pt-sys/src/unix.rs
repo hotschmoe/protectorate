@@ -19,6 +19,22 @@ fn cvt(rc: libc::c_int) -> io::Result<libc::c_int> {
     }
 }
 
+#[cfg(target_os = "linux")]
+pub fn device_read_write(path: &Path) -> io::Result<()> {
+    let name = std::ffi::CString::new(path.as_os_str().as_bytes())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains a NUL"))?;
+    // SAFETY: name is a valid NUL-terminated path; faccessat does not open the device.
+    cvt(unsafe {
+        libc::faccessat(
+            libc::AT_FDCWD,
+            name.as_ptr(),
+            libc::R_OK | libc::W_OK,
+            libc::AT_EACCESS,
+        )
+    })
+    .map(drop)
+}
+
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 pub fn set_malloc_arena_max(max: i32) -> bool {
     // SAFETY: mallopt takes integer parameters and does not borrow any memory.

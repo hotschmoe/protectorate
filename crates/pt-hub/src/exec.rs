@@ -190,6 +190,7 @@ struct Live {
     g: Gen,
     session: Arc<Session>,
     order: Sender<PumpIn>,
+    device_note: String,
 }
 
 struct SleeveExec {
@@ -927,16 +928,25 @@ impl SleeveExec {
             .get(&s.name)
             .copied()
             .unwrap_or(hub.config.sleeve_memory_max);
-        for raw in &hub.config.sleeve_devices {
+        let devices = crate::sleeve_devices::inspect(&hub);
+        let mut device_note = String::new();
+        for device in devices {
+            let raw = &device.path;
             let path = PathBuf::from(raw);
             if !path.is_absolute() {
                 return Err(format!("sleeve device {raw} is not an absolute path"));
             }
-            if path.exists() {
+            info!("sleeve {}: device {}", s.name, device.description());
+            if device.resolved.is_some() {
                 sb.devices.push(path);
-            } else {
-                info!("sleeve {}: device {raw} is missing; not bound", s.name);
+                device_note.push_str(&format!("Device bound: {raw}\n"));
+                for holder in &device.holders {
+                    device_note.push_str(&format!("  holder: {holder}\n"));
+                }
             }
+        }
+        if device_note.is_empty() {
+            device_note.push_str("Devices bound: none\n");
         }
         sb.scope = hub.config.scopes;
         sb.masks = pt_sandbox::default_masks(&hub.owner_home);
@@ -1053,6 +1063,7 @@ impl SleeveExec {
             g,
             session: session.clone(),
             order,
+            device_note,
         });
         let run = Run {
             id: s.id,
@@ -1165,14 +1176,21 @@ impl SleeveExec {
             .parent
             .and_then(|p| view.state.sleeve(p))
             .map(|p| p.name.as_str());
-        Some(match parent {
+        let mut note = match parent {
             Some(name) => format!(
                 "Mail your parent ({name}, $PROTECTORATE_PARENT) or Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`).\n\n"
             ),
             None => format!(
                 "Mail Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`).\n\n"
             ),
-        })
+        };
+        if let Some(live) = &self.live
+            && !live.device_note.is_empty()
+        {
+            note.push_str(&live.device_note);
+            note.push('\n');
+        }
+        Some(note)
     }
 
     fn inbox(&self, view: &View, request_id: &str, text: &str) -> io::Result<()> {

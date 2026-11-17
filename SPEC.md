@@ -261,7 +261,9 @@ crash, every incarnation goes to Recovering and resumes natively.
     bound with `--dev-bind` when the path exists; a missing path is skipped and logged, and
     the sleeve still starts. Config changes require a hub restart; a replug can change the
     resolved node, so running sleeves must restart. Host supplementary groups still apply
-    even when sandbox ownership appears as nobody:nogroup;
+    even when sandbox ownership appears as nobody:nogroup. Doctor and each launch report the
+    resolved node, owner, group, mode and hub read/write access without opening it, plus host
+    process holders; the first prompt lists bound devices and holders;
   - tmpfs masks over the hub's state, `~/.ssh` and the owner's own credentials; every
     harness's shared hub login (`<home>/logins/`) and the owner's cargo registry, Go and pub
     caches bound read-write;
@@ -331,6 +333,8 @@ crash, every incarnation goes to Recovering and resumes natively.
   - each fetched artifact is capped by `job_artifact_max_bytes` on the hub (default 64 MiB),
     and a refused artifact reports the effective cap;
   - cancelling a finished job reports its state and exit code;
+  - `hub info` reports the effective artifact cap; a presence-held job reports the reason in
+    `job show` and once on stderr for `job run --wait`;
   - a job never re-runs by itself;
   - scheduling, which is code, weighs arch, toolchain, load and warm cache, and only among nodes
     that are AWAY;

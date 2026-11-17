@@ -276,6 +276,7 @@ fn hub_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 if !h.clients.is_empty() {
                     println!("client builds: {}", h.clients.join(", "));
                 }
+                println!("job artifact cap: {} bytes", h.job_artifact_max_bytes);
             });
         }
         "state" => {
@@ -797,6 +798,9 @@ fn job_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                     opt(&j.exit_code),
                     j.log_bytes
                 );
+                if let Some(reason) = &j.held_reason {
+                    println!("held: {reason}");
+                }
                 for f in &j.artifacts {
                     println!(
                         "artifact {}: {} bytes, sha256 {}",
@@ -833,10 +837,15 @@ fn wait_job(c: &Client, mut job: api::Job) -> Result<(), Fail> {
     };
     eprintln!("job {}: waiting", job.id);
     let mut unreachable: Option<Instant> = None;
+    let mut reported_hold = false;
     while !matches!(
         job.state,
         S::Succeeded | S::Failed | S::Interrupted | S::Cancelled | S::Abandoned | S::Lost
     ) {
+        if !reported_hold && let Some(reason) = &job.held_reason {
+            eprintln!("held: {reason}");
+            reported_hold = true;
+        }
         std::thread::sleep(Duration::from_millis(500));
         match c.call::<m::GetJob>(&id) {
             Ok(next) => {
@@ -1340,6 +1349,9 @@ fn doctor_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
             &["HARNESS", "ELIGIBLE", "VERSION", "LOGIN", "UPDATED", "WHY"],
             &rows,
         );
+        for device in &d.sleeve_devices {
+            println!("device: {device}");
+        }
         for p in &d.problems {
             println!("problem: {p}");
         }
