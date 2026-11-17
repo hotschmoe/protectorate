@@ -24,6 +24,46 @@ impl Core<'_> {
         let id = EffectId(self.st.next_effect);
         self.st.next_effect += 1;
         let class = kind.class();
+        self.st.open_effects.insert(id);
+        if let Some(sleeve) = kind.sleeve() {
+            self.st
+                .open_sleeve_effects
+                .entry(sleeve)
+                .or_default()
+                .insert(id);
+        }
+        match &kind {
+            EffectKind::KillScope { sleeve, g } => {
+                self.st.killed_scopes.insert((*sleeve, *g));
+            }
+            EffectKind::StartIncarnation {
+                sleeve,
+                g,
+                resume: Some(_),
+                ..
+            } => {
+                self.st.resumed_scopes.insert((*sleeve, *g));
+            }
+            EffectKind::RespondApproval {
+                sleeve,
+                g,
+                approval,
+                ..
+            } => {
+                self.st
+                    .approval_effects
+                    .entry((*sleeve, *g, approval.clone()))
+                    .or_default()
+                    .insert(id);
+            }
+            _ => {}
+        }
+        if let EffectKind::NodeSubmit { job, .. }
+        | EffectKind::NodeCancel { job, .. }
+        | EffectKind::NodeAckCollected { job, .. } = kind
+        {
+            self.st.open_job_effects.entry(job).or_default().insert(id);
+        }
         self.st.effects.insert(
             id,
             Effect {
@@ -50,6 +90,40 @@ impl Core<'_> {
 
     fn set_effect(&mut self, id: EffectId, state: EffectState) {
         self.st.effects.get_mut(&id).expect("effect exists").state = state;
+        let kind = &self.st.effects[&id].kind;
+        if let Some(sleeve) = kind.sleeve() {
+            let open = self.st.open_sleeve_effects.entry(sleeve).or_default();
+            if state.terminal() {
+                open.remove(&id);
+            } else {
+                open.insert(id);
+            }
+            let reportable = self.st.reportable_sleeve_effects.entry(sleeve).or_default();
+            if matches!(
+                state,
+                EffectState::Uncertain | EffectState::Probing | EffectState::Fenced
+            ) {
+                reportable.insert(id);
+            } else {
+                reportable.remove(&id);
+            }
+        }
+        if let EffectKind::NodeSubmit { job, .. }
+        | EffectKind::NodeCancel { job, .. }
+        | EffectKind::NodeAckCollected { job, .. } = kind
+        {
+            let open = self.st.open_job_effects.entry(*job).or_default();
+            if state.terminal() {
+                open.remove(&id);
+            } else {
+                open.insert(id);
+            }
+        }
+        if state.terminal() {
+            self.st.open_effects.remove(&id);
+        } else {
+            self.st.open_effects.insert(id);
+        }
         if matches!(state, EffectState::Uncertain | EffectState::Probing) {
             self.st.retryable_effects.insert(id);
         } else {
@@ -302,8 +376,7 @@ impl Core<'_> {
     pub(crate) fn fence_incarnation(&mut self, sleeve: SleeveId, g: Gen) {
         let ids: Vec<EffectId> = self
             .st
-            .effects
-            .values()
+            .open_effects_for_sleeve(sleeve)
             .filter(|e| !e.state.terminal() && e.kind.incarnation() == Some((sleeve, g)))
             .map(|e| e.id)
             .collect();
@@ -362,13 +435,7 @@ impl Core<'_> {
     /// HubRecovered: anything that may have been in flight becomes Uncertain, and every
     /// Uncertain or Probing record is probed (again).
     pub(crate) fn recover_effects(&mut self) {
-        let ids: Vec<EffectId> = self
-            .st
-            .effects
-            .values()
-            .filter(|e| !e.state.terminal())
-            .map(|e| e.id)
-            .collect();
+        let ids: Vec<EffectId> = self.st.open_effects.iter().copied().collect();
         for id in ids {
             if matches!(
                 self.effect_state(id),

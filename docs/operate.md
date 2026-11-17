@@ -626,4 +626,4 @@ them.
 
 None of these rotate yet.
 
-Tick processing tracks uncertain and probing effects and active jobs while retaining terminal records. These indexes are rebuilt during journal replay.
+Tick processing tracks uncertain and probing effects, active jobs, eligible sleeves and pending approvals while retaining terminal records. These indexes are rebuilt during journal replay.

@@ -26,6 +26,7 @@ impl Core<'_> {
     }
 
     fn decide(&mut self, id: &str, state: ApprovalState, decision: Option<Decision>) {
+        self.st.pending_approvals.remove(id);
         let a = self.approval(id);
         debug_assert!(a.state == ApprovalState::Pending && a.decision.is_none());
         a.state = state;
@@ -49,6 +50,7 @@ impl Core<'_> {
         let deadline = self.st.sleeves[&sid]
             .blocked_at
             .saturating_add(APPROVAL_TIMEOUT);
+        self.st.pending_approvals.insert(id.clone());
         self.st.approvals.insert(
             id.clone(),
             Approval {
@@ -84,6 +86,7 @@ impl Core<'_> {
         let id = format!("{ACTION_PREFIX}{}", self.st.next_approval);
         self.st.next_approval += 1;
         let now = self.now;
+        self.st.pending_approvals.insert(id.clone());
         self.st.approvals.insert(
             id.clone(),
             Approval {
@@ -168,25 +171,31 @@ impl Core<'_> {
     /// nothing, and an Abandoned one is the owner's explicit release.
     fn answered(&self, sid: SleeveId, native: &str) -> Option<bool> {
         let g = self.st.sleeves[&sid].g;
-        self.st.effects.values().find_map(|e| match &e.kind {
-            EffectKind::RespondApproval {
-                sleeve,
-                g: eg,
-                approval: a,
-                allow,
-                ..
-            } if *sleeve == sid
-                && *eg == g
-                && a == native
-                && !matches!(
-                    e.state,
-                    EffectState::Rejected | EffectState::Abandoned | EffectState::Failed
-                ) =>
-            {
-                Some(*allow)
-            }
-            _ => None,
-        })
+        self.st
+            .approval_effects
+            .get(&(sid, g, native.to_string()))
+            .into_iter()
+            .flatten()
+            .map(|id| &self.st.effects[id])
+            .find_map(|e| match &e.kind {
+                EffectKind::RespondApproval {
+                    sleeve,
+                    g: eg,
+                    approval: a,
+                    allow,
+                    ..
+                } if *sleeve == sid
+                    && *eg == g
+                    && a == native
+                    && !matches!(
+                        e.state,
+                        EffectState::Rejected | EffectState::Abandoned | EffectState::Failed
+                    ) =>
+                {
+                    Some(*allow)
+                }
+                _ => None,
+            })
     }
 
     /// Writes a response to the current incarnation unless one is already outstanding.
@@ -262,21 +271,26 @@ impl Core<'_> {
 
     /// Incarnation `g` settled its turn: every request it still had pending went away.
     pub(crate) fn withdraw_tool_approvals(&mut self, sid: SleeveId, g: Gen) {
-        for a in self.st.approvals.values_mut() {
-            if a.sleeve == sid && a.state == ApprovalState::Pending && a.source_gen() == Some(g) {
-                a.state = ApprovalState::Cancelled;
-            }
+        let ids: Vec<_> = self
+            .st
+            .pending_approvals
+            .iter()
+            .filter(|id| {
+                let a = &self.st.approvals[*id];
+                a.sleeve == sid && a.source_gen() == Some(g)
+            })
+            .cloned()
+            .collect();
+        for id in ids {
+            self.decide(&id, ApprovalState::Cancelled, None);
         }
     }
 
     /// Incarnation `g` is dead: its pending requests can no longer be answered.
     pub(crate) fn orphan_tool_approvals(&mut self, sid: SleeveId, g: Gen) {
-        for a in self.st.approvals.values_mut() {
-            if a.sleeve == sid
-                && a.state == ApprovalState::Pending
-                && a.source_gen() == Some(g)
-                && a.orphan.is_none()
-            {
+        for id in &self.st.pending_approvals {
+            let a = self.st.approvals.get_mut(id).expect("approval exists");
+            if a.sleeve == sid && a.source_gen() == Some(g) && a.orphan.is_none() {
                 a.orphan = Some(Orphan::IncarnationEnded);
             }
         }
@@ -310,13 +324,7 @@ impl Core<'_> {
     /// approvals are G9's, which also answers the harness.
     pub(crate) fn tick_approvals(&mut self) {
         let now = self.now;
-        let ids: Vec<String> = self
-            .st
-            .approvals
-            .values()
-            .filter(|a| a.state == ApprovalState::Pending)
-            .map(|a| a.id.clone())
-            .collect();
+        let ids: Vec<String> = self.st.pending_approvals.iter().cloned().collect();
         for id in ids {
             let a = &self.st.approvals[&id];
             let live = self.st.sleeve(a.sleeve).is_some_and(|s| s.life.live());
@@ -346,8 +354,9 @@ impl Core<'_> {
     /// HubRecovered: every API call that waited on an action approval ended with the old
     /// process. Approvals already past their deadline time out now.
     pub(crate) fn recover_approvals(&mut self) {
-        for a in self.st.approvals.values_mut() {
-            if a.state == ApprovalState::Pending && a.source == Source::Action {
+        for id in &self.st.pending_approvals {
+            let a = self.st.approvals.get_mut(id).expect("approval exists");
+            if a.source == Source::Action {
                 a.orphan.get_or_insert(Orphan::HubRestarted);
             }
         }

@@ -139,6 +139,13 @@ impl Core<'_> {
                 d9: false,
             },
         );
+        if let Some(parent) = spec.parent {
+            self.st
+                .children_by_parent
+                .entry(parent)
+                .or_default()
+                .insert(id);
+        }
         if spec.d9 || spec.parent.is_some_and(|p| self.st.sleeves[&p].d9) {
             self.mark_d9(id);
         }
@@ -355,9 +362,10 @@ impl Core<'_> {
     }
 
     pub(crate) fn launched(&mut self, sid: SleeveId, g: Gen, scope: &str, pid: u32) {
-        let Some(s) = self.st.sleeves.get_mut(&sid) else {
+        if !self.st.sleeves.contains_key(&sid) {
             return;
-        };
+        }
+        let s = self.sl(sid);
         if s.g != g || s.proc == Proc::Down {
             return;
         }
@@ -462,13 +470,9 @@ impl Core<'_> {
         let delivery_sent = matches!(s.activity, Activity::Delivering { effect } if self.effect_state(effect) != Some(EffectState::Intent));
         // The ack can lose the race with Exited: the watcher reports the scope empty before
         // KillScope is confirmed. A guardrail kill is not HubRestart, so the parent still hears.
-        let killed_by_recovery = s.kill_cause == Some(Cause::HubRestart)
-            && self
-                .st
-                .effects
-                .values()
-                .any(|e| e.kind == EffectKind::KillScope { sleeve: sid, g });
-        let s = self.st.sleeves.get_mut(&sid).expect("sleeve exists");
+        let killed_by_recovery =
+            s.kill_cause == Some(Cause::HubRestart) && self.st.killed_scopes.contains(&(sid, g));
+        let s = self.sl(sid);
         let was = std::mem::replace(&mut s.activity, Activity::Ended);
         // An interrupt is the owner or a guardrail stopping the turn. `turn` stays set, so it
         // must not count on its own: resuming would continue the turn they stopped.
@@ -714,7 +718,7 @@ impl Core<'_> {
     }
 
     pub(crate) fn recover_sleeves(&mut self) {
-        let ids: Vec<SleeveId> = self.st.sleeves.keys().copied().collect();
+        let ids: Vec<SleeveId> = self.st.recovering_sleeves.iter().copied().collect();
         for sid in ids {
             let s = self.sl(sid);
             // Idle means this incarnation reached Ready. A debt still held means no prompt
@@ -1328,13 +1332,7 @@ impl Core<'_> {
     }
 
     pub(crate) fn tick_unwritten(&mut self) {
-        let ids: Vec<_> = self
-            .st
-            .sleeves
-            .values()
-            .filter(|s| s.retry_unwritten && s.foreign.is_none())
-            .map(|s| s.id)
-            .collect();
+        let ids: Vec<_> = self.st.unwritten_sleeves.iter().copied().collect();
         for sid in ids {
             self.sl(sid).retry_unwritten = false;
             let s = &self.st.sleeves[&sid];
@@ -1744,8 +1742,7 @@ impl Core<'_> {
                 }
                 let pending: Vec<EffectId> = self
                     .st
-                    .effects
-                    .values()
+                    .open_effects_for_sleeve(sid)
                     .filter(|e| {
                         !e.state.terminal() && e.kind == EffectKind::Compact { sleeve: sid, g }
                     })
@@ -1870,17 +1867,7 @@ impl Core<'_> {
     /// whose turn was acked. A fresh session leaves `resume` empty.
     fn native_resume(&self, sid: SleeveId) -> bool {
         let g = self.st.sleeves[&sid].g;
-        self.st.effects.values().any(|e| {
-            matches!(
-                &e.kind,
-                EffectKind::StartIncarnation {
-                    sleeve,
-                    g: eg,
-                    resume,
-                    ..
-                } if *sleeve == sid && *eg == g && resume.is_some()
-            )
-        })
+        self.st.resumed_scopes.contains(&(sid, g))
     }
 
     fn continue_key(sid: SleeveId, seq: u64) -> String {
