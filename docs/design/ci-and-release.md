@@ -4,36 +4,51 @@ Proposal for owner review, 2026-11-18. No behavior here is implemented or author
 file. SPEC.md wins until amended. This proposes changes to SPEC sections 2, 6, 7 and 12b:
 section 7's `make test` cross-arch rule becomes a declared background gate; section 6's local
 release and D36's unsigned release change to the release protocol below. Section 12b's two-node
-matching rule remains for fleet-built release assets. Engineering.md supersedes repo testing rules:
+matching rule remains for Rust binaries; the client exception below needs a SPEC amendment.
+Engineering.md supersedes repo testing rules:
 at most ten blocking end-to-end tests per project, with other checks in the major gate. Migration
 of existing tests and commands is separate work, not performed by this proposal.
 
+## Phases
+
+Each phase ships independently after the needed SPEC amendments; later phases are not prerequisites.
+The boundary against executing repository code with hub secrets is hard from the start.
+
+1. **Background gate and culprit finder.** Ship the declaration, fleet scheduling, journaled results,
+   bounded investigation, cancellation and reviewable fix branch without release credentials. Defer
+   automated merges and releases to later phases.
+2. **Merge to dev.** Add fixed hub-side Git, fleet rerun of the blocking set and compare-and-swap
+   update of `dev-hotschmoe`. Keep release preparation and publication manual until phase 3.
+3. **Release.** Add prepare, stable approval, fixed signing and publication, fleet builds, and the
+   never-execute-artifacts rule. The first release may use the existing rollback-sensitive journal
+   audit and an isolated fixed APK signer; separately retained append-only audit and a hardened APK
+   signer/validator follow as hardening. Until then show the audit rollback limitation and isolate
+   the signer with only the APK key, no hub state or network. Neither deferral permits repo-supplied
+   signer code, arbitrary signing requests or executing artifacts on the hub.
+4. **Hub-host node.** Ship only after the separate identities, fail-closed isolation, explicit device
+   grants and negative access checks below work. Further device types can follow independently.
+
 ## Gate declaration and scheduling
 
-Each owner-registered repository has a root `protectorate-ci.toml` at the tested commit. Example:
+Each owner-registered repository has a root `protectorate-ci.json` at the tested commit, parsed
+with `pt_json`. Example:
 
-```toml
-version = 1
-branch = "dev-hotschmoe"
-every_commits = 15
-nightly_utc = "18:00"
-
-[[blocking]]
-id = "main-path"
-argv = ["make", "test-main"]
-timeout_secs = 180
-
-[[heavy]]
-id = "linux-e2e"
-argv = ["make", "test-e2e"]
-node = "linux-amd64"
-timeout_secs = 3600
-
-[[heavy]]
-id = "fuzz-seeds"
-argv = ["sh", "scripts/replay-seeds.sh"]
-node = "linux-amd64"
-timeout_secs = 3600
+```json
+{
+  "version": 1,
+  "branch": "dev-hotschmoe",
+  "every_commits": 15,
+  "nightly_utc": "18:00",
+  "blocking": [
+    {"id": "main-path", "argv": ["make", "test-main"], "timeout_secs": 180}
+  ],
+  "heavy": [
+    {"id": "linux-e2e", "argv": ["make", "test-e2e"],
+     "node": "linux-amd64", "timeout_secs": 3600},
+    {"id": "fuzz-seeds", "argv": ["sh", "scripts/replay-seeds.sh"],
+     "node": "linux-amd64", "timeout_secs": 3600}
+  ]
+}
 ```
 
 IDs are unique, stable test selectors; each entry must run one independently rerunnable scenario
@@ -71,6 +86,17 @@ one pending tip; unavailable nodes leave work queued without blocking commits. C
 concurrent heavy jobs globally. Jobs do not receive hub secrets. Node results are claims, with node,
 commit, declaration digest, command, timestamps, exit status and bounded log/artifact references.
 
+Protectorate's heavy e2e tests require bwrap, unprivileged user namespaces and a systemd user
+manager. Today's node system service and its jobs run as root under the system manager. For a
+configured test node, the owner provisions a dedicated non-root test account with lingering enabled,
+a private work directory and a running user manager. The root node service starts the gate job with
+fixed, owner-configured credentials and environment for that account, including its
+`XDG_RUNTIME_DIR` and user bus; it verifies the account, manager, bwrap and namespace prerequisites
+before dispatch. The job runs as that account in its user manager's scope, never as root. Missing
+prerequisites hold the job visibly, without a root or process-group fallback. The account has no
+hub credentials; the node remains untrusted and results are node claims. Other projects may use
+other explicitly provisioned node profiles.
+
 `GateRegister`, `GateRun`, `GateList`, `GateShow`, `GateCancel`, `GatePause` and `GateResume`
 are proposed API methods, exposed as `protectorate gate register|run|list|show|cancel|pause|resume`
 and app controls. Owner configures registration; Envoy can run and inspect; owner and Envoy may
@@ -103,7 +129,7 @@ time, four hours wall time, and two hours per job; earlier good must be within t
 confirmed good, resources, budget or consistent outcome, stop inconclusive with evidence. A sleeve
 may commit a proposed fix on its own branch based on the current working tip, run the blocking set
 and the failing heavy test, and report the branch, base and evidence for review. It cannot declare
-itself green or directly merge; Envoy may request the separate merge protocol. A changed branch tip
+itself green or directly merge; after phase 2 Envoy may request the separate merge protocol. A changed branch tip
 requires revalidation. Journal `InvestigationStarted`, `InvestigationSampled` (revision, attempts,
 node, result), `CulpritIdentified` or `InvestigationInconclusive`, `FixProposed`, and
 `InvestigationStopped`. The owner sees the evidence and stop control on the gate, event list,
@@ -135,10 +161,13 @@ HTTP operations use a clean environment and disabled hooks/config; the scoped Gi
 access only configured repositories and necessary contents, pull-request and release permissions.
 Branch protections remain effective. Audit every authorization and external write before effect.
 
-Merge requires a reported green blocking set tied to the exact source tree and approved merge base;
-it merges into dev only if the expected dev ref still matches. Conflicts, a moved ref, missing proof
-or a rejected push stop for a new request. Since agent-reported local results are claims, label them
-as such; the hub does not pretend to attest local runs. For a release, create a PR from the exact dev
+Before a merge, the hub dispatches the entire declared blocking set as fleet jobs against the exact
+source commit and its declared configuration, recording the node, test results and expected dev
+SHA. All must pass; a missing test, failed job or unavailable node leaves the request unmerged.
+The hub constructs and tests the exact proposed merge tree against that expected dev SHA as well;
+it updates dev only by compare-and-swap if that SHA still matches. Conflicts, a moved ref, missing
+proof or a rejected push stop for a new request. Results are node claims, not proof against a
+compromised node. For a release, create a PR from the exact dev
 SHA to master, record its number and head/base, verify required GitHub checks and merge through the
 GitHub API with a head SHA precondition. If base/head changes, approvals or gates are stale: stop and
 reprepare. Record the resulting master commit, fast-forward dev only if it still matches, and create
@@ -153,19 +182,25 @@ gate; stable publication requires explicit owner approval of the exact master co
 and artifact hashes after builds. D9 approvals still apply. Signing-key rotation, token scope changes,
 new trusted nodes and policy changes are owner-only; failures and mismatches stop without fallback.
 
-Build each asset in secret-free fleet jobs from the immutable tagged commit on two distinct nodes;
-require byte-identical unsigned outputs and record both node identities and digests (SPEC 12b).
-Independent builds reduce but cannot eliminate collusion or a shared compromised toolchain; hashes
-prove byte identity, not trustworthy source-to-binary correspondence. Reject non-reproducible
-artifacts rather than quietly relaxing this rule. Nodes get no signing credentials. The hub fetches
+Build Rust binaries in secret-free fleet jobs from the immutable tagged commit on two distinct
+nodes; require byte-identical unsigned outputs and record both node identities and digests. Independent
+builds reduce but cannot eliminate collusion or a shared compromised toolchain; hashes prove byte
+identity, not trustworthy source-to-binary correspondence. Reject mismatched Rust outputs.
+
+OWNER: Permit client assets, including the Flutter APK, Windows zips and arm64 desktop build, to
+come from a single node until reproducible across nodes. Record its identity and digest and mark each
+such manifest entry `single-builder`; this amends SPEC 12b. Reproducible client assets should move
+to the two-node rule.
+
+Nodes get no signing credentials. The hub fetches
 bounded regular files through the job artifact protocol, treats them as hostile bytes, rejects paths,
 links, duplicate names, unexpected sizes/types and digest mismatches, and hashes the received bytes
 itself. Fixed hub code constructs the allowlisted manifest and SHA256SUMS. It never executes,
 unpacks, sources or dynamically loads a fetched artifact or repository script. Signing uses a
 hub-installed, independently managed fixed signer with a narrow interface and secret accessible only
-to that signer; Android APK signing needs an isolated hardened fixed signer/validator for hostile APK
-input and the existing Android key. No repository-controlled signer, flags, provider, hooks or
-config. Sign the manifest and APK as required, hash final signed outputs, and publish exactly those
+to that signer; Android APK signing initially uses the isolated fixed signer and existing Android
+key. A hardened fixed signer/validator for hostile APK input follows the first release. No
+repository-controlled signer, flags, provider, hooks or config. Sign the manifest and APK as required, hash final signed outputs, and publish exactly those
 bytes with the scoped token. Clients must verify the manifest signature against a separately pinned
 public key before accepting hashes; HTTPS-only sums are insufficient. Bootstrap and key rotation
 must be designed before deployment. No signing of arbitrary blobs via the API.
@@ -182,14 +217,13 @@ recovery action. Release state is serialized per repo. Cancelling cannot undo an
 tag or publication. Once published, request the existing hub and node update paths and their
 probation/rollback, with protocol compatibility ordering; failed canary stops its rollout group.
 Rollback restores service versions/state under the existing documented limits, not Git history or an
-immutable release. Journal snapshot rollback can lose recent journal events, so release audit also
-needs an append-only, independently retained hub-host audit log outside rollback snapshots, with
-reconciliation on restart; fail closed if it cannot be written.
+immutable release. Journal snapshot rollback can lose recent release audit events. The first release uses the existing journal and exposes that limitation;
+subsequent hardening adds an independently retained append-only hub-host audit log outside rollback
+snapshots, with reconciliation on restart and fail-closed writes.
 
 OWNER: Approve the proposed signing trust root, key custody and rotation, scoped GitHub permissions,
-release asset allowlist and hardening of the APK signer before implementing publication. Decide
-whether agent-reported blocking results suffice for dev merges or must be independently rerun on a
-fleet node. Decide which repos, branches and release architectures to register. A green release gate
+and release asset allowlist before implementing publication. Decide which repos, branches and release
+architectures to register. Review the deferred APK signer and audit hardening. A green release gate
 is mandatory in this proposal even for a prerelease; approve or change that policy.
 
 ## Node on the hub host
@@ -201,7 +235,7 @@ must not be installed unchanged on the hub host.
 
 Install a distinct `protectorate-local-node` system account with its own private state and home,
 no login shell, no hub group, sudo, privileged capabilities or owner credentials. Run its node
-service and all jobs as that account, with `NoNewPrivileges`, dropped capabilities, private devices
+service as that account and jobs as a separate unprivileged identity, with `NoNewPrivileges`, dropped capabilities, private devices
 and a restricted filesystem namespace. Bind only a dedicated job work directory and explicitly
 configured devices; no owner home, hub state, hub API socket, token, signing key, SSH agent, service
 manager socket, shared caches or inherited file descriptors/environment. Deny access both by mount
