@@ -1115,7 +1115,7 @@ exec sleep 300"#,
         "envoy" => pt_json::obj! { "harness" => "claude" },
         "claude_program" => fake.to_str().unwrap(),
         "scopes" => true,
-        "sleeve_memory_max" => 8589934592u64,
+        "sleeve_memory_max" => 1611137024u64,
         "sleeve_memory_max_overrides" => pt_json::obj! { "devices" => 17179869184u64 },
         "quota_poll_secs" => 0u64,
         "harness_update_hours" => 0u64,
@@ -1176,7 +1176,7 @@ exec sleep 300"#,
     assert!(
         hub.cli(&["sleeve", "show", "devices"])
             .ok()
-            .contains("17179869184 bytes")
+            .contains("16 GiB (17179869184 bytes)")
     );
     let repo2 = temp_repo("memory-default");
     hub.cli(&[
@@ -1192,8 +1192,18 @@ exec sleep 300"#,
     .json();
     eventually("default memory scope", Duration::from_secs(60), || {
         let args = std::fs::read_to_string(dir.join("scope-args")).ok()?;
-        args.contains("MemoryMax=8589934592").then_some(())
+        args.contains("MemoryMax=1611137024").then_some(())
     });
+    eventually(
+        "formatted default memory limit",
+        Duration::from_secs(30),
+        || {
+            hub.cli(&["sleeve", "show", "memory-default"])
+                .ok()
+                .contains("1536.50 MiB (1611137024 bytes)")
+                .then_some(())
+        },
+    );
     assert!(
         hub.log_text().contains(&format!(
             "device {} is missing; not bound",
@@ -1625,6 +1635,12 @@ exec sleep 300"#,
                     .ok()
             },
         );
+        if id == &envoy_id {
+            assert!(
+                !saw.contains("Mail Envoy ($PROTECTORATE_ENVOY"),
+                "Envoy received its own mail rules: {saw}"
+            );
+        }
         assert!(
             saw.contains("[from sleeve leaf]") && saw.contains(marker),
             "prompt for {id}: {saw}"

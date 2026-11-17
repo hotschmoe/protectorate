@@ -331,8 +331,21 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 if let Some(i) = &s.incarnation {
                     println!(
                         "memory limit {}",
-                        i.memory_max_bytes
-                            .map_or_else(|| "unlimited".to_string(), |n| format!("{n} bytes"))
+                        i.memory_max_bytes.map_or_else(
+                            || "unlimited".to_string(),
+                            |n| {
+                                let gib = 1_u64 << 30;
+                                let mib = 1_u64 << 20;
+                                let size = if n % gib == 0 {
+                                    format!("{} GiB", n / gib)
+                                } else if n % mib == 0 {
+                                    format!("{} MiB", n / mib)
+                                } else {
+                                    format!("{:.2} MiB", n as f64 / mib as f64)
+                                };
+                                format!("{size} ({n} bytes)")
+                            }
+                        )
                     );
                     println!(
                         "g{} {} {} {}, turn {}, context {}/{}, session {}",

@@ -1192,6 +1192,9 @@ impl SleeveExec {
         } else {
             "Scopes are disabled; no memory limit is enforced.\n\n".to_string()
         };
+        if envoy_id(&view.state) == Some(self.id) {
+            return Some(memory);
+        }
         Some(
             memory
                 + &match parent {
