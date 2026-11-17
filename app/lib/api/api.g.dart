@@ -4669,6 +4669,7 @@ final class SendMessageRequest {
     required this.sleeveId,
     required this.text,
     this.delivery = Delivery.queue,
+    this.supersede = false,
   });
 
   factory SendMessageRequest.fromJson(Object? json) {
@@ -4677,6 +4678,11 @@ final class SendMessageRequest {
       sleeveId: _string(j['sleeve_id'], 'SendMessageRequest.sleeve_id'),
       text: _string(j['text'], 'SendMessageRequest.text'),
       delivery: _or(j['delivery'], Delivery.queue, Delivery.fromJson),
+      supersede: _or(
+        j['supersede'],
+        false,
+        (e0) => _bool(e0, 'SendMessageRequest.supersede'),
+      ),
     );
   }
 
@@ -4686,10 +4692,13 @@ final class SendMessageRequest {
 
   final Delivery delivery;
 
+  final bool supersede;
+
   Map<String, Object?> toJson() => {
     'sleeve_id': sleeveId,
     'text': text,
     'delivery': delivery.toJson(),
+    'supersede': supersede,
   };
 }
 
@@ -5650,6 +5659,10 @@ final class HubApi {
   /// `POST /api/GetInbox`, scope `sleeve`.
   Future<Inbox> getInbox(InboxRequest request) =>
       _call('GetInbox', request.toJson(), Inbox.fromJson);
+
+  /// `POST /api/DropQueued`, scope `sleeve`.
+  Future<Empty> dropQueued(SleeveRef request) =>
+      _call('DropQueued', request.toJson(), Empty.fromJson);
 
   /// `POST /api/GetTranscript`, scope `sleeve`.
   Future<Transcript> getTranscript(GetTranscriptRequest request) =>

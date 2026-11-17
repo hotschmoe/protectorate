@@ -8,7 +8,8 @@
 //!
 //! ```text
 //! spawn NAME PATH [parent=NAME] [view] [harness=H] [pane] [budget=N] [disk=N] [effort=E] [to=H,H] [d9] [by-envoy]
-//! send NAME ID [steer] [from=NAME|from=agent:NAME] [d9]
+//! send NAME ID [steer|supersede] [from=NAME|from=agent:NAME] [d9]
+//! drop NAME [from=NAME]
 //! continue NAME                    a second journaled continuation; the first is sent by the core
 //! stop|remove|interrupt|compact|viewed NAME
 //! start|resleeve NAME [harness=H] [effort=E]
@@ -266,19 +267,38 @@ impl Runner {
                     None => (Party::Owner, None),
                 };
                 let id = arg(2)?;
-                self.sim.apply(E::Send {
-                    to,
-                    request_id: id.into(),
-                    from,
-                    agent,
-                    text: format!("text of {id}"),
-                    mode: if flag("steer") {
-                        SendMode::Steer
-                    } else {
-                        SendMode::Queue
-                    },
-                    d9: flag("d9"),
-                });
+                let event = if flag("supersede") {
+                    E::Supersede {
+                        to,
+                        request_id: id.into(),
+                        from,
+                        text: format!("text of {id}"),
+                        d9: flag("d9"),
+                    }
+                } else {
+                    E::Send {
+                        to,
+                        request_id: id.into(),
+                        from,
+                        agent,
+                        text: format!("text of {id}"),
+                        mode: if flag("steer") {
+                            SendMode::Steer
+                        } else {
+                            SendMode::Queue
+                        },
+                        d9: flag("d9"),
+                    }
+                };
+                self.sim.apply(event);
+            }
+            "drop" => {
+                let to = self.id(arg(1)?)?;
+                let from = match kv("from") {
+                    Some(n) => Party::Sleeve(self.id(n)?),
+                    None => Party::Owner,
+                };
+                self.sim.apply(E::DropQueued { to, from });
             }
             "stop" | "remove" | "interrupt" | "compact" | "viewed" | "start" | "resleeve" => {
                 let sleeve = self.id(arg(1)?)?;

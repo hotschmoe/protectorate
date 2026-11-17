@@ -20,6 +20,35 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
             mode,
             ..
         } => on_send(owed, prev, *to, request_id, *from, text, *mode),
+        E::Supersede {
+            to,
+            request_id,
+            from,
+            text,
+            ..
+        } => {
+            let mut state = prev.clone();
+            if let Some(s) = state.sleeves.get_mut(to) {
+                s.queue.retain(|key| {
+                    !s.messages
+                        .get(key)
+                        .is_some_and(|m| m.from == *from && m.kind == MsgKind::Prompt)
+                });
+            }
+            on_send(owed, &state, *to, request_id, *from, text, SendMode::Queue);
+        }
+        E::DropQueued { to, from } => {
+            if let Some(s) = prev.sleeves.get(to) {
+                let mut remaining = s.clone();
+                remaining.queue.retain(|key| {
+                    !remaining
+                        .messages
+                        .get(key)
+                        .is_some_and(|m| m.from == *from && m.kind == MsgKind::Prompt)
+                });
+                note_dequeue(owed, prev, &remaining);
+            }
+        }
         E::Report {
             sleeve,
             to,
@@ -283,12 +312,20 @@ fn on_exit(
         let sent = |effect: &EffectId| {
             prev.effects.get(effect).is_some_and(|e| {
                 e.state != EffectState::Intent
-                    && matches!(e.kind, EffectKind::SendPrompt { kind: MsgKind::Prompt, .. })
+                    && matches!(
+                        e.kind,
+                        EffectKind::SendPrompt {
+                            kind: MsgKind::Prompt,
+                            ..
+                        }
+                    )
             })
         };
         let seq = if s.foreign.is_some()
             && (matches!(was, Activity::Delivering { effect } if sent(effect))
-                || s.delivery.as_ref().is_some_and(|d| !d.applied && sent(&d.effect)))
+                || s.delivery
+                    .as_ref()
+                    .is_some_and(|d| !d.applied && sent(&d.effect)))
         {
             s.turn_seq + 1
         } else {

@@ -66,9 +66,9 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   sleeve list | sleeve show <sleeve>  (includes scope memory limit)
   sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
         [--provider P] [--model M] [--effort E] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT | --message-file FILE]
-  sleeve send <sleeve> (<text...> | --message-file FILE) [--steer]
+  sleeve send <sleeve> (<text...> | --message-file FILE) [--steer | --supersede]
         a sleeve may send to itself, its children, its parent, or envoy
-  sleeve inbox [<sleeve>]
+  sleeve inbox [<sleeve>] | sleeve inbox <sleeve> --drop
         --message-file accepts - for stdin
   sleeve interrupt|stop|rm|takeover <sleeve>
   sleeve start <sleeve> [--harness H] [--provider P] [--model M] [--effort E]

@@ -121,7 +121,11 @@ CLI on the hub machine (section 3.1).
   Send answers whether delivery began or the message was queued, and the queue length at
   acceptance. List and show display the oldest queue age. `sleeve inbox [<sleeve>]` reads
   queued messages in order, with sender, enqueue time and text, without consuming them; a
-  sleeve credential can inspect only its own queue, while the owner can inspect any queue.
+  sleeve credential can inspect its own queue, and its own messages in another reachable
+  sleeve's queue; the owner can inspect any queue. `sleeve inbox <sleeve> --drop` journals
+  removal of the caller's queued prompts. `sleeve send <sleeve> --supersede` atomically
+  replaces those prompts with the new send; a refusal drops nothing. Neither affects other
+  senders, in-flight messages or continuations, and supersede cannot steer.
   Queued messages still deliver at a turn boundary.
   One tree may land at most 8 messages on Envoy in 10 minutes, counted on the tree's root. Upward
   mail to a parent who is not Envoy has the same bound per sender. Mail to Envoy spends only the

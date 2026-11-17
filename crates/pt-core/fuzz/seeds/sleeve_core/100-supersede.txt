@@ -1,0 +1,22 @@
+#scenario 55ff081a70eb9887
+# Sender-scoped replacement survives journal replay and keeps other senders' mail.
+spawn root /w/a
+spawn sender /w/b
+run
+obs root ready
+obs sender ready
+send root active
+run
+send root owner1
+send root sender1 from=sender
+send root owner2
+send root replacement supersede
+expect root msg:owner1=Rejected msg:owner2=Rejected msg:sender1=Queued msg:replacement=Queued
+run
+crash
+expect root msg:owner1=Rejected msg:owner2=Rejected msg:sender1=Queued msg:replacement=Queued
+drop root from=sender
+expect root msg:sender1=Rejected msg:replacement=Queued
+run
+crash
+expect root msg:sender1=Rejected msg:replacement=Queued

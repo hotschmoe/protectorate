@@ -148,6 +148,7 @@ api_records! {
         pub sleeve_id: String,
         pub text: String,
         pub delivery: Delivery = Delivery::Queue,
+        pub supersede: bool = false,
     }
 
     /// A message the hub took; its `user_message` and `prompt_ack` entries carry this id.
@@ -683,6 +684,7 @@ api_methods! {
     GetState(Empty) -> HubState: Owner,
     ListSleeves(Empty) -> SleeveList: Sleeve,
     GetInbox(InboxRequest) -> Inbox: Sleeve,
+    DropQueued(SleeveRef) -> Empty: Sleeve,
     GetTranscript(GetTranscriptRequest) -> Transcript: Sleeve,
 
     // Sleeves

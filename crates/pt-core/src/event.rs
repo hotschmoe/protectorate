@@ -133,6 +133,17 @@ pub enum EventKind {
         /// The sending turn had D9 origin. The recipient is marked, and so are its children.
         d9: bool,
     },
+    Supersede {
+        to: SleeveId,
+        request_id: String,
+        from: Party,
+        text: String,
+        d9: bool,
+    },
+    DropQueued {
+        to: SleeveId,
+        from: Party,
+    },
     Interrupt {
         sleeve: SleeveId,
     },
