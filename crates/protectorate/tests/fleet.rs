@@ -223,16 +223,19 @@ fn hub_runs_the_fleet_and_node_jobs() {
     let mut hub = Hub::start_config(
         "fleet",
         "pi_local",
-        &[(
-            "fleet",
-            obj! {
-                "listen" => listen.as_str(),
-                "dir" => tailnet.to_str().unwrap(),
-                "poll_secs" => 2u64,
-                // A bare address: headscale refuses to start unless the hub widens it to a prefix.
-                "trusted_proxies" => vec![Value::from("127.0.0.2")],
-            },
-        )],
+        &[
+            (
+                "fleet",
+                obj! {
+                    "listen" => listen.as_str(),
+                    "dir" => tailnet.to_str().unwrap(),
+                    "poll_secs" => 2u64,
+                    // A bare address: headscale refuses to start unless the hub widens it to a prefix.
+                    "trusted_proxies" => vec![Value::from("127.0.0.2")],
+                },
+            ),
+            ("job_artifact_max_bytes", Value::from(4_000_000u64)),
+        ],
         &[],
         &[("PROTECTORATE_FLEET_TEST_MEMBER_TIMEOUT_MS", "1000")],
     );
@@ -690,6 +693,33 @@ fn hub_runs_the_fleet_and_node_jobs() {
     );
     let done = wait_job(&hub, &art, &["succeeded", "failed"], 120);
     assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
+    let cancelled = hub.cli(&["job", "cancel", &art]);
+    assert_ne!(cancelled.status, 0);
+    assert!(
+        cancelled.stderr.contains(&format!(
+            "job {art} already finished (succeeded, exit code 0)"
+        )),
+        "{}",
+        cancelled.stderr
+    );
+    let oversized = run_job(
+        &hub,
+        &["--artifact", "oversized"],
+        &[
+            "sh",
+            "-c",
+            "dd if=/dev/zero of=oversized bs=1000000 count=5",
+        ],
+    );
+    let refused = wait_job(&hub, &oversized, &["succeeded", "failed"], 120);
+    assert_eq!(refused["state"].as_str(), Some("failed"), "{refused}");
+    assert!(
+        refused["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("4000000 byte cap"),
+        "{refused}"
+    );
     let expected = b"artifact\x01\xffbytes";
     let a = &done["artifacts"][0];
     assert_eq!(a["path"].as_str(), Some("out.bin"));

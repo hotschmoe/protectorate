@@ -45,7 +45,6 @@ const SCHEDULE_EVERY: Duration = Duration::from_secs(2);
 /// polls a job it just submitted after FOLLOW_FIRST, then on a doubling delay below FOLLOW_UNTIL.
 const FOLLOW_FIRST: Duration = Duration::from_millis(250);
 const FOLLOW_UNTIL: Duration = Duration::from_secs(10);
-const ARTIFACT_CAP: u64 = 64 << 20;
 /// Artifact bytes asked for per FetchArtifact.
 const ARTIFACT_FETCH: u64 = 4 << 20;
 
@@ -1027,9 +1026,10 @@ impl NodeExec {
                 token: token.clone(),
             };
             let (bytes, end) = self.call("FetchArtifact", |c| c.fetch_artifact(q.clone()))?;
-            if end.size > ARTIFACT_CAP {
+            let cap = self.hub.config.job_artifact_max_bytes;
+            if end.size > cap {
                 return Err(Fail::Check(format!(
-                    "{} bytes, over the {ARTIFACT_CAP} byte cap",
+                    "{} bytes, over the {cap} byte cap (job_artifact_max_bytes)",
                     end.size
                 )));
             }

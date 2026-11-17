@@ -259,7 +259,9 @@ crash, every incarnation goes to Recovering and resumes natively.
     tmpfs or ramfs;
   - host device nodes named in `sleeve_devices` (for example `/dev/aipu` and `/dev/mali0`)
     bound with `--dev-bind` when the path exists; a missing path is skipped and logged, and
-    the sleeve still starts;
+    the sleeve still starts. Config changes require a hub restart; a replug can change the
+    resolved node, so running sleeves must restart. Host supplementary groups still apply
+    even when sandbox ownership appears as nobody:nogroup;
   - tmpfs masks over the hub's state, `~/.ssh` and the owner's own credentials; every
     harness's shared hub login (`<home>/logins/`) and the owner's cargo registry, Go and pub
     caches bound read-write;
@@ -326,6 +328,9 @@ crash, every incarnation goes to Recovering and resumes natively.
   - the node journals each job before exec, and limits each one: 1 h by default, 64 MiB of log,
     and a per-job cgroup or Job Object;
   - the hub pulls output as length-prefixed frames;
+  - each fetched artifact is capped by `job_artifact_max_bytes` on the hub (default 64 MiB),
+    and a refused artifact reports the effective cap;
+  - cancelling a finished job reports its state and exit code;
   - a job never re-runs by itself;
   - scheduling, which is code, weighs arch, toolchain, load and warm cache, and only among nodes
     that are AWAY;

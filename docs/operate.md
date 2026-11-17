@@ -230,6 +230,7 @@ job artifact <job> <path> [--out FILE]
 - If someone arrives mid-job, the job drops to idle priority and keeps running; `--on-present
   kill` kills it instead.
 - `--timeout` defaults to 1 hour; a log is capped at 64 MiB. A job never re-runs by itself.
+- Each artifact is capped by the hub's `job_artifact_max_bytes` config (default 67108864 bytes); restart the hub after changing it. Cancelling a finished job reports its state and exit code.
 - Without `--cwd` a job runs in its own directory on the node. `--cwd` is an absolute path in
   the node's OS (`/srv/x`, `C:\dev\x` or `C:/dev/x`); the hub checks it when `--node` names a
   node it has met, otherwise (`--arch`) the node does and the job fails there.
@@ -428,7 +429,11 @@ disabled in scopes; build parallelism continues to follow the CPU quota.
 `--dev-bind` when the path exists, for example
 `"sleeve_devices": ["/dev/aipu", "/dev/mali0"]`. A path that is not there is skipped and
 the hub log says it was not bound; the sleeve still starts. The list is empty by default,
-so a sleeve sees only the sandbox's own `/dev`. A change applies to the next launch.
+so a sleeve sees only the sandbox's own `/dev`. Adding a device requires a hub restart,
+then a new sleeve launch. A replugged device keeps its `/dev/serial/by-id/` name but may
+get a new `ttyUSBn`; restart running sleeves to bind the new node. Inside a sleeve the
+device may appear as `nobody:nogroup` and `id` may show `nogroup`; supplementary host
+groups still apply, so this alone does not mean a 0666 udev rule is needed.
 
 ## Updates and rollback
 

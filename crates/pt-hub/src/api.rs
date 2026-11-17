@@ -1654,7 +1654,29 @@ fn get_job_artifact(c: &Ctx<'_>, r: api::GetJobArtifactRequest) -> Result<api::J
 
 fn cancel_job(c: &Ctx<'_>, r: api::JobRef) -> Result<api::Job> {
     let id = find_job(c, &c.hub.view(), &r.job_id)?;
-    command(c.hub, EventKind::CancelJob { job: id })?;
+    if let Err(e) = command(c.hub, EventKind::CancelJob { job: id }) {
+        let job = job_view(c.hub, id)?;
+        if matches!(
+            job.state,
+            api::JobState::Succeeded
+                | api::JobState::Failed
+                | api::JobState::Interrupted
+                | api::JobState::Cancelled
+                | api::JobState::Abandoned
+        ) {
+            return Err(err(
+                ErrorCode::Conflict,
+                format!(
+                    "job {} already finished ({}, exit code {})",
+                    job.id,
+                    job.state,
+                    job.exit_code
+                        .map_or_else(|| "unknown".into(), |n| n.to_string())
+                ),
+            ));
+        }
+        return Err(e);
+    }
     job_view(c.hub, id)
 }
 
