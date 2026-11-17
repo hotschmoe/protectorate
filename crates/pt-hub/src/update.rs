@@ -39,6 +39,7 @@ use crate::log::{info, warning};
 /// The hub's exit status when it stops to be restarted on another release.
 pub const RESTART_CODE: u8 = 75;
 const NODE_CALL_TIMEOUT: Duration = Duration::from_secs(20 * 60);
+const NODE_BUSY_WAIT: Duration = Duration::from_secs(30);
 /// How long past its probation the hub waits for an updated node to answer.
 const NODE_BACK_SLACK: Duration = Duration::from_secs(120);
 /// The longest node probation an `UpdateNodes` may ask for: a day.
@@ -1532,9 +1533,25 @@ struct Target {
     os: String,
     arch: String,
     release: String,
+    online: bool,
+    protocol_error: Option<String>,
 }
 
-pub fn update_nodes(hub: &Hub, r: api::UpdateNodesRequest) -> Result<api::NodeUpdates, ApiError> {
+pub struct NodeRollout {
+    up: crate::fleet::Up,
+    rel: Release,
+    probation: u64,
+    results: Vec<api::NodeUpdate>,
+    todo: Vec<Target>,
+}
+
+impl NodeRollout {
+    pub fn version(&self) -> &str {
+        &self.rel.tag
+    }
+}
+
+pub fn prepare_nodes(hub: &Hub, r: &api::UpdateNodesRequest) -> Result<NodeRollout, ApiError> {
     let up = hub
         .fleet
         .wait_up(Duration::from_secs(10))
@@ -1567,30 +1584,34 @@ pub fn update_nodes(hub: &Hub, r: api::UpdateNodesRequest) -> Result<api::NodeUp
         Some(Target {
             id: v.node.id.clone(),
             name: v.node.name.clone(),
-            ip: v.ip.clone()?,
+            ip: v.ip.clone().unwrap_or_default(),
             os: h.os.clone(),
             arch: asset_arch(&h.arch).to_string(),
             release: h.release.clone().unwrap_or_else(|| h.node_version.clone()),
+            online: v.node.online,
+            protocol_error: v.protocol_error().map(|e| e.to_string()),
         })
     };
     let mut results = Vec::new();
     let mut todo: Vec<Target> = Vec::new();
     if r.all {
         for v in &views {
-            if let Some(e) = v.protocol_error() {
-                results.push(failed(
-                    &v.node.id,
-                    &v.node.name,
-                    &v.node.node_version,
-                    &tag,
-                    &e.to_string(),
-                ));
-            }
-        }
-        for v in views.iter().filter(|v| v.node.online) {
             match target(v) {
                 Some(t) => todo.push(t),
-                None => results.push(failed(&v.node.id, &v.node.name, "", &tag, "no hello yet")),
+                None => {
+                    let reason = v
+                        .protocol_error()
+                        .map(|e| e.to_string())
+                        .unwrap_or_else(|| {
+                            if v.node.online {
+                                "no hello yet"
+                            } else {
+                                "deferred: offline"
+                            }
+                            .into()
+                        });
+                    results.push(failed(&v.node.id, &v.node.name, "", &tag, &reason));
+                }
             }
         }
         let mut first = std::collections::BTreeMap::<(String, String), String>::new();
@@ -1629,71 +1650,210 @@ pub fn update_nodes(hub: &Hub, r: api::UpdateNodesRequest) -> Result<api::NodeUp
             })?);
         }
     }
-    let mut failed_groups: Vec<(String, String)> = Vec::new();
-    for t in todo {
-        let group = (t.os.clone(), t.arch.clone());
-        if failed_groups.contains(&group) {
-            results.push(failed(
-                &t.id,
-                &t.name,
-                &t.release,
-                &tag,
-                "skipped: the canary for this OS and arch failed",
-            ));
-            continue;
+    Ok(NodeRollout {
+        up,
+        rel,
+        probation,
+        results,
+        todo,
+    })
+}
+
+pub fn update_nodes(hub: &Hub, r: api::UpdateNodesRequest) -> Result<api::NodeUpdates, ApiError> {
+    let rollout = prepare_nodes(hub, &r)?;
+    Ok(run_nodes(hub, r, rollout))
+}
+
+pub fn run_nodes(hub: &Hub, r: api::UpdateNodesRequest, rollout: NodeRollout) -> api::NodeUpdates {
+    let NodeRollout {
+        up,
+        rel,
+        probation,
+        mut results,
+        todo,
+    } = rollout;
+    let tag = rel.tag.clone();
+    let progress = |name: &str, text: &str| {
+        if let Some(id) = &r.rollout_id {
+            hub.bus.event(
+                Kind::Node,
+                Level::Info,
+                "node-update",
+                id,
+                &format!("{name}: {text}"),
+            );
         }
-        let cmp = Version::parse(&tag)
-            .zip(Version::parse(&t.release))
-            .map(|(to, from)| to.cmp(&from));
-        let res = if r.version.is_none() && cmp.is_none() {
-            Err(format!(
-                "cannot compare {tag} with {}; specify --version",
-                t.release
-            ))
-        } else if r.version.is_none() && cmp != Some(Ordering::Greater) {
-            Ok(format!(
-                "no newer release than {} on this channel (latest {tag})",
-                t.release
-            ))
-        } else {
-            update_one(hub, &up, &rel, &t, probation, r.no_wait).map(|s| {
-                if cmp == Some(Ordering::Less) {
-                    format!("{s} (downgrade)")
-                } else {
-                    s
+    };
+    for row in &results {
+        progress(&row.name, &row.detail);
+    }
+    let mut groups = std::collections::BTreeMap::<(String, String), Vec<Target>>::new();
+    for t in todo {
+        groups
+            .entry((t.os.clone(), t.arch.clone()))
+            .or_default()
+            .push(t);
+    }
+    let done = std::sync::Mutex::new(Vec::new());
+    thread::scope(|scope| {
+        for group in groups.into_values() {
+            let progress = &progress;
+            let done = &done;
+            let tag = &tag;
+            let rel = &rel;
+            let up = &up;
+            let r = &r;
+            scope.spawn(move || {
+                let mut canary_failed = false;
+                for (index, t) in group.into_iter().enumerate() {
+                    if canary_failed {
+                        let row = failed(
+                            &t.id,
+                            &t.name,
+                            &t.release,
+                            tag,
+                            "skipped: the canary for this OS and arch failed",
+                        );
+                        progress(&t.name, &row.detail);
+                        lock(done).push(row);
+                        continue;
+                    }
+                    progress(&t.name, "started");
+                    let cmp = Version::parse(tag)
+                        .zip(Version::parse(&t.release))
+                        .map(|(to, from)| to.cmp(&from));
+                    let res = if let Some(error) = &t.protocol_error {
+                        Err(error.clone())
+                    } else if !t.online {
+                        Err("deferred: offline".into())
+                    } else if t.ip.is_empty() {
+                        Err("deferred: no node address".into())
+                    } else if r.version.is_none() && cmp.is_none() {
+                        Err(format!(
+                            "cannot compare {tag} with {}; specify --version",
+                            t.release
+                        ))
+                    } else if r.version.is_none() && cmp != Some(Ordering::Greater) {
+                        Ok(format!(
+                            "no newer release than {} on this channel (latest {tag})",
+                            t.release
+                        ))
+                    } else if t.release == rel.tag {
+                        Ok("already on it".into())
+                    } else {
+                        wait_for_node_jobs(hub, &t, progress)
+                            .and_then(|deadline| {
+                                update_one(
+                                    hub,
+                                    up,
+                                    rel,
+                                    &t,
+                                    (probation, r.no_wait, deadline),
+                                    progress,
+                                )
+                            })
+                            .map(|s| {
+                                if cmp == Some(Ordering::Less) {
+                                    format!("{s} (downgrade)")
+                                } else {
+                                    s
+                                }
+                            })
+                    };
+                    let line = match &res {
+                        Ok(d) => format!("node {}: {} -> {tag}: {d}", t.name, t.release),
+                        Err(e) => format!("node {}: update to {tag} failed: {e}", t.name),
+                    };
+                    let level = if res.is_ok() {
+                        Level::Info
+                    } else {
+                        Level::Warn
+                    };
+                    hub.bus.event(Kind::Node, level, &t.name, "owner", &line);
+                    info!("update: {line}");
+                    progress(
+                        &t.name,
+                        match &res {
+                            Ok(detail) => detail,
+                            Err(e) => e,
+                        },
+                    );
+                    match res {
+                        Ok(detail) => lock(done).push(api::NodeUpdate {
+                            node_id: t.id,
+                            name: t.name,
+                            from: t.release,
+                            to: tag.clone(),
+                            ok: true,
+                            detail,
+                        }),
+                        Err(e) => {
+                            canary_failed = index == 0;
+                            lock(done).push(failed(&t.id, &t.name, &t.release, tag, &e));
+                        }
+                    }
                 }
+            });
+        }
+    });
+    results.extend(done.into_inner().unwrap_or_else(|p| p.into_inner()));
+    if let Some(id) = &r.rollout_id {
+        hub.bus.event(
+            Kind::Node,
+            Level::Info,
+            "node-update",
+            id,
+            "rollout complete",
+        );
+    }
+    api::NodeUpdates {
+        version: tag,
+        nodes: results,
+        rollout_id: r.rollout_id,
+    }
+}
+
+fn wait_for_node_jobs(
+    hub: &Hub,
+    t: &Target,
+    progress: &impl Fn(&str, &str),
+) -> Result<Instant, String> {
+    let deadline = Instant::now() + NODE_BUSY_WAIT;
+    let mut reported = None;
+    loop {
+        let view = hub.view();
+        let job = view
+            .state
+            .jobs
+            .values()
+            .find(|j| {
+                j.node.is_some_and(|n| n.0.to_string() == t.id)
+                    && matches!(
+                        j.state,
+                        pt_core::JobState::Submitting
+                            | pt_core::JobState::SubmitUncertain { .. }
+                            | pt_core::JobState::Running
+                            | pt_core::JobState::Cancelling
+                    )
             })
-        };
-        let line = match &res {
-            Ok(d) => format!("node {}: {} -> {tag}: {d}", t.name, t.release),
-            Err(e) => format!("node {}: update to {tag} failed: {e}", t.name),
-        };
-        let level = if res.is_ok() {
-            Level::Info
-        } else {
-            Level::Warn
-        };
-        hub.bus.event(Kind::Node, level, &t.name, "owner", &line);
-        info!("update: {line}");
-        match res {
-            Ok(detail) => results.push(api::NodeUpdate {
-                node_id: t.id,
-                name: t.name,
-                from: t.release,
-                to: tag.clone(),
-                ok: true,
-                detail,
-            }),
-            Err(e) => {
-                failed_groups.push(group);
-                results.push(failed(&t.id, &t.name, &t.release, &tag, &e));
+            .map(|j| j.id.0);
+        match job {
+            None => return Ok(deadline),
+            Some(id) => {
+                if reported != Some(id) {
+                    progress(&t.name, &format!("waiting: busy with job {id}"));
+                    reported = Some(id);
+                }
+                if Instant::now() >= deadline {
+                    return Err(format!(
+                        "deferred: busy with job {id} after {} s",
+                        NODE_BUSY_WAIT.as_secs()
+                    ));
+                }
+                thread::sleep(Duration::from_secs(1));
             }
         }
     }
-    Ok(api::NodeUpdates {
-        version: tag,
-        nodes: results,
-    })
 }
 
 fn failed(id: &str, name: &str, from: &str, to: &str, why: &str) -> api::NodeUpdate {
@@ -1712,9 +1872,10 @@ fn update_one(
     up: &crate::fleet::Up,
     rel: &Release,
     t: &Target,
-    probation: u64,
-    no_wait: bool,
+    options: (u64, bool, Instant),
+    progress: &impl Fn(&str, &str),
 ) -> Result<String, String> {
+    let (probation, no_wait, busy_deadline) = options;
     let ext = if t.os == "windows" { ".exe" } else { "" };
     let asset = format!("protectorate-node-{}-{}{ext}", t.os, t.arch);
     rel.asset(&asset).map_err(|e| e.message)?;
@@ -1725,17 +1886,50 @@ fn update_one(
     if t.release == rel.tag {
         return Ok("already on it".into());
     }
-    let reply = c
-        .update(msg::Update {
-            version: rel.tag.clone(),
-            api: hub.config.release_api.clone(),
-            repo: hub.config.release_repo.clone(),
-            probation_secs: probation,
-        })
-        .map_err(|e| match e {
-            pt_fleet::Error::Node(r) => format!("{}: {}", r.code.as_str(), r.message),
-            e => e.to_string(),
-        })?;
+    let request = msg::Update {
+        version: rel.tag.clone(),
+        api: hub.config.release_api.clone(),
+        repo: hub.config.release_repo.clone(),
+        probation_secs: probation,
+    };
+    let mut reported = None;
+    let reply = loop {
+        match c.update(request.clone()) {
+            Ok(reply) => break reply,
+            Err(pt_fleet::Error::Node(r)) if r.code == msg::ErrorCode::Busy => {
+                let job = c
+                    .list_jobs()
+                    .ok()
+                    .and_then(|jobs| {
+                        jobs.jobs.into_iter().find(|job| {
+                            matches!(
+                                job.state,
+                                msg::JobState::Running | msg::JobState::Cancelling
+                            )
+                        })
+                    })
+                    .map(|job| job.job_id);
+                let Some(job) = job else {
+                    return Err(format!("deferred: {}", r.message));
+                };
+                if reported.as_ref() != Some(&job) {
+                    progress(&t.name, &format!("waiting: busy with job {job}"));
+                    reported = Some(job.clone());
+                }
+                if Instant::now() >= busy_deadline {
+                    return Err(format!(
+                        "deferred: busy with job {job} after {} s",
+                        NODE_BUSY_WAIT.as_secs()
+                    ));
+                }
+                thread::sleep(Duration::from_secs(1));
+            }
+            Err(pt_fleet::Error::Node(r)) => {
+                return Err(format!("{}: {}", r.code.as_str(), r.message));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    };
     drop(c);
     let switched = format!(
         "switched from {}{}",
@@ -1746,6 +1940,7 @@ fn update_one(
             ""
         }
     );
+    progress(&t.name, &format!("{switched}; waiting for restart"));
     if no_wait {
         return Ok(format!("{switched}; restarting on {probation} s probation"));
     }

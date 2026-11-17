@@ -82,6 +82,7 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   node rename <node> <new-name> | node rm <node> [--force]
   node update (<node>... | --all) [--version TAG] [--channel stable|dev] [--probation SECS]
         [--no-wait]
+        --all reports progress; --all --no-wait runs in the background (see event list).
   job run (--node ID | --arch ARCH) [--even-if-present] [--on-present idle|kill]
         [--maintenance] [--wait] [--timeout SECS] [--cwd DIR] [--artifact PATH]... -- <argv...>
         Artifact cap: job_artifact_max_bytes (default 67108864 bytes); hub info shows the effective value.

@@ -632,8 +632,11 @@ api_records! {
         pub channel: Option<ReleaseChannel>,
         /// How long a node waits for the hub after its restart before it rolls back (600).
         pub probation_secs: Option<u64>,
-        /// Answer once each node has switched, without waiting for it to come back.
+        /// For all nodes, accept the rollout in the background. For named nodes, answer once
+        /// each has switched, without waiting for it to come back.
         pub no_wait: bool = false,
+        /// Identifies this rollout's progress events.
+        pub rollout_id: Option<String>,
     }
 
     pub struct NodeUpdate {
@@ -649,6 +652,7 @@ api_records! {
     pub struct NodeUpdates {
         pub version: String,
         pub nodes: Vec<NodeUpdate> = Vec::new(),
+        pub rollout_id: Option<String>,
     }
 }
 

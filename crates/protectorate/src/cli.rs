@@ -654,11 +654,75 @@ fn node_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 channel: channel(a)?,
                 probation_secs: a.num("--probation")?,
                 no_wait: a.has("--no-wait"),
+                rollout_id: if a.has("--all") {
+                    Some(format!(
+                        "rollout-{}-{}",
+                        std::process::id(),
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_nanos()
+                    ))
+                } else {
+                    None
+                },
             };
             if req.all == !req.nodes.is_empty() {
                 return Err(Fail::Usage("node update needs node names or --all".into()));
             }
-            let v = c.call_for::<m::UpdateNodes>(&req, Duration::from_secs(4 * 3600))?;
+            let v = if req.all && !req.no_wait && !o.json {
+                let latest = c.call::<m::ListEvents>(&api::ListEventsRequest {
+                    from_seq: None,
+                    limit: Some(1),
+                })?;
+                let mut cursor = latest.events.last().map_or(0, |e| e.seq.saturating_add(1));
+                std::thread::scope(|scope| {
+                    let task = scope.spawn(|| {
+                        c.call_for::<m::UpdateNodes>(&req, Duration::from_secs(4 * 3600))
+                    });
+                    let mut finished_at = None;
+                    let mut complete = false;
+                    loop {
+                        let events = c.call::<m::ListEvents>(&api::ListEventsRequest {
+                            from_seq: Some(cursor),
+                            limit: Some(500),
+                        })?;
+                        for event in events.events {
+                            cursor = cursor.max(event.seq.saturating_add(1));
+                            if event.source == "node-update"
+                                && event.target.as_deref() == req.rollout_id.as_deref()
+                            {
+                                complete |= event.text == "rollout complete";
+                                println!("{}", event.text);
+                                use std::io::Write;
+                                std::io::stdout()
+                                    .flush()
+                                    .map_err(|e| Fail::Other(e.to_string()))?;
+                            }
+                        }
+                        if task.is_finished() {
+                            let at = finished_at.get_or_insert_with(Instant::now);
+                            if complete || at.elapsed() >= Duration::from_secs(5) {
+                                break;
+                            }
+                        }
+                        std::thread::sleep(Duration::from_millis(500));
+                    }
+                    task.join()
+                        .map_err(|_| Fail::Other("node rollout worker failed".into()))?
+                })?
+            } else {
+                c.call_for::<m::UpdateNodes>(&req, Duration::from_secs(4 * 3600))?
+            };
+            if req.all && req.no_wait {
+                o.show(&v, |_| {
+                    println!(
+                        "Rollout accepted; follow with `protectorate event list` ({}).",
+                        v.rollout_id.as_deref().unwrap_or("node-update")
+                    )
+                });
+                return Ok(());
+            }
             o.show(&v, |u| {
                 let rows: Vec<Vec<String>> = u
                     .nodes
