@@ -266,8 +266,7 @@ crash, every incarnation goes to Recovering and resumes natively.
   - a systemd scope per incarnation with a memory limit in bytes from `sleeve_memory_max`
     (default 4 GiB), overridden by sleeve name in `sleeve_memory_max_overrides`; swap is
     disabled and build parallelism follows the CPU quota. Configuration is read at hub start
-    and applied at launch;
-  - a systemd scope per incarnation with limits, `OOMPolicy=continue` and `cgroup.kill`,
+    and applied at launch. The scope uses `OOMPolicy=continue` and `cgroup.kill`,
     plus the orphan reaper. A child the kernel kills for memory does not stop the scope.
     The guardrail requires a scope OOM kill and a launcher exit by SIGKILL or code 137.
 

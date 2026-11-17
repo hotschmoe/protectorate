@@ -1106,7 +1106,7 @@ exec sleep 300"#,
     write_script(
         &dir.join("systemd-run"),
         &format!(
-            "if [ \"$#\" -lt 16 ]; then exit 0; fi\nprintf '%s\\n' \"$*\" >> '{}'\nshift 16\nexec \"$@\"",
+            "if [ \"$*\" = '--user --scope --quiet true' ]; then exit 0; fi\nprintf '%s\\n' \"$*\" >> '{}'\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in bwrap|*/bwrap) exec \"$@\" ;; esac\n  shift\ndone\necho 'systemd-run: bwrap command missing' >&2\nexit 1",
             dir.join("scope-args").display()
         ),
     );
