@@ -420,7 +420,11 @@ Not available: the systemd user bus (`systemd-run --user` in a test) and long un
 be positive. The hub reads config at startup; changes apply on the next sleeve launch
 after a hub restart. Names include `envoy`, and an override applies to a new sleeve
 with the same name too. With scopes disabled no memory limit is enforced. Swap remains
-disabled in scopes; build parallelism continues to follow the CPU quota.
+disabled in scopes; build parallelism continues to follow the CPU quota. `sleeve show` reports
+the incarnation limit in bytes (including JSON); `PROTECTORATE_MEMORY_MAX` supplies the
+configured value inside the sleeve. The first prompt reports the limit and directs a sleeve
+that needs more to ask Envoy; the owner raises `sleeve_memory_max_overrides`. A scope OOM
+notice and the next prompt name the limit and override key.
 
 ## Sleeve devices
 

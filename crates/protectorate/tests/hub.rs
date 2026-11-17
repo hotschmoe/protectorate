@@ -1099,6 +1099,7 @@ fn sleeve_devices_are_bound_and_missing_ones_are_logged() {
         &format!(
             r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi
 cat '{}' > "$CARGO_TARGET_DIR/saw"
+printf '%s' "$PROTECTORATE_MEMORY_MAX" > "$CARGO_TARGET_DIR/memory"
 exec sleep 300"#,
             node.display()
         ),
@@ -1114,7 +1115,7 @@ exec sleep 300"#,
         "envoy" => pt_json::obj! { "harness" => "claude" },
         "claude_program" => fake.to_str().unwrap(),
         "scopes" => true,
-        "sleeve_memory_max" => 8589934592u64,
+        "sleeve_memory_max" => 1611137024u64,
         "sleeve_memory_max_overrides" => pt_json::obj! { "devices" => 17179869184u64 },
         "quota_poll_secs" => 0u64,
         "harness_update_hours" => 0u64,
@@ -1141,15 +1142,42 @@ exec sleep 300"#,
         .json();
     let id = s["id"].as_str().unwrap();
     let scratch = hub.home.join(format!("sleeves/{id}/scratch"));
-    let saw = eventually(
-        "the bound device to be readable",
-        Duration::from_secs(60),
-        || std::fs::read_to_string(scratch.join("target/saw")).ok(),
-    );
+    let end = std::time::Instant::now() + Duration::from_secs(60);
+    let saw = loop {
+        if let Ok(saw) = std::fs::read_to_string(scratch.join("target/saw")) {
+            break saw;
+        }
+        assert!(
+            std::time::Instant::now() < end,
+            "timed out waiting for the bound device; hub log:\n{}",
+            tail(&hub.log_text(), 80)
+        );
+        std::thread::sleep(Duration::from_millis(200));
+    };
     assert_eq!(saw.trim(), "NPU");
+    eventually(
+        "the sandbox memory environment",
+        Duration::from_secs(10),
+        || {
+            (std::fs::read_to_string(scratch.join("target/memory"))
+                .ok()?
+                .trim()
+                == "17179869184")
+                .then_some(())
+        },
+    );
     let args = std::fs::read_to_string(dir.join("scope-args")).unwrap();
     assert!(args.contains("MemoryMax=17179869184"), "{args}");
     assert!(args.contains("MemorySwapMax=0"), "{args}");
+    assert_eq!(
+        hub.sleeve("devices")["incarnation"]["memory_max_bytes"].as_u64(),
+        Some(17179869184)
+    );
+    assert!(
+        hub.cli(&["sleeve", "show", "devices"])
+            .ok()
+            .contains("16 GiB (17179869184 bytes)")
+    );
     let repo2 = temp_repo("memory-default");
     hub.cli(&[
         "--json",
@@ -1164,8 +1192,18 @@ exec sleep 300"#,
     .json();
     eventually("default memory scope", Duration::from_secs(60), || {
         let args = std::fs::read_to_string(dir.join("scope-args")).ok()?;
-        args.contains("MemoryMax=8589934592").then_some(())
+        args.contains("MemoryMax=1611137024").then_some(())
     });
+    eventually(
+        "formatted default memory limit",
+        Duration::from_secs(30),
+        || {
+            hub.cli(&["sleeve", "show", "memory-default"])
+                .ok()
+                .contains("1536.50 MiB (1611137024 bytes)")
+                .then_some(())
+        },
+    );
     assert!(
         hub.log_text().contains(&format!(
             "device {} is missing; not bound",
@@ -1424,6 +1462,10 @@ exec sleep 300"#,
         .unwrap()
         .to_string();
     assert!(token.starts_with("pc1."), "{token}");
+    assert_eq!(
+        env_get(&leaf_env, "PROTECTORATE_MEMORY_MAX"),
+        Some("4294967296")
+    );
     assert_eq!(env_get(&leaf_env, "PROTECTORATE_PARENT"), Some("tree"));
     assert_eq!(env_get(&leaf_env, "PROTECTORATE_ENVOY"), Some("envoy"));
     assert_eq!(
@@ -1487,6 +1529,18 @@ exec sleep 300"#,
     };
     sent("tree", "before the task");
     hub.cli(&["sleeve", "send", "leaf", "do the task"]).ok();
+    eventually(
+        "the first prompt memory note",
+        Duration::from_secs(30),
+        || {
+            let input =
+                std::fs::read_to_string(hub.home.join(format!("sleeves/{leaf}/scratch/target/in")))
+                    .ok()?;
+            input
+                .contains("Scopes are disabled; no memory limit is enforced")
+                .then_some(())
+        },
+    );
     let early = report(&[], "2");
     assert_ne!(
         early.status, 0,
@@ -1581,6 +1635,12 @@ exec sleep 300"#,
                     .ok()
             },
         );
+        if id == &envoy_id {
+            assert!(
+                !saw.contains("Mail Envoy ($PROTECTORATE_ENVOY"),
+                "Envoy received its own mail rules: {saw}"
+            );
+        }
         assert!(
             saw.contains("[from sleeve leaf]") && saw.contains(marker),
             "prompt for {id}: {saw}"
@@ -2477,6 +2537,7 @@ while True: a.append(bytearray(4*1024*1024))'"#,
     let config = pt_json::obj! {
         "envoy" => pt_json::obj! { "harness" => "claude" },
         "claude_program" => fake.to_str().unwrap(),
+        "sleeve_memory_max" => 100663296u64,
         "quota_poll_secs" => 0u64,
         "harness_update_hours" => 0u64,
     };
@@ -2504,18 +2565,6 @@ while True: a.append(bytearray(4*1024*1024))'"#,
                 .exists()
                 .then_some(())
         });
-        let scope = hub.scope(id, g);
-        let status = std::process::Command::new("systemctl")
-            .args([
-                "--user",
-                "set-property",
-                "--runtime",
-                &scope,
-                "MemoryMax=96M",
-            ])
-            .status()
-            .unwrap();
-        assert!(status.success(), "set memory limit on {scope}");
         std::thread::sleep(Duration::from_secs(1));
         std::fs::write(scratch.join(format!("tmp/go{g}")), "go").unwrap();
     }
@@ -2532,7 +2581,7 @@ while True: a.append(bytearray(4*1024*1024))'"#,
             .collect::<Vec<_>>()
             .join("\n");
         (notices
-            .matches("guardrail G4 tripped: the memory limit")
+            .matches("scope memory limit 100663296 bytes was hit; raise sleeve_memory_max_overrides for oom")
             .count()
             == 2)
             .then_some(())

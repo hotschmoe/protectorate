@@ -268,6 +268,8 @@ api_records! {
     /// One harness process tree with generation `g`.
     pub struct Incarnation {
         pub g: u64,
+        /// Scope memory limit in bytes; absent when scopes are disabled.
+        pub memory_max_bytes: Option<u64>,
         pub mode: Mode,
         pub harness: Harness,
         pub subscription: Subscription,

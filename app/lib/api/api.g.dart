@@ -2865,6 +2865,7 @@ final class HubUpdate {
 final class Incarnation {
   const Incarnation({
     required this.g,
+    this.memoryMaxBytes,
     required this.mode,
     required this.harness,
     required this.subscription,
@@ -2884,6 +2885,10 @@ final class Incarnation {
     final j = _object(json, 'Incarnation');
     return Incarnation(
       g: _int(j['g'], 'Incarnation.g'),
+      memoryMaxBytes: _opt(
+        j['memory_max_bytes'],
+        (e0) => _int(e0, 'Incarnation.memory_max_bytes'),
+      ),
       mode: Mode.fromJson(j['mode']),
       harness: Harness.fromJson(j['harness']),
       subscription: Subscription.fromJson(j['subscription']),
@@ -2916,6 +2921,9 @@ final class Incarnation {
 
   final int g;
 
+  /// Scope memory limit in bytes; absent when scopes are disabled.
+  final int? memoryMaxBytes;
+
   final Mode mode;
 
   final Harness harness;
@@ -2947,6 +2955,7 @@ final class Incarnation {
 
   Map<String, Object?> toJson() => {
     'g': g,
+    if (memoryMaxBytes case final v?) 'memory_max_bytes': v,
     'mode': mode.toJson(),
     'harness': harness.toJson(),
     'subscription': subscription.toJson(),

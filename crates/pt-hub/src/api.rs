@@ -218,7 +218,7 @@ fn sleeve_view(hub: &Hub, id: SleeveId) -> Result<api::Sleeve> {
     let view = hub.view();
     view.state
         .sleeve(id)
-        .map(|s| wire::sleeve(&hub.transcripts, &view, s))
+        .map(|s| wire::sleeve(&hub.config, &hub.transcripts, &view, s))
         .ok_or_else(|| err(ErrorCode::NotFound, format!("sleeve {} is gone", id.0)))
 }
 
@@ -246,7 +246,7 @@ fn list_sleeves(c: &Ctx<'_>, _: api::Empty) -> Result<api::SleeveList> {
             .sleeves
             .values()
             .filter(|s| s.life != Life::Removed && reaches(st, c.who, s.id))
-            .map(|s| wire::sleeve(&c.hub.transcripts, &view, s))
+            .map(|s| wire::sleeve(&c.hub.config, &c.hub.transcripts, &view, s))
             .collect(),
     })
 }
