@@ -75,6 +75,12 @@ pub enum Status {
 }
 
 impl FleetSlot {
+    pub fn nodes(&self) -> Vec<pt_fleet::NodeView> {
+        match self.status() {
+            Status::Up(up) => up.poller.nodes(),
+            _ => Vec::new(),
+        }
+    }
     fn set(&self, s: Slot) {
         *lock(&self.slot) = s;
         self.cv.notify_all();

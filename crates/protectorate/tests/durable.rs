@@ -167,7 +167,7 @@ fn d9_approval_across_restart() {
         let (tx, rx) = mpsc::channel();
         let home = hub.home.clone();
         std::thread::spawn(move || {
-            let out = Command::new(bin())
+            let out = cli_command()
                 .arg("--home")
                 .arg(home)
                 .args(["sleeve", "rm", "victim"])
@@ -289,7 +289,7 @@ fn undecodable_journal_publishes_nothing() {
     journal.append(&[pt_core::codec::FORMAT]).unwrap();
     drop(journal);
 
-    let output = Command::new(bin())
+    let output = cli_command()
         .arg("--home")
         .arg(&home)
         .args(["serve", "--listen", "off"])

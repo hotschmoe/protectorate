@@ -7,7 +7,6 @@ use crate::approvals;
 use crate::bus::SNAPSHOT_EVENTS;
 use crate::fleet::Status;
 use crate::hub::Hub;
-use crate::jobs;
 use crate::lock::lock;
 use crate::view::View;
 use crate::wire;
@@ -59,7 +58,11 @@ pub fn state(
             .collect(),
         approvals,
         nodes: nodes(hub),
-        jobs: st.jobs.values().map(|j| jobs::view(&hub.jobs, j)).collect(),
+        jobs: st
+            .jobs
+            .values()
+            .map(|j| crate::jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes()))
+            .collect(),
         quotas: hub.quotas.list(),
         events: hub.bus.recent_events(SNAPSHOT_EVENTS),
     }

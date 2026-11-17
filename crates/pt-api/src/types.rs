@@ -233,6 +233,7 @@ api_records! {
         /// served at `GET /api/client/<name>`. Empty for a hub not started from
         /// `releases/current`.
         pub clients: Vec<String> = Vec::new(),
+        pub job_artifact_max_bytes: u64 = 67108864,
     }
 
     /// One full snapshot. `GET /api/events` starts with it and then streams changes.
@@ -460,6 +461,7 @@ api_records! {
         pub exit_code: Option<i64>,
         /// Why the hub ended it when no node did, such as `node 4 was removed`.
         pub error: Option<String>,
+        pub held_reason: Option<String>,
         /// Bytes of log the hub holds.
         pub log_bytes: u64 = 0,
         /// The node's directory the job ran in; absent means the node's own work dir.

@@ -63,6 +63,55 @@ impl JobRequest {
     }
 }
 
+fn arch(a: &str) -> &str {
+    match a {
+        "aarch64" | "arm64" => "arm64",
+        "x86_64" | "amd64" | "x64" => "amd64",
+        other => other,
+    }
+}
+
+pub fn matches_target(node: &pt_fleet::NodeView, target: &api::JobTarget) -> bool {
+    node.node.online
+        && node.error.is_none()
+        && node.hello.as_ref().is_some_and(|hello| match target {
+            api::JobTarget::Node { node_id } => node.node.id == *node_id,
+            api::JobTarget::Arch { arch: wanted } => arch(&hello.arch) == arch(wanted),
+        })
+        && node.node.id.parse::<u64>().is_ok()
+}
+
+pub fn held_for_presence(state: api::PresenceState, even_if_present: bool) -> bool {
+    !even_if_present && state != api::PresenceState::Away
+}
+
+pub fn view_with_nodes(store: &JobStore, j: &Job, nodes: &[pt_fleet::NodeView]) -> api::Job {
+    let mut job = view(store, j);
+    if job.state == api::JobState::Queued {
+        let candidates: Vec<_> = nodes
+            .iter()
+            .filter(|n| matches_target(n, &job.target))
+            .collect();
+        if !candidates.is_empty()
+            && candidates
+                .iter()
+                .all(|n| held_for_presence(n.node.presence.state, job.even_if_present))
+        {
+            let node = &candidates[0].node;
+            let presence = if node.presence.state == api::PresenceState::Present {
+                "is present"
+            } else {
+                "has unknown presence"
+            };
+            job.held_reason = Some(format!(
+                "node {} {presence}; --even-if-present runs it now, --on-present idle|kill chooses",
+                node.id
+            ));
+        }
+    }
+    job
+}
+
 pub fn api_state(s: JobState) -> api::JobState {
     use api::JobState as A;
     match s {
@@ -311,6 +360,7 @@ pub fn view(store: &JobStore, j: &Job) -> api::Job {
         even_if_present: j.spec.even_if_present,
         on_present: req.as_ref().map_or(api::OnPresent::Idle, |r| r.on_present),
         approval_id: req.as_ref().and_then(|r| r.approval_id.clone()),
+        held_reason: None,
         queued_at_ms: EpochMs(req.as_ref().map_or(0, |r| r.queued_at_ms)),
         started_at_ms: store.started(j.id, j.attempt).map(EpochMs),
         ended_at_ms: ended(j.state).then_some(EpochMs(j.state_at)),

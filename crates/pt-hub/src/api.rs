@@ -1522,7 +1522,7 @@ fn job_view(hub: &Hub, id: pt_core::JobId) -> Result<api::Job> {
     view.state
         .jobs
         .get(&id)
-        .map(|j| crate::jobs::view(&hub.jobs, j))
+        .map(|j| crate::jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes()))
         .ok_or_else(|| err(ErrorCode::NotFound, format!("job {} is gone", id.0)))
 }
 
@@ -1646,7 +1646,7 @@ fn list_jobs(c: &Ctx<'_>, r: api::ListJobsRequest) -> Result<api::JobList> {
         .filter(|j| node.is_none_or(|n| j.node.map(|x| x.0) == Some(n)))
         .filter(|j| job_visible(&view.state, c.who, JobRequest::of(&j.spec).as_ref()))
         .take(limit)
-        .map(|j| crate::jobs::view(&c.hub.jobs, j))
+        .map(|j| crate::jobs::view_with_nodes(&c.hub.jobs, j, &c.hub.fleet.nodes()))
         .collect();
     jobs.reverse();
     Ok(api::JobList {
@@ -1711,7 +1711,29 @@ fn get_job_artifact(c: &Ctx<'_>, r: api::GetJobArtifactRequest) -> Result<api::J
 
 fn cancel_job(c: &Ctx<'_>, r: api::JobRef) -> Result<api::Job> {
     let id = find_job(c, &c.hub.view(), &r.job_id)?;
-    command(c.hub, EventKind::CancelJob { job: id })?;
+    if let Err(e) = command(c.hub, EventKind::CancelJob { job: id }) {
+        let job = job_view(c.hub, id)?;
+        if matches!(
+            job.state,
+            api::JobState::Succeeded
+                | api::JobState::Failed
+                | api::JobState::Interrupted
+                | api::JobState::Cancelled
+                | api::JobState::Abandoned
+        ) {
+            return Err(err(
+                ErrorCode::Conflict,
+                format!(
+                    "job {} already finished ({}, exit code {})",
+                    job.id,
+                    job.state,
+                    job.exit_code
+                        .map_or_else(|| "unknown".into(), |n| n.to_string())
+                ),
+            ));
+        }
+        return Err(e);
+    }
     job_view(c.hub, id)
 }
 
@@ -2448,6 +2470,10 @@ fn doctor_report(hub: &Hub, r: Option<&pt_doctor::Report>) -> api::DoctorReport 
             gh_logged_in: false,
             gh_account: String::new(),
             sandbox_ok: false,
+            sleeve_devices: crate::sleeve_devices::inspect(hub)
+                .into_iter()
+                .map(|d| d.description())
+                .collect(),
             problems: vec!["doctor has not finished its first run".into()],
         };
     };
@@ -2481,6 +2507,10 @@ fn doctor_report(hub: &Hub, r: Option<&pt_doctor::Report>) -> api::DoctorReport 
         sandbox_ok: r.sandbox.bwrap.present
             && r.sandbox.bwrap.error.is_empty()
             && r.sandbox.systemd_run_user,
+        sleeve_devices: crate::sleeve_devices::inspect(hub)
+            .into_iter()
+            .map(|d| d.description())
+            .collect(),
         problems: {
             let mut problems = r.problems.clone();
             let capped = hub.history.capped_sleeves();

@@ -578,6 +578,7 @@ api_records! {
         pub gh_logged_in: bool,
         pub gh_account: String,
         pub sandbox_ok: bool,
+        pub sleeve_devices: Vec<String> = Vec::new(),
         /// Everything that needs the owner, one line each.
         pub problems: Vec<String> = Vec::new(),
     }

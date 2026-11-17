@@ -85,7 +85,7 @@ fn job_wait_reports_lost_cancelled_and_hub_restart() {
                 }
             }
         });
-        let mut cli = Command::new(bin())
+        let mut cli = cli_command()
             .arg("--socket")
             .arg(&path)
             .args(["job", "run", "--node", "1", "--wait", "--", "true"])
@@ -507,7 +507,7 @@ fn d9_agent_turns_need_owner_approval() {
         let (tx, rx) = mpsc::channel();
         let (home, token) = (hub.home.clone(), envoy_token.clone());
         std::thread::spawn(move || {
-            let out = Command::new(bin())
+            let out = cli_command()
                 .arg("--home")
                 .arg(home)
                 .args(&args)
@@ -661,7 +661,7 @@ fn d9_continuation_after_crash_still_asks() {
     let (tx, rx) = mpsc::channel();
     let home = hub.home.clone();
     std::thread::spawn(move || {
-        let out = Command::new(bin())
+        let out = cli_command()
             .arg("--home")
             .arg(home)
             .args(["sleeve", "rm", "victim"])
@@ -715,7 +715,7 @@ struct Mcp {
 
 impl Mcp {
     fn start(hub: &Hub, token_file: &std::path::Path) -> Mcp {
-        let mut child = Command::new(bin())
+        let mut child = cli_command()
             .arg("--home")
             .arg(&hub.home)
             .args(["mcp", "--envoy", "--token-file"])
@@ -773,7 +773,7 @@ fn mcp_envoy_round_trip() {
     }
     let hub = Hub::start("mcp");
     hub.wait("envoy", "idle", 120);
-    let no_token = Command::new(bin())
+    let no_token = cli_command()
         .arg("--home")
         .arg(&hub.home)
         .args(["mcp", "--envoy"])
