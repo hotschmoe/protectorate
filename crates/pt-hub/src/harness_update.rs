@@ -51,6 +51,7 @@ pub struct Updater {
     wanted: Mutex<BTreeSet<String>>,
     wake: Condvar,
     running: Mutex<Option<String>>,
+    waiting: Mutex<BTreeMap<String, String>>,
 }
 
 impl Updater {
@@ -163,13 +164,20 @@ impl Updater {
                 continue;
             }
             if let Some(s) = busy_sleeve(&view(), &p.harnesses) {
-                info!(
-                    "harness update: {} waits for sleeve {s} to finish its turn",
-                    p.name
-                );
+                let mut waiting = lock(&self.waiting);
+                if waiting.get(&p.name) != Some(&s) {
+                    info!(
+                        "harness update: {} waits for sleeve {s} to finish its turn",
+                        p.name
+                    );
+                    waiting.insert(p.name.clone(), s);
+                }
                 next = next.min(RETRY);
                 lock(&self.wanted).insert(p.name.clone());
                 continue;
+            }
+            if let Some(s) = lock(&self.waiting).remove(&p.name) {
+                info!("harness update: {} no longer waits for sleeve {s}", p.name);
             }
             lock(&self.wanted).remove(&p.name);
             self.run(bus, home, &p);

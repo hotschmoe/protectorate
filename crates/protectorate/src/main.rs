@@ -87,6 +87,7 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
         Artifact cap: job_artifact_max_bytes (default 67108864 bytes); hub info shows the effective value.
         --wait reports a presence hold; job show displays the reason.
   job ls [--node N] [--limit N] | job show|cancel <job> | job log <job> [--offset N] [--limit N]
+    job ls abbreviates commands; job show and --json retain them in full.
   job artifact <job> <path> [--out FILE]
   quota list
   event list [--from SEQ] [--limit N] | event read <seq>

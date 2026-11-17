@@ -1074,6 +1074,25 @@ fn hub_runs_the_fleet_and_node_jobs() {
     }
     let human = hub.cli(&["job", "ls", "--node", "e2e-hubfleet"]);
     assert!(human.ok().contains("sleep 600"), "{}", human.stdout);
+    let script = format!("echo {}\necho hidden-second-line", "x".repeat(100));
+    let multiline = run_job(&hub, &[], &["sh", "-c", &script]);
+    let listing = hub.cli(&["job", "ls"]);
+    assert!(listing.stdout.contains("..."), "{}", listing.stdout);
+    assert!(
+        !listing.stdout.contains("hidden-second-line"),
+        "{}",
+        listing.stdout
+    );
+    assert!(
+        hub.cli(&["job", "show", &multiline])
+            .stdout
+            .contains("hidden-second-line")
+    );
+    assert!(
+        hub.cli(&["--json", "job", "ls"])
+            .stdout
+            .contains("hidden-second-line")
+    );
 
     // A planned stop takes headscale and member with it.
     let needle = tailnet.to_str().unwrap().to_string();

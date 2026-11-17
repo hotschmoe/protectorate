@@ -2556,12 +2556,23 @@ fn harness_updates_run_daily_and_wait_for_a_sleeve_mid_turn() {
         .map(String::from);
     if busy_now.as_deref() == Some("working") {
         assert_eq!(pi_runs(), 1, "pi waits while the sleeve works");
+        thread::sleep(Duration::from_secs(7));
+        assert_eq!(
+            hub.log_text()
+                .matches("harness update: pi waits for sleeve busy")
+                .count(),
+            1
+        );
     }
     hub.wait("busy", "idle", 300);
     eventually(
         "pi's update after the turn",
         Duration::from_secs(30),
         || (pi_runs() == 2).then_some(()),
+    );
+    assert!(
+        hub.log_text()
+            .contains("harness update: pi no longer waits for sleeve busy")
     );
 }
 

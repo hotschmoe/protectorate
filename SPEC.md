@@ -312,6 +312,8 @@ crash, every incarnation goes to Recovering and resumes natively.
   - an update never touches a running sleeve: the running process keeps its binary, and the next
     launch or resume picks up the new one;
   - the hub runs a harness's own update command only when no sleeve of that harness is mid-turn;
+    it logs the start and end of each wait and changes of the blocking sleeve; a long turn can
+    defer an update indefinitely;
   - `doctor` records the version and install method per harness, so a behavior change can be
     traced to the version that brought it;
   - a failed launch after an update marks that harness ineligible in `doctor.json` until a
@@ -343,6 +345,8 @@ crash, every incarnation goes to Recovering and resumes natively.
   - Remote logins (ssh, the hub's own job sessions) are not presence; only local seat input and
     lock state are.
 - **Jobs** (maintenance, cross-arch build and test):
+  - Human-readable `job ls` shows the first command line, capped at 80 characters with `...`
+    when shortened; `job show` and JSON retain the full command.
   - the node journals each job before exec, and limits each one: 1 h by default, 64 MiB of log,
     and a per-job cgroup or Job Object;
   - the hub pulls output as length-prefixed frames;

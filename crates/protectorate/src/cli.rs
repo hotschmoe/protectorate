@@ -802,7 +802,16 @@ fn job_rows(jobs: &[api::Job]) {
                 opt(&j.exit_code),
                 j.requested_by.clone(),
                 ago(j.queued_at_ms),
-                j.argv.join(" "),
+                {
+                    let command = j.argv.join(" ");
+                    let line = command.lines().next().unwrap_or("");
+                    let cut = line.chars().count() > 77 || line.len() < command.len();
+                    format!(
+                        "{}{}",
+                        line.chars().take(77).collect::<String>(),
+                        if cut { "..." } else { "" }
+                    )
+                },
             ]
         })
         .collect();

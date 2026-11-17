@@ -231,6 +231,8 @@ job ls [--node N] [--limit N] | job show|cancel <job> | job log <job> [--offset 
 job artifact <job> <path> [--out FILE]
 ```
 
+- Human-readable `job ls` shows only the first command line, capped at 80 characters with
+  `...` when shortened. `job show` and JSON retain the full command.
 - `--node` names a node by id or name, and the hub keeps its id: a later rename does not move
   the job, a node not on the tailnet is refused, and a job pinned to a node that is removed
   before it starts fails; `--arch` lets the hub pick an AWAY node of that arch (the
@@ -457,6 +459,8 @@ Doctor reports each configured path, resolved node, owner, group, mode and hub r
 **Harnesses** update natively, through each program's own command (`claude update`, `codex
 update`, `grok update`, `pi update self`), once every `harness_update_hours` (24). A program is
 updated only while none of its sleeves is starting or mid-turn.
+The hub logs when this wait starts, changes sleeve, and ends. A long turn can defer an update
+indefinitely.
 
 ```
 harness update [PROGRAM...]          # claude, codex, grok, pi; none means every installed one
