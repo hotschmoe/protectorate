@@ -93,6 +93,7 @@ pub fn call(hub: &Arc<Hub>, who: &Principal, name: &str, body: &Value) -> Result
         GetState => get_state,
         ListSleeves => list_sleeves,
         GetInbox => get_inbox,
+        DropQueued => drop_queued,
         GetTranscript => get_transcript,
         SpawnSleeve => spawn,
         SendMessage => send_message,
@@ -263,10 +264,10 @@ fn get_inbox(c: &Ctx<'_>, r: api::InboxRequest) -> Result<api::Inbox> {
         Some(name) => find(&view.state, &name)?,
         None => own.ok_or_else(|| err(ErrorCode::Invalid, "a sleeve is required"))?,
     };
-    if own.is_some_and(|me| me != id) {
+    if !may_mail(&view.state, c.who, id) {
         return Err(err(
             ErrorCode::Forbidden,
-            "a sleeve may peek only at its own queue",
+            "that sleeve is outside this capability",
         ));
     }
     let s = view
@@ -278,6 +279,7 @@ fn get_inbox(c: &Ctx<'_>, r: api::InboxRequest) -> Result<api::Inbox> {
             .queue
             .iter()
             .filter_map(|key| s.messages.get(key))
+            .filter(|m| c.who.full() && own.is_none() || own == Some(id) || m.from == c.who.party())
             .map(|m| {
                 let sender = match m.from {
                     Party::Owner => "owner".to_string(),
@@ -296,6 +298,25 @@ fn get_inbox(c: &Ctx<'_>, r: api::InboxRequest) -> Result<api::Inbox> {
             })
             .collect(),
     })
+}
+
+fn drop_queued(c: &Ctx<'_>, r: api::SleeveRef) -> Result<api::Empty> {
+    let view = c.hub.view();
+    let id = find(&view.state, &r.sleeve_id)?;
+    if !may_mail(&view.state, c.who, id) {
+        return Err(err(
+            ErrorCode::Forbidden,
+            "that sleeve is outside this capability",
+        ));
+    }
+    command(
+        c.hub,
+        EventKind::DropQueued {
+            to: id,
+            from: c.who.party(),
+        },
+    )?;
+    Ok(api::Empty {})
 }
 
 fn sent(request_id: String, reply: Reply) -> Result<api::Sent> {
@@ -969,23 +990,39 @@ fn send_message(c: &Ctx<'_>, r: api::SendMessageRequest) -> Result<api::Sent> {
     if r.text.is_empty() {
         return Err(err(ErrorCode::Invalid, "text is required"));
     }
+    if r.supersede && r.delivery == api::Delivery::Steer {
+        return Err(err(
+            ErrorCode::Invalid,
+            "--supersede cannot be combined with --steer",
+        ));
+    }
     let request_id = new_request(c, "")?;
     let from = c.who.party();
     let sender_marked =
         matches!(from, Party::Sleeve(id) if view.state.sleeve(id).is_some_and(|s| s.d9));
     let reply = command(
         c.hub,
-        EventKind::Send {
-            to: id,
-            request_id: request_id.clone(),
-            from,
-            agent: None,
-            text: prefix(&view.state, c.who, "", &r.text),
-            mode: match r.delivery {
-                api::Delivery::Queue => SendMode::Queue,
-                api::Delivery::Steer => SendMode::Steer,
-            },
-            d9: marks_d9(c.hub, c.who) || sender_marked,
+        if r.supersede {
+            EventKind::Supersede {
+                to: id,
+                request_id: request_id.clone(),
+                from,
+                text: prefix(&view.state, c.who, "", &r.text),
+                d9: marks_d9(c.hub, c.who) || sender_marked,
+            }
+        } else {
+            EventKind::Send {
+                to: id,
+                request_id: request_id.clone(),
+                from,
+                agent: None,
+                text: prefix(&view.state, c.who, "", &r.text),
+                mode: match r.delivery {
+                    api::Delivery::Queue => SendMode::Queue,
+                    api::Delivery::Steer => SendMode::Steer,
+                },
+                d9: marks_d9(c.hub, c.who) || sender_marked,
+            }
         },
     )?;
     sent(request_id, reply)

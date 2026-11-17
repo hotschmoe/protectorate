@@ -891,6 +891,7 @@ impl Core<'_> {
         mode: SendMode,
         d9: bool,
         bounded: bool,
+        supersede: bool,
     ) {
         if !self.existing(to) {
             return;
@@ -956,6 +957,9 @@ impl Core<'_> {
             if !self.mail_ok(to, from, d9, bounded) {
                 return;
             }
+            if supersede {
+                self.drop_queued_from(to, from);
+            }
             insert(self, MsgState::Queued);
             if self.frozen(to) {
                 self.sl(to).queue.push_back(request_id.to_string());
@@ -999,6 +1003,7 @@ impl Core<'_> {
                 if !self.mail_ok(to, from, d9, bounded) {
                     return;
                 }
+                if supersede { self.drop_queued_from(to, from); }
                 insert(self, MsgState::Queued);
                 self.sl(to).queue.push_back(request_id.to_string());
                 self.deliver_next(to);
@@ -1009,6 +1014,35 @@ impl Core<'_> {
                 self.reply(Reply::Sent { queued: !sent, count: self.st.sleeves[&to].queue.len() as u64 });
             }
         }
+    }
+
+    fn drop_queued_from(&mut self, to: SleeveId, from: Party) {
+        let s = self.sl(to);
+        let keys: Vec<_> = s
+            .queue
+            .iter()
+            .filter(|id| {
+                s.messages
+                    .get(*id)
+                    .is_some_and(|m| m.from == from && m.kind == MsgKind::Prompt)
+            })
+            .cloned()
+            .collect();
+        s.queue.retain(|id| !keys.contains(id));
+        for id in keys {
+            if let Some(m) = s.messages.get_mut(&id) {
+                m.state = MsgState::Rejected;
+            }
+        }
+    }
+
+    pub(crate) fn drop_queued_cmd(&mut self, to: SleeveId, from: Party) {
+        if !self.existing(to) {
+            return;
+        }
+        self.drop_queued_from(to, from);
+        self.deliver_next(to);
+        self.reply(Reply::Accepted);
     }
 
     fn inbox(&mut self, sid: SleeveId, request_id: &str) {
@@ -1198,6 +1232,7 @@ impl Core<'_> {
             None,
             text,
             SendMode::Queue,
+            false,
             false,
             false,
         );

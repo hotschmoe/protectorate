@@ -43,10 +43,10 @@ always give it the token.
 ## Sleeves
 
 ```
-sleeve list | sleeve show <sleeve> | sleeve inbox [<sleeve>]
+sleeve list | sleeve show <sleeve> | sleeve inbox [<sleeve>] | sleeve inbox <sleeve> --drop
 sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
       [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT | --message-file FILE]
-sleeve send <sleeve> <text...> [--steer]
+sleeve send <sleeve> <text...> [--steer | --supersede]
 sleeve interrupt|stop|rm|takeover <sleeve>
 sleeve start <sleeve> [--harness H] [--provider P] [--model M]
 sleeve resleeve <sleeve> --harness H [--provider P] [--model M]
@@ -64,7 +64,12 @@ List and show include the oldest queued message's age beside the queue count. `s
 reports whether the message was queued or sent for delivery and the queue length at acceptance.
 Queued messages wait for a turn boundary. `sleeve inbox` peeks at the FIFO, showing sender,
 age and text without consuming or reordering it. A sleeve credential can inspect only its own
-queue and can omit the name; the owner supplies a name and can inspect any queue.
+queue and can omit the name. For another reachable sleeve it sees only messages it sent;
+the owner supplies a name and can inspect any queue. `sleeve inbox <sleeve> --drop`
+removes only the caller's queued messages to that sleeve. `sleeve send <sleeve>
+--supersede <text>` atomically replaces the caller's queued messages with the new send;
+it cannot be combined with `--steer`. In-flight messages and other senders' messages are
+unaffected. A refused send does not drop anything.
 
 - **spawn** with `--path DIR` makes a root sleeve on that directory (one root per directory). The
   directory must already exist where the hub can see it; a missing one is `the hub cannot see
