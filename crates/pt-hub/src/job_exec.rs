@@ -45,7 +45,6 @@ const SCHEDULE_EVERY: Duration = Duration::from_secs(2);
 /// polls a job it just submitted after FOLLOW_FIRST, then on a doubling delay below FOLLOW_UNTIL.
 const FOLLOW_FIRST: Duration = Duration::from_millis(250);
 const FOLLOW_UNTIL: Duration = Duration::from_secs(10);
-const ARTIFACT_CAP: u64 = 64 << 20;
 /// Artifact bytes asked for per FetchArtifact.
 const ARTIFACT_FETCH: u64 = 4 << 20;
 
@@ -73,18 +72,10 @@ fn epoch(s: &str) -> u64 {
     u64::from_be_bytes(b)
 }
 
-fn arch(a: &str) -> &str {
-    match a {
-        "aarch64" | "arm64" => "arm64",
-        "x86_64" | "amd64" | "x64" => "amd64",
-        other => other,
-    }
-}
-
 fn stream(hub: &Hub, job: JobId) {
     let v = hub.view();
     if let Some(j) = v.state.jobs.get(&job) {
-        let job = jobs::view(&hub.jobs, j);
+        let job = jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes());
         hub.bus.push(|seq| HubStreamMessage::Job { seq, job });
     }
 }
@@ -182,14 +173,10 @@ fn choose(
 ) -> Option<(NodeId, u64)> {
     nodes
         .iter()
-        .filter(|v| v.node.online && v.error.is_none())
+        .filter(|v| jobs::matches_target(v, &req.target))
         .filter_map(|v| Some((v, v.node.id.parse::<u64>().ok()?, v.hello.as_ref()?)))
         .filter(|(_, id, _)| !exclude.contains(&NodeId(*id)))
-        .filter(|(v, _, h)| match &req.target {
-            api::JobTarget::Node { node_id } => v.node.id == *node_id,
-            api::JobTarget::Arch { arch: want } => arch(&h.arch) == arch(want),
-        })
-        .filter(|(v, ..)| even_if_present || v.node.presence.state == api::PresenceState::Away)
+        .filter(|(v, ..)| !jobs::held_for_presence(v.node.presence.state, even_if_present))
         .min_by(|a, b| {
             let load = |v: &pt_fleet::NodeView| {
                 v.node
@@ -1027,9 +1014,10 @@ impl NodeExec {
                 token: token.clone(),
             };
             let (bytes, end) = self.call("FetchArtifact", |c| c.fetch_artifact(q.clone()))?;
-            if end.size > ARTIFACT_CAP {
+            let cap = self.hub.config.job_artifact_max_bytes;
+            if end.size > cap {
                 return Err(Fail::Check(format!(
-                    "{} bytes, over the {ARTIFACT_CAP} byte cap",
+                    "{} bytes, over the {cap} byte cap (job_artifact_max_bytes)",
                     end.size
                 )));
             }

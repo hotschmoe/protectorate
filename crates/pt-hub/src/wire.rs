@@ -144,11 +144,17 @@ pub fn role(state: &State, s: &Sleeve) -> api::SleeveRole {
     }
 }
 
-pub fn sleeve(transcripts: &Transcripts, view: &View, s: &Sleeve) -> api::Sleeve {
+pub fn sleeve(
+    config: &crate::home::Config,
+    transcripts: &Transcripts,
+    view: &View,
+    s: &Sleeve,
+) -> api::Sleeve {
     let st = &view.state;
     let stats = transcripts.stats(s.id);
     let incarnation = (s.g.0 > 0).then(|| api::Incarnation {
         g: s.g.0,
+        memory_max_bytes: config.scopes.then(|| config.sleeve_memory_limit(&s.name)),
         mode: match s.target.mode {
             Mode::Headless => api::Mode::Headless,
             Mode::Pane => api::Mode::Pane,
@@ -202,6 +208,13 @@ pub fn sleeve(transcripts: &Transcripts, view: &View, s: &Sleeve) -> api::Sleeve
         },
         incarnation,
         queued: s.queue.len() as u64,
+        oldest_queued_at_ms: s
+            .queue
+            .iter()
+            .filter_map(|id| s.messages.get(id))
+            .map(|m| m.queued_at)
+            .min()
+            .map(EpochMs),
         budget_used: s.budget.map(|_| s.used),
         budget_limit: s.budget,
         d9: s.d9,

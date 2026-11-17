@@ -204,12 +204,12 @@ fn announce_changes(hub: &Hub, before: &View, after: &View) {
             hub.bus
                 .push(|seq| HubStreamMessage::Workspace { seq, workspace });
         }
-        let sleeve = wire::sleeve(&hub.transcripts, after, s);
+        let sleeve = wire::sleeve(&hub.config, &hub.transcripts, after, s);
         hub.bus.push(|seq| HubStreamMessage::Sleeve { seq, sleeve });
     }
     for j in after.state.jobs.values() {
         if before.state.jobs.get(&j.id) != Some(j) {
-            let job = crate::jobs::view(&hub.jobs, j);
+            let job = crate::jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes());
             hub.bus.push(|seq| HubStreamMessage::Job { seq, job });
         }
     }
@@ -335,7 +335,20 @@ fn notice_text(view: &View, n: &Notice) -> (Kind, Level, String) {
 
 /// A notice becomes a hub event on the stream and, for a sleeve, a line in its transcript.
 fn notify(hub: &Hub, view: &View, to: Party, sleeve: Option<SleeveId>, n: &Notice) {
-    let (kind, level, text) = notice_text(view, n);
+    let (kind, level, mut text) = notice_text(view, n);
+    if matches!(
+        n,
+        Notice::Tripped {
+            guardrail: pt_core::Guardrail::Oom
+        }
+    ) && let Some(s) = sleeve.and_then(|id| view.state.sleeve(id))
+    {
+        text = format!(
+            "guardrail G4 tripped: scope memory limit {} bytes was hit; raise sleeve_memory_max_overrides for {}",
+            hub.config.sleeve_memory_limit(&s.name),
+            s.name
+        );
+    }
     let target = match to {
         Party::Owner => "owner".to_string(),
         Party::Envoy => "envoy".to_string(),

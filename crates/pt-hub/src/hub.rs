@@ -134,6 +134,7 @@ impl Hub {
             config.history_budget_bytes,
         );
         let started_ms = now_ms();
+        let job_artifact_max_bytes = config.job_artifact_max_bytes;
         Hub {
             home,
             config,
@@ -151,6 +152,7 @@ impl Hub {
                 history_capped: Vec::new(),
                 restore_error: None,
                 clients: clients.names(),
+                job_artifact_max_bytes,
             }),
             clients,
             owner_home,

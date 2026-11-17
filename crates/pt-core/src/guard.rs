@@ -298,9 +298,7 @@ impl Core<'_> {
         let cause = s.guard.cause.unwrap_or(Cause::Manual);
         let effects = self
             .st
-            .effects
-            .values()
-            .filter(|e| e.kind.sleeve() == Some(sid))
+            .reportable_effects_for_sleeve(sid)
             .filter(|e| match e.state {
                 EffectState::Uncertain | EffectState::Probing => true,
                 EffectState::Fenced => e.kind.incarnation().is_some_and(|(_, g)| g >= since),
@@ -310,10 +308,9 @@ impl Core<'_> {
             .collect();
         let roster = self
             .st
-            .sleeves
-            .values()
-            .filter(|c| c.parent == Some(sid) && c.life.live())
-            .map(|c| c.id)
+            .children(sid)
+            .into_iter()
+            .filter(|id| self.st.sleeves[id].life.live())
             .collect();
         let s = self.sl(sid);
         s.life = Life::Resleeving;
@@ -438,15 +435,7 @@ impl Core<'_> {
 
     pub(crate) fn tick_sleeves(&mut self) {
         let now = self.now;
-        let ids: Vec<SleeveId> = self
-            .st
-            .sleeves
-            .values()
-            .filter(|s| {
-                s.proc != Proc::Down || matches!(s.guard.state, GuardState::Cooldown { .. })
-            })
-            .map(|s| s.id)
-            .collect();
+        let ids: Vec<SleeveId> = self.st.ticking_sleeves.iter().copied().collect();
         for sid in ids {
             let s = &self.st.sleeves[&sid];
             if let GuardState::Cooldown { until } = s.guard.state

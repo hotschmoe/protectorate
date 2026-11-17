@@ -9,7 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "=0.4.13"
-pt-core = { path = ".." }
+pt-core = { path = "..", features = ["fuzz-reference"] }
 
 [workspace]
 

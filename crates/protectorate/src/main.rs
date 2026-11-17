@@ -63,11 +63,13 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   harness update [PROGRAM...]       claude, codex, grok, pi; none means every installed one
   harness login <claude|codex|grok|pi> [-- ARGS...]
                                     the sleeves' shared login, on this terminal, without the API
-  sleeve list | sleeve show <sleeve>
+  sleeve list | sleeve show <sleeve>  (includes scope memory limit)
   sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
-        [--provider P] [--model M] [--effort E] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
-  sleeve send <sleeve> <text...> [--steer]
+        [--provider P] [--model M] [--effort E] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT | --message-file FILE]
+  sleeve send <sleeve> (<text...> | --message-file FILE) [--steer]
         a sleeve may send to itself, its children, its parent, or envoy
+  sleeve inbox [<sleeve>]
+        --message-file accepts - for stdin
   sleeve interrupt|stop|rm|takeover <sleeve>
   sleeve start <sleeve> [--harness H] [--provider P] [--model M] [--effort E]
   sleeve resleeve <sleeve> --harness H [--provider P] [--model M] [--effort E]
@@ -82,11 +84,13 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
         [--no-wait]
   job run (--node ID | --arch ARCH) [--even-if-present] [--on-present idle|kill]
         [--maintenance] [--wait] [--timeout SECS] [--cwd DIR] [--artifact PATH]... -- <argv...>
+        Artifact cap: job_artifact_max_bytes (default 67108864 bytes); hub info shows the effective value.
+        --wait reports a presence hold; job show displays the reason.
   job ls [--node N] [--limit N] | job show|cancel <job> | job log <job> [--offset N] [--limit N]
   job artifact <job> <path> [--out FILE]
   quota list
   event list [--from SEQ] [--limit N] | event read <seq>
-  envoy send <text...> [--as NAME] | envoy wait [REQUEST_ID] [--timeout SECS]
+  envoy send (<text...> | --message-file FILE) [--as NAME] | envoy wait [REQUEST_ID] [--timeout SECS]
   envoy read [--from SEQ] | envoy token
   history search <query...> [--mode all|any|phrase] [--sleeve S]... [--harness H]
         [--session ID] [--role user|assistant|tool-call|tool-error|compaction]...

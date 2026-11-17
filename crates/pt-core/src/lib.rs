@@ -32,14 +32,27 @@ pub use state::*;
 
 /// Applies one event and returns the intents to execute once the event is durable.
 pub fn apply(state: &mut State, event: &Event) -> Vec<Intent> {
+    apply_impl(state, event, false)
+}
+
+#[cfg(feature = "fuzz-reference")]
+pub fn apply_reference(state: &mut State, event: &Event) -> Vec<Intent> {
+    apply_impl(state, event, true)
+}
+
+fn apply_impl(state: &mut State, event: &Event, _reference_jobs: bool) -> Vec<Intent> {
     let now = event.at.max(state.now);
     state.now = now;
     let mut core = Core {
         st: state,
         out: Vec::new(),
         now,
+        dirty_sleeves: Default::default(),
+        #[cfg(feature = "fuzz-reference")]
+        reference_jobs: _reference_jobs,
     };
     core.handle(&event.kind);
+    core.index_sleeves();
     core.out
 }
 
@@ -182,14 +195,24 @@ impl Core<'_> {
             E::Exited { sleeve, g, cause } => self.exited(*sleeve, *g, *cause),
             E::Tick => {
                 self.tick_effects();
+                self.index_sleeves();
                 self.tick_sleeves();
+                self.index_sleeves();
                 self.tick_unwritten();
+                #[cfg(feature = "fuzz-reference")]
+                if self.reference_jobs {
+                    self.reference_tick_jobs();
+                } else {
+                    self.tick_jobs();
+                }
+                #[cfg(not(feature = "fuzz-reference"))]
                 self.tick_jobs();
                 self.tick_approvals();
             }
             E::Continue { sleeve, text } => self.continue_turn(*sleeve, text),
             E::HubRecovered => {
                 self.recover_effects();
+                self.index_sleeves();
                 self.recover_sleeves();
                 self.recover_jobs();
                 self.recover_approvals();

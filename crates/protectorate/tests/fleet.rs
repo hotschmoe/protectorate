@@ -19,7 +19,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use common::{Hub, Run, bin, eventually, tail};
+use common::{Hub, Run, bin, cli_command, eventually, tail};
 use pt_json::{Value, obj};
 
 struct Kill(Child);
@@ -90,8 +90,8 @@ fn start_node(
 
 #[test]
 fn version_flag_matches_version_command() {
-    let command = Command::new(bin()).arg("version").output().unwrap();
-    let flag = Command::new(bin()).arg("--version").output().unwrap();
+    let command = cli_command().arg("version").output().unwrap();
+    let flag = cli_command().arg("--version").output().unwrap();
     assert!(command.status.success());
     assert!(
         flag.status.success(),
@@ -205,7 +205,7 @@ fn log_text(hub: &Hub, id: &str, offset: u64) -> String {
 
 #[test]
 fn hub_runs_the_fleet_and_node_jobs() {
-    let version = Command::new(bin()).arg("version").output().unwrap();
+    let version = cli_command().arg("version").output().unwrap();
     let version = String::from_utf8_lossy(&version.stdout).into_owned();
     if version.contains("missing") {
         eprintln!("SKIP: this protectorate does not embed headscale and member: {version}");
@@ -223,18 +223,26 @@ fn hub_runs_the_fleet_and_node_jobs() {
     let mut hub = Hub::start_config(
         "fleet",
         "pi_local",
-        &[(
-            "fleet",
-            obj! {
-                "listen" => listen.as_str(),
-                "dir" => tailnet.to_str().unwrap(),
-                "poll_secs" => 2u64,
-                // A bare address: headscale refuses to start unless the hub widens it to a prefix.
-                "trusted_proxies" => vec![Value::from("127.0.0.2")],
-            },
-        )],
+        &[
+            (
+                "fleet",
+                obj! {
+                    "listen" => listen.as_str(),
+                    "dir" => tailnet.to_str().unwrap(),
+                    "poll_secs" => 2u64,
+                    // A bare address: headscale refuses to start unless the hub widens it to a prefix.
+                    "trusted_proxies" => vec![Value::from("127.0.0.2")],
+                },
+            ),
+            ("job_artifact_max_bytes", Value::from(4_000_000u64)),
+        ],
         &[],
         &[("PROTECTORATE_FLEET_TEST_MEMBER_TIMEOUT_MS", "1000")],
+    );
+    assert!(
+        hub.cli(&["hub", "info"])
+            .stdout
+            .contains("job artifact cap: 4000000 bytes")
     );
     let enrollment = eventually("the fleet to come up", Duration::from_secs(120), || {
         let r = hub.cli(&["--json", "node", "add"]);
@@ -690,6 +698,33 @@ fn hub_runs_the_fleet_and_node_jobs() {
     );
     let done = wait_job(&hub, &art, &["succeeded", "failed"], 120);
     assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
+    let cancelled = hub.cli(&["job", "cancel", &art]);
+    assert_ne!(cancelled.status, 0);
+    assert!(
+        cancelled.stderr.contains(&format!(
+            "job {art} already finished (succeeded, exit code 0)"
+        )),
+        "{}",
+        cancelled.stderr
+    );
+    let oversized = run_job(
+        &hub,
+        &["--artifact", "oversized"],
+        &[
+            "sh",
+            "-c",
+            "dd if=/dev/zero of=oversized bs=1000000 count=5",
+        ],
+    );
+    let refused = wait_job(&hub, &oversized, &["succeeded", "failed"], 120);
+    assert_eq!(refused["state"].as_str(), Some("failed"), "{refused}");
+    assert!(
+        refused["error"]
+            .as_str()
+            .unwrap_or("")
+            .contains("4000000 byte cap"),
+        "{refused}"
+    );
     let expected = b"artifact\x01\xffbytes";
     let a = &done["artifacts"][0];
     assert_eq!(a["path"].as_str(), Some("out.bin"));
@@ -932,13 +967,85 @@ fn hub_runs_the_fleet_and_node_jobs() {
     let gated = run_job(&hub, &[], &["echo", "gated"]);
     std::thread::sleep(Duration::from_secs(6));
     assert_eq!(job_json(&hub, &gated)["state"].as_str(), Some("queued"));
+    let reason = format!(
+        "held: node {node_id} is present; --even-if-present runs it now, --on-present idle|kill chooses"
+    );
+    assert!(hub.cli(&["job", "show", &gated]).stdout.contains(&reason));
+    let arch_job = hub
+        .cli(&[
+            "--json",
+            "job",
+            "run",
+            "--arch",
+            std::env::consts::ARCH,
+            "--",
+            "echo",
+            "arch-held",
+        ])
+        .json();
+    let arch_id = arch_job["id"].as_str().unwrap();
+    assert!(hub.cli(&["job", "show", arch_id]).stdout.contains(&reason));
+    let waiting = cli_command()
+        .arg("--home")
+        .arg(&hub.home)
+        .env_remove("PROTECTORATE_SOCKET")
+        .env_remove("PROTECTORATE_TOKEN")
+        .args([
+            "job",
+            "run",
+            "--node",
+            &node_id,
+            "--wait",
+            "--",
+            "echo",
+            "waited-held",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    eventually("waiting job to be queued", Duration::from_secs(30), || {
+        let jobs = hub.cli(&["--json", "job", "ls"]).json();
+        jobs["jobs"]
+            .as_array()?
+            .iter()
+            .any(|j| {
+                j["state"].as_str() == Some("queued")
+                    && j["argv"].to_string().contains("waited-held")
+            })
+            .then_some(())
+    });
+    std::thread::sleep(Duration::from_secs(1));
     let urgent = run_job(&hub, &["--even-if-present"], &["echo", "urgent"]);
     let done = wait_job(&hub, &urgent, &["succeeded", "failed"], 90);
     assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
     fs::write(&presence, "AWAY").unwrap();
+    let waited = waiting.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&waited.stderr);
+    assert!(waited.status.success(), "{stderr}");
+    assert_eq!(stderr.matches(&reason).count(), 1, "{stderr}");
     let done = wait_job(&hub, &gated, &["succeeded", "failed"], 90);
     assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
+    let done = wait_job(&hub, arch_id, &["succeeded", "failed"], 90);
+    assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
     assert!(log_text(&hub, &gated, 0).contains("gated"));
+
+    fs::write(&presence, "UNKNOWN").unwrap();
+    eventually("the node UNKNOWN", Duration::from_secs(30), || {
+        let v = hub.cli(&["--json", "node", "show", &node_id]).json();
+        (v["presence"]["state"].as_str() == Some("unknown")).then_some(())
+    });
+    let unknown = run_job(&hub, &[], &["echo", "unknown-held"]);
+    let reason = format!(
+        "held: node {node_id} has unknown presence; --even-if-present runs it now, --on-present idle|kill chooses"
+    );
+    assert!(hub.cli(&["job", "show", &unknown]).stdout.contains(&reason));
+    let override_job = run_job(&hub, &["--even-if-present"], &["echo", "unknown-override"]);
+    let done = wait_job(&hub, &override_job, &["succeeded", "failed"], 90);
+    assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
+    fs::write(&presence, "AWAY").unwrap();
+    let done = wait_job(&hub, &unknown, &["succeeded", "failed"], 90);
+    assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
 
     // A long job, cancelled.
     let long = run_job(&hub, &[], &["sleep", "600"]);

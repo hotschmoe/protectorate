@@ -766,6 +766,7 @@ final class DoctorReport {
     required this.ghLoggedIn,
     required this.ghAccount,
     required this.sandboxOk,
+    this.sleeveDevices = const <String>[],
     this.problems = const <String>[],
   });
 
@@ -783,6 +784,15 @@ final class DoctorReport {
       ghLoggedIn: _bool(j['gh_logged_in'], 'DoctorReport.gh_logged_in'),
       ghAccount: _string(j['gh_account'], 'DoctorReport.gh_account'),
       sandboxOk: _bool(j['sandbox_ok'], 'DoctorReport.sandbox_ok'),
+      sleeveDevices: _or(
+        j['sleeve_devices'],
+        const <String>[],
+        (e0) => _list(
+          e0,
+          'DoctorReport.sleeve_devices',
+          (e1) => _string(e1, 'DoctorReport.sleeve_devices[]'),
+        ),
+      ),
       problems: _or(
         j['problems'],
         const <String>[],
@@ -810,6 +820,8 @@ final class DoctorReport {
 
   final bool sandboxOk;
 
+  final List<String> sleeveDevices;
+
   /// Everything that needs the owner, one line each.
   final List<String> problems;
 
@@ -821,6 +833,7 @@ final class DoctorReport {
     'gh_logged_in': ghLoggedIn,
     'gh_account': ghAccount,
     'sandbox_ok': sandboxOk,
+    'sleeve_devices': sleeveDevices,
     'problems': problems,
   };
 }
@@ -2340,6 +2353,7 @@ final class HubInfo {
     this.historyCapped = const <String>[],
     this.restoreError,
     this.clients = const <String>[],
+    this.jobArtifactMaxBytes = 67108864,
   });
 
   factory HubInfo.fromJson(Object? json) {
@@ -2372,6 +2386,11 @@ final class HubInfo {
           (e1) => _string(e1, 'HubInfo.clients[]'),
         ),
       ),
+      jobArtifactMaxBytes: _or(
+        j['job_artifact_max_bytes'],
+        67108864,
+        (e0) => _int(e0, 'HubInfo.job_artifact_max_bytes'),
+      ),
     );
   }
 
@@ -2399,6 +2418,8 @@ final class HubInfo {
   /// `releases/current`.
   final List<String> clients;
 
+  final int jobArtifactMaxBytes;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'version': version,
@@ -2408,6 +2429,7 @@ final class HubInfo {
     'history_capped': historyCapped,
     if (restoreError case final v?) 'restore_error': v,
     'clients': clients,
+    'job_artifact_max_bytes': jobArtifactMaxBytes,
   };
 }
 
@@ -2861,10 +2883,50 @@ final class HubUpdate {
   };
 }
 
+final class Inbox {
+  const Inbox({this.messages = const <QueuedMessage>[]});
+
+  factory Inbox.fromJson(Object? json) {
+    final j = _object(json, 'Inbox');
+    return Inbox(
+      messages: _or(
+        j['messages'],
+        const <QueuedMessage>[],
+        (e0) => _list(e0, 'Inbox.messages', QueuedMessage.fromJson),
+      ),
+    );
+  }
+
+  final List<QueuedMessage> messages;
+
+  Map<String, Object?> toJson() => {
+    'messages': [for (final e0 in messages) e0.toJson()],
+  };
+}
+
+final class InboxRequest {
+  const InboxRequest({this.sleeveId});
+
+  factory InboxRequest.fromJson(Object? json) {
+    final j = _object(json, 'InboxRequest');
+    return InboxRequest(
+      sleeveId: _opt(
+        j['sleeve_id'],
+        (e0) => _string(e0, 'InboxRequest.sleeve_id'),
+      ),
+    );
+  }
+
+  final String? sleeveId;
+
+  Map<String, Object?> toJson() => {if (sleeveId case final v?) 'sleeve_id': v};
+}
+
 /// One harness process tree with generation `g`.
 final class Incarnation {
   const Incarnation({
     required this.g,
+    this.memoryMaxBytes,
     required this.mode,
     required this.harness,
     required this.subscription,
@@ -2884,6 +2946,10 @@ final class Incarnation {
     final j = _object(json, 'Incarnation');
     return Incarnation(
       g: _int(j['g'], 'Incarnation.g'),
+      memoryMaxBytes: _opt(
+        j['memory_max_bytes'],
+        (e0) => _int(e0, 'Incarnation.memory_max_bytes'),
+      ),
       mode: Mode.fromJson(j['mode']),
       harness: Harness.fromJson(j['harness']),
       subscription: Subscription.fromJson(j['subscription']),
@@ -2916,6 +2982,9 @@ final class Incarnation {
 
   final int g;
 
+  /// Scope memory limit in bytes; absent when scopes are disabled.
+  final int? memoryMaxBytes;
+
   final Mode mode;
 
   final Harness harness;
@@ -2947,6 +3016,7 @@ final class Incarnation {
 
   Map<String, Object?> toJson() => {
     'g': g,
+    if (memoryMaxBytes case final v?) 'memory_max_bytes': v,
     'mode': mode.toJson(),
     'harness': harness.toJson(),
     'subscription': subscription.toJson(),
@@ -3061,6 +3131,7 @@ final class Job {
     this.endedAt,
     this.exitCode,
     this.error,
+    this.heldReason,
     this.logBytes = 0,
     this.cwd,
     this.artifacts = const <JobArtifact>[],
@@ -3094,6 +3165,10 @@ final class Job {
       endedAt: _opt(j['ended_at_ms'], (e0) => _time(e0, 'Job.ended_at_ms')),
       exitCode: _opt(j['exit_code'], (e0) => _int(e0, 'Job.exit_code')),
       error: _opt(j['error'], (e0) => _string(e0, 'Job.error')),
+      heldReason: _opt(
+        j['held_reason'],
+        (e0) => _string(e0, 'Job.held_reason'),
+      ),
       logBytes: _or(j['log_bytes'], 0, (e0) => _int(e0, 'Job.log_bytes')),
       cwd: _opt(j['cwd'], (e0) => _string(e0, 'Job.cwd')),
       artifacts: _or(
@@ -3138,6 +3213,8 @@ final class Job {
   /// Why the hub ended it when no node did, such as `node 4 was removed`.
   final String? error;
 
+  final String? heldReason;
+
   /// Bytes of log the hub holds.
   final int logBytes;
 
@@ -3163,6 +3240,7 @@ final class Job {
     if (endedAt case final v?) 'ended_at_ms': v.millisecondsSinceEpoch,
     if (exitCode case final v?) 'exit_code': v,
     if (error case final v?) 'error': v,
+    if (heldReason case final v?) 'held_reason': v,
     'log_bytes': logBytes,
     if (cwd case final v?) 'cwd': v,
     'artifacts': [for (final e0 in artifacts) e0.toJson()],
@@ -3950,6 +4028,35 @@ enum PresenceState {
   String toJson() => wire;
 }
 
+final class QueuedMessage {
+  const QueuedMessage({
+    required this.sender,
+    required this.queuedAt,
+    required this.text,
+  });
+
+  factory QueuedMessage.fromJson(Object? json) {
+    final j = _object(json, 'QueuedMessage');
+    return QueuedMessage(
+      sender: _string(j['sender'], 'QueuedMessage.sender'),
+      queuedAt: _time(j['queued_at_ms'], 'QueuedMessage.queued_at_ms'),
+      text: _string(j['text'], 'QueuedMessage.text'),
+    );
+  }
+
+  final String sender;
+
+  final DateTime queuedAt;
+
+  final String text;
+
+  Map<String, Object?> toJson() => {
+    'sender': sender,
+    'queued_at_ms': queuedAt.millisecondsSinceEpoch,
+    'text': text,
+  };
+}
+
 final class Quota {
   const Quota({
     required this.subscription,
@@ -4577,16 +4684,32 @@ final class SendMessageRequest {
 
 /// A message the hub took; its `user_message` and `prompt_ack` entries carry this id.
 final class Sent {
-  const Sent({required this.requestId});
+  const Sent({
+    required this.requestId,
+    required this.queued,
+    required this.queueLength,
+  });
 
   factory Sent.fromJson(Object? json) {
     final j = _object(json, 'Sent');
-    return Sent(requestId: _string(j['request_id'], 'Sent.request_id'));
+    return Sent(
+      requestId: _string(j['request_id'], 'Sent.request_id'),
+      queued: _bool(j['queued'], 'Sent.queued'),
+      queueLength: _int(j['queue_length'], 'Sent.queue_length'),
+    );
   }
 
   final String requestId;
 
-  Map<String, Object?> toJson() => {'request_id': requestId};
+  final bool queued;
+
+  final int queueLength;
+
+  Map<String, Object?> toJson() => {
+    'request_id': requestId,
+    'queued': queued,
+    'queue_length': queueLength,
+  };
 }
 
 /// The durable identity: name, workspace claim, parent link, resleeve policy, budget and
@@ -4606,6 +4729,7 @@ final class Sleeve {
     this.view,
     this.incarnation,
     this.queued = 0,
+    this.oldestQueuedAt,
     this.budgetUsed,
     this.budgetLimit,
     this.d9 = false,
@@ -4634,6 +4758,10 @@ final class Sleeve {
       view: _opt(j['view'], WorkspaceView.fromJson),
       incarnation: _opt(j['incarnation'], Incarnation.fromJson),
       queued: _or(j['queued'], 0, (e0) => _int(e0, 'Sleeve.queued')),
+      oldestQueuedAt: _opt(
+        j['oldest_queued_at_ms'],
+        (e0) => _time(e0, 'Sleeve.oldest_queued_at_ms'),
+      ),
       budgetUsed: _opt(
         j['budget_used'],
         (e0) => _int(e0, 'Sleeve.budget_used'),
@@ -4679,6 +4807,8 @@ final class Sleeve {
   /// Messages waiting for the turn to settle.
   final int queued;
 
+  final DateTime? oldestQueuedAt;
+
   /// Tokens.
   final int? budgetUsed;
 
@@ -4702,6 +4832,8 @@ final class Sleeve {
     if (view case final v?) 'view': v.toJson(),
     if (incarnation case final v?) 'incarnation': v.toJson(),
     'queued': queued,
+    if (oldestQueuedAt case final v?)
+      'oldest_queued_at_ms': v.millisecondsSinceEpoch,
     if (budgetUsed case final v?) 'budget_used': v,
     if (budgetLimit case final v?) 'budget_limit': v,
     'd9': d9,
@@ -5493,6 +5625,10 @@ final class HubApi {
   /// `POST /api/ListSleeves`, scope `sleeve`.
   Future<SleeveList> listSleeves([Empty request = const Empty()]) =>
       _call('ListSleeves', request.toJson(), SleeveList.fromJson);
+
+  /// `POST /api/GetInbox`, scope `sleeve`.
+  Future<Inbox> getInbox(InboxRequest request) =>
+      _call('GetInbox', request.toJson(), Inbox.fromJson);
 
   /// `POST /api/GetTranscript`, scope `sleeve`.
   Future<Transcript> getTranscript(GetTranscriptRequest request) =>

@@ -153,6 +153,22 @@ api_records! {
     /// A message the hub took; its `user_message` and `prompt_ack` entries carry this id.
     pub struct Sent {
         pub request_id: String,
+        pub queued: bool,
+        pub queue_length: u64,
+    }
+
+    pub struct InboxRequest {
+        pub sleeve_id: Option<String>,
+    }
+
+    pub struct QueuedMessage {
+        pub sender: String,
+        pub queued_at_ms: EpochMs,
+        pub text: String,
+    }
+
+    pub struct Inbox {
+        pub messages: Vec<QueuedMessage> = Vec::new(),
     }
 
     pub struct SleeveRef {
@@ -562,6 +578,7 @@ api_records! {
         pub gh_logged_in: bool,
         pub gh_account: String,
         pub sandbox_ok: bool,
+        pub sleeve_devices: Vec<String> = Vec::new(),
         /// Everything that needs the owner, one line each.
         pub problems: Vec<String> = Vec::new(),
     }
@@ -661,6 +678,7 @@ api_methods! {
     /// The full snapshot.
     GetState(Empty) -> HubState: Owner,
     ListSleeves(Empty) -> SleeveList: Sleeve,
+    GetInbox(InboxRequest) -> Inbox: Sleeve,
     GetTranscript(GetTranscriptRequest) -> Transcript: Sleeve,
 
     // Sleeves

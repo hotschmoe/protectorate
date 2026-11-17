@@ -37,7 +37,10 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
-use common::{Hub, LONG, Run, bin, eventually, free_port, pair, post, tail, temp_repo};
+use common::{
+    Hub, LONG, Run, bin, cli_command, eventually, free_port, pair, post, protectorate_command,
+    tail, temp_repo,
+};
 use pt_http::{Config, Request, Response, Server, ShutdownHandle};
 use pt_json::{Value, obj};
 
@@ -274,7 +277,7 @@ impl Supervisor {
             while !stop.load(Ordering::SeqCst) {
                 let previous = root.join("releases/previous").join(program);
                 if previous.exists() {
-                    let out = unbusy(|| Command::new(&previous).args(&prestart).output());
+                    let out = unbusy(|| protectorate_command(&previous).args(&prestart).output());
                     append(
                         &log,
                         &format!(
@@ -290,7 +293,7 @@ impl Supervisor {
                 let release = pointer(&root, "current").unwrap_or_default();
                 append(&log, &format!("start {release}\n"));
                 let err = fs::OpenOptions::new().append(true).open(&log).unwrap();
-                let mut cmd = Command::new(root.join("releases/current").join(program));
+                let mut cmd = protectorate_command(root.join("releases/current").join(program));
                 cmd.args(&args)
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
@@ -391,7 +394,7 @@ fn append(path: &Path, text: &str) {
 }
 
 fn cli(home: &Path, args: &[&str]) -> Run {
-    let out = Command::new(bin())
+    let out = cli_command()
         .arg("--home")
         .arg(home)
         .args(args)
@@ -594,7 +597,7 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
     let before_probation = fs::read(home.join("releases/probation.json")).unwrap();
     let before_current = pointer(&home, "current");
     let before_previous = pointer(&home, "previous");
-    let not_from_releases = Command::new(bin())
+    let not_from_releases = cli_command()
         .args(["--home", &home_s, "hub", "probation"])
         .output()
         .unwrap();
@@ -695,7 +698,7 @@ fn hub_rollbacks_restore_a_journal_the_previous_binary_cannot_read() {
         journal.append(&event).unwrap();
         drop(journal);
         let old = home.join("releases/previous/protectorate");
-        let refuses = Command::new(&old).args(&serve).output().unwrap();
+        let refuses = protectorate_command(&old).args(&serve).output().unwrap();
         assert!(!refuses.status.success(), "{refuses:?}");
         assert!(
             String::from_utf8_lossy(&refuses.stderr)
@@ -725,7 +728,7 @@ fn hub_rollbacks_restore_a_journal_the_previous_binary_cannot_read() {
         )
         .unwrap();
         let gitdir = home.join("repo/.git/worktrees").join(format!("wt-{next}"));
-        let rollback = Command::new(&old).args(&prestart).output().unwrap();
+        let rollback = protectorate_command(&old).args(&prestart).output().unwrap();
         assert!(rollback.status.success(), "{rollback:?}");
         let err = String::from_utf8_lossy(&rollback.stderr);
         assert!(err.contains("events after the snapshot are lost"), "{err}");
@@ -833,7 +836,7 @@ fn can_mount_journal() -> bool {
 /// swaps the journal then fails with EBUSY, after staging and quarantine, which only
 /// need the home directory to be writable. A mode bit cannot single out that rename.
 fn prestart_with_journal_mounted(home: &Path) -> std::process::Output {
-    Command::new("unshare")
+    protectorate_command("unshare")
         .args(["-Ur", "-m", "--", "/bin/sh", "-c"])
         .arg(
             r#"/bin/mount --bind "$1/journal" "$1/journal" && exec "$1/releases/previous/protectorate" --home "$1" hub probation"#,
@@ -1065,7 +1068,7 @@ fn partial_manual_rollback_does_not_keep_the_trial() {
     // be written again. Staying incomplete depends on the marker from the first run.
     let hidden = home.join("snapshots/journal-held");
     fs::rename(&snapshot, &hidden).unwrap();
-    let second = Command::new(home.join("releases/previous/protectorate"))
+    let second = protectorate_command(home.join("releases/previous/protectorate"))
         .arg("--home")
         .arg(&home)
         .args(["hub", "probation"])
@@ -1097,7 +1100,7 @@ fn partial_manual_rollback_does_not_keep_the_trial() {
     assert!(!home.join("sleeves/7").exists());
     fs::rename(&hidden, &snapshot).unwrap();
 
-    let done = Command::new(home.join("releases/previous/protectorate"))
+    let done = protectorate_command(home.join("releases/previous/protectorate"))
         .arg("--home")
         .arg(&home)
         .args(["hub", "probation"])
@@ -1153,7 +1156,7 @@ fn serve_refuses_an_incomplete_manual_rollback() {
     fs::write(&marker, b"open\n").unwrap();
 
     let mut serve = unbusy(|| {
-        Command::new(home.join("releases/current/protectorate"))
+        protectorate_command(home.join("releases/current/protectorate"))
             .arg("--home")
             .arg(&home)
             .args(["serve", "--listen", "off"])
@@ -1293,7 +1296,7 @@ fn release_switches_survive_a_crash_at_each_step() {
         "deadline_ms" => 2u64,
     };
     fs::write(home.join("releases/probation.json"), trial.to_string()).unwrap();
-    let out = Command::new(home.join("releases/previous/protectorate"))
+    let out = protectorate_command(home.join("releases/previous/protectorate"))
         .args(words(&["hub", "probation"]))
         .env("PT_TEST_CRASH_AT", "rollback-current")
         .output()
@@ -1364,7 +1367,7 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         .as_millis() as u64;
     let missing = obj! { "version" => "v0.0.2", "previous" => "v0.0.1", "switched_ms" => now, "deadline_ms" => now + 60_000u64, "starts" => 3u64, "headscale_snapshot" => fleet.join("snapshots/missing").display().to_string() };
     fs::write(home.join("releases/probation.json"), missing.to_string()).unwrap();
-    let failed = Command::new(home.join("releases/previous/protectorate"))
+    let failed = protectorate_command(home.join("releases/previous/protectorate"))
         .arg("--home")
         .arg(&home)
         .args(["hub", "probation"])
@@ -1426,7 +1429,7 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         "{:?}",
         events(&home)
     );
-    let online_retry = Command::new(home.join("releases/previous/protectorate"))
+    let online_retry = protectorate_command(home.join("releases/previous/protectorate"))
         .arg("--home")
         .arg(&home)
         .args(["hub", "probation", "--retry-rollback"])
@@ -1467,7 +1470,7 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         missing_journal.to_string(),
     )
     .unwrap();
-    let failed = Command::new(home.join("releases/previous/protectorate"))
+    let failed = protectorate_command(home.join("releases/previous/protectorate"))
         .arg("--home")
         .arg(&home)
         .args(["hub", "probation"])
@@ -1496,7 +1499,7 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
     let repaired = fleet.join("snapshots/missing-journal");
     fs::create_dir_all(&repaired).unwrap();
     fs::write(repaired.join("segment-00000000000000000000"), &readable).unwrap();
-    let out = Command::new(home.join("releases/previous/protectorate"))
+    let out = protectorate_command(home.join("releases/previous/protectorate"))
         .arg("--home")
         .arg(&home)
         .args(["hub", "probation", "--retry-rollback"])
@@ -1552,7 +1555,7 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         "journal_snapshot" => other.display().to_string()
     };
     fs::write(home.join("releases/probation.json"), keep.to_string()).unwrap();
-    let out = Command::new(home.join("releases/previous/protectorate"))
+    let out = protectorate_command(home.join("releases/previous/protectorate"))
         .arg("--home")
         .arg(&home)
         .args(["hub", "probation"])
@@ -2062,7 +2065,7 @@ fn free_pair() -> u16 {
 
 #[test]
 fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
-    let version = Command::new(bin()).arg("version").output().unwrap();
+    let version = cli_command().arg("version").output().unwrap();
     if String::from_utf8_lossy(&version.stdout).contains("missing") {
         eprintln!("SKIP: this protectorate does not embed headscale and member");
         return;

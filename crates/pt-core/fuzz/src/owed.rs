@@ -418,6 +418,7 @@ fn on_send(
     queued.messages.insert(
         request_id.to_string(),
         Message {
+            queued_at: prev.now,
             from,
             agent: None,
             kind: MsgKind::Prompt,

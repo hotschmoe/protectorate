@@ -36,6 +36,30 @@ impl Core<'_> {
 
     fn set_job(&mut self, id: JobId, state: JobState) {
         let now = self.now;
+        if matches!(
+            state,
+            JobState::Succeeded
+                | JobState::Failed(_)
+                | JobState::Interrupted
+                | JobState::Cancelled
+                | JobState::Abandoned
+        ) {
+            self.st.recoverable_jobs.remove(&id);
+        } else {
+            self.st.recoverable_jobs.insert(id);
+        }
+        if matches!(
+            state,
+            JobState::SubmitUncertain { .. }
+                | JobState::Running
+                | JobState::Collecting { .. }
+                | JobState::Lost { .. }
+                | JobState::Cancelling
+        ) {
+            self.st.active_jobs.insert(id);
+        } else {
+            self.st.active_jobs.remove(&id);
+        }
         let j = self.job(id);
         // The first loss starts the abandon window. Collecting is a retry of that same loss.
         if matches!(state, JobState::Lost { .. }) {
@@ -101,8 +125,7 @@ impl Core<'_> {
     fn node_writes(&self, id: JobId, ack: bool) -> Vec<EffectId> {
         let attempt = self.st.jobs[&id].attempt;
         self.st
-            .effects
-            .values()
+            .open_effects_for_job(id)
             .filter(|e| match e.kind {
                 EffectKind::NodeCancel {
                     job, attempt: a, ..
@@ -154,11 +177,22 @@ impl Core<'_> {
             self.st.jobs[&id].state,
             JobState::Cancelling | JobState::Lost { .. } | JobState::Abandoned
         );
-        let mut writes = self.node_writes(id, true);
-        if cancel_wanted {
-            writes.extend(self.node_writes(id, false));
+        let attempt = self.st.jobs[&id].attempt;
+        let mut acks = Vec::new();
+        let mut cancels = Vec::new();
+        for &eff in &self.st.retryable_effects {
+            match self.st.effects[&eff].kind {
+                EffectKind::NodeAckCollected {
+                    job, attempt: a, ..
+                } if job == id && a == attempt => acks.push(eff),
+                EffectKind::NodeCancel {
+                    job, attempt: a, ..
+                } if cancel_wanted && job == id && a == attempt => cancels.push(eff),
+                _ => {}
+            }
         }
-        for eff in writes {
+        acks.extend(cancels);
+        for eff in acks {
             self.resend_or_give_up(eff, NODE_RESENDS);
         }
     }
@@ -199,6 +233,7 @@ impl Core<'_> {
                 lost_at: None,
             },
         );
+        self.st.recoverable_jobs.insert(id);
         self.st.job_requests.insert(request_id.to_string(), id);
         self.schedule(id);
         self.reply(Reply::JobCreated(id));
@@ -580,6 +615,78 @@ impl Core<'_> {
 
     pub(crate) fn tick_jobs(&mut self) {
         let now = self.now;
+        // Only an Uncertain or Probing write is re-sent, and nothing on this path makes one,
+        // so one pass finds every job with work instead of a scan of all effects per job.
+        let resend: BTreeSet<JobId> =
+            self.st
+                .retryable_effects
+                .iter()
+                .map(|id| &self.st.effects[id])
+                .filter_map(|e| match e.kind {
+                    EffectKind::NodeCancel { job, .. }
+                    | EffectKind::NodeAckCollected { job, .. } => Some(job),
+                    _ => None,
+                })
+                .collect();
+        let ids: Vec<JobId> = self.st.active_jobs.union(&resend).copied().collect();
+        for id in ids {
+            let j = &self.st.jobs[&id];
+            let (state, seen_at, state_at, lost_at) = (j.state, j.seen_at, j.state_at, j.lost_at);
+            // From the first loss, not the latest bounce back into Lost. Entering Lost
+            // always records that stamp, so a Lost job without one does not start the window.
+            let loss_for = match (state, lost_at) {
+                (JobState::Lost { .. } | JobState::Collecting { .. }, Some(t)) => Some(t),
+                _ => None,
+            };
+            if loss_for.is_some_and(|t| since(now, t) >= LOST_ABANDON) {
+                self.finish(id, JobState::Abandoned, false);
+                self.node_effect(id, false);
+            } else {
+                match state {
+                    JobState::SubmitUncertain { .. } | JobState::Running
+                        if since(now, seen_at) >= LEASE =>
+                    {
+                        self.lose(id);
+                    }
+                    JobState::Cancelling if since(now, state_at) >= LEASE => self.lose(id),
+                    // No artifact check answered within the lease: Lost, and a later Exited
+                    // report collects again. That retry does not move the first-loss stamp.
+                    JobState::Collecting { .. } if since(now, seen_at) >= LEASE => self.lose(id),
+                    JobState::SubmitUncertain { .. }
+                    | JobState::Running
+                    | JobState::Cancelling
+                    | JobState::Lost { .. } => self.poll(id),
+                    _ => {}
+                }
+            }
+            if resend.contains(&id) {
+                self.resend_node_writes(id);
+            }
+        }
+    }
+
+    #[cfg(feature = "fuzz-reference")]
+    fn node_writes_reference(&self, id: JobId, ack: bool) -> Vec<EffectId> {
+        let attempt = self.st.jobs[&id].attempt;
+        self.st
+            .effects
+            .values()
+            .filter(|e| match e.kind {
+                EffectKind::NodeCancel {
+                    job, attempt: a, ..
+                } => !ack && job == id && a == attempt,
+                EffectKind::NodeAckCollected {
+                    job, attempt: a, ..
+                } => ack && job == id && a == attempt,
+                _ => false,
+            })
+            .map(|e| e.id)
+            .collect()
+    }
+
+    #[cfg(feature = "fuzz-reference")]
+    pub(crate) fn reference_tick_jobs(&mut self) {
+        let now = self.now;
         let ids: Vec<JobId> = self.st.jobs.keys().copied().collect();
         // Only an Uncertain or Probing write is re-sent, and nothing on this path makes one,
         // so one pass finds every job with work instead of a scan of all effects per job.
@@ -625,7 +732,17 @@ impl Core<'_> {
                 }
             }
             if resend.contains(&id) {
-                self.resend_node_writes(id);
+                let cancel_wanted = matches!(
+                    self.st.jobs[&id].state,
+                    JobState::Cancelling | JobState::Lost { .. } | JobState::Abandoned
+                );
+                let mut writes = self.node_writes_reference(id, true);
+                if cancel_wanted {
+                    writes.extend(self.node_writes_reference(id, false));
+                }
+                for eff in writes {
+                    self.resend_or_give_up(eff, NODE_RESENDS);
+                }
             }
         }
     }
@@ -634,7 +751,15 @@ impl Core<'_> {
     /// stamps, so time spent down counts (12b item 9); the polls issued here answer before the
     /// next Tick for a node that is up.
     pub(crate) fn recover_jobs(&mut self) {
-        let ids: Vec<JobId> = self.st.jobs.keys().copied().collect();
+        let mut ids = self.st.recoverable_jobs.clone();
+        ids.extend(self.st.retryable_effects.iter().filter_map(
+            |id| match self.st.effects[id].kind {
+                EffectKind::NodeCancel { job, .. } | EffectKind::NodeAckCollected { job, .. } => {
+                    Some(job)
+                }
+                _ => None,
+            },
+        ));
         for id in ids {
             match self.st.jobs[&id].state {
                 JobState::Queued => self.schedule(id),

@@ -43,9 +43,9 @@ always give it the token.
 ## Sleeves
 
 ```
-sleeve list | sleeve show <sleeve>
+sleeve list | sleeve show <sleeve> | sleeve inbox [<sleeve>]
 sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
-      [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
+      [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT | --message-file FILE]
 sleeve send <sleeve> <text...> [--steer]
 sleeve interrupt|stop|rm|takeover <sleeve>
 sleeve start <sleeve> [--harness H] [--provider P] [--model M]
@@ -54,7 +54,17 @@ sleeve transcript <sleeve> [--from SEQ] [--limit N]
 sleeve wait <sleeve> [--until idle|done|blocked|parked|ended|report] [--timeout SECS]
 ```
 
+For `sleeve send` and `envoy send`, `--message-file FILE` replaces the text arguments;
+for `sleeve spawn` it replaces `--message`. Use `-` for stdin. This avoids shell expansion
+of long or code-bearing messages. A sleeve reaches a sibling through its parent.
+
 A sleeve is named by its id or its name.
+
+List and show include the oldest queued message's age beside the queue count. `sleeve send`
+reports whether the message was queued or sent for delivery and the queue length at acceptance.
+Queued messages wait for a turn boundary. `sleeve inbox` peeks at the FIFO, showing sender,
+age and text without consuming or reordering it. A sleeve credential can inspect only its own
+queue and can omit the name; the owner supplies a name and can inspect any queue.
 
 - **spawn** with `--path DIR` makes a root sleeve on that directory (one root per directory). The
   directory must already exist where the hub can see it; a missing one is `the hub cannot see
@@ -230,6 +240,8 @@ job artifact <job> <path> [--out FILE]
 - If someone arrives mid-job, the job drops to idle priority and keeps running; `--on-present
   kill` kills it instead.
 - `--timeout` defaults to 1 hour; a log is capped at 64 MiB. A job never re-runs by itself.
+- Each artifact is capped by the hub's `job_artifact_max_bytes` config (default 67108864 bytes); restart the hub after changing it. Cancelling a finished job reports its state and exit code.
+- `hub info` shows the effective artifact cap. A job queued for a present node or one with unknown presence reports the hold in `job show`; `job run --wait` prints it once to stderr. Unknown presence is held by the scheduler just like present.
 - Without `--cwd` a job runs in its own directory on the node. `--cwd` is an absolute path in
   the node's OS (`/srv/x`, `C:\dev\x` or `C:/dev/x`); the hub checks it when `--node` names a
   node it has met, otherwise (`--arch`) the node does and the job fails there.
@@ -420,7 +432,12 @@ Not available: the systemd user bus (`systemd-run --user` in a test) and long un
 be positive. The hub reads config at startup; changes apply on the next sleeve launch
 after a hub restart. Names include `envoy`, and an override applies to a new sleeve
 with the same name too. With scopes disabled no memory limit is enforced. Swap remains
-disabled in scopes; build parallelism continues to follow the CPU quota.
+disabled in scopes; build parallelism continues to follow the CPU quota. `sleeve show` reports
+the incarnation limit in bytes (including JSON); `PROTECTORATE_MEMORY_MAX` supplies the
+configured value inside the sleeve. A non-Envoy sleeve’s first prompt reports the limit and
+directs a sleeve that needs more to ask Envoy; the owner raises `sleeve_memory_max_overrides`. A scope OOM
+notice and the next non-Envoy prompt name the limit and override key. The transcript and
+continuation brief show the original request, without the hub’s prompt preamble.
 
 ## Sleeve devices
 
@@ -428,7 +445,12 @@ disabled in scopes; build parallelism continues to follow the CPU quota.
 `--dev-bind` when the path exists, for example
 `"sleeve_devices": ["/dev/aipu", "/dev/mali0"]`. A path that is not there is skipped and
 the hub log says it was not bound; the sleeve still starts. The list is empty by default,
-so a sleeve sees only the sandbox's own `/dev`. A change applies to the next launch.
+so a sleeve sees only the sandbox's own `/dev`. Adding a device requires a hub restart,
+then a new sleeve launch. A replugged device keeps its `/dev/serial/by-id/` name but may
+get a new `ttyUSBn`; restart running sleeves to bind the new node. Inside a sleeve the
+device may appear as `nobody:nogroup` and `id` may show `nogroup`; supplementary host
+groups still apply, so this alone does not mean a 0666 udev rule is needed.
+Doctor reports each configured path, resolved node, owner, group, mode and hub read/write access without opening it. At each launch the hub logs the same information and any host processes holding the device; the first prompt lists bound devices and their holders. Processes that cannot be inspected are skipped.
 
 ## Updates and rollback
 
@@ -625,3 +647,5 @@ them.
 | `sleeve transcript`, `event list`, `job log` | what the hub saw from sleeves, itself and jobs |
 
 None of these rotate yet.
+
+Tick processing tracks uncertain and probing effects, active jobs, eligible sleeves and pending approvals while retaining terminal records. These indexes are rebuilt during journal replay.

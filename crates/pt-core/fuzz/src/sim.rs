@@ -125,7 +125,153 @@ impl Sim {
         );
         let prev = self.st.clone();
         let owed_before = self.owed.clone();
+        let mut reference = prev.clone();
+        let expected = apply_reference(&mut reference, &e);
         let out = apply(&mut self.st, &e);
+        assert_eq!(self.st, reference, "state differs from old job tick scan");
+        assert_eq!(out, expected, "intents differ from old job tick scan");
+        let scan: BTreeSet<_> = self
+            .st
+            .effects
+            .values()
+            .filter(|e| matches!(e.state, EffectState::Uncertain | EffectState::Probing))
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(
+            self.st.retryable_effects, scan,
+            "retryable effects differ from scan"
+        );
+        let jobs: BTreeSet<_> = self
+            .st
+            .jobs
+            .values()
+            .filter(|j| {
+                matches!(
+                    j.state,
+                    JobState::SubmitUncertain { .. }
+                        | JobState::Running
+                        | JobState::Collecting { .. }
+                        | JobState::Lost { .. }
+                        | JobState::Cancelling
+                )
+            })
+            .map(|j| j.id)
+            .collect();
+        assert_eq!(self.st.active_jobs, jobs, "active jobs differ from scan");
+        let ticking: BTreeSet<_> = self
+            .st
+            .sleeves
+            .values()
+            .filter(|s| {
+                s.proc != Proc::Down || matches!(s.guard.state, GuardState::Cooldown { .. })
+            })
+            .map(|s| s.id)
+            .collect();
+        let unwritten: BTreeSet<_> = self
+            .st
+            .sleeves
+            .values()
+            .filter(|s| s.retry_unwritten && s.foreign.is_none())
+            .map(|s| s.id)
+            .collect();
+        let pending: BTreeSet<_> = self
+            .st
+            .approvals
+            .values()
+            .filter(|a| a.state == ApprovalState::Pending)
+            .map(|a| a.id.clone())
+            .collect();
+        let open: BTreeSet<_> = self
+            .st
+            .effects
+            .values()
+            .filter(|e| !e.state.terminal())
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(
+            self.st.ticking_sleeves, ticking,
+            "ticking sleeves differ from scan"
+        );
+        assert_eq!(
+            self.st.unwritten_sleeves, unwritten,
+            "unwritten sleeves differ from scan"
+        );
+        assert_eq!(
+            self.st.pending_approvals, pending,
+            "pending approvals differ from scan"
+        );
+        assert_eq!(self.st.open_effects, open, "open effects differ from scan");
+        for (&sid, ids) in &self.st.open_sleeve_effects {
+            let want: BTreeSet<_> = self
+                .st
+                .effects
+                .values()
+                .filter(|e| e.kind.sleeve() == Some(sid) && !e.state.terminal())
+                .map(|e| e.id)
+                .collect();
+            assert_eq!(*ids, want, "open sleeve effects differ from scan");
+        }
+        for (&sid, ids) in &self.st.reportable_sleeve_effects {
+            let want: BTreeSet<_> = self
+                .st
+                .effects
+                .values()
+                .filter(|e| {
+                    e.kind.sleeve() == Some(sid)
+                        && matches!(
+                            e.state,
+                            EffectState::Uncertain | EffectState::Probing | EffectState::Fenced
+                        )
+                })
+                .map(|e| e.id)
+                .collect();
+            assert_eq!(*ids, want, "reportable sleeve effects differ from scan");
+        }
+        for (&job, ids) in &self.st.open_job_effects {
+            let want: BTreeSet<_> = self.st.effects.values().filter(|e| !e.state.terminal() && matches!(e.kind, EffectKind::NodeSubmit { job: j, .. } | EffectKind::NodeCancel { job: j, .. } | EffectKind::NodeAckCollected { job: j, .. } if j == job)).map(|e| e.id).collect();
+            assert_eq!(*ids, want, "open job effects differ from scan");
+        }
+        let recover_sleeves: BTreeSet<_> = self
+            .st
+            .sleeves
+            .values()
+            .filter(|s| {
+                s.proc == Proc::Up
+                    || s.guard.state == GuardState::Selecting
+                    || (s.auto_continue.is_some()
+                        && matches!(s.activity, Activity::Idle { .. })
+                        && s.guard.state == GuardState::Armed)
+            })
+            .map(|s| s.id)
+            .collect();
+        assert_eq!(
+            self.st.recovering_sleeves, recover_sleeves,
+            "recovering sleeves differ from scan"
+        );
+        let recover_jobs: BTreeSet<_> = self
+            .st
+            .jobs
+            .values()
+            .filter(|j| {
+                !matches!(
+                    j.state,
+                    JobState::Succeeded
+                        | JobState::Failed(_)
+                        | JobState::Interrupted
+                        | JobState::Cancelled
+                        | JobState::Abandoned
+                )
+            })
+            .map(|j| j.id)
+            .collect();
+        assert_eq!(
+            self.st.recoverable_jobs, recover_jobs,
+            "recoverable jobs differ from scan"
+        );
+        for ((sid, g, native), ids) in &self.st.approval_effects {
+            let want: BTreeSet<_> = self.st.effects.values().filter(|e| matches!(&e.kind, EffectKind::RespondApproval { sleeve, g: eg, approval, .. } if sleeve == sid && eg == g && approval == native) && !matches!(e.state, EffectState::Rejected | EffectState::Abandoned | EffectState::Failed)).map(|e| e.id).collect();
+            assert_eq!(*ids, want, "approval effects differ from scan");
+        }
         self.owed_before = owed_before.clone();
         self.last_kind = format!("{:?}", e.kind);
         crate::owed::note(&mut self.owed, &prev, &e.kind, e.at.max(prev.now));

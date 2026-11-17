@@ -24,7 +24,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use common::{Hub, bin, eventually, tail};
+use common::{Hub, bin, cli_command, eventually, tail};
 use pt_json::{Value, obj};
 
 struct Kill(Child);
@@ -242,7 +242,7 @@ impl Blocker {
 
 #[test]
 fn owner_removes_a_stale_node_and_renames_its_successor() {
-    let version = Command::new(bin()).arg("version").output().unwrap();
+    let version = cli_command().arg("version").output().unwrap();
     let version = String::from_utf8_lossy(&version.stdout).into_owned();
     if version.contains("missing") {
         eprintln!("SKIP: this protectorate does not embed headscale and member: {version}");

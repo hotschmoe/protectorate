@@ -18,8 +18,23 @@ pub struct State {
     /// Next [`Message::seq`]. It moves only when a message is accepted, so replay assigns the same numbers.
     pub next_msg: u64,
     pub sleeves: BTreeMap<SleeveId, Sleeve>,
+    pub children_by_parent: BTreeMap<SleeveId, BTreeSet<SleeveId>>,
+    pub ticking_sleeves: BTreeSet<SleeveId>,
+    pub recovering_sleeves: BTreeSet<SleeveId>,
+    pub unwritten_sleeves: BTreeSet<SleeveId>,
+    pub pending_approvals: BTreeSet<String>,
     pub effects: BTreeMap<EffectId, Effect>,
+    pub retryable_effects: BTreeSet<EffectId>,
+    pub open_effects: BTreeSet<EffectId>,
+    pub killed_scopes: BTreeSet<(SleeveId, Gen)>,
+    pub resumed_scopes: BTreeSet<(SleeveId, Gen)>,
+    pub approval_effects: BTreeMap<(SleeveId, Gen, String), BTreeSet<EffectId>>,
+    pub open_sleeve_effects: BTreeMap<SleeveId, BTreeSet<EffectId>>,
+    pub reportable_sleeve_effects: BTreeMap<SleeveId, BTreeSet<EffectId>>,
+    pub open_job_effects: BTreeMap<JobId, BTreeSet<EffectId>>,
     pub jobs: BTreeMap<JobId, Job>,
+    pub active_jobs: BTreeSet<JobId>,
+    pub recoverable_jobs: BTreeSet<JobId>,
     /// Spawn request ids, for idempotent retries.
     pub spawn_requests: BTreeMap<String, SleeveId>,
     pub job_requests: BTreeMap<String, JobId>,
@@ -227,6 +242,7 @@ pub enum Activity {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Message {
+    pub queued_at: Millis,
     pub from: Party,
     /// The vendor agent's name when `from` is an agent. A continuation carries the turn's.
     pub agent: Option<String>,
@@ -443,23 +459,54 @@ pub enum JobFailure {
 }
 
 impl State {
+    pub(crate) fn open_effects_for_sleeve(&self, id: SleeveId) -> impl Iterator<Item = &Effect> {
+        self.open_sleeve_effects
+            .get(&id)
+            .into_iter()
+            .flatten()
+            .map(|id| &self.effects[id])
+    }
+
+    pub(crate) fn reportable_effects_for_sleeve(
+        &self,
+        id: SleeveId,
+    ) -> impl Iterator<Item = &Effect> {
+        self.reportable_sleeve_effects
+            .get(&id)
+            .into_iter()
+            .flatten()
+            .map(|id| &self.effects[id])
+    }
+
+    pub(crate) fn open_effects_for_job(&self, id: JobId) -> impl Iterator<Item = &Effect> {
+        self.open_job_effects
+            .get(&id)
+            .into_iter()
+            .flatten()
+            .map(|id| &self.effects[id])
+    }
+
     pub fn sleeve(&self, id: SleeveId) -> Option<&Sleeve> {
         self.sleeves.get(&id)
     }
 
     /// Children of `id` that are not Removed.
     pub fn children(&self, id: SleeveId) -> Vec<SleeveId> {
-        self.sleeves
-            .values()
-            .filter(|s| s.parent == Some(id) && s.life != Life::Removed)
-            .map(|s| s.id)
+        self.children_by_parent
+            .get(&id)
+            .into_iter()
+            .flatten()
+            .copied()
+            .filter(|child| self.sleeves[child].life != Life::Removed)
             .collect()
     }
 
     pub fn live_children(&self, id: SleeveId) -> usize {
-        self.sleeves
-            .values()
-            .filter(|s| s.parent == Some(id) && s.life.live())
+        self.children_by_parent
+            .get(&id)
+            .into_iter()
+            .flatten()
+            .filter(|child| self.sleeves[child].life.live())
             .count()
     }
 }

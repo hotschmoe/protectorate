@@ -244,6 +244,7 @@ pt_json::record! {
         /// Host device nodes bound into every sleeve (`--dev-bind`) when the path exists.
         /// A missing path is skipped and logged. Empty: only the sandbox's own `/dev`.
         pub sleeve_devices: Vec<String> = Vec::new(),
+        pub job_artifact_max_bytes: u64 = 64 << 20,
         /// Default and per-name scope memory limits, in bytes.
         pub sleeve_memory_max: u64 = 4 << 30,
         pub sleeve_memory_max_overrides: BTreeMap<String, u64> = BTreeMap::new(),
@@ -277,6 +278,13 @@ pt_json::record! {
 }
 
 impl Config {
+    pub fn sleeve_memory_limit(&self, name: &str) -> u64 {
+        self.sleeve_memory_max_overrides
+            .get(name)
+            .copied()
+            .unwrap_or(self.sleeve_memory_max)
+    }
+
     /// Reads `config.json`, writing the defaults first when it does not exist.
     pub fn load(home: &Home) -> io::Result<Config> {
         let path = home.config();
