@@ -26,7 +26,7 @@ CARGO_VERSION := PROTECTORATE_BUILD_VERSION='$(VERSION)'
 -include .env.e2e
 export PT_E2E_PI_PROVIDER PT_E2E_PI_MODEL PT_RELEASE_WIN_HOST PT_RELEASE_WIN_DIR ZIG PT_RELEASE_REPO
 
-.PHONY: build release release-assets release-snapshot release-publish web test test-paid check check-deps check-levels check-gen check-version check-fuzz gen fmt app-check version
+.PHONY: build release release-assets release-snapshot release-publish web test test-paid check fmt-check clippy check-deps check-levels check-gen check-version check-fuzz gen fmt app-check version
 
 DART ?= dart
 FLUTTER ?= flutter
