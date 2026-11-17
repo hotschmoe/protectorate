@@ -312,6 +312,8 @@ crash, every incarnation goes to Recovering and resumes natively.
   - an update never touches a running sleeve: the running process keeps its binary, and the next
     launch or resume picks up the new one;
   - the hub runs a harness's own update command only when no sleeve of that harness is mid-turn;
+    it logs the start and end of each wait and changes of the blocking sleeve; a long turn can
+    defer an update indefinitely;
   - `doctor` records the version and install method per harness, so a behavior change can be
     traced to the version that brought it;
   - a failed launch after an update marks that harness ineligible in `doctor.json` until a
@@ -343,6 +345,8 @@ crash, every incarnation goes to Recovering and resumes natively.
   - Remote logins (ssh, the hub's own job sessions) are not presence; only local seat input and
     lock state are.
 - **Jobs** (maintenance, cross-arch build and test):
+  - Human-readable `job ls` shows the first command line, capped at 80 characters with `...`
+    when shortened; `job show` and JSON retain the full command.
   - the node journals each job before exec, and limits each one: 1 h by default, 64 MiB of log,
     and a per-job cgroup or Job Object;
   - the hub pulls output as length-prefixed frames;
@@ -599,6 +603,12 @@ straight from GitHub releases, on the stable or dev channel, as today.
 - **Order:** hub first, then one canary node per OS and arch, then the rest. Headscale accepts
   clients up to 10 minor versions old, and `member` shares headscale's `tailscale.com` version
   through one go.mod, so a fleet mid-rollout keeps working.
+  `node update --all` runs OS/architecture groups independently; a failed or deferred canary
+  skips the remainder of its group. A running job holds its node for up to 30 seconds, then the
+  update is deferred. Offline nodes are deferred. Progress is published as node events and the
+  CLI prints it before the final table. `--all --no-wait` accepts the rollout in the background;
+  its rollout id identifies the events; a hub restart stops an unfinished rollout. Named-node `--no-wait` still waits for the switch but
+  does not wait for the node to return.
 - **Apps, from the hub's release:** `HubInfo.clients` lists the client builds the running
   release's `SHA256SUMS` names (`protectorate-android.apk`,
   `protectorate-desktop-windows-{amd64,arm64}.zip`); a hub not started from `releases/current`

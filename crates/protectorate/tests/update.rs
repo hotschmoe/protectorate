@@ -2190,41 +2190,200 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
             .then_some(())
     });
 
+    // A second node reports another architecture and runs a long job. Its busy canary must
+    // not delay the first node's update, and the CLI must report both while it is still running.
+    let busy_dir = hub.home.with_file_name("node-busy");
+    fs::create_dir_all(&busy_dir).unwrap();
+    let mut join = Command::new(&node_bin)
+        .args([
+            "join",
+            &format!("http://{listen}"),
+            "--name",
+            "e2e-busy",
+            "--state-dir",
+        ])
+        .arg(&busy_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let (tx, rx) = mpsc::channel();
+    let out = join.stdout.take().unwrap();
+    thread::spawn(move || {
+        for l in BufReader::new(out).lines().map_while(Result::ok) {
+            if tx.send(l).is_err() {
+                break;
+            }
+        }
+    });
+    let payload = loop {
+        let l = rx
+            .recv_timeout(Duration::from_secs(60))
+            .expect("busy node registration");
+        if let Some(p) = l.trim_start().strip_prefix("paste") {
+            break p.trim().to_string();
+        }
+    };
+    let pending = hub.cli(&["--json", "node", "add", &payload]).json();
+    hub.cli(&[
+        "--json",
+        "node",
+        "approve",
+        pending["auth_id"].as_str().unwrap(),
+    ])
+    .json();
+    assert!(
+        eventually("busy join", Duration::from_secs(60), || join
+            .try_wait()
+            .unwrap())
+        .success()
+    );
+    install(
+        &busy_dir,
+        "v0.0.1",
+        "protectorate-node",
+        &wrapper(
+            "protectorate-node",
+            "--version",
+            "v0.0.1",
+            &node_bin,
+            "",
+            false,
+        ),
+    );
+    let busy_presence = busy_dir.join("presence");
+    fs::write(&busy_presence, "AWAY").unwrap();
+    let busy_state = busy_dir.display().to_string();
+    let busy_sup = Supervisor::start(
+        &busy_dir,
+        "protectorate-node",
+        vec!["probation".into(), "--state-dir".into(), busy_state.clone()],
+        vec![
+            "serve".into(),
+            "--state-dir".into(),
+            busy_state.clone(),
+            "--forward-socket".into(),
+            format!("{busy_state}/agent.sock"),
+            "--no-scope".into(),
+        ],
+        vec![
+            (
+                "PROTECTORATE_NODE_TEST_PRESENCE".into(),
+                busy_presence.display().to_string(),
+            ),
+            ("PROTECTORATE_NODE_TEST_ARCH".into(), "test-busy".into()),
+        ],
+        Duration::from_secs(2),
+    );
+    eventually("busy node online", Duration::from_secs(120), || {
+        let v = hub.cli(&["--json", "node", "ls"]).json();
+        v["nodes"]
+            .as_array()?
+            .iter()
+            .any(|n| n["name"].as_str() == Some("e2e-busy") && n["online"].as_bool() == Some(true))
+            .then_some(())
+    });
+    let job = hub
+        .cli(&[
+            "--json", "job", "run", "--node", "e2e-busy", "--", "sleep", "120",
+        ])
+        .json();
+    let job_id = job["id"].as_str().unwrap();
+    eventually("busy job running", Duration::from_secs(60), || {
+        let j = hub.cli(&["--json", "job", "show", job_id]).json();
+        (j["state"].as_str() == Some("running")).then_some(())
+    });
+    let mut rollout = cli_command()
+        .arg("--home")
+        .arg(&hub.home)
+        .args([
+            "node",
+            "update",
+            "--all",
+            "--version",
+            "v0.0.2",
+            "--probation",
+            "90",
+        ])
+        .env_remove("PROTECTORATE_TOKEN")
+        .env_remove("PROTECTORATE_SOCKET")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let (tx, rx) = mpsc::channel();
+    let stdout = rollout.stdout.take().unwrap();
+    thread::spawn(move || {
+        for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let mut lines = Vec::new();
+    while !lines
+        .iter()
+        .any(|l: &String| l.contains("e2e-busy: waiting: busy with job"))
+        || !lines
+            .iter()
+            .any(|l: &String| l.contains("e2e-upd:") && l.contains("answered Presence"))
+    {
+        lines.push(
+            rx.recv_timeout(Duration::from_secs(90))
+                .expect("live rollout progress"),
+        );
+    }
+    assert!(rollout.try_wait().unwrap().is_none(), "{lines:?}");
+    assert!(lines.iter().any(|l| l.contains(job_id)), "{lines:?}");
+    let status = eventually("rollout deferred", Duration::from_secs(45), || {
+        rollout.try_wait().unwrap()
+    });
+    assert!(!status.success());
+    lines.extend(rx.try_iter());
+    assert!(
+        lines.iter().any(|l| l.contains("deferred: busy")),
+        "{lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("NODE") && l.contains("DETAIL")),
+        "{lines:?}"
+    );
+    let accepted = hub
+        .cli(&[
+            "--json",
+            "node",
+            "update",
+            "--all",
+            "--version",
+            "v0.0.2",
+            "--no-wait",
+        ])
+        .json();
+    let rollout_id = accepted["rollout_id"].as_str().expect("rollout id");
+    hub.cli(&["--json", "job", "cancel", job_id]).json();
+    eventually(
+        "background rollout completion",
+        Duration::from_secs(60),
+        || {
+            let events = hub.cli(&["--json", "event", "list"]).json();
+            events["events"]
+                .as_array()?
+                .iter()
+                .any(|e| {
+                    e["target"].as_str() == Some(rollout_id)
+                        && e["text"].as_str() == Some("rollout complete")
+                })
+                .then_some(())
+        },
+    );
+    drop(busy_sup);
+
     // The hub has the node fetch v0.0.2 from the fake GitHub, then waits for it to answer
     // Hello and Presence from it, which is the contact that keeps it.
     let n = sup.starts().len();
-    let r = hub.cli(&[
-        "--json",
-        "node",
-        "update",
-        "e2e-upd",
-        "--version",
-        "v0.0.2",
-        "--probation",
-        "90",
-    ]);
-    assert_eq!(
-        r.status,
-        0,
-        "{}{}\n--- node ---\n{}\n--- hub ---\n{}",
-        r.stdout,
-        r.stderr,
-        tail(&sup.log_text(), 40),
-        tail(&hub.log_text(), 40)
-    );
-    let u = r.json();
-    let row = &u["nodes"][0];
-    assert_eq!(row["from"].as_str(), Some("v0.0.1"), "{u}");
-    assert_eq!(row["to"].as_str(), Some("v0.0.2"), "{u}");
-    assert!(
-        row["detail"]
-            .as_str()
-            .unwrap_or("")
-            .contains("answered Presence"),
-        "{u}"
-    );
-    sup.running("v0.0.2", n, 30);
-    assert_eq!(sup.starts()[n - 1].code, Some(75), "{:?}", sup.starts());
+    sup.running("v0.0.2", n - 1, 30);
     eventually(
         "the node to confirm v0.0.2",
         Duration::from_secs(30),
@@ -2559,12 +2718,23 @@ fn harness_updates_run_daily_and_wait_for_a_sleeve_mid_turn() {
         .map(String::from);
     if busy_now.as_deref() == Some("working") {
         assert_eq!(pi_runs(), 1, "pi waits while the sleeve works");
+        thread::sleep(Duration::from_secs(7));
+        assert_eq!(
+            hub.log_text()
+                .matches("harness update: pi waits for sleeve busy")
+                .count(),
+            1
+        );
     }
     hub.wait("busy", "idle", 300);
     eventually(
         "pi's update after the turn",
         Duration::from_secs(30),
         || (pi_runs() == 2).then_some(()),
+    );
+    assert!(
+        hub.log_text()
+            .contains("harness update: pi no longer waits for sleeve busy")
     );
 }
 

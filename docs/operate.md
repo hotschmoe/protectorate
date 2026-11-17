@@ -231,6 +231,8 @@ job ls [--node N] [--limit N] | job show|cancel <job> | job log <job> [--offset 
 job artifact <job> <path> [--out FILE]
 ```
 
+- Human-readable `job ls` shows only the first command line, capped at 80 characters with
+  `...` when shortened. `job show` and JSON retain the full command.
 - `--node` names a node by id or name, and the hub keeps its id: a later rename does not move
   the job, a node not on the tailnet is refused, and a job pinned to a node that is removed
   before it starts fails; `--arch` lets the hub pick an AWAY node of that arch (the
@@ -457,6 +459,8 @@ Doctor reports each configured path, resolved node, owner, group, mode and hub r
 **Harnesses** update natively, through each program's own command (`claude update`, `codex
 update`, `grok update`, `pi update self`), once every `harness_update_hours` (24). A program is
 updated only while none of its sleeves is starting or mid-turn.
+The hub logs when this wait starts, changes sleeve, and ends. A long turn can defer an update
+indefinitely.
 
 ```
 harness update [PROGRAM...]          # claude, codex, grok, pi; none means every installed one
@@ -536,8 +540,12 @@ restart through its service manager. A node confirms its release after it has fu
 hub request other than Hello. A node that has not done so within the
 probation window (`--probation`, default 600 s) reverts to its previous binary. The command waits
 for every node unless `--no-wait`. Update the hub first, then one node per OS and arch, then the
-rest. A node with running jobs answers `busy`; once an update is admitted, new jobs answer `busy`
-until the restart.
+rest. `--all` runs OS/architecture groups independently, with the first node as canary; a failed
+or deferred canary skips its group. A node with a running job waits up to 30 seconds and then is
+deferred; an offline node is deferred. The CLI prints progress and then the results table, and the
+hub records progress in events. `--all --no-wait` accepts the rollout in the background and prints
+its event id; follow it with `event list`. A hub restart stops an unfinished rollout. With named nodes `--no-wait` waits for the switch but
+not the return. Once an update is admitted, new jobs answer `busy` until the restart.
 
 A Windows node updates the same way. The SCM cannot run a step before each start or restart a
 service from inside it, so the service runs a supervisor, `protectorate-node supervise --service`,
