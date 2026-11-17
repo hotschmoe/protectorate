@@ -287,6 +287,20 @@ fn serve_conn<S: Conn>(node: &Node, stream: &mut S) -> Result<(), String> {
             return Err(format!("protocol: a {:?} frame from the hub", frame.kind));
         }
         #[cfg(debug_assertions)]
+        if std::env::var_os("PROTECTORATE_NODE_TEST_DROP_UPDATE")
+            .and_then(|p| fs::read_to_string(p).ok())
+            .is_some_and(|s| s.trim() == "1")
+            && matches!(parse_request(&frame.payload), Ok(Request::Update(_)))
+        {
+            let (_, restart) = answer(node, frame.id, &frame.payload, &mut io::sink())
+                .map_err(|e| format!("answering dropped update: {e}"))?;
+            if let Some(to) = restart {
+                crate::update::restart_soon(to);
+            }
+            thread::sleep(Duration::from_secs(20));
+            return Ok(());
+        }
+        #[cfg(debug_assertions)]
         if std::env::var_os("PROTECTORATE_NODE_TEST_DROP_SUBMIT")
             .is_some_and(|p| Path::new(&p).is_file())
             && matches!(parse_request(&frame.payload), Ok(Request::SubmitJob(_)))
@@ -316,12 +330,21 @@ fn serve_conn<S: Conn>(node: &Node, stream: &mut S) -> Result<(), String> {
         }
         let non_hello =
             matches!(parse_request(&frame.payload), Ok(r) if !matches!(r, Request::Hello(_)));
-        let success = answer(node, frame.id, &frame.payload, &mut w)
+        let (success, restart) = answer(node, frame.id, &frame.payload, &mut w)
             .map_err(|e| format!("answering request {}: {e}", frame.id))?;
-        w.flush()
-            .map_err(|e| format!("flushing request {}: {e}", frame.id))?;
+        let flushed = w.flush();
+        if let Some(to) = restart {
+            if flushed.is_ok() && stream.read_timeout(Some(Duration::from_secs(5))).is_ok() {
+                let _ = reader.read();
+            }
+            crate::update::restart_soon(to);
+        }
+        flushed.map_err(|e| format!("flushing request {}: {e}", frame.id))?;
         if non_hello && success {
             node.releases.contact();
+        }
+        if matches!(parse_request(&frame.payload), Ok(Request::Update(_))) && success {
+            return Ok(());
         }
     }
 }
@@ -380,6 +403,7 @@ fn reported_version() -> String {
 struct ReplyWriter<'a, W> {
     inner: &'a mut W,
     success: bool,
+    restart: Option<String>,
 }
 
 impl<W: Write> Write for ReplyWriter<'_, W> {
@@ -391,13 +415,24 @@ impl<W: Write> Write for ReplyWriter<'_, W> {
     }
 }
 
-fn answer(node: &Node, id: u64, payload: &[u8], w: &mut impl Write) -> io::Result<bool> {
+fn answer(
+    node: &Node,
+    id: u64,
+    payload: &[u8],
+    w: &mut impl Write,
+) -> io::Result<(bool, Option<String>)> {
     let mut reply = ReplyWriter {
         inner: w,
         success: true,
+        restart: None,
     };
-    answer_inner(node, id, payload, &mut reply)?;
-    Ok(reply.success)
+    if let Err(e) = answer_inner(node, id, payload, &mut reply) {
+        if let Some(to) = reply.restart {
+            crate::update::restart_soon(to);
+        }
+        return Err(e);
+    }
+    Ok((reply.success, reply.restart))
 }
 
 fn answer_inner(
@@ -500,7 +535,13 @@ fn answer_inner(
             },
         ),
         Request::Update(u) => match node.releases.update(&u, r) {
-            Ok(reply) => respond(w, id, &reply),
+            Ok(reply) => {
+                let switched = node.releases.started().as_deref() != Some(reply.to.as_str());
+                if switched {
+                    w.restart = Some(reply.to.clone());
+                }
+                respond(w, id, &reply)
+            }
             Err((code, message)) => {
                 eprintln!(
                     "protectorate-node: update to {} refused: {message}",

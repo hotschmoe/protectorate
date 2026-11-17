@@ -66,9 +66,9 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   sleeve list | sleeve show <sleeve>  (includes scope memory limit)
   sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
         [--provider P] [--model M] [--effort E] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT | --message-file FILE]
-  sleeve send <sleeve> (<text...> | --message-file FILE) [--steer]
+  sleeve send <sleeve> (<text...> | --message-file FILE) [--steer | --supersede]
         a sleeve may send to itself, its children, its parent, or envoy
-  sleeve inbox [<sleeve>]
+  sleeve inbox [<sleeve>] | sleeve inbox <sleeve> --drop
         --message-file accepts - for stdin
   sleeve interrupt|stop|rm|takeover <sleeve>
   sleeve start <sleeve> [--harness H] [--provider P] [--model M] [--effort E]
@@ -82,7 +82,7 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   node rename <node> <new-name> | node rm <node> [--force]
   node update (<node>... | --all) [--version TAG] [--channel stable|dev] [--probation SECS]
         [--no-wait]
-        --all reports progress; --all --no-wait runs in the background (see event list).
+        Reports progress; --all --no-wait runs in the background (see event list).
   job run (--node ID | --arch ARCH) [--even-if-present] [--on-present idle|kill]
         [--maintenance] [--wait] [--timeout SECS] [--cwd DIR] [--artifact PATH]... -- <argv...>
         Artifact cap: job_artifact_max_bytes (default 67108864 bytes); hub info shows the effective value.

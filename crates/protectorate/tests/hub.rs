@@ -1757,9 +1757,62 @@ exec sleep 300"#,
     let result = hub.cli(&["sleeve", "show", "leaf"]);
     let show = result.ok();
     assert!(show.contains("QUEUED") && show.contains(" ("), "{show}");
+    assert_eq!(hub.cli_env(&as_leaf, &["sleeve", "inbox", "sib"]).status, 4);
+    let as_tree = [("PROTECTORATE_TOKEN", tree_token.as_str())];
+    for text in ["old one", "old two"] {
+        hub.cli_env(&as_tree, &["sleeve", "send", "leaf", text])
+            .ok();
+    }
+    let before = hub
+        .cli_env(&as_tree, &["--json", "sleeve", "inbox", "leaf"])
+        .json();
+    assert_eq!(before["messages"].as_array().unwrap().len(), 2);
+    assert!(before.to_string().contains("old one"));
+    assert!(!before.to_string().contains("waiting in queue"));
+    let refused = hub.cli_env(
+        &as_tree,
+        &[
+            "sleeve",
+            "send",
+            "leaf",
+            "replacement",
+            "--supersede",
+            "--steer",
+        ],
+    );
+    assert_ne!(refused.status, 0);
     assert_eq!(
-        hub.cli_env(&as_leaf, &["sleeve", "inbox", "tree"]).status,
-        4
+        before,
+        hub.cli_env(&as_tree, &["--json", "sleeve", "inbox", "leaf"])
+            .json()
+    );
+    hub.cli_env(
+        &as_tree,
+        &["sleeve", "send", "leaf", "replacement", "--supersede"],
+    )
+    .ok();
+    let after = hub
+        .cli_env(&as_tree, &["--json", "sleeve", "inbox", "leaf"])
+        .json();
+    assert_eq!(after["messages"].as_array().unwrap().len(), 1);
+    assert!(after.to_string().contains("replacement"));
+    let all = hub.cli(&["--json", "sleeve", "inbox", "leaf"]).json();
+    assert!(all.to_string().contains("waiting in queue"));
+    assert!(all.to_string().contains("replacement"));
+    hub.cli_env(&as_tree, &["sleeve", "inbox", "leaf", "--drop"])
+        .ok();
+    assert!(
+        hub.cli_env(&as_tree, &["--json", "sleeve", "inbox", "leaf"])
+            .json()["messages"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        hub.cli(&["--json", "sleeve", "inbox", "leaf"])
+            .json()
+            .to_string()
+            .contains("waiting in queue")
     );
     let early = report(&[], "2");
     assert_ne!(
@@ -1818,7 +1871,6 @@ exec sleep 300"#,
         again.stderr
     );
 
-    let as_tree = [("PROTECTORATE_TOKEN", tree_token.as_str())];
     hub.cli_env(&as_tree, &["sleeve", "send", "leaf", "task from parent"])
         .ok();
     sent("envoy", "to envoy only");
@@ -3949,4 +4001,37 @@ fn gate_reports_all_failures_and_replays_seeds_after_e2e_failure() {
     assert!(stdout.contains("test failed: e2e seeds"), "{stdout}");
     assert!(stdout.contains("ran-check-version"), "{stdout}");
     assert!(stdout.contains("check failed: fmt-check clippy check-fuzz test check-deps check-levels check-gen app-check check-version"), "{stdout}");
+}
+
+#[test]
+fn timeout_reports_the_hubs_launch_refusal() {
+    let hub = Hub::start_config(
+        "timeout-diagnostic",
+        "claude",
+        &[("claude_program", "/nonexistent/test-claude".into())],
+        &[],
+        &[],
+    );
+    eventually("launch refusal", Duration::from_secs(60), || {
+        let events = hub.cli(&["--json", "event", "list"]).json();
+        events["events"]
+            .as_array()?
+            .iter()
+            .any(|e| {
+                e["text"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("launch refused:"))
+            })
+            .then_some(())
+    });
+    let error = std::panic::catch_unwind(|| {
+        eventually::<()>("sleeve x", Duration::ZERO, || None);
+    })
+    .unwrap_err();
+    let text = error.downcast_ref::<String>().unwrap();
+    assert!(
+        text.contains("timed out waiting for sleeve x: launch refused:"),
+        "{text}"
+    );
+    assert!(text.contains("claude"), "{text}");
 }

@@ -43,10 +43,10 @@ always give it the token.
 ## Sleeves
 
 ```
-sleeve list | sleeve show <sleeve> | sleeve inbox [<sleeve>]
+sleeve list | sleeve show <sleeve> | sleeve inbox [<sleeve>] | sleeve inbox <sleeve> --drop
 sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
       [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT | --message-file FILE]
-sleeve send <sleeve> <text...> [--steer]
+sleeve send <sleeve> <text...> [--steer | --supersede]
 sleeve interrupt|stop|rm|takeover <sleeve>
 sleeve start <sleeve> [--harness H] [--provider P] [--model M]
 sleeve resleeve <sleeve> --harness H [--provider P] [--model M]
@@ -64,7 +64,12 @@ List and show include the oldest queued message's age beside the queue count. `s
 reports whether the message was queued or sent for delivery and the queue length at acceptance.
 Queued messages wait for a turn boundary. `sleeve inbox` peeks at the FIFO, showing sender,
 age and text without consuming or reordering it. A sleeve credential can inspect only its own
-queue and can omit the name; the owner supplies a name and can inspect any queue.
+queue and can omit the name. For another reachable sleeve it sees only messages it sent;
+the owner supplies a name and can inspect any queue. `sleeve inbox <sleeve> --drop`
+removes only the caller's queued messages to that sleeve. `sleeve send <sleeve>
+--supersede <text>` atomically replaces the caller's queued messages with the new send;
+it cannot be combined with `--steer`. In-flight messages and other senders' messages are
+unaffected. A refused send does not drop anything.
 
 - **spawn** with `--path DIR` makes a root sleeve on that directory (one root per directory). The
   directory must already exist where the hub can see it; a missing one is `the hub cannot see
@@ -540,10 +545,11 @@ restart through its service manager. A node confirms its release after it has fu
 hub request other than Hello. A node that has not done so within the
 probation window (`--probation`, default 600 s) reverts to its previous binary. The command waits
 for every node unless `--no-wait`. Update the hub first, then one node per OS and arch, then the
-rest. `--all` runs OS/architecture groups independently, with the first node as canary; a failed
-or deferred canary skips its group. A node with a running job waits up to 30 seconds and then is
+rest. Updates run OS/architecture groups independently, preferring an online idle canary. A busy
+deferred canary gives way to the next node; a failed canary skips its group. A node with a running job waits up to 30 seconds and then is
 deferred; an offline node is deferred. The CLI prints progress and then the results table, and the
-hub records progress in events. `--all --no-wait` accepts the rollout in the background and prints
+hub records progress in events. A lost update reply can be confirmed by Hello and Presence on the
+target release. `--all --no-wait` accepts the rollout in the background and prints
 its event id; follow it with `event list`. A hub restart stops an unfinished rollout. With named nodes `--no-wait` waits for the switch but
 not the return. Once an update is admitted, new jobs answer `busy` until the restart.
 

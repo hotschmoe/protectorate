@@ -30,7 +30,7 @@ fn sleeve(sim: &Sim, b: &mut Bytes) -> SleeveId {
 fn command(sim: &mut Sim, b: &mut Bytes) {
     use EventKind as E;
     let s = sleeve(sim, b);
-    let kind = match b.below(20) {
+    let kind = match b.below(22) {
         0 | 1 => {
             let parent = if b.below(3) == 0 {
                 None
@@ -161,8 +161,27 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
             turn: b.below(4),
             text: "turn report".into(),
         },
-        _ => E::AbandonJob {
+        19 => E::AbandonJob {
             job: JobId(b.below(sim.st.next_job + 1)),
+        },
+        20 => E::DropQueued {
+            to: s,
+            from: if b.bool() {
+                Party::Owner
+            } else {
+                Party::Sleeve(sleeve(sim, b))
+            },
+        },
+        _ => E::Supersede {
+            to: s,
+            request_id: format!("m{}", b.below(12)),
+            from: if b.bool() {
+                Party::Owner
+            } else {
+                Party::Sleeve(sleeve(sim, b))
+            },
+            text: "replacement".into(),
+            d9: b.bool(),
         },
     };
     sim.apply(kind);

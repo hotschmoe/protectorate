@@ -7,6 +7,8 @@ pub struct Args {
 const SWITCHES: &[&str] = &[
     "--json",
     "--steer",
+    "--supersede",
+    "--drop",
     "--help",
     "--pending",
     "--readonly",

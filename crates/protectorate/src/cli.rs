@@ -400,6 +400,11 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
             });
         }
         "inbox" => {
+            if a.has("--drop") {
+                let v = c.call::<m::DropQueued>(&sleeve_ref(a)?)?;
+                o.show(&v, |_| println!("dropped queued messages"));
+                return Ok(());
+            }
             let req = api::InboxRequest {
                 sleeve_id: a.words.get(2).cloned(),
             };
@@ -469,6 +474,7 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 } else {
                     api::Delivery::Queue
                 },
+                supersede: a.has("--supersede"),
             };
             let v = c.call::<m::SendMessage>(&req)?;
             o.show(&v, |v| {
@@ -654,7 +660,7 @@ fn node_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 channel: channel(a)?,
                 probation_secs: a.num("--probation")?,
                 no_wait: a.has("--no-wait"),
-                rollout_id: if a.has("--all") {
+                rollout_id: if !o.json {
                     Some(format!(
                         "rollout-{}-{}",
                         std::process::id(),
@@ -670,7 +676,7 @@ fn node_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
             if req.all == !req.nodes.is_empty() {
                 return Err(Fail::Usage("node update needs node names or --all".into()));
             }
-            let v = if req.all && !req.no_wait && !o.json {
+            let v = if !req.no_wait && !o.json {
                 let latest = c.call::<m::ListEvents>(&api::ListEventsRequest {
                     from_seq: None,
                     limit: Some(1),

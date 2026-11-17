@@ -1694,6 +1694,25 @@ pub fn run_nodes(hub: &Hub, r: api::UpdateNodesRequest, rollout: NodeRollout) ->
             .or_default()
             .push(t);
     }
+    let view = hub.view();
+    for group in groups.values_mut() {
+        group.sort_by_key(|t| {
+            let busy = view.state.jobs.values().any(|j| {
+                j.node.is_some_and(|n| n.0.to_string() == t.id)
+                    && matches!(
+                        j.state,
+                        pt_core::JobState::Submitting
+                            | pt_core::JobState::SubmitUncertain { .. }
+                            | pt_core::JobState::Running
+                            | pt_core::JobState::Cancelling
+                    )
+            });
+            (
+                !t.online || t.protocol_error.is_some() || t.ip.is_empty(),
+                busy,
+            )
+        });
+    }
     let done = std::sync::Mutex::new(Vec::new());
     thread::scope(|scope| {
         for group in groups.into_values() {
@@ -1705,7 +1724,8 @@ pub fn run_nodes(hub: &Hub, r: api::UpdateNodesRequest, rollout: NodeRollout) ->
             let r = &r;
             scope.spawn(move || {
                 let mut canary_failed = false;
-                for (index, t) in group.into_iter().enumerate() {
+                let mut canary_passed = false;
+                for t in group {
                     if canary_failed {
                         let row = failed(
                             &t.id,
@@ -1738,8 +1758,6 @@ pub fn run_nodes(hub: &Hub, r: api::UpdateNodesRequest, rollout: NodeRollout) ->
                             "no newer release than {} on this channel (latest {tag})",
                             t.release
                         ))
-                    } else if t.release == rel.tag {
-                        Ok("already on it".into())
                     } else {
                         wait_for_node_jobs(hub, &t, progress)
                             .and_then(|deadline| {
@@ -1779,16 +1797,20 @@ pub fn run_nodes(hub: &Hub, r: api::UpdateNodesRequest, rollout: NodeRollout) ->
                         },
                     );
                     match res {
-                        Ok(detail) => lock(done).push(api::NodeUpdate {
-                            node_id: t.id,
-                            name: t.name,
-                            from: t.release,
-                            to: tag.clone(),
-                            ok: true,
-                            detail,
-                        }),
+                        Ok(detail) => {
+                            canary_passed = true;
+                            lock(done).push(api::NodeUpdate {
+                                node_id: t.id,
+                                name: t.name,
+                                from: t.release,
+                                to: tag.clone(),
+                                ok: true,
+                                detail,
+                            });
+                        }
                         Err(e) => {
-                            canary_failed = index == 0;
+                            canary_failed =
+                                !canary_passed && !e.starts_with("deferred: busy with job ");
                             lock(done).push(failed(&t.id, &t.name, &t.release, tag, &e));
                         }
                     }
@@ -1883,7 +1905,7 @@ fn update_one(
     c.set_timeout(NODE_CALL_TIMEOUT)
         .map_err(|e| e.to_string())?;
     c.require_compatible().map_err(|e| e.to_string())?;
-    if t.release == rel.tag {
+    if c.hello().map_err(|e| e.to_string())?.release.as_deref() == Some(rel.tag.as_str()) {
         return Ok("already on it".into());
     }
     let request = msg::Update {
@@ -1892,45 +1914,88 @@ fn update_one(
         repo: hub.config.release_repo.clone(),
         probation_secs: probation,
     };
-    let mut reported = None;
-    let reply = loop {
-        match c.update(request.clone()) {
-            Ok(reply) => break reply,
-            Err(pt_fleet::Error::Node(r)) if r.code == msg::ErrorCode::Busy => {
-                let job = c
-                    .list_jobs()
-                    .ok()
-                    .and_then(|jobs| {
-                        jobs.jobs.into_iter().find(|job| {
-                            matches!(
-                                job.state,
-                                msg::JobState::Running | msg::JobState::Cancelling
-                            )
+    let (tx, rx) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let mut reported = None;
+        let reply = loop {
+            match c.update(request.clone()) {
+                Ok(reply) => break Ok(reply),
+                Err(pt_fleet::Error::Node(r)) if r.code == msg::ErrorCode::Busy => {
+                    let job = c
+                        .list_jobs()
+                        .ok()
+                        .and_then(|jobs| {
+                            jobs.jobs.into_iter().find(|job| {
+                                matches!(
+                                    job.state,
+                                    msg::JobState::Running | msg::JobState::Cancelling
+                                )
+                            })
                         })
-                    })
-                    .map(|job| job.job_id);
-                let Some(job) = job else {
-                    return Err(format!("deferred: {}", r.message));
-                };
-                if reported.as_ref() != Some(&job) {
-                    progress(&t.name, &format!("waiting: busy with job {job}"));
-                    reported = Some(job.clone());
+                        .map(|job| job.job_id);
+                    let Some(job) = job else {
+                        break Err((true, format!("deferred: {}", r.message)));
+                    };
+                    if reported.as_ref() != Some(&job) {
+                        let _ = tx.send(Ok(format!("waiting: busy with job {job}")));
+                        reported = Some(job.clone());
+                    }
+                    if Instant::now() >= busy_deadline {
+                        break Err((
+                            true,
+                            format!(
+                                "deferred: busy with job {job} after {} s",
+                                NODE_BUSY_WAIT.as_secs()
+                            ),
+                        ));
+                    }
+                    thread::sleep(Duration::from_secs(1));
                 }
-                if Instant::now() >= busy_deadline {
-                    return Err(format!(
-                        "deferred: busy with job {job} after {} s",
-                        NODE_BUSY_WAIT.as_secs()
-                    ));
+                Err(pt_fleet::Error::Node(r)) => {
+                    break Err((true, format!("{}: {}", r.code.as_str(), r.message)));
                 }
-                thread::sleep(Duration::from_secs(1));
+                Err(e) => break Err((false, e.to_string())),
             }
-            Err(pt_fleet::Error::Node(r)) => {
-                return Err(format!("{}: {}", r.code.as_str(), r.message));
+        };
+        let _ = tx.send(Err(reply));
+    });
+    let deadline = Instant::now() + NODE_CALL_TIMEOUT;
+    let mut uncertain = None;
+    let reply = loop {
+        match rx.recv_timeout(Duration::from_secs(2)) {
+            Ok(Ok(line)) => progress(&t.name, &line),
+            Ok(Err(Ok(reply))) => break reply,
+            Ok(Err(Err((true, e)))) => return Err(e),
+            Ok(Err(Err((false, e)))) => uncertain = Some(e),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+        }
+        let confirmed = up.fleet.connect(&t.ip).and_then(|mut c| {
+            c.set_timeout(Duration::from_secs(5))?;
+            let h = c.hello()?;
+            if h.release.as_deref() == Some(rel.tag.as_str()) {
+                c.require_compatible()?;
+                c.presence()?;
+                Ok(true)
+            } else {
+                Ok(false)
             }
-            Err(e) => return Err(e.to_string()),
+        });
+        if matches!(confirmed, Ok(true)) {
+            return Ok(format!(
+                "confirmed by hello on {} and answered Presence",
+                rel.tag
+            ));
+        }
+        if Instant::now() >= deadline {
+            return Err(uncertain.unwrap_or_else(|| {
+                "update timed out and the node did not return on the target release".into()
+            }));
+        }
+        if uncertain.is_some() {
+            thread::sleep(Duration::from_secs(2));
         }
     };
-    drop(c);
     let switched = format!(
         "switched from {}{}",
         reply.from.as_deref().unwrap_or("-"),

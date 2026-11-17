@@ -128,6 +128,34 @@ impl Sim {
         let mut reference = prev.clone();
         let expected = apply_reference(&mut reference, &e);
         let out = apply(&mut self.st, &e);
+        let (target, sender, accepted) = match &e.kind {
+            EventKind::DropQueued { to, from } => (
+                Some(*to),
+                Some(*from),
+                out.contains(&Intent::Reply(Reply::Accepted)),
+            ),
+            EventKind::Supersede { to, from, .. } => (
+                Some(*to),
+                Some(*from),
+                out.iter()
+                    .any(|i| matches!(i, Intent::Reply(Reply::Sent { .. }))),
+            ),
+            _ => (None, None, false),
+        };
+        if accepted && let Some(before) = target.and_then(|id| prev.sleeves.get(&id)) {
+            let after = &self.st.sleeves[&target.unwrap()];
+            for key in &before.queue {
+                let old = &before.messages[key];
+                if old.kind == MsgKind::Prompt {
+                    let removed = after.messages[key].state == MsgState::Rejected;
+                    assert_eq!(
+                        removed,
+                        Some(old.from) == sender,
+                        "queue drop reference for {key}"
+                    );
+                }
+            }
+        }
         assert_eq!(self.st, reference, "state differs from old job tick scan");
         assert_eq!(out, expected, "intents differ from old job tick scan");
         let scan: BTreeSet<_> = self
@@ -397,6 +425,8 @@ impl Sim {
                 let saved = if matches!(
                     kind,
                     EventKind::Send { .. }
+                        | EventKind::Supersede { .. }
+                        | EventKind::DropQueued { .. }
                         | EventKind::Observed {
                             obs: Obs::Ready { .. },
                             ..
