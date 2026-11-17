@@ -983,6 +983,8 @@ nothing has to stay compatible with it.
 5. **Jobs:** node jobs, cross-arch CI, `doctor`.
 6. **Hardening:** the stdio `mcp --envoy`, terminal takeover and the remaining harnesses.
 
+Proposed follow-on design, awaiting owner review: [background gates, releases and a hub-host node](docs/design/ci-and-release.md). Current SPEC rules remain in force until amended.
+
 ## 15. Implementation choices (2026-11-01)
 
 How the code is built, chosen to keep third-party code near zero (D37). Each choice that is a
