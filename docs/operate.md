@@ -625,3 +625,5 @@ them.
 | `sleeve transcript`, `event list`, `job log` | what the hub saw from sleeves, itself and jobs |
 
 None of these rotate yet.
+
+Tick processing tracks uncertain and probing effects and active jobs while retaining terminal records. These indexes are rebuilt during journal replay.

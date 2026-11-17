@@ -126,6 +126,34 @@ impl Sim {
         let prev = self.st.clone();
         let owed_before = self.owed.clone();
         let out = apply(&mut self.st, &e);
+        let scan: BTreeSet<_> = self
+            .st
+            .effects
+            .values()
+            .filter(|e| matches!(e.state, EffectState::Uncertain | EffectState::Probing))
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(
+            self.st.retryable_effects, scan,
+            "retryable effects differ from scan"
+        );
+        let jobs: BTreeSet<_> = self
+            .st
+            .jobs
+            .values()
+            .filter(|j| {
+                matches!(
+                    j.state,
+                    JobState::SubmitUncertain { .. }
+                        | JobState::Running
+                        | JobState::Collecting { .. }
+                        | JobState::Lost { .. }
+                        | JobState::Cancelling
+                )
+            })
+            .map(|j| j.id)
+            .collect();
+        assert_eq!(self.st.active_jobs, jobs, "active jobs differ from scan");
         self.owed_before = owed_before.clone();
         self.last_kind = format!("{:?}", e.kind);
         crate::owed::note(&mut self.owed, &prev, &e.kind, e.at.max(prev.now));

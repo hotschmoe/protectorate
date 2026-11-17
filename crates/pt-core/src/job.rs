@@ -36,6 +36,18 @@ impl Core<'_> {
 
     fn set_job(&mut self, id: JobId, state: JobState) {
         let now = self.now;
+        if matches!(
+            state,
+            JobState::SubmitUncertain { .. }
+                | JobState::Running
+                | JobState::Collecting { .. }
+                | JobState::Lost { .. }
+                | JobState::Cancelling
+        ) {
+            self.st.active_jobs.insert(id);
+        } else {
+            self.st.active_jobs.remove(&id);
+        }
         let j = self.job(id);
         // The first loss starts the abandon window. Collecting is a retry of that same loss.
         if matches!(state, JobState::Lost { .. }) {
@@ -154,11 +166,22 @@ impl Core<'_> {
             self.st.jobs[&id].state,
             JobState::Cancelling | JobState::Lost { .. } | JobState::Abandoned
         );
-        let mut writes = self.node_writes(id, true);
-        if cancel_wanted {
-            writes.extend(self.node_writes(id, false));
+        let attempt = self.st.jobs[&id].attempt;
+        let mut acks = Vec::new();
+        let mut cancels = Vec::new();
+        for &eff in &self.st.retryable_effects {
+            match self.st.effects[&eff].kind {
+                EffectKind::NodeAckCollected {
+                    job, attempt: a, ..
+                } if job == id && a == attempt => acks.push(eff),
+                EffectKind::NodeCancel {
+                    job, attempt: a, ..
+                } if cancel_wanted && job == id && a == attempt => cancels.push(eff),
+                _ => {}
+            }
         }
-        for eff in writes {
+        acks.extend(cancels);
+        for eff in acks {
             self.resend_or_give_up(eff, NODE_RESENDS);
         }
     }
@@ -580,20 +603,20 @@ impl Core<'_> {
 
     pub(crate) fn tick_jobs(&mut self) {
         let now = self.now;
-        let ids: Vec<JobId> = self.st.jobs.keys().copied().collect();
         // Only an Uncertain or Probing write is re-sent, and nothing on this path makes one,
         // so one pass finds every job with work instead of a scan of all effects per job.
         let resend: BTreeSet<JobId> =
             self.st
-                .effects
-                .values()
-                .filter(|e| matches!(e.state, EffectState::Uncertain | EffectState::Probing))
+                .retryable_effects
+                .iter()
+                .map(|id| &self.st.effects[id])
                 .filter_map(|e| match e.kind {
                     EffectKind::NodeCancel { job, .. }
                     | EffectKind::NodeAckCollected { job, .. } => Some(job),
                     _ => None,
                 })
                 .collect();
+        let ids: Vec<JobId> = self.st.active_jobs.union(&resend).copied().collect();
         for id in ids {
             let j = &self.st.jobs[&id];
             let (state, seen_at, state_at, lost_at) = (j.state, j.seen_at, j.state_at, j.lost_at);

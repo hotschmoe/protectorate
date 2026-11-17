@@ -19,7 +19,9 @@ pub struct State {
     pub next_msg: u64,
     pub sleeves: BTreeMap<SleeveId, Sleeve>,
     pub effects: BTreeMap<EffectId, Effect>,
+    pub retryable_effects: BTreeSet<EffectId>,
     pub jobs: BTreeMap<JobId, Job>,
+    pub active_jobs: BTreeSet<JobId>,
     /// Spawn request ids, for idempotent retries.
     pub spawn_requests: BTreeMap<String, SleeveId>,
     pub job_requests: BTreeMap<String, JobId>,

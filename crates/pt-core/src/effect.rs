@@ -50,6 +50,11 @@ impl Core<'_> {
 
     fn set_effect(&mut self, id: EffectId, state: EffectState) {
         self.st.effects.get_mut(&id).expect("effect exists").state = state;
+        if matches!(state, EffectState::Uncertain | EffectState::Probing) {
+            self.st.retryable_effects.insert(id);
+        } else {
+            self.st.retryable_effects.remove(&id);
+        }
     }
 
     pub(crate) fn effect_report(&mut self, id: EffectId, attempt: u32, report: Report) {
@@ -147,8 +152,8 @@ impl Core<'_> {
 
     /// A probe answer for a record whose kind cannot tell "not applied" apart: Unsafe kinds.
     fn unknowable(&mut self, id: EffectId) {
+        self.set_effect(id, EffectState::Uncertain);
         let e = self.st.effects.get_mut(&id).expect("effect exists");
-        e.state = EffectState::Uncertain;
         e.unknowable += 1;
         if e.unknowable == UNKNOWABLE_NOTIFY {
             let sleeve = e.kind.sleeve();
@@ -203,9 +208,9 @@ impl Core<'_> {
             );
             return self.on_effect(id, None);
         }
+        self.set_effect(id, EffectState::Intent);
         let e = self.st.effects.get_mut(&id).expect("effect exists");
         e.attempt += 1;
-        e.state = EffectState::Intent;
         let intent = Intent::Execute {
             effect: id,
             attempt: e.attempt,
@@ -221,10 +226,13 @@ impl Core<'_> {
     pub(crate) fn tick_effects(&mut self) {
         let ids: Vec<EffectId> = self
             .st
-            .effects
-            .values()
-            .filter(|e| e.state == EffectState::Uncertain && e.kind.sleeve().is_some())
-            .map(|e| e.id)
+            .retryable_effects
+            .iter()
+            .copied()
+            .filter(|id| {
+                let e = &self.st.effects[id];
+                e.state == EffectState::Uncertain && e.kind.sleeve().is_some()
+            })
             .collect();
         for id in ids {
             let e = &self.st.effects[&id];
