@@ -1103,11 +1103,19 @@ exec sleep 300"#,
             node.display()
         ),
     );
-    write_script(&dir.join("systemd-run"), "exit 0");
+    write_script(
+        &dir.join("systemd-run"),
+        &format!(
+            "if [ \"$*\" = '--user --scope --quiet true' ]; then exit 0; fi\nprintf '%s\\n' \"$*\" >> '{}'\nwhile [ \"$#\" -gt 0 ]; do\n  case \"$1\" in bwrap|*/bwrap) exec \"$@\" ;; esac\n  shift\ndone\necho 'systemd-run: bwrap command missing' >&2\nexit 1",
+            dir.join("scope-args").display()
+        ),
+    );
     let config = pt_json::obj! {
         "envoy" => pt_json::obj! { "harness" => "claude" },
         "claude_program" => fake.to_str().unwrap(),
-        "scopes" => false,
+        "scopes" => true,
+        "sleeve_memory_max" => 8589934592u64,
+        "sleeve_memory_max_overrides" => pt_json::obj! { "devices" => 17179869184u64 },
         "quota_poll_secs" => 0u64,
         "harness_update_hours" => 0u64,
         "sleeve_devices" => vec![
@@ -1139,6 +1147,25 @@ exec sleep 300"#,
         || std::fs::read_to_string(scratch.join("target/saw")).ok(),
     );
     assert_eq!(saw.trim(), "NPU");
+    let args = std::fs::read_to_string(dir.join("scope-args")).unwrap();
+    assert!(args.contains("MemoryMax=17179869184"), "{args}");
+    assert!(args.contains("MemorySwapMax=0"), "{args}");
+    let repo2 = temp_repo("memory-default");
+    hub.cli(&[
+        "--json",
+        "sleeve",
+        "spawn",
+        "memory-default",
+        "--path",
+        repo2.to_str().unwrap(),
+        "--harness",
+        "claude",
+    ])
+    .json();
+    eventually("default memory scope", Duration::from_secs(60), || {
+        let args = std::fs::read_to_string(dir.join("scope-args")).ok()?;
+        args.contains("MemoryMax=8589934592").then_some(())
+    });
     assert!(
         hub.log_text().contains(&format!(
             "device {} is missing; not bound",

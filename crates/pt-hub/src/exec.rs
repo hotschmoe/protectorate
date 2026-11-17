@@ -921,6 +921,12 @@ impl SleeveExec {
         }
         let mut sb =
             pt_sandbox::SandboxSpec::new(&hub.scope_sleeve(s.id), g.0, work.clone(), home, scratch);
+        sb.limits.memory_max_bytes = hub
+            .config
+            .sleeve_memory_max_overrides
+            .get(&s.name)
+            .copied()
+            .unwrap_or(hub.config.sleeve_memory_max);
         for raw in &hub.config.sleeve_devices {
             let path = PathBuf::from(raw);
             if !path.is_absolute() {

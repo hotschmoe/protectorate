@@ -263,7 +263,10 @@ crash, every incarnation goes to Recovering and resumes natively.
   - tmpfs masks over the hub's state, `~/.ssh` and the owner's own credentials; every
     harness's shared hub login (`<home>/logins/`) and the owner's cargo registry, Go and pub
     caches bound read-write;
-  - a systemd scope per incarnation with limits, `OOMPolicy=continue` and `cgroup.kill`,
+  - a systemd scope per incarnation with a memory limit in bytes from `sleeve_memory_max`
+    (default 4 GiB), overridden by sleeve name in `sleeve_memory_max_overrides`; swap is
+    disabled and build parallelism follows the CPU quota. Configuration is read at hub start
+    and applied at launch. The scope uses `OOMPolicy=continue` and `cgroup.kill`,
     plus the orphan reaper. A child the kernel kills for memory does not stop the scope.
     The guardrail requires a scope OOM kill and a launcher exit by SIGKILL or code 137.
 
