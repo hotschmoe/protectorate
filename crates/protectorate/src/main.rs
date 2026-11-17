@@ -63,7 +63,7 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   harness update [PROGRAM...]       claude, codex, grok, pi; none means every installed one
   harness login <claude|codex|grok|pi> [-- ARGS...]
                                     the sleeves' shared login, on this terminal, without the API
-  sleeve list | sleeve show <sleeve>
+  sleeve list | sleeve show <sleeve>  (includes scope memory limit)
   sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
         [--provider P] [--model M] [--effort E] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT]
   sleeve send <sleeve> <text...> [--steer]

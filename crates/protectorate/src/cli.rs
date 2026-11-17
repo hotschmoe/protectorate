@@ -330,6 +330,11 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 sleeve_rows(std::slice::from_ref(s));
                 if let Some(i) = &s.incarnation {
                     println!(
+                        "memory limit {}",
+                        i.memory_max_bytes
+                            .map_or_else(|| "unlimited".to_string(), |n| format!("{n} bytes"))
+                    );
+                    println!(
                         "g{} {} {} {}, turn {}, context {}/{}, session {}",
                         i.g,
                         i.harness,
