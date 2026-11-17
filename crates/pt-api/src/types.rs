@@ -309,6 +309,7 @@ api_records! {
         pub incarnation: Option<Incarnation>,
         /// Messages waiting for the turn to settle.
         pub queued: u64 = 0,
+        pub oldest_queued_at_ms: Option<EpochMs>,
         /// Tokens.
         pub budget_used: Option<u64>,
         pub budget_limit: Option<u64>,

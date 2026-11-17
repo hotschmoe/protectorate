@@ -1,6 +1,7 @@
 //! `protectorate <noun> <verb>`: one hub API method per command, a table or a line for people,
 //! the API's own JSON under `--json`.
 
+use std::io::Read;
 use std::time::{Duration, Instant};
 
 use pt_api::{self as api, EpochMs, method as m};
@@ -12,6 +13,35 @@ use crate::fail::Fail;
 
 /// Methods a D9 approval may hold: the CLI waits as long as the hub may.
 const APPROVAL_WAIT: Duration = Duration::from_secs(3600);
+
+fn message_file(a: &Args) -> Result<Option<String>, Fail> {
+    a.flag("--message-file")
+        .map(|path| {
+            if path == "-" {
+                let mut text = String::new();
+                std::io::stdin()
+                    .read_to_string(&mut text)
+                    .map_err(|e| Fail::Other(format!("read stdin: {e}")))?;
+                Ok(text)
+            } else {
+                std::fs::read_to_string(path).map_err(|e| Fail::Other(format!("read {path}: {e}")))
+            }
+        })
+        .transpose()
+}
+
+fn send_text(a: &Args, from: usize) -> Result<String, Fail> {
+    if a.flag("--message-file").is_some() && a.words.len() > from {
+        return Err(Fail::Usage(
+            "--message-file and message text are mutually exclusive".into(),
+        ));
+    }
+    if let Some(text) = message_file(a)? {
+        Ok(text)
+    } else {
+        Ok(a.rest(from, "the message text")?)
+    }
+}
 
 struct Out {
     json: bool,
@@ -102,7 +132,10 @@ pub fn sleeve_rows(sleeves: &[api::Sleeve]) {
                 inc.map_or("-".into(), |i| i.activity.state.to_string()),
                 inc.map_or("-".into(), |i| i.harness.to_string()),
                 inc.map_or("-".into(), |i| format!("g{}", i.g)),
-                s.queued.to_string(),
+                s.oldest_queued_at_ms.map_or_else(
+                    || s.queued.to_string(),
+                    |t| format!("{} ({})", s.queued, ago(t).trim_end_matches(" ago")),
+                ),
                 s.path.clone(),
             ]
         })
@@ -347,7 +380,23 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 println!("d9 {}", if s.d9 { "marked" } else { "no" });
             });
         }
+        "inbox" => {
+            let req = api::InboxRequest {
+                sleeve_id: a.words.get(2).cloned(),
+            };
+            let v = c.call::<m::GetInbox>(&req)?;
+            o.show(&v, |v| {
+                for m in &v.messages {
+                    println!("{} ({})\n{}", m.sender, ago(m.queued_at_ms), m.text);
+                }
+            });
+        }
         "spawn" => {
+            if a.flag("--message").is_some() && a.flag("--message-file").is_some() {
+                return Err(Fail::Usage(
+                    "--message and --message-file are mutually exclusive".into(),
+                ));
+            }
             let harness_name = a.flag("--harness").unwrap_or("claude");
             let path_flag = a.flag("--path");
             let new_path = a.flag("--new-path");
@@ -384,7 +433,7 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 provider: a.flag("--provider").map(str::to_string),
                 effort: a.flag("--effort").map(str::to_string),
                 resleeve_to,
-                message: a.flag("--message").map(str::to_string),
+                message: message_file(a)?.or_else(|| a.flag("--message").map(str::to_string)),
                 budget: a.num("--budget")?,
             };
             let v = c.call_for::<m::SpawnSleeve>(&req, APPROVAL_WAIT)?;
@@ -395,7 +444,7 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
         "send" => {
             let req = api::SendMessageRequest {
                 sleeve_id: a.word(2, "a sleeve")?.to_string(),
-                text: a.rest(3, "the message text")?,
+                text: send_text(a, 3)?,
                 delivery: if a.has("--steer") {
                     api::Delivery::Steer
                 } else {
@@ -403,7 +452,16 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 },
             };
             let v = c.call::<m::SendMessage>(&req)?;
-            o.show(&v, |v| println!("{}", v.request_id));
+            o.show(&v, |v| {
+                if v.queued {
+                    println!(
+                        "queued: {} ({} queued); delivered at its next turn boundary",
+                        req.sleeve_id, v.queue_length
+                    );
+                } else {
+                    println!("delivering: {} ({} queued)", req.sleeve_id, v.queue_length);
+                }
+            });
         }
         "interrupt" => {
             let v = c.call::<m::Interrupt>(&sleeve_ref(a)?)?;
@@ -1193,7 +1251,7 @@ fn envoy_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
     match a.word(1, "an envoy command (send, wait, read, token)")? {
         "send" => {
             let req = api::EnvoySendRequest {
-                text: a.rest(2, "the message text")?,
+                text: send_text(a, 2)?,
                 agent: a.flag("--as").map(str::to_string),
             };
             let v = c.call::<m::EnvoySend>(&req)?;

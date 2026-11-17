@@ -202,6 +202,13 @@ pub fn sleeve(transcripts: &Transcripts, view: &View, s: &Sleeve) -> api::Sleeve
         },
         incarnation,
         queued: s.queue.len() as u64,
+        oldest_queued_at_ms: s
+            .queue
+            .iter()
+            .filter_map(|id| s.messages.get(id))
+            .map(|m| m.queued_at)
+            .min()
+            .map(EpochMs),
         budget_used: s.budget.map(|_| s.used),
         budget_limit: s.budget,
         d9: s.d9,

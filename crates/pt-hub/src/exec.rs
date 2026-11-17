@@ -1167,10 +1167,10 @@ impl SleeveExec {
             .map(|p| p.name.as_str());
         Some(match parent {
             Some(name) => format!(
-                "Mail your parent ({name}, $PROTECTORATE_PARENT) or Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`).\n\n"
+                "Mail your parent ({name}, $PROTECTORATE_PARENT) or Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`). A sleeve may send to itself, its children, its parent, and Envoy; reach a sibling through the parent. Use `--message-file FILE` (or `-` for stdin) for long or code-bearing text.\n\n"
             ),
             None => format!(
-                "Mail Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`).\n\n"
+                "Mail Envoy ($PROTECTORATE_ENVOY, {envoy}) with $PROTECTORATE_MAIL (`protectorate sleeve send <name> <text>`). A sleeve may send to itself, its children, its parent, and Envoy; reach a sibling through the parent. Use `--message-file FILE` (or `-` for stdin) for long or code-bearing text.\n\n"
             ),
         })
     }

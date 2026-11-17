@@ -2861,6 +2861,45 @@ final class HubUpdate {
   };
 }
 
+final class Inbox {
+  const Inbox({this.messages = const <QueuedMessage>[]});
+
+  factory Inbox.fromJson(Object? json) {
+    final j = _object(json, 'Inbox');
+    return Inbox(
+      messages: _or(
+        j['messages'],
+        const <QueuedMessage>[],
+        (e0) => _list(e0, 'Inbox.messages', QueuedMessage.fromJson),
+      ),
+    );
+  }
+
+  final List<QueuedMessage> messages;
+
+  Map<String, Object?> toJson() => {
+    'messages': [for (final e0 in messages) e0.toJson()],
+  };
+}
+
+final class InboxRequest {
+  const InboxRequest({this.sleeveId});
+
+  factory InboxRequest.fromJson(Object? json) {
+    final j = _object(json, 'InboxRequest');
+    return InboxRequest(
+      sleeveId: _opt(
+        j['sleeve_id'],
+        (e0) => _string(e0, 'InboxRequest.sleeve_id'),
+      ),
+    );
+  }
+
+  final String? sleeveId;
+
+  Map<String, Object?> toJson() => {if (sleeveId case final v?) 'sleeve_id': v};
+}
+
 /// One harness process tree with generation `g`.
 final class Incarnation {
   const Incarnation({
@@ -3950,6 +3989,35 @@ enum PresenceState {
   String toJson() => wire;
 }
 
+final class QueuedMessage {
+  const QueuedMessage({
+    required this.sender,
+    required this.queuedAt,
+    required this.text,
+  });
+
+  factory QueuedMessage.fromJson(Object? json) {
+    final j = _object(json, 'QueuedMessage');
+    return QueuedMessage(
+      sender: _string(j['sender'], 'QueuedMessage.sender'),
+      queuedAt: _time(j['queued_at_ms'], 'QueuedMessage.queued_at_ms'),
+      text: _string(j['text'], 'QueuedMessage.text'),
+    );
+  }
+
+  final String sender;
+
+  final DateTime queuedAt;
+
+  final String text;
+
+  Map<String, Object?> toJson() => {
+    'sender': sender,
+    'queued_at_ms': queuedAt.millisecondsSinceEpoch,
+    'text': text,
+  };
+}
+
 final class Quota {
   const Quota({
     required this.subscription,
@@ -4577,16 +4645,32 @@ final class SendMessageRequest {
 
 /// A message the hub took; its `user_message` and `prompt_ack` entries carry this id.
 final class Sent {
-  const Sent({required this.requestId});
+  const Sent({
+    required this.requestId,
+    required this.queued,
+    required this.queueLength,
+  });
 
   factory Sent.fromJson(Object? json) {
     final j = _object(json, 'Sent');
-    return Sent(requestId: _string(j['request_id'], 'Sent.request_id'));
+    return Sent(
+      requestId: _string(j['request_id'], 'Sent.request_id'),
+      queued: _bool(j['queued'], 'Sent.queued'),
+      queueLength: _int(j['queue_length'], 'Sent.queue_length'),
+    );
   }
 
   final String requestId;
 
-  Map<String, Object?> toJson() => {'request_id': requestId};
+  final bool queued;
+
+  final int queueLength;
+
+  Map<String, Object?> toJson() => {
+    'request_id': requestId,
+    'queued': queued,
+    'queue_length': queueLength,
+  };
 }
 
 /// The durable identity: name, workspace claim, parent link, resleeve policy, budget and
@@ -4606,6 +4690,7 @@ final class Sleeve {
     this.view,
     this.incarnation,
     this.queued = 0,
+    this.oldestQueuedAt,
     this.budgetUsed,
     this.budgetLimit,
     this.d9 = false,
@@ -4634,6 +4719,10 @@ final class Sleeve {
       view: _opt(j['view'], WorkspaceView.fromJson),
       incarnation: _opt(j['incarnation'], Incarnation.fromJson),
       queued: _or(j['queued'], 0, (e0) => _int(e0, 'Sleeve.queued')),
+      oldestQueuedAt: _opt(
+        j['oldest_queued_at_ms'],
+        (e0) => _time(e0, 'Sleeve.oldest_queued_at_ms'),
+      ),
       budgetUsed: _opt(
         j['budget_used'],
         (e0) => _int(e0, 'Sleeve.budget_used'),
@@ -4679,6 +4768,8 @@ final class Sleeve {
   /// Messages waiting for the turn to settle.
   final int queued;
 
+  final DateTime? oldestQueuedAt;
+
   /// Tokens.
   final int? budgetUsed;
 
@@ -4702,6 +4793,8 @@ final class Sleeve {
     if (view case final v?) 'view': v.toJson(),
     if (incarnation case final v?) 'incarnation': v.toJson(),
     'queued': queued,
+    if (oldestQueuedAt case final v?)
+      'oldest_queued_at_ms': v.millisecondsSinceEpoch,
     if (budgetUsed case final v?) 'budget_used': v,
     if (budgetLimit case final v?) 'budget_limit': v,
     'd9': d9,
@@ -5493,6 +5586,10 @@ final class HubApi {
   /// `POST /api/ListSleeves`, scope `sleeve`.
   Future<SleeveList> listSleeves([Empty request = const Empty()]) =>
       _call('ListSleeves', request.toJson(), SleeveList.fromJson);
+
+  /// `POST /api/GetInbox`, scope `sleeve`.
+  Future<Inbox> getInbox(InboxRequest request) =>
+      _call('GetInbox', request.toJson(), Inbox.fromJson);
 
   /// `POST /api/GetTranscript`, scope `sleeve`.
   Future<Transcript> getTranscript(GetTranscriptRequest request) =>
