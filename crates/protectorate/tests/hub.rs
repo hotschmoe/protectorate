@@ -3950,3 +3950,36 @@ fn gate_reports_all_failures_and_replays_seeds_after_e2e_failure() {
     assert!(stdout.contains("ran-check-version"), "{stdout}");
     assert!(stdout.contains("check failed: fmt-check clippy check-fuzz test check-deps check-levels check-gen app-check check-version"), "{stdout}");
 }
+
+#[test]
+fn timeout_reports_the_hubs_launch_refusal() {
+    let hub = Hub::start_config(
+        "timeout-diagnostic",
+        "claude",
+        &[("claude_program", "/nonexistent/test-claude".into())],
+        &[],
+        &[],
+    );
+    eventually("launch refusal", Duration::from_secs(60), || {
+        let events = hub.cli(&["--json", "event", "list"]).json();
+        events["events"]
+            .as_array()?
+            .iter()
+            .any(|e| {
+                e["text"]
+                    .as_str()
+                    .is_some_and(|text| text.contains("launch refused:"))
+            })
+            .then_some(())
+    });
+    let error = std::panic::catch_unwind(|| {
+        eventually::<()>("sleeve x", Duration::ZERO, || None);
+    })
+    .unwrap_err();
+    let text = error.downcast_ref::<String>().unwrap();
+    assert!(
+        text.contains("timed out waiting for sleeve x: launch refused:"),
+        "{text}"
+    );
+    assert!(text.contains("claude"), "{text}");
+}
