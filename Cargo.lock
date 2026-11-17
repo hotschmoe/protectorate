@@ -21,6 +21,7 @@ dependencies = [
  "pt-hub",
  "pt-journal",
  "pt-json",
+ "pt-sandbox",
  "pt-sys",
  "pt-version",
 ]

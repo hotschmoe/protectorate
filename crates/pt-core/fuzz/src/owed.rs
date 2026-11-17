@@ -591,7 +591,7 @@ fn on_ready(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, s: &Sleeve) {
     }
     let mut now_s = s.clone();
     now_s.activity = Activity::Idle { seen: true };
-    match (s.life, s.guard.state.clone()) {
+    match (s.life, s.guard.state) {
         (Life::Launching, guard) => {
             now_s.life = Life::Running;
             if guard == GuardState::Resuming {

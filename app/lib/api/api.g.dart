@@ -3792,7 +3792,11 @@ final class NodeUpdate {
 }
 
 final class NodeUpdates {
-  const NodeUpdates({required this.version, this.nodes = const <NodeUpdate>[]});
+  const NodeUpdates({
+    required this.version,
+    this.nodes = const <NodeUpdate>[],
+    this.rolloutId,
+  });
 
   factory NodeUpdates.fromJson(Object? json) {
     final j = _object(json, 'NodeUpdates');
@@ -3803,6 +3807,10 @@ final class NodeUpdates {
         const <NodeUpdate>[],
         (e0) => _list(e0, 'NodeUpdates.nodes', NodeUpdate.fromJson),
       ),
+      rolloutId: _opt(
+        j['rollout_id'],
+        (e0) => _string(e0, 'NodeUpdates.rollout_id'),
+      ),
     );
   }
 
@@ -3810,9 +3818,12 @@ final class NodeUpdates {
 
   final List<NodeUpdate> nodes;
 
+  final String? rolloutId;
+
   Map<String, Object?> toJson() => {
     'version': version,
     'nodes': [for (final e0 in nodes) e0.toJson()],
+    if (rolloutId case final v?) 'rollout_id': v,
   };
 }
 
@@ -5288,6 +5299,7 @@ final class UpdateNodesRequest {
     this.channel,
     this.probationSecs,
     this.noWait = false,
+    this.rolloutId,
   });
 
   factory UpdateNodesRequest.fromJson(Object? json) {
@@ -5317,6 +5329,10 @@ final class UpdateNodesRequest {
         false,
         (e0) => _bool(e0, 'UpdateNodesRequest.no_wait'),
       ),
+      rolloutId: _opt(
+        j['rollout_id'],
+        (e0) => _string(e0, 'UpdateNodesRequest.rollout_id'),
+      ),
     );
   }
 
@@ -5334,8 +5350,12 @@ final class UpdateNodesRequest {
   /// How long a node waits for the hub after its restart before it rolls back (600).
   final int? probationSecs;
 
-  /// Answer once each node has switched, without waiting for it to come back.
+  /// For all nodes, accept the rollout in the background. For named nodes, answer once
+  /// each has switched, without waiting for it to come back.
   final bool noWait;
+
+  /// Identifies this rollout's progress events.
+  final String? rolloutId;
 
   Map<String, Object?> toJson() => {
     'nodes': nodes,
@@ -5344,6 +5364,7 @@ final class UpdateNodesRequest {
     if (channel case final v?) 'channel': v.toJson(),
     if (probationSecs case final v?) 'probation_secs': v,
     'no_wait': noWait,
+    if (rolloutId case final v?) 'rollout_id': v,
   };
 }
 

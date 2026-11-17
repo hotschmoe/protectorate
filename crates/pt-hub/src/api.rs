@@ -5,6 +5,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::ops::ControlFlow;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use pt_api::{self as api, ApiError, ErrorCode, Method, method as m};
@@ -46,7 +47,7 @@ pub fn unavailable(what: &str) -> ApiError {
 }
 
 struct Ctx<'a> {
-    hub: &'a Hub,
+    hub: &'a Arc<Hub>,
     who: &'a Principal,
 }
 
@@ -70,7 +71,7 @@ macro_rules! routes {
 }
 
 /// Calls API method `name` for `who` with a JSON request body.
-pub fn call(hub: &Hub, who: &Principal, name: &str, body: &Value) -> Result<Value> {
+pub fn call(hub: &Arc<Hub>, who: &Principal, name: &str, body: &Value) -> Result<Value> {
     let def = api::find_method(name)
         .ok_or_else(|| err(ErrorCode::NotFound, format!("no method {name}")))?;
     if !who.scope().allows(def.scope) {
@@ -2551,5 +2552,26 @@ fn update_hub(c: &Ctx<'_>, r: api::UpdateHubRequest) -> Result<api::HubUpdate> {
 }
 
 fn update_nodes(c: &Ctx<'_>, r: api::UpdateNodesRequest) -> Result<api::NodeUpdates> {
+    if r.all && r.no_wait {
+        let rollout = crate::update::prepare_nodes(c.hub, &r)?;
+        let hub = Arc::clone(c.hub);
+        let version = rollout.version().to_string();
+        let id = match &r.rollout_id {
+            Some(id) => id.clone(),
+            None => format!("rollout-{}", random_hex(16).map_err(internal)?),
+        };
+        let response_id = id.clone();
+        std::thread::spawn(move || {
+            let mut request = r;
+            request.no_wait = false;
+            request.rollout_id = Some(id);
+            crate::update::run_nodes(&hub, request, rollout);
+        });
+        return Ok(api::NodeUpdates {
+            version,
+            nodes: Vec::new(),
+            rollout_id: Some(response_id),
+        });
+    }
     crate::update::update_nodes(c.hub, r)
 }

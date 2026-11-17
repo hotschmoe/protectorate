@@ -361,6 +361,14 @@ fn reported_protocol() -> u32 {
     msg::PROTOCOL
 }
 
+fn reported_arch() -> String {
+    #[cfg(debug_assertions)]
+    if let Ok(arch) = std::env::var("PROTECTORATE_NODE_TEST_ARCH") {
+        return arch;
+    }
+    std::env::consts::ARCH.into()
+}
+
 fn reported_version() -> String {
     #[cfg(debug_assertions)]
     if let Ok(version) = std::env::var("PROTECTORATE_NODE_TEST_VERSION") {
@@ -426,7 +434,7 @@ fn answer_inner(
                 journal_epoch: epoch.clone(),
                 hostname: pt_node::hostname(),
                 os: std::env::consts::OS.into(),
-                arch: std::env::consts::ARCH.into(),
+                arch: reported_arch(),
                 release: node.releases.started(),
             },
         ),

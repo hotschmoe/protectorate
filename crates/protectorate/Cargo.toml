@@ -21,6 +21,7 @@ pt-sys = { path = "../pt-sys" }
 pt-core = { path = "../pt-core" }
 pt-frame = { path = "../pt-frame" }
 pt-journal = { path = "../pt-journal" }
+pt-sandbox = { path = "../pt-sandbox" }
 
 [build-dependencies]
 pt-embed = { path = "../pt-embed" }

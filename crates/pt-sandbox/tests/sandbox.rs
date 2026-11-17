@@ -146,6 +146,14 @@ fn mask_and_runtime_tmpfs_have_small_limits() {
 
 #[test]
 fn masks_hide_credentials_and_filesystem_is_read_only_outside_workspace() {
+    if !Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("SKIP: no systemd user bus");
+        return;
+    }
     let base = fixture("masks");
     let host_home = sub(&base, "owner-home");
     fs::create_dir_all(host_home.join(".ssh")).unwrap();
@@ -208,6 +216,14 @@ fn masks_hide_credentials_and_filesystem_is_read_only_outside_workspace() {
 
 #[test]
 fn sleeves_share_nothing_private() {
+    if !Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("SKIP: no systemd user bus");
+        return;
+    }
     let base = fixture("two");
     let state = sub(&base, "state");
     let a = spec("alpha", &base);
@@ -256,6 +272,14 @@ fn sleeves_share_nothing_private() {
 
 #[test]
 fn scope_limits_and_kill_reaches_double_forked_tree() {
+    if !Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("SKIP: no systemd user bus");
+        return;
+    }
     let base = fixture("scope");
     let mut s = spec("scopetest", &base);
     s.limits.memory_max_bytes = 300 << 20;
@@ -369,6 +393,14 @@ fn worktree(base: &Path, branch: &str) -> (PathBuf, PathBuf) {
 
 #[test]
 fn worktree_hooks_are_read_only() {
+    if !Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("SKIP: no systemd user bus");
+        return;
+    }
     let base = fixture("hooks");
     let (main, wt) = worktree(&base, "pt-hooks-test");
     let dirs = resolve_git_dirs(&wt, &main).unwrap();
@@ -401,6 +433,14 @@ fn worktree_hooks_are_read_only() {
 /// instead of binding them writable over the masks.
 #[test]
 fn a_rewritten_gitdir_never_reaches_the_next_launch() {
+    if !Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("SKIP: no systemd user bus");
+        return;
+    }
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -474,6 +514,14 @@ fn a_rewritten_gitdir_never_reaches_the_next_launch() {
 /// credential masks, and the masked state dir contains the private home. Every mask must hold.
 #[test]
 fn binds_never_undo_masks() {
+    if !Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("SKIP: no systemd user bus");
+        return;
+    }
     let base = fixture("nested");
     let owner = sub(&base, "owner-home");
     fs::create_dir_all(owner.join(".ssh")).unwrap();
@@ -519,6 +567,14 @@ fn binds_never_undo_masks() {
 /// lives outside its scope and sandbox. The sandbox gets a private, empty runtime dir instead.
 #[test]
 fn a_sleeve_cannot_reach_the_user_manager() {
+    if !Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("SKIP: no systemd user bus");
+        return;
+    }
     let base = fixture("bus");
     let rt = std::env::var("XDG_RUNTIME_DIR").expect("XDG_RUNTIME_DIR is set for these tests");
     assert!(Path::new(&rt).join("bus").exists(), "no user bus at {rt}");
@@ -558,6 +614,14 @@ fn a_sleeve_cannot_reach_the_user_manager() {
 /// root, which holds the child's git dirs.
 #[test]
 fn other_roots_are_masked_and_a_worktree_child_still_commits() {
+    if !Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("SKIP: no systemd user bus");
+        return;
+    }
     let base = fixture("roots");
     let other = sub(&base, "other-root");
     fs::write(other.join("plan.md"), "OTHER").unwrap();
@@ -589,6 +653,14 @@ fn other_roots_are_masked_and_a_worktree_child_still_commits() {
 /// to it; a caller's own value wins, and without a scope nothing is capped.
 #[test]
 fn build_jobs_follow_the_cpu_quota() {
+    if !Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("SKIP: no systemd user bus");
+        return;
+    }
     let base = fixture("jobs");
     let probe = "echo $CARGO_BUILD_JOBS $GOMAXPROCS $GOFLAGS $FLUTTER_TEST_CONCURRENCY";
     let mut s = spec("jobs", &base);

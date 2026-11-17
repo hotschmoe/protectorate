@@ -26,7 +26,7 @@ CARGO_VERSION := PROTECTORATE_BUILD_VERSION='$(VERSION)'
 -include .env.e2e
 export PT_E2E_PI_PROVIDER PT_E2E_PI_MODEL PT_RELEASE_WIN_HOST PT_RELEASE_WIN_DIR ZIG PT_RELEASE_REPO
 
-.PHONY: build release release-assets release-snapshot release-publish web test test-paid check check-deps check-levels check-gen check-version gen fmt app-check version
+.PHONY: build release release-assets release-snapshot release-publish web test test-paid check fmt-check clippy check-deps check-levels check-gen check-version check-fuzz gen fmt app-check version
 
 DART ?= dart
 FLUTTER ?= flutter
@@ -68,8 +68,9 @@ release-publish:
 # The workspace's e2e tests (their binaries side by side), then every committed fuzz seed
 # through its real fuzz targets.
 test:
-	$(CARGO_VERSION) sh scripts/test.sh
-	$(CARGO_VERSION) sh scripts/replay-seeds.sh
+	@failed=""; $(CARGO_VERSION) sh scripts/test.sh || failed="$$failed e2e"; \
+	  $(CARGO_VERSION) sh scripts/replay-seeds.sh || failed="$$failed seeds"; \
+	  if [ -n "$$failed" ]; then echo "test failed:$$failed"; exit 1; fi
 
 # Also runs the Claude, Codex and Grok e2e tests, which spend a few small turns of quota.
 test-paid:
@@ -79,9 +80,23 @@ fmt:
 	cargo fmt --all
 
 check:
+	@failed=""; \
+	  for step in fmt-check clippy check-fuzz test check-deps check-levels check-gen app-check check-version; do \
+	    $(MAKE) $$step || failed="$$failed $$step"; \
+	  done; \
+	  if [ -n "$$failed" ]; then echo "check failed:$$failed"; exit 1; fi; \
+	  echo "check: all steps passed"
+
+fmt-check:
 	cargo fmt --all -- --check
+
+clippy:
 	$(CARGO_VERSION) cargo clippy --locked --workspace --all-targets -- -D warnings
-	$(MAKE) test check-deps check-levels check-gen app-check check-version
+
+check-fuzz:
+	@failed=""; for dir in crates/*/fuzz; do \
+	  $(CARGO_VERSION) CARGO_TARGET_DIR='$(if $(CARGO_TARGET_DIR),$(CARGO_TARGET_DIR),$(CURDIR)/target)/fuzz-seeds' cargo build --locked --manifest-path "$$dir/Cargo.toml" --bins || failed="$$failed $$dir"; \
+	  done; if [ -n "$$failed" ]; then echo "fuzz build failed:$$failed"; exit 1; fi
 
 check-deps:
 	sh scripts/check-deps.sh

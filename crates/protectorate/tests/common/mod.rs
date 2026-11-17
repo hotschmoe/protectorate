@@ -53,6 +53,9 @@ pub fn on_path(name: &str) -> bool {
 
 /// Pi with a local model, bwrap and a systemd user manager, or a SKIP line and false.
 pub fn have_runtime() -> bool {
+    if !have_user_bus() {
+        return false;
+    }
     for tool in ["pi", "bwrap", "systemd-run", "git"] {
         if !on_path(tool) {
             eprintln!("SKIP: {tool} is not installed");
@@ -64,6 +67,18 @@ pub fn have_runtime() -> bool {
             "SKIP: set PT_E2E_PI_PROVIDER and PT_E2E_PI_MODEL (a Pi provider for a local \
              OpenAI-compatible endpoint and its model), or put them in .env.e2e"
         );
+        return false;
+    }
+    true
+}
+
+pub fn have_user_bus() -> bool {
+    if !Command::new("systemctl")
+        .args(["--user", "show-environment"])
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("SKIP: no systemd user bus");
         return false;
     }
     true
@@ -427,8 +442,23 @@ impl Hub {
 
 impl Drop for Hub {
     fn drop(&mut self) {
-        // The sandboxes die with the hub (bwrap --die-with-parent).
         self.kill9();
+        if let Ok(bytes) = fs::read(self.home.join("tokens"))
+            && let Ok(tokens) = pt_json::from_bytes::<Value>(&bytes)
+            && let Some(tag) = tokens["hub_tag"].as_str()
+            && let Ok(units) = pt_sandbox::list_scope_units()
+        {
+            for unit in units {
+                if pt_sandbox::scope_sleeve_id(tag, &unit).is_some() {
+                    let status = Command::new("systemctl")
+                        .args(["--user", "stop", &unit])
+                        .status();
+                    if !status.is_ok_and(|s| s.success()) {
+                        eprintln!("failed to stop test scope {unit}");
+                    }
+                }
+            }
+        }
     }
 }
 
