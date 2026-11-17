@@ -138,7 +138,7 @@ impl Releases {
         runner.submit(spec)
     }
 
-    /// `Update`: stage, check, switch and schedule the restart before sending the reply.
+    /// `Update`: stage, check and switch before sending the reply.
     pub fn update(&self, u: &Update, runner: &Runner) -> Result<UpdateReply, (ErrorCode, String)> {
         let unsupported = |m: String| (ErrorCode::Unsupported, m);
         let mut gate = self.updating.lock().unwrap_or_else(|p| p.into_inner());
@@ -219,7 +219,6 @@ impl Releases {
             .switch_on_probation(&rel.tag, Duration::from_secs(u.probation_secs.max(1)))
             .map_err(fail)?;
         admission.switched = true;
-        restart_soon(sw.to.clone());
         eprintln!(
             "protectorate-node: switched from {} to {}{}",
             sw.from.as_deref().unwrap_or("-"),

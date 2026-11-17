@@ -540,10 +540,11 @@ restart through its service manager. A node confirms its release after it has fu
 hub request other than Hello. A node that has not done so within the
 probation window (`--probation`, default 600 s) reverts to its previous binary. The command waits
 for every node unless `--no-wait`. Update the hub first, then one node per OS and arch, then the
-rest. `--all` runs OS/architecture groups independently, with the first node as canary; a failed
-or deferred canary skips its group. A node with a running job waits up to 30 seconds and then is
+rest. Updates run OS/architecture groups independently, preferring an online idle canary. A busy
+deferred canary gives way to the next node; a failed canary skips its group. A node with a running job waits up to 30 seconds and then is
 deferred; an offline node is deferred. The CLI prints progress and then the results table, and the
-hub records progress in events. `--all --no-wait` accepts the rollout in the background and prints
+hub records progress in events. A lost update reply can be confirmed by Hello and Presence on the
+target release. `--all --no-wait` accepts the rollout in the background and prints
 its event id; follow it with `event list`. A hub restart stops an unfinished rollout. With named nodes `--no-wait` waits for the switch but
 not the return. Once an update is admitted, new jobs answer `busy` until the restart.
 

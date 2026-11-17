@@ -603,10 +603,12 @@ straight from GitHub releases, on the stable or dev channel, as today.
 - **Order:** hub first, then one canary node per OS and arch, then the rest. Headscale accepts
   clients up to 10 minor versions old, and `member` shares headscale's `tailscale.com` version
   through one go.mod, so a fleet mid-rollout keeps working.
-  `node update --all` runs OS/architecture groups independently; a failed or deferred canary
-  skips the remainder of its group. A running job holds its node for up to 30 seconds, then the
+  Node update runs OS/architecture groups independently, preferring an online idle canary. A
+  busy deferred canary gives way to the next candidate; a failed canary skips the rest of its
+  group. A running job holds its node for up to 30 seconds, then the
   update is deferred. Offline nodes are deferred. Progress is published as node events and the
-  CLI prints it before the final table. `--all --no-wait` accepts the rollout in the background;
+  CLI prints it before the final table. A lost update reply can be confirmed by Hello and
+  Presence on the target release. `--all --no-wait` accepts the rollout in the background;
   its rollout id identifies the events; a hub restart stops an unfinished rollout. Named-node `--no-wait` still waits for the switch but
   does not wait for the node to return.
 - **Apps, from the hub's release:** `HubInfo.clients` lists the client builds the running
