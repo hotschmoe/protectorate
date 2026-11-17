@@ -2081,7 +2081,11 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
             )],
         )
     };
-    let fake = serve_releases(vec![node_rel("v0.0.2"), node_rel("v0.0.3")]);
+    let fake = serve_releases(vec![
+        node_rel("v0.0.1"),
+        node_rel("v0.0.2"),
+        node_rel("v0.0.3"),
+    ]);
     let port = free_pair();
     let listen = format!("127.0.0.1:{port}");
     let tailnet = std::env::temp_dir().join(format!("pt-nodeupd-{}-{port}", std::process::id()));
@@ -2162,6 +2166,8 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
     );
     let presence = node_dir.join("presence");
     fs::write(&presence, "AWAY").unwrap();
+    let drop_update = node_dir.join("drop-update");
+    fs::write(&drop_update, "1").unwrap();
     let state = node_dir.display().to_string();
     let sup = Supervisor::start(
         &node_dir,
@@ -2175,10 +2181,16 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
             format!("{state}/agent.sock"),
             "--no-scope".into(),
         ],
-        vec![(
-            "PROTECTORATE_NODE_TEST_PRESENCE".into(),
-            presence.display().to_string(),
-        )],
+        vec![
+            (
+                "PROTECTORATE_NODE_TEST_PRESENCE".into(),
+                presence.display().to_string(),
+            ),
+            (
+                "PROTECTORATE_NODE_TEST_DROP_UPDATE".into(),
+                drop_update.display().to_string(),
+            ),
+        ],
         Duration::from_secs(2),
     );
     eventually("the node online", Duration::from_secs(120), || {
@@ -2190,8 +2202,7 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
             .then_some(())
     });
 
-    // A second node reports another architecture and runs a long job. Its busy canary must
-    // not delay the first node's update, and the CLI must report both while it is still running.
+    // A busy node is named first, but the idle node of the same architecture is the canary.
     let busy_dir = hub.home.with_file_name("node-busy");
     fs::create_dir_all(&busy_dir).unwrap();
     let mut join = Command::new(&node_bin)
@@ -2266,13 +2277,10 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
             format!("{busy_state}/agent.sock"),
             "--no-scope".into(),
         ],
-        vec![
-            (
-                "PROTECTORATE_NODE_TEST_PRESENCE".into(),
-                busy_presence.display().to_string(),
-            ),
-            ("PROTECTORATE_NODE_TEST_ARCH".into(), "test-busy".into()),
-        ],
+        vec![(
+            "PROTECTORATE_NODE_TEST_PRESENCE".into(),
+            busy_presence.display().to_string(),
+        )],
         Duration::from_secs(2),
     );
     eventually("busy node online", Duration::from_secs(120), || {
@@ -2285,7 +2293,7 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
     });
     let job = hub
         .cli(&[
-            "--json", "job", "run", "--node", "e2e-busy", "--", "sleep", "120",
+            "--json", "job", "run", "--node", "e2e-busy", "--", "sleep", "300",
         ])
         .json();
     let job_id = job["id"].as_str().unwrap();
@@ -2299,7 +2307,8 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
         .args([
             "node",
             "update",
-            "--all",
+            "e2e-busy",
+            "e2e-upd",
             "--version",
             "v0.0.2",
             "--probation",
@@ -2335,6 +2344,13 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
     }
     assert!(rollout.try_wait().unwrap().is_none(), "{lines:?}");
     assert!(lines.iter().any(|l| l.contains(job_id)), "{lines:?}");
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("e2e-upd: confirmed by hello")),
+        "{lines:?}"
+    );
+    fs::write(&drop_update, "0").unwrap();
     let status = eventually("rollout deferred", Duration::from_secs(45), || {
         rollout.try_wait().unwrap()
     });
@@ -2349,6 +2365,60 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
             .iter()
             .any(|l| l.contains("NODE") && l.contains("DETAIL")),
         "{lines:?}"
+    );
+    let other_job = hub
+        .cli(&[
+            "--json", "job", "run", "--node", "e2e-upd", "--", "sleep", "40",
+        ])
+        .json();
+    let other_id = other_job["id"].as_str().unwrap();
+    eventually("second busy job", Duration::from_secs(60), || {
+        let j = hub.cli(&["--json", "job", "show", other_id]).json();
+        (j["state"].as_str() == Some("running")).then_some(())
+    });
+    let out = hub.cli(&[
+        "--json",
+        "node",
+        "update",
+        "e2e-busy",
+        "e2e-upd",
+        "--version",
+        "v0.0.3",
+        "--probation",
+        "90",
+    ]);
+    assert_ne!(out.status, 0);
+    let promoted = pt_json::parse(out.stdout.trim()).unwrap();
+    let rows = promoted["nodes"].as_array().unwrap();
+    assert!(
+        rows.iter().any(|n| n["name"].as_str() == Some("e2e-busy")
+            && n["detail"]
+                .as_str()
+                .unwrap_or("")
+                .contains("deferred: busy")),
+        "{promoted}"
+    );
+    assert!(
+        rows.iter()
+            .any(|n| n["name"].as_str() == Some("e2e-upd") && n["ok"].as_bool() == Some(true)),
+        "{promoted}"
+    );
+    let restored = hub
+        .cli(&[
+            "--json",
+            "node",
+            "update",
+            "e2e-upd",
+            "--version",
+            "v0.0.2",
+            "--probation",
+            "90",
+        ])
+        .json();
+    assert_eq!(
+        restored["nodes"][0]["ok"].as_bool(),
+        Some(true),
+        "{restored}"
     );
     let accepted = hub
         .cli(&[

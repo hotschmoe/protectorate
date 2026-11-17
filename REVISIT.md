@@ -3,6 +3,7 @@
 Shortcuts taken to make something work, and what "right" (then "fast") would be. Newest last.
 Each entry: where, what was done, what right looks like.
 
+
 - **Release signing** (SPEC 6): no signing key; updates trust SHA256SUMS over HTTPS. Right: an
   offline-held key and a signature checked against a key embedded in the binary.
 - **Outbound HTTPS through curl** (hub, nodes): no Rust TLS stack. Right: decide between
@@ -1051,3 +1052,5 @@ Each entry: where, what was done, what right looks like.
   input plus cache reads and writes of the turn's last assistant message, checked at each settle.
   A turn that grows past 500k mid-turn compacts only after it settles, unless the harness's own
   auto-compaction runs first. Right: fine while the harness auto-compacts below its window.
+- **Background node rollouts:** `node update --all --no-wait` stops at a hub restart. Right:
+  persist rollout progress and recover in-flight nodes after restart.
