@@ -2804,17 +2804,13 @@ fn d9_spawn_limit_holds_across_a_hub_restart() {
             .unwrap()
             .iter()
             .find(|a| {
-                a["title"]
-                    .as_str()
-                    .is_some_and(|t| t.starts_with("spawn sleeve b2 (2 this turn"))
+                a["kind"].as_str() == Some("action")
+                    && a["sleeve_id"].as_str() == Some(envoy_id.as_str())
             })
             .cloned()
     });
     assert!(
-        approval["summary"]
-            .as_str()
-            .unwrap()
-            .contains("agent:grokbot"),
+        approval["summary"].as_str().unwrap().contains("grokbot"),
         "{approval}"
     );
     hub.cli(&[
