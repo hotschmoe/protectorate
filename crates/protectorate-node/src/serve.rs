@@ -331,8 +331,13 @@ fn serve_conn<S: Conn>(node: &Node, stream: &mut S) -> Result<(), String> {
         }
         let non_hello =
             matches!(parse_request(&frame.payload), Ok(r) if !matches!(r, Request::Hello(_)));
-        let (success, restart) = answer(node, frame.id, &frame.payload, &mut w)
-            .map_err(|e| format!("answering request {}: {e}", frame.id))?;
+        let (success, restart) = answer(node, frame.id, &frame.payload, &mut w).map_err(|e| {
+            #[cfg(debug_assertions)]
+            if non_hello {
+                crate::update::mark_test_failure("PROTECTORATE_NODE_TEST_REPLY_FAILED");
+            }
+            format!("answering request {}: {e}", frame.id)
+        })?;
         let flushed = w.flush();
         if let Some(to) = restart {
             if flushed.is_ok() && stream.read_timeout(Some(Duration::from_secs(5))).is_ok() {
@@ -340,7 +345,13 @@ fn serve_conn<S: Conn>(node: &Node, stream: &mut S) -> Result<(), String> {
             }
             crate::update::restart_soon(to);
         }
-        flushed.map_err(|e| format!("flushing request {}: {e}", frame.id))?;
+        flushed.map_err(|e| {
+            #[cfg(debug_assertions)]
+            if non_hello {
+                crate::update::mark_test_failure("PROTECTORATE_NODE_TEST_REPLY_FAILED");
+            }
+            format!("flushing request {}: {e}", frame.id)
+        })?;
         if non_hello && success {
             node.releases.contact();
         }

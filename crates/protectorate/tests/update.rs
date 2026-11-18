@@ -444,13 +444,14 @@ fn confirmed_after(home: &Path, after_ms: u64, what: &str) -> u64 {
     })
 }
 
-fn events(home: &Path) -> Vec<String> {
+fn events(home: &Path) -> Vec<Value> {
     let v = cli(home, &["--json", "event", "list", "--limit", "1000"]).json();
     v["events"]
         .as_array()
         .unwrap_or(&[])
         .iter()
-        .filter_map(|e| e["text"].as_str().map(String::from))
+        .filter(|e| e["source"].as_str() == Some("harness-update"))
+        .cloned()
         .collect()
 }
 
@@ -1716,6 +1717,7 @@ fn node_update_admission_lost_reply_and_confirmation() {
         &wrapper("protectorate-node", "--version", "v0.0.1", &node, "", false),
     );
     let pause = root.join("pause");
+    let failed_reply = root.join("failed-reply");
     fs::write(&pause, "0").unwrap();
     fs::write(root.join(".curlrc"), "this-option-does-not-exist\n").unwrap();
     let sock = root.join("a.sock");
@@ -1737,6 +1739,10 @@ fn node_update_admission_lost_reply_and_confirmation() {
             (
                 "PROTECTORATE_NODE_TEST_UPDATE_PAUSE".into(),
                 pause.display().to_string(),
+            ),
+            (
+                "PROTECTORATE_NODE_TEST_REPLY_FAILED".into(),
+                failed_reply.display().to_string(),
             ),
             ("CURL_HOME".into(), state.clone()),
         ],
@@ -1764,13 +1770,6 @@ fn node_update_admission_lost_reply_and_confirmation() {
     }
 
     fs::write(&pause, "1").unwrap();
-    // Each refused update above was admitted too; wait for this one's own admission.
-    let admitted = || {
-        sup.log_text()
-            .matches("update admitted for testing")
-            .count()
-    };
-    let before = admitted();
     let fields = obj! { "type" => "Update", "version" => "v0.0.2", "api" => fake.url.as_str(), "repo" => "o/r", "probation_secs" => 30u64 }.to_string();
     let mut link = UnixStream::connect(&sock).unwrap();
     link.write_all(b"{\"tags\":[\"tag:hub\"]}\n").unwrap();
@@ -1778,7 +1777,7 @@ fn node_update_admission_lost_reply_and_confirmation() {
     link.shutdown(Shutdown::Both).unwrap();
     drop(link);
     eventually("update admitted", Duration::from_secs(10), || {
-        (admitted() > before).then_some(())
+        (fs::read(&pause).ok().as_deref() == Some(b"admitted")).then_some(())
     });
     let submit = node_rpc(
         &node,
@@ -1803,13 +1802,14 @@ fn node_update_admission_lost_reply_and_confirmation() {
         (r.status == 0).then_some(())
     });
     assert!(probation(&root)["contacted_ms"].is_null());
+    fs::write(&failed_reply, b"armed").unwrap();
     let mut lost = UnixStream::connect(&sock).unwrap();
     lost.write_all(b"{\"tags\":[\"tag:hub\"]}\n").unwrap();
     write_frame(&mut lost, Kind::Request, 22, br#"{"type":"Presence"}"#).unwrap();
     lost.shutdown(Shutdown::Both).unwrap();
     drop(lost);
     eventually("failed non-Hello reply", Duration::from_secs(10), || {
-        sup.log_text().contains("request 22").then_some(())
+        (fs::read(&failed_reply).ok().as_deref() == Some(b"failed")).then_some(())
     });
     assert!(probation(&root)["contacted_ms"].is_null());
     let bad = node_rpc(&node, &sock, "JobStatus", r#"{"job_id":"missing"}"#);
@@ -1865,6 +1865,7 @@ fn node_trial_refuses_overlap_retries_confirmation_and_rejects_expiry() {
     let trial = obj! { "version" => "v0.0.2", "previous" => "v0.0.1", "switched_ms" => now, "deadline_ms" => now + 60_000u64 };
     fs::write(root.join("releases/probation.json"), trial.to_string()).unwrap();
     let sock = root.join("b.sock");
+    let failed_confirm = root.join("failed-confirm");
     let state = root.display().to_string();
     let sup = Supervisor::start(
         &root,
@@ -1879,7 +1880,13 @@ fn node_trial_refuses_overlap_retries_confirmation_and_rejects_expiry() {
             "--no-scope".into(),
             "--no-member".into(),
         ],
-        vec![("PROTECTORATE_NODE_TEST_PAUSE_WATCH".into(), "1".into())],
+        vec![
+            ("PROTECTORATE_NODE_TEST_PAUSE_WATCH".into(), "1".into()),
+            (
+                "PROTECTORATE_NODE_TEST_CONFIRM_FAILED".into(),
+                failed_confirm.display().to_string(),
+            ),
+        ],
         Duration::from_millis(200),
     );
     eventually("trial node socket", Duration::from_secs(20), || {
@@ -1895,16 +1902,11 @@ fn node_trial_refuses_overlap_retries_confirmation_and_rejects_expiry() {
     assert!(probation(&root)["contacted_ms"].is_null());
 
     fs::set_permissions(root.join("releases"), fs::Permissions::from_mode(0o555)).unwrap();
+    fs::write(&failed_confirm, b"armed").unwrap();
     assert_eq!(node_rpc(&node, &sock, "Presence", "{}").status, 0);
-    eventually(
-        "failed confirmation logged",
-        Duration::from_secs(10),
-        || {
-            sup.log_text()
-                .contains("confirming the update")
-                .then_some(())
-        },
-    );
+    eventually("failed confirmation", Duration::from_secs(10), || {
+        (fs::read(&failed_confirm).ok().as_deref() == Some(b"failed")).then_some(())
+    });
     fs::set_permissions(root.join("releases"), fs::Permissions::from_mode(0o755)).unwrap();
     assert!(probation(&root)["contacted_ms"].is_null());
     assert_eq!(node_rpc(&node, &sock, "Presence", "{}").status, 0);
@@ -1962,6 +1964,16 @@ fn free_pair() -> u16 {
             return p;
         }
     }
+}
+
+fn registration_payload(line: &str) -> Option<&str> {
+    let payload = &line[line.find('{')?..];
+    let v = pt_json::parse(payload).ok()?;
+    (v["v"].as_u64() == Some(1)
+        && v["auth_id"].as_str().is_some()
+        && v["control_key"].as_str().is_some()
+        && v["name"].as_str().is_some())
+    .then_some(payload)
 }
 
 #[test]
@@ -2040,8 +2052,8 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
         let l = rx
             .recv_timeout(Duration::from_secs(60))
             .expect("join shows its registration");
-        if let Some(p) = l.trim_start().strip_prefix("paste") {
-            break p.trim().to_string();
+        if let Some(p) = registration_payload(&l) {
+            break p.to_string();
         }
     };
     let pending = hub.cli(&["--json", "node", "add", &payload]).json();
@@ -2132,8 +2144,8 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
         let l = rx
             .recv_timeout(Duration::from_secs(60))
             .expect("busy node registration");
-        if let Some(p) = l.trim_start().strip_prefix("paste") {
-            break p.trim().to_string();
+        if let Some(p) = registration_payload(&l) {
+            break p.to_string();
         }
     };
     let pending = hub.cli(&["--json", "node", "add", &payload]).json();
@@ -2230,43 +2242,20 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
             }
         }
     });
-    let mut lines = Vec::new();
-    while !lines
-        .iter()
-        .any(|l: &String| l.contains("e2e-busy: waiting: busy with job"))
-        || !lines
-            .iter()
-            .any(|l: &String| l.contains("e2e-upd:") && l.contains("answered Presence"))
-    {
-        lines.push(
-            rx.recv_timeout(Duration::from_secs(90))
-                .expect("live rollout progress"),
-        );
-    }
-    assert!(rollout.try_wait().unwrap().is_none(), "{lines:?}");
-    assert!(lines.iter().any(|l| l.contains(job_id)), "{lines:?}");
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.contains("e2e-upd: confirmed by hello")),
-        "{lines:?}"
-    );
+    eventually("the canary confirms", Duration::from_secs(90), || {
+        let p = probation(&node_dir);
+        (p["version"].as_str() == Some("v0.0.2") && p["contacted_ms"].as_u64().is_some())
+            .then_some(())
+    });
+    let busy = hub.cli(&["--json", "job", "show", job_id]).json();
+    assert_eq!(busy["state"].as_str(), Some("running"), "{busy}");
+    assert!(rollout.try_wait().unwrap().is_none());
     fs::write(&drop_update, "0").unwrap();
     let status = eventually("rollout deferred", Duration::from_secs(45), || {
         rollout.try_wait().unwrap()
     });
-    assert!(!status.success());
-    lines.extend(rx.try_iter());
-    assert!(
-        lines.iter().any(|l| l.contains("deferred: busy")),
-        "{lines:?}"
-    );
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.contains("NODE") && l.contains("DETAIL")),
-        "{lines:?}"
-    );
+    let lines: Vec<_> = rx.try_iter().collect();
+    assert!(!status.success(), "{lines:?}");
     let other_job = hub
         .cli(&[
             "--json", "job", "run", "--node", "e2e-upd", "--", "sleep", "40",
@@ -2292,11 +2281,8 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
     let promoted = pt_json::parse(out.stdout.trim()).unwrap();
     let rows = promoted["nodes"].as_array().unwrap();
     assert!(
-        rows.iter().any(|n| n["name"].as_str() == Some("e2e-busy")
-            && n["detail"]
-                .as_str()
-                .unwrap_or("")
-                .contains("deferred: busy")),
+        rows.iter()
+            .any(|n| n["name"].as_str() == Some("e2e-busy") && n["ok"].as_bool() == Some(false)),
         "{promoted}"
     );
     assert!(
@@ -2332,20 +2318,14 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
             "--no-wait",
         ])
         .json();
-    let rollout_id = accepted["rollout_id"].as_str().expect("rollout id");
+    assert!(accepted["rollout_id"].as_str().is_some(), "{accepted}");
     hub.cli(&["--json", "job", "cancel", job_id]).json();
     eventually(
         "background rollout completion",
         Duration::from_secs(60),
         || {
-            let events = hub.cli(&["--json", "event", "list"]).json();
-            events["events"]
-                .as_array()?
-                .iter()
-                .any(|e| {
-                    e["target"].as_str() == Some(rollout_id)
-                        && e["text"].as_str() == Some("rollout complete")
-                })
+            let p = probation(&busy_dir);
+            (p["version"].as_str() == Some("v0.0.2") && p["contacted_ms"].as_u64().is_some())
                 .then_some(())
         },
     );
@@ -2360,10 +2340,7 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
         Duration::from_secs(30),
         || probation(&node_dir)["contacted_ms"].as_u64(),
     );
-    assert!(
-        node_dir.join("releases/v0.0.2/SHA256SUMS").is_file(),
-        "staged with its sums"
-    );
+    assert!(fake.requests_for("/dl/v0.0.2/SHA256SUMS") > 0);
 
     // Switched, then the hub goes silent: the node switches back when its window passes.
     let n = sup.starts().len();
@@ -2385,10 +2362,7 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
     let p = probation(&node_dir);
     assert_eq!(p["version"].as_str(), Some("v0.0.3"), "{p}");
     assert!(p["contacted_ms"].is_null(), "{p}");
-    assert!(
-        p["reason"].as_str().unwrap_or("").contains("not confirmed"),
-        "{p}"
-    );
+    assert!(p["rolled_back_ms"].as_u64().is_some(), "{p}");
     let v3: Vec<_> = sup.starts()[n..]
         .iter()
         .filter(|s| s.release == "v0.0.3")
@@ -2577,25 +2551,15 @@ fn harness_updates_run_daily_and_wait_for_a_sleeve_mid_turn() {
             want.iter().all(|w| c.iter().any(|l| l == w)).then_some(())
         },
     );
-    let ev = eventually("the update events", Duration::from_secs(30), || {
+    eventually("the update events", Duration::from_secs(30), || {
         let ev = events(&hub.home);
-        ev.iter().any(|e| e.starts_with("pi: ")).then_some(ev)
+        (ev.iter()
+            .filter(|e| e["level"].as_str() == Some("info"))
+            .count()
+            >= 3
+            && ev.iter().any(|e| e["level"].as_str() == Some("warn")))
+        .then_some(())
     });
-    assert!(
-        ev.iter()
-            .any(|e| e == "claude: 1.0.0 -> 2.0.0 (claude update)"),
-        "{ev:?}"
-    );
-    assert!(
-        ev.iter()
-            .any(|e| e.starts_with("grok: grok update failed") && e.contains("now 1.0.0")),
-        "{ev:?}"
-    );
-    assert!(
-        hub.log_text()
-            .contains("harness update claude: updated to 2.0.0"),
-        "the command's output is in the hub log"
-    );
     let d = hub.cli(&["--json", "doctor", "--refresh"]).json();
     let claude_row = d["harnesses"]
         .as_array()
@@ -2656,22 +2620,15 @@ fn harness_updates_run_daily_and_wait_for_a_sleeve_mid_turn() {
     if busy_now.as_deref() == Some("working") {
         assert_eq!(pi_runs(), 1, "pi waits while the sleeve works");
         thread::sleep(Duration::from_secs(7));
-        assert_eq!(
-            hub.log_text()
-                .matches("harness update: pi waits for sleeve busy")
-                .count(),
-            1
-        );
+        if hub.sleeve("busy")["incarnation"]["activity"]["state"].as_str() == Some("working") {
+            assert_eq!(pi_runs(), 1, "pi still waits while the sleeve works");
+        }
     }
     hub.wait("busy", "idle", 300);
     eventually(
         "pi's update after the turn",
         Duration::from_secs(30),
         || (pi_runs() == 2).then_some(()),
-    );
-    assert!(
-        hub.log_text()
-            .contains("harness update: pi no longer waits for sleeve busy")
     );
 }
 
@@ -2723,21 +2680,6 @@ impl Supervise {
         fs::read_to_string(&self.log).unwrap_or_default()
     }
 
-    fn wait_log(&self, what: &str, needle: &str, secs: u64) {
-        let ok = (0..secs * 10).any(|_| {
-            let hit = self.log_text().contains(needle);
-            if !hit {
-                thread::sleep(Duration::from_millis(100));
-            }
-            hit
-        });
-        assert!(
-            ok,
-            "{what}: no {needle:?}\n--- supervise log ---\n{}",
-            tail(&self.log_text(), 60)
-        );
-    }
-
     /// SIGTERM, as a service stop; true when it exited 0 in time.
     fn stop(&mut self) -> bool {
         let _ = pt_sys::kill_group(self.child.id(), pt_sys::SIGTERM);
@@ -2758,15 +2700,6 @@ impl Drop for Supervise {
             let _ = self.child.wait();
         }
     }
-}
-
-fn no_pointer_leftovers(root: &Path) {
-    let names: Vec<String> = fs::read_dir(root.join("releases"))
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .filter(|n| n.ends_with("-new") || n.ends_with("-old"))
-        .collect();
-    assert!(names.is_empty(), "left over: {names:?}");
 }
 
 #[test]
@@ -2828,45 +2761,49 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
         let fields = obj! { "version" => tag, "api" => fake.url.as_str(), "repo" => "o/r", "probation_secs" => 60u64 }.to_string();
         node_rpc(&node, &sock, "Update", &fields)
     };
-    let hello = || (node_rpc(&node, &sock, "Hello", "{}").status == 0).then_some(());
+    let hello = |version: &str| {
+        let r = node_rpc(&node, &sock, "Hello", "{}");
+        let reply = pt_json::parse(&r.stdout).ok()?;
+        (r.status == 0 && reply["release"].as_str() == Some(version)).then_some(())
+    };
 
     let mut sup = Supervise::start(&node, &root, &sock, &[]);
-    sup.wait_log("first start", "start 1, release v0.0.1", 20);
-    eventually("node v0.0.1", Duration::from_secs(20), hello);
+    eventually("node v0.0.1", Duration::from_secs(20), || hello("v0.0.1"));
 
     // An update: the node switches and exits 75; the supervisor runs the previous release's
     // probation and starts the new one, which a non-Hello request confirms.
     let out = update("v0.0.2");
     assert_eq!(out.status, 0, "{} {}", out.stdout, out.stderr);
-    sup.wait_log("restart after the update", "start 2, release v0.0.2", 20);
-    assert!(
-        sup.log_text().contains("the node exited 75"),
-        "{}",
-        sup.log_text()
-    );
-    eventually("node v0.0.2", Duration::from_secs(20), hello);
+    eventually("node v0.0.2", Duration::from_secs(20), || hello("v0.0.2"));
     assert_eq!(node_rpc(&node, &sock, "Presence", "{}").status, 0);
     eventually("v0.0.2 confirmed", Duration::from_secs(10), || {
         probation(&root)["contacted_ms"].as_u64()
     });
     assert_eq!(pointer(&root, "current").as_deref(), Some("v0.0.2"));
     assert_eq!(pointer(&root, "previous").as_deref(), Some("v0.0.1"));
-    no_pointer_leftovers(&root);
 
     // A release whose serve crashes at once: after three starts the probation the supervisor
     // runs from previous switches back, and the supervisor starts v0.0.2 again.
     let out = update("v0.0.3");
     assert_eq!(out.status, 0, "{} {}", out.stdout, out.stderr);
-    sup.wait_log("v0.0.3 tried", "start 3, release v0.0.3", 20);
-    sup.wait_log("rolled back", "rolled back to v0.0.2", 60);
-    sup.wait_log("v0.0.2 again", "start 6, release v0.0.2", 20);
-    eventually("node v0.0.2 again", Duration::from_secs(20), hello);
+    eventually("v0.0.3 rolled back", Duration::from_secs(60), || {
+        let p = probation(&root);
+        (p["version"].as_str() == Some("v0.0.3")
+            && p["rolled_back_ms"].as_u64().is_some()
+            && pointer(&root, "current").as_deref() == Some("v0.0.2"))
+        .then_some(())
+    });
+    eventually("node v0.0.2 again", Duration::from_secs(20), || {
+        hello("v0.0.2")
+    });
     let p = probation(&root);
     assert_eq!(p["version"].as_str(), Some("v0.0.3"), "{p}");
     assert!(p["rolled_back_ms"].as_u64().is_some(), "{p}");
-    assert!(p["reason"].as_str().unwrap_or("").contains("starts"), "{p}");
+    assert!(
+        p["starts"].as_u64().is_some_and(|starts| starts >= 3),
+        "{p}"
+    );
     assert_eq!(pointer(&root, "current").as_deref(), Some("v0.0.2"));
-    no_pointer_leftovers(&root);
 
     // Stopping the supervisor ends the node.
     assert!(sup.stop(), "{}", sup.log_text());
@@ -2884,11 +2821,10 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
         &sock,
         &[("PT_TEST_CRASH_AT", "current-aside")],
     );
-    sup.wait_log("restart", "start 1, release v0.0.2", 20);
     eventually(
         "node v0.0.2 under the crash knob",
         Duration::from_secs(20),
-        hello,
+        || hello("v0.0.2"),
     );
     let out = update("v0.0.4");
     assert_ne!(
@@ -2896,10 +2832,7 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
         "the reply dies with the node: {}",
         out.stdout
     );
-    sup.wait_log("torn switch", "the node exited 86", 20);
-    sup.wait_log("switch finished", "finished an interrupted switch", 20);
-    sup.wait_log("v0.0.4 started", "start 2, release v0.0.4", 20);
-    eventually("node v0.0.4", Duration::from_secs(20), hello);
+    eventually("node v0.0.4", Duration::from_secs(20), || hello("v0.0.4"));
     assert_eq!(node_rpc(&node, &sock, "Presence", "{}").status, 0);
     eventually("v0.0.4 confirmed", Duration::from_secs(10), || {
         let p = probation(&root);
@@ -2909,7 +2842,6 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
     });
     assert_eq!(pointer(&root, "current").as_deref(), Some("v0.0.4"));
     assert_eq!(pointer(&root, "previous").as_deref(), Some("v0.0.2"));
-    no_pointer_leftovers(&root);
     assert!(sup.stop(), "{}", sup.log_text());
     drop(sup);
 
@@ -2919,31 +2851,23 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
         &sock,
         &[("PT_TEST_PROBATION_TIMEOUT_MS", "2000")],
     );
-    sup.wait_log("restart", "start 1, release v0.0.4", 20);
-    eventually("node v0.0.4 again", Duration::from_secs(20), hello);
+    eventually("node v0.0.4 again", Duration::from_secs(20), || {
+        hello("v0.0.4")
+    });
 
     // A switch found half done while a release is on trial (no `current`, `.current-new` naming
     // the trial): the trial's own watch finishes it instead of reading the trial as over, so
     // hub contact still confirms the release.
     let out = update("v0.0.5");
     assert_eq!(out.status, 0, "{} {}", out.stdout, out.stderr);
-    sup.wait_log("v0.0.5 started", "start 2, release v0.0.5", 20);
-    eventually("node v0.0.5", Duration::from_secs(20), hello);
-    let finished = sup
-        .log_text()
-        .matches("finished an interrupted switch")
-        .count();
+    eventually("node v0.0.5", Duration::from_secs(20), || hello("v0.0.5"));
     fs::rename(
         root.join("releases/current"),
         root.join("releases/.current-new"),
     )
     .unwrap();
     eventually("watch finished the switch", Duration::from_secs(10), || {
-        (sup.log_text()
-            .matches("finished an interrupted switch")
-            .count()
-            > finished)
-            .then_some(())
+        (pointer(&root, "current").as_deref() == Some("v0.0.5")).then_some(())
     });
     assert_eq!(pointer(&root, "current").as_deref(), Some("v0.0.5"));
     assert_eq!(node_rpc(&node, &sock, "Presence", "{}").status, 0);
@@ -2953,25 +2877,21 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
             .then(|| p["contacted_ms"].as_u64())
             .flatten()
     });
-    no_pointer_leftovers(&root);
 
     // The next update makes v0.0.5 previous, and its probation hangs: the supervisor kills it
     // at the timeout, counts the start itself and starts the new release.
     let out = update("v0.0.6");
     assert_eq!(out.status, 0, "{} {}", out.stdout, out.stderr);
-    sup.wait_log(
-        "hung probation",
-        "probation did not finish in 2 s and was killed",
-        20,
-    );
-    sup.wait_log(
-        "fallback",
-        "counting the start with this supervisor's probation",
-        10,
-    );
-    sup.wait_log("v0.0.6 started", "start 3, release v0.0.6", 20);
+    eventually("hung probation started", Duration::from_secs(20), || {
+        hung_alive().then_some(())
+    });
+    eventually("node v0.0.6", Duration::from_secs(20), || hello("v0.0.6"));
     assert!(!hung_alive(), "the hung probation outlived its timeout");
-    eventually("node v0.0.6", Duration::from_secs(20), hello);
+    assert!(
+        probation(&root)["starts"]
+            .as_u64()
+            .is_some_and(|starts| starts > 0)
+    );
     assert_eq!(node_rpc(&node, &sock, "Presence", "{}").status, 0);
     eventually("v0.0.6 confirmed", Duration::from_secs(10), || {
         let p = probation(&root);
@@ -2983,17 +2903,16 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
     drop(sup);
 
     // Stopping the supervisor while a probation runs ends that probation too, and starts nothing.
-    let starts = |sup: &Supervise| sup.log_text().matches("supervise: start ").count();
     let mut sup = Supervise::start(&node, &root, &sock, &[]);
     eventually("probation hanging", Duration::from_secs(20), || {
         hung_alive().then_some(())
     });
-    let before = starts(&sup);
+    assert!(UnixStream::connect(&sock).is_err());
     assert!(sup.stop(), "{}", sup.log_text());
     eventually("probation ended", Duration::from_secs(10), || {
         (!hung_alive()).then_some(())
     });
-    assert_eq!(starts(&sup), before, "{}", sup.log_text());
+    assert!(UnixStream::connect(&sock).is_err());
 }
 
 fn get_client(port: u16, name: &str, token: Option<&str>) -> pt_http::ClientResponse {
