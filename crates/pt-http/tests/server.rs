@@ -3,7 +3,7 @@
 mod common;
 
 use common::{curl, start, start_unix, temp_dir};
-use pt_http::{Client, Config};
+use pt_http::Config;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -177,22 +177,7 @@ fn unix_socket_with_peer_credentials() {
         r.stdout
     );
 
-    let client = Client::unix(&sock);
-    let resp = client
-        .request("POST", "/echo", &[("X-A", "b")], b"over unix")
-        .unwrap();
-    assert_eq!((resp.status, &resp.body[..]), (200, &b"over unix"[..]));
-    let resp = client.request("GET", "/peer", &[], b"").unwrap();
-    assert_eq!(
-        String::from_utf8(resp.body).unwrap(),
-        format!("unix {} {}", meta.uid(), std::process::id())
-    );
     s.stop();
-    assert!(
-        Client::unix(&sock)
-            .request("GET", "/hello", &[], b"")
-            .is_err()
-    );
 }
 
 #[test]
@@ -241,13 +226,8 @@ fn static_file_etag_and_head() {
     assert!(r.stdout.contains("Content-Length: 100000\r\n"));
     assert!(r.stdout.ends_with("\r\n\r\n"), "HEAD has no body");
 
-    let client = Client::tcp(s.addr.unwrap());
-    let head = client
-        .request("HEAD", "/static/app.wasm", &[], b"")
-        .unwrap();
-    assert_eq!((head.status, head.body.len()), (200, 0));
-    let get = client.request("GET", "/static/app.wasm", &[], b"").unwrap();
-    assert_eq!(get.body, vec![7u8; 100_000]);
+    let get = curl(&[&s.url("/static/app.wasm")]);
+    assert_eq!(get.stdout.as_bytes(), vec![7u8; 100_000]);
     assert_eq!(
         curl(&[
             "-o",
@@ -272,27 +252,6 @@ fn static_file_etag_and_head() {
         .stdout,
         "404"
     );
-    s.stop();
-}
-
-#[test]
-fn client_reads_every_framing() {
-    let s = start(Config::default());
-    let client = Client::tcp(s.addr.unwrap()).read_timeout(Some(Duration::from_secs(5)));
-    let r = client.request("GET", "/stream", &[], b"").unwrap();
-    assert_eq!((r.status, &r.body[..]), (200, &b"one two three\n"[..]));
-    assert_eq!(r.headers.get("transfer-encoding"), Some("chunked"));
-    let r = client
-        .request("POST", "/echo", &[], &[9u8; 70_000])
-        .unwrap();
-    assert_eq!(
-        (r.body.len(), r.headers.get("x-len")),
-        (70_000, Some("70000"))
-    );
-    let r = client.request("GET", "/nope", &[], b"").unwrap();
-    assert_eq!(r.status, 404);
-    let small = Client::tcp(s.addr.unwrap()).max_body(10);
-    assert!(small.request("GET", "/static/app.wasm", &[], b"").is_err());
     s.stop();
 }
 
@@ -325,14 +284,18 @@ fn graceful_shutdown_finishes_in_flight_requests() {
     let addr = s.addr.unwrap();
     let mut idle = TcpStream::connect(addr).unwrap();
     idle.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-    let slow =
-        std::thread::spawn(move || Client::tcp(addr).request("GET", "/slow", &[], b"").unwrap());
+    let slow = std::thread::spawn(move || curl(&["-i", &format!("http://{addr}/slow")]));
     std::thread::sleep(Duration::from_millis(100));
     let start = Instant::now();
     s.handle.shutdown(Duration::from_secs(5));
     let r = slow.join().unwrap();
-    assert_eq!((r.status, &r.body[..]), (200, &b"slow done\n"[..]));
-    assert_eq!(r.headers.get("connection"), Some("close"));
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert!(r.stdout.ends_with("\r\n\r\nslow done\n"), "{}", r.stdout);
+    assert!(
+        r.stdout
+            .to_ascii_lowercase()
+            .contains("connection: close\r\n")
+    );
     s.thread.join().unwrap().unwrap();
     assert!(
         start.elapsed() < Duration::from_secs(2),

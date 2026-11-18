@@ -27,7 +27,7 @@ layout() {
         pt-frame) echo "decode reply request roundtrip" ;;
         pt-hash) echo "differential" ;;
         pt-history) echo "extract_lines segment tail tokenize" ;;
-        pt-http) echo "client_deadline request ws_frame" ;;
+        pt-http) echo "client_deadline client_exchange request ws_frame" ;;
         pt-journal) echo "recovery" ;;
         pt-json) echo "files" ;;
         pt-qr) echo "encode" ;;
