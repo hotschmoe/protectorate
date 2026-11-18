@@ -1,12 +1,5 @@
 #!/bin/sh
-# The workspace's test binaries side by side instead of one after another, each from its
-# package's dir as `cargo test` runs it, slowest first by the last run's times. The binaries
-# whose tests take turns on the local model (their source calls have_runtime or reads
-# PT_E2E_PI_*) run one at a time in a lane of their own: one endpoint serves them all, and
-# side by side their turns time out. A failing binary's output is printed; every log stays in
-# <target>/test-logs. The e2e tests' homes from the last run stay in <target>/tmp.
-#
-#   sh scripts/test.sh            PT_TEST_JOBS (default half the cores) binaries at once
+# One local-model endpoint serves the model tests, so they run serially.
 set -eu
 
 jobs=${PT_TEST_JOBS:-$(( $(nproc) / 2 > 1 ? $(nproc) / 2 : 1 ))}
@@ -23,9 +16,7 @@ PROTECTORATE_BUILD_VERSION=${PROTECTORATE_BUILD_VERSION:-dev} cargo test --locke
     sed -n 's/.*"manifest_path":"\([^"]*\)".*"kind":\["\([^"]*\)".*"executable":"\([^"]*\)".*/\1 \2 \3/p' >"$logs/list"
 [ -s "$logs/list" ] || { echo "test: no test binaries" >&2; exit 1; }
 
-# A binary's key outlives its hash: the package dir, the target kind (a lib and a bin can share
-# a name) and the test name. Slowest first, so the long ones never start last; one the last run
-# did not time counts as slowest.
+# The package, target kind and name identify a binary across rebuilds.
 while read -r manifest kind exe; do
     key=$(basename "$(dirname "$manifest")")/$kind-$(basename "$exe" | sed 's/-[0-9a-f]*$//')
     t=$(awk -v k="$key" '$2 == k { print $1; exit }' "$times")
