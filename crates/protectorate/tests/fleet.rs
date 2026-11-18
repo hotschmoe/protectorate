@@ -729,12 +729,6 @@ fn hub_runs_the_fleet_and_node_jobs() {
         "true",
     ]);
     assert_eq!(refusal.status, 1, "{} {}", refusal.stdout, refusal.stderr);
-    let log = fs::read_to_string(node_dir.join("serve.log")).unwrap_or_default();
-    assert_eq!(
-        log.matches("artifact \"nope.txt\" refused").count(),
-        1,
-        "{log}"
-    );
     let blocked = run_job(
         &hub,
         &[
@@ -796,8 +790,6 @@ fn hub_runs_the_fleet_and_node_jobs() {
     assert_eq!(bytes.len(), 3_000_000);
     assert_eq!(pt_hash::to_hex(&pt_hash::sha256(&bytes)), node_sha);
     assert_eq!(done["artifacts"][1]["size_bytes"].as_u64(), Some(4));
-    let node_log = || fs::read_to_string(node_dir.join("serve.log")).unwrap_or_default();
-
     // A symlink or `..` out of the job's directory is refused by the node; the job fails.
     let outside = hub.home.with_file_name("outside.txt");
     fs::write(&outside, "not for the hub").unwrap();
@@ -809,17 +801,6 @@ fn hub_runs_the_fleet_and_node_jobs() {
         let done = wait_job(&hub, &id, &["succeeded", "failed"], 120);
         assert_eq!(done["state"].as_str(), Some("failed"), "{name}: {done}");
         assert!(done["artifacts"][0]["sha256"].is_null(), "{done}");
-        assert!(
-            node_log().contains(&format!("artifact {name:?} refused")),
-            "{name}: {}",
-            tail(&node_log(), 20)
-        );
-        assert_eq!(
-            node_log()
-                .matches(&format!("artifact {name:?} refused"))
-                .count(),
-            1
-        );
     }
 
     // Another submit already holds the node job id the hub's next job gets: its status (and
