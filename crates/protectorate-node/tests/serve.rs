@@ -175,8 +175,9 @@ fn restart_mid_job(extra: &[&str]) {
     assert_eq!(num(&short_now, "pid"), num(&short, "pid"));
 
     // Neither runs again, by itself or on a repeated submit; a new attempt does run.
-    assert_eq!(text(&a.submit(submit), "state"), "interrupted");
-    assert_eq!(a.journal().matches(r#""type":"start""#).count(), 2);
+    let repeated = a.submit(submit);
+    assert_eq!(text(&repeated, "state"), "interrupted");
+    assert_eq!(num(&repeated, "pid"), pid);
     let next = a.submit(r#"{"job_id":"long","attempt":2,"script":"exit 0"}"#);
     assert_ne!(num(&next, "pid"), pid);
     a.wait_state("long", 2, &["succeeded"], 10 * SECS);
