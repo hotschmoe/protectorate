@@ -1258,7 +1258,9 @@ exec sleep 300"#,
     let scratch = hub.home.join(format!("sleeves/{id}/scratch"));
     let end = std::time::Instant::now() + Duration::from_secs(60);
     let saw = loop {
-        if let Ok(saw) = std::fs::read_to_string(scratch.join("target/saw")) {
+        if scratch.join("target/memory").is_file()
+            && let Ok(saw) = std::fs::read_to_string(scratch.join("target/saw"))
+        {
             break saw;
         }
         assert!(
