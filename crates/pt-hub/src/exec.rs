@@ -919,6 +919,10 @@ impl SleeveExec {
         if pt_sys::is_memory_filesystem(&scratch)
             .map_err(|e| format!("check scratch filesystem {}: {e}", scratch.display()))?
         {
+            #[cfg(debug_assertions)]
+            if let Some(path) = std::env::var_os("PT_TEST_MEMORY_SCRATCH_REFUSED") {
+                let _ = fs::write(path, b"refused");
+            }
             return Err(format!(
                 "scratch {} is on a memory filesystem; use a disk-backed hub home",
                 scratch.display()

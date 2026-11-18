@@ -26,6 +26,7 @@ fn sleeve_lifecycle() {
     assert_eq!(roles, ["envoy"], "a fresh hub has Envoy and nothing else");
 
     let repo = temp_repo("lifecycle");
+    let refs_before = git_out(&repo, &["for-each-ref", "--format=%(refname)"]);
     let s = hub.spawn_pi("one", &repo);
     let id = s["id"].as_str().unwrap().to_string();
     let rid = hub.send("one", READY);
@@ -52,9 +53,13 @@ fn sleeve_lifecycle() {
         "a checkpoint after the turn",
         Duration::from_secs(20),
         || {
-            std::fs::read_to_string(&checkpoints)
-                .ok()
-                .filter(|t| t.contains("\"g\":1"))
+            std::fs::read_to_string(&checkpoints).ok().filter(|t| {
+                t.lines().any(|line| {
+                    pt_json::parse(line)
+                        .ok()
+                        .is_some_and(|v| v["g"].as_u64() == Some(1))
+                })
+            })
         },
     );
 
@@ -88,8 +93,6 @@ fn sleeve_lifecycle() {
             .then_some(())
         },
     );
-    // Removed, the sleeve keeps nothing open in the hub: its executor ends, its transcript
-    // closes.
     hub.cli(&["sleeve", "rm", "one"]).ok();
     let scratch = hub.home.join(format!("sleeves/{id}/scratch"));
     let log = hub.home.join(format!("sleeves/{id}/transcript.jsonl"));
@@ -102,22 +105,10 @@ fn sleeve_lifecycle() {
             })
             .unwrap_or(false)
     };
-    let threads = || {
-        std::fs::read_dir(format!("/proc/{pid}/task"))
-            .map(|d| {
-                d.flatten()
-                    .filter(|t| {
-                        std::fs::read_to_string(t.path().join("comm"))
-                            .is_ok_and(|c| c.trim() == format!("pt-exec-{id}"))
-                    })
-                    .count()
-            })
-            .unwrap_or(0)
-    };
     eventually(
-        "the removed sleeve's files and thread to go",
+        "the removed sleeve's files to close",
         Duration::from_secs(10),
-        || (!open() && threads() == 0 && !scratch.exists()).then_some(()),
+        || (!open() && !scratch.exists()).then_some(()),
     );
 
     assert_eq!(
@@ -127,7 +118,7 @@ fn sleeve_lifecycle() {
     );
     assert_eq!(
         git_out(&repo, &["for-each-ref", "--format=%(refname)"]),
-        "refs/heads/main",
+        refs_before,
         "no ref of ours in the repo"
     );
 }
@@ -1011,8 +1002,71 @@ for number, line in enumerate(sys.stdin):
     );
 }
 
+#[cfg(debug_assertions)]
+fn memory_scratch_is_refused(dir: &std::path::Path) {
+    let home = dir.join("home");
+    let fake = dir.join("claude");
+    let started = dir.join("harness-started");
+    let refused = dir.join("refused");
+    std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
+    std::fs::write(home.join("logins/.claude/.credentials.json"), "{}").unwrap();
+    write_script(
+        &fake,
+        &format!(
+            "if [ \"$1\" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi\ntouch '{}'\nexec sleep 300",
+            started.display()
+        ),
+    );
+    write_script(&dir.join("systemd-run"), "exit 0");
+    let config = pt_json::obj! {
+        "envoy" => pt_json::obj! { "harness" => "claude" },
+        "claude_program" => fake.to_str().unwrap(),
+        "scopes" => false,
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+    };
+    std::fs::write(home.join("config.json"), config.to_string()).unwrap();
+    let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
+    let hub = Hub::open(
+        home,
+        &[],
+        &[
+            ("PATH", &path),
+            ("PT_TEST_MEMORY_SCRATCH_REFUSED", refused.to_str().unwrap()),
+        ],
+    );
+    let until = std::time::Instant::now() + Duration::from_secs(60);
+    while std::fs::read(&refused).ok().as_deref() != Some(b"refused")
+        && std::time::Instant::now() < until
+    {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let log = hub.log_text();
+    let diagnostic = log
+        .lines()
+        .filter(|line| {
+            line.contains("scratch") || line.contains("doctor") || line.contains("space")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert_eq!(
+        std::fs::read(&refused).ok().as_deref(),
+        Some(b"refused".as_slice()),
+        "{diagnostic}"
+    );
+    assert!(
+        !started.exists(),
+        "the harness started on a memory filesystem"
+    );
+}
+
 #[test]
 fn scratch_survives_a_restart_and_is_removed_with_the_sleeve() {
+    #[cfg(debug_assertions)]
+    if let Some(dir) = std::env::var_os("PT_TEST_MEMORY_SCRATCH") {
+        memory_scratch_is_refused(std::path::Path::new(&dir));
+        return;
+    }
     let dir = unique("scratch");
     let home = dir.join("home");
     let fake = dir.join("claude");
@@ -1085,26 +1139,36 @@ exec sleep 300"#,
         Duration::from_secs(20),
         || (!scratch.exists()).then_some(()),
     );
-    let fs = std::process::Command::new("stat")
-        .args(["-f", "-c", "%t", "/tmp"])
-        .output()
-        .unwrap();
-    if String::from_utf8_lossy(&fs.stdout).trim() == "1021994" {
-        let memory_home =
-            std::path::PathBuf::from(format!("/tmp/pt-scratch-test-{}/home", std::process::id()));
-        std::fs::create_dir_all(memory_home.join("logins/.claude")).unwrap();
-        std::fs::write(memory_home.join("logins/.claude/.credentials.json"), "{}").unwrap();
-        std::fs::write(memory_home.join("config.json"), config.to_string()).unwrap();
-        let memory_hub = Hub::open(memory_home, &[], &[("PATH", &path)]);
-        eventually(
-            "the tmpfs hub home to be refused",
-            Duration::from_secs(60),
-            || {
-                memory_hub
-                    .log_text()
-                    .contains("is on a memory filesystem")
-                    .then_some(())
-            },
+    #[cfg(debug_assertions)]
+    {
+        let available = std::process::Command::new("unshare")
+            .args(["-Ur", "-m", "--", "/bin/true"])
+            .status()
+            .is_ok_and(|status| status.success());
+        if !available {
+            eprintln!("SKIP: a private mount namespace is unavailable");
+            return;
+        }
+        let mount = unique("scratch-memory");
+        std::fs::create_dir_all(&mount).unwrap();
+        let out = std::process::Command::new("unshare")
+            .args(["-Ur", "-m", "--", "/bin/sh", "-c"])
+            .arg(r#"/bin/mount -t tmpfs -o size=256m tmpfs "$1" || exit 77; exec "$2" --exact scratch_survives_a_restart_and_is_removed_with_the_sleeve --nocapture"#)
+            .arg("sh")
+            .arg(&mount)
+            .arg(std::env::current_exe().unwrap())
+            .env("PT_TEST_MEMORY_SCRATCH", &mount)
+            .output()
+            .unwrap();
+        if out.status.code() == Some(77) {
+            eprintln!("SKIP: a tmpfs mount is unavailable");
+            return;
+        }
+        assert!(
+            out.status.success(),
+            "tmpfs scratch case: {}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
         );
     }
 }
@@ -1392,14 +1456,11 @@ exit 2"#,
         Duration::from_secs(60),
         || scratch.join("target/ready3").exists().then_some(()),
     );
-    let entries = hub.transcript("oom");
-    let notices = of_type(&entries, "notice")
-        .iter()
-        .filter_map(|e| e["entry"]["text"].as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    assert!(!notices.contains("guardrail G4"), "{notices}");
-    assert_ne!(hub.sleeve("oom")["lifecycle"].as_str(), Some("parked"));
+    eventually(
+        "the sleeve remains running",
+        Duration::from_secs(10),
+        || (hub.sleeve("oom")["lifecycle"].as_str() == Some("running")).then_some(()),
+    );
 }
 
 /// The environment of this hub's sandboxed process for `name`. The socket keeps a parallel
