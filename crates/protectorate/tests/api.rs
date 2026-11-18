@@ -146,6 +146,19 @@ fn get(port: u16, path: &str, headers: &[(&str, &str)]) -> pt_http::ClientRespon
 /// build is served with ETags and an SPA fallback.
 #[test]
 fn api_surface() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let fake_bin = unique("doctor-redaction");
+    std::fs::create_dir_all(&fake_bin).unwrap();
+    let fake_gh = fake_bin.join("gh");
+    std::fs::write(
+        &fake_gh,
+        "#!/bin/sh\ncase \"$1\" in --version) echo 'gh version test';; auth) echo 'Logged in to github.com account doctor-test'; echo \"Token: $GH_FAKE_TOKEN\";; esac\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&fake_gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", fake_bin.display(), std::env::var("PATH").unwrap());
+    let secret = "doctor-secret-7f3a";
     let port = free_port();
     let web = std::env::temp_dir().join(format!("pt-web-{port}"));
     std::fs::create_dir_all(web.join("assets")).unwrap();
@@ -157,10 +170,22 @@ fn api_surface() {
         "api",
         "pi_local",
         &["--listen", &listen, "--web-dir", web.to_str().unwrap()],
-        &[("PT_TEST_HUB_SAMPLE_MS", "1500")],
+        &[
+            ("PT_TEST_HUB_SAMPLE_MS", "1500"),
+            ("PATH", &path),
+            ("GH_FAKE_TOKEN", secret),
+            ("XAI_API_KEY", secret),
+        ],
     );
     let owner = hub.printed("owner token (shown once): ");
     let agent = hub.printed("envoy-only token: ");
+
+    let doctor = hub.cli(&["--json", "doctor", "--refresh"]).json();
+    assert_eq!(doctor["gh_account"].as_str(), Some("doctor-test"));
+    assert!(!doctor.to_string().contains(secret));
+    assert!(!hub.cli(&["doctor"]).ok().contains(secret));
+    let cached_doctor = std::fs::read_to_string(hub.home.join("doctor.json")).unwrap();
+    assert!(!cached_doctor.contains(secret));
 
     for m in METHODS {
         let (s, v) = post(port, m.name, None, "{}");
