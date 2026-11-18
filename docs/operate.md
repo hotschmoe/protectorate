@@ -685,4 +685,4 @@ None of these rotate yet.
 
 Tick processing tracks uncertain and probing effects, active jobs, eligible sleeves and pending approvals while retaining terminal records. These indexes are rebuilt during journal replay.
 
-The development gate `make check` runs every check and reports failed steps together. `make test` runs both e2e tests and fuzz seed replay even if either fails. The gate also builds every standalone fuzz workspace. Real-scope e2e tests skip with `SKIP: no systemd user bus` when the user manager is unavailable; test hubs stop their sleeve scopes on teardown.
+The development gate `make check` runs the blocking checks and reports failed steps together. `make test` runs the seven blocking e2e tests. `make test-heavy` runs the full e2e suite, replays fuzz seeds and builds the standalone fuzz workspaces. Real-scope e2e tests skip with `SKIP: no systemd user bus` when the user manager is unavailable; test hubs stop their sleeve scopes on teardown.

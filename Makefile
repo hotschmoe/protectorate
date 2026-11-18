@@ -65,15 +65,14 @@ release-snapshot:
 release-publish:
 	VERSION='$(VERSION)' bash scripts/release.sh publish
 
-# The workspace's e2e tests (their binaries side by side), then every committed fuzz seed
-# through its real fuzz targets.
 test:
-	@failed=""; $(CARGO_VERSION) sh scripts/test.sh || failed="$$failed e2e"; \
-	  $(CARGO_VERSION) sh scripts/replay-seeds.sh || failed="$$failed seeds"; \
-	  if [ -n "$$failed" ]; then echo "test failed:$$failed"; exit 1; fi
+	$(CARGO_VERSION) sh scripts/test-blocking.sh
 
 test-heavy:
-	$(CARGO_VERSION) cargo test --locked --workspace --test nodes node_job_policy_survives_restart_and_routes_around_restricted_nodes -- --ignored
+	@failed=""; $(CARGO_VERSION) sh scripts/test.sh || failed="$$failed e2e"; \
+	  $(CARGO_VERSION) sh scripts/replay-seeds.sh || failed="$$failed seeds"; \
+	  $(MAKE) check-fuzz || failed="$$failed check-fuzz"; \
+	  if [ -n "$$failed" ]; then echo "test failed:$$failed"; exit 1; fi
 
 # Also runs the Claude, Codex and Grok e2e tests, which spend a few small turns of quota.
 test-paid:
@@ -84,7 +83,7 @@ fmt:
 
 check:
 	@failed=""; \
-	  for step in fmt-check clippy check-fuzz test check-deps check-levels check-gen app-check check-version; do \
+	  for step in fmt-check clippy test check-deps check-levels check-gen app-check check-version; do \
 	    $(MAKE) $$step || failed="$$failed $$step"; \
 	  done; \
 	  if [ -n "$$failed" ]; then echo "check failed:$$failed"; exit 1; fi; \

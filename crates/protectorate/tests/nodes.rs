@@ -222,7 +222,6 @@ fn has_event(hub: &Hub, level: &str, text: &str) -> bool {
 }
 
 #[test]
-#[ignore = "heavy fleet test"]
 fn node_job_policy_survives_restart_and_routes_around_restricted_nodes() {
     if !common::on_path("bwrap") || !common::on_path("git") {
         eprintln!("SKIP: bwrap or git is missing");
