@@ -2120,6 +2120,42 @@ for line in sys.stdin:
         (hub.sleeve("envoy")["incarnation"]["activity"]["state"].as_str() == Some("working"))
             .then_some(())
     });
+    let mut all_wait = cli_command()
+        .arg("--home")
+        .arg(&hub.home)
+        .args([
+            "--json",
+            "sleeve",
+            "wait",
+            "envoy",
+            "worker",
+            "--all",
+            "--timeout",
+            "60",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let any = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "wait",
+            "envoy",
+            "worker",
+            "--any",
+            "--timeout",
+            "5",
+        ])
+        .json();
+    assert_eq!(any["reached"].as_bool(), Some(true));
+    assert_eq!(any["sleeves"][0]["reached"].as_bool(), Some(false));
+    assert_eq!(any["sleeves"][1]["reached"].as_bool(), Some(true));
+    assert!(
+        all_wait.try_wait().unwrap().is_none(),
+        "all returned while Envoy was working"
+    );
     hub.cli_env(&as_envoy, &["sleeve", "send", "worker", "do the work"])
         .ok();
     let queued = eventually("structured queued report", Duration::from_secs(10), || {
@@ -2141,6 +2177,14 @@ for line in sys.stdin:
     let (from, report) = eventually("the turn report", Duration::from_secs(60), || {
         reports().pop()
     });
+    let all_output = all_wait.wait_with_output().unwrap();
+    assert!(
+        all_output.status.success(),
+        "all wait failed: {}",
+        String::from_utf8_lossy(&all_output.stderr)
+    );
+    let all = pt_json::parse_bytes(&all_output.stdout).unwrap();
+    assert_eq!(all["reached"].as_bool(), Some(true));
     let transcript = hub.transcript("envoy");
     let structured = of_type(&transcript, "user_message")
         .into_iter()
