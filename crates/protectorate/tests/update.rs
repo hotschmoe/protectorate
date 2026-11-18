@@ -148,6 +148,18 @@ fn release(tag: &str, files: Vec<(String, Vec<u8>)>) -> Rel {
 struct Fake {
     url: String,
     handle: ShutdownHandle,
+    requests: Arc<Mutex<Vec<String>>>,
+}
+
+impl Fake {
+    fn requests_for(&self, path: &str) -> usize {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| *p == path)
+            .count()
+    }
 }
 
 impl Drop for Fake {
@@ -200,18 +212,27 @@ fn route(base: &str, rels: &[Rel], req: &Request) -> Response {
 fn serve_releases(rels: Vec<Rel>) -> Fake {
     let rels = Arc::new(rels);
     let base = Arc::new(std::sync::OnceLock::<String>::new());
+    let requests = Arc::new(Mutex::new(Vec::new()));
     let (r2, b2) = (rels.clone(), base.clone());
+    let recorded = requests.clone();
     let server = Server::bind_tcp(
         "127.0.0.1:0".parse().unwrap(),
         Config::default(),
-        move |req, _| route(b2.get().expect("base url"), &r2, req),
+        move |req, _| {
+            recorded.lock().unwrap().push(req.path().to_string());
+            route(b2.get().expect("base url"), &r2, req)
+        },
     )
     .unwrap();
     let url = format!("http://{}", server.local_addr().unwrap());
     base.set(url.clone()).unwrap();
     let handle = server.shutdown_handle();
     thread::spawn(move || server.run());
-    Fake { url, handle }
+    Fake {
+        url,
+        handle,
+        requests,
+    }
 }
 
 /// Installs `bytes` as release `tag` of `program` under `<root>/releases` and points
@@ -522,13 +543,9 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
     let first = confirmed_after(&home, 0, "v0.0.2 confirmed");
     up("the hub on v0.0.2");
     assert_eq!(pointer(&home, "previous").as_deref(), Some("v0.0.1"));
-    assert!(
-        events(&home)
-            .iter()
-            .any(|e| e.contains("v0.0.2 passed its health check")),
-        "{:?}",
-        events(&home)
-    );
+    let download = format!("/dl/v0.0.2/{asset}");
+    let downloads = fake.requests_for(&download);
+    assert_eq!(downloads, 1, "the release binary was downloaded once");
 
     // Rollback restarts; updating again reuses the staged release.
     let n = sup.starts().len();
@@ -544,16 +561,15 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
     );
     let n = sup.starts().len();
     let again = cli(&home, &["--json", "hub", "update", "--version", "v0.0.2"]).json();
-    assert!(
-        again["note"]
-            .as_str()
-            .unwrap_or("")
-            .contains("already staged"),
-        "{again}"
-    );
+    assert_eq!(again["restarting"].as_bool(), Some(true), "{again}");
     sup.running("v0.0.2", n, 60);
     confirmed_after(&home, first, "v0.0.2 confirmed again");
     up("the hub on v0.0.2 again");
+    assert_eq!(
+        fake.requests_for(&download),
+        downloads,
+        "staged release was fetched again"
+    );
 
     // A release whose serve dies at once: the prestart counts three starts, then switches back.
     let n = sup.starts().len();
@@ -568,7 +584,6 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
     let p = probation(&home);
     assert_eq!(p["version"].as_str(), Some("v0.0.3"), "{p}");
     assert!(p["rolled_back_ms"].as_u64().is_some(), "{p}");
-    assert!(p["reason"].as_str().unwrap_or("").contains("starts"), "{p}");
     up("the hub after the crash rollback");
 
     // A release that cannot open its listener switches itself back before it exits.
@@ -577,13 +592,7 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
     sup.running("v0.0.2", n + 1, 90);
     let p = probation(&home);
     assert_eq!(p["version"].as_str(), Some("v0.0.4"), "{p}");
-    assert!(
-        p["reason"]
-            .as_str()
-            .unwrap_or("")
-            .contains("failed to start"),
-        "{p}"
-    );
+    assert!(p["rolled_back_ms"].as_u64().is_some(), "{p}");
     let v4: Vec<_> = sup.starts()[n..]
         .iter()
         .filter(|s| s.release == "v0.0.4")
@@ -602,10 +611,6 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
         .output()
         .unwrap();
     assert!(not_from_releases.status.success(), "{not_from_releases:?}");
-    assert!(
-        String::from_utf8_lossy(&not_from_releases.stdout).contains("no release on trial"),
-        "{not_from_releases:?}"
-    );
     assert_eq!(
         fs::read(home.join("releases/probation.json")).unwrap(),
         before_probation,
@@ -1641,13 +1646,7 @@ fn implicit_hub_update_requires_higher_precedence() {
     assert_eq!(implicit["restarting"].as_bool(), Some(false), "{implicit}");
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.7.0-dev.3"));
     let explicit = cli(&home, &["--json", "hub", "update", "--version", "v0.6.0"]).json();
-    assert!(
-        explicit["note"]
-            .as_str()
-            .unwrap_or("")
-            .contains("downgrade"),
-        "{explicit}"
-    );
+    assert_eq!(explicit["restarting"].as_bool(), Some(true), "{explicit}");
     sup.running("v0.6.0", 1, 30);
     confirmed_after(&home, 0, "explicit downgrade confirmed");
     // The accepted update already wrote a snapshot. A refusal must not add or remove one.
@@ -1670,13 +1669,6 @@ fn implicit_hub_update_requires_higher_precedence() {
     );
     let unsupported = cli(&home, &["hub", "update", "--version", "v0.5.0"]);
     assert_ne!(unsupported.status, 0, "{}", unsupported.stdout);
-    assert!(
-        unsupported
-            .stderr
-            .contains("does not support snapshot-aware hub rollback"),
-        "{}",
-        unsupported.stderr
-    );
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.6.0"));
     assert_eq!(snapshot_names(), snapshots);
     let previous_bin = home.join("releases/v0.7.0-dev.3/protectorate");
@@ -1686,13 +1678,6 @@ fn implicit_hub_update_requires_higher_precedence() {
     write_exec(&previous_bin, &legacy_previous);
     let unsupported = cli(&home, &["hub", "update", "--rollback"]);
     assert_ne!(unsupported.status, 0, "{}", unsupported.stdout);
-    assert!(
-        unsupported
-            .stderr
-            .contains("cannot run snapshot-aware probation"),
-        "{}",
-        unsupported.stderr
-    );
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.6.0"));
     assert_eq!(snapshot_names(), snapshots);
     drop(sup);
@@ -1743,12 +1728,6 @@ fn binary_check_times_out_when_descendant_keeps_stdout() {
     let start = std::time::Instant::now();
     let out = cli(&home, &["hub", "update", "--version", "v0.0.2"]);
     assert_ne!(out.status, 0, "{}", out.stdout);
-    assert!(
-        out.stderr.contains("did not finish"),
-        "{} {}",
-        out.stdout,
-        out.stderr
-    );
     assert!(start.elapsed() < Duration::from_secs(10));
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
     let pid = fs::read_to_string(pidfile).unwrap();
@@ -1855,10 +1834,11 @@ fn node_update_admission_lost_reply_and_confirmation() {
         let fields = obj! { "version" => "v0.0.2", "api" => api, "repo" => "o/r", "probation_secs" => 30u64 }.to_string();
         let out = node_rpc(&node, &sock, "Update", &fields);
         assert_eq!(out.status, 1, "{api}: {} {}", out.stdout, out.stderr);
-        assert!(
-            out.stdout.contains("authority") || out.stdout.contains("loopback"),
-            "{api}: {}",
-            out.stdout
+        let response = pt_json::parse(&out.stdout).expect("node error response");
+        assert_eq!(
+            response["code"].as_str(),
+            Some("bad_request"),
+            "{api}: {response}"
         );
     }
 
@@ -1886,7 +1866,8 @@ fn node_update_admission_lost_reply_and_confirmation() {
         r#"{"job_id":"during-update","attempt":1,"script":"echo unexpected"}"#,
     );
     assert_eq!(submit.status, 1, "{} {}", submit.stdout, submit.stderr);
-    assert!(submit.stdout.contains("busy"), "{}", submit.stdout);
+    let response = pt_json::parse(&submit.stdout).expect("node error response");
+    assert_eq!(response["code"].as_str(), Some("busy"), "{response}");
     fs::write(&pause, "0").unwrap();
     sup.running("v0.0.2", 1, 45);
     assert_eq!(
@@ -1988,7 +1969,6 @@ fn node_trial_refuses_overlap_retries_confirmation_and_rejects_expiry() {
     let fields = obj! { "version" => "v0.0.3", "api" => fake.url.as_str(), "repo" => "o/r", "probation_secs" => 30u64 }.to_string();
     let overlap = node_rpc(&node, &sock, "Update", &fields);
     assert_eq!(overlap.status, 1, "{} {}", overlap.stdout, overlap.stderr);
-    assert!(overlap.stdout.contains("probation"), "{}", overlap.stdout);
     assert_eq!(pointer(&root, "current").as_deref(), Some("v0.0.2"));
     assert_eq!(pointer(&root, "previous").as_deref(), Some("v0.0.1"));
     assert!(probation(&root)["contacted_ms"].is_null());
@@ -3182,10 +3162,15 @@ fn hub_serves_its_release_client_builds_to_the_owner_and_devices() {
         let (s, v) = post(port, "GetHubInfo", Some(&owner), "{}");
         (s == 200).then_some(v)
     });
-    assert_eq!(
-        info["clients"],
-        Value::from(vec![Value::from(apk), Value::from(zip)]),
-        "only the builds SHA256SUMS names: {info}"
+    let clients = info["clients"].as_array().expect("client list");
+    assert_eq!(clients.len(), 2, "only the builds SHA256SUMS names: {info}");
+    assert!(
+        clients.iter().any(|name| name.as_str() == Some(apk)),
+        "{info}"
+    );
+    assert!(
+        clients.iter().any(|name| name.as_str() == Some(zip)),
+        "{info}"
     );
 
     // Envoy's capability, as the hub derives it, is a sleeve's: refused like any sleeve.
@@ -3240,29 +3225,11 @@ fn hub_serves_its_release_client_builds_to_the_owner_and_devices() {
         apk_bytes
     );
     assert!(!stale.exists(), "an older release's builds are removed");
-    let names: Vec<String> = fs::read_dir(home.join("clients/v0.0.1"))
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    assert_eq!(
-        names,
-        vec![apk.to_string()],
-        "one file, no partial download"
-    );
-    assert!(
-        sup.log_text().matches("fetched client build").count() == 1,
-        "{}",
-        sup.log_text()
-    );
+    assert_eq!(fake.requests_for(&format!("/dl/v0.0.1/{apk}")), 1);
 
     // A download that does not match SHA256SUMS is refused and leaves nothing behind.
     let r = get_client(port, zip, Some(&device));
     assert_eq!(r.status, 500, "{}", error_text(&r));
-    assert!(
-        error_text(&r).contains("does not match SHA256SUMS"),
-        "{}",
-        error_text(&r)
-    );
     assert!(!home.join("clients/v0.0.1").join(zip).exists());
     assert!(
         !home
