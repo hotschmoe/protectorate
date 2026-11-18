@@ -32,6 +32,7 @@ layout() {
         pt-json) echo "files" ;;
         pt-qr) echo "encode" ;;
         pt-quota) echo "claude codex grok local select" ;;
+        pt-sys) echo "pdeath" ;;
         pt-update) echo "sums tags" ;;
         *) return 1 ;;
     esac
@@ -42,7 +43,7 @@ fail() {
     exit 1
 }
 
-crates="pt-api pt-core pt-drivers pt-embed pt-frame pt-hash pt-history pt-http pt-journal pt-json pt-qr pt-quota pt-update"
+crates="pt-api pt-core pt-drivers pt-embed pt-frame pt-hash pt-history pt-http pt-journal pt-json pt-qr pt-quota pt-sys pt-update"
 
 for dir in crates/*/fuzz; do
     crate=$(basename "$(dirname "$dir")")

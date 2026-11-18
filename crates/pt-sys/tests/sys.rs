@@ -1,26 +1,9 @@
 //! Real sockets, real signals from the `kill` binary, real children.
 
-use pt_sys::{SIGKILL, SIGTERM, install_term_handler, pdeathsig_on_spawn};
-use std::os::unix::process::ExitStatusExt;
+use pt_sys::{SIGTERM, install_term_handler, pdeathsig_on_spawn};
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
-
-#[test]
-fn pdeathsig_kills_child_when_spawning_thread_exits() {
-    let mut child = std::thread::spawn(|| {
-        let mut cmd = Command::new("sleep");
-        cmd.arg("30");
-        pdeathsig_on_spawn(&mut cmd, SIGKILL).unwrap();
-        cmd.spawn().unwrap()
-    })
-    .join()
-    .unwrap();
-    let start = Instant::now();
-    let status = child.wait().unwrap();
-    assert_eq!(status.signal(), Some(SIGKILL));
-    assert!(start.elapsed() < Duration::from_secs(10));
-}
 
 const HELPER: &str = "PT_SYS_HELPER";
 
