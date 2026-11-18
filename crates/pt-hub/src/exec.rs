@@ -990,6 +990,9 @@ impl SleeveExec {
             sb.git_dirs = pt_sandbox::resolve_git_dirs(&work, Path::new(&parent.claim.path))
                 .map_err(|e| e.to_string())?;
         }
+        if s.layout != Layout::Worktree && work.join(".git").is_file() {
+            sb.git_dirs = pt_sandbox::resolve_git_dirs(&work, &work).map_err(|e| e.to_string())?;
+        }
         let token = hub.tokens.sleeve(s.id);
         sb.env = vec![
             ("PROTECTORATE_TOKEN".into(), token),
