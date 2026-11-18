@@ -11,6 +11,7 @@ pub const CLIENT_ASSETS: &[&str] = &[
     "protectorate-desktop-windows-arm64.zip",
 ];
 pub const FROM_SEQ_PARAM: &str = "from_seq";
+pub const TRANSCRIPTS_PARAM: &str = "transcripts";
 pub const ACCESS_TOKEN_PARAM: &str = "access_token";
 
 pt_json::string_enum! {

@@ -328,7 +328,7 @@ fn api_surface() {
         if delta {
             assert_eq!(seq, last, "a delta repeats the last seq");
         } else {
-            assert_eq!(seq, last + 1, "kept messages are one seq apart: {m}");
+            assert!(seq > last, "kept sequences increase: {m}");
             last = seq;
         }
     }
@@ -356,7 +356,7 @@ fn api_surface() {
         Some("snapshot"),
         "resume replays: {first}"
     );
-    assert_eq!(first["seq"].as_u64(), Some(last + 1));
+    assert!(first["seq"].as_u64().unwrap() > last);
     let tablet = |m: &Value| m["event"]["text"].as_str() == Some("device tablet paired");
     if !tablet(&first) {
         until(&mut s2, "event", tablet);

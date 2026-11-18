@@ -1038,7 +1038,11 @@ shortcut is also in `REVISIT.md`.
     follows the replay or snapshot before newer stream messages; its sequence is the last
     kept sequence at that boundary and does not allocate a new sequence. If a live subscriber
     falls behind the ring, a snapshot and another `live` marker replace the lost gap. Clients
-    publish the caught-up state only after `live` and discard an interrupted catch-up;
+    publish the caught-up state only after `live` and discard an interrupted catch-up. Entry
+    messages are sent only for sleeve IDs in the connection's comma-separated `transcripts`
+    query parameter. Other messages retain their original sequence numbers, so clients must
+    allow gaps. A client changes subscriptions by reconnecting and loads each open transcript
+    after `live` to cover the changeover;
   - loopback and unix-socket listeners serve the CLI and sleeves; the trusted-proxy listener serves
     Traefik.
 

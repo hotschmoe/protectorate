@@ -33,6 +33,7 @@ class RealHub implements HubClient {
   final List<(String, ChatEntry)> _pendingEntries = [];
   bool _connected = false;
   bool _closed = false;
+  bool _subscriptionsChanged = false;
   int _backoff = 1;
   String? _lastError;
   StreamSubscription<HubStreamMessage>? _sub;
@@ -72,9 +73,17 @@ class RealHub implements HubClient {
   Future<void> _run() async {
     while (!_closed) {
       _beginCatchup();
+      _reloadTranscripts = true;
+      _subscriptionsChanged = false;
       final drop = _drop = Completer<void>();
       _sub = _api
-          .events(fromSeq: _seq == null ? null : _seq! + 1)
+          .events(
+            fromSeq: _seq == null ? null : _seq! + 1,
+            transcripts: [
+              for (final e in _tx.entries)
+                if (e.value.ctl.hasListener) e.key,
+            ],
+          )
           .listen(
             _onMessage,
             onError: (Object e) {
@@ -95,6 +104,7 @@ class RealHub implements HubClient {
         _reloadTranscripts = false;
         _catchingUp = false;
       }
+      if (_subscriptionsChanged) continue;
       if (_connected) {
         _connected = false;
         _changed();
@@ -107,6 +117,12 @@ class RealHub implements HubClient {
   void _finish() {
     final d = _drop;
     if (d != null && !d.isCompleted) d.complete();
+  }
+
+  void _subscriptionsChangedNow() {
+    if (_closed) return;
+    _subscriptionsChanged = true;
+    _finish();
   }
 
   static String _short(Object e) {
@@ -308,7 +324,8 @@ class RealHub implements HubClient {
 
   // ---- transcripts ---------------------------------------------------------------------------
 
-  _Tx _txFor(String sleeveId) => _tx.putIfAbsent(sleeveId, _Tx.new);
+  _Tx _txFor(String sleeveId) =>
+      _tx.putIfAbsent(sleeveId, () => _Tx(_subscriptionsChangedNow));
 
   @override
   Transcript transcript(String sleeveId) {
@@ -329,7 +346,7 @@ class RealHub implements HubClient {
         GetTranscriptRequest(sleeveId: sleeveId, limit: _Tx.keep),
       );
       for (final e in r.entries) {
-        t.entries.putIfAbsent(e.seq, () => e);
+        t.add(e);
       }
       t.trim();
       t.loaded = true;
@@ -390,10 +407,16 @@ class RealHub implements HubClient {
 /// One sleeve's transcript by seq. A delta shares the seq of its block's whole entry, so it
 /// joins the delta before it and gives way to the whole entry.
 class _Tx {
+  _Tx(void Function() changed)
+    : ctl = StreamController<Transcript>.broadcast(
+        onListen: changed,
+        onCancel: changed,
+      );
+
   static const keep = 2000;
 
   final entries = SplayTreeMap<int, ChatEntry>();
-  final ctl = StreamController<Transcript>.broadcast();
+  final StreamController<Transcript> ctl;
   bool loading = false;
   bool loaded = false;
   bool reload = false;

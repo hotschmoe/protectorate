@@ -21,7 +21,7 @@ mod types;
 
 pub use endpoint::{
     ACCESS_TOKEN_PARAM, API_PREFIX, CLIENT_ASSETS, CLIENT_PATH, EVENTS_PATH, FROM_SEQ_PARAM,
-    Method, MethodDef, MethodVisitor, Scope,
+    Method, MethodDef, MethodVisitor, Scope, TRANSCRIPTS_PARAM,
 };
 pub use methods::*;
 pub use schema::{

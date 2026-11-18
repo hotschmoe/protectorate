@@ -945,7 +945,7 @@ fn stream_large_gap_uses_snapshot() {
 exec python3 -u -c '
 import json, os, time
 while not os.path.exists("start-burst"): time.sleep(0.05)
-for n in range(1600):
+for n in range(3000):
     print(json.dumps({"type":"assistant", "message":{"id":str(n), "content":[{"type":"text", "text":"activity " + str(n) + " x" * 100}]}}), flush=True)
 while True: time.sleep(1)
 ' "$@""#,
@@ -981,18 +981,91 @@ while True: time.sleep(1)
     hub.wait("worker", "idle", 60);
     let owner = hub.printed("owner token (shown once): ");
     let auth = format!("?access_token={owner}");
+    let worker = hub.sleeve("worker")["id"].as_str().unwrap().to_string();
+    let probe_dir = unique("reconnect-probe");
+    std::fs::create_dir_all(&probe_dir).unwrap();
+    let mut probe = if on_path("dart") {
+        let script =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/reconnect_probe.dart");
+        let child = std::process::Command::new("dart")
+            .arg(script)
+            .arg(port.to_string())
+            .arg(&owner)
+            .arg(&probe_dir)
+            .arg(&worker)
+            .spawn()
+            .expect("start the real app client");
+        eventually("the app client to connect", Duration::from_secs(45), || {
+            probe_dir.join("ready").exists().then_some(())
+        });
+        std::fs::write(probe_dir.join("drop"), "drop").unwrap();
+        eventually(
+            "the app client to disconnect",
+            Duration::from_secs(45),
+            || probe_dir.join("dropped").exists().then_some(()),
+        );
+        Some(child)
+    } else {
+        eprintln!("SKIP: dart is not installed; app reconnect probe");
+        None
+    };
     let mut before = ws(port, &auth, &[]).unwrap();
     let start = next(&mut before)["seq"].as_u64().unwrap();
     drop(before);
-    let mut measure = ws(port, &auth, &[]).unwrap();
+    let mut unopened = ws(port, &auth, &[]).unwrap();
+    let _ = next(&mut unopened);
+    let mut measure = ws(port, &format!("{auth}&transcripts={worker}"), &[]).unwrap();
     let _ = next(&mut measure);
     std::fs::write(repo.join("start-burst"), "go").unwrap();
     let messages = until(&mut measure, "entry", |m| {
         m["entry"]["entry"]["text"]
             .as_str()
-            .is_some_and(|s| s.starts_with("activity 1599"))
+            .is_some_and(|s| s.starts_with("activity 2999"))
     });
     let backlog_bytes: usize = messages.iter().map(|m| m.to_string().len()).sum();
+    if let Some(child) = &mut probe {
+        std::fs::write(probe_dir.join("resume"), "resume").unwrap();
+        eventually(
+            "the app client to reconnect",
+            Duration::from_secs(45),
+            || probe_dir.join("result").exists().then_some(()),
+        );
+        assert_eq!(
+            std::fs::read_to_string(probe_dir.join("result")).unwrap(),
+            "1"
+        );
+        assert!(child.wait().unwrap().success());
+    }
+    pair(port, &owner, "stream-sentinel");
+    let unopened_messages = until(&mut unopened, "event", |m| {
+        m["event"]["text"].as_str() == Some("device stream-sentinel paired")
+    });
+    assert!(
+        unopened_messages
+            .iter()
+            .all(|m| m["type"].as_str() != Some("entry")),
+        "an unopened transcript must not be sent"
+    );
+    let replay_from = messages.last().unwrap()["seq"].as_u64().unwrap() - 2;
+    for (query, want_entry) in [
+        (format!("{auth}&from_seq={replay_from}"), false),
+        (
+            format!("{auth}&from_seq={replay_from}&transcripts={worker}"),
+            true,
+        ),
+    ] {
+        let mut replay = ws(port, &query, &[]).unwrap();
+        let mut found_entry = false;
+        loop {
+            let m = next_raw(&mut replay);
+            if m["type"].as_str() == Some("live") {
+                break;
+            }
+            assert_ne!(m["type"].as_str(), Some("snapshot"));
+            found_entry |= m["type"].as_str() == Some("entry");
+        }
+        assert_eq!(found_entry, want_entry, "query: {query}");
+    }
     let mut resumed = ws(port, &format!("{auth}&from_seq={}", start + 1), &[]).unwrap();
     let snapshot = next(&mut resumed);
     assert_eq!(snapshot["type"].as_str(), Some("snapshot"));

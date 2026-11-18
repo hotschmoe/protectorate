@@ -1,6 +1,7 @@
 //! Routes, authentication per listener, the `/api/events` WebSocket, the client builds and the
 //! web build.
 
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,6 +11,7 @@ use std::time::Duration;
 
 use pt_api::{
     ACCESS_TOKEN_PARAM, API_PREFIX, ApiError, ErrorCode, FROM_SEQ_PARAM, HubStreamMessage,
+    TRANSCRIPTS_PARAM,
 };
 use pt_http::{Message, Peer, Request, Response};
 use pt_json::ToJson;
@@ -179,11 +181,18 @@ pub fn handler(
                 return error(&err(ErrorCode::Forbidden, "cross-origin event stream"));
             }
             let from = req.query_param(FROM_SEQ_PARAM).and_then(|s| s.parse().ok());
+            let transcripts: HashSet<String> = req
+                .query_param(TRANSCRIPTS_PARAM)
+                .unwrap_or_default()
+                .split(',')
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned)
+                .collect();
             let (h, peer) = (hub.clone(), peer.clone());
             // A revoked device, or a token or sleeve that no longer names this caller, ends
             // the stream within a second.
             let still = move || principal(&h, l, token.as_deref(), &peer).is_ok_and(|p| p == who);
-            return events(hub.clone(), from, still);
+            return events(hub.clone(), from, transcripts, still);
         }
         if let Some(name) = path.strip_prefix(pt_api::CLIENT_PATH) {
             return client(&hub, &who, req, name);
@@ -312,12 +321,22 @@ fn live(writer: &pt_http::WsWriter, seq: u64) -> std::io::Result<()> {
     writer.send_text(&HubStreamMessage::Live { seq }.to_json().to_string())
 }
 
+fn subscribed(text: &str, transcripts: &HashSet<String>) -> bool {
+    pt_json::parse(text).is_ok_and(|v| {
+        v["type"].as_str() != Some("entry")
+            || v["sleeve_id"]
+                .as_str()
+                .is_some_and(|id| transcripts.contains(id))
+    })
+}
+
 /// The WebSocket fan-out: replays from `from_seq` while the ring or the stream log still holds
 /// every kept message from it, else starts with a snapshot; then streams every message, deltas
 /// included, for as long as `still` holds.
 fn events(
     hub: Arc<Hub>,
     from: Option<u64>,
+    transcripts: HashSet<String>,
     still: impl Fn() -> bool + Send + Sync + 'static,
 ) -> Response {
     Response::websocket(move |mut ws| {
@@ -342,7 +361,7 @@ fn events(
             }) => hub.bus.logged(from, until).and_then(|texts| {
                 texts
                     .iter()
-                    .all(|t| writer.send_text(t).is_ok())
+                    .all(|t| !subscribed(t, &transcripts) || writer.send_text(t).is_ok())
                     .then_some(cursor)
             }),
             None => None,
@@ -384,7 +403,7 @@ fn events(
                         if !i.kept && i.pos <= replay_to {
                             continue;
                         }
-                        if writer.send_text(&i.text).is_err() {
+                        if subscribed(&i.text, &transcripts) && writer.send_text(&i.text).is_err() {
                             return;
                         }
                     }

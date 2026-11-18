@@ -371,7 +371,7 @@ class FakeHub implements HubClient {
       _states.add(_state);
     }
     for (final id in _dirtyTx) {
-      _txCtl[id]?.add(transcript(id));
+      if (_txCtl[id]?.hasListener ?? false) _txCtl[id]?.add(transcript(id));
     }
     _dirtyTx.clear();
   }
