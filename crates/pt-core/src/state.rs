@@ -50,6 +50,7 @@ pub struct PendingNodeUpdate {
     pub revision: u64,
     pub version: String,
     pub probation_secs: u64,
+    pub attempted: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

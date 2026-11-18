@@ -83,9 +83,10 @@ impl Core<'_> {
                         revision: self.st.next_node_update,
                         version: version.clone(),
                         probation_secs: *probation_secs,
+                        attempted: false,
                     },
                 );
-                self.reply(Reply::Accepted);
+                self.reply(Reply::PendingNodeUpdate(self.st.next_node_update));
             }
             E::ClearPendingNodeUpdate { node, revision } => {
                 if self
@@ -97,6 +98,18 @@ impl Core<'_> {
                     self.st.pending_node_updates.remove(node);
                 }
                 self.reply(Reply::Accepted);
+            }
+            E::ClaimPendingNodeUpdate { node, revision } => {
+                match self.st.pending_node_updates.get_mut(node) {
+                    Some(p) if p.revision == *revision && !p.attempted => {
+                        p.attempted = true;
+                        self.reply(Reply::Accepted);
+                    }
+                    _ => self.reply(Reply::Refused(
+                        Code::FailedPrecondition,
+                        "pending node update changed or was already attempted".into(),
+                    )),
+                }
             }
             E::Spawn(spec) => self.spawn(spec),
             E::Send {

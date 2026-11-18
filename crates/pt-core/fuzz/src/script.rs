@@ -236,6 +236,12 @@ impl Runner {
                     revision: words.get(2).map(|s| num(s)).transpose()?,
                 });
             }
+            "claim-pending-node" => {
+                self.sim.apply(E::ClaimPendingNodeUpdate {
+                    node: NodeId(num(arg(1)?)?),
+                    revision: num(arg(2)?)?,
+                });
+            }
             "expect-pending-node" if self.checked => {
                 let node = NodeId(num(arg(1)?)?);
                 let pending = self.sim.st.pending_node_updates.get(&node);
@@ -247,6 +253,7 @@ impl Runner {
                     let pending = pending.ok_or("pending target missing")?;
                     if pending.version != arg(2)? || pending.revision != num(arg(3)?)?
                         || pending.probation_secs != num(arg(4)?)?
+                        || pending.attempted != flag("attempted")
                     {
                         return Err(format!("unexpected pending target: {pending:?}"));
                     }

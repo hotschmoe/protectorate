@@ -130,6 +130,10 @@ pub enum EventKind {
         node: NodeId,
         revision: Option<u64>,
     },
+    ClaimPendingNodeUpdate {
+        node: NodeId,
+        revision: u64,
+    },
     // Commands from the API (owner, Envoy, agents, sleeves).
     Spawn(SpawnSpec),
     Send {

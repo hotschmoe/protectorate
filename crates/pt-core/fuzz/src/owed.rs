@@ -104,6 +104,7 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
         E::MailBatching
         | E::PendingNodeUpdate { .. }
         | E::ClearPendingNodeUpdate { .. }
+        | E::ClaimPendingNodeUpdate { .. }
         | E::Spawn(_)
         | E::Interrupt { .. }
         | E::Compact { .. }
