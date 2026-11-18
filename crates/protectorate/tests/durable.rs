@@ -39,8 +39,8 @@ fn kept_seq(m: &Value) -> Option<u64> {
 }
 
 /// A client follows the stream, the hub is SIGKILLed and restarts, and the client resumes from
-/// the first seq it saw: every kept message comes back in order, identical, with no gap or
-/// duplicate, and seqs continue after the restart. Hub events outlive the restart.
+/// the first seq it saw: subscribed messages come back in order, identical, without duplicates,
+/// and seqs continue after the restart. Hub events outlive the restart.
 #[test]
 fn stream_resumes_across_restart() {
     if !have_runtime() {
@@ -87,20 +87,20 @@ fn stream_resumes_across_restart() {
         "a resume across the restart replays: {}",
         after[0]
     );
-    let mut want = start + 1;
+    let mut previous = start;
     for m in &after {
         let Some(seq) = kept_seq(m) else { continue };
-        assert_eq!(
-            seq, want,
-            "kept messages one seq apart across the restart: {m}"
+        assert!(
+            seq > previous,
+            "kept sequences increase across the restart: {m}"
         );
         if let Some(old) = before.get(&seq) {
             assert_eq!(old, m, "seq {seq} replayed as it was first sent");
         }
-        want += 1;
+        previous = seq;
     }
     assert!(
-        want > last + 1,
+        previous > last,
         "messages after the restart continue the seqs"
     );
 

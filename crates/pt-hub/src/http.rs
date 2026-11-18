@@ -1,6 +1,7 @@
 //! Routes, authentication per listener, the `/api/events` WebSocket, the client builds and the
 //! web build.
 
+use std::collections::HashSet;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,6 +11,7 @@ use std::time::Duration;
 
 use pt_api::{
     ACCESS_TOKEN_PARAM, API_PREFIX, ApiError, ErrorCode, FROM_SEQ_PARAM, HubStreamMessage,
+    TRANSCRIPTS_PARAM,
 };
 use pt_http::{Message, Peer, Request, Response};
 use pt_json::ToJson;
@@ -179,11 +181,18 @@ pub fn handler(
                 return error(&err(ErrorCode::Forbidden, "cross-origin event stream"));
             }
             let from = req.query_param(FROM_SEQ_PARAM).and_then(|s| s.parse().ok());
+            let transcripts: HashSet<String> = req
+                .query_param(TRANSCRIPTS_PARAM)
+                .unwrap_or_default()
+                .split(',')
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned)
+                .collect();
             let (h, peer) = (hub.clone(), peer.clone());
             // A revoked device, or a token or sleeve that no longer names this caller, ends
             // the stream within a second.
             let still = move || principal(&h, l, token.as_deref(), &peer).is_ok_and(|p| p == who);
-            return events(hub.clone(), from, still);
+            return events(hub.clone(), from, transcripts, still);
         }
         if let Some(name) = path.strip_prefix(pt_api::CLIENT_PATH) {
             return client(&hub, &who, req, name);
@@ -300,12 +309,25 @@ fn static_file(req: &Request, web: &Web) -> Response {
 }
 
 /// The snapshot message, and the bus position it covers.
-fn snapshot(hub: &Hub) -> (u64, String) {
+fn snapshot(hub: &Hub) -> (u64, u64, String) {
     let (seq, pos) = hub.bus.mark();
     let view = hub.view();
     let state = crate::snapshot::state(hub, &view, seq, &|_| true);
     let msg = HubStreamMessage::Snapshot { seq, state };
-    (pos, msg.to_json().to_string())
+    (seq, pos, msg.to_json().to_string())
+}
+
+fn live(writer: &pt_http::WsWriter, seq: u64) -> std::io::Result<()> {
+    writer.send_text(&HubStreamMessage::Live { seq }.to_json().to_string())
+}
+
+fn subscribed(text: &str, transcripts: &HashSet<String>) -> bool {
+    pt_json::parse(text).is_ok_and(|v| {
+        v["type"].as_str() != Some("entry")
+            || v["sleeve_id"]
+                .as_str()
+                .is_some_and(|id| transcripts.contains(id))
+    })
 }
 
 /// The WebSocket fan-out: replays from `from_seq` while the ring or the stream log still holds
@@ -314,6 +336,7 @@ fn snapshot(hub: &Hub) -> (u64, String) {
 fn events(
     hub: Arc<Hub>,
     from: Option<u64>,
+    transcripts: HashSet<String>,
     still: impl Fn() -> bool + Send + Sync + 'static,
 ) -> Response {
     Response::websocket(move |mut ws| {
@@ -329,8 +352,6 @@ fn events(
             }
             flag.store(true, Ordering::SeqCst);
         });
-        // Deltas up to here belong to messages the client already has or is about to replay.
-        let replay_to = hub.bus.pos();
         let start = match from.and_then(|f| hub.bus.resume(f)) {
             Some(Resume::Ring(pos)) => Some(pos),
             Some(Resume::Log {
@@ -340,44 +361,63 @@ fn events(
             }) => hub.bus.logged(from, until).and_then(|texts| {
                 texts
                     .iter()
-                    .all(|t| writer.send_text(t).is_ok())
+                    .all(|t| !subscribed(t, &transcripts) || writer.send_text(t).is_ok())
                     .then_some(cursor)
             }),
             None => None,
         };
-        let (mut cursor, replay_to) = match start {
-            Some(pos) => (pos, replay_to),
+        // Deltas up to here belong to messages the client already has or is about to replay.
+        let (replay_seq, replay_to) = hub.bus.mark();
+        let (mut cursor, replay_to, live_seq) = match start {
+            Some(pos) => (pos, replay_to, replay_seq),
             None => {
-                let (pos, text) = snapshot(&hub);
+                let (seq, pos, text) = snapshot(&hub);
                 if writer.send_text(&text).is_err() {
                     return;
                 }
-                (pos, 0)
+                (pos, pos, seq)
             }
         };
+        let mut catching_up = true;
         while !closed.load(Ordering::SeqCst) {
             if !still() {
                 let _ = writer.close(1008, "no longer authorized");
                 return;
             }
+            if catching_up && cursor >= replay_to {
+                if live(&writer, live_seq).is_err() {
+                    return;
+                }
+                catching_up = false;
+            }
             match hub.bus.since(cursor, Duration::from_secs(1)) {
                 Since::Items(items) => {
                     for i in items {
+                        if catching_up && i.pos > replay_to {
+                            if live(&writer, live_seq).is_err() {
+                                return;
+                            }
+                            catching_up = false;
+                        }
                         cursor = i.pos;
                         if !i.kept && i.pos <= replay_to {
                             continue;
                         }
-                        if writer.send_text(&i.text).is_err() {
+                        if subscribed(&i.text, &transcripts) && writer.send_text(&i.text).is_err() {
                             return;
                         }
                     }
                 }
                 Since::Gap => {
-                    let (pos, text) = snapshot(&hub);
+                    let (seq, pos, text) = snapshot(&hub);
                     if writer.send_text(&text).is_err() {
                         return;
                     }
                     cursor = pos;
+                    if live(&writer, seq).is_err() {
+                        return;
+                    }
+                    catching_up = false;
                 }
             }
         }

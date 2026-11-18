@@ -556,6 +556,15 @@ pub fn ws(port: u16, query: &str, headers: &[(&str, &str)]) -> std::io::Result<p
 }
 
 pub fn next(ws: &mut pt_http::WebSocket) -> Value {
+    loop {
+        let m = next_raw(ws);
+        if m["type"].as_str() != Some("live") {
+            return m;
+        }
+    }
+}
+
+pub fn next_raw(ws: &mut pt_http::WebSocket) -> Value {
     next_for(ws, "a stream message")
 }
 
@@ -574,7 +583,16 @@ fn next_for(ws: &mut pt_http::WebSocket, what: &str) -> Value {
 
 /// Reads until a message of type `kind` passes `pick`; returns every message read.
 pub fn until(ws: &mut pt_http::WebSocket, kind: &str, pick: impl Fn(&Value) -> bool) -> Vec<Value> {
-    let end = Instant::now() + Duration::from_secs(120);
+    until_for(ws, kind, Duration::from_secs(120), pick)
+}
+
+pub fn until_for(
+    ws: &mut pt_http::WebSocket,
+    kind: &str,
+    timeout: Duration,
+    pick: impl Fn(&Value) -> bool,
+) -> Vec<Value> {
+    let end = Instant::now() + timeout;
     let mut seen = Vec::new();
     loop {
         assert!(
@@ -583,6 +601,9 @@ pub fn until(ws: &mut pt_http::WebSocket, kind: &str, pick: impl Fn(&Value) -> b
             current_diagnostic()
         );
         let m = next_for(ws, &format!("a {kind} message"));
+        if m["type"].as_str() == Some("live") {
+            continue;
+        }
         let hit = m["type"].as_str() == Some(kind) && pick(&m);
         seen.push(m);
         if hit {

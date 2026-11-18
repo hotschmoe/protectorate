@@ -252,6 +252,9 @@ fn api_surface() {
     let snap = next(&mut s1);
     assert_eq!(snap["type"].as_str(), Some("snapshot"), "{snap}");
     let start = snap["seq"].as_u64().unwrap();
+    let live = next_raw(&mut s1);
+    assert_eq!(live["type"].as_str(), Some("live"));
+    assert_eq!(live["seq"].as_u64(), Some(start));
     assert_eq!(snap["state"]["seq"].as_u64(), Some(start));
     assert_eq!(snap["state"]["hub"]["name"].as_str(), Some("protectorate"));
     let info = eventually("hub inventory and sample", Duration::from_secs(40), || {
@@ -305,6 +308,13 @@ fn api_surface() {
     let update_seq = updates.last().unwrap()["seq"].as_u64().unwrap();
     let mut resumed = ws(port, &format!("{auth}&from_seq={update_seq}"), &[]).unwrap();
     assert_eq!(next(&mut resumed), *updates.last().unwrap());
+    let replay_live = loop {
+        let m = next_raw(&mut resumed);
+        if m["type"].as_str() == Some("live") {
+            break m;
+        }
+    };
+    assert!(replay_live["seq"].as_u64().unwrap() >= update_seq);
     let before_phone = hub.state()["seq"].as_u64().unwrap();
     let phone = pair(port, &owner, "phone");
     let hub_event = |m: &Value| {
@@ -323,7 +333,7 @@ fn api_surface() {
         if delta {
             assert_eq!(seq, last, "a delta repeats the last seq");
         } else {
-            assert_eq!(seq, last + 1, "kept messages are one seq apart: {m}");
+            assert!(seq > last, "kept sequences increase: {m}");
             last = seq;
         }
     }
@@ -352,7 +362,7 @@ fn api_surface() {
         Some("snapshot"),
         "resume replays: {first}"
     );
-    assert_eq!(first["seq"].as_u64(), Some(last + 1));
+    assert!(first["seq"].as_u64().unwrap() > last);
     let after_tablet =
         |m: &Value| hub_event(m) && m["seq"].as_u64().is_some_and(|s| s > before_tablet);
     if !after_tablet(&first) {

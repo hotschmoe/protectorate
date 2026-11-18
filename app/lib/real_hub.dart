@@ -9,7 +9,8 @@ import 'hub.dart';
 /// with `from_seq` after a drop; actions are API calls. Transcripts load with `GetTranscript`
 /// when first asked for and then follow the stream's `entry` messages.
 class RealHub implements HubClient {
-  RealHub(this.url, {String? token}) : _api = HubApi(Uri.parse(url), token: token) {
+  RealHub(this.url, {String? token})
+    : _api = HubApi(Uri.parse(url), token: token) {
     unawaited(_run());
   }
 
@@ -18,11 +19,21 @@ class RealHub implements HubClient {
 
   HubState _state = HubState(
     seq: 0,
-    hub: HubInfo(name: '-', version: '-', startedAt: DateTime.fromMillisecondsSinceEpoch(0)),
+    hub: HubInfo(
+      name: '-',
+      version: '-',
+      startedAt: DateTime.fromMillisecondsSinceEpoch(0),
+    ),
   );
   int? _seq;
+  int? _savedSeq;
+  HubState? _pendingState;
+  bool _catchingUp = false;
+  bool _reloadTranscripts = false;
+  final List<(String, ChatEntry)> _pendingEntries = [];
   bool _connected = false;
   bool _closed = false;
+  bool _subscriptionsChanged = false;
   int _backoff = 1;
   String? _lastError;
   StreamSubscription<HubStreamMessage>? _sub;
@@ -61,9 +72,18 @@ class RealHub implements HubClient {
 
   Future<void> _run() async {
     while (!_closed) {
+      _beginCatchup();
+      _reloadTranscripts = true;
+      _subscriptionsChanged = false;
       final drop = _drop = Completer<void>();
       _sub = _api
-          .events(fromSeq: _seq == null ? null : _seq! + 1)
+          .events(
+            fromSeq: _seq == null ? null : _seq! + 1,
+            transcripts: [
+              for (final e in _tx.entries)
+                if (e.value.ctl.hasListener) e.key,
+            ],
+          )
           .listen(
             _onMessage,
             onError: (Object e) {
@@ -77,6 +97,14 @@ class RealHub implements HubClient {
       await _sub?.cancel();
       _sub = null;
       if (_closed) return;
+      if (_catchingUp) {
+        _seq = _savedSeq;
+        _pendingState = null;
+        _pendingEntries.clear();
+        _reloadTranscripts = false;
+        _catchingUp = false;
+      }
+      if (_subscriptionsChanged) continue;
       if (_connected) {
         _connected = false;
         _changed();
@@ -91,59 +119,167 @@ class RealHub implements HubClient {
     if (d != null && !d.isCompleted) d.complete();
   }
 
+  void _subscriptionsChangedNow() {
+    if (_closed) return;
+    _subscriptionsChanged = true;
+    _finish();
+  }
+
   static String _short(Object e) {
     final s = '$e';
     return s.length > 80 ? '${s.substring(0, 80)}...' : s;
   }
 
+  void _beginCatchup() {
+    if (_catchingUp) return;
+    _catchingUp = true;
+    _savedSeq = _seq;
+    _pendingState = _state;
+    _flush?.cancel();
+    _flush = null;
+    for (final t in _tx.values) {
+      t.flush?.cancel();
+      t.flush = null;
+    }
+  }
+
+  void _setState(HubState state) {
+    if (_catchingUp) {
+      _pendingState = state;
+    } else {
+      _state = state;
+    }
+  }
+
   void _onMessage(HubStreamMessage m) {
-    if (!_connected) {
+    if (m is HubStreamMessageSnapshot && !_catchingUp) _beginCatchup();
+    if (m is HubStreamMessageLive) {
+      if (m.seq > (_seq ?? -1)) _seq = m.seq;
+      _state = _pendingState ?? _state;
+      _pendingState = null;
+      _catchingUp = false;
+      for (final (sleeveId, entry) in _pendingEntries) {
+        _tx[sleeveId]?.add(entry);
+      }
+      _pendingEntries.clear();
+      for (final MapEntry(:key, :value) in _tx.entries) {
+        if (_reloadTranscripts) {
+          value.loaded = false;
+          if (value.loading) {
+            value.reload = true;
+          } else if (value.ctl.hasListener) {
+            unawaited(_load(key, value));
+          }
+        }
+        if (value.ctl.hasListener) _emitTx(key, value);
+      }
+      _reloadTranscripts = false;
       _connected = true;
       _lastError = null;
+      _backoff = 1;
       _changed();
+      return;
     }
     _backoff = 1;
     if (m.seq > (_seq ?? -1)) _seq = m.seq;
-    final s = _state;
+    final s = _pendingState ?? _state;
     switch (m) {
       case HubStreamMessageSnapshot(:final state):
-        _state = state;
+        _setState(state);
         _seq = state.seq;
-        for (final MapEntry(:key, :value) in _tx.entries) {
-          value.loaded = false;
-          if (value.ctl.hasListener) unawaited(_load(key, value));
-        }
+        _pendingEntries.clear();
+        _reloadTranscripts = true;
+      case HubStreamMessageLive():
+        throw StateError('live handled above');
       case HubStreamMessageWorkspace(:final workspace):
-        _state = _copy(s, workspaces: _upsert(s.workspaces, workspace, (x) => x.id == workspace.id));
+        _setState(
+          _copy(
+            s,
+            workspaces: _upsert(
+              s.workspaces,
+              workspace,
+              (x) => x.id == workspace.id,
+            ),
+          ),
+        );
       case HubStreamMessageSleeve(:final sleeve):
-        _state = _copy(s, sleeves: _upsert(s.sleeves, sleeve, (x) => x.id == sleeve.id));
+        _setState(
+          _copy(
+            s,
+            sleeves: _upsert(s.sleeves, sleeve, (x) => x.id == sleeve.id),
+          ),
+        );
       case HubStreamMessageSleeveRemoved(:final id):
-        _state = _copy(s, sleeves: [for (final x in s.sleeves) if (x.id != id) x]);
+        _setState(
+          _copy(
+            s,
+            sleeves: [
+              for (final x in s.sleeves)
+                if (x.id != id) x,
+            ],
+          ),
+        );
       case HubStreamMessageEntry(:final sleeveId, :final entry):
         final t = _tx[sleeveId];
         if (t != null) {
-          t.add(entry);
-          _emitTx(sleeveId, t);
+          if (_catchingUp) {
+            _pendingEntries.add((sleeveId, entry));
+          } else {
+            t.add(entry);
+            _emitTx(sleeveId, t);
+          }
         }
         return;
       case HubStreamMessageApproval(:final approval):
-        _state = _copy(s, approvals: _upsert(s.approvals, approval, (x) => x.id == approval.id));
+        _setState(
+          _copy(
+            s,
+            approvals: _upsert(
+              s.approvals,
+              approval,
+              (x) => x.id == approval.id,
+            ),
+          ),
+        );
       case HubStreamMessageHub(:final hub):
-        _state = _copy(s, hub: hub);
+        _setState(_copy(s, hub: hub));
       case HubStreamMessageNode(:final node):
-        _state = _copy(s, nodes: _upsert(s.nodes, node, (x) => x.id == node.id));
+        _setState(
+          _copy(s, nodes: _upsert(s.nodes, node, (x) => x.id == node.id)),
+        );
       case HubStreamMessageNodeRemoved(:final id):
-        _state = _copy(s, nodes: [for (final x in s.nodes) if (x.id != id) x]);
+        _setState(
+          _copy(
+            s,
+            nodes: [
+              for (final x in s.nodes)
+                if (x.id != id) x,
+            ],
+          ),
+        );
       case HubStreamMessageJob(:final job):
-        _state = _copy(s, jobs: _upsert(s.jobs, job, (x) => x.id == job.id));
+        _setState(_copy(s, jobs: _upsert(s.jobs, job, (x) => x.id == job.id)));
       case HubStreamMessageQuota(:final quota):
-        _state = _copy(
-          s,
-          quotas: _upsert(s.quotas, quota, (x) => x.subscription == quota.subscription),
+        _setState(
+          _copy(
+            s,
+            quotas: _upsert(
+              s.quotas,
+              quota,
+              (x) => x.subscription == quota.subscription,
+            ),
+          ),
         );
       case HubStreamMessageEvent(:final event):
         final events = _upsert(s.events, event, (x) => x.seq == event.seq);
-        _state = _copy(s, events: events.length > 500 ? events.sublist(events.length - 500) : events);
+        _setState(
+          _copy(
+            s,
+            events: events.length > 500
+                ? events.sublist(events.length - 500)
+                : events,
+          ),
+        );
       case HubStreamMessageUnknown():
         return;
     }
@@ -179,7 +315,7 @@ class RealHub implements HubClient {
 
   /// Coalesces bursts into one state per 50 ms.
   void _changed() {
-    if (_closed) return;
+    if (_closed || _catchingUp) return;
     _flush ??= Timer(const Duration(milliseconds: 50), () {
       _flush = null;
       if (!_closed) _states.add(_state);
@@ -188,7 +324,8 @@ class RealHub implements HubClient {
 
   // ---- transcripts ---------------------------------------------------------------------------
 
-  _Tx _txFor(String sleeveId) => _tx.putIfAbsent(sleeveId, _Tx.new);
+  _Tx _txFor(String sleeveId) =>
+      _tx.putIfAbsent(sleeveId, () => _Tx(_subscriptionsChangedNow));
 
   @override
   Transcript transcript(String sleeveId) {
@@ -198,15 +335,18 @@ class RealHub implements HubClient {
   }
 
   @override
-  Stream<Transcript> transcripts(String sleeveId) => _txFor(sleeveId).ctl.stream;
+  Stream<Transcript> transcripts(String sleeveId) =>
+      _txFor(sleeveId).ctl.stream;
 
   Future<void> _load(String sleeveId, _Tx t) async {
     if (t.loading) return;
     t.loading = true;
     try {
-      final r = await _api.getTranscript(GetTranscriptRequest(sleeveId: sleeveId, limit: _Tx.keep));
+      final r = await _api.getTranscript(
+        GetTranscriptRequest(sleeveId: sleeveId, limit: _Tx.keep),
+      );
       for (final e in r.entries) {
-        t.entries.putIfAbsent(e.seq, () => e);
+        t.add(e);
       }
       t.trim();
       t.loaded = true;
@@ -216,10 +356,16 @@ class RealHub implements HubClient {
       _changed();
     } finally {
       t.loading = false;
+      if (t.reload) {
+        t.reload = false;
+        t.loaded = false;
+        if (!_closed && t.ctl.hasListener) unawaited(_load(sleeveId, t));
+      }
     }
   }
 
   void _emitTx(String sleeveId, _Tx t) {
+    if (_catchingUp) return;
     t.flush ??= Timer(const Duration(milliseconds: 50), () {
       t.flush = null;
       if (!t.ctl.isClosed) t.ctl.add(t.snapshot(sleeveId));
@@ -233,10 +379,12 @@ class RealHub implements HubClient {
       _api.sendMessage(SendMessageRequest(sleeveId: sleeveId, text: text));
 
   @override
-  Future<void> interrupt(String sleeveId) => _api.interrupt(SleeveRef(sleeveId: sleeveId));
+  Future<void> interrupt(String sleeveId) =>
+      _api.interrupt(SleeveRef(sleeveId: sleeveId));
 
   @override
-  Future<void> stop(String sleeveId) => _api.stopSleeve(SleeveRef(sleeveId: sleeveId));
+  Future<void> stop(String sleeveId) =>
+      _api.stopSleeve(SleeveRef(sleeveId: sleeveId));
 
   @override
   Future<void> resleeve(String sleeveId, Harness target) =>
@@ -250,19 +398,28 @@ class RealHub implements HubClient {
   Future<void> markEventsRead() async {
     final events = _state.events;
     if (events.isEmpty) return;
-    await _api.markEventsRead(MarkEventsReadRequest(upToSeq: events.map((e) => e.seq).reduce(max)));
+    await _api.markEventsRead(
+      MarkEventsReadRequest(upToSeq: events.map((e) => e.seq).reduce(max)),
+    );
   }
 }
 
 /// One sleeve's transcript by seq. A delta shares the seq of its block's whole entry, so it
 /// joins the delta before it and gives way to the whole entry.
 class _Tx {
+  _Tx(void Function() changed)
+    : ctl = StreamController<Transcript>.broadcast(
+        onListen: changed,
+        onCancel: changed,
+      );
+
   static const keep = 2000;
 
   final entries = SplayTreeMap<int, ChatEntry>();
-  final ctl = StreamController<Transcript>.broadcast();
+  final StreamController<Transcript> ctl;
   bool loading = false;
   bool loaded = false;
+  bool reload = false;
   Timer? flush;
 
   void add(ChatEntry e) {
@@ -280,22 +437,30 @@ class _Tx {
   static ChatEntry _merge(ChatEntry old, ChatEntry e) {
     final (a, b) = (old.entry, e.entry);
     final Entry? joined = switch ((a, b)) {
-      (EntryAssistantText(delta: true), EntryAssistantText(delta: true)) => EntryAssistantText(
-        id: (b as EntryAssistantText).id,
-        text: (a as EntryAssistantText).text + b.text,
-        delta: true,
-      ),
-      (EntryReasoning(delta: true), EntryReasoning(delta: true)) => EntryReasoning(
-        id: (b as EntryReasoning).id,
-        text: (a as EntryReasoning).text + b.text,
-        delta: true,
-      ),
+      (EntryAssistantText(delta: true), EntryAssistantText(delta: true)) =>
+        EntryAssistantText(
+          id: (b as EntryAssistantText).id,
+          text: (a as EntryAssistantText).text + b.text,
+          delta: true,
+        ),
+      (EntryReasoning(delta: true), EntryReasoning(delta: true)) =>
+        EntryReasoning(
+          id: (b as EntryReasoning).id,
+          text: (a as EntryReasoning).text + b.text,
+          delta: true,
+        ),
       (EntryAssistantText(delta: false), EntryAssistantText(delta: true)) => a,
       (EntryReasoning(delta: false), EntryReasoning(delta: true)) => a,
       _ => null,
     };
     if (joined == null) return e;
-    return ChatEntry(seq: e.seq, g: e.g, turn: e.turn, at: old.at, entry: joined);
+    return ChatEntry(
+      seq: e.seq,
+      g: e.g,
+      turn: e.turn,
+      at: old.at,
+      entry: joined,
+    );
   }
 
   void close() {
@@ -303,6 +468,8 @@ class _Tx {
     unawaited(ctl.close());
   }
 
-  Transcript snapshot(String sleeveId) =>
-      Transcript(sleeveId: sleeveId, entries: List.unmodifiable(entries.values));
+  Transcript snapshot(String sleeveId) => Transcript(
+    sleeveId: sleeveId,
+    entries: List.unmodifiable(entries.values),
+  );
 }

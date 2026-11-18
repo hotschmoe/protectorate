@@ -859,6 +859,201 @@ for line in sys.stdin:
 }
 
 #[test]
+#[ignore = "heavy reconnect scenario"]
+fn stream_large_gap_uses_snapshot() {
+    if !on_path("bwrap") || !on_path("python3") || !on_path("git") {
+        return;
+    }
+    let dir = unique("stream-gap");
+    let gap_secs = std::env::var("PT_RECONNECT_GAP_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    std::fs::create_dir_all(&dir).unwrap();
+    let fake = dir.join("claude");
+    write_script(&dir.join("systemd-run"), "exit 0");
+    write_script(
+        &fake,
+        r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit; fi
+exec python3 -u -c '
+import json, os, time
+while not os.path.exists("start-burst"): time.sleep(0.05)
+duration = int(open("start-burst").read())
+started = time.monotonic()
+print(json.dumps({"type":"stream_event", "event":{"type":"message_start", "message":{"id":"busy"}}}), flush=True)
+for n in range(3000):
+    delay = started + duration * (n + 1) / 3000 - time.monotonic()
+    if delay > 0: time.sleep(delay)
+    print(json.dumps({"type":"assistant", "message":{"id":str(n), "content":[{"type":"text", "text":"activity " + str(n) + " x" * 100}]}}), flush=True)
+while True: time.sleep(1)
+' "$@""#,
+    );
+    let port = free_port();
+    let listen = format!("127.0.0.1:{port}");
+    let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
+    let hub = Hub::start_config(
+        "stream-gap",
+        "claude",
+        &[
+            ("scopes", false.into()),
+            ("claude_program", fake.to_str().unwrap().into()),
+        ],
+        &["--listen", &listen],
+        &[("PATH", &path)],
+    );
+    let login = hub.home.join("logins/.claude/.credentials.json");
+    std::fs::create_dir_all(login.parent().unwrap()).unwrap();
+    std::fs::write(login, "test").unwrap();
+    hub.cli(&["doctor", "--refresh"]).ok();
+    let repo = temp_repo("stream-gap");
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "worker",
+        "--path",
+        repo.to_str().unwrap(),
+        "--harness",
+        "claude",
+    ])
+    .ok();
+    hub.wait("worker", "idle", 60);
+    let owner = hub.printed("owner token (shown once): ");
+    let auth = format!("?access_token={owner}");
+    let worker = hub.sleeve("worker")["id"].as_str().unwrap().to_string();
+    let probe_dir = unique("reconnect-probe");
+    std::fs::create_dir_all(&probe_dir).unwrap();
+    let mut probe = if on_path("dart") {
+        let script =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/reconnect_probe.dart");
+        let child = std::process::Command::new("dart")
+            .arg(script)
+            .arg(port.to_string())
+            .arg(&owner)
+            .arg(&probe_dir)
+            .arg(&worker)
+            .arg(gap_secs.to_string())
+            .spawn()
+            .expect("start the real app client");
+        eventually("the app client to connect", Duration::from_secs(45), || {
+            probe_dir.join("ready").exists().then_some(())
+        });
+        std::fs::write(probe_dir.join("drop"), "drop").unwrap();
+        eventually(
+            "the app client to disconnect",
+            Duration::from_secs(45),
+            || probe_dir.join("dropped").exists().then_some(()),
+        );
+        Some(child)
+    } else {
+        eprintln!("SKIP: dart is not installed; app reconnect probe");
+        None
+    };
+    let mut before = ws(port, &auth, &[]).unwrap();
+    let start = next(&mut before)["seq"].as_u64().unwrap();
+    drop(before);
+    let mut unopened = ws(port, &auth, &[]).unwrap();
+    let _ = next(&mut unopened);
+    let unopened_reader = std::thread::spawn(move || {
+        until_for(
+            &mut unopened,
+            "event",
+            Duration::from_secs(gap_secs + 180),
+            |m| m["event"]["text"].as_str() == Some("device stream-sentinel paired"),
+        )
+    });
+    let mut measure = ws(port, &format!("{auth}&transcripts={worker}"), &[]).unwrap();
+    let _ = next(&mut measure);
+    let started = std::time::Instant::now();
+    std::fs::write(repo.join("start-burst"), gap_secs.to_string()).unwrap();
+    let entries_seen = std::cell::Cell::new(0usize);
+    let messages = until_for(
+        &mut measure,
+        "entry",
+        Duration::from_secs(gap_secs + 120),
+        |m| {
+            let count = entries_seen.get() + 1;
+            entries_seen.set(count);
+            if gap_secs > 0 && count.is_multiple_of(500) {
+                eprintln!(
+                    "gap measurement: {count} entries after {:?}",
+                    started.elapsed()
+                );
+            }
+            m["entry"]["entry"]["text"]
+                .as_str()
+                .is_some_and(|s| s.starts_with("activity 2999"))
+        },
+    );
+    assert!(started.elapsed() >= Duration::from_secs(gap_secs));
+    let backlog_bytes: usize = messages.iter().map(|m| m.to_string().len()).sum();
+    if let Some(child) = &mut probe {
+        std::fs::write(probe_dir.join("resume"), "resume").unwrap();
+        eventually(
+            "the app client to reconnect",
+            Duration::from_secs(45),
+            || probe_dir.join("result").exists().then_some(()),
+        );
+        let result = std::fs::read_to_string(probe_dir.join("result")).unwrap();
+        let mut fields = result.split_whitespace();
+        assert_eq!(fields.next(), Some("1"), "app states: {result}");
+        let reconnect_bytes = fields.next().unwrap().parse::<usize>().unwrap();
+        assert!(
+            reconnect_bytes < backlog_bytes,
+            "reconnect {reconnect_bytes} bytes, backlog {backlog_bytes} bytes"
+        );
+        eprintln!(
+            "app reconnect: {reconnect_bytes} bytes including transcript reload; observed backlog payload: {backlog_bytes} bytes; gap: {:?}",
+            started.elapsed()
+        );
+        assert!(child.wait().unwrap().success());
+    }
+    pair(port, &owner, "stream-sentinel");
+    let unopened_messages = unopened_reader.join().expect("read unopened stream");
+    assert!(
+        unopened_messages
+            .iter()
+            .all(|m| m["type"].as_str() != Some("entry")),
+        "an unopened transcript must not be sent"
+    );
+    let replay_from = messages.last().unwrap()["seq"].as_u64().unwrap() - 2;
+    for (query, want_entry) in [
+        (format!("{auth}&from_seq={replay_from}"), false),
+        (
+            format!("{auth}&from_seq={replay_from}&transcripts={worker}"),
+            true,
+        ),
+    ] {
+        let mut replay = ws(port, &query, &[]).unwrap();
+        let mut found_entry = false;
+        loop {
+            let m = next_raw(&mut replay);
+            if m["type"].as_str() == Some("live") {
+                break;
+            }
+            assert_ne!(m["type"].as_str(), Some("snapshot"));
+            found_entry |= m["type"].as_str() == Some("entry");
+        }
+        assert_eq!(found_entry, want_entry, "query: {query}");
+    }
+    let mut resumed = ws(port, &format!("{auth}&from_seq={}", start + 1), &[]).unwrap();
+    let snapshot = next(&mut resumed);
+    assert_eq!(snapshot["type"].as_str(), Some("snapshot"));
+    assert!(snapshot["seq"].as_u64().unwrap() > start + 500);
+    let live = next_raw(&mut resumed);
+    assert_eq!(live["type"].as_str(), Some("live"));
+    assert_eq!(live["seq"], snapshot["seq"]);
+    eprintln!(
+        "reconnect snapshot: {} bytes; observed backlog: {backlog_bytes} bytes",
+        snapshot.to_string().len()
+    );
+    assert!(
+        snapshot.to_string().len() * 4 < backlog_bytes,
+        "snapshot {} backlog {backlog_bytes}",
+        snapshot.to_string().len()
+    );
+}
+
+#[test]
 fn envoy_wait_ignores_a_foreign_result_before_the_prompt_echo() {
     if !on_path("bwrap") || !on_path("python3") || !on_path("git") {
         return;

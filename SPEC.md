@@ -1081,7 +1081,19 @@ shortcut is also in `REVISIT.md`.
   dev-only fuzz dependencies. There is no SQLite: `pt-history` replaces `rusqlite` (3.7).
 - **The API** is JSON over HTTP:
   - `POST /api/<Method>` carries the request and response bodies;
-  - `GET /api/events` is a WebSocket of state changes;
+  - `GET /api/events` is a WebSocket of state changes. A client resumes with `from_seq`
+    one greater than the last kept sequence it received. If more than 500 kept messages
+    are missing, the cursor is unavailable, or no cursor is supplied, the hub sends a fresh
+    snapshot instead of replaying the gap; its sequence identifies the cursor it covers.
+    Streaming deltas repeat the last kept sequence and are not replayed. A `live` marker
+    follows the replay or snapshot before newer stream messages; its sequence is the last
+    kept sequence at that boundary and does not allocate a new sequence. If a live subscriber
+    falls behind the ring, a snapshot and another `live` marker replace the lost gap. Clients
+    publish the caught-up state only after `live` and discard an interrupted catch-up. Entry
+    messages are sent only for sleeve IDs in the connection's comma-separated `transcripts`
+    query parameter. Other messages retain their original sequence numbers, so clients must
+    allow gaps. A client changes subscriptions by reconnecting and loads each open transcript
+    after `live` to cover the changeover;
   - loopback and unix-socket listeners serve the CLI and sleeves; the trusted-proxy listener serves
     Traefik.
 

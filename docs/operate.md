@@ -676,6 +676,20 @@ Neither installer has run on a real device yet.
 
 ## Devices
 
+The app's event stream resumes a short interruption from its last sequence. After a gap of more
+than 500 retained stream messages, or when that cursor is unavailable, the hub sends a current
+snapshot instead of replaying the gap.
+The app holds the catch-up state until the hub's `live` marker, then displays it in one update.
+The stream sends transcript entries only for open chats; the app reloads those chats after a
+reconnect to fill any gap.
+
+For development, `make test-heavy` runs the large-gap reconnect scenario separately from
+`make test`. To pace its 3,000-entry fake-harness workload across 30 minutes, run
+`PT_RECONNECT_GAP_SECS=1801 cargo test --locked --workspace --test hub stream_large_gap_uses_snapshot -- --ignored --nocapture`.
+One run with one open transcript measured 2,838,984 bytes of backlog message payload versus
+674,268 network bytes received on reconnect, including the transcript reload; the snapshot alone
+was 4,137 bytes. These are synthetic workload measurements, not mobile traffic estimates.
+
 ```
 device list | device add <name> | device pair <code> | device revoke <id>
 ```
