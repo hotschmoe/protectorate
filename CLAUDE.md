@@ -36,17 +36,9 @@ overwrite code or data. Overwriting a file you created in this task with Write/E
 - No bulk-modifying scripts (codemods, giant sed/regex refactors).
 - Full migrations only: no compat shims, `_legacy`/`_old` names or "remove later" code.
 - Errors carry context at each layer; cancellation propagates.
-- **No unit tests, ever** (owner: "unit tests are a waste and offered no value add"). Only:
-  - **complex end-to-end tests** that would show a future regression: they run our built binaries
-    (`protectorate`, `protectorate-node`) or real external programs (harness CLIs, curl, git,
-    headscale, member) against real sockets, files and processes, and check a whole scenario
-    across that boundary;
-  - **fuzz targets** (`crates/<crate>/fuzz/`) for parsers and state machines, differential
-    against a reference wherever one exists.
-
-  A test that calls a library function with crafted inputs and checks its return value is a unit
-  test, even under `tests/`. Put such edge cases into fuzz seeds instead. `#[cfg(test)]` modules
-  are not allowed.
+- Follow [ENGINEERING.md](/home/hotschmoe/github/hotschmoe-setup/ENGINEERING.md): no unit
+  tests; at most ten real-binary e2e scenarios block work. Run `make check` for the blocking
+  gate and `make test-heavy` for the background gate, including fuzz seed replay.
 - `#![forbid(unsafe_code)]` in every crate except the explicitly exempted OS FFI crates.
 
 ## Layout and commands
@@ -61,8 +53,9 @@ app/           Flutter client (desktop, Android, web)
 ```
 make build       # debug build of the workspace
 make release     # release binaries for the host
-make test        # e2e test binaries side by side (PT_TEST_JOBS), then every fuzz seed replayed
-make check       # fmt --check, clippy -D warnings, test, check-deps, check-gen, app-check, check-version
+make test        # blocking e2e scenarios
+make test-heavy  # background e2e, fuzz seed replay and fuzz builds
+make check       # fmt, clippy, blocking e2e, dependency, levels, generation and version checks
 make version     # the version builds carry: git describe of the v* tag, the one source of truth
 make check-deps  # fails on any third-party crate not listed in DEPENDENCIES.md
 make gen         # writes app/lib/api/api.g.dart from crates/pt-api (never hand-edit it); needs dart

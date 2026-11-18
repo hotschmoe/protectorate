@@ -4021,45 +4021,6 @@ fn transcript_pages_skip_torn_and_corrupt_lines() {
 }
 
 #[test]
-fn gate_reports_all_failures_and_replays_seeds_after_e2e_failure() {
-    let dir = unique("gate");
-    std::fs::create_dir_all(dir.join("scripts")).unwrap();
-    std::fs::copy(
-        concat!(env!("CARGO_MANIFEST_DIR"), "/../../Makefile"),
-        dir.join("Makefile"),
-    )
-    .unwrap();
-    std::fs::write(dir.join("scripts/test.sh"), "echo e2e-ran; exit 1\n").unwrap();
-    std::fs::write(
-        dir.join("scripts/replay-seeds.sh"),
-        "echo seeds-ran; exit 1\n",
-    )
-    .unwrap();
-    std::fs::write(dir.join("overrides.mk"), "fmt-check clippy check-fuzz check-deps check-levels check-gen app-check check-version:\n\t@echo ran-$@; false\n").unwrap();
-    let output = std::process::Command::new("make")
-        .current_dir(&dir)
-        .args([
-            "-f",
-            "Makefile",
-            "-f",
-            "overrides.mk",
-            "MAKE=make -f Makefile -f overrides.mk",
-            "check",
-        ])
-        .output()
-        .unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(!output.status.success(), "{stdout}");
-    assert!(
-        stdout.contains("e2e-ran") && stdout.contains("seeds-ran"),
-        "{stdout}"
-    );
-    assert!(stdout.contains("test failed: e2e seeds"), "{stdout}");
-    assert!(stdout.contains("ran-check-version"), "{stdout}");
-    assert!(stdout.contains("check failed: fmt-check clippy check-fuzz test check-deps check-levels check-gen app-check check-version"), "{stdout}");
-}
-
-#[test]
 fn timeout_reports_the_hubs_launch_refusal() {
     let hub = Hub::start_config(
         "timeout-diagnostic",

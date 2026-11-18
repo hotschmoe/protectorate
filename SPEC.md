@@ -673,7 +673,7 @@ backup that recovers a dead hub moves a live one.
 - **GitHub stays the origin.** `gh` is installed and authed on the hub, and the hub alone holds
   the push token. Sleeves push through `protectorate git push` (12b item 6) and get a read-only
   token for `gh` queries. The hub keeps bare mirrors as backup. No Forgejo, GitLab or Woodpecker.
-- **Cross-arch CI** is a hub rule: dispatch `make test` as a node job to each required arch. Plain
+- **Cross-arch CI** is a hub rule: dispatch `make test-heavy` as a node job to each required arch. Plain
   binaries; containers only when a job asks for them.
 - **`doctor`**, on hub and node, checks:
   - harness CLIs present, with versions and install method (D33);
@@ -1045,4 +1045,4 @@ shortcut is also in `REVISIT.md`.
 - **Envoy** is a root sleeve running Claude Code headless in `$PROTECTORATE_HOME/envoy/`. That
   directory's own `CLAUDE.md` describes the `protectorate` CLI, so no worked-on repo is touched.
 
-The development gate `make check` runs every check and reports failed steps together. `make test` runs both e2e tests and fuzz seed replay even if either fails. The gate also builds every standalone fuzz workspace. Real-scope e2e tests skip with `SKIP: no systemd user bus` when the user manager is unavailable; test hubs stop their sleeve scopes on teardown.
+The blocking gate is `make check`; `make test` runs its e2e scenarios. `make test-heavy` runs the background e2e suite, fuzz seed replay and fuzz builds. Real-scope tests skip without a systemd user bus.

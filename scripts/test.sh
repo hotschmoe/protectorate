@@ -11,14 +11,10 @@ set -eu
 
 jobs=${PT_TEST_JOBS:-$(( $(nproc) / 2 > 1 ? $(nproc) / 2 : 1 ))}
 target=${CARGO_TARGET_DIR:-target}
-logs=$target/test-logs
+logs=$target/test-logs/run-$(date +%s)-$$
 times=$target/test-times
 mkdir -p "$logs"
-rm -f "$logs"/*.log "$logs"/failed "$logs"/times.new
 touch "$times" "$logs/failed" "$logs/times.new"
-# The e2e tests leave their homes in CARGO_TARGET_TMPDIR (<target>/tmp), about 20 GiB after a
-# week of runs. Each run clears the last one's before the build, which recreates the dir.
-rm -rf --one-file-system "$target/tmp"
 
 # Doctests are left out: the workspace has none, and building them costs a rustdoc per crate.
 PROTECTORATE_BUILD_VERSION=${PROTECTORATE_BUILD_VERSION:-dev} cargo test --locked --workspace \

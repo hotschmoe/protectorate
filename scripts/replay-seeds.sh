@@ -1,6 +1,6 @@
 #!/bin/sh
 # Replays every committed fuzz seed through the real fuzz targets, so a fixed crash or a seed
-# that encodes an edge case stays checked by `make test`. Each crates/*/fuzz is its own
+# that encodes an edge case stays checked by `make test-heavy`. Each crates/*/fuzz is its own
 # workspace; its targets are built with plain cargo (libFuzzer's runtime only executes the
 # files it is handed, it does not fuzz) and every seed of the crate goes through every target
 # of the crate. A panic aborts the target and fails the run.
