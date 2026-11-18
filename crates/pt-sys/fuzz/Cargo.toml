@@ -27,3 +27,10 @@ path = "fuzz_targets/signals.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "signal_errno"
+path = "fuzz_targets/signal_errno.rs"
+test = false
+doc = false
+bench = false
