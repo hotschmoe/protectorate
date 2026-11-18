@@ -127,6 +127,7 @@ impl Core<'_> {
                 kill_at: None,
                 kill_cause: None,
                 probing: false,
+                device_refresh: false,
                 boot_at: now,
                 turn_at: now,
                 progress_at: now,
@@ -298,6 +299,7 @@ impl Core<'_> {
         s.kill_at = None;
         s.kill_cause = None;
         s.probing = false;
+        s.device_refresh = false;
         s.loop_hash = None;
         s.loop_count = 0;
         if s.guard.state != GuardState::Launching {
@@ -320,6 +322,7 @@ impl Core<'_> {
     fn wants_down(s: &Sleeve) -> bool {
         matches!(s.life, Life::Stopping { .. } | Life::Parked(_))
             || matches!(s.guard.state, GuardState::Quiescing { .. })
+            || (s.device_refresh && matches!(s.activity, Activity::Idle { .. }))
     }
 
     pub(crate) fn on_start(&mut self, sid: SleeveId, id: EffectId) {
@@ -429,6 +432,29 @@ impl Core<'_> {
         );
     }
 
+    pub(crate) fn device_changed(&mut self, sid: SleeveId, g: Gen, path: &str) {
+        let Some(s) = self.st.sleeves.get(&sid) else {
+            return;
+        };
+        if s.g != g
+            || !matches!(s.life, Life::Running | Life::Launching | Life::Resleeving)
+            || s.proc == Proc::Down
+        {
+            return;
+        }
+        self.sl(sid).device_refresh = true;
+        self.notify(
+            Party::Owner,
+            Some(sid),
+            Notice::DeviceChanged {
+                path: path.to_string(),
+            },
+        );
+        if matches!(self.st.sleeves[&sid].activity, Activity::Idle { .. }) {
+            self.stop_incarnation(sid);
+        }
+    }
+
     pub(crate) fn kill(&mut self, sid: SleeveId, cause: Option<Cause>) {
         let now = self.now;
         let n = self.st.next_effect;
@@ -483,6 +509,8 @@ impl Core<'_> {
                 || matches!(was, Activity::Working | Activity::Blocked { .. }));
         let old = std::mem::replace(&mut s.proc, Proc::Down);
         let stop_requested = s.stop_at.is_some();
+        let refresh = s.device_refresh && stop_requested;
+        s.device_refresh = false;
         let kill_cause = s.kill_cause.take();
         s.turn = None;
         s.stop_at = None;
@@ -505,6 +533,14 @@ impl Core<'_> {
         };
         self.fence_incarnation(sid, g);
         self.orphan_tool_approvals(sid, g);
+
+        if refresh && matches!(self.st.sleeves[&sid].life, Life::Running | Life::Launching) {
+            let s = self.sl(sid);
+            s.guard.state = GuardState::Resuming;
+            let target = s.target.clone();
+            self.start_incarnation(sid, target, true);
+            return;
+        }
 
         let s = &self.st.sleeves[&sid];
         match s.life {
@@ -1256,6 +1292,7 @@ impl Core<'_> {
             && s.proc == Proc::Up
             && !s.probing
             && !s.retry_unwritten
+            && !s.device_refresh
             && matches!(s.activity, Activity::Idle { .. })
             && s.target.mode == Mode::Headless
             && matches!(
@@ -1461,6 +1498,10 @@ impl Core<'_> {
 
     /// Activity just became Idle: let a quiescing resleeve stop the incarnation, else deliver.
     pub(crate) fn settled(&mut self, sid: SleeveId) {
+        if self.st.sleeves[&sid].device_refresh {
+            self.stop_incarnation(sid);
+            return;
+        }
         if matches!(
             self.st.sleeves[&sid].guard.state,
             GuardState::Quiescing { .. }

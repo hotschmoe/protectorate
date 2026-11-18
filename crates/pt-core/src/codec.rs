@@ -19,7 +19,7 @@ use crate::model::*;
 
 pub const FORMAT: u8 = 1;
 /// Highest event tag this binary reads. Any incompatible encoding must get a new event tag.
-pub const MAX_EVENT_TAG: u8 = 46;
+pub const MAX_EVENT_TAG: u8 = 47;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -574,6 +574,12 @@ impl Wire for EventKind {
         use EventKind as E;
         match self {
             E::MailBatching => w.push(46),
+            E::DeviceChanged { sleeve, g, path } => {
+                w.push(47);
+                sleeve.put(w);
+                g.put(w);
+                path.put(w);
+            }
             E::Spawn(spec) => {
                 // Bit 0: an effort string follows. Bit 1: this spawn marks D9. Bit 2: Envoy
                 // asked for it. Tag 38 exists only with bit 1 or 2 set, so a tag 0 or 32 event
@@ -1127,6 +1133,11 @@ impl Wire for EventKind {
                 from: Wire::get(r)?,
             },
             46 => E::MailBatching,
+            47 => E::DeviceChanged {
+                sleeve: Wire::get(r)?,
+                g: Wire::get(r)?,
+                path: Wire::get(r)?,
+            },
             _ => return Err(DecodeError::UnknownTag { what: "event", tag }),
         })
     }

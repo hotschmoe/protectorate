@@ -283,8 +283,14 @@ crash, every incarnation goes to Recovering and resumes natively.
     tmpfs or ramfs;
   - host device nodes named in `sleeve_devices` (for example `/dev/aipu` and `/dev/mali0`)
     bound with `--dev-bind` when the path exists; a missing path is skipped and logged, and
-    the sleeve still starts. Config changes require a hub restart; a replug can change the
-    resolved node, so running sleeves must restart. Host supplementary groups still apply
+    the sleeve still starts. Config changes require a hub restart. The hub polls configured
+    paths for a new resolved filesystem node; when one appears, each running sleeve records a
+    notice naming it and relaunches with a native session resume, immediately if idle or at
+    the next turn boundary if working. A path missing at hub startup is watched too. A device
+    removed and still absent is not rebound until it returns. Shared mount propagation does
+    not replace this: a bind of an individual node pins the old inode, while propagating a
+    host directory would expose unlisted devices and requires a separately managed shared
+    allowlist mount and propagation setup. Host supplementary groups still apply
     even when sandbox ownership appears as nobody:nogroup. Doctor and each launch report the
     resolved node, owner, group, mode and hub read/write access without opening it, plus host
     process holders; the first prompt lists bound devices and holders;

@@ -102,6 +102,7 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
         E::HubRecovered => on_recovered(owed, prev),
         E::Continue { sleeve, text } => on_continue(owed, prev, *sleeve, text),
         E::MailBatching
+        | E::DeviceChanged { .. }
         | E::Spawn(_)
         | E::Interrupt { .. }
         | E::Compact { .. }
@@ -137,6 +138,7 @@ fn deliverable(st: &State, s: &Sleeve) -> bool {
     s.life == Life::Running
         && s.proc == Proc::Up
         && !s.probing
+        && !s.device_refresh
         && matches!(s.activity, Activity::Idle { .. })
         && s.target.mode == Mode::Headless
         && matches!(
@@ -269,6 +271,10 @@ fn on_exit(
         return;
     };
     if s.g != g || s.proc == Proc::Down {
+        return;
+    }
+    if s.device_refresh && s.stop_at.is_some() && matches!(s.life, Life::Running | Life::Launching)
+    {
         return;
     }
     let was = s.foreign.as_ref().map_or(&s.activity, |f| &f.previous);

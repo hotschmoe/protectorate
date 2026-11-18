@@ -233,6 +233,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<crate::update::Trial>) -> Resu
     if !state.mail_batching {
         hub.submit(EventKind::MailBatching);
     }
+    crate::sleeve_devices::watch(hub.clone())?;
     let writer_hub = hub.clone();
     thread::Builder::new()
         .name("pt-stream".into())

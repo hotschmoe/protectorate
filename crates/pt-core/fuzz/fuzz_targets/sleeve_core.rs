@@ -30,7 +30,7 @@ fn sleeve(sim: &Sim, b: &mut Bytes) -> SleeveId {
 fn command(sim: &mut Sim, b: &mut Bytes) {
     use EventKind as E;
     let s = sleeve(sim, b);
-    let kind = match b.below(23) {
+    let kind = match b.below(24) {
         0 | 1 => {
             let parent = if b.below(3) == 0 {
                 None
@@ -183,7 +183,12 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
             text: "replacement".into(),
             d9: b.bool(),
         },
-        _ => E::MailBatching,
+        22 => E::MailBatching,
+        _ => E::DeviceChanged {
+            sleeve: s,
+            g: sim.st.sleeves.get(&s).map_or(Gen(0), |s| s.g),
+            path: "/dev/fake".into(),
+        },
     };
     sim.apply(kind);
 }

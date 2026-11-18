@@ -1357,6 +1357,113 @@ exec sleep 300"#,
 }
 
 #[test]
+#[ignore = "real-scope heavy test"]
+fn device_replacement_refreshes_idle_and_working_sleeves() {
+    if !have_user_bus() || !on_path("bwrap") || !on_path("python3") || !on_path("git") {
+        return;
+    }
+    let dir = unique("device-refresh");
+    let home = dir.join("home");
+    let repo = temp_repo("device-refresh");
+    let fake = repo.join("claude");
+    let node = repo.join("device");
+    std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
+    std::fs::write(home.join("logins/.claude/.credentials.json"), "{}").unwrap();
+    std::fs::write(&node, "first").unwrap();
+    write_script(
+        &fake,
+        &format!(
+            r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi
+exec python3 -u -c '
+import json, os, sys, time
+g = int(open(os.path.expanduser("~/generation")).read()) + 1 if os.path.exists(os.path.expanduser("~/generation")) else 1
+open(os.path.expanduser("~/generation"), "w").write(str(g))
+open("seen" + str(g), "w").write(open("{}").read())
+open("args" + str(g), "w").write(" ".join(sys.argv[1:]))
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("type") != "user": continue
+    msg["isReplay"] = True
+    print(json.dumps(msg), flush=True)
+    open("working", "w").write("yes")
+    while not os.path.exists("release"): time.sleep(0.05)
+    print(json.dumps({{"type":"result", "subtype":"success", "is_error":False, "stop_reason":"end_turn"}}), flush=True)
+' "$@""#,
+            node.display()
+        ),
+    );
+    let config = pt_json::obj! {
+        "envoy" => pt_json::obj! { "harness" => "claude" },
+        "claude_program" => fake.to_str().unwrap(),
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+        "sleeve_devices" => vec![pt_json::Value::from(node.to_str().unwrap())],
+    };
+    std::fs::write(home.join("config.json"), config.to_string()).unwrap();
+    let hub = Hub::open(home, &[], &[]);
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "worker",
+        "--path",
+        repo.to_str().unwrap(),
+        "--harness",
+        "claude",
+    ])
+    .ok();
+    hub.wait("worker", "idle", 90);
+    eventually("first bound device", Duration::from_secs(30), || {
+        (std::fs::read_to_string(repo.join("seen1")).ok()?.trim() == "first").then_some(())
+    });
+    let replace = |number: u8, value: &str| {
+        let next = dir.join(format!("next{number}"));
+        std::fs::write(&next, value).unwrap();
+        std::fs::rename(&node, dir.join(format!("retired{number}"))).unwrap();
+        std::fs::rename(next, &node).unwrap();
+    };
+    replace(1, "second");
+    eventually(
+        "idle sleeve reopens device",
+        Duration::from_secs(90),
+        || (std::fs::read_to_string(repo.join("seen2")).ok()?.trim() == "second").then_some(()),
+    );
+    hub.wait("worker", "idle", 90);
+    hub.send("worker", "hold this turn");
+    eventually("working turn", Duration::from_secs(30), || {
+        repo.join("working").exists().then_some(())
+    });
+    replace(2, "third");
+    eventually("device change notice", Duration::from_secs(30), || {
+        let events = hub.cli(&["event", "list"]).stdout;
+        (events
+            .lines()
+            .filter(|line| {
+                line.contains("worker")
+                    && line.contains(&format!("device {} changed", node.display()))
+            })
+            .count()
+            >= 2)
+            .then_some(())
+    });
+    assert!(
+        !repo.join("seen3").exists(),
+        "a working turn must not be interrupted"
+    );
+    std::fs::write(repo.join("release"), "go").unwrap();
+    eventually(
+        "working sleeve reopens device after settling",
+        Duration::from_secs(90),
+        || (std::fs::read_to_string(repo.join("seen3")).ok()?.trim() == "third").then_some(()),
+    );
+    eventually("native session resumed", Duration::from_secs(30), || {
+        std::fs::read_to_string(repo.join("args3"))
+            .ok()?
+            .contains("--resume")
+            .then_some(())
+    });
+}
+
+#[test]
 fn child_oom_then_harness_exit_does_not_trip_g4() {
     if !have_user_bus() {
         return;
