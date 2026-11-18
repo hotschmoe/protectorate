@@ -172,7 +172,8 @@ CLI on the hub machine (section 3.1).
   It includes the declared status when the final message ends in `STATUS: DONE`,
   `STATUS: CONTINUING <remaining work>` or `STATUS: BLOCKED <reason>` (the latter two need a
   nonempty detail). Sleeve API views expose the latest settled turn's status, turn number and
-  detail; list displays its state. A turn without a valid declaration clears the previous status.
+  detail; list displays its state and up to 80 characters of its detail. A turn without a valid
+  declaration clears the previous status.
   A usage-limit or auth settle reports after its continuation. Envoy reports to no one.
 - **Envoy's context ceiling.** When an Envoy turn settles with its context at 500k tokens or
   more, the hub sends the core a `Compact` for Envoy; the core takes it once Envoy is idle with

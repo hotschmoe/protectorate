@@ -2139,6 +2139,11 @@ for line in sys.stdin:
     let status = hub.sleeve("worker");
     assert_eq!(status["last_status"]["state"].as_str(), Some("continuing"));
     assert_eq!(status["last_status"]["detail"].as_str(), Some("more work"));
+    assert!(
+        hub.cli(&["sleeve", "list"])
+            .stdout
+            .contains("continuing: more work")
+    );
 
     hub.send("worker", "an owner question");
     eventually(
@@ -2160,6 +2165,11 @@ for line in sys.stdin:
     assert_eq!(
         hub.sleeve("worker")["last_status"]["detail"].as_str(),
         Some("missing input")
+    );
+    assert!(
+        hub.cli(&["sleeve", "list"])
+            .stdout
+            .contains("blocked: missing input")
     );
     hub.wait("worker", "idle", 60);
     hub.restart();

@@ -134,7 +134,10 @@ pub fn sleeve_rows(sleeves: &[api::Sleeve]) {
                 inc.map_or("-".into(), |i| format!("g{}", i.g)),
                 s.last_status
                     .as_ref()
-                    .map_or("-".into(), |status| status.state.to_string()),
+                    .map_or("-".into(), |status| match &status.detail {
+                        Some(detail) => format!("{}: {}", status.state, first_line(detail, 80)),
+                        None => status.state.to_string(),
+                    }),
                 s.oldest_queued_at_ms.map_or_else(
                     || s.queued.to_string(),
                     |t| format!("{} ({})", s.queued, ago(t).trim_end_matches(" ago")),
