@@ -19,6 +19,7 @@ mod common;
 
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
@@ -223,7 +224,8 @@ fn has_event(hub: &Hub, level: &str, text: &str) -> bool {
 #[test]
 #[ignore = "heavy fleet test"]
 fn node_job_policy_survives_restart_and_routes_around_restricted_nodes() {
-    if !common::have_runtime() {
+    if !common::on_path("bwrap") || !common::on_path("git") {
+        eprintln!("SKIP: bwrap or git is missing");
         return;
     }
     let version = cli_command().arg("version").output().unwrap();
@@ -239,20 +241,40 @@ fn node_job_policy_survives_restart_and_routes_around_restricted_nodes() {
     let port = free_pair();
     let listen = format!("127.0.0.1:{port}");
     let tailnet = std::env::temp_dir().join(format!("pt-nodejobs-{}-{port}", std::process::id()));
+    let fake_dir = common::unique("nodejobs-harness");
+    fs::create_dir_all(&fake_dir).unwrap();
+    let fake = fake_dir.join("claude");
+    fs::write(&fake, "#!/bin/sh\nif [ \"$1\" = --version ]; then echo '2.0.0 (Claude Code)'; exit; fi\nprintf '%s' \"$PROTECTORATE_TOKEN\" > \"$HOME/test-token\"\nexec sleep 300\n").unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+    let systemd = fake_dir.join("systemd-run");
+    fs::write(&systemd, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&systemd, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", fake_dir.display(), std::env::var("PATH").unwrap());
     let mut hub = Hub::start_config(
         "nodejobs",
-        "pi_local",
-        &[(
-            "fleet",
-            obj! {
-                "listen" => listen.as_str(),
-                "dir" => tailnet.to_str().unwrap(),
-                "poll_secs" => 2u64,
-            },
-        )],
+        "claude",
+        &[
+            ("scopes", false.into()),
+            ("claude_program", fake.to_str().unwrap().into()),
+            (
+                "fleet",
+                obj! {
+                    "listen" => listen.as_str(),
+                    "dir" => tailnet.to_str().unwrap(),
+                    "poll_secs" => 2u64,
+                },
+            ),
+        ],
         &[],
-        &[("PROTECTORATE_FLEET_TEST_MEMBER_TIMEOUT_MS", "1000")],
+        &[
+            ("PROTECTORATE_FLEET_TEST_MEMBER_TIMEOUT_MS", "1000"),
+            ("PATH", &path),
+        ],
     );
+    let login = hub.home.join("logins/.claude/.credentials.json");
+    fs::create_dir_all(login.parent().unwrap()).unwrap();
+    fs::write(login, "test").unwrap();
+    hub.cli(&["doctor", "--refresh"]).ok();
     eventually("fleet to start", Duration::from_secs(120), || {
         (hub.cli(&["node", "add"]).status == 0).then_some(())
     });
@@ -271,8 +293,27 @@ fn node_job_policy_survives_restart_and_routes_around_restricted_nodes() {
             .map(str::to_string)
     });
     let repo = common::temp_repo("nodejobs");
-    let sleeve = hub.spawn_pi("nodejobs", &repo);
-    let token = hub.sleeve_token(sleeve["id"].as_str().unwrap(), 1);
+    let sleeve = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "nodejobs",
+            "--path",
+            repo.to_str().unwrap(),
+            "--harness",
+            "claude",
+        ])
+        .json();
+    let token_file = hub.home.join(format!(
+        "sleeves/{}/home/test-token",
+        sleeve["id"].as_str().unwrap()
+    ));
+    let token = eventually("sleeve capability", Duration::from_secs(60), || {
+        fs::read_to_string(&token_file)
+            .ok()
+            .filter(|s| !s.is_empty())
+    });
     let caller = [("PROTECTORATE_TOKEN", token.as_str())];
 
     let denied = hub.cli_env(&caller, &["node", "set", &first, "--jobs", "any"]);
@@ -321,9 +362,15 @@ fn node_job_policy_survives_restart_and_routes_around_restricted_nodes() {
     );
     hub.restart();
     let after = eventually("policy after restart", Duration::from_secs(120), || {
-        listed(&hub, &first).filter(|v| v["jobs"].as_str() == Some("none"))
+        let result = hub.cli(&["--json", "node", "show", &first]);
+        (result.status == 0)
+            .then(|| result.json())
+            .filter(|v| v["jobs"].as_str() == Some("none"))
     });
     assert_eq!(after["jobs_note"].as_str(), Some("storage"));
+    let denied = hub.cli(&["job", "run", "--node", &first, "--", "true"]);
+    assert_ne!(denied.status, 0);
+    assert!(denied.stderr.contains("storage"), "{}", denied.stderr);
 }
 
 /// A directory where the enrollment file's temporary copy goes: writing the record fails, while
