@@ -189,6 +189,9 @@ pub enum Code {
 /// Something a person or a sleeve should hear about.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Notice {
+    DeviceChanged {
+        path: String,
+    },
     MessageRejected {
         request_id: String,
     },

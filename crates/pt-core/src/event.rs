@@ -121,6 +121,11 @@ pub enum Obs {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EventKind {
     MailBatching,
+    DeviceChanged {
+        sleeve: SleeveId,
+        g: Gen,
+        path: String,
+    },
     // Commands from the API (owner, Envoy, agents, sleeves).
     Spawn(SpawnSpec),
     Send {

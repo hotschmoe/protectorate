@@ -229,6 +229,7 @@ fn notice_text(view: &View, n: &Notice) -> (Kind, Level, String) {
             .map_or_else(|| id.0.to_string(), |s| s.name.clone())
     };
     match n {
+        Notice::DeviceChanged { path } => (Kind::Sleeve, Level::Info, format!("device {path} changed; relaunching at the next turn boundary")),
         Notice::MessageRejected { request_id } => (
             Kind::Mail,
             Level::Warn,

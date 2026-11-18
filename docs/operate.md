@@ -468,8 +468,11 @@ continuation brief show the original request, without the hub’s prompt preambl
 `"sleeve_devices": ["/dev/aipu", "/dev/mali0"]`. A path that is not there is skipped and
 the hub log says it was not bound; the sleeve still starts. The list is empty by default,
 so a sleeve sees only the sandbox's own `/dev`. Adding a device requires a hub restart,
-then a new sleeve launch. A replugged device keeps its `/dev/serial/by-id/` name but may
-get a new `ttyUSBn`; restart running sleeves to bind the new node. Inside a sleeve the
+then a new sleeve launch. The hub checks paths once a second; when a missing or replaced node
+appears, running sleeves record a notice naming the path and relaunch with native session
+resume. An idle sleeve relaunches immediately; a working sleeve waits for its next turn
+boundary. A replugged device can keep its `/dev/serial/by-id/` name while getting a new
+`ttyUSBn`. Inside a sleeve the
 device may appear as `nobody:nogroup` and `id` may show `nogroup`; supplementary host
 groups still apply, so this alone does not mean a 0666 udev rule is needed.
 Doctor reports each configured path, resolved node, owner, group, mode and hub read/write access without opening it. At each launch the hub logs the same information and any host processes holding the device; the first prompt lists bound devices and their holders. Processes that cannot be inspected are skipped.

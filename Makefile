@@ -68,8 +68,10 @@ release-publish:
 test:
 	$(CARGO_VERSION) sh scripts/test-blocking.sh
 
+# The long feature scenarios are #[ignore]d; the second step runs every one of them.
 test-heavy:
 	@failed=""; $(CARGO_VERSION) sh scripts/test.sh || failed="$$failed e2e"; \
+	  $(CARGO_VERSION) cargo test --locked --workspace --features ssh-poc --tests -- --ignored || failed="$$failed ignored"; \
 	  $(CARGO_VERSION) sh scripts/replay-seeds.sh || failed="$$failed seeds"; \
 	  $(MAKE) check-fuzz || failed="$$failed check-fuzz"; \
 	  if [ -n "$$failed" ]; then echo "test failed:$$failed"; exit 1; fi

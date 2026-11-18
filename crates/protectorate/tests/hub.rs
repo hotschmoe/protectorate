@@ -1188,6 +1188,20 @@ fn sleeve_devices_are_bound_and_missing_ones_are_logged() {
         .args(["-c", "exec 3<>/dev/zero; exec sleep 300"])
         .spawn()
         .unwrap();
+    let other_dir = dir.join("other");
+    std::fs::create_dir_all(&other_dir).unwrap();
+    let other_claude = other_dir.join("claude");
+    std::os::unix::fs::symlink("/bin/sh", &other_claude).unwrap();
+    let mut other_holder = std::process::Command::new(other_claude)
+        .args(["-c", "exec 3<>/dev/zero; read line"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    eventually(
+        "other holder to open device",
+        Duration::from_secs(30),
+        || std::fs::metadata(format!("/proc/{}/fd/3", other_holder.id())).ok(),
+    );
     std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
     std::fs::write(home.join("logins/.claude/.credentials.json"), "{}").unwrap();
     write_script(
@@ -1284,6 +1298,33 @@ exec sleep 300"#,
         std::thread::sleep(Duration::from_millis(200));
     };
     assert_eq!(saw.trim(), "NPU");
+    let socket = hub.home.join("run/sleeves/api.sock");
+    let socket_var = format!("PROTECTORATE_SOCKET={}", socket.display());
+    let sleeve_pids = eventually("sleeve to open device", Duration::from_secs(30), || {
+        use std::os::unix::fs::MetadataExt;
+        let zero = std::fs::metadata("/dev/zero").ok()?.rdev();
+        let pids: Vec<u32> = std::fs::read_dir("/proc")
+            .ok()?
+            .flatten()
+            .filter_map(|entry| {
+                let pid = entry.file_name().to_str()?.parse::<u32>().ok()?;
+                let env = std::fs::read(entry.path().join("environ")).ok()?;
+                if !env.split(|b| *b == 0).any(|v| v == socket_var.as_bytes())
+                    || !env
+                        .split(|b| *b == 0)
+                        .any(|v| v == b"PROTECTORATE_SLEEVE=devices")
+                {
+                    return None;
+                }
+                std::fs::read_dir(entry.path().join("fd"))
+                    .ok()?
+                    .flatten()
+                    .any(|fd| std::fs::metadata(fd.path()).is_ok_and(|m| m.rdev() == zero))
+                    .then_some(pid)
+            })
+            .collect();
+        (!pids.is_empty()).then_some(pids)
+    });
     let doctor_after = doctor_devices();
     let device_line = doctor_after
         .iter()
@@ -1295,7 +1336,15 @@ exec sleep 300"#,
         "{device_line}"
     );
     assert!(device_line.contains("sleep"), "{device_line}");
-    assert!(!device_line.contains(" claude"), "{device_line}");
+    assert!(device_line.contains("claude"), "{device_line}");
+    let listed: Vec<u32> = device_line
+        .split(|c: char| !c.is_ascii_digit())
+        .filter_map(|n| n.parse().ok())
+        .collect();
+    assert!(listed.contains(&other_holder.id()), "{device_line}");
+    for pid in sleeve_pids {
+        assert!(!listed.contains(&pid), "{device_line}");
+    }
     hub.send("devices", "hello");
     let prompt = eventually("the first prompt", Duration::from_secs(30), || {
         std::fs::read_to_string(scratch.join("target/prompt"))
@@ -1353,6 +1402,115 @@ exec sleep 300"#,
     );
     holder.kill().unwrap();
     holder.wait().unwrap();
+    other_holder.kill().unwrap();
+    other_holder.wait().unwrap();
+}
+
+#[test]
+#[ignore = "real-scope heavy test"]
+fn device_replacement_refreshes_idle_and_working_sleeves() {
+    if !have_user_bus() || !on_path("bwrap") || !on_path("python3") || !on_path("git") {
+        return;
+    }
+    let dir = unique("device-refresh");
+    let home = dir.join("home");
+    let repo = temp_repo("device-refresh");
+    let fake = repo.join("claude");
+    let node = repo.join("device");
+    std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
+    std::fs::write(home.join("logins/.claude/.credentials.json"), "{}").unwrap();
+    std::fs::write(&node, "first").unwrap();
+    write_script(
+        &fake,
+        &format!(
+            r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi
+exec python3 -u -c '
+import json, os, sys, time
+g = int(open(os.path.expanduser("~/generation")).read()) + 1 if os.path.exists(os.path.expanduser("~/generation")) else 1
+open(os.path.expanduser("~/generation"), "w").write(str(g))
+open("seen" + str(g), "w").write(open("{}").read())
+open("args" + str(g), "w").write(" ".join(sys.argv[1:]))
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("type") != "user": continue
+    msg["isReplay"] = True
+    print(json.dumps(msg), flush=True)
+    open("working", "w").write("yes")
+    while not os.path.exists("release"): time.sleep(0.05)
+    print(json.dumps({{"type":"result", "subtype":"success", "is_error":False, "stop_reason":"end_turn"}}), flush=True)
+' "$@""#,
+            node.display()
+        ),
+    );
+    let config = pt_json::obj! {
+        "envoy" => pt_json::obj! { "harness" => "claude" },
+        "claude_program" => fake.to_str().unwrap(),
+        "quota_poll_secs" => 0u64,
+        "harness_update_hours" => 0u64,
+        "sleeve_devices" => vec![pt_json::Value::from(node.to_str().unwrap())],
+    };
+    std::fs::write(home.join("config.json"), config.to_string()).unwrap();
+    let hub = Hub::open(home, &[], &[]);
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "worker",
+        "--path",
+        repo.to_str().unwrap(),
+        "--harness",
+        "claude",
+    ])
+    .ok();
+    hub.wait("worker", "idle", 90);
+    eventually("first bound device", Duration::from_secs(30), || {
+        (std::fs::read_to_string(repo.join("seen1")).ok()?.trim() == "first").then_some(())
+    });
+    let replace = |number: u8, value: &str| {
+        let next = dir.join(format!("next{number}"));
+        std::fs::write(&next, value).unwrap();
+        std::fs::rename(&node, dir.join(format!("retired{number}"))).unwrap();
+        std::fs::rename(next, &node).unwrap();
+    };
+    replace(1, "second");
+    eventually(
+        "idle sleeve reopens device",
+        Duration::from_secs(90),
+        || (std::fs::read_to_string(repo.join("seen2")).ok()?.trim() == "second").then_some(()),
+    );
+    hub.wait("worker", "idle", 90);
+    hub.send("worker", "hold this turn");
+    eventually("working turn", Duration::from_secs(30), || {
+        repo.join("working").exists().then_some(())
+    });
+    replace(2, "third");
+    eventually("device change notice", Duration::from_secs(30), || {
+        let events = hub.cli(&["event", "list"]).stdout;
+        (events
+            .lines()
+            .filter(|line| {
+                line.contains("worker")
+                    && line.contains(&format!("device {} changed", node.display()))
+            })
+            .count()
+            >= 2)
+            .then_some(())
+    });
+    assert!(
+        !repo.join("seen3").exists(),
+        "a working turn must not be interrupted"
+    );
+    std::fs::write(repo.join("release"), "go").unwrap();
+    eventually(
+        "working sleeve reopens device after settling",
+        Duration::from_secs(90),
+        || (std::fs::read_to_string(repo.join("seen3")).ok()?.trim() == "third").then_some(()),
+    );
+    eventually("native session resumed", Duration::from_secs(30), || {
+        std::fs::read_to_string(repo.join("args3"))
+            .ok()?
+            .contains("--resume")
+            .then_some(())
+    });
 }
 
 #[test]

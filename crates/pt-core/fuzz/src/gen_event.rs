@@ -107,7 +107,7 @@ pub fn event(b: &mut Bytes) -> Event {
     let j = |b: &mut Bytes| JobId(b.u64());
     let a = |b: &mut Bytes| b.u64() as u32;
     use EventKind as E;
-    let kind = match b.below(37) {
+    let kind = match b.below(38) {
         0 => E::Spawn(SpawnSpec {
             request_id: b.string(),
             name: b.string(),
@@ -290,7 +290,12 @@ pub fn event(b: &mut Bytes) -> Event {
             effect: e(b),
             attempt: a(b),
         },
-        _ => E::MailBatching,
+        36 => E::MailBatching,
+        _ => E::DeviceChanged {
+            sleeve: s(b),
+            g: g(b),
+            path: b.string(),
+        },
     };
     Event { at, kind }
 }

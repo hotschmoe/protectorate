@@ -122,6 +122,7 @@ pub struct Sleeve {
     pub kill_cause: Option<Cause>,
     /// A post-restart ProbeScope is outstanding for the current generation.
     pub probing: bool,
+    pub device_refresh: bool,
 
     pub boot_at: Millis,
     pub turn_at: Millis,
