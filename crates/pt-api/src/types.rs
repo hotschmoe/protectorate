@@ -20,6 +20,13 @@ api_enums! {
         Child = "child",
     }
 
+    /// A sleeve's declared result on the final line of its turn.
+    pub enum TurnStatusState {
+        Done = "done",
+        Continuing = "continuing",
+        Blocked = "blocked",
+    }
+
     /// SPEC 4, sleeve lifecycle.
     pub enum Lifecycle {
         Provisioning = "provisioning",
@@ -291,6 +298,13 @@ api_records! {
 
     /// The durable identity: name, workspace claim, parent link, resleeve policy, budget and
     /// queue.
+    pub struct TurnStatus {
+        pub turn: u64,
+        pub state: TurnStatusState,
+        /// The remaining work or blocking reason, absent for done.
+        pub detail: Option<String>,
+    }
+
     pub struct Sleeve {
         pub id: String,
         pub name: String,
@@ -319,6 +333,8 @@ api_records! {
         /// Permanent for this sleeve id. A D9-origin turn spawned it or sent to it, or a
         /// marked sleeve sent to it.
         pub d9: bool = false,
+        /// Status declared by the latest settled turn, absent when it declared none.
+        pub last_status: Option<TurnStatus>,
     }
 
     /// Token counts the harness reported for one turn.

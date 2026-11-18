@@ -60,7 +60,11 @@ of long or code-bearing messages. A sleeve reaches a sibling through its parent.
 
 A sleeve is named by its id or its name.
 
-List and show include the oldest queued message's age beside the queue count. `sleeve send`
+List and show include the oldest queued message's age beside the queue count. They also show the
+latest settled turn's declared status. The API includes its turn number, state and detail.
+A final line `STATUS: DONE`, `STATUS: CONTINUING <remaining work>` or `STATUS: BLOCKED <reason>`
+declares the status; the last two require a nonempty detail. A later turn without a valid final
+status clears it. Turn reports include the declaration. `sleeve send`
 reports whether the message was queued or sent for delivery and the queue length at acceptance.
 Queued messages wait for a turn boundary. At a headless turn start, consecutive queued prompts
 are delivered together in FIFO order, with their normal sender headers; a continuation ends

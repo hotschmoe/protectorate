@@ -572,6 +572,13 @@ pub fn report(hub: &Hub, s: &Sleeve, workdir: &Path, turn: u64) -> String {
     });
     match last {
         Some(t) => {
+            if let Some((state, detail)) = crate::transcript::turn_status(t) {
+                let _ = writeln!(
+                    b,
+                    "Declared status: {state}{}.",
+                    detail.map_or(String::new(), |d| format!(": {d}"))
+                );
+            }
             let _ = writeln!(
                 b,
                 "Final message:\n> {}",

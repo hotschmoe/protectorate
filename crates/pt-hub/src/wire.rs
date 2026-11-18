@@ -218,6 +218,7 @@ pub fn sleeve(
         budget_used: s.budget.map(|_| s.used),
         budget_limit: s.budget,
         d9: s.d9,
+        last_status: stats.last_status,
     }
 }
 

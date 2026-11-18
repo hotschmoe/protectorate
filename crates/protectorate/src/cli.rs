@@ -132,6 +132,9 @@ pub fn sleeve_rows(sleeves: &[api::Sleeve]) {
                 inc.map_or("-".into(), |i| i.activity.state.to_string()),
                 inc.map_or("-".into(), |i| i.harness.to_string()),
                 inc.map_or("-".into(), |i| format!("g{}", i.g)),
+                s.last_status
+                    .as_ref()
+                    .map_or("-".into(), |status| status.state.to_string()),
                 s.oldest_queued_at_ms.map_or_else(
                     || s.queued.to_string(),
                     |t| format!("{} ({})", s.queued, ago(t).trim_end_matches(" ago")),
@@ -149,6 +152,7 @@ pub fn sleeve_rows(sleeves: &[api::Sleeve]) {
             "ACTIVITY",
             "HARNESS",
             "G",
+            "STATUS",
             "QUEUED",
             "PATH",
         ],

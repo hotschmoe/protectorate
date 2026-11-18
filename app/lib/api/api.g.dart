@@ -4732,8 +4732,6 @@ final class Sent {
   };
 }
 
-/// The durable identity: name, workspace claim, parent link, resleeve policy, budget and
-/// queue.
 final class Sleeve {
   const Sleeve({
     required this.id,
@@ -4753,6 +4751,7 @@ final class Sleeve {
     this.budgetUsed,
     this.budgetLimit,
     this.d9 = false,
+    this.lastStatus,
   });
 
   factory Sleeve.fromJson(Object? json) {
@@ -4791,6 +4790,7 @@ final class Sleeve {
         (e0) => _int(e0, 'Sleeve.budget_limit'),
       ),
       d9: _or(j['d9'], false, (e0) => _bool(e0, 'Sleeve.d9')),
+      lastStatus: _opt(j['last_status'], TurnStatus.fromJson),
     );
   }
 
@@ -4838,6 +4838,9 @@ final class Sleeve {
   /// marked sleeve sent to it.
   final bool d9;
 
+  /// Status declared by the latest settled turn, absent when it declared none.
+  final TurnStatus? lastStatus;
+
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
@@ -4857,6 +4860,7 @@ final class Sleeve {
     if (budgetUsed case final v?) 'budget_used': v,
     if (budgetLimit case final v?) 'budget_limit': v,
     'd9': d9,
+    if (lastStatus case final v?) 'last_status': v.toJson(),
   };
 }
 
@@ -5225,6 +5229,57 @@ final class Transcript {
     'entries': [for (final e0 in entries) e0.toJson()],
     'more': more,
   };
+}
+
+/// The durable identity: name, workspace claim, parent link, resleeve policy, budget and
+/// queue.
+final class TurnStatus {
+  const TurnStatus({required this.turn, required this.state, this.detail});
+
+  factory TurnStatus.fromJson(Object? json) {
+    final j = _object(json, 'TurnStatus');
+    return TurnStatus(
+      turn: _int(j['turn'], 'TurnStatus.turn'),
+      state: TurnStatusState.fromJson(j['state']),
+      detail: _opt(j['detail'], (e0) => _string(e0, 'TurnStatus.detail')),
+    );
+  }
+
+  final int turn;
+
+  final TurnStatusState state;
+
+  /// The remaining work or blocking reason, absent for done.
+  final String? detail;
+
+  Map<String, Object?> toJson() => {
+    'turn': turn,
+    'state': state.toJson(),
+    if (detail case final v?) 'detail': v,
+  };
+}
+
+/// A sleeve's declared result on the final line of its turn.
+enum TurnStatusState {
+  done('done'),
+  continuing('continuing'),
+  blocked('blocked'),
+
+  /// A value this client does not know.
+  unknown('unknown');
+
+  const TurnStatusState(this.wire);
+
+  final String wire;
+
+  static TurnStatusState fromJson(Object? json) {
+    for (final v in values) {
+      if (v.wire == json) return v;
+    }
+    return unknown;
+  }
+
+  String toJson() => wire;
 }
 
 final class UpdateHarnessesRequest {

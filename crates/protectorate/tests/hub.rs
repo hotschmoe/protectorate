@@ -2058,7 +2058,11 @@ for line in sys.stdin:
         open("b.txt", "w").write("b\n")
         emit({"type":"assistant", "message":{"id":"t", "content":[{"type":"tool_use", "id":"tu1", "name":"Bash", "input":{"command":"cargo test -q"}}]}})
         emit({"type":"user", "message":{"content":[{"type":"tool_result", "tool_use_id":"tu1", "content":"test result: ok", "is_error":False}]}})
-    emit({"type":"assistant", "message":{"id":"r", "content":[{"type":"text", "text":"all done"}]}})
+    if "do the work" in line: answer = "all done\nSTATUS: CONTINUING more work"
+    elif "blocked question" in line: answer = "STATUS: BLOCKED missing input"
+    elif "no status question" in line: answer = "STATUS: DONE\nmore text"
+    else: answer = "STATUS: DONE"
+    emit({"type":"assistant", "message":{"id":"r", "content":[{"type":"text", "text":answer}]}})
     emit({"type":"result", "subtype":"success", "is_error":False, "stop_reason":"end_turn"})
 ' "$@""#,
     );
@@ -2072,7 +2076,7 @@ for line in sys.stdin:
     };
     std::fs::write(home.join("config.json"), config.to_string()).unwrap();
     let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
-    let hub = Hub::open(home, &[], &[("PATH", &path)]);
+    let mut hub = Hub::open(home, &[], &[("PATH", &path)]);
     let repo = temp_repo("report");
     hub.cli(&[
         "sleeve",
@@ -2127,10 +2131,14 @@ for line in sys.stdin:
         "b.txt",
         "Last test command this turn: `",
         "cargo test",
+        "Declared status: continuing: more work.",
         "Final message:\n> all done",
     ] {
         assert!(report.contains(want), "missing {want:?} in:\n{report}");
     }
+    let status = hub.sleeve("worker");
+    assert_eq!(status["last_status"]["state"].as_str(), Some("continuing"));
+    assert_eq!(status["last_status"]["detail"].as_str(), Some("more work"));
 
     hub.send("worker", "an owner question");
     eventually(
@@ -2140,6 +2148,31 @@ for line in sys.stdin:
     );
     hub.wait("envoy", "idle", 60);
     assert_eq!(reports().len(), 1, "the owner's turn reported to Envoy");
+    hub.wait("worker", "idle", 60);
+    let status = hub.sleeve("worker");
+    assert_eq!(status["last_status"]["state"].as_str(), Some("done"));
+    assert_eq!(status["last_status"]["turn"].as_u64(), Some(2));
+    assert!(hub.cli(&["sleeve", "list"]).stdout.contains("done"));
+    hub.send("worker", "blocked question");
+    eventually("blocked status", Duration::from_secs(60), || {
+        (hub.sleeve("worker")["last_status"]["state"].as_str() == Some("blocked")).then_some(())
+    });
+    assert_eq!(
+        hub.sleeve("worker")["last_status"]["detail"].as_str(),
+        Some("missing input")
+    );
+    hub.wait("worker", "idle", 60);
+    hub.restart();
+    assert_eq!(
+        hub.sleeve("worker")["last_status"]["state"].as_str(),
+        Some("blocked")
+    );
+    hub.wait("worker", "idle", 60);
+    hub.send("worker", "no status question");
+    eventually("status cleared", Duration::from_secs(60), || {
+        let s = hub.sleeve("worker");
+        (s["last_status"].is_null()).then_some(())
+    });
     hub.wait("worker", "idle", 60);
     let all = hub
         .cli(&[

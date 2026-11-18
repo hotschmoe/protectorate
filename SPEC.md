@@ -167,9 +167,13 @@ CLI on the hub machine (section 3.1).
   transcript and git, with no model: how the turn ended, tokens and context, branch, head and
   uncommitted files, commits and diffstat since the task's base commit (the workspace's HEAD at
   the sleeve's first launch), the turn's last test command and its result, notices, and the final
-  message clipped at 2000 bytes with the transcript range for the rest. It skips the mail bound,
-  since the recipient opened the turn, and carries the D9 mark like any mail from the sleeve. A
-  usage-limit or auth settle reports after its continuation. Envoy reports to no one.
+  message clipped at 2000 bytes with the transcript range for the rest. It skips the mail bound
+  since the recipient opened the turn, and carries the D9 mark like any mail from the sleeve.
+  It includes the declared status when the final message ends in `STATUS: DONE`,
+  `STATUS: CONTINUING <remaining work>` or `STATUS: BLOCKED <reason>` (the latter two need a
+  nonempty detail). Sleeve API views expose the latest settled turn's status, turn number and
+  detail; list displays its state. A turn without a valid declaration clears the previous status.
+  A usage-limit or auth settle reports after its continuation. Envoy reports to no one.
 - **Envoy's context ceiling.** When an Envoy turn settles with its context at 500k tokens or
   more, the hub sends the core a `Compact` for Envoy; the core takes it once Envoy is idle with
   nothing queued, and the driver sends the harness's own compaction (`/compact` for Claude Code).
