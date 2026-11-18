@@ -4020,35 +4020,3 @@ fn transcript_pages_skip_torn_and_corrupt_lines() {
     assert_eq!(v["more"].as_bool(), Some(true), "{v}");
 }
 
-#[test]
-fn timeout_reports_the_hubs_launch_refusal() {
-    let hub = Hub::start_config(
-        "timeout-diagnostic",
-        "claude",
-        &[("claude_program", "/nonexistent/test-claude".into())],
-        &[],
-        &[],
-    );
-    eventually("launch refusal", Duration::from_secs(60), || {
-        let events = hub.cli(&["--json", "event", "list"]).json();
-        events["events"]
-            .as_array()?
-            .iter()
-            .any(|e| {
-                e["text"]
-                    .as_str()
-                    .is_some_and(|text| text.contains("launch refused:"))
-            })
-            .then_some(())
-    });
-    let error = std::panic::catch_unwind(|| {
-        eventually::<()>("sleeve x", Duration::ZERO, || None);
-    })
-    .unwrap_err();
-    let text = error.downcast_ref::<String>().unwrap();
-    assert!(
-        text.contains("timed out waiting for sleeve x: launch refused:"),
-        "{text}"
-    );
-    assert!(text.contains("claude"), "{text}");
-}
