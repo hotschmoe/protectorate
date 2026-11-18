@@ -727,7 +727,9 @@ and limit flags, balance, and available reset credits. When the limit is reached
 are available, the row shows the balance and the estimated hourly decrease between consecutive
 readings; the rate is not a vendor claim. Envoy receives one queued notice when Codex begins
 or stops spending credits; its journaled message records the last reported state across hub
-restarts. Unknown and stale readings do not change that state. Model-scoped Claude windows
+restarts. Unknown and stale readings do not change that state. Spawn, start and resleeve onto
+Codex succeed while it uses credits but return a warning, naming an eligible harness with fresh
+quota headroom when one exists. Model-scoped Claude windows
 (`wk <name>`) stay on the quota row
 and gate a candidate of the same family (opus, sonnet, haiku), ignoring case and version
 (`Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus). `opusplan`

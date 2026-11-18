@@ -941,11 +941,28 @@ fn codex_credit_readings() {
     let requests = Arc::clone(&count);
     let on_credits = Arc::new(AtomicBool::new(true));
     let server_on_credits = Arc::clone(&on_credits);
+    let fake_bin = unique("codex-credit-bin");
+    std::fs::create_dir_all(&fake_bin).unwrap();
+    std::os::unix::fs::symlink("/bin/true", fake_bin.join("systemd-run")).unwrap();
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
     std::thread::spawn(move || {
         for stream in server.incoming().flatten() {
             let mut stream = stream;
             let mut request = [0u8; 4096];
-            let _ = stream.read(&mut request);
+            let n = stream.read(&mut request).unwrap_or(0);
+            if String::from_utf8_lossy(&request[..n]).starts_with("GET /v1/models ") {
+                let body = r#"{"data":[{"id":"stand-in"}]}"#;
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                continue;
+            }
             let balance = if requests.fetch_add(1, Ordering::SeqCst) == 0 {
                 "1000"
             } else {
@@ -965,10 +982,15 @@ fn codex_credit_readings() {
     });
     let mut hub = Hub::start_config(
         "codex-credits",
-        "pi_local",
+        "claude",
         &[
             ("quota_poll_secs", 1u64.into()),
+            ("scopes", false.into()),
             ("codex_program", "/bin/true".into()),
+            ("pi_program", "/bin/true".into()),
+            ("pi_local_provider", "stand-in".into()),
+            ("pi_local_model", "stand-in".into()),
+            ("local_url", url.as_str().into()),
             ("claude_program", "/nonexistent/program".into()),
             ("grok_program", "/nonexistent/program".into()),
         ],
@@ -976,6 +998,7 @@ fn codex_credit_readings() {
         &[
             ("PT_TEST_CODEX_USAGE_BASE", &url),
             ("PT_TEST_QUOTA_TTL_MS", "1000"),
+            ("PATH", &path),
         ],
     );
     let login = hub.home.join("logins/.codex");
@@ -985,6 +1008,13 @@ fn codex_credit_readings() {
         r#"{"tokens":{"access_token":"test-token"}}"#,
     )
     .unwrap();
+    let pi_login = hub.home.join("logins/.pi/agent");
+    std::fs::create_dir_all(&pi_login).unwrap();
+    std::fs::write(
+        pi_login.join("models.json"),
+        r#"{"providers":{"stand-in":{}}}"#,
+    )
+    .unwrap();
     hub.restart();
     eventually("two Codex credit readings", Duration::from_secs(30), || {
         let list = hub.cli(&["--json", "quota", "list"]).json();
@@ -992,7 +1022,9 @@ fn codex_credit_readings() {
         let row = rows
             .iter()
             .find(|q| q["subscription"].as_str() == Some("codex"))?;
-        (row["credits"]["per_hour"].as_f64().is_some()
+        (rows.iter().any(|q| {
+            q["subscription"].as_str() == Some("local") && q["reading"].as_str() == Some("ok")
+        }) && row["credits"]["per_hour"].as_f64().is_some()
             && row["credits"]["balance"].as_f64() == Some(990.0))
         .then_some(())
     });
@@ -1004,6 +1036,29 @@ fn codex_credit_readings() {
     );
     assert!(display.stdout.contains("reset credits available: 2"));
     assert!(display.stdout.contains("an hour"));
+    hub.cli(&["doctor", "--refresh"]).ok();
+    let workspace = unique("codex-credit-workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let spawned = hub.cli(&[
+        "sleeve",
+        "spawn",
+        "credit-worker",
+        "--harness",
+        "codex",
+        "--path",
+        workspace.to_str().unwrap(),
+    ]);
+    spawned.ok();
+    assert!(
+        spawned.stderr.contains("will use account credits"),
+        "{}",
+        spawned.stderr
+    );
+    assert!(
+        spawned.stderr.contains("pi_local has quota headroom"),
+        "{}",
+        spawned.stderr
+    );
     let inbox = || hub.cli(&["--json", "sleeve", "inbox", "envoy"]).json();
     eventually("Envoy credit notice", Duration::from_secs(15), || {
         let messages = inbox();

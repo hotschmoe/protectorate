@@ -461,6 +461,9 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 budget: a.num("--budget")?,
             };
             let v = c.call_for::<m::SpawnSleeve>(&req, APPROVAL_WAIT)?;
+            if let Some(warning) = &v.warning {
+                eprintln!("warning: {warning}");
+            }
             o.show(&v, |s| {
                 println!("spawned {} (id {}) at {}", s.name, s.id, s.path)
             });
@@ -513,6 +516,9 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 effort: a.flag("--effort").map(str::to_string),
             };
             let v = c.call::<m::StartSleeve>(&req)?;
+            if let Some(warning) = &v.warning {
+                eprintln!("warning: {warning}");
+            }
             o.show(&v, |v| accepted(v, "starting"));
         }
         "resleeve" => {
@@ -527,6 +533,9 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 effort: a.flag("--effort").map(str::to_string),
             };
             let v = c.call::<m::Resleeve>(&req)?;
+            if let Some(warning) = &v.warning {
+                eprintln!("warning: {warning}");
+            }
             o.show(&v, |v| accepted(v, "resleeving"));
         }
         "transcript" => {

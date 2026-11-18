@@ -295,6 +295,9 @@ the number of reset credits available. The estimate is not a vendor-provided rat
 Envoy receives a queued notice when Codex starts or stops using credits. The last notice is
 journaled, so a hub restart does not repeat a transition; an unknown or stale reading does not
 change the reported state.
+Spawn, start and resleeve onto Codex still succeed while it uses credits. The CLI warns and,
+when a fresh reading identifies an eligible alternative with headroom, names that harness. JSON
+responses carry the warning as a field; later sleeve readings do not retain the spawn warning.
 Resleeve targets are weighted by fresh readings; known-exhausted candidates are skipped, and the
 sleeve parks if all eligible candidates are exhausted. A stale reading keeps its last windows:
 under the usable minimum it counts as exhausted, and with spare left the fallback may still

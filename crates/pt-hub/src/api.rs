@@ -719,6 +719,7 @@ fn worktree_taken(root: &str, path: &Path) -> Result<bool> {
 
 fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
     let hub = c.hub;
+    let warning = credit_warning(hub, wire::core_harness(r.harness));
     let view = hub.view();
     let st = &view.state;
     if r.name.is_empty() {
@@ -932,7 +933,49 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
             },
         )?;
     }
-    sleeve_view(hub, id)
+    let mut sleeve = sleeve_view(hub, id)?;
+    sleeve.warning = warning;
+    Ok(sleeve)
+}
+
+fn credit_warning(hub: &Hub, harness: pt_core::Harness) -> Option<String> {
+    if harness != pt_core::Harness::Codex {
+        return None;
+    }
+    let quotas = hub.quotas.list();
+    if !quotas
+        .iter()
+        .any(|q| crate::quota::credit_state(q) == Some(true))
+    {
+        return None;
+    }
+    let candidates: Vec<pt_quota::Candidate> = [
+        pt_core::Harness::Claude,
+        pt_core::Harness::Grok,
+        pt_core::Harness::PiLocal,
+    ]
+    .into_iter()
+    .filter(|h| hub.doctor.check(&hub.config, *h).is_ok())
+    .map(|h| pt_quota::Candidate {
+        harness: wire::api_harness(h),
+        model: String::new(),
+    })
+    .collect();
+    let alternative = pt_quota::select_target(
+        now_ms(),
+        pt_quota::TaskSize::Medium,
+        &candidates,
+        api::Mode::Headless,
+        &[],
+        &quotas,
+        &[],
+    );
+    let mut text =
+        "Codex subscription limit reached; this work will use account credits".to_string();
+    if let Some(target) = alternative {
+        text.push_str(&format!("; {} has quota headroom", target.harness));
+    }
+    Some(text)
 }
 
 /// What the harness reads: mail from a sleeve and agent messages are marked (Envoy's CLAUDE.md
@@ -1038,7 +1081,10 @@ fn interrupt(c: &Ctx<'_>, r: api::SleeveRef) -> Result<api::Empty> {
 fn stop(c: &Ctx<'_>, r: api::SleeveRef) -> Result<api::Accepted> {
     let id = target_sleeve(c, &c.hub.view(), &r.sleeve_id)?;
     command(c.hub, EventKind::Stop { sleeve: id })?;
-    Ok(api::Accepted { approval_id: None })
+    Ok(api::Accepted {
+        approval_id: None,
+        warning: None,
+    })
 }
 
 fn remove(c: &Ctx<'_>, r: api::SleeveRef) -> Result<api::Accepted> {
@@ -1047,7 +1093,10 @@ fn remove(c: &Ctx<'_>, r: api::SleeveRef) -> Result<api::Accepted> {
     let name = view.state.sleeve(id).map_or("", |s| s.name.as_str());
     let approval_id = rule::gate(c.hub, c.who, Guarded::Remove(name))?;
     command(c.hub, EventKind::Remove { sleeve: id })?;
-    Ok(api::Accepted { approval_id })
+    Ok(api::Accepted {
+        approval_id,
+        warning: None,
+    })
 }
 
 fn optional_target(
@@ -1081,6 +1130,12 @@ fn start(c: &Ctx<'_>, r: api::StartSleeveRequest) -> Result<api::Accepted> {
     } else {
         optional_target(c.hub, r.target, r.provider, r.model)
     };
+    let warning = credit_warning(
+        c.hub,
+        target
+            .as_ref()
+            .map_or(view.state.sleeves[&id].target.harness, |t| t.harness),
+    );
     command(
         c.hub,
         EventKind::Start {
@@ -1089,12 +1144,16 @@ fn start(c: &Ctx<'_>, r: api::StartSleeveRequest) -> Result<api::Accepted> {
             effort: r.effort.filter(|e| !e.is_empty()),
         },
     )?;
-    Ok(api::Accepted { approval_id: None })
+    Ok(api::Accepted {
+        approval_id: None,
+        warning,
+    })
 }
 
 fn resleeve(c: &Ctx<'_>, r: api::ResleeveRequest) -> Result<api::Accepted> {
     let id = target_sleeve(c, &c.hub.view(), &r.sleeve_id)?;
     let target = optional_target(c.hub, Some(r.target), r.provider, r.model);
+    let warning = credit_warning(c.hub, wire::core_harness(r.target));
     command(
         c.hub,
         EventKind::Resleeve {
@@ -1103,7 +1162,10 @@ fn resleeve(c: &Ctx<'_>, r: api::ResleeveRequest) -> Result<api::Accepted> {
             effort: r.effort.filter(|e| !e.is_empty()),
         },
     )?;
-    Ok(api::Accepted { approval_id: None })
+    Ok(api::Accepted {
+        approval_id: None,
+        warning,
+    })
 }
 
 fn takeover(_: &Ctx<'_>, _: api::SleeveRef) -> Result<api::Empty> {

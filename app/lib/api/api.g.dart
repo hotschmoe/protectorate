@@ -39,7 +39,7 @@ T _or<T>(Object? v, T fallback, T Function(Object?) f) =>
 /// The hub took the action. `approval_id` is set when a code rule made it wait for the
 /// owner first.
 final class Accepted {
-  const Accepted({this.approvalId});
+  const Accepted({this.approvalId, this.warning});
 
   factory Accepted.fromJson(Object? json) {
     final j = _object(json, 'Accepted');
@@ -48,13 +48,17 @@ final class Accepted {
         j['approval_id'],
         (e0) => _string(e0, 'Accepted.approval_id'),
       ),
+      warning: _opt(j['warning'], (e0) => _string(e0, 'Accepted.warning')),
     );
   }
 
   final String? approvalId;
 
+  final String? warning;
+
   Map<String, Object?> toJson() => {
     if (approvalId case final v?) 'approval_id': v,
+    if (warning case final v?) 'warning': v,
   };
 }
 
@@ -4822,6 +4826,7 @@ final class Sleeve {
     this.budgetUsed,
     this.budgetLimit,
     this.d9 = false,
+    this.warning,
   });
 
   factory Sleeve.fromJson(Object? json) {
@@ -4860,6 +4865,7 @@ final class Sleeve {
         (e0) => _int(e0, 'Sleeve.budget_limit'),
       ),
       d9: _or(j['d9'], false, (e0) => _bool(e0, 'Sleeve.d9')),
+      warning: _opt(j['warning'], (e0) => _string(e0, 'Sleeve.warning')),
     );
   }
 
@@ -4907,6 +4913,9 @@ final class Sleeve {
   /// marked sleeve sent to it.
   final bool d9;
 
+  /// Warning returned by spawn; absent from subsequent sleeve readings.
+  final String? warning;
+
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
@@ -4926,6 +4935,7 @@ final class Sleeve {
     if (budgetUsed case final v?) 'budget_used': v,
     if (budgetLimit case final v?) 'budget_limit': v,
     'd9': d9,
+    if (warning case final v?) 'warning': v,
   };
 }
 

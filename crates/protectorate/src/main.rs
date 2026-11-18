@@ -73,6 +73,7 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   sleeve interrupt|stop|rm|takeover <sleeve>
   sleeve start <sleeve> [--harness H] [--provider P] [--model M] [--effort E]
   sleeve resleeve <sleeve> --harness H [--provider P] [--model M] [--effort E]
+        Codex on credits warns and names an eligible harness with quota headroom, if any.
   sleeve transcript <sleeve> [--from SEQ] [--limit N]
   sleeve wait <sleeve> [--until idle|done|blocked|parked|ended|report]
         [--after-seq N] [--timeout SECS]

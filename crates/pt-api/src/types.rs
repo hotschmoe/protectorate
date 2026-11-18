@@ -319,6 +319,8 @@ api_records! {
         /// Permanent for this sleeve id. A D9-origin turn spawned it or sent to it, or a
         /// marked sleeve sent to it.
         pub d9: bool = false,
+        /// Warning returned by spawn; absent from subsequent sleeve readings.
+        pub warning: Option<String>,
     }
 
     /// Token counts the harness reported for one turn.
