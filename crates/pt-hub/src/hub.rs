@@ -93,6 +93,9 @@ pub struct Hub {
     pub harness_updates: crate::harness_update::Updater,
     /// Hub and node updates, one at a time.
     pub update_lock: Mutex<()>,
+    pub node_update_active: Mutex<std::collections::BTreeSet<String>>,
+    pub node_update_offline: Mutex<std::collections::BTreeMap<String, u64>>,
+    pub node_update_busy: Mutex<std::collections::BTreeMap<String, (u64, u64)>>,
     /// Where `serve` waits; an update sends `Stop::Restart` here.
     pub stop: Mutex<Option<Sender<Stop>>>,
     input: Sender<Input>,
@@ -166,6 +169,9 @@ impl Hub {
             doctor: Default::default(),
             harness_updates: Default::default(),
             update_lock: Mutex::new(()),
+            node_update_active: Mutex::new(std::collections::BTreeSet::new()),
+            node_update_offline: Mutex::new(std::collections::BTreeMap::new()),
+            node_update_busy: Mutex::new(std::collections::BTreeMap::new()),
             stop: Mutex::new(None),
             input,
             input_depth: AtomicU64::new(0),

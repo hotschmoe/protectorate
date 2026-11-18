@@ -19,7 +19,7 @@ use crate::model::*;
 
 pub const FORMAT: u8 = 1;
 /// Highest event tag this binary reads. Any incompatible encoding must get a new event tag.
-pub const MAX_EVENT_TAG: u8 = 52;
+pub const MAX_EVENT_TAG: u8 = 56;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -604,6 +604,31 @@ impl Wire for EventKind {
                 sleeve.put(w);
                 g.put(w);
                 path.put(w);
+            }
+            E::PendingNodeUpdate {
+                node,
+                version,
+                probation_secs,
+            } => {
+                w.push(53);
+                node.put(w);
+                version.put(w);
+                probation_secs.put(w);
+            }
+            E::ClearPendingNodeUpdate { node, revision } => {
+                w.push(54);
+                node.put(w);
+                revision.put(w);
+            }
+            E::ClaimPendingNodeUpdate { node, revision } => {
+                w.push(55);
+                node.put(w);
+                revision.put(w);
+            }
+            E::ReleasePendingNodeUpdate { node, revision } => {
+                w.push(56);
+                node.put(w);
+                revision.put(w);
             }
             E::Spawn(spec) => {
                 // Bit 0: an effort string follows. Bit 1: this spawn marks D9. Bit 2: Envoy
@@ -1274,6 +1299,23 @@ impl Wire for EventKind {
             52 => E::CreditFloor {
                 effect: Wire::get(r)?,
                 attempt: Wire::get(r)?,
+            },
+            53 => E::PendingNodeUpdate {
+                node: Wire::get(r)?,
+                version: Wire::get(r)?,
+                probation_secs: Wire::get(r)?,
+            },
+            54 => E::ClearPendingNodeUpdate {
+                node: Wire::get(r)?,
+                revision: Wire::get(r)?,
+            },
+            55 => E::ClaimPendingNodeUpdate {
+                node: Wire::get(r)?,
+                revision: Wire::get(r)?,
+            },
+            56 => E::ReleasePendingNodeUpdate {
+                node: Wire::get(r)?,
+                revision: Wire::get(r)?,
             },
             _ => return Err(DecodeError::UnknownTag { what: "event", tag }),
         })

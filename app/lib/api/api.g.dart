@@ -3679,6 +3679,7 @@ final class Node {
     required this.online,
     required this.lastSeen,
     required this.nodeVersion,
+    this.pendingUpdate,
     this.error,
     this.inventory,
     this.sample,
@@ -3693,6 +3694,10 @@ final class Node {
       online: _bool(j['online'], 'Node.online'),
       lastSeen: _time(j['last_seen_ms'], 'Node.last_seen_ms'),
       nodeVersion: _string(j['node_version'], 'Node.node_version'),
+      pendingUpdate: _opt(
+        j['pending_update'],
+        (e0) => _string(e0, 'Node.pending_update'),
+      ),
       error: _opt(j['error'], (e0) => _string(e0, 'Node.error')),
       inventory: _opt(j['inventory'], Inventory.fromJson),
       sample: _opt(j['sample'], Sample.fromJson),
@@ -3710,6 +3715,8 @@ final class Node {
 
   final String nodeVersion;
 
+  final String? pendingUpdate;
+
   final String? error;
 
   /// Absent until the first inventory arrives.
@@ -3725,6 +3732,7 @@ final class Node {
     'online': online,
     'last_seen_ms': lastSeen.millisecondsSinceEpoch,
     'node_version': nodeVersion,
+    if (pendingUpdate case final v?) 'pending_update': v,
     if (error case final v?) 'error': v,
     if (inventory case final v?) 'inventory': v.toJson(),
     if (sample case final v?) 'sample': v.toJson(),
@@ -5511,6 +5519,7 @@ final class UpdateHubRequest {
 
 final class UpdateNodesRequest {
   const UpdateNodesRequest({
+    this.cancel,
     this.nodes = const <String>[],
     this.all = false,
     this.version,
@@ -5523,6 +5532,10 @@ final class UpdateNodesRequest {
   factory UpdateNodesRequest.fromJson(Object? json) {
     final j = _object(json, 'UpdateNodesRequest');
     return UpdateNodesRequest(
+      cancel: _opt(
+        j['cancel'],
+        (e0) => _string(e0, 'UpdateNodesRequest.cancel'),
+      ),
       nodes: _or(
         j['nodes'],
         const <String>[],
@@ -5554,6 +5567,9 @@ final class UpdateNodesRequest {
     );
   }
 
+  /// Cancel the pending update for this node, without starting a rollout.
+  final String? cancel;
+
   /// By id or name; leave empty with `all`.
   final List<String> nodes;
 
@@ -5576,6 +5592,7 @@ final class UpdateNodesRequest {
   final String? rolloutId;
 
   Map<String, Object?> toJson() => {
+    if (cancel case final v?) 'cancel': v,
     'nodes': nodes,
     'all': all,
     if (version case final v?) 'version': v,

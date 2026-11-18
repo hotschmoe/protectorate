@@ -598,12 +598,21 @@ hub request other than Hello. A node that has not done so within the
 probation window (`--probation`, default 600 s) reverts to its previous binary. The command waits
 for every node unless `--no-wait`. Update the hub first, then one node per OS and arch, then the
 rest. Updates run OS/architecture groups independently, preferring an online idle canary. A busy
-deferred canary gives way to the next node; a failed canary skips its group. A node with a running job waits up to 30 seconds and then is
-deferred; an offline node is deferred. The CLI prints progress and then the results table, and the
+deferred canary gives way to the next node; a failed canary skips its group, labeling those rows
+`SKIPPED`. A node with a running job waits up to 30 seconds and then is
+deferred; an offline node is deferred. Deferred rows are labeled `DEFERRED` in the CLI results
+table; a pending update cancelled before dispatch is labeled `CANCELLED`. The CLI prints progress and then the results table, and the
 hub records progress in events. A lost update reply can be confirmed by Hello and Presence on the
 target release. `--all --no-wait` accepts the rollout in the background and prints
 its event id; follow it with `event list`. A hub restart stops an unfinished rollout. With named nodes `--no-wait` waits for the switch but
 not the return. Once an update is admitted, new jobs answer `busy` until the restart.
+
+The journal retains each deferred target and probation window. `node show <node>` shows its
+pending target; a newer rollout replaces it, and `node update --cancel <node>` drops it. When the
+node returns the hub makes one attempt using the normal switch and confirmation path. An attempt
+interrupted by a hub crash is not sent again: the hub confirms it if the node returns on the target,
+otherwise it remains pending with an uncertain outcome reported in events. Unattempted targets
+survive a hub restart.
 
 A Windows node updates the same way. The SCM cannot run a step before each start or restart a
 service from inside it, so the service runs a supervisor, `protectorate-node supervise --service`,

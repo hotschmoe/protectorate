@@ -116,7 +116,7 @@ pub fn event(b: &mut Bytes) -> Event {
     let j = |b: &mut Bytes| JobId(b.u64());
     let a = |b: &mut Bytes| b.u64() as u32;
     use EventKind as E;
-    let kind = match b.below(42) {
+    let kind = match b.below(46) {
         0 => E::Spawn(SpawnSpec {
             request_id: b.string(),
             name: b.string(),
@@ -338,10 +338,27 @@ pub fn event(b: &mut Bytes) -> Event {
             from: party(b),
             limit: b.u64(),
         },
-        _ => E::ArmUntil {
+        41 => E::ArmUntil {
             sleeve: s(b),
             from: party(b),
             limit: b.u64(),
+        },
+        42 => E::PendingNodeUpdate {
+            node: NodeId(b.u64()),
+            version: b.string(),
+            probation_secs: b.u64(),
+        },
+        43 => E::ClearPendingNodeUpdate {
+            node: NodeId(b.u64()),
+            revision: opt(b, |b| b.u64()),
+        },
+        44 => E::ClaimPendingNodeUpdate {
+            node: NodeId(b.u64()),
+            revision: b.u64(),
+        },
+        _ => E::ReleasePendingNodeUpdate {
+            node: NodeId(b.u64()),
+            revision: b.u64(),
         },
     };
     Event { at, kind }

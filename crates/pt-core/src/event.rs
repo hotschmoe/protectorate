@@ -131,6 +131,23 @@ pub enum EventKind {
         g: Gen,
         path: String,
     },
+    PendingNodeUpdate {
+        node: NodeId,
+        version: String,
+        probation_secs: u64,
+    },
+    ClearPendingNodeUpdate {
+        node: NodeId,
+        revision: Option<u64>,
+    },
+    ClaimPendingNodeUpdate {
+        node: NodeId,
+        revision: u64,
+    },
+    ReleasePendingNodeUpdate {
+        node: NodeId,
+        revision: u64,
+    },
     // Commands from the API (owner, Envoy, agents, sleeves).
     Spawn(SpawnSpec),
     Send {

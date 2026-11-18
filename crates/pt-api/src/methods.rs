@@ -637,6 +637,8 @@ api_records! {
     }
 
     pub struct UpdateNodesRequest {
+        /// Cancel the pending update for this node, without starting a rollout.
+        pub cancel: Option<String>,
         /// By id or name; leave empty with `all`.
         pub nodes: Vec<String> = Vec::new(),
         /// Every online node, one canary per OS and arch first.

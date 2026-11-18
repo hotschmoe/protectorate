@@ -73,6 +73,54 @@ impl Core<'_> {
             E::MailBatching => self.st.mail_batching = true,
             E::DeviceChanged { sleeve, g, path } => self.device_changed(*sleeve, *g, path),
             E::CreditFloor { effect, attempt } => self.credit_floor(*effect, *attempt),
+            E::PendingNodeUpdate {
+                node,
+                version,
+                probation_secs,
+            } => {
+                self.st.next_node_update += 1;
+                self.st.pending_node_updates.insert(
+                    *node,
+                    crate::state::PendingNodeUpdate {
+                        revision: self.st.next_node_update,
+                        version: version.clone(),
+                        probation_secs: *probation_secs,
+                        attempted: false,
+                    },
+                );
+                self.reply(Reply::PendingNodeUpdate(self.st.next_node_update));
+            }
+            E::ClearPendingNodeUpdate { node, revision } => {
+                if self
+                    .st
+                    .pending_node_updates
+                    .get(node)
+                    .is_some_and(|p| revision.is_none_or(|revision| p.revision == revision))
+                {
+                    self.st.pending_node_updates.remove(node);
+                }
+                self.reply(Reply::Accepted);
+            }
+            E::ClaimPendingNodeUpdate { node, revision } => {
+                match self.st.pending_node_updates.get_mut(node) {
+                    Some(p) if p.revision == *revision && !p.attempted => {
+                        p.attempted = true;
+                        self.reply(Reply::Accepted);
+                    }
+                    _ => self.reply(Reply::Refused(
+                        Code::FailedPrecondition,
+                        "pending node update changed or was already attempted".into(),
+                    )),
+                }
+            }
+            E::ReleasePendingNodeUpdate { node, revision } => {
+                if let Some(p) = self.st.pending_node_updates.get_mut(node)
+                    && p.revision == *revision
+                {
+                    p.attempted = false;
+                }
+                self.reply(Reply::Accepted);
+            }
             E::Spawn(spec) => self.spawn(spec),
             E::Send {
                 to,

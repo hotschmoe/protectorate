@@ -169,6 +169,7 @@ pub enum Reply {
     ApprovalOpened(String),
     /// Accepted; the result arrives as state changes and notices.
     Accepted,
+    PendingNodeUpdate(u64),
     Sent {
         queued: bool,
         count: u64,

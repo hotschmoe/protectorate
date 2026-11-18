@@ -141,6 +141,10 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
         E::ArmUntil { .. }
         | E::MailBatching
         | E::DeviceChanged { .. }
+        | E::PendingNodeUpdate { .. }
+        | E::ClearPendingNodeUpdate { .. }
+        | E::ClaimPendingNodeUpdate { .. }
+        | E::ReleasePendingNodeUpdate { .. }
         | E::Spawn(_)
         | E::Interrupt { .. }
         | E::Compact { .. }

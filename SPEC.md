@@ -648,11 +648,19 @@ straight from GitHub releases, on the stable or dev channel, as today.
   through one go.mod, so a fleet mid-rollout keeps working.
   Node update runs OS/architecture groups independently, preferring an online idle canary. A
   busy deferred canary gives way to the next candidate; a failed canary skips the rest of its
-  group. A running job holds its node for up to 30 seconds, then the
-  update is deferred. Offline nodes are deferred. Progress is published as node events and the
+  group, whose remaining rows are labeled `SKIPPED`. A running job holds its node for up to 30 seconds, then the
+  update is deferred. Offline nodes are deferred. The CLI labels deferred results `DEFERRED`
+  with the reason. The journal keeps the target and probation window; `node show` displays the
+  target, a newer rollout replaces it, and `node update --cancel <node>` drops it. A pending
+  attempt cancelled before dispatch is labeled `CANCELLED`. On the node's
+  return the hub attempts the same update and confirmation once. The attempt is journaled before
+  sending; after a hub crash an interrupted attempt is confirmed by Hello and Presence on the
+  target, or remains pending as an uncertain outcome without automatic retry.
+  Progress is published as node events and the
   CLI prints it before the final table. A lost update reply can be confirmed by Hello and
   Presence on the target release. `--all --no-wait` accepts the rollout in the background;
-  its rollout id identifies the events; a hub restart stops an unfinished rollout. Named-node `--no-wait` still waits for the switch but
+  its rollout id identifies the events; a hub restart stops an unfinished rollout, while its
+  unattempted targets remain pending. Named-node `--no-wait` still waits for the switch but
   does not wait for the node to return.
 - **Apps, from the hub's release:** `HubInfo.clients` lists the client builds the running
   release's `SHA256SUMS` names (`protectorate-android.apk`,

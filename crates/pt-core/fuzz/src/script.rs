@@ -224,6 +224,48 @@ impl Runner {
         let arg = |i: usize| words.get(i).copied().ok_or("missing argument".to_string());
         use EventKind as E;
         match words[0] {
+            "pending-node" => {
+                self.sim.apply(E::PendingNodeUpdate {
+                    node: NodeId(num(arg(1)?)?),
+                    version: arg(2)?.into(),
+                    probation_secs: num(arg(3)?)?,
+                });
+            }
+            "clear-pending-node" => {
+                self.sim.apply(E::ClearPendingNodeUpdate {
+                    node: NodeId(num(arg(1)?)?),
+                    revision: words.get(2).map(|s| num(s)).transpose()?,
+                });
+            }
+            "claim-pending-node" => {
+                self.sim.apply(E::ClaimPendingNodeUpdate {
+                    node: NodeId(num(arg(1)?)?),
+                    revision: num(arg(2)?)?,
+                });
+            }
+            "release-pending-node" => {
+                self.sim.apply(E::ReleasePendingNodeUpdate {
+                    node: NodeId(num(arg(1)?)?),
+                    revision: num(arg(2)?)?,
+                });
+            }
+            "expect-pending-node" if self.checked => {
+                let node = NodeId(num(arg(1)?)?);
+                let pending = self.sim.st.pending_node_updates.get(&node);
+                if arg(2)? == "none" {
+                    if pending.is_some() {
+                        return Err("pending target exists".into());
+                    }
+                } else {
+                    let pending = pending.ok_or("pending target missing")?;
+                    if pending.version != arg(2)? || pending.revision != num(arg(3)?)?
+                        || pending.probation_secs != num(arg(4)?)?
+                        || pending.attempted != flag("attempted")
+                    {
+                        return Err(format!("unexpected pending target: {pending:?}"));
+                    }
+                }
+            }
             "mail-batching" => {
                 self.sim.apply(E::MailBatching);
             }
@@ -712,7 +754,7 @@ impl Runner {
             }
             "expect-approval" if self.checked => self.expect_approval(&words)?,
             "expect" | "expect-batch" | "expect-effect" | "expect-job" | "expect-none"
-            | "expect-approval" | "expect-notice" | "expect-reply" => {}
+            | "expect-approval" | "expect-notice" | "expect-reply" | "expect-pending-node" => {}
             w => return Err(format!("unknown command {w}")),
         }
         Ok(())
