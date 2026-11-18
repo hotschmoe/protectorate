@@ -220,6 +220,7 @@ fn hub_runs_the_fleet_and_node_jobs() {
     let listen = format!("127.0.0.1:{port}");
     // member's socket lives in the tailnet dir: the target dir is too deep for a unix socket.
     let tailnet = std::env::temp_dir().join(format!("pt-hubfleet-{}-{port}", std::process::id()));
+    let status_failure = tailnet.join("status-failure");
     let mut hub = Hub::start_config(
         "fleet",
         "pi_local",
@@ -237,7 +238,13 @@ fn hub_runs_the_fleet_and_node_jobs() {
             ("job_artifact_max_bytes", Value::from(4_000_000u64)),
         ],
         &[],
-        &[("PROTECTORATE_FLEET_TEST_MEMBER_TIMEOUT_MS", "1000")],
+        &[
+            ("PROTECTORATE_FLEET_TEST_MEMBER_TIMEOUT_MS", "1000"),
+            (
+                "PROTECTORATE_FLEET_TEST_STATUS_FAILURE",
+                status_failure.to_str().unwrap(),
+            ),
+        ],
     );
     let enrollment = eventually("the fleet to come up", Duration::from_secs(120), || {
         let r = hub.cli(&["--json", "node", "add"]);
@@ -470,11 +477,7 @@ fn hub_runs_the_fleet_and_node_jobs() {
         let done = wait_job(&hub, &replay, &["succeeded", "failed", "lost"], 90);
         assert_eq!(done["state"].as_str(), Some("succeeded"), "{done}");
         assert_eq!(fs::read(work.join("exactly-once")).unwrap(), b"x");
-        assert!(
-            fs::read_to_string(node_dir.join("serve.log"))
-                .unwrap()
-                .contains("dropped a submit reply for testing")
-        );
+        assert_eq!(fs::read(node_dir.join("drop-submit")).unwrap(), b"dropped");
 
         fs::write(node_dir.join("slow-presence"), "1").unwrap();
         eventually(
@@ -501,7 +504,6 @@ fn hub_runs_the_fleet_and_node_jobs() {
             .find(|(_, cmd)| cmd.contains("--mode hub"))
             .expect("the hub's member")
             .0;
-        let before = hub.log_text().len();
         assert!(
             Command::new("kill")
                 .args(["-STOP", &member.to_string()])
@@ -524,16 +526,11 @@ fn hub_runs_the_fleet_and_node_jobs() {
             }
         }
         assert!(full, "member's accept queue did not fill");
+        fs::write(&status_failure, b"armed").unwrap();
         eventually(
             "a full member queue to time out",
             Duration::from_secs(15),
-            || {
-                let log = hub.log_text();
-                log[before..]
-                    .lines()
-                    .any(|l| l.contains("poller:") && l.contains("unix connect timed out"))
-                    .then_some(())
-            },
+            || (fs::read(&status_failure).ok().as_deref() == Some(b"failed")).then_some(()),
         );
         drop(queued);
         drop(resume);

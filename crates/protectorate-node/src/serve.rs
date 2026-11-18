@@ -301,13 +301,14 @@ fn serve_conn<S: Conn>(node: &Node, stream: &mut S) -> Result<(), String> {
             return Ok(());
         }
         #[cfg(debug_assertions)]
-        if std::env::var_os("PROTECTORATE_NODE_TEST_DROP_SUBMIT")
-            .is_some_and(|p| Path::new(&p).is_file())
+        if let Some(marker) = std::env::var_os("PROTECTORATE_NODE_TEST_DROP_SUBMIT")
+            && Path::new(&marker).is_file()
             && matches!(parse_request(&frame.payload), Ok(Request::SubmitJob(_)))
             && !node.dropped_submit.swap(true, Ordering::SeqCst)
         {
             answer(node, frame.id, &frame.payload, &mut io::sink())
                 .map_err(|e| format!("answering dropped submit: {e}"))?;
+            fs::write(marker, b"dropped").map_err(|e| format!("marking dropped submit: {e}"))?;
             eprintln!("protectorate-node: dropped a submit reply for testing");
             return Ok(());
         }
