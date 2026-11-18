@@ -315,6 +315,14 @@ fn node_job_policy_survives_restart_and_routes_around_restricted_nodes() {
             .filter(|s| !s.is_empty())
     });
     let caller = [("PROTECTORATE_TOKEN", token.as_str())];
+    let envoy_id = hub.sleeve("envoy")["id"].as_str().unwrap().to_string();
+    let envoy_token_file = hub.home.join(format!("sleeves/{envoy_id}/home/test-token"));
+    let envoy_token = eventually("Envoy capability", Duration::from_secs(60), || {
+        fs::read_to_string(&envoy_token_file)
+            .ok()
+            .filter(|s| !s.is_empty())
+    });
+    let envoy = [("PROTECTORATE_TOKEN", envoy_token.as_str())];
 
     let denied = hub.cli_env(&caller, &["node", "set", &first, "--jobs", "any"]);
     assert_ne!(denied.status, 0);
@@ -325,7 +333,14 @@ fn node_job_policy_survives_restart_and_routes_around_restricted_nodes() {
         ])
         .json();
     assert_eq!(set["jobs"].as_str(), Some("owner"));
+    assert_eq!(
+        listed(&hub, &first).unwrap()["jobs"].as_str(),
+        Some("owner")
+    );
     let denied = hub.cli_env(&caller, &["job", "run", "--node", &first, "--", "true"]);
+    assert_ne!(denied.status, 0);
+    assert!(denied.stderr.contains("storage"), "{}", denied.stderr);
+    let denied = hub.cli_env(&envoy, &["job", "run", "--node", &first, "--", "true"]);
     assert_ne!(denied.status, 0);
     assert!(denied.stderr.contains("storage"), "{}", denied.stderr);
     let accepted = run_job(&hub, &first, &["true"]);
@@ -355,6 +370,9 @@ fn node_job_policy_survives_restart_and_routes_around_restricted_nodes() {
     let denied = hub.cli_env(&caller, &["job", "run", "--node", &first, "--", "true"]);
     assert_ne!(denied.status, 0);
     assert!(denied.stderr.contains("storage"));
+    let denied = hub.cli_env(&envoy, &["job", "run", "--node", &first, "--", "true"]);
+    assert_ne!(denied.status, 0);
+    assert!(denied.stderr.contains("storage"), "{}", denied.stderr);
     assert_ne!(
         hub.cli(&["job", "run", "--node", &first, "--", "true"])
             .status,
