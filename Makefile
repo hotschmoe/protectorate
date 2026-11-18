@@ -83,7 +83,7 @@ fmt:
 
 check:
 	@failed=""; \
-	  for step in fmt-check clippy test check-deps check-levels check-gen check-version; do \
+	  for step in fmt-check clippy test check-deps check-levels check-gen app-check check-version; do \
 	    $(MAKE) $$step || failed="$$failed $$step"; \
 	  done; \
 	  if [ -n "$$failed" ]; then echo "check failed:$$failed"; exit 1; fi; \

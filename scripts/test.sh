@@ -4,10 +4,12 @@ set -eu
 
 jobs=${PT_TEST_JOBS:-$(( $(nproc) / 2 > 1 ? $(nproc) / 2 : 1 ))}
 target=${CARGO_TARGET_DIR:-target}
-logs=$target/test-logs/run-$(date +%s)-$$
+logs=$target/test-logs
 times=$target/test-times
 mkdir -p "$logs"
+rm -f "$logs"/*.log "$logs"/failed "$logs"/times.new
 touch "$times" "$logs/failed" "$logs/times.new"
+rm -rf --one-file-system "$target/tmp"
 
 # Doctests are left out: the workspace has none, and building them costs a rustdoc per crate.
 PROTECTORATE_BUILD_VERSION=${PROTECTORATE_BUILD_VERSION:-dev} cargo test --locked --workspace \
