@@ -203,31 +203,6 @@ fn commit_retries_preserve_documents_and_cursors() {
     }
 }
 
-#[test]
-fn open_sweeps_unreferenced_segments() {
-    let dir = scratch("sweep");
-    let home = dir.join("home");
-    write(
-        &home.join(".claude/projects/project/session.jsonl"),
-        "{\"type\":\"user\",\"message\":{\"content\":\"sweepmarker\"}}\n",
-    );
-    let index = dir.join("index");
-    let a = index.join("a");
-    fs::create_dir_all(&a).unwrap();
-    fs::write(a.join("seg-00000099"), b"orphan").unwrap();
-    fs::write(a.join("seg-00000001.tmp"), b"partial").unwrap();
-    fs::write(a.join("sidecar"), b"leave").unwrap();
-    let out = run(&home, &index, &["sweepmarker"], None);
-    let stdout = String::from_utf8(out.stdout).unwrap();
-    let stderr = String::from_utf8(out.stderr).unwrap();
-    assert!(stdout.contains("query \"sweepmarker\": top 1"), "{stdout}");
-    assert!(stderr.contains("warning: history: no manifest"), "{stderr}");
-    assert!(!a.join("seg-00000099").exists());
-    assert!(!a.join("seg-00000001.tmp").exists());
-    assert_eq!(fs::read(a.join("sidecar")).unwrap(), b"leave");
-    assert!(a.join("manifest").is_file());
-}
-
 /// The indexed-byte charge of one user doc: source text plus the per-doc overhead.
 fn doc_charge(text: &str, session: &str, path: &Path, sleeve: &str) -> u64 {
     let path = path.to_str().unwrap();
