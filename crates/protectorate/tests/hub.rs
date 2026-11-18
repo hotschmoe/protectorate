@@ -1186,6 +1186,20 @@ fn sleeve_devices_are_bound_and_missing_ones_are_logged() {
         .args(["-c", "exec 3<>/dev/zero; exec sleep 300"])
         .spawn()
         .unwrap();
+    let other_dir = dir.join("other");
+    std::fs::create_dir_all(&other_dir).unwrap();
+    let other_claude = other_dir.join("claude");
+    std::os::unix::fs::symlink("/bin/sh", &other_claude).unwrap();
+    let mut other_holder = std::process::Command::new(other_claude)
+        .args(["-c", "exec 3<>/dev/zero; read line"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    eventually(
+        "other holder to open device",
+        Duration::from_secs(30),
+        || std::fs::metadata(format!("/proc/{}/fd/3", other_holder.id())).ok(),
+    );
     std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
     std::fs::write(home.join("logins/.claude/.credentials.json"), "{}").unwrap();
     write_script(
@@ -1269,6 +1283,33 @@ exec sleep 300"#,
         std::thread::sleep(Duration::from_millis(200));
     };
     assert_eq!(saw.trim(), "NPU");
+    let socket = hub.home.join("run/sleeves/api.sock");
+    let socket_var = format!("PROTECTORATE_SOCKET={}", socket.display());
+    let sleeve_pids = eventually("sleeve to open device", Duration::from_secs(30), || {
+        use std::os::unix::fs::MetadataExt;
+        let zero = std::fs::metadata("/dev/zero").ok()?.rdev();
+        let pids: Vec<u32> = std::fs::read_dir("/proc")
+            .ok()?
+            .flatten()
+            .filter_map(|entry| {
+                let pid = entry.file_name().to_str()?.parse::<u32>().ok()?;
+                let env = std::fs::read(entry.path().join("environ")).ok()?;
+                if !env.split(|b| *b == 0).any(|v| v == socket_var.as_bytes())
+                    || !env
+                        .split(|b| *b == 0)
+                        .any(|v| v == b"PROTECTORATE_SLEEVE=devices")
+                {
+                    return None;
+                }
+                std::fs::read_dir(entry.path().join("fd"))
+                    .ok()?
+                    .flatten()
+                    .any(|fd| std::fs::metadata(fd.path()).is_ok_and(|m| m.rdev() == zero))
+                    .then_some(pid)
+            })
+            .collect();
+        (!pids.is_empty()).then_some(pids)
+    });
     let doctor_after = hub.cli(&["doctor"]).stdout;
     let device_line = doctor_after
         .lines()
@@ -1278,7 +1319,16 @@ exec sleep 300"#,
         device_line.contains(&format!("holder pid {} sleep", holder.id())),
         "{device_line}"
     );
-    assert!(!device_line.contains(" claude"), "{device_line}");
+    assert!(
+        device_line.contains(&format!("holder pid {} claude", other_holder.id())),
+        "{device_line}"
+    );
+    for pid in sleeve_pids {
+        assert!(
+            !device_line.contains(&format!("holder pid {pid} ")),
+            "{device_line}"
+        );
+    }
     hub.send("devices", "hello");
     let prompt = eventually("the first prompt", Duration::from_secs(30), || {
         std::fs::read_to_string(scratch.join("target/prompt"))
@@ -1354,6 +1404,8 @@ exec sleep 300"#,
     );
     holder.kill().unwrap();
     holder.wait().unwrap();
+    other_holder.kill().unwrap();
+    other_holder.wait().unwrap();
 }
 
 #[test]
