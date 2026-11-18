@@ -634,6 +634,9 @@ reconnect to fill any gap.
 For development, `make test-heavy` runs the large-gap reconnect scenario separately from
 `make test`. To pace its 3,000-entry fake-harness workload across 30 minutes, run
 `PT_RECONNECT_GAP_SECS=1801 cargo test --locked --workspace --test hub stream_large_gap_uses_snapshot -- --ignored --nocapture`.
+One run with one open transcript measured 2,838,984 bytes of backlog message payload versus
+674,268 network bytes received on reconnect, including the transcript reload; the snapshot alone
+was 4,137 bytes. These are synthetic workload measurements, not mobile traffic estimates.
 
 ```
 device list | device add <name> | device pair <code> | device revoke <id>
