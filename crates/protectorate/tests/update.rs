@@ -2574,8 +2574,11 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
         Duration::from_secs(60),
         || {
             let p = probation(&busy_dir);
-            (p["version"].as_str() == Some("v0.0.2") && p["contacted_ms"].as_u64().is_some())
-                .then_some(())
+            let node = hub.cli(&["--json", "node", "show", "e2e-busy"]).json();
+            (p["version"].as_str() == Some("v0.0.2")
+                && p["contacted_ms"].as_u64().is_some()
+                && node["pending_update"].is_null())
+            .then_some(())
         },
     );
     drop(busy_sup);
