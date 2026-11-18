@@ -1572,12 +1572,15 @@ fn inject_failure(phase: &str) -> io::Result<()> {
     #[cfg(debug_assertions)]
     {
         static FAILED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-        let armed = std::env::var_os("PT_TEST_HISTORY_FAIL_ARM")
-            .is_none_or(|path| Path::new(&path).exists());
+        let arm = std::env::var_os("PT_TEST_HISTORY_FAIL_ARM");
+        let armed = arm.as_ref().is_none_or(|path| Path::new(path).exists());
         if std::env::var("PT_TEST_HISTORY_FAIL_COMMIT").as_deref() == Ok(phase)
             && armed
             && !FAILED.swap(true, std::sync::atomic::Ordering::Relaxed)
         {
+            if let Some(path) = arm {
+                fs::write(path, b"failed")?;
+            }
             return Err(io::Error::other(format!(
                 "injected history {phase} commit failure"
             )));

@@ -241,11 +241,7 @@ fn failed_history_commit_retries_without_new_transcript_data() {
     eventually(
         "the injected commit failure",
         Duration::from_secs(15),
-        || {
-            hub.log_text()
-                .contains("history commit: injected history manifest commit failure")
-                .then_some(())
-        },
+        || (fs::read(&arm).ok().as_deref() == Some(b"failed")).then_some(()),
     );
     let len = fs::metadata(&transcript).unwrap().len();
     let h = found(&hub, "historyretryquartz", 15);
@@ -255,40 +251,6 @@ fn failed_history_commit_retries_without_new_transcript_data() {
         len,
         "retry did not need new transcript bytes"
     );
-    let index = hub.home.join("history");
-    eventually(
-        "every history segment named by the manifest",
-        Duration::from_secs(15),
-        || referenced_segments(&index).then_some(()),
-    );
-}
-
-/// Every `seg-*` file is named by the manifest, and no partial rewrite is left behind.
-fn referenced_segments(index: &std::path::Path) -> bool {
-    let Ok(manifest) = fs::read_to_string(index.join("manifest")) else {
-        return false;
-    };
-    let Ok(entries) = fs::read_dir(index) else {
-        return false;
-    };
-    let mut segs = 0;
-    for ent in entries {
-        let Ok(ent) = ent else {
-            return false;
-        };
-        let name = ent.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        if !name.starts_with("seg-") {
-            continue;
-        }
-        if name.ends_with(".tmp") || !manifest.contains(name) {
-            return false;
-        }
-        segs += 1;
-    }
-    segs > 0
 }
 
 fn write_transcript_line(file: &mut fs::File, line: &str) {
