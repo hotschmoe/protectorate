@@ -1,0 +1,17 @@
+#scenario a454cabfe71ddf85
+# A pending target survives replay; stale completion cannot erase its replacement.
+pending-node 4 v1 600
+commit
+crash
+expect-pending-node 4 v1 1 600
+pending-node 4 v2 90
+clear-pending-node 4 1
+expect-pending-node 4 v2 2 90
+commit
+crash
+expect-pending-node 4 v2 2 90
+clear-pending-node 4
+expect-pending-node 4 none
+commit
+crash
+expect-pending-node 4 none

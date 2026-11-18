@@ -102,6 +102,8 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
         E::HubRecovered => on_recovered(owed, prev),
         E::Continue { sleeve, text } => on_continue(owed, prev, *sleeve, text),
         E::MailBatching
+        | E::PendingNodeUpdate { .. }
+        | E::ClearPendingNodeUpdate { .. }
         | E::Spawn(_)
         | E::Interrupt { .. }
         | E::Compact { .. }

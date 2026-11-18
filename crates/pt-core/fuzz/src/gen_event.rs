@@ -107,7 +107,7 @@ pub fn event(b: &mut Bytes) -> Event {
     let j = |b: &mut Bytes| JobId(b.u64());
     let a = |b: &mut Bytes| b.u64() as u32;
     use EventKind as E;
-    let kind = match b.below(37) {
+    let kind = match b.below(39) {
         0 => E::Spawn(SpawnSpec {
             request_id: b.string(),
             name: b.string(),
@@ -289,6 +289,15 @@ pub fn event(b: &mut Bytes) -> Event {
         35 => E::Unwritten {
             effect: e(b),
             attempt: a(b),
+        },
+        36 => E::PendingNodeUpdate {
+            node: NodeId(b.u64()),
+            version: b.string(),
+            probation_secs: b.u64(),
+        },
+        37 => E::ClearPendingNodeUpdate {
+            node: NodeId(b.u64()),
+            revision: opt(b, |b| b.u64()),
         },
         _ => E::MailBatching,
     };

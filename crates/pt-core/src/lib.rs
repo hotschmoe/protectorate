@@ -71,6 +71,33 @@ impl Core<'_> {
         use EventKind as E;
         match kind {
             E::MailBatching => self.st.mail_batching = true,
+            E::PendingNodeUpdate {
+                node,
+                version,
+                probation_secs,
+            } => {
+                self.st.next_node_update += 1;
+                self.st.pending_node_updates.insert(
+                    *node,
+                    crate::state::PendingNodeUpdate {
+                        revision: self.st.next_node_update,
+                        version: version.clone(),
+                        probation_secs: *probation_secs,
+                    },
+                );
+                self.reply(Reply::Accepted);
+            }
+            E::ClearPendingNodeUpdate { node, revision } => {
+                if self
+                    .st
+                    .pending_node_updates
+                    .get(node)
+                    .is_some_and(|p| revision.is_none_or(|revision| p.revision == revision))
+                {
+                    self.st.pending_node_updates.remove(node);
+                }
+                self.reply(Reply::Accepted);
+            }
             E::Spawn(spec) => self.spawn(spec),
             E::Send {
                 to,

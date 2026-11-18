@@ -10,6 +10,8 @@ use crate::model::*;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct State {
     pub mail_batching: bool,
+    pub next_node_update: u64,
+    pub pending_node_updates: BTreeMap<NodeId, PendingNodeUpdate>,
     /// The latest event time seen.
     pub now: Millis,
     pub next_sleeve: u64,
@@ -41,6 +43,13 @@ pub struct State {
     pub job_requests: BTreeMap<String, JobId>,
     /// Every approval, by id: `<sleeve>:<g>:<native id>` for a tool, `action:<n>` for D9.
     pub approvals: BTreeMap<String, Approval>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingNodeUpdate {
+    pub revision: u64,
+    pub version: String,
+    pub probation_secs: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
