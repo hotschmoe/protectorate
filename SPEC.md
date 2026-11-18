@@ -148,7 +148,9 @@ CLI on the hub machine (section 3.1).
   by its children. A send from a marked sleeve marks the recipient, so the mark crosses a relay;
   replay applies the same rule. `sleeve show` reports the mark. Mail from a marked sleeve starts
   an Envoy turn with D9 origin, so the same removals, node jobs and mass spawns wait for the
-  owner. Mail from an unmarked sleeve does not. `Wait --until report` returns when the waited-on
+  owner. Mail from an unmarked sleeve does not. `Wait` accepts several sleeves, waits for all by
+  default or any with `--any`, and retains each reached result during the wait. It returns failure
+  when the requested condition becomes impossible or the deadline passes. `Wait --until report` returns when the waited-on
   sleeve has mailed after the cursor, and it returns that report's seq. `--after-seq` sets the
   cursor; without it the cursor is the waiter's newest message to the sleeve, so the same report
   releases a later wait again. The core's continuation of a turn is not mail
@@ -165,9 +167,29 @@ CLI on the hub machine (section 3.1).
   transcript and git, with no model: how the turn ended, tokens and context, branch, head and
   uncommitted files, commits and diffstat since the task's base commit (the workspace's HEAD at
   the sleeve's first launch), the turn's last test command and its result, notices, and the final
-  message clipped at 2000 bytes with the transcript range for the rest. It skips the mail bound,
-  since the recipient opened the turn, and carries the D9 mark like any mail from the sleeve. A
-  usage-limit or auth settle reports after its continuation. Envoy reports to no one.
+  message clipped at 2000 bytes with the transcript range for the rest. It skips the mail bound
+  since the recipient opened the turn, and carries the D9 mark like any mail from the sleeve.
+  It includes the declared status when the final message ends in `STATUS: DONE`,
+  `STATUS: CONTINUING <remaining work>` or `STATUS: BLOCKED <reason>` (the latter two need a
+  nonempty detail). Sleeve API views expose the latest settled turn's status, turn number and
+  detail; list displays its state and up to 80 characters of its detail. A turn without a valid
+  declaration clears the previous status.
+  New owner-turn settle observations journal the declaration together with the outcome, so the
+  core reconstructs it on replay without consulting the transcript.
+  Each newly stored transcript settle also carries its own structured status in the API, so
+  clients can inspect earlier turns after a later turn changes the sleeve's current status.
+  The report carries its sleeve, turn and status as structured inbox and transcript data,
+  captured when the turn settled and journaled with the report. Batched deliveries retain the
+  metadata of each report.
+  Spawn, send and start accept `--until-done N` for a nonnegative N. A CONTINUING settle sends a
+  fixed continuation as the requesting party, at most N rounds. DONE, BLOCKED, a missing
+  declaration, usage limit, auth failure, another party's message, stop or park ends the loop.
+  The request, settle and allocated rounds are journaled; replay preserves their count. An
+  unconfirmed round remains Uncertain, counts against N, and is not silently retried; the
+  requester is told it may have applied. Exactly-once delivery is not promised because a
+  harness write and its acknowledgement cannot be recorded atomically. A bounded continuation
+  is not mail for report cursors.
+  A usage-limit or auth settle reports after its continuation. Envoy reports to no one.
 - **Envoy's context ceiling.** When an Envoy turn settles with its context at 500k tokens or
   more, the hub sends the core a `Compact` for Envoy; the core takes it once Envoy is idle with
   nothing queued, and the driver sends the harness's own compaction (`/compact` for Claude Code).
@@ -1062,4 +1084,4 @@ shortcut is also in `REVISIT.md`.
 - **Envoy** is a root sleeve running Claude Code headless in `$PROTECTORATE_HOME/envoy/`. That
   directory's own `CLAUDE.md` describes the `protectorate` CLI, so no worked-on repo is touched.
 
-The blocking gate is `make check`; `make test` runs its e2e scenarios. `make test-heavy` runs the background e2e suite, fuzz seed replay and fuzz builds. Real-scope tests skip without a systemd user bus.
+The blocking gate is `make check`; `make test` runs its e2e scenarios. `make test-heavy` runs the background e2e suite, every `#[ignore]`d long feature scenario, fuzz seed replay and fuzz builds. Real-scope tests skip without a systemd user bus.

@@ -206,7 +206,8 @@ fn api_surface() {
         port,
         "Wait",
         Some(&owner),
-        &obj! { "sleeve_id" => "envoy", "until" => "report", "timeout_ms" => 10 }.to_string(),
+        &obj! { "sleeve_ids" => vec![Value::from("envoy")], "until" => "report", "timeout_ms" => 10 }
+            .to_string(),
     );
     assert_eq!(s, 400, "wait report on Envoy: {v}");
     assert_eq!(v["error"]["code"].as_str(), Some("invalid"));

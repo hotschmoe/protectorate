@@ -19,7 +19,7 @@ use crate::model::*;
 
 pub const FORMAT: u8 = 1;
 /// Highest event tag this binary reads. Any incompatible encoding must get a new event tag.
-pub const MAX_EVENT_TAG: u8 = 47;
+pub const MAX_EVENT_TAG: u8 = 51;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -490,6 +490,22 @@ impl Wire for Obs {
                 w.push(4);
                 end.put(w);
             }
+            Obs::TurnSettledStatus { end, status } => {
+                w.push(14);
+                end.put(w);
+                match status {
+                    None => w.push(0),
+                    Some(DeclaredStatus::Done) => w.push(1),
+                    Some(DeclaredStatus::Continuing(detail)) => {
+                        w.push(2);
+                        detail.put(w);
+                    }
+                    Some(DeclaredStatus::Blocked(detail)) => {
+                        w.push(3);
+                        detail.put(w);
+                    }
+                }
+            }
             Obs::TurnBegan => w.push(12),
             Obs::ForeignTurnSettled { end } => {
                 w.push(13);
@@ -519,7 +535,7 @@ impl Wire for Obs {
         }
     }
     fn get(r: &mut Reader) -> Result<Self, DecodeError> {
-        Ok(match r.tag("observation", 13)? {
+        Ok(match r.tag("observation", 14)? {
             0 => Obs::Ready {
                 session: Wire::get(r)?,
             },
@@ -551,7 +567,16 @@ impl Wire for Obs {
                 ask: Some(Wire::get(r)?),
             },
             12 => Obs::TurnBegan,
-            _ => Obs::ForeignTurnSettled { end: Wire::get(r)? },
+            13 => Obs::ForeignTurnSettled { end: Wire::get(r)? },
+            _ => Obs::TurnSettledStatus {
+                end: Wire::get(r)?,
+                status: match r.tag("declared status", 3)? {
+                    0 => None,
+                    1 => Some(DeclaredStatus::Done),
+                    2 => Some(DeclaredStatus::Continuing(Wire::get(r)?)),
+                    _ => Some(DeclaredStatus::Blocked(Wire::get(r)?)),
+                },
+            },
         })
     }
 }
@@ -909,6 +934,75 @@ impl Wire for EventKind {
                 turn.put(w);
                 text.put(w);
             }
+            E::ReportStatus {
+                sleeve,
+                to,
+                turn,
+                text,
+                status,
+            } => {
+                w.push(48);
+                sleeve.put(w);
+                to.put(w);
+                turn.put(w);
+                text.put(w);
+                match status {
+                    None => w.push(0),
+                    Some(DeclaredStatus::Done) => w.push(1),
+                    Some(DeclaredStatus::Continuing(detail)) => {
+                        w.push(2);
+                        detail.put(w);
+                    }
+                    Some(DeclaredStatus::Blocked(detail)) => {
+                        w.push(3);
+                        detail.put(w);
+                    }
+                }
+            }
+            E::SendUntil {
+                to,
+                request_id,
+                from,
+                text,
+                mode,
+                d9,
+                supersede,
+                limit,
+            } => {
+                w.push(49);
+                to.put(w);
+                request_id.put(w);
+                from.put(w);
+                text.put(w);
+                mode.put(w);
+                d9.put(w);
+                supersede.put(w);
+                limit.put(w);
+            }
+            E::StartUntil {
+                sleeve,
+                target,
+                effort,
+                from,
+                limit,
+            } => {
+                w.push(50);
+                sleeve.put(w);
+                target.put(w);
+                effort.put(w);
+                from.put(w);
+                limit.put(w);
+            }
+            E::ArmUntil {
+                sleeve,
+                from,
+                limit,
+            } => {
+                w.push(51);
+                sleeve.put(w);
+                from.put(w);
+                limit.put(w);
+            }
         }
     }
 
@@ -1137,6 +1231,40 @@ impl Wire for EventKind {
                 sleeve: Wire::get(r)?,
                 g: Wire::get(r)?,
                 path: Wire::get(r)?,
+            },
+            48 => E::ReportStatus {
+                sleeve: Wire::get(r)?,
+                to: Wire::get(r)?,
+                turn: Wire::get(r)?,
+                text: Wire::get(r)?,
+                status: match r.tag("declared status", 3)? {
+                    0 => None,
+                    1 => Some(DeclaredStatus::Done),
+                    2 => Some(DeclaredStatus::Continuing(Wire::get(r)?)),
+                    _ => Some(DeclaredStatus::Blocked(Wire::get(r)?)),
+                },
+            },
+            49 => E::SendUntil {
+                to: Wire::get(r)?,
+                request_id: Wire::get(r)?,
+                from: Wire::get(r)?,
+                text: Wire::get(r)?,
+                mode: Wire::get(r)?,
+                d9: Wire::get(r)?,
+                supersede: Wire::get(r)?,
+                limit: Wire::get(r)?,
+            },
+            50 => E::StartUntil {
+                sleeve: Wire::get(r)?,
+                target: Wire::get(r)?,
+                effort: Wire::get(r)?,
+                from: Wire::get(r)?,
+                limit: Wire::get(r)?,
+            },
+            51 => E::ArmUntil {
+                sleeve: Wire::get(r)?,
+                from: Wire::get(r)?,
+                limit: Wire::get(r)?,
             },
             _ => return Err(DecodeError::UnknownTag { what: "event", tag }),
         })

@@ -788,13 +788,18 @@ impl Sim {
                 self.apply(EventKind::Continue { sleeve, text });
             }
             Intent::Report {
-                sleeve, turn, to, ..
+                sleeve,
+                turn,
+                to,
+                status,
+                ..
             } => {
-                self.apply(EventKind::Report {
+                self.apply(EventKind::ReportStatus {
                     sleeve,
                     to,
                     turn,
                     text: "turn report".into(),
+                    status,
                 });
             }
         }

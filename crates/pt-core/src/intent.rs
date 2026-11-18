@@ -199,6 +199,9 @@ pub enum Notice {
     MessageMayHaveApplied {
         request_id: String,
     },
+    UntilRoundMayHaveApplied {
+        round: u64,
+    },
     EffectUnknowable {
         effect: EffectId,
     },
@@ -324,5 +327,6 @@ pub enum Intent {
         g: Gen,
         turn: u64,
         to: SleeveId,
+        status: Option<DeclaredStatus>,
     },
 }

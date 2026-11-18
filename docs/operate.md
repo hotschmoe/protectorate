@@ -45,13 +45,13 @@ always give it the token.
 ```
 sleeve list | sleeve show <sleeve> | sleeve inbox [<sleeve>] | sleeve inbox <sleeve> --drop
 sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
-      [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT | --message-file FILE]
-sleeve send <sleeve> <text...> [--steer | --supersede]
+      [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT | --message-file FILE] [--until-done N]
+sleeve send <sleeve> <text...> [--steer | --supersede] [--until-done N]
 sleeve interrupt|stop|rm|takeover <sleeve>
-sleeve start <sleeve> [--harness H] [--provider P] [--model M]
+sleeve start <sleeve> [--harness H] [--provider P] [--model M] [--until-done N]
 sleeve resleeve <sleeve> --harness H [--provider P] [--model M]
 sleeve transcript <sleeve> [--from SEQ] [--limit N]
-sleeve wait <sleeve> [--until idle|done|blocked|parked|ended|report] [--timeout SECS]
+sleeve wait <sleeve>... [--all | --any] [--until idle|done|blocked|parked|ended|report] [--timeout SECS]
 ```
 
 For `sleeve send` and `envoy send`, `--message-file FILE` replaces the text arguments;
@@ -60,8 +60,24 @@ of long or code-bearing messages. A sleeve reaches a sibling through its parent.
 
 A sleeve is named by its id or its name.
 
-List and show include the oldest queued message's age beside the queue count. `sleeve send`
-reports whether the message was queued or sent for delivery and the queue length at acceptance.
+`--until-done N` on spawn, send or start sends a fixed continuation as the original sender after
+a `STATUS: CONTINUING` settle, at most N times. It stops on DONE, BLOCKED,
+a missing declaration, a usage limit or auth failure, a message from another sender, stop or
+park. The settle and count are journaled, so a restart keeps the remaining rounds. An
+unconfirmed round counts against N; the requester is told it may have applied, and it is not
+silently retried. Exactly-once delivery cannot be promised across a crash during a harness write.
+
+List and show include the oldest queued message's age beside the queue count. They also show the
+latest settled turn's declared status and up to 80 characters of its detail. The API includes
+its turn number, state and full detail.
+A final line `STATUS: DONE`, `STATUS: CONTINUING <remaining work>` or `STATUS: BLOCKED <reason>`
+declares the status; the last two require a nonempty detail. A later turn without a valid final
+status clears it. Turn reports include the declaration. The hub records an owner turn's
+declaration with its settle observation for journal replay. `sleeve send` reports whether the
+message was queued or sent for delivery and the queue length at acceptance.
+Each new transcript turn-settled entry includes its structured status, if declared, in the API.
+Turn reports expose their sleeve, turn and status as structured fields in the inbox API and in
+the delivered transcript entry, including when several reports are batched.
 Queued messages wait for a turn boundary. At a headless turn start, consecutive queued prompts
 are delivered together in FIFO order, with their normal sender headers; a continuation ends
 the batch. For Envoy, a switch between vendor-agent and other senders also ends the batch,
@@ -116,8 +132,11 @@ unaffected. A refused send does not drop anything.
 - **start** starts a stopped or parked sleeve, optionally on another harness. **resleeve** moves a
   sleeve to another harness, with a continuation brief in `.protectorate/BRIEF.md`.
 - **transcript** prints the chat: messages, tool calls and results, approvals, turns.
-- **wait** blocks until the sleeve reaches a state (default `idle`, 600 s) and exits non-zero if
-  it does not. `--until report` returns when that sleeve has mailed since the cursor, and prints
+- **wait** blocks until all named sleeves reach a state (default `idle`, 600 s); `--any`
+  returns when one reaches it. A sleeve that reaches the state stays counted for that wait.
+  It exits non-zero if the requested condition cannot be reached or times out. It prints each
+  sleeve's result; JSON includes the overall result and per-sleeve results. `--until report`
+  returns when the sleeve has mailed since the cursor, and prints
   that report's seq. `--after-seq N` counts only mail with a seq above N. Without it the cursor
   is the waiter's newest message to the sleeve, so the same report releases a later wait again.
   The hub's continuation of a turn after a crash is not mail for that cursor: it is not a
@@ -682,4 +701,4 @@ None of these rotate yet.
 
 Tick processing tracks uncertain and probing effects, active jobs, eligible sleeves and pending approvals while retaining terminal records. These indexes are rebuilt during journal replay.
 
-The blocking gate is `make check`; `make test` runs its e2e scenarios. `make test-heavy` runs the background e2e suite, fuzz seed replay and fuzz builds. Real-scope tests skip without a systemd user bus.
+The blocking gate is `make check`; `make test` runs its e2e scenarios. `make test-heavy` runs the background e2e suite, every `#[ignore]`d long feature scenario, fuzz seed replay and fuzz builds. Real-scope tests skip without a systemd user bus.

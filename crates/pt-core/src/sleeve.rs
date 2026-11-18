@@ -15,6 +15,7 @@ const BRIEF_PROMPT: &str = "Continue from .protectorate/BRIEF.md: read it first,
 /// Sent once, after a native resume of a headless turn a crash ended. Not after an interrupt,
 /// and not for a turn this prompt itself started.
 const CONTINUE_PROMPT: &str = "The previous turn was interrupted. Continue from where it stopped.";
+const UNTIL_PROMPT: &str = "Continue from where you stopped, with the same rules and order. Do as many batches as fit before the context gets large, then report and end with the STATUS line.";
 
 /// A sleeve name: 1-64 bytes of `[A-Za-z0-9._-]`.
 pub fn name_ok(name: &str) -> bool {
@@ -110,6 +111,8 @@ impl Core<'_> {
                 desync_during_turn: false,
                 desync_while_idle: false,
                 turn_seq: 0,
+                last_status: None,
+                until_done: None,
                 turn_from: Party::Owner,
                 turn_agent: None,
                 auto_continue: None,
@@ -494,6 +497,9 @@ impl Core<'_> {
         }
         let s = &self.st.sleeves[&sid];
         let delivery_sent = matches!(s.activity, Activity::Delivering { effect } if self.effect_state(effect) != Some(EffectState::Intent));
+        let uncertain_until = matches!(s.activity, Activity::Delivering { effect }
+            if matches!(self.st.effects[&effect].kind, EffectKind::SendPrompt { kind: MsgKind::Until { .. }, .. })
+                && self.effect_state(effect) != Some(EffectState::Intent));
         // The ack can lose the race with Exited: the watcher reports the scope empty before
         // KillScope is confirmed. A guardrail kill is not HubRestart, so the parent still hears.
         let killed_by_recovery =
@@ -502,7 +508,8 @@ impl Core<'_> {
         let was = std::mem::replace(&mut s.activity, Activity::Ended);
         // An interrupt is the owner or a guardrail stopping the turn. `turn` stays set, so it
         // must not count on its own: resuming would continue the turn they stopped.
-        let interrupted_turn = was != Activity::Interrupting
+        let interrupted_turn = !uncertain_until
+            && was != Activity::Interrupting
             && (s.turn.is_some()
                 || s.desync_during_turn
                 || delivery_sent
@@ -668,6 +675,7 @@ impl Core<'_> {
             }
             _ => {}
         }
+        self.cancel_until(sid);
         let s = self.sl(sid);
         s.life = Life::Stopping { remove };
         s.guard.state = GuardState::Armed;
@@ -733,6 +741,7 @@ impl Core<'_> {
     /// `quiet` is an idle death that parks: the debt goes, and nobody is told the turn
     /// will not continue. A queued continuation is still dropped.
     pub(crate) fn park_quiet(&mut self, sid: SleeveId, reason: ParkReason, quiet: bool) {
+        self.cancel_until(sid);
         let s = self.sl(sid);
         s.life = Life::Parked(reason);
         s.guard.state = GuardState::Parked;
@@ -928,6 +937,7 @@ impl Core<'_> {
         d9: bool,
         bounded: bool,
         supersede: bool,
+        until_done: Option<u64>,
     ) {
         if !self.existing(to) {
             return;
@@ -968,6 +978,23 @@ impl Core<'_> {
             matches!(s.activity, Activity::Delivering { .. }) && s.steer_slot.is_none();
         let queue_empty = s.queue.is_empty();
         let insert = |core: &mut Self, state| {
+            for message in core.sl(to).messages.values_mut() {
+                if message.from != from
+                    && matches!(
+                        message.state,
+                        MsgState::Queued | MsgState::SteerHeld | MsgState::InFlight(_)
+                    )
+                {
+                    message.until_done = None;
+                }
+            }
+            if core.st.sleeves[&to]
+                .until_done
+                .as_ref()
+                .is_some_and(|u| u.from != from)
+            {
+                core.cancel_until(to);
+            }
             let seq = core.st.next_msg;
             core.st.next_msg += 1;
             let queued_at = core.now;
@@ -982,6 +1009,8 @@ impl Core<'_> {
                     mode,
                     state,
                     seq,
+                    report: None,
+                    until_done,
                 },
             );
         };
@@ -1247,7 +1276,14 @@ impl Core<'_> {
 
     /// Queues the hub's turn report as mail from `sid`, once per turn. It skips the mail bound,
     /// since the recipient opened that turn, and marks like any mail from the sleeve.
-    pub(crate) fn report_cmd(&mut self, sid: SleeveId, to: SleeveId, turn: u64, text: &str) {
+    pub(crate) fn report_cmd(
+        &mut self,
+        sid: SleeveId,
+        to: SleeveId,
+        turn: u64,
+        text: &str,
+        report: Option<TurnReport>,
+    ) {
         let Some(s) = self.st.sleeve(sid) else {
             return;
         };
@@ -1275,7 +1311,14 @@ impl Core<'_> {
             false,
             false,
             false,
+            None,
         );
+        if let Some(report) = report
+            && self.st.sleeve(to).is_some()
+            && let Some(message) = self.sl(to).messages.get_mut(&request_id)
+        {
+            message.report = Some(report);
+        }
     }
 
     fn is_envoy(&self, id: SleeveId) -> bool {
@@ -1368,7 +1411,7 @@ impl Core<'_> {
         // A continuation belongs to the turn already begun. Any other prompt starts the next one
         // and supersedes a continuation that turn still owed.
         match msg_kind {
-            MsgKind::Prompt => self.account_prompt(sid, eff),
+            MsgKind::Prompt | MsgKind::Until { .. } => self.account_prompt(sid, eff),
             MsgKind::Continuation { .. } => {
                 let m = &self.st.sleeves[&sid].messages[&r];
                 self.taint_d9(sid, m.from, m.agent.clone());
@@ -1404,15 +1447,45 @@ impl Core<'_> {
             applied: true,
             turn_seq: s.turn_seq,
             auto_continue: s.auto_continue,
+            until_done: s.until_done.clone(),
             turn_from: s.turn_from,
             turn_agent: s.turn_agent.clone(),
             d9_turn: s.d9_turn.clone(),
         };
-        let d9 = self.d9_origin(sid, from, agent.clone());
+        let d9 = if matches!(
+            self.st.effects[&effect].kind,
+            EffectKind::SendPrompt {
+                kind: MsgKind::Until { .. },
+                ..
+            }
+        ) {
+            s.d9_turn.clone()
+        } else {
+            self.d9_origin(sid, from, agent.clone())
+        };
+        let new_limit = ids
+            .iter()
+            .filter_map(|id| s.messages[id].until_done)
+            .next_back();
+        let mixed = s.until_done.as_ref().is_some_and(|run| run.from != from)
+            || ids.iter().any(|id| s.messages[id].from != from)
+            || s.queue.iter().any(|id| {
+                let message = &s.messages[id];
+                message.kind == MsgKind::Prompt && message.from != from
+            });
         let s = self.sl(sid);
         s.delivery = Some(saved);
         s.turn_seq += 1;
         s.auto_continue = None;
+        if let Some(limit) = new_limit.filter(|_| !mixed) {
+            s.until_done = Some(UntilDone {
+                from,
+                limit,
+                rounds: 0,
+            });
+        } else if mixed {
+            s.until_done = None;
+        }
         s.turn_from = from;
         s.turn_agent = agent;
         s.d9_turn = d9;
@@ -1429,6 +1502,7 @@ impl Core<'_> {
         };
         s.turn_seq = saved.turn_seq;
         s.auto_continue = saved.auto_continue;
+        s.until_done.clone_from(&saved.until_done);
         s.turn_from = saved.turn_from;
         s.turn_agent.clone_from(&saved.turn_agent);
         s.d9_turn.clone_from(&saved.d9_turn);
@@ -1437,6 +1511,17 @@ impl Core<'_> {
 
     pub(crate) fn retry_unwritten(&mut self, sid: SleeveId, effect: EffectId) {
         self.unaccount_prompt(sid, effect);
+        let cancelled = self.st.sleeves[&sid].until_done.is_none()
+            && matches!(
+                self.st.effects[&effect].kind,
+                EffectKind::SendPrompt {
+                    kind: MsgKind::Until { .. },
+                    ..
+                }
+            );
+        if cancelled {
+            self.cancel_until(sid);
+        }
         let s = self.sl(sid);
         if s.delivery.as_ref().is_some_and(|d| d.effect == effect) {
             s.delivery = None;
@@ -1511,6 +1596,77 @@ impl Core<'_> {
         self.deliver_next(sid);
     }
 
+    fn until_next(&mut self, sid: SleeveId) {
+        let s = &self.st.sleeves[&sid];
+        let Some(run) = s.until_done.as_ref() else {
+            return;
+        };
+        if run.rounds >= run.limit
+            || !s.life.live()
+            || matches!(s.guard.state, GuardState::Quiescing { .. })
+        {
+            self.sl(sid).until_done = None;
+            return;
+        }
+        let from = run.from;
+        let round = run.rounds + 1;
+        if s.queue.iter().any(|key| {
+            let message = &s.messages[key];
+            message.kind == MsgKind::Prompt && message.from != from
+        }) {
+            self.sl(sid).until_done = None;
+            return;
+        }
+        let text = match from {
+            Party::Sleeve(id) => format!(
+                "[from sleeve {}] {UNTIL_PROMPT}",
+                self.st.sleeve(id).map_or("?", |s| s.name.as_str())
+            ),
+            _ => UNTIL_PROMPT.to_string(),
+        };
+        let seq = self.st.next_msg;
+        self.st.next_msg += 1;
+        let key = format!("until:{}:{round}:{seq}", sid.0);
+        let queued_at = self.now;
+        let s = self.sl(sid);
+        s.until_done.as_mut().expect("run exists").rounds += 1;
+        s.messages.insert(
+            key.clone(),
+            Message {
+                queued_at,
+                from,
+                agent: None,
+                kind: MsgKind::Until { round },
+                text,
+                mode: SendMode::Queue,
+                state: MsgState::Queued,
+                seq,
+                report: None,
+                until_done: None,
+            },
+        );
+        s.queue.push_front(key);
+    }
+
+    fn cancel_until(&mut self, sid: SleeveId) {
+        let s = self.sl(sid);
+        s.until_done = None;
+        if let Some(delivery) = &mut s.delivery {
+            delivery.until_done = None;
+        }
+        let keys: Vec<_> = s
+            .queue
+            .iter()
+            .filter(|key| matches!(s.messages[*key].kind, MsgKind::Until { .. }))
+            .cloned()
+            .collect();
+        s.queue.retain(|key| !keys.contains(key));
+        for key in keys {
+            s.unwritten_prompts.remove(&key);
+            s.messages.get_mut(&key).expect("queued").state = MsgState::Rejected;
+        }
+    }
+
     /// The message of a prompt or steer record that was never dispatched goes back to the head
     /// of its queue, for the next incarnation; true when there was one.
     pub(crate) fn return_unsent(&mut self, id: EffectId) -> bool {
@@ -1537,7 +1693,7 @@ impl Core<'_> {
         if matches!(
             self.st.effects[&id].kind,
             EffectKind::SendPrompt {
-                kind: MsgKind::Prompt,
+                kind: MsgKind::Prompt | MsgKind::Until { .. },
                 ..
             }
         ) && self.st.sleeves[&sleeve]
@@ -1581,6 +1737,7 @@ impl Core<'_> {
             }
         );
         let state = self.effect_state(id).expect("effect exists");
+        let first_probe = state == EffectState::Probing && self.st.effects[&id].unknowable == 0;
         for request_id in request_ids {
             if state.terminal()
                 && (state != EffectState::Abandoned
@@ -1606,8 +1763,17 @@ impl Core<'_> {
                     }
                     EffectState::Fenced | EffectState::Abandoned => {
                         m.state = MsgState::MayHaveApplied;
-                        Some(Notice::MessageMayHaveApplied { request_id })
+                        Some(match m.kind {
+                            MsgKind::Until { round } => Notice::UntilRoundMayHaveApplied { round },
+                            _ => Notice::MessageMayHaveApplied { request_id },
+                        })
                     }
+                    EffectState::Probing if first_probe => match m.kind {
+                        MsgKind::Until { round } => {
+                            Some(Notice::UntilRoundMayHaveApplied { round })
+                        }
+                        _ => None,
+                    },
                     _ => None,
                 };
                 if let Some(n) = notice {
@@ -1734,9 +1900,19 @@ impl Core<'_> {
             return;
         }
         let from = m.from;
+        let until_done = m.until_done;
         let request_id = request_id.to_string();
         match state {
-            EffectState::Confirmed => m.state = MsgState::Delivered,
+            EffectState::Confirmed => {
+                m.state = MsgState::Delivered;
+                if let Some(limit) = until_done {
+                    self.sl(sid).until_done = Some(UntilDone {
+                        from,
+                        limit,
+                        rounds: 0,
+                    });
+                }
+            }
             EffectState::Rejected | EffectState::Failed => {
                 m.state = MsgState::Rejected;
                 self.notify(from, Some(sid), Notice::MessageRejected { request_id });
@@ -1818,10 +1994,24 @@ impl Core<'_> {
                 }
                 self.tool_withdrawn(sid, g, id);
             }
-            Obs::TurnSettled { end } => {
+            Obs::TurnSettled { end } | Obs::TurnSettledStatus { end, .. } => {
                 // A usage limit or a rejected login resleeves, and the brief is sent as the
                 // owner, so the D9 origin and the spawn count must outlive it.
-                if !matches!(end, TurnEnd::UsageLimit | TurnEnd::AuthFailed) {
+                let s = &self.st.sleeves[&sid];
+                let keep_d9 = matches!(
+                    obs,
+                    Obs::TurnSettledStatus {
+                        status: Some(DeclaredStatus::Continuing(_)),
+                        ..
+                    }
+                ) && s.until_done.as_ref().is_some_and(|run| {
+                    run.rounds < run.limit
+                        && s.queue.iter().all(|key| {
+                            let message = &s.messages[key];
+                            message.kind != MsgKind::Prompt || message.from == run.from
+                        })
+                }) && !matches!(s.guard.state, GuardState::Quiescing { .. });
+                if !matches!(end, TurnEnd::UsageLimit | TurnEnd::AuthFailed) && !keep_d9 {
                     self.sl(sid).d9_turn = None;
                 }
                 // Not evidence for an in-flight prompt: a settle with no turn begun is the
@@ -1838,6 +2028,10 @@ impl Core<'_> {
                     }
                     return;
                 }
+                s.last_status = match obs {
+                    Obs::TurnSettledStatus { status, .. } => status.clone(),
+                    _ => None,
+                };
                 s.activity = Activity::Idle { seen: false };
                 s.turn = None;
                 if s.auto_continue == Some(s.turn_seq) {
@@ -1860,6 +2054,7 @@ impl Core<'_> {
                         g,
                         turn,
                         to,
+                        status: self.st.sleeves[&sid].last_status.clone(),
                     });
                 }
                 self.return_steer(sid);
@@ -1867,6 +2062,16 @@ impl Core<'_> {
                     TurnEnd::UsageLimit => self.trip(sid, Guardrail::QuotaExhausted),
                     TurnEnd::AuthFailed => self.trip(sid, Guardrail::AuthFailed),
                     _ => {}
+                }
+                if !matches!(end, TurnEnd::UsageLimit | TurnEnd::AuthFailed)
+                    && matches!(
+                        &self.st.sleeves[&sid].last_status,
+                        Some(DeclaredStatus::Continuing(_))
+                    )
+                {
+                    self.until_next(sid);
+                } else {
+                    self.sl(sid).until_done = None;
                 }
                 self.settled(sid);
             }
@@ -2022,7 +2227,16 @@ impl Core<'_> {
     /// the caller warns with `TurnNeedsPrompt` when something was actually dropped.
     pub(crate) fn discard_continuation(&mut self, sid: SleeveId) -> bool {
         let had = self.sl(sid).auto_continue.take().is_some();
-        had || self.reject_queued_continues(sid)
+        let has_until = self.st.sleeves[&sid].queue.iter().any(|key| {
+            matches!(
+                self.st.sleeves[&sid].messages[key].kind,
+                MsgKind::Until { .. }
+            )
+        });
+        if had && !has_until {
+            return true;
+        }
+        self.reject_queued_continues(sid) || had
     }
 
     fn drop_queued_continuation(&mut self, sid: SleeveId) {
@@ -2034,9 +2248,9 @@ impl Core<'_> {
     fn reject_queued_continues(&mut self, sid: SleeveId) -> bool {
         let s = self.sl(sid);
         let continuation = |id: &String| {
-            s.messages
-                .get(id)
-                .is_some_and(|m| matches!(m.kind, MsgKind::Continuation { .. }))
+            s.messages.get(id).is_some_and(|m| {
+                matches!(m.kind, MsgKind::Continuation { .. } | MsgKind::Until { .. })
+            })
         };
         let keys: Vec<String> = s
             .queue
@@ -2146,6 +2360,8 @@ impl Core<'_> {
                 mode: SendMode::Queue,
                 state: MsgState::Queued,
                 seq: msg_seq,
+                report: None,
+                until_done: None,
             },
         );
         self.sl(sid).queue.push_back(key);

@@ -30,7 +30,7 @@ fn sleeve(sim: &Sim, b: &mut Bytes) -> SleeveId {
 fn command(sim: &mut Sim, b: &mut Bytes) {
     use EventKind as E;
     let s = sleeve(sim, b);
-    let kind = match b.below(24) {
+    let kind = match b.below(27) {
         0 | 1 => {
             let parent = if b.below(3) == 0 {
                 None
@@ -184,17 +184,39 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
             d9: b.bool(),
         },
         22 => E::MailBatching,
-        _ => E::DeviceChanged {
+        23 => E::DeviceChanged {
             sleeve: s,
             g: sim.st.sleeves.get(&s).map_or(Gen(0), |s| s.g),
             path: "/dev/fake".into(),
+        },
+        24 => E::SendUntil {
+            to: s,
+            request_id: format!("m{}", b.below(12)),
+            from: Party::Owner,
+            text: "do the thing".into(),
+            mode: SendMode::Queue,
+            d9: false,
+            supersede: false,
+            limit: b.below(4),
+        },
+        25 => E::StartUntil {
+            sleeve: s,
+            target: None,
+            effort: None,
+            from: Party::Owner,
+            limit: b.below(4),
+        },
+        _ => E::ArmUntil {
+            sleeve: s,
+            from: Party::Owner,
+            limit: b.below(4),
         },
     };
     sim.apply(kind);
 }
 
 fn obs(b: &mut Bytes) -> Obs {
-    match b.below(16) {
+    match b.below(17) {
         0 | 1 => Obs::Ready {
             session: "sess".into(),
         },
@@ -245,7 +267,11 @@ fn obs(b: &mut Bytes) -> Obs {
             path: ".github/workflows/x".into(),
         },
         14 => Obs::TurnBegan,
-        _ => Obs::ForeignTurnSettled { end: TurnEnd::Done },
+        15 => Obs::ForeignTurnSettled { end: TurnEnd::Done },
+        _ => Obs::TurnSettledStatus {
+            end: TurnEnd::Done,
+            status: Some(DeclaredStatus::Continuing("remaining".into())),
+        },
     }
 }
 

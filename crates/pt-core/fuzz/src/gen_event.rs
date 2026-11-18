@@ -58,7 +58,7 @@ fn obs(b: &mut Bytes) -> Obs {
         Verdict::Blocked,
         Verdict::NoMatch,
     ];
-    match b.below(13) {
+    match b.below(14) {
         0 => Obs::Ready {
             session: b.string(),
         },
@@ -80,8 +80,17 @@ fn obs(b: &mut Bytes) -> Obs {
         9 => Obs::Disk { bytes: b.u64() },
         10 => Obs::ForbiddenPath { path: b.string() },
         11 => Obs::TurnBegan,
-        _ => Obs::ForeignTurnSettled {
+        12 => Obs::ForeignTurnSettled {
             end: ENDS[b.below(5) as usize],
+        },
+        _ => Obs::TurnSettledStatus {
+            end: ENDS[b.below(5) as usize],
+            status: match b.below(4) {
+                0 => None,
+                1 => Some(DeclaredStatus::Done),
+                2 => Some(DeclaredStatus::Continuing(b.string())),
+                _ => Some(DeclaredStatus::Blocked(b.string())),
+            },
         },
     }
 }
@@ -107,7 +116,7 @@ pub fn event(b: &mut Bytes) -> Event {
     let j = |b: &mut Bytes| JobId(b.u64());
     let a = |b: &mut Bytes| b.u64() as u32;
     use EventKind as E;
-    let kind = match b.below(38) {
+    let kind = match b.below(42) {
         0 => E::Spawn(SpawnSpec {
             request_id: b.string(),
             name: b.string(),
@@ -291,10 +300,48 @@ pub fn event(b: &mut Bytes) -> Event {
             attempt: a(b),
         },
         36 => E::MailBatching,
-        _ => E::DeviceChanged {
+        37 => E::DeviceChanged {
             sleeve: s(b),
             g: g(b),
             path: b.string(),
+        },
+        38 => E::ReportStatus {
+            sleeve: s(b),
+            to: s(b),
+            turn: b.u64(),
+            text: b.string(),
+            status: match b.below(4) {
+                0 => None,
+                1 => Some(DeclaredStatus::Done),
+                2 => Some(DeclaredStatus::Continuing(b.string())),
+                _ => Some(DeclaredStatus::Blocked(b.string())),
+            },
+        },
+        39 => E::SendUntil {
+            to: s(b),
+            request_id: b.string(),
+            from: party(b),
+            text: b.string(),
+            mode: if b.bool() {
+                SendMode::Steer
+            } else {
+                SendMode::Queue
+            },
+            d9: b.bool(),
+            supersede: b.bool(),
+            limit: b.u64(),
+        },
+        40 => E::StartUntil {
+            sleeve: s(b),
+            target: opt(b, target),
+            effort: opt(b, |b| b.string()),
+            from: party(b),
+            limit: b.u64(),
+        },
+        _ => E::ArmUntil {
+            sleeve: s(b),
+            from: party(b),
+            limit: b.u64(),
         },
     };
     Event { at, kind }

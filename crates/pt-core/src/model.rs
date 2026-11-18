@@ -32,6 +32,13 @@ pub struct JobId(pub u64);
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeId(pub u64);
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DeclaredStatus {
+    Done,
+    Continuing(String),
+    Blocked(String),
+}
+
 /// A workspace claim: an absolute, normalized directory path.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Claim {
@@ -156,6 +163,8 @@ pub enum MsgKind {
     Prompt,
     /// The one continuation of owner turn `turn` after a crash ended it.
     Continuation { turn: u64 },
+    /// A bounded automatic follow-up, kept out of mail cursors.
+    Until { round: u64 },
     /// A resleeve's brief prompt. It has no message and is sent as the owner.
     Brief,
 }

@@ -11,7 +11,7 @@ use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use pt_api::{Harness, Level};
+use pt_api::{Harness, Level, TurnStatus, TurnStatusState};
 use pt_core::SleeveId;
 use pt_drivers::Entry;
 use pt_json::ToJson;
@@ -33,15 +33,18 @@ pt_json::record! {
         pub turn: u64 = 0,
         pub harness: Option<Harness>,
         pub level: Option<Level>,
+        pub status: Option<TurnStatus>,
+        pub reports: Vec<pt_api::QueuedTurnReport> = Vec::new(),
         pub entry: Entry,
     }
 }
 
 /// What `Store::append` takes besides the entry.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Note {
     pub harness: Option<Harness>,
     pub level: Option<Level>,
+    pub reports: Vec<pt_api::QueuedTurnReport>,
 }
 
 /// Facts the sleeve listing shows, folded from the entries as they arrive.
@@ -55,6 +58,27 @@ pub struct Stats {
     pub effort: Option<String>,
     pub started_ms: u64,
     pub g: u64,
+    pub last_status: Option<TurnStatus>,
+    pending_status: Option<(TurnStatusState, Option<String>)>,
+}
+
+pub fn turn_status(text: &str) -> Option<(TurnStatusState, Option<String>)> {
+    let line = text.trim_end().lines().last()?;
+    if line == "STATUS: DONE" {
+        return Some((TurnStatusState::Done, None));
+    }
+    for (prefix, state) in [
+        ("STATUS: CONTINUING ", TurnStatusState::Continuing),
+        ("STATUS: BLOCKED ", TurnStatusState::Blocked),
+    ] {
+        if let Some(detail) = line.strip_prefix(prefix) {
+            let detail = detail.trim();
+            if !detail.is_empty() {
+                return Some((state, Some(detail.to_string())));
+            }
+        }
+    }
+    None
 }
 
 impl Stats {
@@ -72,7 +96,17 @@ impl Stats {
                 self.started_ms = e.time_ms;
                 self.g = e.g;
             }
+            Entry::TurnStarted { .. } => self.pending_status = None,
+            Entry::AssistantText { text, .. } => self.pending_status = turn_status(text),
             Entry::TurnSettled { usage, .. } => {
+                self.last_status = self
+                    .pending_status
+                    .take()
+                    .map(|(state, detail)| TurnStatus {
+                        turn: e.turn,
+                        state,
+                        detail,
+                    });
                 self.turns += 1;
                 if let Some(c) = usage.context_tokens {
                     self.context_tokens = c;
@@ -215,13 +249,24 @@ impl Store {
     }
 
     pub fn append(&mut self, g: u64, time_ms: u64, entry: Entry, note: Note) -> io::Result<Line> {
+        let turn = self.peek_turn(&entry);
+        let status = matches!(entry, Entry::TurnSettled { .. })
+            .then(|| self.stats.pending_status.clone())
+            .flatten()
+            .map(|(state, detail)| TurnStatus {
+                turn,
+                state,
+                detail,
+            });
         let e = Line {
             seq: self.next_seq,
             g,
             time_ms,
-            turn: self.peek_turn(&entry),
+            turn,
             harness: note.harness,
             level: note.level,
+            status,
+            reports: note.reports,
             entry,
         };
         let mut line = e.to_json().to_string();

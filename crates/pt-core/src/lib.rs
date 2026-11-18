@@ -91,6 +91,28 @@ impl Core<'_> {
                 *d9,
                 true,
                 false,
+                None,
+            ),
+            E::SendUntil {
+                to,
+                request_id,
+                from,
+                text,
+                mode,
+                d9,
+                supersede,
+                limit,
+            } => self.send(
+                *to,
+                request_id,
+                *from,
+                None,
+                text,
+                *mode,
+                *d9,
+                true,
+                *supersede,
+                Some(*limit),
             ),
             E::Supersede {
                 to,
@@ -108,6 +130,7 @@ impl Core<'_> {
                 *d9,
                 true,
                 true,
+                None,
             ),
             E::DropQueued { to, from } => self.drop_queued_cmd(*to, *from),
             E::Report {
@@ -115,7 +138,23 @@ impl Core<'_> {
                 to,
                 turn,
                 text,
-            } => self.report_cmd(*sleeve, *to, *turn, text),
+            } => self.report_cmd(*sleeve, *to, *turn, text, None),
+            E::ReportStatus {
+                sleeve,
+                to,
+                turn,
+                text,
+                status,
+            } => self.report_cmd(
+                *sleeve,
+                *to,
+                *turn,
+                text,
+                Some(TurnReport {
+                    turn: *turn,
+                    status: status.clone(),
+                }),
+            ),
             E::Interrupt { sleeve } => self.interrupt_cmd(*sleeve),
             E::Compact { sleeve } => self.compact_cmd(*sleeve),
             E::RespondApproval {
@@ -136,6 +175,42 @@ impl Core<'_> {
                 target,
                 effort,
             } => self.start_cmd(*sleeve, target.as_ref(), effort.as_deref()),
+            E::StartUntil {
+                sleeve,
+                target,
+                effort,
+                from,
+                limit,
+            } => {
+                let before = self.out.len();
+                self.start_cmd(*sleeve, target.as_ref(), effort.as_deref());
+                if self.out[before..]
+                    .iter()
+                    .any(|i| matches!(i, Intent::Reply(Reply::Accepted)))
+                {
+                    self.sl(*sleeve).until_done = Some(UntilDone {
+                        from: *from,
+                        limit: *limit,
+                        rounds: 0,
+                    });
+                }
+            }
+            E::ArmUntil {
+                sleeve,
+                from,
+                limit,
+            } => {
+                if self.st.sleeve(*sleeve).is_some_and(|s| s.life.live()) {
+                    self.sl(*sleeve).until_done = Some(UntilDone {
+                        from: *from,
+                        limit: *limit,
+                        rounds: 0,
+                    });
+                    self.reply(Reply::Accepted);
+                } else {
+                    self.refuse(Code::FailedPrecondition, "cannot enable until-done");
+                }
+            }
             E::Resleeve {
                 sleeve,
                 target,

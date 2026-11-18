@@ -1,0 +1,21 @@
+#scenario fd160755e765c11b
+# A different sender cancels an in-flight round that the driver reports unwritten.
+spawn root /w/a
+spawn other /w/b
+run
+obs root ready
+obs other ready
+send root m1 until=3
+run
+obs root continuing
+commit
+send root m2 from=other
+policy prompt=busy
+run
+expect root until_rounds=none queue=1
+expect-effect until:* state=Abandoned attempt=1 count=1
+policy prompt=ack
+tick 1s
+run
+expect root until_rounds=none msg:m2=Delivered
+expect-effect until:* state=Abandoned attempt=1 count=1

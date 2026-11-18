@@ -93,6 +93,11 @@ pub enum Obs {
     TurnSettled {
         end: TurnEnd,
     },
+    /// A settle with the final message's declaration, recorded with the observation.
+    TurnSettledStatus {
+        end: TurnEnd,
+        status: Option<DeclaredStatus>,
+    },
     /// A turn started by the harness, independently of a delivered prompt.
     TurnBegan,
     ForeignTurnSettled {
@@ -139,6 +144,16 @@ pub enum EventKind {
         /// The sending turn had D9 origin. The recipient is marked, and so are its children.
         d9: bool,
     },
+    SendUntil {
+        to: SleeveId,
+        request_id: String,
+        from: Party,
+        text: String,
+        mode: SendMode,
+        d9: bool,
+        supersede: bool,
+        limit: u64,
+    },
     Supersede {
         to: SleeveId,
         request_id: String,
@@ -179,6 +194,18 @@ pub enum EventKind {
         sleeve: SleeveId,
         target: Option<Target>,
         effort: Option<String>,
+    },
+    StartUntil {
+        sleeve: SleeveId,
+        target: Option<Target>,
+        effort: Option<String>,
+        from: Party,
+        limit: u64,
+    },
+    ArmUntil {
+        sleeve: SleeveId,
+        from: Party,
+        limit: u64,
     },
     Resleeve {
         sleeve: SleeveId,
@@ -316,6 +343,13 @@ pub enum EventKind {
         to: SleeveId,
         turn: u64,
         text: String,
+    },
+    ReportStatus {
+        sleeve: SleeveId,
+        to: SleeveId,
+        turn: u64,
+        text: String,
+        status: Option<DeclaredStatus>,
     },
 }
 

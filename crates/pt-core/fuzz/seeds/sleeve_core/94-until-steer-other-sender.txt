@@ -1,0 +1,18 @@
+#scenario c8c9a5664c114dd6
+# A different sender cancels a bounded steer before the harness acknowledges it.
+spawn root /w/a harness=codex
+spawn other /w/b
+run
+obs root ready
+obs other ready
+send root m1
+run
+send root m2 steer until=3
+commit
+send root m3 from=other
+run
+expect root until_rounds=none msg:m2=Delivered
+obs root continuing
+run
+expect root until_rounds=none msg:m3=Delivered
+expect-effect until:* count=0

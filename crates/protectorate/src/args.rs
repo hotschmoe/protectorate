@@ -20,6 +20,7 @@ const SWITCHES: &[&str] = &[
     "--retry-rollback",
     "--refresh",
     "--all",
+    "--any",
     "--no-wait",
     "--wait",
     "--force",

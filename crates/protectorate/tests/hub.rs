@@ -2205,6 +2205,9 @@ for line in sys.stdin:
     if msg.get("type") != "user": continue
     msg["isReplay"] = True
     emit(msg)
+    if "hold report inbox" in line:
+        import time
+        time.sleep(15)
     if "do the work" in line:
         open("a.txt", "w").write("a\n")
         subprocess.run(g + ["add", "a.txt"], check=True)
@@ -2212,7 +2215,11 @@ for line in sys.stdin:
         open("b.txt", "w").write("b\n")
         emit({"type":"assistant", "message":{"id":"t", "content":[{"type":"tool_use", "id":"tu1", "name":"Bash", "input":{"command":"cargo test -q"}}]}})
         emit({"type":"user", "message":{"content":[{"type":"tool_result", "tool_use_id":"tu1", "content":"test result: ok", "is_error":False}]}})
-    emit({"type":"assistant", "message":{"id":"r", "content":[{"type":"text", "text":"all done"}]}})
+    if "do the work" in line: answer = "all done\nSTATUS: CONTINUING more work"
+    elif "blocked question" in line: answer = "STATUS: BLOCKED missing input"
+    elif "no status question" in line: answer = "STATUS: DONE\nmore text"
+    else: answer = "STATUS: DONE"
+    emit({"type":"assistant", "message":{"id":"r", "content":[{"type":"text", "text":answer}]}})
     emit({"type":"result", "subtype":"success", "is_error":False, "stop_reason":"end_turn"})
 ' "$@""#,
     );
@@ -2226,7 +2233,7 @@ for line in sys.stdin:
     };
     std::fs::write(home.join("config.json"), config.to_string()).unwrap();
     let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
-    let hub = Hub::open(home, &[], &[("PATH", &path)]);
+    let mut hub = Hub::open(home, &[], &[("PATH", &path)]);
     let repo = temp_repo("report");
     hub.cli(&[
         "sleeve",
@@ -2262,11 +2269,83 @@ for line in sys.stdin:
             .collect()
     };
 
+    hub.send("envoy", "hold report inbox");
+    eventually("Envoy is working", Duration::from_secs(30), || {
+        (hub.sleeve("envoy")["incarnation"]["activity"]["state"].as_str() == Some("working"))
+            .then_some(())
+    });
+    let mut all_wait = cli_command()
+        .arg("--home")
+        .arg(&hub.home)
+        .args([
+            "--json",
+            "sleeve",
+            "wait",
+            "envoy",
+            "worker",
+            "--all",
+            "--timeout",
+            "60",
+        ])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let any = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "wait",
+            "envoy",
+            "worker",
+            "--any",
+            "--timeout",
+            "5",
+        ])
+        .json();
+    assert_eq!(any["reached"].as_bool(), Some(true));
+    assert_eq!(any["sleeves"][0]["reached"].as_bool(), Some(false));
+    assert_eq!(any["sleeves"][1]["reached"].as_bool(), Some(true));
+    assert!(
+        all_wait.try_wait().unwrap().is_none(),
+        "all returned while Envoy was working"
+    );
     hub.cli_env(&as_envoy, &["sleeve", "send", "worker", "do the work"])
         .ok();
+    let queued = eventually("structured queued report", Duration::from_secs(10), || {
+        let inbox = hub.cli(&["--json", "sleeve", "inbox", "envoy"]).json();
+        inbox["messages"]
+            .as_array()?
+            .iter()
+            .find(|m| m["report"]["turn"].as_u64() == Some(1))
+            .cloned()
+    });
+    assert_eq!(
+        queued["report"]["status"]["state"].as_str(),
+        Some("continuing")
+    );
+    assert_eq!(
+        queued["report"]["status"]["detail"].as_str(),
+        Some("more work")
+    );
     let (from, report) = eventually("the turn report", Duration::from_secs(60), || {
         reports().pop()
     });
+    let all_output = all_wait.wait_with_output().unwrap();
+    assert!(
+        all_output.status.success(),
+        "all wait failed: {}",
+        String::from_utf8_lossy(&all_output.stderr)
+    );
+    let all = pt_json::parse_bytes(&all_output.stdout).unwrap();
+    assert_eq!(all["reached"].as_bool(), Some(true));
+    let transcript = hub.transcript("envoy");
+    let structured = of_type(&transcript, "user_message")
+        .into_iter()
+        .find_map(|entry| entry["entry"]["reports"].as_array()?.first().cloned())
+        .expect("delivered report metadata");
+    assert_eq!(structured["status"]["state"].as_str(), Some("continuing"));
+    assert_eq!(structured["status"]["detail"].as_str(), Some("more work"));
     assert!(
         from.contains("worker"),
         "the report is mail from the worker: {from}"
@@ -2281,10 +2360,29 @@ for line in sys.stdin:
         "b.txt",
         "Last test command this turn: `",
         "cargo test",
+        "Declared status: continuing: more work.",
         "Final message:\n> all done",
     ] {
         assert!(report.contains(want), "missing {want:?} in:\n{report}");
     }
+    let status = hub.sleeve("worker");
+    assert_eq!(status["last_status"]["state"].as_str(), Some("continuing"));
+    assert_eq!(status["last_status"]["detail"].as_str(), Some("more work"));
+    let entries = hub.transcript("worker");
+    let settled = of_type(&entries, "turn_settled");
+    assert_eq!(
+        settled[0]["entry"]["status"]["state"].as_str(),
+        Some("continuing")
+    );
+    assert_eq!(
+        settled[0]["entry"]["status"]["detail"].as_str(),
+        Some("more work")
+    );
+    assert!(
+        hub.cli(&["sleeve", "list"])
+            .stdout
+            .contains("continuing: more work")
+    );
 
     hub.send("worker", "an owner question");
     eventually(
@@ -2294,6 +2392,440 @@ for line in sys.stdin:
     );
     hub.wait("envoy", "idle", 60);
     assert_eq!(reports().len(), 1, "the owner's turn reported to Envoy");
+    hub.wait("worker", "idle", 60);
+    let status = hub.sleeve("worker");
+    assert_eq!(status["last_status"]["state"].as_str(), Some("done"));
+    assert_eq!(status["last_status"]["turn"].as_u64(), Some(2));
+    assert!(hub.cli(&["sleeve", "list"]).stdout.contains("done"));
+    hub.send("worker", "blocked question");
+    eventually("blocked status", Duration::from_secs(60), || {
+        (hub.sleeve("worker")["last_status"]["state"].as_str() == Some("blocked")).then_some(())
+    });
+    assert_eq!(
+        hub.sleeve("worker")["last_status"]["detail"].as_str(),
+        Some("missing input")
+    );
+    assert!(
+        hub.cli(&["sleeve", "list"])
+            .stdout
+            .contains("blocked: missing input")
+    );
+    hub.wait("worker", "idle", 60);
+    hub.restart();
+    let entries = hub.transcript("envoy");
+    assert!(of_type(&entries, "user_message").iter().any(|entry| {
+        entry["entry"]["reports"].as_array().is_some_and(|reports| {
+            reports.iter().any(|report| {
+                report["status"]["state"].as_str() == Some("continuing")
+                    && report["status"]["detail"].as_str() == Some("more work")
+            })
+        })
+    }));
+    assert_eq!(
+        hub.sleeve("worker")["last_status"]["state"].as_str(),
+        Some("blocked")
+    );
+    let entries = hub.transcript("worker");
+    let settled = of_type(&entries, "turn_settled");
+    assert_eq!(
+        settled[0]["entry"]["status"]["state"].as_str(),
+        Some("continuing")
+    );
+    assert_eq!(
+        settled[2]["entry"]["status"]["state"].as_str(),
+        Some("blocked")
+    );
+    hub.wait("worker", "idle", 60);
+    hub.send("worker", "no status question");
+    eventually("status cleared", Duration::from_secs(60), || {
+        let s = hub.sleeve("worker");
+        (s["last_status"].is_null()).then_some(())
+    });
+    hub.wait("worker", "idle", 60);
+    let entries = hub.transcript("worker");
+    let settled = of_type(&entries, "turn_settled");
+    assert!(settled[3]["entry"]["status"].is_null());
+    let all = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "wait",
+            "envoy",
+            "worker",
+            "--all",
+            "--timeout",
+            "5",
+        ])
+        .json();
+    assert_eq!(all["reached"].as_bool(), Some(true));
+    assert_eq!(all["sleeves"].as_array().unwrap().len(), 2);
+    hub.cli(&["sleeve", "stop", "worker"]).ok();
+    hub.wait("worker", "ended", 60);
+    let any = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "wait",
+            "worker",
+            "envoy",
+            "--any",
+            "--timeout",
+            "5",
+        ])
+        .json();
+    assert_eq!(any["reached"].as_bool(), Some(true));
+    assert_eq!(any["sleeves"][0]["reached"].as_bool(), Some(false));
+    assert_eq!(any["sleeves"][1]["reached"].as_bool(), Some(true));
+    let all = hub.cli(&["sleeve", "wait", "worker", "envoy", "--timeout", "5"]);
+    assert_ne!(all.status, 0, "all must fail when one sleeve stopped");
+    let id = pt_core::SleeveId(
+        hub.sleeve("worker")["id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap(),
+    );
+    hub.stop();
+    let (_journal, recovered) = pt_journal::Journal::open(&hub.home.join("journal")).unwrap();
+    let events: Vec<_> = recovered
+        .frames
+        .iter()
+        .map(|frame| pt_core::codec::decode(frame).unwrap())
+        .collect();
+    let statuses: Vec<_> = events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            pt_core::EventKind::Observed {
+                sleeve,
+                obs: pt_core::Obs::TurnSettledStatus { status, .. },
+                ..
+            } if *sleeve == id => Some(status.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        statuses,
+        vec![
+            Some(pt_core::DeclaredStatus::Continuing("more work".into())),
+            Some(pt_core::DeclaredStatus::Done),
+            Some(pt_core::DeclaredStatus::Blocked("missing input".into())),
+            None,
+        ]
+    );
+    let replayed = pt_core::replay(&events);
+    assert_eq!(replayed.sleeves[&id].last_status, None);
+    let envoy = replayed
+        .sleeves
+        .values()
+        .find(|s| s.name == "envoy")
+        .unwrap();
+    let report = envoy
+        .messages
+        .get(&format!("report:{}:1", id.0))
+        .unwrap()
+        .report
+        .as_ref()
+        .unwrap();
+    assert_eq!(report.turn, 1);
+    assert_eq!(
+        report.status,
+        Some(pt_core::DeclaredStatus::Continuing("more work".into()))
+    );
+    let through_blocked: Vec<_> = events.iter().take_while(|event| !matches!(&event.kind,
+        pt_core::EventKind::Observed { sleeve, obs: pt_core::Obs::TurnSettledStatus { status: None, .. }, .. } if *sleeve == id
+    )).collect();
+    let replayed = pt_core::replay(through_blocked);
+    assert_eq!(
+        replayed.sleeves[&id].last_status,
+        Some(pt_core::DeclaredStatus::Blocked("missing input".into()))
+    );
+}
+
+/// Bounded continuation across real hub restarts, and cancellation by a different sender.
+#[test]
+#[ignore = "heavy"]
+fn until_done_continues_and_stops() {
+    if !on_path("bwrap") || !on_path("python3") || !on_path("git") {
+        return;
+    }
+    let dir = unique("until-done");
+    let home = dir.join("home");
+    let fake = dir.join("claude");
+    std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
+    std::fs::write(home.join("logins/.claude/.credentials.json"), "{}").unwrap();
+    write_script(
+        &fake,
+        r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi
+exec python3 -u -c '
+import json, os, sys, time
+def emit(v): print(json.dumps(v), flush=True)
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("type") != "user": continue
+    msg["isReplay"] = True
+    emit(msg)
+    if "scenario-three" in line: mode, n = "three", 0
+    elif "scenario-restart" in line: mode, n = "restart", 0
+    elif "scenario-blocked" in line: mode, n = "blocked", 0
+    elif "scenario-missing" in line: mode, n = "missing", 0
+    elif "scenario-interrupt" in line: mode, n = "interrupt", 0
+    elif "scenario-stop" in line: mode, n = "stop", 0
+    elif "owner-override" in line: mode, n = "override", 0
+    elif os.path.exists(".until-mode"):
+        mode, raw = open(".until-mode").read().split(":")
+        n = int(raw)
+    else: mode, n = "other", 0
+    if (mode == "restart" and n == 1) or (mode in ("interrupt", "stop") and n == 0):
+        open(".until-held-" + mode, "w").close()
+        while not os.path.exists(".until-release-" + mode): time.sleep(0.05)
+    open(".until-mode", "w").write(mode + ":" + str(n + 1))
+    if mode == "blocked": answer = "STATUS: BLOCKED waiting"
+    elif mode == "missing": answer = "no declaration"
+    elif mode in ("three", "restart") and n < 3: answer = "STATUS: CONTINUING remaining"
+    elif mode == "interrupt": answer = "STATUS: CONTINUING remaining"
+    else: answer = "STATUS: DONE"
+    emit({"type":"assistant", "message":{"id":"r", "content":[{"type":"text", "text":answer}]}})
+    emit({"type":"result", "subtype":"success", "is_error":False, "stop_reason":"end_turn"})
+' "$@""#,
+    );
+    write_script(&dir.join("systemd-run"), "exit 0");
+    let config = pt_json::obj! {
+        "envoy" => pt_json::obj! { "harness" => "claude" },
+        "claude_program" => fake.to_str().unwrap(), "scopes" => false,
+        "quota_poll_secs" => 0u64, "harness_update_hours" => 0u64,
+    };
+    std::fs::write(home.join("config.json"), config.to_string()).unwrap();
+    let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
+    let mut hub = Hub::open(home, &[], &[("PATH", &path)]);
+    let repo = temp_repo("until-done");
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "worker",
+        "--path",
+        repo.to_str().unwrap(),
+        "--harness",
+        "claude",
+    ])
+    .ok();
+    hub.wait("worker", "idle", 60);
+    hub.wait("envoy", "idle", 60);
+    let count = |hub: &Hub| {
+        of_type(&hub.transcript("worker"), "user_message")
+            .iter()
+            .filter(|e| {
+                e["entry"]["text"].as_str().is_some_and(|t| {
+                    t.contains("Continue from where you stopped, with the same rules and order.")
+                })
+            })
+            .count()
+    };
+    hub.cli(&[
+        "sleeve",
+        "send",
+        "worker",
+        "scenario-three",
+        "--until-done",
+        "3",
+    ])
+    .ok();
+    eventually(
+        "three continuations and done",
+        Duration::from_secs(60),
+        || {
+            (count(&hub) == 3
+                && hub.sleeve("worker")["last_status"]["state"].as_str() == Some("done"))
+            .then_some(())
+        },
+    );
+    hub.wait("worker", "idle", 60);
+    hub.cli(&[
+        "sleeve",
+        "send",
+        "worker",
+        "scenario-blocked",
+        "--until-done",
+        "3",
+    ])
+    .ok();
+    eventually("blocked", Duration::from_secs(60), || {
+        (hub.sleeve("worker")["last_status"]["state"].as_str() == Some("blocked")).then_some(())
+    });
+    hub.wait("worker", "idle", 60);
+    assert_eq!(count(&hub), 3);
+    hub.cli(&[
+        "sleeve",
+        "send",
+        "worker",
+        "scenario-missing",
+        "--until-done",
+        "3",
+    ])
+    .ok();
+    eventually("missing declaration", Duration::from_secs(60), || {
+        hub.sleeve("worker")["last_status"].is_null().then_some(())
+    });
+    hub.wait("worker", "idle", 60);
+    assert_eq!(count(&hub), 3);
+    hub.cli(&[
+        "sleeve",
+        "send",
+        "worker",
+        "scenario-three",
+        "--until-done",
+        "0",
+    ])
+    .ok();
+    eventually("zero rounds", Duration::from_secs(60), || {
+        (hub.sleeve("worker")["last_status"]["state"].as_str() == Some("continuing")).then_some(())
+    });
+    hub.wait("worker", "idle", 60);
+    assert_eq!(count(&hub), 3);
+    hub.cli(&[
+        "sleeve",
+        "send",
+        "worker",
+        "scenario-restart",
+        "--until-done",
+        "3",
+    ])
+    .ok();
+    eventually("restart hold", Duration::from_secs(60), || {
+        repo.join(".until-held-restart").exists().then_some(())
+    });
+    hub.restart();
+    std::fs::write(repo.join(".until-release-restart"), "go").unwrap();
+    eventually("done after restart", Duration::from_secs(120), || {
+        (count(&hub) == 6 && hub.sleeve("worker")["last_status"]["state"].as_str() == Some("done"))
+            .then_some(())
+    });
+    hub.wait("worker", "idle", 60);
+    let socket = hub
+        .home
+        .join("run/sleeves/api.sock")
+        .to_string_lossy()
+        .into_owned();
+    let token = env_get(&sleeve_process_env(&socket, "envoy"), "PROTECTORATE_TOKEN")
+        .unwrap()
+        .to_string();
+    hub.cli_env(
+        &[("PROTECTORATE_TOKEN", &token)],
+        &[
+            "sleeve",
+            "send",
+            "worker",
+            "scenario-interrupt",
+            "--until-done",
+            "3",
+        ],
+    )
+    .ok();
+    eventually("interrupt hold", Duration::from_secs(60), || {
+        repo.join(".until-held-interrupt").exists().then_some(())
+    });
+    hub.send("worker", "owner-override");
+    std::fs::write(repo.join(".until-release-interrupt"), "go").unwrap();
+    eventually("override settled", Duration::from_secs(60), || {
+        (hub.sleeve("worker")["last_status"]["state"].as_str() == Some("done")).then_some(())
+    });
+    hub.wait("worker", "idle", 60);
+    assert_eq!(count(&hub), 6);
+    hub.cli(&["sleeve", "stop", "worker"]).ok();
+    hub.wait("worker", "ended", 60);
+    hub.cli(&["sleeve", "start", "worker", "--until-done", "2"])
+        .ok();
+    hub.wait("worker", "idle", 60);
+    hub.send("worker", "scenario-three");
+    eventually("start bounded followups", Duration::from_secs(60), || {
+        (count(&hub) == 8
+            && hub.sleeve("worker")["last_status"]["state"].as_str() == Some("continuing"))
+        .then_some(())
+    });
+    hub.wait("worker", "idle", 60);
+    let repo2 = temp_repo("until-spawn");
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "worker-two",
+        "--path",
+        repo2.to_str().unwrap(),
+        "--harness",
+        "claude",
+        "--message",
+        "scenario-three",
+        "--until-done",
+        "3",
+    ])
+    .ok();
+    eventually("spawn bounded followups", Duration::from_secs(60), || {
+        let entries = hub.transcript("worker-two");
+        let n = of_type(&entries, "user_message")
+            .iter()
+            .filter(|e| {
+                e["entry"]["text"].as_str().is_some_and(|t| {
+                    t.contains("Continue from where you stopped, with the same rules and order.")
+                })
+            })
+            .count();
+        (n == 3 && hub.sleeve("worker-two")["last_status"]["state"].as_str() == Some("done"))
+            .then_some(())
+    });
+    hub.cli(&[
+        "sleeve",
+        "send",
+        "worker",
+        "scenario-stop",
+        "--until-done",
+        "3",
+    ])
+    .ok();
+    eventually("stop hold", Duration::from_secs(60), || {
+        repo.join(".until-held-stop").exists().then_some(())
+    });
+    hub.cli(&["sleeve", "stop", "worker"]).ok();
+    hub.wait("worker", "ended", 60);
+    hub.cli(&["sleeve", "start", "worker"]).ok();
+    hub.wait("worker", "idle", 60);
+    hub.send("worker", "owner-override");
+    hub.wait("worker", "idle", 60);
+    assert_eq!(count(&hub), 8);
+    let quota_home = dir.join("quota-home");
+    std::fs::create_dir_all(quota_home.join("logins/.claude")).unwrap();
+    std::fs::write(quota_home.join("logins/.claude/.credentials.json"), "{}").unwrap();
+    std::fs::write(quota_home.join("config.json"), config.to_string()).unwrap();
+    let quota = Hub::open(
+        quota_home,
+        &[],
+        &[
+            ("PATH", &path),
+            ("PT_TEST_FAULT", "usage_limit:quota-worker"),
+        ],
+    );
+    let quota_repo = temp_repo("until-quota");
+    quota
+        .cli(&[
+            "sleeve",
+            "spawn",
+            "quota-worker",
+            "--path",
+            quota_repo.to_str().unwrap(),
+            "--harness",
+            "claude",
+            "--message",
+            "scenario-three",
+            "--until-done",
+            "3",
+        ])
+        .ok();
+    eventually("quota stops loop", Duration::from_secs(90), || {
+        (quota.sleeve("quota-worker")["lifecycle"].as_str() == Some("parked")).then_some(())
+    });
+    let entries = quota.transcript("quota-worker");
+    assert!(!of_type(&entries, "user_message").iter().any(|e| {
+        e["entry"]["text"].as_str().is_some_and(|t| {
+            t.contains("Continue from where you stopped, with the same rules and order.")
+        })
+    }));
 }
 
 /// An Envoy turn that settles past the context ceiling gets the harness's own `/compact`

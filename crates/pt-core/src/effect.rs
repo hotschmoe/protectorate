@@ -208,7 +208,7 @@ impl Core<'_> {
         let prompt = match &e.kind {
             EffectKind::SendPrompt {
                 request_ids,
-                kind: MsgKind::Prompt,
+                kind: MsgKind::Prompt | MsgKind::Until { .. },
                 ..
             } => Some(request_ids.clone()),
             _ => None,
