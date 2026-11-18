@@ -1,32 +1,35 @@
 //! pt-json and serde_json must agree on accept/reject, and on the value when both accept.
-//! Accepted divergences, both where serde_json is stricter:
-//! - numbers whose magnitude overflows f64 ("number out of range"): RFC 8259 allows them and
-//!   pt-json keeps their text;
-//! - exactly 128 nested arrays and objects: serde_json's limit is 127, ours 128.
+//! Numbers whose magnitude overflows f64 are accepted by pt-json and retained as text.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
 use pt_json::Value;
+use serde::Deserialize;
 use serde_json::Value as Serde;
 
 fuzz_target!(|data: &[u8]| {
-    match (
-        pt_json::parse_bytes(data),
-        serde_json::from_slice::<Serde>(data),
-    ) {
+    match (pt_json::parse_bytes(data), reference(data)) {
         (Ok(ours), Ok(theirs)) => {
             assert!(same(&ours, &theirs), "values differ: {ours} vs {theirs}")
         }
         (Err(_), Err(_)) => {}
         (Ok(_), Err(e)) => assert!(
-            (e.to_string().starts_with("number out of range") && overflow_at(data, &e))
-                || (e.to_string().starts_with("recursion limit exceeded")
-                    && raw_depth(data) == 128),
+            raw_depth(data) <= 128 && overflow_at(data, &e),
             "pt-json accepts, serde_json rejects: {e}"
         ),
         (Err(e), Ok(_)) => panic!("pt-json rejects, serde_json accepts: {e}"),
     }
 });
+
+fn reference(data: &[u8]) -> serde_json::Result<Serde> {
+    let mut deserializer = serde_json::Deserializer::from_slice(data);
+    if raw_depth(data) <= 128 {
+        deserializer.disable_recursion_limit();
+    }
+    let value = Serde::deserialize(&mut deserializer)?;
+    deserializer.end()?;
+    Ok(value)
+}
 
 fn same(a: &Value, b: &Serde) -> bool {
     match (a, b) {
