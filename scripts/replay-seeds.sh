@@ -28,7 +28,7 @@ layout() {
         pt-hash) echo "differential" ;;
         pt-history) echo "extract_lines segment tail tokenize" ;;
         pt-http) echo "request ws_frame" ;;
-        pt-journal) echo "-" ;;
+        pt-journal) echo "recovery" ;;
         pt-json) echo "files" ;;
         pt-qr) echo "encode" ;;
         pt-quota) echo "claude codex grok local select" ;;
