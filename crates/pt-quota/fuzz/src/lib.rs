@@ -113,6 +113,7 @@ pub fn quota(b: &mut Bytes, now_ms: u64) -> Quota {
         reading,
         fetched_at_ms: EpochMs(fetched),
         windows,
+        credits: None,
         note: String::new(),
     }
 }

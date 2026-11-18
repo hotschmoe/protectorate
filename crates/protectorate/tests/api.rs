@@ -929,6 +929,80 @@ for line in sys.stdin:
 }
 
 #[test]
+#[ignore = "heavy quota integration"]
+fn codex_credit_readings() {
+    use std::io::Read;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", server.local_addr().unwrap());
+    let count = Arc::new(AtomicUsize::new(0));
+    let requests = Arc::clone(&count);
+    std::thread::spawn(move || {
+        for stream in server.incoming().flatten() {
+            let mut stream = stream;
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request);
+            let balance = if requests.fetch_add(1, Ordering::SeqCst) == 0 {
+                "1000"
+            } else {
+                "990"
+            };
+            let body = format!(
+                r#"{{"plan_type":"pro","rate_limit":{{"allowed":false,"limit_reached":true,"primary_window":{{"used_percent":100,"limit_window_seconds":604800,"reset_at":4102444800}}}},"credits":{{"has_credits":true,"balance":"{balance}","overage_limit_reached":false}},"rate_limit_reset_credits":{{"available_count":2}}}}"#
+            );
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    let mut hub = Hub::start_config(
+        "codex-credits",
+        "pi_local",
+        &[
+            ("quota_poll_secs", 1u64.into()),
+            ("codex_program", "/bin/true".into()),
+            ("claude_program", "/nonexistent/program".into()),
+            ("grok_program", "/nonexistent/program".into()),
+        ],
+        &[],
+        &[
+            ("PT_TEST_CODEX_USAGE_BASE", &url),
+            ("PT_TEST_QUOTA_TTL_MS", "1000"),
+        ],
+    );
+    let login = hub.home.join("logins/.codex");
+    std::fs::create_dir_all(&login).unwrap();
+    std::fs::write(
+        login.join("auth.json"),
+        r#"{"tokens":{"access_token":"test-token"}}"#,
+    )
+    .unwrap();
+    hub.restart();
+    eventually("two Codex credit readings", Duration::from_secs(30), || {
+        let list = hub.cli(&["--json", "quota", "list"]).json();
+        let rows = list["quotas"].as_array()?;
+        let row = rows
+            .iter()
+            .find(|q| q["subscription"].as_str() == Some("codex"))?;
+        (row["credits"]["per_hour"].as_f64().is_some()
+            && row["credits"]["balance"].as_f64() == Some(990.0))
+        .then_some(())
+    });
+    let display = hub.cli(&["quota", "list"]);
+    assert!(
+        display
+            .ok()
+            .contains("limit reached, on credits: balance 990")
+    );
+    assert!(display.stdout.contains("reset credits available: 2"));
+    assert!(display.stdout.contains("an hour"));
+}
+
+#[test]
 fn quota_readers_run() {
     let models = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let models_port = models.local_addr().unwrap().port();

@@ -4075,6 +4075,7 @@ final class Quota {
     required this.reading,
     required this.fetchedAt,
     this.windows = const <QuotaWindow>[],
+    this.credits,
     this.note = '',
   });
 
@@ -4090,6 +4091,7 @@ final class Quota {
         const <QuotaWindow>[],
         (e0) => _list(e0, 'Quota.windows', QuotaWindow.fromJson),
       ),
+      credits: _opt(j['credits'], QuotaCredits.fromJson),
       note: _or(j['note'], '', (e0) => _string(e0, 'Quota.note')),
     );
   }
@@ -4104,6 +4106,8 @@ final class Quota {
 
   final List<QuotaWindow> windows;
 
+  final QuotaCredits? credits;
+
   final String note;
 
   Map<String, Object?> toJson() => {
@@ -4112,7 +4116,72 @@ final class Quota {
     'reading': reading.toJson(),
     'fetched_at_ms': fetchedAt.millisecondsSinceEpoch,
     'windows': [for (final e0 in windows) e0.toJson()],
+    if (credits case final v?) 'credits': v.toJson(),
     'note': note,
+  };
+}
+
+final class QuotaCredits {
+  const QuotaCredits({
+    this.allowed,
+    this.limitReached,
+    this.hasCredits,
+    this.balance,
+    this.overageLimitReached,
+    this.resetAvailableCount,
+    this.perHour,
+  });
+
+  factory QuotaCredits.fromJson(Object? json) {
+    final j = _object(json, 'QuotaCredits');
+    return QuotaCredits(
+      allowed: _opt(j['allowed'], (e0) => _bool(e0, 'QuotaCredits.allowed')),
+      limitReached: _opt(
+        j['limit_reached'],
+        (e0) => _bool(e0, 'QuotaCredits.limit_reached'),
+      ),
+      hasCredits: _opt(
+        j['has_credits'],
+        (e0) => _bool(e0, 'QuotaCredits.has_credits'),
+      ),
+      balance: _opt(j['balance'], (e0) => _double(e0, 'QuotaCredits.balance')),
+      overageLimitReached: _opt(
+        j['overage_limit_reached'],
+        (e0) => _bool(e0, 'QuotaCredits.overage_limit_reached'),
+      ),
+      resetAvailableCount: _opt(
+        j['reset_available_count'],
+        (e0) => _int(e0, 'QuotaCredits.reset_available_count'),
+      ),
+      perHour: _opt(
+        j['per_hour'],
+        (e0) => _double(e0, 'QuotaCredits.per_hour'),
+      ),
+    );
+  }
+
+  final bool? allowed;
+
+  final bool? limitReached;
+
+  final bool? hasCredits;
+
+  final double? balance;
+
+  final bool? overageLimitReached;
+
+  final int? resetAvailableCount;
+
+  final double? perHour;
+
+  Map<String, Object?> toJson() => {
+    if (allowed case final v?) 'allowed': v,
+    if (limitReached case final v?) 'limit_reached': v,
+    if (hasCredits case final v?) 'has_credits': v,
+    if (balance case final v?) 'balance': v,
+    if (overageLimitReached case final v?) 'overage_limit_reached': v,
+    if (resetAvailableCount case final v?) 'reset_available_count': v,
+    if (perHour case final v?) 'per_hour': v,
   };
 }
 

@@ -487,12 +487,23 @@ api_records! {
         pub length_ms: Option<u64>,
     }
 
+    pub struct QuotaCredits {
+        pub allowed: Option<bool>,
+        pub limit_reached: Option<bool>,
+        pub has_credits: Option<bool>,
+        pub balance: Option<f64>,
+        pub overage_limit_reached: Option<bool>,
+        pub reset_available_count: Option<u64>,
+        pub per_hour: Option<f64>,
+    }
+
     pub struct Quota {
         pub subscription: Subscription,
         pub plan: String,
         pub reading: QuotaReading,
         pub fetched_at_ms: EpochMs,
         pub windows: Vec<QuotaWindow> = Vec::new(),
+        pub credits: Option<QuotaCredits>,
         pub note: String = String::new(),
     }
 

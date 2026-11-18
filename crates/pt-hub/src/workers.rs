@@ -110,7 +110,11 @@ fn quota_readers(hub: &Hub) -> Vec<Box<dyn Reader>> {
     if installed(Harness::Codex) {
         out.push(Box::new(pt_quota::codex::Codex {
             home: home.clone(),
-            base_url: None,
+            base_url: if cfg!(debug_assertions) {
+                std::env::var("PT_TEST_CODEX_USAGE_BASE").ok()
+            } else {
+                None
+            },
         }));
     }
     if installed(Harness::Grok) {
@@ -134,6 +138,17 @@ fn quota_readers(hub: &Hub) -> Vec<Box<dyn Reader>> {
 /// `quota_poll_secs` 0 never reads: every row stays `unknown`.
 pub fn start_quotas(hub: &Arc<Hub>) {
     let opts = Options::default();
+    #[cfg(debug_assertions)]
+    let opts = match std::env::var("PT_TEST_QUOTA_TTL_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+    {
+        Some(ms) => Options {
+            ttl: Duration::from_millis(ms),
+            ..opts
+        },
+        None => opts,
+    };
     #[cfg(debug_assertions)]
     let opts = match std::env::var("PT_TEST_QUOTA_STALE_MS")
         .ok()

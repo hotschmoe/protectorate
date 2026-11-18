@@ -149,6 +149,7 @@ impl Reader for Local {
         Ok(Snapshot {
             plan: String::new(),
             windows: Vec::new(),
+            credits: None,
             note,
         })
     }
