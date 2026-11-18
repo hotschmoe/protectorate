@@ -970,8 +970,20 @@ fn credit_warning(hub: &Hub, harness: pt_core::Harness) -> Option<String> {
         &quotas,
         &[],
     );
-    let mut text =
-        "Codex subscription limit reached; this work will use account credits".to_string();
+    let below_floor = hub.config.quota_credit_floor.is_some_and(|floor| {
+        quotas.iter().any(|q| {
+            q.subscription == api::Subscription::Codex
+                && q.credits
+                    .as_ref()
+                    .and_then(|c| c.balance)
+                    .is_some_and(|b| b < floor)
+        })
+    });
+    let mut text = if below_floor {
+        "Codex subscription limit reached; this work will park below quota_credit_floor".to_string()
+    } else {
+        "Codex subscription limit reached; this work will use account credits".to_string()
+    };
     if let Some(target) = alternative {
         text.push_str(&format!("; {} has quota headroom", target.harness));
     }

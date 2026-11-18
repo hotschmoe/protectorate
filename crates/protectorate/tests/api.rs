@@ -1106,6 +1106,54 @@ fn codex_credit_readings() {
         notices, 2,
         "one notice per transition across restart: {messages}"
     );
+    let config_path = hub.home.join("config.json");
+    let mut config = pt_json::parse(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    config
+        .as_object_mut()
+        .unwrap()
+        .insert("quota_credit_floor", 991u64);
+    std::fs::write(config_path, config.to_string()).unwrap();
+    hub.restart();
+    eventually(
+        "credit balance after restart",
+        Duration::from_secs(15),
+        || {
+            let list = hub.cli(&["--json", "quota", "list"]).json();
+            list["quotas"]
+                .as_array()?
+                .iter()
+                .any(|q| {
+                    q["subscription"].as_str() == Some("codex")
+                        && q["credits"]["balance"].as_f64() == Some(990.0)
+                })
+                .then_some(())
+        },
+    );
+    let floor_workspace = unique("codex-floor-workspace");
+    std::fs::create_dir_all(&floor_workspace).unwrap();
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "floor-worker",
+        "--harness",
+        "codex",
+        "--path",
+        floor_workspace.to_str().unwrap(),
+    ])
+    .ok();
+    eventually(
+        "worker parked at credit floor",
+        Duration::from_secs(30),
+        || {
+            let sleeve = hub.sleeve("floor-worker");
+            (sleeve["park_reason"].as_str() == Some("credit_floor")).then_some(())
+        },
+    );
+    hub.restart();
+    assert_eq!(
+        hub.sleeve("floor-worker")["park_reason"].as_str(),
+        Some("credit_floor")
+    );
 }
 
 #[test]

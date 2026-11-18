@@ -492,6 +492,20 @@ impl SleeveExec {
                 if !view.fresh(effect, attempt, &kind) {
                     return debug!("sleeve {}: dropped stale effect {}", self.id.0, effect.0);
                 }
+                if let EffectKind::StartIncarnation { target, .. } = &kind
+                    && target.harness == Harness::Codex
+                    && let Some(floor) = self.hub.config.quota_credit_floor
+                    && self.hub.quotas.list().iter().any(|q| {
+                        q.subscription == pt_api::Subscription::Codex
+                            && q.credits
+                                .as_ref()
+                                .and_then(|c| c.balance)
+                                .is_some_and(|b| b < floor)
+                    })
+                {
+                    self.submit(EventKind::CreditFloor { effect, attempt });
+                    return;
+                }
                 if !matches!(
                     kind,
                     EffectKind::SendPrompt { .. } | EffectKind::Steer { .. }

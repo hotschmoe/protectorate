@@ -4881,7 +4881,7 @@ final class Sleeve {
 
   final Lifecycle lifecycle;
 
-  /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed or `g<N>`.
+  /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed, credit_floor or `g<N>`.
   /// A flap after a rejected login is `flapping (<harness> login rejected)`. Envoy whose
   /// own harness doctor refused is `ineligible (<harness>)` until doctor finds it eligible.
   final String? parkReason;
