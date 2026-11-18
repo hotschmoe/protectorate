@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 
+target=${CARGO_TARGET_DIR:-target}
+rm -rf --one-file-system "$target/tmp"
+
 PROTECTORATE_BUILD_VERSION=${PROTECTORATE_BUILD_VERSION:-dev} cargo build --locked --workspace
 
 run() {
