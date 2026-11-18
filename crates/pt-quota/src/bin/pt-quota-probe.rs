@@ -12,12 +12,14 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use pt_api::{Harness, Mode, Quota};
+use pt_json::{ToJson, Value, obj};
 use pt_quota::{
     Cache, Candidate, Options, Reader, TaskSize, claude::Claude, codex::Codex, grok::Grok,
     local::Local,
 };
 
 fn main() -> ExitCode {
+    let reporting = std::env::var_os("PT_TEST_QUOTA_REPORT").is_some();
     let mut home: Option<PathBuf> = None;
     let mut local = std::env::var("PT_LOCAL_URL").unwrap_or_default();
     let mut pi_provider = std::env::var("PT_E2E_PI_PROVIDER").unwrap_or_default();
@@ -99,6 +101,8 @@ fn main() -> ExitCode {
         }),
     ];
     let mut options = Options::default();
+    let mut aged_report = Vec::new();
+    let mut aged_target = Value::Null;
     if let Some(ms) = test_cache_ms {
         let interval = std::time::Duration::from_millis(ms);
         options.ttl = interval;
@@ -123,53 +127,72 @@ fn main() -> ExitCode {
             ms.saturating_mul(2).saturating_add(50),
         ));
         let aged = cache.quotas();
+        if reporting {
+            aged_report = aged.iter().map(ToJson::to_json).collect();
+        }
         for q in &aged {
             println!("aged {}", line(q, now));
         }
         if let Some(candidates) = &allow {
-            println!(
-                "aged {}",
-                target_line(
-                    candidates,
-                    pt_quota::select_with_fallback(now, TaskSize::Medium, candidates, &aged)
-                )
-            );
+            let picked = pt_quota::select_with_fallback(now, TaskSize::Medium, candidates, &aged);
+            println!("aged {}", target_line(candidates, picked.clone()));
+            if reporting {
+                aged_target = selected(candidates, &picked);
+            }
         }
     }
-    if let Some(candidates) = allow {
-        println!(
-            "{}",
-            target_line(
-                &candidates,
-                pt_quota::select_with_fallback(now, TaskSize::Medium, &candidates, &quotas)
-            )
+    let target = if let Some(candidates) = &allow {
+        let picked = pt_quota::select_with_fallback(now, TaskSize::Medium, candidates, &quotas);
+        println!("{}", target_line(candidates, picked.clone()));
+        if reporting {
+            selected(candidates, &picked)
+        } else {
+            Value::Null
+        }
+    } else {
+        let allow = [
+            Harness::Claude,
+            Harness::Codex,
+            Harness::Grok,
+            Harness::PiLocal,
+        ]
+        .map(|harness| Candidate {
+            harness,
+            model: String::new(),
+        });
+        let target = pt_quota::select_target(
+            now,
+            TaskSize::Medium,
+            &allow,
+            Mode::Headless,
+            &[],
+            &quotas,
+            &[],
         );
-        return ExitCode::SUCCESS;
-    }
-    let allow = [
-        Harness::Claude,
-        Harness::Codex,
-        Harness::Grok,
-        Harness::PiLocal,
-    ]
-    .map(|harness| Candidate {
-        harness,
-        model: String::new(),
-    });
-    let target = pt_quota::select_target(
-        now,
-        TaskSize::Medium,
-        &allow,
-        Mode::Headless,
-        &[],
-        &quotas,
-        &[],
-    );
-    match target {
-        Some(t) => println!("target {:?}: {}", t.harness, t.reason),
-        None => println!("target none"),
+        match &target {
+            Some(t) => println!("target {:?}: {}", t.harness, t.reason),
+            None => println!("target none"),
+        }
+        target.map_or(
+            Value::Null,
+            |t| obj! { "harness" => t.harness.as_str(), "model" => t.model },
+        )
+    };
+    if reporting {
+        let rows: Vec<Value> = quotas.iter().map(ToJson::to_json).collect();
+        println!(
+            "\u{1e}{}",
+            obj! { "quotas" => rows, "aged" => aged_report, "target" => target, "aged_target" => aged_target }
+        );
     }
     ExitCode::SUCCESS
+}
+
+fn selected(candidates: &[Candidate], picked: &Result<(usize, String), String>) -> Value {
+    picked.as_ref().ok().map_or(Value::Null, |(i, _)| {
+        let c = &candidates[*i];
+        obj! { "harness" => c.harness.as_str(), "model" => c.model.as_str() }
+    })
 }
 
 fn target_line(candidates: &[Candidate], picked: Result<(usize, String), String>) -> String {

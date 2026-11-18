@@ -1,5 +1,6 @@
 //! End-to-end: the real `pt-quota-probe` binary, the real `curl`, real sockets and login files.
 
+use pt_json::Value;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
@@ -7,15 +8,34 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 const PROBE: &str = env!("CARGO_BIN_EXE_pt-quota-probe");
-const STATES: [&str; 4] = ["fresh", "stale", "unknown", "error"];
+const STATES: [&str; 4] = ["ok", "stale", "unknown", "error"];
 
-fn probe(args: &[&str]) -> String {
+struct Probe {
+    output: String,
+    report: Value,
+}
+
+impl std::fmt::Display for Probe {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.output)
+    }
+}
+
+impl Probe {
+    fn contains(&self, text: &str) -> bool {
+        self.output.contains(text)
+    }
+}
+
+fn probe(args: &[&str]) -> Probe {
     probe_env(args, &[])
 }
 
-fn probe_env(args: &[&str], env: &[(&str, &str)]) -> String {
+fn probe_env(args: &[&str], env: &[(&str, &str)]) -> Probe {
     let mut cmd = Command::new(PROBE);
-    cmd.args(args).env_remove("PT_LOCAL_URL");
+    cmd.args(args)
+        .env_remove("PT_LOCAL_URL")
+        .env("PT_TEST_QUOTA_REPORT", "1");
     for (k, v) in env {
         cmd.env(k, v);
     }
@@ -25,30 +45,43 @@ fn probe_env(args: &[&str], env: &[(&str, &str)]) -> String {
         "probe failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    String::from_utf8(out.stdout).expect("probe output is UTF-8")
+    let output = String::from_utf8(out.stdout).expect("probe output is UTF-8");
+    let line = output
+        .lines()
+        .find_map(|l| l.strip_prefix('\u{1e}'))
+        .expect("probe report");
+    let report = pt_json::parse(line).expect("valid probe report");
+    Probe { output, report }
 }
 
-fn line_of<'a>(out: &'a str, name: &str) -> &'a str {
-    out.lines()
-        .find(|l| l.split(' ').next() == Some(name))
-        .unwrap_or_else(|| panic!("no {name} line in:\n{out}"))
+fn line_of<'a>(out: &'a Probe, name: &str) -> &'a Value {
+    row_of(out, "quotas", name)
 }
 
-fn target_of(out: &str) -> &str {
-    out.lines()
-        .find(|l| l.starts_with("target "))
-        .unwrap_or_else(|| panic!("no target line in:\n{out}"))
+fn aged_line_of<'a>(out: &'a Probe, name: &str) -> &'a Value {
+    row_of(out, "aged", name)
 }
 
-fn aged_target_of(out: &str) -> &str {
-    out.lines()
-        .find(|l| l.starts_with("aged target "))
-        .unwrap_or_else(|| panic!("no aged target line in:\n{out}"))
+fn row_of<'a>(out: &'a Probe, group: &str, name: &str) -> &'a Value {
+    out.report[group]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|q| q["subscription"].as_str() == Some(name))
+        .unwrap_or_else(|| panic!("no {name} reading: {out}"))
 }
 
-fn state_of(line: &str) -> &str {
-    let state = line.split(' ').nth(1).unwrap_or("");
-    assert!(STATES.contains(&state), "bad state in {line:?}");
+fn target_of(out: &Probe) -> &Value {
+    &out.report["target"]
+}
+
+fn aged_target_of(out: &Probe) -> &Value {
+    &out.report["aged_target"]
+}
+
+fn state_of(line: &Value) -> &str {
+    let state = line["reading"].as_str().unwrap_or("");
+    assert!(STATES.contains(&state), "bad reading in {line}");
     state
 }
 
@@ -196,15 +229,17 @@ fn fixture_readers_over_real_curl() {
     ]);
     println!("{out}");
     let claude = line_of(&out, "claude");
-    assert_eq!(state_of(claude), "fresh");
+    assert_eq!(state_of(claude), "ok");
     let codex = line_of(&out, "codex");
-    assert_eq!(state_of(codex), "fresh");
+    assert_eq!(state_of(codex), "ok");
     let grok = line_of(&out, "grok");
     assert_eq!(state_of(grok), "unknown", "{grok}");
     let local = line_of(&out, "local");
-    assert_eq!(state_of(local), "fresh");
+    assert_eq!(state_of(local), "ok");
     assert!(
-        local.contains("model-a") && local.contains("llama"),
+        local["note"]
+            .as_str()
+            .is_some_and(|note| note.contains("model-a") && note.contains("llama")),
         "{local}"
     );
 
@@ -287,14 +322,19 @@ fn local_reader_sends_the_pi_provider_key() {
         );
         println!("{out}");
         assert!(!out.contains("secret-key"), "a key leaked: {out}");
-        line_of(&out, "local").to_string()
+        line_of(&out, "local").clone()
     };
 
     let home = scratch(&format!("local-key-home-{}", std::process::id()));
     models(&home, "local-secret-key");
     let local = run(&home, &[]);
-    assert_eq!(state_of(&local), "fresh", "{local}");
-    assert!(local.contains("qwen-local"), "{local}");
+    assert_eq!(state_of(&local), "ok", "{local}");
+    assert!(
+        local["note"]
+            .as_str()
+            .is_some_and(|note| note.contains("qwen-local")),
+        "{local}"
+    );
 
     models(&home, "wrong-secret-key");
     let local = run(&home, &[]);
@@ -307,11 +347,11 @@ fn local_reader_sends_the_pi_provider_key() {
         "--allow",
         "pi_local",
     ]);
-    assert!(target_of(&parked).starts_with("target none:"), "{parked}");
+    assert!(target_of(&parked).is_null(), "{parked}");
 
     models(&home, "PT_E2E_LOCAL_KEY");
     let local = run(&home, &[("PT_E2E_LOCAL_KEY", "local-secret-key")]);
-    assert_eq!(state_of(&local), "fresh", "{local}");
+    assert_eq!(state_of(&local), "ok", "{local}");
 
     models(&home, "!cat /nonexistent");
     let local = run(&home, &[]);
@@ -375,9 +415,9 @@ fn partial_responses_and_exhausted_selection() {
     let run = |args: Vec<String>| probe(&args.iter().map(String::as_str).collect::<Vec<_>>());
     let out = run(args(&full));
     for name in ["claude", "codex", "grok"] {
-        assert_eq!(state_of(line_of(&out, name)), "fresh", "{out}");
+        assert_eq!(state_of(line_of(&out, name)), "ok", "{out}");
     }
-    assert!(target_of(&out).starts_with("target none:"), "{out}");
+    assert!(target_of(&out).is_null(), "{out}");
 
     let (mixed_port, _) = serve(vec![
         (
@@ -393,7 +433,7 @@ fn partial_responses_and_exhausted_selection() {
     let mixed = format!("http://127.0.0.1:{mixed_port}");
     let out = run(args(&mixed));
     assert_eq!(state_of(line_of(&out, "codex")), "error", "{out}");
-    assert!(target_of(&out).starts_with("target none:"), "{out}");
+    assert!(target_of(&out).is_null(), "{out}");
 
     let (partial_port, _) = serve(vec![
         (
@@ -413,7 +453,7 @@ fn partial_responses_and_exhausted_selection() {
         let line = line_of(&out, name);
         assert_eq!(state_of(line), "error", "{line}");
     }
-    assert!(target_of(&out).starts_with("target none:"), "{out}");
+    assert!(target_of(&out).is_null(), "{out}");
 }
 
 #[test]
@@ -448,7 +488,7 @@ fn local_endpoint_rejects_non_loopback_http_and_accepts_an_unlisted_model() {
         "wanted",
     ]);
     let local = line_of(&out, "local");
-    assert_eq!(state_of(local), "fresh", "{local}");
+    assert_eq!(state_of(local), "ok", "{local}");
 }
 
 #[test]
@@ -468,7 +508,7 @@ fn fifo_login_does_not_block_other_readers() {
     let start = std::time::Instant::now();
     let out = probe(&["--home", home.to_str().unwrap(), "--local", &base]);
     assert!(start.elapsed() < std::time::Duration::from_secs(5), "{out}");
-    assert_eq!(state_of(line_of(&out, "local")), "fresh", "{out}");
+    assert_eq!(state_of(line_of(&out, "local")), "ok", "{out}");
 }
 
 #[test]
@@ -501,9 +541,9 @@ fn cache_uses_monotonic_time_for_ttl_backoff_and_age() {
         "--test-cache-ms",
         "150",
     ]);
-    assert_eq!(state_of(line_of(&out, "claude")), "fresh", "{out}");
+    assert_eq!(state_of(line_of(&out, "claude")), "ok", "{out}");
     assert_eq!(state_of(line_of(&out, "grok")), "error", "{out}");
-    assert!(out.contains("aged claude stale"), "{out}");
+    assert!(state_of(aged_line_of(&out, "claude")) == "stale", "{out}");
     let seen = seen.lock().unwrap();
     assert_eq!(
         seen.iter()
@@ -547,18 +587,21 @@ fn stale_windows_still_gate_the_fallback() {
     let exhausted = run(
         r#"{"five_hour":{"utilization":99,"resets_at":"2100-01-01T00:00:00Z"},"seven_day":{"utilization":10,"resets_at":"2100-01-08T00:00:00Z"}}"#,
     );
-    assert!(exhausted.contains("aged claude stale"), "{exhausted}");
     assert!(
-        aged_target_of(&exhausted).starts_with("aged target none:"),
+        state_of(aged_line_of(&exhausted, "claude")) == "stale",
         "{exhausted}"
     );
+    assert!(aged_target_of(&exhausted).is_null(), "{exhausted}");
 
     let spare = run(
         r#"{"five_hour":{"utilization":0,"resets_at":"2100-01-01T00:00:00Z"},"seven_day":{"utilization":10,"resets_at":"2100-01-08T00:00:00Z"}}"#,
     );
-    assert!(spare.contains("aged claude stale"), "{spare}");
     assert!(
-        aged_target_of(&spare).starts_with("aged target Claude:"),
+        state_of(aged_line_of(&spare, "claude")) == "stale",
+        "{spare}"
+    );
+    assert!(
+        aged_target_of(&spare)["harness"].as_str() == Some("claude"),
         "{spare}"
     );
 }
@@ -589,26 +632,32 @@ fn a_reset_just_behind_blocks_and_an_ancient_one_counts_as_reset() {
         secs = now_s.saturating_sub(5)
     ));
     let line = line_of(&behind, "codex");
-    assert_eq!(state_of(line), "fresh", "{behind}");
-    assert!(target_of(&behind).starts_with("target none:"), "{behind}");
+    assert_eq!(state_of(line), "ok", "{behind}");
+    assert!(target_of(&behind).is_null(), "{behind}");
 
     let zero = run(
         r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":100,"limit_window_seconds":18000,"reset_at":0}}}"#,
     );
     let line = line_of(&zero, "codex");
-    assert_eq!(state_of(line), "fresh", "{zero}");
-    assert!(target_of(&zero).starts_with("target none:"), "{zero}");
+    assert_eq!(state_of(line), "ok", "{zero}");
+    assert!(target_of(&zero).is_null(), "{zero}");
 
     let passed = run(
         r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":100,"limit_window_seconds":18000,"reset_at":1}}}"#,
     );
-    assert_eq!(state_of(line_of(&passed, "codex")), "fresh", "{passed}");
-    assert!(target_of(&passed).starts_with("target Codex:"), "{passed}");
+    assert_eq!(state_of(line_of(&passed, "codex")), "ok", "{passed}");
+    assert!(
+        target_of(&passed)["harness"].as_str() == Some("codex"),
+        "{passed}"
+    );
 
     let room = run(
         r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":18000,"reset_at":1}}}"#,
     );
-    assert!(target_of(&room).starts_with("target Codex:"), "{room}");
+    assert!(
+        target_of(&room)["harness"].as_str() == Some("codex"),
+        "{room}"
+    );
 }
 
 /// A stale row fetched before the reset still blocks inside the ten-minute grace, and counts
@@ -644,13 +693,10 @@ fn a_passed_reset_blocks_only_inside_the_grace() {
         ])
     };
     let inside = run(now_s.saturating_sub(120));
-    assert!(
-        aged_target_of(&inside).starts_with("aged target none:"),
-        "{inside}"
-    );
+    assert!(aged_target_of(&inside).is_null(), "{inside}");
     let outside = run(now_s.saturating_sub(30 * 60));
     assert!(
-        aged_target_of(&outside).starts_with("aged target Codex:"),
+        aged_target_of(&outside)["harness"].as_str() == Some("codex"),
         "{outside}"
     );
 }
@@ -673,16 +719,21 @@ fn a_stale_local_reading_is_not_spent() {
         "--test-cache-ms",
         "150",
     ]);
+    let local = line_of(&out, "local");
+    assert_eq!(state_of(local), "ok", "{out}");
     assert!(
-        out.contains("local fresh") && out.contains("local-model"),
+        local["note"]
+            .as_str()
+            .is_some_and(|note| note.contains("local-model")),
         "{out}"
     );
-    assert!(out.contains("target PiLocal:"), "{out}");
-    assert!(out.contains("aged local stale"), "{out}");
-    assert!(
-        aged_target_of(&out).starts_with("aged target none:"),
+    assert_eq!(
+        target_of(&out)["harness"].as_str(),
+        Some("pi_local"),
         "{out}"
     );
+    assert!(state_of(aged_line_of(&out, "local")) == "stale", "{out}");
+    assert!(aged_target_of(&out).is_null(), "{out}");
 }
 
 /// A stale exhausted window with no reset stops blocking after its length. Five hours is that
@@ -710,11 +761,11 @@ fn a_stale_exhausted_window_with_no_reset_becomes_unknown() {
         "--test-cache-ms",
         "150",
     ]);
-    assert_eq!(state_of(line_of(&out, "claude")), "fresh", "{out}");
-    assert!(target_of(&out).starts_with("target none:"), "{out}");
-    assert!(out.contains("aged claude stale"), "{out}");
+    assert_eq!(state_of(line_of(&out, "claude")), "ok", "{out}");
+    assert!(target_of(&out).is_null(), "{out}");
+    assert!(state_of(aged_line_of(&out, "claude")) == "stale", "{out}");
     assert!(
-        aged_target_of(&out).starts_with("aged target Claude:"),
+        aged_target_of(&out)["harness"].as_str() == Some("claude"),
         "{out}"
     );
 }
@@ -737,22 +788,31 @@ fn a_rejected_or_unscoped_login_is_unknown() {
     let denied = run("HTTP 401 Unauthorized\n");
     let line = line_of(&denied, "claude");
     assert_eq!(state_of(line), "unknown", "{denied}");
-    assert!(target_of(&denied).starts_with("target Claude:"), "{denied}");
+    assert!(
+        target_of(&denied)["harness"].as_str() == Some("claude"),
+        "{denied}"
+    );
 
     let scope = run("HTTP 403 Forbidden\n{\"error\":\"insufficient_scope\"}");
     let line = line_of(&scope, "claude");
     assert_eq!(state_of(line), "unknown", "{scope}");
-    assert!(target_of(&scope).starts_with("target Claude:"), "{scope}");
+    assert!(
+        target_of(&scope)["harness"].as_str() == Some("claude"),
+        "{scope}"
+    );
 
     let typed = run(
         "HTTP 403 Forbidden\n{\"error\":{\"type\":\"permission_error\",\"message\":\"permission denied\"}}",
     );
     assert_eq!(state_of(line_of(&typed, "claude")), "unknown", "{typed}");
-    assert!(target_of(&typed).starts_with("target Claude:"), "{typed}");
+    assert!(
+        target_of(&typed)["harness"].as_str() == Some("claude"),
+        "{typed}"
+    );
 
     let noise = run("HTTP 403 Forbidden\n{\"message\":\"permission denied for this resource\"}");
     assert_eq!(state_of(line_of(&noise, "claude")), "error", "{noise}");
-    assert!(target_of(&noise).starts_with("target none:"), "{noise}");
+    assert!(target_of(&noise).is_null(), "{noise}");
 }
 
 /// A weekly Sonnet cap is shown on the row. It does not exhaust an Opus candidate while the
@@ -788,12 +848,15 @@ fn a_model_scoped_window_does_not_exhaust_the_subscription() {
     };
     let both = run("claude:opus,pi_local");
     let claude = line_of(&both, "claude");
-    assert_eq!(state_of(claude), "fresh", "{both}");
-    assert!(target_of(&both).starts_with("target Claude:"), "{both}");
+    assert_eq!(state_of(claude), "ok", "{both}");
+    assert!(
+        target_of(&both)["harness"].as_str() == Some("claude"),
+        "{both}"
+    );
 
     let bare = run("claude");
     let chosen = target_of(&bare);
-    assert!(chosen.starts_with("target Claude:"), "{bare}");
+    assert_eq!(chosen["harness"].as_str(), Some("claude"), "{bare}");
 }
 
 /// `Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus. A candidate
@@ -815,15 +878,15 @@ fn a_versioned_cap_gates_its_model_family() {
     let shown = run("claude:opus");
     for model in ["claude:sonnet", "claude:claude-sonnet-4-5"] {
         let out = run(model);
-        assert!(
-            target_of(&out).starts_with("target none:"),
-            "{model}: {out}"
-        );
+        assert!(target_of(&out).is_null(), "{model}: {out}");
     }
     let bare_out = run("claude");
     let bare = target_of(&bare_out);
-    assert!(bare.starts_with("target Claude:"), "{bare}");
-    assert!(target_of(&shown).starts_with("target Claude:"), "{shown}");
+    assert_eq!(bare["harness"].as_str(), Some("claude"), "{bare}");
+    assert!(
+        target_of(&shown)["harness"].as_str() == Some("claude"),
+        "{shown}"
+    );
 }
 
 /// The Opus weekly cap gates a Claude candidate whose model is Opus, and does not gate Sonnet
@@ -844,10 +907,13 @@ fn a_model_cap_gates_the_candidate_that_runs_that_model() {
     let home_s = home.to_str().unwrap();
     let run = |allow: &str| probe(&["--home", home_s, "--claude-url", &base, "--allow", allow]);
     let opus = run("claude:claude-opus-4-6");
-    assert!(target_of(&opus).starts_with("target none:"), "{opus}");
+    assert!(target_of(&opus).is_null(), "{opus}");
 
     let sonnet = run("claude:sonnet");
-    assert!(target_of(&sonnet).starts_with("target Claude:"), "{sonnet}");
+    assert!(
+        target_of(&sonnet)["harness"].as_str() == Some("claude"),
+        "{sonnet}"
+    );
 
     for (pct, label) in [(0, "open"), (100, "full")] {
         let body = format!(
@@ -863,13 +929,9 @@ fn a_model_cap_gates_the_candidate_that_runs_that_model() {
             "--allow",
             "claude:sonnet",
         ]);
-        assert_eq!(
-            state_of(line_of(&only, "claude")),
-            "fresh",
-            "{label}: {only}"
-        );
+        assert_eq!(state_of(line_of(&only, "claude")), "ok", "{label}: {only}");
         assert!(
-            target_of(&only).starts_with("target Claude:"),
+            target_of(&only)["harness"].as_str() == Some("claude"),
             "{label}: {only}"
         );
     }
@@ -915,21 +977,21 @@ fn an_unspecified_model_ranks_below_a_cap() {
 
     let ranked_out = run("claude,claude:opus");
     let ranked = target_of(&ranked_out);
-    assert!(ranked.ends_with("[opus]"), "{ranked}");
+    assert_eq!(ranked["model"].as_str(), Some("opus"), "{ranked}");
 
     let bare_out = run("claude");
     let bare = target_of(&bare_out);
-    assert!(bare.starts_with("target Claude:"), "{bare}");
+    assert_eq!(bare["harness"].as_str(), Some("claude"), "{bare}");
     let fallback_out = run("claude:default");
     let fallback = target_of(&fallback_out);
-    assert!(fallback.ends_with("[default]"), "{fallback}");
+    assert_eq!(fallback["model"].as_str(), Some("default"), "{fallback}");
 
     let plan = run("claude:opusplan");
-    assert!(target_of(&plan).starts_with("target none:"), "{plan}");
+    assert!(target_of(&plan).is_null(), "{plan}");
 
     let better_out = run("claude,codex");
     let better = target_of(&better_out);
-    assert!(better.starts_with("target Claude:"), "{better}");
+    assert_eq!(better["harness"].as_str(), Some("claude"), "{better}");
 
     let (port, _) = serve(vec![(
         "/api/oauth/usage",
@@ -944,7 +1006,7 @@ fn an_unspecified_model_ranks_below_a_cap() {
         "--allow",
         "claude:opusplan",
     ]);
-    assert!(target_of(&opus).starts_with("target none:"), "{opus}");
+    assert!(target_of(&opus).is_null(), "{opus}");
 
     let (port, _) = serve(vec![(
         "/api/oauth/usage",
@@ -953,7 +1015,7 @@ fn an_unspecified_model_ranks_below_a_cap() {
     let base = format!("http://127.0.0.1:{port}");
     let parked = probe(&["--home", home_s, "--claude-url", &base, "--allow", "claude"]);
     let line = target_of(&parked);
-    assert!(line.starts_with("target none:"), "{parked}");
+    assert!(line.is_null(), "{parked}");
 }
 
 /// Pi with a vendor login has no quota reader. A missing reading is not "unknown", so the
@@ -979,9 +1041,9 @@ fn an_unmetered_harness_is_not_spent_when_its_reading_is_missing() {
         "--allow",
         "claude,pi_vendor",
     ]);
-    assert_eq!(state_of(line_of(&out, "claude")), "fresh", "{out}");
-    assert!(target_of(&out).starts_with("target none:"), "{out}");
+    assert_eq!(state_of(line_of(&out, "claude")), "ok", "{out}");
+    assert!(target_of(&out).is_null(), "{out}");
 
     let alone = probe(&["--home", home_s, "--allow", "pi_vendor"]);
-    assert!(target_of(&alone).starts_with("target none:"), "{alone}");
+    assert!(target_of(&alone).is_null(), "{alone}");
 }
