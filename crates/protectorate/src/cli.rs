@@ -738,7 +738,14 @@ fn node_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                             n.name.clone(),
                             n.from.clone(),
                             n.to.clone(),
-                            if n.ok { "ok" } else { "FAILED" }.into(),
+                            if n.ok {
+                                "ok"
+                            } else if n.detail.starts_with("deferred:") {
+                                "DEFERRED"
+                            } else {
+                                "FAILED"
+                            }
+                            .into(),
                             n.detail.clone(),
                         ]
                     })

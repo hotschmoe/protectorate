@@ -621,7 +621,8 @@ straight from GitHub releases, on the stable or dev channel, as today.
   Node update runs OS/architecture groups independently, preferring an online idle canary. A
   busy deferred canary gives way to the next candidate; a failed canary skips the rest of its
   group. A running job holds its node for up to 30 seconds, then the
-  update is deferred. Offline nodes are deferred. Progress is published as node events and the
+  update is deferred. Offline nodes are deferred. The CLI labels deferred results `DEFERRED`.
+  Progress is published as node events and the
   CLI prints it before the final table. A lost update reply can be confirmed by Hello and
   Presence on the target release. `--all --no-wait` accepts the rollout in the background;
   its rollout id identifies the events; a hub restart stops an unfinished rollout. Named-node `--no-wait` still waits for the switch but

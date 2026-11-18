@@ -2363,6 +2363,12 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
     assert!(
         lines
             .iter()
+            .any(|l| l.contains("DEFERRED") && l.contains("e2e-busy")),
+        "{lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
             .any(|l| l.contains("NODE") && l.contains("DETAIL")),
         "{lines:?}"
     );

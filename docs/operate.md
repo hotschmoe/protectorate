@@ -562,7 +562,8 @@ probation window (`--probation`, default 600 s) reverts to its previous binary. 
 for every node unless `--no-wait`. Update the hub first, then one node per OS and arch, then the
 rest. Updates run OS/architecture groups independently, preferring an online idle canary. A busy
 deferred canary gives way to the next node; a failed canary skips its group. A node with a running job waits up to 30 seconds and then is
-deferred; an offline node is deferred. The CLI prints progress and then the results table, and the
+deferred; an offline node is deferred. Deferred rows are labeled `DEFERRED` in the CLI results
+table. The CLI prints progress and then the results table, and the
 hub records progress in events. A lost update reply can be confirmed by Hello and Presence on the
 target release. `--all --no-wait` accepts the rollout in the background and prints
 its event id; follow it with `event list`. A hub restart stops an unfinished rollout. With named nodes `--no-wait` waits for the switch but
