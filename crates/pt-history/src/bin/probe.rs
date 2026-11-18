@@ -17,6 +17,7 @@ use pt_history::{
     DEFAULT_BUDGET, DocId, Filters, Hit, Index, Query, Selector, Source, SourceKind, brief_query,
     discover,
 };
+use pt_json::{Value, obj};
 
 const QUERIES: &[&str] = &[
     "journal codec torn tail",
@@ -293,7 +294,13 @@ fn fingerprint(hits: &[Hit]) -> Vec<(u64, u64, String)> {
 }
 
 /// One page of a session: `doc ID TURN` lines, then `more true` or `more false`.
-fn read_page(index: &Path, session: &str, after: Option<u64>, budget: u64) -> Result<(), String> {
+fn read_page(
+    index: &Path,
+    session: &str,
+    after: Option<u64>,
+    budget: u64,
+    reporting: bool,
+) -> Result<(), String> {
     let ix = Index::open(index, budget).map_err(|e| e.to_string())?;
     let (docs, more) = ix
         .read(
@@ -311,16 +318,24 @@ fn read_page(index: &Path, session: &str, after: Option<u64>, budget: u64) -> Re
         println!("doc {} {}", d.id.0, d.turn);
     }
     println!("more {more}");
+    if reporting {
+        let docs: Vec<Value> = docs
+            .iter()
+            .map(|d| obj! {"id" => d.id.0, "turn" => d.turn})
+            .collect();
+        println!("\u{1e}{}", obj! {"docs" => docs, "more" => more});
+    }
     Ok(())
 }
 
 fn run() -> Result<bool, String> {
     let a = args()?;
+    let reporting = std::env::var_os("PT_TEST_HISTORY_REPORT").is_some();
     if a.after.is_some() && a.read.is_none() {
         return Err(usage());
     }
     if let Some(session) = &a.read {
-        read_page(&a.index, session, a.after, a.budget)?;
+        read_page(&a.index, session, a.after, a.budget, reporting)?;
         return Ok(true);
     }
     let mut sources = select(&a.home, a.cap)?;
@@ -356,6 +371,12 @@ fn run() -> Result<bool, String> {
     );
     if sources.is_empty() {
         println!("summary: files=0");
+        if reporting {
+            println!(
+                "\u{1e}{}",
+                obj! { "files" => 0, "queries" => Vec::<Value>::new(), "contexts" => Vec::<Value>::new(), "sampled" => 0 }
+            );
+        }
         return Ok(true);
     }
 
@@ -390,6 +411,7 @@ fn run() -> Result<bool, String> {
     let filters = Filters::default();
     let mut with_hits = 0;
     let mut results = Vec::new();
+    let mut report_queries = Vec::new();
     for q in &a.queries {
         let query = Query::all(q);
         let mut times = Vec::with_capacity(a.runs);
@@ -424,6 +446,13 @@ fn run() -> Result<bool, String> {
         if !hits.is_empty() {
             with_hits += 1;
         }
+        if reporting {
+            let harnesses: Vec<Value> = hits
+                .iter()
+                .map(|h| Value::from(h.doc.harness.map_or("hub", |h| h.as_str())))
+                .collect();
+            report_queries.push(obj! { "query" => q.as_str(), "harnesses" => harnesses });
+        }
         results.push(fingerprint(&hits));
     }
 
@@ -439,8 +468,12 @@ fn run() -> Result<bool, String> {
         brief.len(),
         ms(t0.elapsed())
     );
+    let mut report_contexts = Vec::new();
     for s in sources.iter().rev().take(3) {
         if let Some(u) = ix.context_usage(&s.session) {
+            if reporting {
+                report_contexts.push(obj! { "harness" => s.kind.as_str(), "session" => s.session.as_str(), "tokens" => u.tokens, "window" => u.window });
+            }
             println!(
                 "context: {} {} tokens {} window {} turns {} compactions {}",
                 s.kind,
@@ -482,6 +515,12 @@ fn run() -> Result<bool, String> {
         a.queries.len(),
         if same { "identical" } else { "different" }
     );
+    if reporting {
+        println!(
+            "\u{1e}{}",
+            obj! { "files" => sources.len() as u64, "queries" => report_queries, "contexts" => report_contexts, "sampled" => sampled as u64 }
+        );
+    }
     Ok(same && found == sampled)
 }
 

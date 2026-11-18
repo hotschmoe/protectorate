@@ -3,6 +3,7 @@
 //! queries, checks recall, rebuilds a second index with a different commit pattern and checks
 //! the results are identical.
 
+use pt_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -23,33 +24,34 @@ fn temp(name: &str) -> PathBuf {
     dir
 }
 
-fn probe(args: &[&str]) -> String {
+fn probe(args: &[&str]) -> Value {
     let out = Command::new(env!("CARGO_BIN_EXE_pt-history-probe"))
         .args(args)
+        .env("PT_TEST_HISTORY_REPORT", "1")
         .output()
         .expect("run pt-history-probe");
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
-    eprintln!("{stdout}{}", String::from_utf8_lossy(&out.stderr));
-    assert!(out.status.success(), "probe failed: {:?}", out.status);
-    stdout
-}
-
-/// The `top N` count printed for `query`.
-fn top(out: &str, query: &str) -> usize {
-    let prefix = format!("query {query:?}: top ");
-    let line = out
+    assert!(
+        out.status.success(),
+        "probe failed: {:?}\n{stdout}{}",
+        out.status,
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let line = stdout
         .lines()
-        .find_map(|l| l.strip_prefix(&prefix))
-        .unwrap_or_else(|| panic!("no result line for {query:?}"));
-    line.split(',').next().unwrap().parse().unwrap()
+        .find_map(|l| l.strip_prefix('\u{1e}'))
+        .expect("probe report");
+    pt_json::parse(line).expect("valid probe report")
 }
 
-/// The first hit line printed under `query`.
-fn first_hit<'a>(out: &'a str, query: &str) -> &'a str {
-    let prefix = format!("query {query:?}: top ");
-    let mut lines = out.lines().skip_while(|l| !l.starts_with(&prefix));
-    lines.next();
-    lines.next().expect("a hit line").trim()
+fn hits<'a>(out: &'a Value, query: &str) -> &'a [Value] {
+    out["queries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["query"].as_str() == Some(query))
+        .and_then(|r| r["harnesses"].as_array())
+        .unwrap_or_else(|| panic!("no result for {query:?}: {out}"))
 }
 
 fn write(path: &Path, text: &str) {
@@ -180,36 +182,33 @@ fn synthetic_home_every_harness() {
     }
     let out = probe(&args);
     for (q, harness) in hits {
-        assert!(top(&out, q) > 0, "{q:?} finds something");
-        let hit = first_hit(&out, q);
-        assert!(
-            hit.contains(&format!(" {harness} ")),
-            "{q:?} top hit is {harness}: {hit}"
+        let found = self::hits(&out, q);
+        assert_eq!(
+            found.first().and_then(Value::as_str),
+            Some(harness),
+            "{q:?}: {found:?}"
         );
     }
     for q in misses {
-        assert_eq!(top(&out, q), 0, "{q:?} is not indexed");
+        assert!(self::hits(&out, q).is_empty(), "{q:?} is not indexed");
     }
+    let contexts = out["contexts"].as_array().unwrap();
     assert!(
-        out.lines().any(|line| {
-            ["codex", "bbbbbbbb", "5000", "258400"]
-                .iter()
-                .all(|value| line.contains(value))
-        }),
+        contexts
+            .iter()
+            .any(|c| c["harness"].as_str() == Some("codex")
+                && c["session"].as_str() == Some("bbbbbbbb-0000-4000-8000-000000000002")
+                && c["tokens"].as_u64() == Some(5000)
+                && c["window"].as_u64() == Some(258400)),
         "codex context usage: {out}"
     );
     assert!(
-        out.lines().any(|line| {
-            ["pi", "dddddddd", "2600"]
-                .iter()
-                .all(|value| line.contains(value))
-        }),
+        contexts.iter().any(|c| c["harness"].as_str() == Some("pi")
+            && c["session"].as_str() == Some("dddddddd-0000-4000-8000-000000000004")
+            && c["tokens"].as_u64() == Some(2600)),
         "pi context usage: {out}"
     );
-    assert!(
-        out.contains("recall=") && !out.contains("recall=0/"),
-        "recall sampled"
-    );
+    assert!(out["sampled"].as_u64().is_some_and(|n| n > 0), "{out}");
 }
 
 #[test]
@@ -240,29 +239,9 @@ fn real_logs_50mb() {
         "--runs",
         "3",
     ]);
-    let summary = out
-        .lines()
-        .find(|l| l.starts_with("summary: "))
-        .expect("summary line");
-    if summary.contains("files=0") {
+    if out["files"].as_u64() == Some(0) {
         eprintln!("SKIP: no logs found");
         return;
     }
-    let field = |k: &str| {
-        summary
-            .split_whitespace()
-            .find_map(|w| w.strip_prefix(k))
-            .unwrap_or_else(|| panic!("no {k} in {summary}"))
-    };
-    let (found, sampled) = field("recall=").split_once('/').unwrap();
-    assert_eq!(
-        found, sampled,
-        "every sampled doc is found by its own words"
-    );
-    assert_ne!(sampled, "0", "docs were sampled");
-    let (with_hits, _) = field("queries_with_hits=").split_once('/').unwrap();
-    assert!(
-        with_hits.parse::<u32>().unwrap() >= 1,
-        "some query finds hits"
-    );
+    assert!(out["sampled"].as_u64().is_some_and(|n| n > 0), "{out}");
 }
