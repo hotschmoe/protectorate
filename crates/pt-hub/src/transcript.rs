@@ -33,6 +33,7 @@ pt_json::record! {
         pub turn: u64 = 0,
         pub harness: Option<Harness>,
         pub level: Option<Level>,
+        pub status: Option<TurnStatus>,
         pub entry: Entry,
     }
 }
@@ -246,13 +247,23 @@ impl Store {
     }
 
     pub fn append(&mut self, g: u64, time_ms: u64, entry: Entry, note: Note) -> io::Result<Line> {
+        let turn = self.peek_turn(&entry);
+        let status = matches!(entry, Entry::TurnSettled { .. })
+            .then(|| self.stats.pending_status.clone())
+            .flatten()
+            .map(|(state, detail)| TurnStatus {
+                turn,
+                state,
+                detail,
+            });
         let e = Line {
             seq: self.next_seq,
             g,
             time_ms,
-            turn: self.peek_turn(&entry),
+            turn,
             harness: note.harness,
             level: note.level,
+            status,
             entry,
         };
         let mut line = e.to_json().to_string();

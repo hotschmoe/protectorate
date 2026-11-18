@@ -286,6 +286,7 @@ impl Hub {
             turn: store.peek_turn(&entry),
             harness: None,
             level: None,
+            status: None,
             entry,
         };
         let entry = wire::chat_entry(id, &line, true);

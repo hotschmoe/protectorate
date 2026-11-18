@@ -436,6 +436,7 @@ pub fn chat_entry(sleeve: SleeveId, l: &Line, delta: bool) -> api::ChatEntry {
                 context_window: usage.context_window,
             },
             duration_ms: *duration_ms,
+            status: l.status.clone(),
         },
         D::Error { class, text } => A::Error {
             kind: error_class(*class),

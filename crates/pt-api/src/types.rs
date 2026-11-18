@@ -613,6 +613,8 @@ api_unions! {
             native_stop: Option<String>,
             usage: Usage,
             duration_ms: Option<u64>,
+            /// The declaration at the end of this turn's final message, if present.
+            status: Option<TurnStatus>,
         },
         Error = "error" {
             kind: ErrorClass,

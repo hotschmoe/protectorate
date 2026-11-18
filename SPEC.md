@@ -176,6 +176,8 @@ CLI on the hub machine (section 3.1).
   declaration clears the previous status.
   New owner-turn settle observations journal the declaration together with the outcome, so the
   core reconstructs it on replay without consulting the transcript.
+  Each newly stored transcript settle also carries its own structured status in the API, so
+  clients can inspect earlier turns after a later turn changes the sleeve's current status.
   A usage-limit or auth settle reports after its continuation. Envoy reports to no one.
 - **Envoy's context ceiling.** When an Envoy turn settles with its context at 500k tokens or
   more, the hub sends the core a `Compact` for Envoy; the core takes it once Envoy is idle with

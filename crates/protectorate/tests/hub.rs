@@ -2139,6 +2139,16 @@ for line in sys.stdin:
     let status = hub.sleeve("worker");
     assert_eq!(status["last_status"]["state"].as_str(), Some("continuing"));
     assert_eq!(status["last_status"]["detail"].as_str(), Some("more work"));
+    let entries = hub.transcript("worker");
+    let settled = of_type(&entries, "turn_settled");
+    assert_eq!(
+        settled[0]["entry"]["status"]["state"].as_str(),
+        Some("continuing")
+    );
+    assert_eq!(
+        settled[0]["entry"]["status"]["detail"].as_str(),
+        Some("more work")
+    );
     assert!(
         hub.cli(&["sleeve", "list"])
             .stdout
@@ -2177,6 +2187,16 @@ for line in sys.stdin:
         hub.sleeve("worker")["last_status"]["state"].as_str(),
         Some("blocked")
     );
+    let entries = hub.transcript("worker");
+    let settled = of_type(&entries, "turn_settled");
+    assert_eq!(
+        settled[0]["entry"]["status"]["state"].as_str(),
+        Some("continuing")
+    );
+    assert_eq!(
+        settled[2]["entry"]["status"]["state"].as_str(),
+        Some("blocked")
+    );
     hub.wait("worker", "idle", 60);
     hub.send("worker", "no status question");
     eventually("status cleared", Duration::from_secs(60), || {
@@ -2184,6 +2204,9 @@ for line in sys.stdin:
         (s["last_status"].is_null()).then_some(())
     });
     hub.wait("worker", "idle", 60);
+    let entries = hub.transcript("worker");
+    let settled = of_type(&entries, "turn_settled");
+    assert!(settled[3]["entry"]["status"].is_null());
     let all = hub
         .cli(&[
             "--json",

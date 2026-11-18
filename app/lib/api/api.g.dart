@@ -1316,6 +1316,7 @@ final class EntryTurnSettled extends Entry {
     this.nativeStop,
     required this.usage,
     this.durationMs,
+    this.status,
   });
 
   factory EntryTurnSettled._fromMap(Map<String, Object?> j) => EntryTurnSettled(
@@ -1329,6 +1330,7 @@ final class EntryTurnSettled extends Entry {
       j['duration_ms'],
       (e0) => _int(e0, 'EntryTurnSettled.duration_ms'),
     ),
+    status: _opt(j['status'], TurnStatus.fromJson),
   );
 
   final Stop stop;
@@ -1339,6 +1341,9 @@ final class EntryTurnSettled extends Entry {
 
   final int? durationMs;
 
+  /// The declaration at the end of this turn's final message, if present.
+  final TurnStatus? status;
+
   @override
   Map<String, Object?> toJson() => {
     'type': 'turn_settled',
@@ -1346,6 +1351,7 @@ final class EntryTurnSettled extends Entry {
     if (nativeStop case final v?) 'native_stop': v,
     'usage': usage.toJson(),
     if (durationMs case final v?) 'duration_ms': v,
+    if (status case final v?) 'status': v.toJson(),
   };
 }
 
