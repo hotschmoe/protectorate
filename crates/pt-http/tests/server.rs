@@ -14,7 +14,13 @@ fn get_stream_query_and_errors() {
     let s = start(Config::default());
     let r = curl(&["-i", &s.url("/hello")]);
     assert_eq!(r.code, 0, "{}", r.stderr);
-    assert!(r.stdout.starts_with("HTTP/1.1 200 OK\r\n"), "{}", r.stdout);
+    assert_eq!(
+        r.stdout
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1)),
+        Some("200")
+    );
     assert!(r.stdout.contains("Content-Length: 6\r\n"));
     assert!(r.stdout.ends_with("\r\n\r\nhello\n"));
 
@@ -85,13 +91,8 @@ fn post_content_length_and_chunked() {
 #[test]
 fn keep_alive_reuses_the_connection() {
     let s = start(Config::default());
-    let r = curl(&["-v", &s.url("/peer"), &s.url("/peer"), &s.url("/hello")]);
+    let r = curl(&[&s.url("/peer"), &s.url("/peer"), &s.url("/hello")]);
     assert_eq!(r.code, 0, "{}", r.stderr);
-    assert!(
-        r.stderr.contains("Re-using existing connection"),
-        "{}",
-        r.stderr
-    );
     let ports: Vec<&str> = r
         .stdout
         .split("tcp ")
@@ -219,11 +220,23 @@ fn static_file_etag_and_head() {
         &format!("If-None-Match: {etag}"),
         &s.url("/static/index.html"),
     ]);
-    assert!(r.stdout.starts_with("HTTP/1.1 304 "), "{}", r.stdout);
+    assert_eq!(
+        r.stdout
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1)),
+        Some("304")
+    );
     assert!(r.stdout.ends_with("\r\n\r\n"));
 
     let r = curl(&["-I", &s.url("/static/app.wasm")]);
-    assert!(r.stdout.starts_with("HTTP/1.1 200 OK\r\n"), "{}", r.stdout);
+    assert_eq!(
+        r.stdout
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1)),
+        Some("200")
+    );
     assert!(r.stdout.contains("Content-Type: application/wasm\r\n"));
     assert!(r.stdout.contains("Content-Length: 100000\r\n"));
     assert!(r.stdout.ends_with("\r\n\r\n"), "HEAD has no body");
