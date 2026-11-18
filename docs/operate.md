@@ -632,7 +632,8 @@ The stream sends transcript entries only for open chats; the app reloads those c
 reconnect to fill any gap.
 
 For development, `make test-heavy` runs the large-gap reconnect scenario separately from
-`make test`.
+`make test`. To pace its 3,000-entry fake-harness workload across 30 minutes, run
+`PT_RECONNECT_GAP_SECS=1801 cargo test --locked --workspace --test hub stream_large_gap_uses_snapshot -- --ignored --nocapture`.
 
 ```
 device list | device add <name> | device pair <code> | device revoke <id>

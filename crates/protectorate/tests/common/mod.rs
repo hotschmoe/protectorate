@@ -583,7 +583,16 @@ fn next_for(ws: &mut pt_http::WebSocket, what: &str) -> Value {
 
 /// Reads until a message of type `kind` passes `pick`; returns every message read.
 pub fn until(ws: &mut pt_http::WebSocket, kind: &str, pick: impl Fn(&Value) -> bool) -> Vec<Value> {
-    let end = Instant::now() + Duration::from_secs(120);
+    until_for(ws, kind, Duration::from_secs(120), pick)
+}
+
+pub fn until_for(
+    ws: &mut pt_http::WebSocket,
+    kind: &str,
+    timeout: Duration,
+    pick: impl Fn(&Value) -> bool,
+) -> Vec<Value> {
+    let end = Instant::now() + timeout;
     let mut seen = Vec::new();
     loop {
         assert!(

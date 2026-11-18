@@ -936,6 +936,10 @@ fn stream_large_gap_uses_snapshot() {
         return;
     }
     let dir = unique("stream-gap");
+    let gap_secs = std::env::var("PT_RECONNECT_GAP_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(0);
     std::fs::create_dir_all(&dir).unwrap();
     let fake = dir.join("claude");
     write_script(&dir.join("systemd-run"), "exit 0");
@@ -945,7 +949,12 @@ fn stream_large_gap_uses_snapshot() {
 exec python3 -u -c '
 import json, os, time
 while not os.path.exists("start-burst"): time.sleep(0.05)
+duration = int(open("start-burst").read())
+started = time.monotonic()
+print(json.dumps({"type":"stream_event", "event":{"type":"message_start", "message":{"id":"busy"}}}), flush=True)
 for n in range(3000):
+    delay = started + duration * (n + 1) / 3000 - time.monotonic()
+    if delay > 0: time.sleep(delay)
     print(json.dumps({"type":"assistant", "message":{"id":str(n), "content":[{"type":"text", "text":"activity " + str(n) + " x" * 100}]}}), flush=True)
 while True: time.sleep(1)
 ' "$@""#,
@@ -993,6 +1002,7 @@ while True: time.sleep(1)
             .arg(&owner)
             .arg(&probe_dir)
             .arg(&worker)
+            .arg(gap_secs.to_string())
             .spawn()
             .expect("start the real app client");
         eventually("the app client to connect", Duration::from_secs(45), || {
@@ -1014,14 +1024,38 @@ while True: time.sleep(1)
     drop(before);
     let mut unopened = ws(port, &auth, &[]).unwrap();
     let _ = next(&mut unopened);
+    let unopened_reader = std::thread::spawn(move || {
+        until_for(
+            &mut unopened,
+            "event",
+            Duration::from_secs(gap_secs + 180),
+            |m| m["event"]["text"].as_str() == Some("device stream-sentinel paired"),
+        )
+    });
     let mut measure = ws(port, &format!("{auth}&transcripts={worker}"), &[]).unwrap();
     let _ = next(&mut measure);
-    std::fs::write(repo.join("start-burst"), "go").unwrap();
-    let messages = until(&mut measure, "entry", |m| {
-        m["entry"]["entry"]["text"]
-            .as_str()
-            .is_some_and(|s| s.starts_with("activity 2999"))
-    });
+    let started = std::time::Instant::now();
+    std::fs::write(repo.join("start-burst"), gap_secs.to_string()).unwrap();
+    let entries_seen = std::cell::Cell::new(0usize);
+    let messages = until_for(
+        &mut measure,
+        "entry",
+        Duration::from_secs(gap_secs + 120),
+        |m| {
+            let count = entries_seen.get() + 1;
+            entries_seen.set(count);
+            if gap_secs > 0 && count.is_multiple_of(500) {
+                eprintln!(
+                    "gap measurement: {count} entries after {:?}",
+                    started.elapsed()
+                );
+            }
+            m["entry"]["entry"]["text"]
+                .as_str()
+                .is_some_and(|s| s.starts_with("activity 2999"))
+        },
+    );
+    assert!(started.elapsed() >= Duration::from_secs(gap_secs));
     let backlog_bytes: usize = messages.iter().map(|m| m.to_string().len()).sum();
     if let Some(child) = &mut probe {
         std::fs::write(probe_dir.join("resume"), "resume").unwrap();
@@ -1030,16 +1064,22 @@ while True: time.sleep(1)
             Duration::from_secs(45),
             || probe_dir.join("result").exists().then_some(()),
         );
-        assert_eq!(
-            std::fs::read_to_string(probe_dir.join("result")).unwrap(),
-            "1"
+        let result = std::fs::read_to_string(probe_dir.join("result")).unwrap();
+        let mut fields = result.split_whitespace();
+        assert_eq!(fields.next(), Some("1"), "app states: {result}");
+        let reconnect_bytes = fields.next().unwrap().parse::<usize>().unwrap();
+        assert!(
+            reconnect_bytes < backlog_bytes,
+            "reconnect {reconnect_bytes} bytes, backlog {backlog_bytes} bytes"
+        );
+        eprintln!(
+            "app reconnect: {reconnect_bytes} bytes including transcript reload; observed backlog payload: {backlog_bytes} bytes; gap: {:?}",
+            started.elapsed()
         );
         assert!(child.wait().unwrap().success());
     }
     pair(port, &owner, "stream-sentinel");
-    let unopened_messages = until(&mut unopened, "event", |m| {
-        m["event"]["text"].as_str() == Some("device stream-sentinel paired")
-    });
+    let unopened_messages = unopened_reader.join().expect("read unopened stream");
     assert!(
         unopened_messages
             .iter()

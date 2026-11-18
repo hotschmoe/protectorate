@@ -4,8 +4,11 @@ import 'dart:io';
 import '../../../app/lib/api/api.g.dart';
 import '../../../app/lib/real_hub.dart';
 
-Future<void> waitFile(String path) async {
-  final deadline = DateTime.now().add(const Duration(seconds: 60));
+Future<void> waitFile(
+  String path, {
+  Duration timeout = const Duration(seconds: 60),
+}) async {
+  final deadline = DateTime.now().add(timeout);
   while (!File(path).existsSync()) {
     if (DateTime.now().isAfter(deadline))
       throw StateError('timed out waiting for $path');
@@ -18,8 +21,11 @@ Future<void> main(List<String> args) async {
   final token = args[1];
   final dir = args[2];
   final worker = args[3];
+  final gap = int.parse(args[4]);
   final listener = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
   final sockets = <Socket>[];
+  var watching = false;
+  var reconnectBytes = 0;
   final incoming = listener.listen((client) async {
     final upstream = await Socket.connect(InternetAddress.loopbackIPv4, port);
     sockets.addAll([client, upstream]);
@@ -29,7 +35,10 @@ Future<void> main(List<String> args) async {
       onError: (_) => upstream.destroy(),
     );
     upstream.listen(
-      client.add,
+      (data) {
+        if (watching) reconnectBytes += data.length;
+        client.add(data);
+      },
       onDone: client.destroy,
       onError: (_) => client.destroy(),
     );
@@ -38,7 +47,6 @@ Future<void> main(List<String> args) async {
   final transcript = hub.transcripts(worker).listen((_) {});
   final initial = Completer<void>();
   final reconnected = Completer<void>();
-  var watching = false;
   var frames = 0;
   final states = hub.states.listen((_) {
     if (watching) {
@@ -60,7 +68,7 @@ Future<void> main(List<String> args) async {
   }
   await Future<void>.delayed(const Duration(milliseconds: 100));
   File('$dir/dropped').writeAsStringSync('dropped');
-  await waitFile('$dir/resume');
+  await waitFile('$dir/resume', timeout: Duration(seconds: gap + 120));
   watching = true;
   incoming.resume();
   await reconnected.future.timeout(const Duration(seconds: 30));
@@ -72,13 +80,13 @@ Future<void> main(List<String> args) async {
       .any(
         (e) =>
             e.entry is EntryAssistantText &&
-        (e.entry as EntryAssistantText).text.startsWith('activity 2999'),
+            (e.entry as EntryAssistantText).text.startsWith('activity 2999'),
       )) {
     if (DateTime.now().isAfter(deadline))
       throw StateError('transcript did not catch up');
     await Future<void>.delayed(const Duration(milliseconds: 20));
   }
-  File('$dir/result').writeAsStringSync('$catchupFrames');
+  File('$dir/result').writeAsStringSync('$catchupFrames $reconnectBytes');
   await transcript.cancel();
   hub.close();
   await states.cancel();
