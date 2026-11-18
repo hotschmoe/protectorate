@@ -13,5 +13,3 @@ pt-hash = { path = "../pt-hash" }
 pt-json = { path = "../pt-json" }
 pt-sys = { path = "../pt-sys" }
 
-[dev-dependencies]
-pt-http = { path = "../pt-http" }
