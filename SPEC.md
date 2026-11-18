@@ -908,8 +908,8 @@ not repeated here.
    `Status` is reissued. The node fsyncs its journal before exec. Timers re-arm from the journal.
 10. **Parking the root freezes its children.** G10 (budget) and G12 (disk) on a root stop sending
     to its children. A child's budget is checked live against the root's remainder, not only at
-    spawn. In children, `.git/hooks` of the shared gitdir is mounted read-only, and G11 walks the
-    resolved gitdir, not only the worktree diff.
+    spawn. For roots and children, each Git directory has `hooks/`, `config`, `config.worktree` and
+    `info/` bound read-only; G11 walks the resolved child gitdir, not only the worktree diff.
 11. **Task size is not an LLM ranking input (new D27).** `select_target` takes a size class from
     code: the median cost of the last N tasks in that workspace, or an owner-set class. Envoy may
     request one class up or down, and code clamps it.
@@ -1039,6 +1039,17 @@ shortcut is also in `REVISIT.md`.
 - **Outbound HTTPS** (GitHub releases, quota readers) runs the system `curl`. There is no Rust TLS
   stack.
 - **Sleeve sandbox** is bwrap plus a `systemd-run --user --scope` per incarnation.
+  Git directories of root checkouts and linked worktrees have `hooks/`, `config`,
+  `config.worktree` and `info/` bound read-only, including the shared common directory.
+  Missing entries are created empty before binding so they cannot be created by a sleeve;
+  this leaves harmless empty metadata on the host. Symlinked protected entries are refused.
+  Hooks and configuration can execute host commands. `info/attributes` can name a filter
+  but cannot define one; read-only configuration prevents introducing a filter driver, and
+  `info/` is also protected to prevent changes to host Git behavior. The remaining Git state
+  stays writable for ordinary work. A root linked worktree resolves and validates its private
+  and common Git directories just like a child. The common directory’s `worktrees/`
+  is read-only except for the current worktree’s separately protected private gitdir, so
+  another worktree’s configuration cannot be changed through the common directory.
 - **Go** (`go/`): `cmd/headscale` builds the official headscale at the pinned tag, unmodified;
   `cmd/member` is our tsnet glue. `member` exposes a unix socket where the Rust side asks it to
   dial `node:7475` (hub), or where accepted tailnet connections are handed over (node).

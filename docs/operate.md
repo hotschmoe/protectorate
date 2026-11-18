@@ -431,6 +431,16 @@ A sleeve builds with your toolchains, from a private home and a cleared environm
 - `CARGO_BUILD_JOBS`, `GOMAXPROCS`, `GOFLAGS=-p=N` and `FLUTTER_TEST_CONCURRENCY` follow the
   scope's CPU quota (`N` = quota / 100), since tools count host cores and a 4 GiB scope runs out
   of memory otherwise.
+- Git metadata `hooks/`, `config`, `config.worktree` and `info/` is read-only in root
+  and child workspaces, including linked worktrees. Missing entries are created empty at launch. The common Git directory’s `worktrees/`
+  is also read-only except for the current worktree’s private Git directory; worktree creation
+  is handled by the hub or owner.
+  Add, commit, branch, checkout, rebase, merge, stash and log remain available. Commands that
+  update repository config, such as `git remote add`, `git branch --set-upstream-to` and
+  `git config user.name`, must be run by the owner outside the sandbox. For commit identity,
+  sleeves can use `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and
+  `GIT_COMMITTER_EMAIL`, or pass `git -c user.name=... -c user.email=...`.
+  Running sleeves retain their existing binds until relaunched; a hub restart relaunches them.
 - git commits as your global `user.name` and `user.email`, copied into the sleeve's `~/.gitconfig`
   when it has none; later changes to yours do not reach a sleeve that already has one.
 
