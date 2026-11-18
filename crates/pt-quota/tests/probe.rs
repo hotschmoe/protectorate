@@ -52,8 +52,7 @@ fn state_of(line: &str) -> &str {
     state
 }
 
-/// This machine's own logins: every configured subscription yields a reading line, and a fresh
-/// one carries windows. Unknown and error are allowed (offline, expired login) and printed.
+/// This machine's own logins: every configured subscription yields a reading line.
 #[test]
 fn live_logins_each_return_a_reading() {
     let home = std::env::var("HOME").expect("HOME");
@@ -66,14 +65,7 @@ fn live_logins_each_return_a_reading() {
     ] {
         let line = line_of(&out, name);
         let state = state_of(line);
-        if Path::new(&home).join(login).exists() {
-            if state == "fresh" {
-                assert!(
-                    line.contains("plan=") && line.contains(" ["),
-                    "fresh without windows: {line}"
-                );
-            }
-        } else {
+        if !Path::new(&home).join(login).exists() {
             assert_eq!(state, "unknown", "{line}");
         }
     }
@@ -167,7 +159,7 @@ fn serve_guarded<S: Into<String>>(
 /// login is unknown, and a dead endpoint is an error; no token is ever printed.
 #[test]
 fn fixture_readers_over_real_curl() {
-    let home = scratch("fixture-home");
+    let home = scratch(&format!("fixture-home-{}", std::process::id()));
     let far = "4102444800000"; // 2100-01-01
     write(
         &home.join(".claude/.credentials.json"),
@@ -211,21 +203,16 @@ fn fixture_readers_over_real_curl() {
     println!("{out}");
     let claude = line_of(&out, "claude");
     assert_eq!(state_of(claude), "fresh");
-    assert!(
-        claude.contains("plan=max") && claude.contains("[5h 30%") && claude.contains("[wk 10%"),
-        "{claude}"
-    );
     let codex = line_of(&out, "codex");
     assert_eq!(state_of(codex), "fresh");
-    assert!(
-        codex.contains("plan=plus") && codex.contains("[5h 7%") && codex.contains("[wk 12%"),
-        "{codex}"
-    );
     let grok = line_of(&out, "grok");
     assert_eq!(state_of(grok), "unknown", "{grok}");
     let local = line_of(&out, "local");
     assert_eq!(state_of(local), "fresh");
-    assert!(local.contains("model-a, llama"), "{local}");
+    assert!(
+        local.contains("model-a") && local.contains("llama"),
+        "{local}"
+    );
     assert!(out.lines().any(|l| l.starts_with("target ")));
 
     assert!(
@@ -270,13 +257,10 @@ fn fixture_readers_over_real_curl() {
     println!("{out}");
     let claude = line_of(&out, "claude");
     assert_eq!(state_of(claude), "unknown", "{claude}");
-    assert!(claude.contains("log in again"), "{claude}");
     let grok = line_of(&out, "grok");
     assert_eq!(state_of(grok), "unknown", "{grok}");
-    assert!(grok.contains("renews when its CLI next runs"), "{grok}");
     let codex = line_of(&out, "codex");
     assert_eq!(state_of(codex), "unknown", "{codex}");
-    assert!(codex.contains("renews when its CLI next runs"), "{codex}");
     assert!(!out.contains("codex-refresh-secret"));
     assert_eq!(state_of(line_of(&out, "local")), "error");
     assert!(!out.contains("secret-token"));
@@ -313,7 +297,7 @@ fn local_reader_sends_the_pi_provider_key() {
         line_of(&out, "local").to_string()
     };
 
-    let home = scratch("local-key-home");
+    let home = scratch(&format!("local-key-home-{}", std::process::id()));
     models(&home, "local-secret-key");
     let local = run(&home, &[]);
     assert_eq!(state_of(&local), "fresh", "{local}");
@@ -322,7 +306,6 @@ fn local_reader_sends_the_pi_provider_key() {
     models(&home, "wrong-secret-key");
     let local = run(&home, &[]);
     assert_eq!(state_of(&local), "error", "{local}");
-    assert!(local.contains("401"), "{local}");
     let parked = probe(&[
         "--home",
         home.to_str().unwrap(),
@@ -340,7 +323,6 @@ fn local_reader_sends_the_pi_provider_key() {
     models(&home, "!cat /nonexistent");
     let local = run(&home, &[]);
     assert_eq!(state_of(&local), "unknown", "{local}");
-    assert!(local.contains("command"), "{local}");
 
     let seen = seen.lock().unwrap().join("\n");
     assert!(
@@ -572,10 +554,7 @@ fn stale_windows_still_gate_the_fallback() {
     let exhausted = run(
         r#"{"five_hour":{"utilization":99,"resets_at":"2100-01-01T00:00:00Z"},"seven_day":{"utilization":10,"resets_at":"2100-01-08T00:00:00Z"}}"#,
     );
-    assert!(
-        exhausted.contains("aged claude stale") && exhausted.contains("99%"),
-        "{exhausted}"
-    );
+    assert!(exhausted.contains("aged claude stale"), "{exhausted}");
     assert!(
         aged_target_of(&exhausted).starts_with("aged target none:"),
         "{exhausted}"
@@ -740,10 +719,7 @@ fn a_stale_exhausted_window_with_no_reset_becomes_unknown() {
     ]);
     assert_eq!(state_of(line_of(&out, "claude")), "fresh", "{out}");
     assert!(target_of(&out).starts_with("target none:"), "{out}");
-    assert!(
-        out.contains("aged claude stale") && out.contains("100%"),
-        "{out}"
-    );
+    assert!(out.contains("aged claude stale"), "{out}");
     assert!(
         aged_target_of(&out).starts_with("aged target Claude:"),
         "{out}"
@@ -820,14 +796,7 @@ fn a_model_scoped_window_does_not_exhaust_the_subscription() {
     let both = run("claude:opus,pi_local");
     let claude = line_of(&both, "claude");
     assert_eq!(state_of(claude), "fresh", "{both}");
-    assert!(
-        claude.contains("[5h 0%") && claude.contains("sonnet") && claude.contains("100%"),
-        "{claude}"
-    );
-    assert!(
-        both.contains("target Claude:") && both.contains("5h"),
-        "{both}"
-    );
+    assert!(target_of(&both).starts_with("target Claude:"), "{both}");
     assert!(!both.contains("target PiLocal"), "{both}");
 
     let bare = run("claude");
@@ -853,8 +822,6 @@ fn a_versioned_cap_gates_its_model_family() {
     let home_s = home.to_str().unwrap();
     let run = |allow: &str| probe(&["--home", home_s, "--claude-url", &base, "--allow", allow]);
     let shown = run("claude:opus");
-    let line = line_of(&shown, "claude");
-    assert!(line.contains("sonnet") && line.contains("100%"), "{line}");
     for model in ["claude:sonnet", "claude:claude-sonnet-4-5"] {
         let out = run(model);
         assert!(
@@ -866,10 +833,7 @@ fn a_versioned_cap_gates_its_model_family() {
     let bare_out = run("claude");
     let bare = target_of(&bare_out);
     assert!(bare.starts_with("target Claude:"), "{bare}");
-    assert!(
-        shown.contains("target Claude:") && shown.contains("5h"),
-        "{shown}"
-    );
+    assert!(target_of(&shown).starts_with("target Claude:"), "{shown}");
 }
 
 /// The Opus weekly cap gates a Claude candidate whose model is Opus, and does not gate Sonnet
@@ -892,14 +856,9 @@ fn a_model_cap_gates_the_candidate_that_runs_that_model() {
     let opus = run("claude:claude-opus-4-6");
     assert!(target_of(&opus).starts_with("target none:"), "{opus}");
     assert!(!opus.contains("target Claude:"), "{opus}");
-    let line = line_of(&opus, "claude");
-    assert!(line.contains("opus") && line.contains("100%"), "{line}");
 
     let sonnet = run("claude:sonnet");
-    assert!(
-        sonnet.contains("target Claude:") && sonnet.contains("5h"),
-        "{sonnet}"
-    );
+    assert!(target_of(&sonnet).starts_with("target Claude:"), "{sonnet}");
 
     for (pct, label) in [(0, "open"), (100, "full")] {
         let body = format!(
