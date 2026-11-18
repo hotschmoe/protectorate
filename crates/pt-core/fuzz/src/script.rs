@@ -242,6 +242,12 @@ impl Runner {
                     revision: num(arg(2)?)?,
                 });
             }
+            "release-pending-node" => {
+                self.sim.apply(E::ReleasePendingNodeUpdate {
+                    node: NodeId(num(arg(1)?)?),
+                    revision: num(arg(2)?)?,
+                });
+            }
             "expect-pending-node" if self.checked => {
                 let node = NodeId(num(arg(1)?)?);
                 let pending = self.sim.st.pending_node_updates.get(&node);

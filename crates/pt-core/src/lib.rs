@@ -111,6 +111,14 @@ impl Core<'_> {
                     )),
                 }
             }
+            E::ReleasePendingNodeUpdate { node, revision } => {
+                if let Some(p) = self.st.pending_node_updates.get_mut(node)
+                    && p.revision == *revision
+                {
+                    p.attempted = false;
+                }
+                self.reply(Reply::Accepted);
+            }
             E::Spawn(spec) => self.spawn(spec),
             E::Send {
                 to,
