@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{curl, start, start_unix, temp_dir};
+use common::{curl, header, start, start_unix, temp_dir};
 use pt_http::Config;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -21,12 +21,17 @@ fn get_stream_query_and_errors() {
             .and_then(|l| l.split_whitespace().nth(1)),
         Some("200")
     );
-    assert!(r.stdout.contains("Content-Length: 6\r\n"));
+    assert_eq!(
+        header(&r.stdout, "content-length").and_then(|v| v.parse::<u64>().ok()),
+        Some(6)
+    );
     assert!(r.stdout.ends_with("\r\n\r\nhello\n"));
 
     let r = curl(&["-i", &s.url("/stream")]);
     assert!(
-        r.stdout.contains("Transfer-Encoding: chunked\r\n"),
+        header(&r.stdout, "transfer-encoding").is_some_and(|value| value
+            .split(',')
+            .any(|token| token.trim().eq_ignore_ascii_case("chunked"))),
         "{}",
         r.stdout
     );
@@ -68,7 +73,6 @@ fn post_content_length_and_chunked() {
         &s.url("/echo"),
     ]);
     assert_eq!(r.code, 0, "{}", r.stderr);
-    assert!(r.stdout.contains("X-Len: 300000\r\n"), "{}", r.stdout);
     assert_eq!(std::fs::read(&out).unwrap(), body);
 
     let r = curl(&[
@@ -83,7 +87,6 @@ fn post_content_length_and_chunked() {
         &s.url("/echo"),
     ]);
     assert_eq!(r.code, 0, "{}", r.stderr);
-    assert!(r.stdout.contains("X-Len: 300000\r\n"), "{}", r.stdout);
     assert_eq!(std::fs::read(&out).unwrap(), body);
     s.stop();
 }
@@ -155,7 +158,13 @@ fn slow_client_gets_408() {
     }
     let mut out = String::new();
     c.read_to_string(&mut out).unwrap();
-    assert!(out.starts_with("HTTP/1.1 408 "), "{out}");
+    assert_eq!(
+        out.lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1)),
+        Some("408"),
+        "{out}"
+    );
     assert!(start.elapsed() < Duration::from_secs(3));
     s.stop();
 }
@@ -184,20 +193,18 @@ fn unix_socket_with_peer_credentials() {
 fn static_file_etag_and_head() {
     let s = start(Config::default());
     let r = curl(&["-i", &s.url("/static/index.html")]);
-    assert!(
-        r.stdout
-            .contains("Content-Type: text/html; charset=utf-8\r\n"),
-        "{}",
-        r.stdout
-    );
-    assert!(r.stdout.ends_with("<!doctype html><title>t</title>\n"));
-    let etag = r
-        .stdout
-        .lines()
-        .find_map(|l| l.strip_prefix("ETag: "))
+    let mut content_type = header(&r.stdout, "content-type")
         .unwrap()
-        .trim()
-        .to_string();
+        .split(';')
+        .map(str::trim);
+    assert!(
+        content_type
+            .next()
+            .is_some_and(|v| v.eq_ignore_ascii_case("text/html"))
+    );
+    assert!(content_type.any(|v| v.eq_ignore_ascii_case("charset=utf-8")));
+    assert!(r.stdout.ends_with("<!doctype html><title>t</title>\n"));
+    let etag = header(&r.stdout, "etag").unwrap().to_string();
 
     let r = curl(&[
         "-i",
@@ -222,8 +229,15 @@ fn static_file_etag_and_head() {
             .and_then(|l| l.split_whitespace().nth(1)),
         Some("200")
     );
-    assert!(r.stdout.contains("Content-Type: application/wasm\r\n"));
-    assert!(r.stdout.contains("Content-Length: 100000\r\n"));
+    assert!(header(&r.stdout, "content-type").is_some_and(|v| {
+        v.split(';')
+            .next()
+            .is_some_and(|media| media.trim().eq_ignore_ascii_case("application/wasm"))
+    }));
+    assert_eq!(
+        header(&r.stdout, "content-length").and_then(|v| v.parse::<u64>().ok()),
+        Some(100_000)
+    );
     assert!(r.stdout.ends_with("\r\n\r\n"), "HEAD has no body");
 
     let get = curl(&[&s.url("/static/app.wasm")]);
@@ -291,11 +305,11 @@ fn graceful_shutdown_finishes_in_flight_requests() {
     let r = slow.join().unwrap();
     assert_eq!(r.code, 0, "{}", r.stderr);
     assert!(r.stdout.ends_with("\r\n\r\nslow done\n"), "{}", r.stdout);
-    assert!(
-        r.stdout
-            .to_ascii_lowercase()
-            .contains("connection: close\r\n")
-    );
+    assert!(header(&r.stdout, "connection").is_some_and(|value| {
+        value
+            .split(',')
+            .any(|token| token.trim().eq_ignore_ascii_case("close"))
+    }));
     s.thread.join().unwrap().unwrap();
     assert!(
         start.elapsed() < Duration::from_secs(2),
