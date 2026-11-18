@@ -10,12 +10,20 @@ cargo-fuzz = true
 [workspace]
 
 [dependencies]
+libc = "=0.2.191"
 libfuzzer-sys = "=0.4.13"
 pt-sys = { path = ".." }
 
 [[bin]]
 name = "pdeath"
 path = "fuzz_targets/pdeath.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "signals"
+path = "fuzz_targets/signals.rs"
 test = false
 doc = false
 bench = false

@@ -80,6 +80,7 @@ dependencies = [
 name = "pt-sys-fuzz"
 version = "0.0.0"
 dependencies = [
+ "libc",
  "libfuzzer-sys",
  "pt-sys",
 ]

@@ -39,17 +39,6 @@ fn pre_exec_sleep(cmd: &mut Command, d: Duration) {
     };
 }
 
-fn cpu_ticks() -> u64 {
-    let stat = std::fs::read_to_string("/proc/self/stat").unwrap();
-    let f: Vec<&str> = stat
-        .rsplit_once(')')
-        .unwrap()
-        .1
-        .split_whitespace()
-        .collect();
-    f[11].parse::<u64>().unwrap() + f[12].parse::<u64>().unwrap()
-}
-
 #[test]
 fn helper_pdeath_parent() {
     if !is_helper("helper_pdeath_parent") {
@@ -92,66 +81,6 @@ fn a_child_whose_parent_dies_before_exec_still_dies() {
             pid.trim()
         );
     }
-}
-
-#[test]
-fn helper_spin() {
-    if !is_helper("helper_spin") {
-        return;
-    }
-    let flag = install_term_handler().unwrap();
-    let spawner = std::thread::spawn(|| {
-        let mut cmd = Command::new("true");
-        pre_exec_sleep(&mut cmd, Duration::from_secs(1));
-        let _ = cmd.spawn().map(|mut c| c.wait());
-    });
-    let me = std::process::id().to_string();
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let child = loop {
-        let found = std::fs::read_dir("/proc").unwrap().flatten().find_map(|e| {
-            let stat = std::fs::read_to_string(e.path().join("stat")).ok()?;
-            let ppid = stat
-                .rsplit_once(')')?
-                .1
-                .split_whitespace()
-                .nth(1)?
-                .to_string();
-            (ppid == me).then(|| e.file_name().to_string_lossy().into_owned())
-        });
-        if let Some(pid) = found {
-            break pid;
-        }
-        assert!(Instant::now() < deadline, "no pre-exec child appeared");
-        std::thread::sleep(Duration::from_millis(5));
-    };
-    assert!(
-        Command::new("kill")
-            .args(["-TERM", &child])
-            .status()
-            .unwrap()
-            .success()
-    );
-    let before = cpu_ticks();
-    let woke = flag.wait_timeout(Duration::from_millis(1500));
-    let spent = cpu_ticks() - before;
-    spawner.join().unwrap();
-    println!("RESULT {woke} {spent}");
-}
-
-/// A SIGTERM aimed at a child between fork and exec is not the parent's signal: the parent's
-/// flag stays clear and its waiter sleeps instead of spinning on the shared self-pipe.
-#[test]
-fn a_signal_to_a_pre_exec_child_leaves_the_parent_asleep() {
-    let out = helper("helper_spin").output().unwrap();
-    assert!(out.status.success(), "{out:?}");
-    let r = result(&out);
-    let (woke, spent) = r.split_once(' ').unwrap();
-    assert_eq!(
-        woke, "false",
-        "the parent's flag was set by its child's signal"
-    );
-    let spent: u64 = spent.parse().unwrap();
-    assert!(spent < 30, "the waiter spun for {spent} ticks of 150");
 }
 
 #[test]
