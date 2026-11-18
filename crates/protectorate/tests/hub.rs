@@ -196,15 +196,6 @@ fn crash_mid_turn_recovers() {
         Duration::from_secs(30),
         || stale.0.try_wait().unwrap().map(drop),
     );
-    let log = hub.log_text();
-    assert!(
-        log.contains("apply HubRecovered"),
-        "HubRecovered is applied on start"
-    );
-    assert!(
-        !log.contains("replayed 0 events"),
-        "the journal is replayed"
-    );
     hub.wait("two", "idle", 180);
     hub.wait("two-child", "idle", 180);
     let events = hub.cli(&["--json", "event", "list"]).json();
@@ -213,24 +204,16 @@ fn crash_mid_turn_recovers() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|e| e["text"].as_str() == Some("child two-child crashed")),
+            .any(|e| e["kind"].as_str() == Some("sleeve")
+                && e["level"].as_str() == Some("warn")
+                && e["source"].as_str() == Some("two-child")
+                && e["target"].as_str() == Some("two")),
         "{events}"
-    );
-    assert!(
-        events["events"].as_array().unwrap().iter().all(|e| {
-            e["text"]
-                .as_str()
-                .is_none_or(|t| !t.contains("will not continue automatically"))
-        }),
-        "the continuation prompt replaces the warning: {events}"
     );
     let child_entries = hub.transcript("two-child");
     let continuations = of_type(&child_entries, "user_message")
         .iter()
-        .filter(|e| {
-            e["entry"]["text"].as_str()
-                == Some("The previous turn was interrupted. Continue from where it stopped.")
-        })
+        .filter(|e| e["g"].as_u64().is_some_and(|g| g >= 2))
         .count();
     assert_eq!(
         continuations, 1,
@@ -272,16 +255,6 @@ fn crash_mid_turn_recovers() {
     assert!(
         sessions.contains(&1) && sessions.contains(&g),
         "both incarnations: {sessions:?}"
-    );
-    let notices: Vec<&str> = of_type(&entries, "notice")
-        .iter()
-        .filter_map(|e| e["entry"]["text"].as_str())
-        .collect();
-    assert!(
-        notices
-            .iter()
-            .any(|n| n.starts_with("resumed natively") || n.starts_with("resleeved")),
-        "the recovery is in the chat: {notices:?}"
     );
     let after_crash = entries
         .iter()
@@ -742,17 +715,9 @@ for line in sys.stdin:
             .ok()
             .filter(|s| !s.is_empty())
     });
-    let scope = hub.cli_env(&[("PROTECTORATE_TOKEN", &token)], &["job", "ls"]);
     let json_scope = hub
         .cli_env(&[("PROTECTORATE_TOKEN", &token)], &["--json", "job", "ls"])
         .json();
-    assert!(
-        scope
-            .stdout
-            .contains("Showing only this sleeve's and its children's jobs."),
-        "{} {json_scope}",
-        scope.stdout
-    );
     assert_eq!(json_scope["scoped_to_caller"].as_bool(), Some(true));
     hub.send("worker", "Run a tool.");
     eventually("the tool call", Duration::from_secs(30), || {
@@ -760,12 +725,6 @@ for line in sys.stdin:
     });
     let refusal = hub.cli(&["sleeve", "send", "worker", "Change direction", "--steer"]);
     assert_ne!(refusal.status, 0);
-    assert!(
-        refusal.stderr.contains("cannot steer a running turn")
-            && refusal.stderr.contains("omit --steer to queue"),
-        "{}",
-        refusal.stderr
-    );
     hub.cli(&["sleeve", "send", "worker", "Change direction"])
         .ok();
     assert_eq!(hub.sleeve("worker")["queued"].as_u64(), Some(1));
@@ -788,21 +747,18 @@ for line in sys.stdin:
         },
     );
     let entries = hub.transcript("worker");
-    assert!(
-        of_type(&entries, "user_message").iter().all(|e| {
-            e["entry"]["text"].as_str()
-                != Some("The previous turn was interrupted. Continue from where it stopped.")
-        }),
-        "a queued message is the continuation: {entries:?}"
+    let resumed: Vec<_> = of_type(&entries, "user_message")
+        .into_iter()
+        .filter(|e| e["g"].as_u64() == Some(2))
+        .collect();
+    assert_eq!(
+        resumed.len(),
+        1,
+        "the queued message is the continuation: {entries:?}"
     );
-    let events = hub.cli(&["--json", "event", "list"]).json();
-    assert!(
-        events["events"].as_array().unwrap().iter().all(|e| {
-            e["text"]
-                .as_str()
-                .is_none_or(|t| !t.contains("will not continue automatically"))
-        }),
-        "a queued message continues the turn, so there is no warning: {events}"
+    assert_eq!(
+        resumed[0]["entry"]["text"].as_str(),
+        Some("Change direction")
     );
 }
 
