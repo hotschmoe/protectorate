@@ -116,7 +116,7 @@ pub fn event(b: &mut Bytes) -> Event {
     let j = |b: &mut Bytes| JobId(b.u64());
     let a = |b: &mut Bytes| b.u64() as u32;
     use EventKind as E;
-    let kind = match b.below(49) {
+    let kind = match b.below(50) {
         0 => E::Spawn(SpawnSpec {
             request_id: b.string(),
             name: b.string(),
@@ -371,6 +371,10 @@ pub fn event(b: &mut Bytes) -> Event {
             node: NodeId(b.u64()),
             epoch: b.u64(),
             owner: b.bool(),
+        },
+        48 => E::CreditFloor {
+            effect: e(b),
+            attempt: a(b),
         },
         _ => E::CreateNodeJob {
             request_id: b.string(),

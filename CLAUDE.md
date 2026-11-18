@@ -36,7 +36,7 @@ overwrite code or data. Overwriting a file you created in this task with Write/E
 - No bulk-modifying scripts (codemods, giant sed/regex refactors).
 - Full migrations only: no compat shims, `_legacy`/`_old` names or "remove later" code.
 - Errors carry context at each layer; cancellation propagates.
-- Follow [ENGINEERING.md](/home/hotschmoe/github/hotschmoe-setup/ENGINEERING.md): no unit
+- Follow [ENGINEERING.md](https://github.com/hotschmoe/hotschmoe-setup/blob/master/ENGINEERING.md): no unit
   tests; at most ten real-binary e2e scenarios block work. Run `make check` for the blocking
   gate and `make test-heavy` for the background gate, including fuzz seed replay.
 - `#![forbid(unsafe_code)]` in every crate except the explicitly exempted OS FFI crates.
