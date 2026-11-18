@@ -279,6 +279,7 @@ fn small_budget_keeps_the_newest_lines_across_two_sessions() {
 /// One page of `session` from the probe: doc ids, their turns, and whether another page remains.
 fn read_page(index: &Path, session: &str, after: Option<u64>) -> (Vec<u64>, Vec<u32>, bool) {
     let mut cmd = Command::new(PROBE);
+    cmd.env("PT_TEST_HISTORY_REPORT", "1");
     cmd.args(["--index", index.to_str().unwrap(), "--read", session]);
     let after_text = after.map(|id| id.to_string());
     if let Some(id) = &after_text {
@@ -288,19 +289,22 @@ fn read_page(index: &Path, session: &str, after: Option<u64>) -> (Vec<u64>, Vec<
     let stdout = String::from_utf8(out.stdout).unwrap();
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(out.status.success(), "stdout: {stdout}\nstderr: {stderr}");
-    let mut ids = Vec::new();
-    let mut turns = Vec::new();
-    let mut more = None;
-    for line in stdout.lines() {
-        if let Some(rest) = line.strip_prefix("doc ") {
-            let mut parts = rest.split_whitespace();
-            ids.push(parts.next().unwrap().parse().unwrap());
-            turns.push(parts.next().unwrap().parse().unwrap());
-        } else if let Some(rest) = line.strip_prefix("more ") {
-            more = Some(rest == "true");
-        }
-    }
-    (ids, turns, more.expect("probe printed more"))
+    let report = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix('\u{1e}'))
+        .and_then(|line| pt_json::parse(line).ok())
+        .expect("probe report");
+    let docs = report["docs"].as_array().expect("page documents");
+    let ids = docs.iter().map(|doc| doc["id"].as_u64().unwrap()).collect();
+    let turns = docs
+        .iter()
+        .map(|doc| u32::try_from(doc["turn"].as_u64().unwrap()).unwrap())
+        .collect();
+    (
+        ids,
+        turns,
+        report["more"].as_bool().expect("page continuation"),
+    )
 }
 
 #[test]
