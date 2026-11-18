@@ -2217,6 +2217,50 @@ for line in sys.stdin:
     assert_eq!(any["sleeves"][1]["reached"].as_bool(), Some(true));
     let all = hub.cli(&["sleeve", "wait", "worker", "envoy", "--timeout", "5"]);
     assert_ne!(all.status, 0, "all must fail when one sleeve stopped");
+    let id = pt_core::SleeveId(
+        hub.sleeve("worker")["id"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap(),
+    );
+    hub.stop();
+    let (_journal, recovered) = pt_journal::Journal::open(&hub.home.join("journal")).unwrap();
+    let events: Vec<_> = recovered
+        .frames
+        .iter()
+        .map(|frame| pt_core::codec::decode(frame).unwrap())
+        .collect();
+    let statuses: Vec<_> = events
+        .iter()
+        .filter_map(|event| match &event.kind {
+            pt_core::EventKind::Observed {
+                sleeve,
+                obs: pt_core::Obs::TurnSettledStatus { status, .. },
+                ..
+            } if *sleeve == id => Some(status.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        statuses,
+        vec![
+            Some(pt_core::DeclaredStatus::Continuing("more work".into())),
+            Some(pt_core::DeclaredStatus::Done),
+            Some(pt_core::DeclaredStatus::Blocked("missing input".into())),
+            None,
+        ]
+    );
+    let replayed = pt_core::replay(&events);
+    assert_eq!(replayed.sleeves[&id].last_status, None);
+    let through_blocked: Vec<_> = events.iter().take_while(|event| !matches!(&event.kind,
+        pt_core::EventKind::Observed { sleeve, obs: pt_core::Obs::TurnSettledStatus { status: None, .. }, .. } if *sleeve == id
+    )).collect();
+    let replayed = pt_core::replay(through_blocked);
+    assert_eq!(
+        replayed.sleeves[&id].last_status,
+        Some(pt_core::DeclaredStatus::Blocked("missing input".into()))
+    );
 }
 
 /// An Envoy turn that settles past the context ceiling gets the harness's own `/compact`

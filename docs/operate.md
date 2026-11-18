@@ -65,8 +65,9 @@ latest settled turn's declared status and up to 80 characters of its detail. The
 its turn number, state and full detail.
 A final line `STATUS: DONE`, `STATUS: CONTINUING <remaining work>` or `STATUS: BLOCKED <reason>`
 declares the status; the last two require a nonempty detail. A later turn without a valid final
-status clears it. Turn reports include the declaration. `sleeve send`
-reports whether the message was queued or sent for delivery and the queue length at acceptance.
+status clears it. Turn reports include the declaration. The hub records an owner turn's
+declaration with its settle observation for journal replay. `sleeve send` reports whether the
+message was queued or sent for delivery and the queue length at acceptance.
 Queued messages wait for a turn boundary. At a headless turn start, consecutive queued prompts
 are delivered together in FIFO order, with their normal sender headers; a continuation ends
 the batch. For Envoy, a switch between vendor-agent and other senders also ends the batch,

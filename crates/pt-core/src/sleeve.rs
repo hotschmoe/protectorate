@@ -110,6 +110,7 @@ impl Core<'_> {
                 desync_during_turn: false,
                 desync_while_idle: false,
                 turn_seq: 0,
+                last_status: None,
                 turn_from: Party::Owner,
                 turn_agent: None,
                 auto_continue: None,
@@ -1777,7 +1778,7 @@ impl Core<'_> {
                 }
                 self.tool_withdrawn(sid, g, id);
             }
-            Obs::TurnSettled { end } => {
+            Obs::TurnSettled { end } | Obs::TurnSettledStatus { end, .. } => {
                 // A usage limit or a rejected login resleeves, and the brief is sent as the
                 // owner, so the D9 origin and the spawn count must outlive it.
                 if !matches!(end, TurnEnd::UsageLimit | TurnEnd::AuthFailed) {
@@ -1797,6 +1798,10 @@ impl Core<'_> {
                     }
                     return;
                 }
+                s.last_status = match obs {
+                    Obs::TurnSettledStatus { status, .. } => status.clone(),
+                    _ => None,
+                };
                 s.activity = Activity::Idle { seen: false };
                 s.turn = None;
                 if s.auto_continue == Some(s.turn_seq) {

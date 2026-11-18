@@ -490,6 +490,22 @@ impl Wire for Obs {
                 w.push(4);
                 end.put(w);
             }
+            Obs::TurnSettledStatus { end, status } => {
+                w.push(14);
+                end.put(w);
+                match status {
+                    None => w.push(0),
+                    Some(DeclaredStatus::Done) => w.push(1),
+                    Some(DeclaredStatus::Continuing(detail)) => {
+                        w.push(2);
+                        detail.put(w);
+                    }
+                    Some(DeclaredStatus::Blocked(detail)) => {
+                        w.push(3);
+                        detail.put(w);
+                    }
+                }
+            }
             Obs::TurnBegan => w.push(12),
             Obs::ForeignTurnSettled { end } => {
                 w.push(13);
@@ -519,7 +535,7 @@ impl Wire for Obs {
         }
     }
     fn get(r: &mut Reader) -> Result<Self, DecodeError> {
-        Ok(match r.tag("observation", 13)? {
+        Ok(match r.tag("observation", 14)? {
             0 => Obs::Ready {
                 session: Wire::get(r)?,
             },
@@ -551,7 +567,16 @@ impl Wire for Obs {
                 ask: Some(Wire::get(r)?),
             },
             12 => Obs::TurnBegan,
-            _ => Obs::ForeignTurnSettled { end: Wire::get(r)? },
+            13 => Obs::ForeignTurnSettled { end: Wire::get(r)? },
+            _ => Obs::TurnSettledStatus {
+                end: Wire::get(r)?,
+                status: match r.tag("declared status", 3)? {
+                    0 => None,
+                    1 => Some(DeclaredStatus::Done),
+                    2 => Some(DeclaredStatus::Continuing(Wire::get(r)?)),
+                    _ => Some(DeclaredStatus::Blocked(Wire::get(r)?)),
+                },
+            },
         })
     }
 }

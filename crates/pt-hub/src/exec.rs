@@ -1673,6 +1673,24 @@ impl Pump {
         // Stored before the core hears of it, so a settled view always has its text on disk.
         hub.record(id, g.0, ev.time_ms, entry, note);
         for o in obs {
+            let o = if let Obs::TurnSettled { end } = o {
+                let status = hub
+                    .transcripts
+                    .stats(id)
+                    .last_status
+                    .and_then(|s| match s.state {
+                        pt_api::TurnStatusState::Done => Some(pt_core::DeclaredStatus::Done),
+                        pt_api::TurnStatusState::Continuing => {
+                            s.detail.map(pt_core::DeclaredStatus::Continuing)
+                        }
+                        pt_api::TurnStatusState::Blocked => {
+                            s.detail.map(pt_core::DeclaredStatus::Blocked)
+                        }
+                    });
+                Obs::TurnSettledStatus { end, status }
+            } else {
+                o
+            };
             hub.submit(EventKind::Observed {
                 sleeve: id,
                 g,

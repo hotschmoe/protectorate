@@ -610,7 +610,9 @@ fn on_obs(
     match obs {
         Obs::Ready { .. } => on_ready(owed, prev, &live),
         Obs::Progress { tool } => on_progress(owed, prev, &live, *tool, now),
-        Obs::TurnSettled { end } => on_settled(owed, prev, &live, *end),
+        Obs::TurnSettled { end } | Obs::TurnSettledStatus { end, .. } => {
+            on_settled(owed, prev, &live, *end)
+        }
         Obs::CompactDone => on_compact_done(owed, prev, &live),
         Obs::Usage { tokens } => on_usage(owed, prev, &live, *tokens),
         Obs::Disk { bytes } => {

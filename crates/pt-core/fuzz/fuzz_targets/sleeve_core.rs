@@ -189,7 +189,7 @@ fn command(sim: &mut Sim, b: &mut Bytes) {
 }
 
 fn obs(b: &mut Bytes) -> Obs {
-    match b.below(16) {
+    match b.below(17) {
         0 | 1 => Obs::Ready {
             session: "sess".into(),
         },
@@ -240,7 +240,11 @@ fn obs(b: &mut Bytes) -> Obs {
             path: ".github/workflows/x".into(),
         },
         14 => Obs::TurnBegan,
-        _ => Obs::ForeignTurnSettled { end: TurnEnd::Done },
+        15 => Obs::ForeignTurnSettled { end: TurnEnd::Done },
+        _ => Obs::TurnSettledStatus {
+            end: TurnEnd::Done,
+            status: Some(DeclaredStatus::Continuing("remaining".into())),
+        },
     }
 }
 

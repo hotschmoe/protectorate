@@ -58,7 +58,7 @@ fn obs(b: &mut Bytes) -> Obs {
         Verdict::Blocked,
         Verdict::NoMatch,
     ];
-    match b.below(13) {
+    match b.below(14) {
         0 => Obs::Ready {
             session: b.string(),
         },
@@ -80,8 +80,17 @@ fn obs(b: &mut Bytes) -> Obs {
         9 => Obs::Disk { bytes: b.u64() },
         10 => Obs::ForbiddenPath { path: b.string() },
         11 => Obs::TurnBegan,
-        _ => Obs::ForeignTurnSettled {
+        12 => Obs::ForeignTurnSettled {
             end: ENDS[b.below(5) as usize],
+        },
+        _ => Obs::TurnSettledStatus {
+            end: ENDS[b.below(5) as usize],
+            status: match b.below(4) {
+                0 => None,
+                1 => Some(DeclaredStatus::Done),
+                2 => Some(DeclaredStatus::Continuing(b.string())),
+                _ => Some(DeclaredStatus::Blocked(b.string())),
+            },
         },
     }
 }

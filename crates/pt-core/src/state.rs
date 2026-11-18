@@ -80,6 +80,8 @@ pub struct Sleeve {
     pub desync_while_idle: bool,
     /// Owner turns begun here. Incremented when a prompt other than a continuation is dequeued.
     pub turn_seq: u64,
+    /// The declaration on the last journaled owner-turn settle.
+    pub last_status: Option<DeclaredStatus>,
     /// Who opened the current owner turn. An agent steer, or mail from a D9-marked sleeve,
     /// replaces it. A continuation is sent as this party, so D9 sees the same origin the turn had.
     pub turn_from: Party,

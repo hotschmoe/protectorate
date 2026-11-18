@@ -32,6 +32,13 @@ pub struct JobId(pub u64);
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct NodeId(pub u64);
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DeclaredStatus {
+    Done,
+    Continuing(String),
+    Blocked(String),
+}
+
 /// A workspace claim: an absolute, normalized directory path.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Claim {

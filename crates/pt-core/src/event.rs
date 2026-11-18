@@ -93,6 +93,11 @@ pub enum Obs {
     TurnSettled {
         end: TurnEnd,
     },
+    /// A settle with the final message's declaration, recorded with the observation.
+    TurnSettledStatus {
+        end: TurnEnd,
+        status: Option<DeclaredStatus>,
+    },
     /// A turn started by the harness, independently of a delivered prompt.
     TurnBegan,
     ForeignTurnSettled {
