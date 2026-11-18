@@ -942,6 +942,16 @@ impl Core<'_> {
             matches!(s.activity, Activity::Delivering { .. }) && s.steer_slot.is_none();
         let queue_empty = s.queue.is_empty();
         let insert = |core: &mut Self, state| {
+            for message in core.sl(to).messages.values_mut() {
+                if message.from != from
+                    && matches!(
+                        message.state,
+                        MsgState::Queued | MsgState::SteerHeld | MsgState::InFlight(_)
+                    )
+                {
+                    message.until_done = None;
+                }
+            }
             if core.st.sleeves[&to]
                 .until_done
                 .as_ref()
@@ -967,16 +977,6 @@ impl Core<'_> {
                     until_done,
                 },
             );
-            if let Some(limit) = until_done
-                && mode == SendMode::Steer
-                && (working || delivering)
-            {
-                core.sl(to).until_done = Some(UntilDone {
-                    from,
-                    limit,
-                    rounds: 0,
-                });
-            }
         };
 
         if pane {
@@ -1859,9 +1859,19 @@ impl Core<'_> {
             return;
         }
         let from = m.from;
+        let until_done = m.until_done;
         let request_id = request_id.to_string();
         match state {
-            EffectState::Confirmed => m.state = MsgState::Delivered,
+            EffectState::Confirmed => {
+                m.state = MsgState::Delivered;
+                if let Some(limit) = until_done {
+                    self.sl(sid).until_done = Some(UntilDone {
+                        from,
+                        limit,
+                        rounds: 0,
+                    });
+                }
+            }
             EffectState::Rejected | EffectState::Failed => {
                 m.state = MsgState::Rejected;
                 self.notify(from, Some(sid), Notice::MessageRejected { request_id });
