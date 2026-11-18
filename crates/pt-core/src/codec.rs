@@ -19,7 +19,7 @@ use crate::model::*;
 
 pub const FORMAT: u8 = 1;
 /// Highest event tag this binary reads. Any incompatible encoding must get a new event tag.
-pub const MAX_EVENT_TAG: u8 = 47;
+pub const MAX_EVENT_TAG: u8 = 50;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -953,6 +953,50 @@ impl Wire for EventKind {
                     }
                 }
             }
+            E::SendUntil {
+                to,
+                request_id,
+                from,
+                text,
+                mode,
+                d9,
+                supersede,
+                limit,
+            } => {
+                w.push(48);
+                to.put(w);
+                request_id.put(w);
+                from.put(w);
+                text.put(w);
+                mode.put(w);
+                d9.put(w);
+                supersede.put(w);
+                limit.put(w);
+            }
+            E::StartUntil {
+                sleeve,
+                target,
+                effort,
+                from,
+                limit,
+            } => {
+                w.push(49);
+                sleeve.put(w);
+                target.put(w);
+                effort.put(w);
+                from.put(w);
+                limit.put(w);
+            }
+            E::ArmUntil {
+                sleeve,
+                from,
+                limit,
+            } => {
+                w.push(50);
+                sleeve.put(w);
+                from.put(w);
+                limit.put(w);
+            }
         }
     }
 
@@ -1188,6 +1232,28 @@ impl Wire for EventKind {
                     2 => Some(DeclaredStatus::Continuing(Wire::get(r)?)),
                     _ => Some(DeclaredStatus::Blocked(Wire::get(r)?)),
                 },
+            },
+            48 => E::SendUntil {
+                to: Wire::get(r)?,
+                request_id: Wire::get(r)?,
+                from: Wire::get(r)?,
+                text: Wire::get(r)?,
+                mode: Wire::get(r)?,
+                d9: Wire::get(r)?,
+                supersede: Wire::get(r)?,
+                limit: Wire::get(r)?,
+            },
+            49 => E::StartUntil {
+                sleeve: Wire::get(r)?,
+                target: Wire::get(r)?,
+                effort: Wire::get(r)?,
+                from: Wire::get(r)?,
+                limit: Wire::get(r)?,
+            },
+            50 => E::ArmUntil {
+                sleeve: Wire::get(r)?,
+                from: Wire::get(r)?,
+                limit: Wire::get(r)?,
             },
             _ => return Err(DecodeError::UnknownTag { what: "event", tag }),
         })

@@ -920,16 +920,40 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         Err(e) => return Err(after_create(hub, &path, commit.as_deref(), e)),
     };
     if let Some(text) = r.message.filter(|t| !t.is_empty()) {
+        let request_id = new_request(c, "")?;
+        let text = prefix(&view.state, c.who, "", &text);
         command(
             hub,
-            EventKind::Send {
-                to: id,
-                request_id: new_request(c, "")?,
+            if let Some(limit) = r.until_done {
+                EventKind::SendUntil {
+                    to: id,
+                    request_id,
+                    from: c.who.party(),
+                    text,
+                    mode: SendMode::Queue,
+                    d9,
+                    supersede: false,
+                    limit,
+                }
+            } else {
+                EventKind::Send {
+                    to: id,
+                    request_id,
+                    from: c.who.party(),
+                    agent: None,
+                    text,
+                    mode: SendMode::Queue,
+                    d9,
+                }
+            },
+        )?;
+    } else if let Some(limit) = r.until_done {
+        command(
+            hub,
+            EventKind::ArmUntil {
+                sleeve: id,
                 from: c.who.party(),
-                agent: None,
-                text: prefix(&view.state, c.who, "", &text),
-                mode: SendMode::Queue,
-                d9,
+                limit,
             },
         )?;
     }
@@ -1004,7 +1028,22 @@ fn send_message(c: &Ctx<'_>, r: api::SendMessageRequest) -> Result<api::Sent> {
         matches!(from, Party::Sleeve(id) if view.state.sleeve(id).is_some_and(|s| s.d9));
     let reply = command(
         c.hub,
-        if r.supersede {
+        if let Some(limit) = r.until_done {
+            EventKind::SendUntil {
+                to: id,
+                request_id: request_id.clone(),
+                from,
+                text: prefix(&view.state, c.who, "", &r.text),
+                mode: if r.delivery == api::Delivery::Steer {
+                    SendMode::Steer
+                } else {
+                    SendMode::Queue
+                },
+                d9: marks_d9(c.hub, c.who) || sender_marked,
+                supersede: r.supersede,
+                limit,
+            }
+        } else if r.supersede {
             EventKind::Supersede {
                 to: id,
                 request_id: request_id.clone(),
@@ -1084,10 +1123,20 @@ fn start(c: &Ctx<'_>, r: api::StartSleeveRequest) -> Result<api::Accepted> {
     };
     command(
         c.hub,
-        EventKind::Start {
-            sleeve: id,
-            target,
-            effort: r.effort.filter(|e| !e.is_empty()),
+        if let Some(limit) = r.until_done {
+            EventKind::StartUntil {
+                sleeve: id,
+                target,
+                effort: r.effort.filter(|e| !e.is_empty()),
+                from: c.who.party(),
+                limit,
+            }
+        } else {
+            EventKind::Start {
+                sleeve: id,
+                target,
+                effort: r.effort.filter(|e| !e.is_empty()),
+            }
         },
     )?;
     Ok(api::Accepted { approval_id: None })

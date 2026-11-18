@@ -176,6 +176,7 @@ fn prompt_kind(kind: MsgKind) -> PromptKind {
     match kind {
         MsgKind::Prompt => PromptKind::Prompt,
         MsgKind::Continuation { .. } => PromptKind::Continuation,
+        MsgKind::Until { .. } => PromptKind::Continuation,
         MsgKind::Brief => PromptKind::Brief,
     }
 }
@@ -1335,6 +1336,7 @@ fn pump(hub: &Hub, run: &Run, inbox: Receiver<PumpIn>) {
         expects: HashMap::new(),
         held: None,
         turns: VecDeque::new(),
+        turn_status: None,
     };
     loop {
         let got = match &p.held {
@@ -1418,6 +1420,7 @@ struct Pump {
     held: Option<Held>,
     /// Starts are ordered by the driver; results close them in the same order.
     turns: VecDeque<bool>,
+    turn_status: Option<pt_core::DeclaredStatus>,
 }
 
 struct Expect {
@@ -1606,12 +1609,25 @@ impl Pump {
             Entry::ToolCall { name, input, .. } => obs.push(Obs::Progress {
                 tool: Some(tool_hash(name, input)),
             }),
-            Entry::ToolResult { .. }
-            | Entry::AssistantText { .. }
-            | Entry::Reasoning { .. }
-            | Entry::FileChange { .. } => obs.push(Obs::Progress { tool: None }),
+            Entry::AssistantText { text, .. } => {
+                self.turn_status =
+                    crate::transcript::turn_status(text).and_then(|(state, detail)| match state {
+                        pt_api::TurnStatusState::Done => Some(pt_core::DeclaredStatus::Done),
+                        pt_api::TurnStatusState::Continuing => {
+                            detail.map(pt_core::DeclaredStatus::Continuing)
+                        }
+                        pt_api::TurnStatusState::Blocked => {
+                            detail.map(pt_core::DeclaredStatus::Blocked)
+                        }
+                    });
+                obs.push(Obs::Progress { tool: None });
+            }
+            Entry::ToolResult { .. } | Entry::Reasoning { .. } | Entry::FileChange { .. } => {
+                obs.push(Obs::Progress { tool: None })
+            }
             Entry::TurnStarted { request_id, .. } => {
                 self.last_error = None;
+                self.turn_status = None;
                 let foreign = request_id.is_none();
                 self.turns.push_back(foreign);
                 obs.push(if foreign {
@@ -1665,9 +1681,13 @@ impl Pump {
                 }
                 self.last_error = None;
                 obs.push(if self.turns.pop_front().unwrap_or(false) {
+                    self.turn_status = None;
                     Obs::ForeignTurnSettled { end }
                 } else {
-                    Obs::TurnSettled { end }
+                    Obs::TurnSettledStatus {
+                        end,
+                        status: self.turn_status.take(),
+                    }
                 });
             }
             Entry::Error { class, text } => {
@@ -1706,24 +1726,6 @@ impl Pump {
         // Stored before the core hears of it, so a settled view always has its text on disk.
         hub.record(id, g.0, ev.time_ms, entry, note);
         for o in obs {
-            let o = if let Obs::TurnSettled { end } = o {
-                let status = hub
-                    .transcripts
-                    .stats(id)
-                    .last_status
-                    .and_then(|s| match s.state {
-                        pt_api::TurnStatusState::Done => Some(pt_core::DeclaredStatus::Done),
-                        pt_api::TurnStatusState::Continuing => {
-                            s.detail.map(pt_core::DeclaredStatus::Continuing)
-                        }
-                        pt_api::TurnStatusState::Blocked => {
-                            s.detail.map(pt_core::DeclaredStatus::Blocked)
-                        }
-                    });
-                Obs::TurnSettledStatus { end, status }
-            } else {
-                o
-            };
             hub.submit(EventKind::Observed {
                 sleeve: id,
                 g,

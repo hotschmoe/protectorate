@@ -2387,6 +2387,293 @@ for line in sys.stdin:
     );
 }
 
+/// Bounded continuation across real hub restarts, and cancellation by a different sender.
+#[test]
+#[ignore = "heavy"]
+fn until_done_continues_and_stops() {
+    if !on_path("bwrap") || !on_path("python3") || !on_path("git") {
+        return;
+    }
+    let dir = unique("until-done");
+    let home = dir.join("home");
+    let fake = dir.join("claude");
+    std::fs::create_dir_all(home.join("logins/.claude")).unwrap();
+    std::fs::write(home.join("logins/.claude/.credentials.json"), "{}").unwrap();
+    write_script(
+        &fake,
+        r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit 0; fi
+exec python3 -u -c '
+import json, os, sys, time
+def emit(v): print(json.dumps(v), flush=True)
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("type") != "user": continue
+    msg["isReplay"] = True
+    emit(msg)
+    if "scenario-three" in line: mode, n = "three", 0
+    elif "scenario-restart" in line: mode, n = "restart", 0
+    elif "scenario-blocked" in line: mode, n = "blocked", 0
+    elif "scenario-missing" in line: mode, n = "missing", 0
+    elif "scenario-interrupt" in line: mode, n = "interrupt", 0
+    elif "scenario-stop" in line: mode, n = "stop", 0
+    elif "owner-override" in line: mode, n = "override", 0
+    elif os.path.exists(".until-mode"):
+        mode, raw = open(".until-mode").read().split(":")
+        n = int(raw)
+    else: mode, n = "other", 0
+    if (mode == "restart" and n == 1) or (mode in ("interrupt", "stop") and n == 0):
+        open(".until-held-" + mode, "w").close()
+        while not os.path.exists(".until-release-" + mode): time.sleep(0.05)
+    open(".until-mode", "w").write(mode + ":" + str(n + 1))
+    if mode == "blocked": answer = "STATUS: BLOCKED waiting"
+    elif mode == "missing": answer = "no declaration"
+    elif mode in ("three", "restart") and n < 3: answer = "STATUS: CONTINUING remaining"
+    elif mode == "interrupt": answer = "STATUS: CONTINUING remaining"
+    else: answer = "STATUS: DONE"
+    emit({"type":"assistant", "message":{"id":"r", "content":[{"type":"text", "text":answer}]}})
+    emit({"type":"result", "subtype":"success", "is_error":False, "stop_reason":"end_turn"})
+' "$@""#,
+    );
+    write_script(&dir.join("systemd-run"), "exit 0");
+    let config = pt_json::obj! {
+        "envoy" => pt_json::obj! { "harness" => "claude" },
+        "claude_program" => fake.to_str().unwrap(), "scopes" => false,
+        "quota_poll_secs" => 0u64, "harness_update_hours" => 0u64,
+    };
+    std::fs::write(home.join("config.json"), config.to_string()).unwrap();
+    let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
+    let mut hub = Hub::open(home, &[], &[("PATH", &path)]);
+    let repo = temp_repo("until-done");
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "worker",
+        "--path",
+        repo.to_str().unwrap(),
+        "--harness",
+        "claude",
+    ])
+    .ok();
+    hub.wait("worker", "idle", 60);
+    hub.wait("envoy", "idle", 60);
+    let count = |hub: &Hub| {
+        of_type(&hub.transcript("worker"), "user_message")
+            .iter()
+            .filter(|e| {
+                e["entry"]["text"].as_str().is_some_and(|t| {
+                    t.contains("Continue from where you stopped, with the same rules and order.")
+                })
+            })
+            .count()
+    };
+    hub.cli(&[
+        "sleeve",
+        "send",
+        "worker",
+        "scenario-three",
+        "--until-done",
+        "3",
+    ])
+    .ok();
+    eventually(
+        "three continuations and done",
+        Duration::from_secs(60),
+        || {
+            (count(&hub) == 3
+                && hub.sleeve("worker")["last_status"]["state"].as_str() == Some("done"))
+            .then_some(())
+        },
+    );
+    hub.wait("worker", "idle", 60);
+    hub.cli(&[
+        "sleeve",
+        "send",
+        "worker",
+        "scenario-blocked",
+        "--until-done",
+        "3",
+    ])
+    .ok();
+    eventually("blocked", Duration::from_secs(60), || {
+        (hub.sleeve("worker")["last_status"]["state"].as_str() == Some("blocked")).then_some(())
+    });
+    hub.wait("worker", "idle", 60);
+    assert_eq!(count(&hub), 3);
+    hub.cli(&[
+        "sleeve",
+        "send",
+        "worker",
+        "scenario-missing",
+        "--until-done",
+        "3",
+    ])
+    .ok();
+    eventually("missing declaration", Duration::from_secs(60), || {
+        hub.sleeve("worker")["last_status"].is_null().then_some(())
+    });
+    hub.wait("worker", "idle", 60);
+    assert_eq!(count(&hub), 3);
+    hub.cli(&[
+        "sleeve",
+        "send",
+        "worker",
+        "scenario-three",
+        "--until-done",
+        "0",
+    ])
+    .ok();
+    eventually("zero rounds", Duration::from_secs(60), || {
+        (hub.sleeve("worker")["last_status"]["state"].as_str() == Some("continuing")).then_some(())
+    });
+    hub.wait("worker", "idle", 60);
+    assert_eq!(count(&hub), 3);
+    hub.cli(&[
+        "sleeve",
+        "send",
+        "worker",
+        "scenario-restart",
+        "--until-done",
+        "3",
+    ])
+    .ok();
+    eventually("restart hold", Duration::from_secs(60), || {
+        repo.join(".until-held-restart").exists().then_some(())
+    });
+    hub.restart();
+    std::fs::write(repo.join(".until-release-restart"), "go").unwrap();
+    eventually("done after restart", Duration::from_secs(120), || {
+        (count(&hub) == 6 && hub.sleeve("worker")["last_status"]["state"].as_str() == Some("done"))
+            .then_some(())
+    });
+    hub.wait("worker", "idle", 60);
+    let socket = hub
+        .home
+        .join("run/sleeves/api.sock")
+        .to_string_lossy()
+        .into_owned();
+    let token = env_get(&sleeve_process_env(&socket, "envoy"), "PROTECTORATE_TOKEN")
+        .unwrap()
+        .to_string();
+    hub.cli_env(
+        &[("PROTECTORATE_TOKEN", &token)],
+        &[
+            "sleeve",
+            "send",
+            "worker",
+            "scenario-interrupt",
+            "--until-done",
+            "3",
+        ],
+    )
+    .ok();
+    eventually("interrupt hold", Duration::from_secs(60), || {
+        repo.join(".until-held-interrupt").exists().then_some(())
+    });
+    hub.send("worker", "owner-override");
+    std::fs::write(repo.join(".until-release-interrupt"), "go").unwrap();
+    eventually("override settled", Duration::from_secs(60), || {
+        (hub.sleeve("worker")["last_status"]["state"].as_str() == Some("done")).then_some(())
+    });
+    hub.wait("worker", "idle", 60);
+    assert_eq!(count(&hub), 6);
+    hub.cli(&["sleeve", "stop", "worker"]).ok();
+    hub.wait("worker", "ended", 60);
+    hub.cli(&["sleeve", "start", "worker", "--until-done", "2"])
+        .ok();
+    hub.wait("worker", "idle", 60);
+    hub.send("worker", "scenario-three");
+    eventually("start bounded followups", Duration::from_secs(60), || {
+        (count(&hub) == 8
+            && hub.sleeve("worker")["last_status"]["state"].as_str() == Some("continuing"))
+        .then_some(())
+    });
+    hub.wait("worker", "idle", 60);
+    let repo2 = temp_repo("until-spawn");
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "worker-two",
+        "--path",
+        repo2.to_str().unwrap(),
+        "--harness",
+        "claude",
+        "--message",
+        "scenario-three",
+        "--until-done",
+        "3",
+    ])
+    .ok();
+    eventually("spawn bounded followups", Duration::from_secs(60), || {
+        let entries = hub.transcript("worker-two");
+        let n = of_type(&entries, "user_message")
+            .iter()
+            .filter(|e| {
+                e["entry"]["text"].as_str().is_some_and(|t| {
+                    t.contains("Continue from where you stopped, with the same rules and order.")
+                })
+            })
+            .count();
+        (n == 3 && hub.sleeve("worker-two")["last_status"]["state"].as_str() == Some("done"))
+            .then_some(())
+    });
+    hub.cli(&[
+        "sleeve",
+        "send",
+        "worker",
+        "scenario-stop",
+        "--until-done",
+        "3",
+    ])
+    .ok();
+    eventually("stop hold", Duration::from_secs(60), || {
+        repo.join(".until-held-stop").exists().then_some(())
+    });
+    hub.cli(&["sleeve", "stop", "worker"]).ok();
+    hub.wait("worker", "ended", 60);
+    hub.cli(&["sleeve", "start", "worker"]).ok();
+    hub.wait("worker", "idle", 60);
+    hub.send("worker", "owner-override");
+    hub.wait("worker", "idle", 60);
+    assert_eq!(count(&hub), 8);
+    let quota_home = dir.join("quota-home");
+    std::fs::create_dir_all(quota_home.join("logins/.claude")).unwrap();
+    std::fs::write(quota_home.join("logins/.claude/.credentials.json"), "{}").unwrap();
+    std::fs::write(quota_home.join("config.json"), config.to_string()).unwrap();
+    let quota = Hub::open(
+        quota_home,
+        &[],
+        &[
+            ("PATH", &path),
+            ("PT_TEST_FAULT", "usage_limit:quota-worker"),
+        ],
+    );
+    let quota_repo = temp_repo("until-quota");
+    quota
+        .cli(&[
+            "sleeve",
+            "spawn",
+            "quota-worker",
+            "--path",
+            quota_repo.to_str().unwrap(),
+            "--harness",
+            "claude",
+            "--message",
+            "scenario-three",
+            "--until-done",
+            "3",
+        ])
+        .ok();
+    eventually("quota stops loop", Duration::from_secs(90), || {
+        (quota.sleeve("quota-worker")["lifecycle"].as_str() == Some("parked")).then_some(())
+    });
+    let entries = quota.transcript("quota-worker");
+    assert!(!of_type(&entries, "user_message").iter().any(|e| {
+        e["entry"]["text"].as_str().is_some_and(|t| {
+            t.contains("Continue from where you stopped, with the same rules and order.")
+        })
+    }));
+}
+
 /// An Envoy turn that settles past the context ceiling gets the harness's own `/compact`
 /// once Envoy is idle; the compaction shows in the transcript and Envoy takes the next prompt.
 #[test]

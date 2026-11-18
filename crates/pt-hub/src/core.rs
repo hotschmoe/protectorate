@@ -239,6 +239,11 @@ fn notice_text(view: &View, n: &Notice) -> (Kind, Level, String) {
             Level::Warn,
             format!("message {request_id} may or may not have reached the harness"),
         ),
+        Notice::UntilRoundMayHaveApplied { round } => (
+            Kind::Mail,
+            Level::Warn,
+            format!("until-done round {round} may have applied; it will not be silently retried"),
+        ),
         Notice::EffectUnknowable { effect } => (
             Kind::Hub,
             Level::Alarm,

@@ -466,6 +466,7 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 resleeve_to,
                 message: message_file(a)?.or_else(|| a.flag("--message").map(str::to_string)),
                 budget: a.num("--budget")?,
+                until_done: a.num("--until-done")?,
             };
             let v = c.call_for::<m::SpawnSleeve>(&req, APPROVAL_WAIT)?;
             o.show(&v, |s| {
@@ -482,6 +483,7 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                     api::Delivery::Queue
                 },
                 supersede: a.has("--supersede"),
+                until_done: a.num("--until-done")?,
             };
             let v = c.call::<m::SendMessage>(&req)?;
             o.show(&v, |v| {
@@ -518,6 +520,7 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                 model: a.flag("--model").map(str::to_string),
                 provider: a.flag("--provider").map(str::to_string),
                 effort: a.flag("--effort").map(str::to_string),
+                until_done: a.num("--until-done")?,
             };
             let v = c.call::<m::StartSleeve>(&req)?;
             o.show(&v, |v| accepted(v, "starting"));

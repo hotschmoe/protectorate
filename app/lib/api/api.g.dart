@@ -4721,6 +4721,7 @@ final class SendMessageRequest {
     required this.text,
     this.delivery = Delivery.queue,
     this.supersede = false,
+    this.untilDone,
   });
 
   factory SendMessageRequest.fromJson(Object? json) {
@@ -4734,6 +4735,10 @@ final class SendMessageRequest {
         false,
         (e0) => _bool(e0, 'SendMessageRequest.supersede'),
       ),
+      untilDone: _opt(
+        j['until_done'],
+        (e0) => _int(e0, 'SendMessageRequest.until_done'),
+      ),
     );
   }
 
@@ -4745,11 +4750,14 @@ final class SendMessageRequest {
 
   final bool supersede;
 
+  final int? untilDone;
+
   Map<String, Object?> toJson() => {
     'sleeve_id': sleeveId,
     'text': text,
     'delivery': delivery.toJson(),
     'supersede': supersede,
+    if (untilDone case final v?) 'until_done': v,
   };
 }
 
@@ -4987,6 +4995,7 @@ final class SpawnSleeveRequest {
     this.resleeveTo = const <Harness>[],
     this.message,
     this.budget,
+    this.untilDone,
   });
 
   factory SpawnSleeveRequest.fromJson(Object? json) {
@@ -5024,6 +5033,10 @@ final class SpawnSleeveRequest {
         (e0) => _string(e0, 'SpawnSleeveRequest.message'),
       ),
       budget: _opt(j['budget'], (e0) => _int(e0, 'SpawnSleeveRequest.budget')),
+      untilDone: _opt(
+        j['until_done'],
+        (e0) => _int(e0, 'SpawnSleeveRequest.until_done'),
+      ),
     );
   }
 
@@ -5062,6 +5075,8 @@ final class SpawnSleeveRequest {
   /// Tokens; a root's count includes its children's (G10).
   final int? budget;
 
+  final int? untilDone;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'harness': harness.toJson(),
@@ -5076,6 +5091,7 @@ final class SpawnSleeveRequest {
     'resleeve_to': [for (final e0 in resleeveTo) e0.toJson()],
     if (message case final v?) 'message': v,
     if (budget case final v?) 'budget': v,
+    if (untilDone case final v?) 'until_done': v,
   };
 }
 
@@ -5087,6 +5103,7 @@ final class StartSleeveRequest {
     this.model,
     this.provider,
     this.effort,
+    this.untilDone,
   });
 
   factory StartSleeveRequest.fromJson(Object? json) {
@@ -5103,6 +5120,10 @@ final class StartSleeveRequest {
         j['effort'],
         (e0) => _string(e0, 'StartSleeveRequest.effort'),
       ),
+      untilDone: _opt(
+        j['until_done'],
+        (e0) => _int(e0, 'StartSleeveRequest.until_done'),
+      ),
     );
   }
 
@@ -5116,12 +5137,15 @@ final class StartSleeveRequest {
 
   final String? effort;
 
+  final int? untilDone;
+
   Map<String, Object?> toJson() => {
     'sleeve_id': sleeveId,
     if (target case final v?) 'target': v.toJson(),
     if (model case final v?) 'model': v,
     if (provider case final v?) 'provider': v,
     if (effort case final v?) 'effort': v,
+    if (untilDone case final v?) 'until_done': v,
   };
 }
 

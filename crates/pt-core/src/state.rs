@@ -82,6 +82,7 @@ pub struct Sleeve {
     pub turn_seq: u64,
     /// The declaration on the last journaled owner-turn settle.
     pub last_status: Option<DeclaredStatus>,
+    pub until_done: Option<UntilDone>,
     /// Who opened the current owner turn. An agent steer, or mail from a D9-marked sleeve,
     /// replaces it. A continuation is sent as this party, so D9 sees the same origin the turn had.
     pub turn_from: Party,
@@ -152,6 +153,7 @@ pub struct Delivery {
     pub applied: bool,
     pub turn_seq: u64,
     pub auto_continue: Option<u64>,
+    pub until_done: Option<UntilDone>,
     pub turn_from: Party,
     pub turn_agent: Option<String>,
     pub d9_turn: Option<D9Turn>,
@@ -256,6 +258,14 @@ pub struct Message {
     /// Order among accepted messages. Replay assigns the same numbers.
     pub seq: u64,
     pub report: Option<TurnReport>,
+    pub until_done: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UntilDone {
+    pub from: Party,
+    pub limit: u64,
+    pub rounds: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

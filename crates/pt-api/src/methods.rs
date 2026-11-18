@@ -142,6 +142,7 @@ api_records! {
         pub message: Option<String>,
         /// Tokens; a root's count includes its children's (G10).
         pub budget: Option<u64>,
+        pub until_done: Option<u64>,
     }
 
     pub struct SendMessageRequest {
@@ -149,6 +150,7 @@ api_records! {
         pub text: String,
         pub delivery: Delivery = Delivery::Queue,
         pub supersede: bool = false,
+        pub until_done: Option<u64>,
     }
 
     /// A message the hub took; its `user_message` and `prompt_ack` entries carry this id.
@@ -191,6 +193,7 @@ api_records! {
         pub model: Option<String>,
         pub provider: Option<String>,
         pub effort: Option<String>,
+        pub until_done: Option<u64>,
     }
 
     pub struct ResleeveRequest {

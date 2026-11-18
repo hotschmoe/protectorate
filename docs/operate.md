@@ -45,10 +45,10 @@ always give it the token.
 ```
 sleeve list | sleeve show <sleeve> | sleeve inbox [<sleeve>] | sleeve inbox <sleeve> --drop
 sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
-      [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT | --message-file FILE]
-sleeve send <sleeve> <text...> [--steer | --supersede]
+      [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT | --message-file FILE] [--until-done N]
+sleeve send <sleeve> <text...> [--steer | --supersede] [--until-done N]
 sleeve interrupt|stop|rm|takeover <sleeve>
-sleeve start <sleeve> [--harness H] [--provider P] [--model M]
+sleeve start <sleeve> [--harness H] [--provider P] [--model M] [--until-done N]
 sleeve resleeve <sleeve> --harness H [--provider P] [--model M]
 sleeve transcript <sleeve> [--from SEQ] [--limit N]
 sleeve wait <sleeve>... [--all | --any] [--until idle|done|blocked|parked|ended|report] [--timeout SECS]
@@ -59,6 +59,13 @@ for `sleeve spawn` it replaces `--message`. Use `-` for stdin. This avoids shell
 of long or code-bearing messages. A sleeve reaches a sibling through its parent.
 
 A sleeve is named by its id or its name.
+
+`--until-done N` on spawn, send or start sends a fixed continuation as the original sender after
+a `STATUS: CONTINUING` settle, at most N times. It stops on DONE, BLOCKED,
+a missing declaration, a usage limit or auth failure, a message from another sender, stop or
+park. The settle and count are journaled, so a restart keeps the remaining rounds. An
+unconfirmed round counts against N; the requester is told it may have applied, and it is not
+silently retried. Exactly-once delivery cannot be promised across a crash during a harness write.
 
 List and show include the oldest queued message's age beside the queue count. They also show the
 latest settled turn's declared status and up to 80 characters of its detail. The API includes
@@ -691,4 +698,4 @@ None of these rotate yet.
 
 Tick processing tracks uncertain and probing effects, active jobs, eligible sleeves and pending approvals while retaining terminal records. These indexes are rebuilt during journal replay.
 
-The development gate `make check` runs every check and reports failed steps together. `make test` runs both e2e tests and fuzz seed replay even if either fails. The gate also builds every standalone fuzz workspace. Real-scope e2e tests skip with `SKIP: no systemd user bus` when the user manager is unavailable; test hubs stop their sleeve scopes on teardown.
+The development gate `make check` runs every check and reports failed steps together. `make test` runs both e2e tests and fuzz seed replay even if either fails. `make test-heavy` runs the full e2e suite, fuzz seeds, standalone fuzz builds and the ignored bounded-continuation scenario. The gate also builds every standalone fuzz workspace. Real-scope e2e tests skip with `SKIP: no systemd user bus` when the user manager is unavailable; test hubs stop their sleeve scopes on teardown.

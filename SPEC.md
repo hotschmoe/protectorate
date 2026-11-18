@@ -181,6 +181,14 @@ CLI on the hub machine (section 3.1).
   The report carries its sleeve, turn and status as structured inbox and transcript data,
   captured when the turn settled and journaled with the report. Batched deliveries retain the
   metadata of each report.
+  Spawn, send and start accept `--until-done N` for a nonnegative N. A CONTINUING settle sends a
+  fixed continuation as the requesting party, at most N rounds. DONE, BLOCKED, a missing
+  declaration, usage limit, auth failure, another party's message, stop or park ends the loop.
+  The request, settle and allocated rounds are journaled; replay preserves their count. An
+  unconfirmed round remains Uncertain, counts against N, and is not silently retried; the
+  requester is told it may have applied. Exactly-once delivery is not promised because a
+  harness write and its acknowledgement cannot be recorded atomically. A bounded continuation
+  is not mail for report cursors.
   A usage-limit or auth settle reports after its continuation. Envoy reports to no one.
 - **Envoy's context ceiling.** When an Envoy turn settles with its context at 500k tokens or
   more, the hub sends the core a `Compact` for Envoy; the core takes it once Envoy is idle with
@@ -1070,4 +1078,4 @@ shortcut is also in `REVISIT.md`.
 - **Envoy** is a root sleeve running Claude Code headless in `$PROTECTORATE_HOME/envoy/`. That
   directory's own `CLAUDE.md` describes the `protectorate` CLI, so no worked-on repo is touched.
 
-The development gate `make check` runs every check and reports failed steps together. `make test` runs both e2e tests and fuzz seed replay even if either fails. The gate also builds every standalone fuzz workspace. Real-scope e2e tests skip with `SKIP: no systemd user bus` when the user manager is unavailable; test hubs stop their sleeve scopes on teardown.
+The development gate `make check` runs every check and reports failed steps together. `make test` runs both e2e tests and fuzz seed replay even if either fails. `make test-heavy` runs the full e2e suite, fuzz seeds, standalone fuzz builds and the ignored bounded-continuation scenario. The gate also builds every standalone fuzz workspace. Real-scope e2e tests skip with `SKIP: no systemd user bus` when the user manager is unavailable; test hubs stop their sleeve scopes on teardown.
