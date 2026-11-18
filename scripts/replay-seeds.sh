@@ -25,7 +25,7 @@ layout() {
         pt-drivers) echo "claude codex grok pi" ;;
         pt-embed) echo "inflate" ;;
         pt-frame) echo "decode reply request roundtrip" ;;
-        pt-hash) echo "-" ;;
+        pt-hash) echo "differential" ;;
         pt-history) echo "extract_lines segment tail tokenize" ;;
         pt-http) echo "request ws_frame" ;;
         pt-journal) echo "-" ;;
