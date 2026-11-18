@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{closed_by_peer, curl, start};
+use common::{closed_by_peer, curl, header, start};
 use pt_http::Config;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -38,11 +38,9 @@ fn curl_handshake_gets_101_with_rfc_accept() {
             .and_then(|l| l.split_whitespace().nth(1)),
         Some("101")
     );
-    assert!(
-        r.stdout
-            .contains(&format!("Sec-WebSocket-Accept: {SAMPLE_ACCEPT}\r\n")),
-        "{}",
-        r.stdout
+    assert_eq!(
+        header(&r.stdout, "sec-websocket-accept"),
+        Some(SAMPLE_ACCEPT)
     );
 
     let code = |extra: &[&str]| {
@@ -262,7 +260,13 @@ fn raw_handshake(addr: std::net::SocketAddr) -> TcpStream {
         head.push(b[0]);
     }
     let head = String::from_utf8(head).unwrap();
-    assert!(head.starts_with("HTTP/1.1 101 "), "{head}");
-    assert!(head.contains(SAMPLE_ACCEPT));
+    assert_eq!(
+        head.lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1)),
+        Some("101"),
+        "{head}"
+    );
+    assert_eq!(header(&head, "sec-websocket-accept"), Some(SAMPLE_ACCEPT));
     c
 }
