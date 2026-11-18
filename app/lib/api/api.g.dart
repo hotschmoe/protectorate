@@ -3684,6 +3684,8 @@ final class Node {
     this.inventory,
     this.sample,
     required this.presence,
+    this.jobs = NodeJobs.any,
+    this.jobsNote,
   });
 
   factory Node.fromJson(Object? json) {
@@ -3702,6 +3704,8 @@ final class Node {
       inventory: _opt(j['inventory'], Inventory.fromJson),
       sample: _opt(j['sample'], Sample.fromJson),
       presence: Presence.fromJson(j['presence']),
+      jobs: _or(j['jobs'], NodeJobs.any, NodeJobs.fromJson),
+      jobsNote: _opt(j['jobs_note'], (e0) => _string(e0, 'Node.jobs_note')),
     );
   }
 
@@ -3726,6 +3730,10 @@ final class Node {
 
   final Presence presence;
 
+  final NodeJobs jobs;
+
+  final String? jobsNote;
+
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
@@ -3737,7 +3745,31 @@ final class Node {
     if (inventory case final v?) 'inventory': v.toJson(),
     if (sample case final v?) 'sample': v.toJson(),
     'presence': presence.toJson(),
+    'jobs': jobs.toJson(),
+    if (jobsNote case final v?) 'jobs_note': v,
   };
+}
+
+enum NodeJobs {
+  any('any'),
+  owner('owner'),
+  none('none'),
+
+  /// A value this client does not know.
+  unknown('unknown');
+
+  const NodeJobs(this.wire);
+
+  final String wire;
+
+  static NodeJobs fromJson(Object? json) {
+    for (final v in values) {
+      if (v.wire == json) return v;
+    }
+    return unknown;
+  }
+
+  String toJson() => wire;
 }
 
 final class NodeList {
@@ -4872,6 +4904,35 @@ final class Sent {
   };
 }
 
+final class SetNodeJobsRequest {
+  const SetNodeJobsRequest({
+    required this.nodeId,
+    required this.jobs,
+    this.note,
+  });
+
+  factory SetNodeJobsRequest.fromJson(Object? json) {
+    final j = _object(json, 'SetNodeJobsRequest');
+    return SetNodeJobsRequest(
+      nodeId: _string(j['node_id'], 'SetNodeJobsRequest.node_id'),
+      jobs: NodeJobs.fromJson(j['jobs']),
+      note: _opt(j['note'], (e0) => _string(e0, 'SetNodeJobsRequest.note')),
+    );
+  }
+
+  final String nodeId;
+
+  final NodeJobs jobs;
+
+  final String? note;
+
+  Map<String, Object?> toJson() => {
+    'node_id': nodeId,
+    'jobs': jobs.toJson(),
+    if (note case final v?) 'note': v,
+  };
+}
+
 final class Sleeve {
   const Sleeve({
     required this.id,
@@ -5988,6 +6049,10 @@ final class HubApi {
   /// `POST /api/GetNode`, scope `sleeve`.
   Future<Node> getNode(NodeRef request) =>
       _call('GetNode', request.toJson(), Node.fromJson);
+
+  /// `POST /api/SetNodeJobs`, scope `owner`.
+  Future<Node> setNodeJobs(SetNodeJobsRequest request) =>
+      _call('SetNodeJobs', request.toJson(), Node.fromJson);
 
   /// `POST /api/GetEnrollment`, scope `owner`.
   Future<Enrollment> getEnrollment([Empty request = const Empty()]) =>

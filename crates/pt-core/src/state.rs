@@ -12,6 +12,7 @@ pub struct State {
     pub mail_batching: bool,
     pub next_node_update: u64,
     pub pending_node_updates: BTreeMap<NodeId, PendingNodeUpdate>,
+    pub node_jobs: BTreeMap<NodeId, (String, Option<String>)>,
     /// The latest event time seen.
     pub now: Millis,
     pub next_sleeve: u64,

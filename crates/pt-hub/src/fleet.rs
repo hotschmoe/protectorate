@@ -155,9 +155,10 @@ impl FleetSlot {
 
     /// One poller round: streamed when something besides the timestamps changed, and an event
     /// line when the node came up, went down or changed presence.
-    pub fn published(&self, bus: &Bus, e: FleetEvent) {
+    pub fn published(&self, bus: &Bus, state: &pt_core::State, e: FleetEvent) {
         match e {
-            FleetEvent::Node(n) => {
+            FleetEvent::Node(mut n) => {
+                crate::jobs::decorate_node(state, &mut n);
                 let key = quiet(&n);
                 let before = lock(&self.streamed).insert(n.id.clone(), key.clone());
                 if before.as_ref() == Some(&key) {

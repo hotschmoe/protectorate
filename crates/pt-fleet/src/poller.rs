@@ -370,6 +370,8 @@ fn poll_node(s: &Shared, link: &Link, id: u64) {
             inventory: None,
             sample: None,
             presence: view::unknown_presence(),
+            jobs: pt_api::NodeJobs::Any,
+            jobs_note: None,
         },
         hello: None,
         hello_generation: 0,

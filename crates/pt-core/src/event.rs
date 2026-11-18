@@ -148,6 +148,11 @@ pub enum EventKind {
         node: NodeId,
         revision: u64,
     },
+    SetNodeJobs {
+        node: NodeId,
+        jobs: String,
+        note: Option<String>,
+    },
     // Commands from the API (owner, Envoy, agents, sleeves).
     Spawn(SpawnSpec),
     Send {
@@ -243,6 +248,12 @@ pub enum EventKind {
         request_id: String,
         spec: JobSpec,
     },
+    CreateNodeJob {
+        request_id: String,
+        spec: JobSpec,
+        node: NodeId,
+        owner: bool,
+    },
     CancelJob {
         job: JobId,
     },
@@ -307,6 +318,13 @@ pub enum EventKind {
         attempt: u32,
         node: NodeId,
         epoch: u64,
+    },
+    NodeChosenWithPolicy {
+        job: JobId,
+        attempt: u32,
+        node: NodeId,
+        epoch: u64,
+        owner: bool,
     },
     /// The node a queued job is pinned to is gone from the fleet; a job in any other state is
     /// left alone.

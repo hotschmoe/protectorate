@@ -145,6 +145,7 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
         | E::ClearPendingNodeUpdate { .. }
         | E::ClaimPendingNodeUpdate { .. }
         | E::ReleasePendingNodeUpdate { .. }
+        | E::SetNodeJobs { .. }
         | E::Spawn(_)
         | E::Interrupt { .. }
         | E::Compact { .. }
@@ -152,6 +153,7 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
         | E::RequestApproval { .. }
         | E::Viewed { .. }
         | E::CreateJob { .. }
+        | E::CreateNodeJob { .. }
         | E::CancelJob { .. }
         | E::AbandonJob { .. }
         | E::RequeueJob { .. }
@@ -159,6 +161,7 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
         | E::Unwritten { .. }
         | E::Launched { .. }
         | E::NodeChosen { .. }
+        | E::NodeChosenWithPolicy { .. }
         | E::JobNodeRemoved { .. }
         | E::JobStatus { .. }
         | E::ArtifactsChecked { .. }
