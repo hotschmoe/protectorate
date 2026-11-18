@@ -154,6 +154,17 @@ pub fn read_head(c: &mut TcpStream) -> String {
     String::from_utf8(head).unwrap()
 }
 
+pub fn header<'a>(response: &'a str, name: &str) -> Option<&'a str> {
+    response
+        .lines()
+        .skip(1)
+        .take_while(|line| !line.trim().is_empty())
+        .find_map(|line| {
+            let (field, value) = line.split_once(':')?;
+            field.eq_ignore_ascii_case(name).then(|| value.trim())
+        })
+}
+
 /// True once the peer has closed `c`, by EOF or reset, within its read timeout.
 pub fn closed_by_peer(c: &mut TcpStream) -> bool {
     let mut buf = [0u8; 4096];

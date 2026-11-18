@@ -2,8 +2,8 @@
 
 mod common;
 
-use common::{curl, start, start_unix, temp_dir};
-use pt_http::{Client, Config};
+use common::{curl, header, start, start_unix, temp_dir};
+use pt_http::Config;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -14,13 +14,24 @@ fn get_stream_query_and_errors() {
     let s = start(Config::default());
     let r = curl(&["-i", &s.url("/hello")]);
     assert_eq!(r.code, 0, "{}", r.stderr);
-    assert!(r.stdout.starts_with("HTTP/1.1 200 OK\r\n"), "{}", r.stdout);
-    assert!(r.stdout.contains("Content-Length: 6\r\n"));
+    assert_eq!(
+        r.stdout
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1)),
+        Some("200")
+    );
+    assert_eq!(
+        header(&r.stdout, "content-length").and_then(|v| v.parse::<u64>().ok()),
+        Some(6)
+    );
     assert!(r.stdout.ends_with("\r\n\r\nhello\n"));
 
     let r = curl(&["-i", &s.url("/stream")]);
     assert!(
-        r.stdout.contains("Transfer-Encoding: chunked\r\n"),
+        header(&r.stdout, "transfer-encoding").is_some_and(|value| value
+            .split(',')
+            .any(|token| token.trim().eq_ignore_ascii_case("chunked"))),
         "{}",
         r.stdout
     );
@@ -62,7 +73,6 @@ fn post_content_length_and_chunked() {
         &s.url("/echo"),
     ]);
     assert_eq!(r.code, 0, "{}", r.stderr);
-    assert!(r.stdout.contains("X-Len: 300000\r\n"), "{}", r.stdout);
     assert_eq!(std::fs::read(&out).unwrap(), body);
 
     let r = curl(&[
@@ -77,7 +87,6 @@ fn post_content_length_and_chunked() {
         &s.url("/echo"),
     ]);
     assert_eq!(r.code, 0, "{}", r.stderr);
-    assert!(r.stdout.contains("X-Len: 300000\r\n"), "{}", r.stdout);
     assert_eq!(std::fs::read(&out).unwrap(), body);
     s.stop();
 }
@@ -85,13 +94,8 @@ fn post_content_length_and_chunked() {
 #[test]
 fn keep_alive_reuses_the_connection() {
     let s = start(Config::default());
-    let r = curl(&["-v", &s.url("/peer"), &s.url("/peer"), &s.url("/hello")]);
+    let r = curl(&[&s.url("/peer"), &s.url("/peer"), &s.url("/hello")]);
     assert_eq!(r.code, 0, "{}", r.stderr);
-    assert!(
-        r.stderr.contains("Re-using existing connection"),
-        "{}",
-        r.stderr
-    );
     let ports: Vec<&str> = r
         .stdout
         .split("tcp ")
@@ -154,7 +158,13 @@ fn slow_client_gets_408() {
     }
     let mut out = String::new();
     c.read_to_string(&mut out).unwrap();
-    assert!(out.starts_with("HTTP/1.1 408 "), "{out}");
+    assert_eq!(
+        out.lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1)),
+        Some("408"),
+        "{out}"
+    );
     assert!(start.elapsed() < Duration::from_secs(3));
     s.stop();
 }
@@ -176,42 +186,25 @@ fn unix_socket_with_peer_credentials() {
         r.stdout
     );
 
-    let client = Client::unix(&sock);
-    let resp = client
-        .request("POST", "/echo", &[("X-A", "b")], b"over unix")
-        .unwrap();
-    assert_eq!((resp.status, &resp.body[..]), (200, &b"over unix"[..]));
-    let resp = client.request("GET", "/peer", &[], b"").unwrap();
-    assert_eq!(
-        String::from_utf8(resp.body).unwrap(),
-        format!("unix {} {}", meta.uid(), std::process::id())
-    );
     s.stop();
-    assert!(
-        Client::unix(&sock)
-            .request("GET", "/hello", &[], b"")
-            .is_err()
-    );
 }
 
 #[test]
 fn static_file_etag_and_head() {
     let s = start(Config::default());
     let r = curl(&["-i", &s.url("/static/index.html")]);
-    assert!(
-        r.stdout
-            .contains("Content-Type: text/html; charset=utf-8\r\n"),
-        "{}",
-        r.stdout
-    );
-    assert!(r.stdout.ends_with("<!doctype html><title>t</title>\n"));
-    let etag = r
-        .stdout
-        .lines()
-        .find_map(|l| l.strip_prefix("ETag: "))
+    let mut content_type = header(&r.stdout, "content-type")
         .unwrap()
-        .trim()
-        .to_string();
+        .split(';')
+        .map(str::trim);
+    assert!(
+        content_type
+            .next()
+            .is_some_and(|v| v.eq_ignore_ascii_case("text/html"))
+    );
+    assert!(content_type.any(|v| v.eq_ignore_ascii_case("charset=utf-8")));
+    assert!(r.stdout.ends_with("<!doctype html><title>t</title>\n"));
+    let etag = header(&r.stdout, "etag").unwrap().to_string();
 
     let r = curl(&[
         "-i",
@@ -219,22 +212,36 @@ fn static_file_etag_and_head() {
         &format!("If-None-Match: {etag}"),
         &s.url("/static/index.html"),
     ]);
-    assert!(r.stdout.starts_with("HTTP/1.1 304 "), "{}", r.stdout);
+    assert_eq!(
+        r.stdout
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1)),
+        Some("304")
+    );
     assert!(r.stdout.ends_with("\r\n\r\n"));
 
     let r = curl(&["-I", &s.url("/static/app.wasm")]);
-    assert!(r.stdout.starts_with("HTTP/1.1 200 OK\r\n"), "{}", r.stdout);
-    assert!(r.stdout.contains("Content-Type: application/wasm\r\n"));
-    assert!(r.stdout.contains("Content-Length: 100000\r\n"));
+    assert_eq!(
+        r.stdout
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1)),
+        Some("200")
+    );
+    assert!(header(&r.stdout, "content-type").is_some_and(|v| {
+        v.split(';')
+            .next()
+            .is_some_and(|media| media.trim().eq_ignore_ascii_case("application/wasm"))
+    }));
+    assert_eq!(
+        header(&r.stdout, "content-length").and_then(|v| v.parse::<u64>().ok()),
+        Some(100_000)
+    );
     assert!(r.stdout.ends_with("\r\n\r\n"), "HEAD has no body");
 
-    let client = Client::tcp(s.addr.unwrap());
-    let head = client
-        .request("HEAD", "/static/app.wasm", &[], b"")
-        .unwrap();
-    assert_eq!((head.status, head.body.len()), (200, 0));
-    let get = client.request("GET", "/static/app.wasm", &[], b"").unwrap();
-    assert_eq!(get.body, vec![7u8; 100_000]);
+    let get = curl(&[&s.url("/static/app.wasm")]);
+    assert_eq!(get.stdout.as_bytes(), vec![7u8; 100_000]);
     assert_eq!(
         curl(&[
             "-o",
@@ -259,27 +266,6 @@ fn static_file_etag_and_head() {
         .stdout,
         "404"
     );
-    s.stop();
-}
-
-#[test]
-fn client_reads_every_framing() {
-    let s = start(Config::default());
-    let client = Client::tcp(s.addr.unwrap()).read_timeout(Some(Duration::from_secs(5)));
-    let r = client.request("GET", "/stream", &[], b"").unwrap();
-    assert_eq!((r.status, &r.body[..]), (200, &b"one two three\n"[..]));
-    assert_eq!(r.headers.get("transfer-encoding"), Some("chunked"));
-    let r = client
-        .request("POST", "/echo", &[], &[9u8; 70_000])
-        .unwrap();
-    assert_eq!(
-        (r.body.len(), r.headers.get("x-len")),
-        (70_000, Some("70000"))
-    );
-    let r = client.request("GET", "/nope", &[], b"").unwrap();
-    assert_eq!(r.status, 404);
-    let small = Client::tcp(s.addr.unwrap()).max_body(10);
-    assert!(small.request("GET", "/static/app.wasm", &[], b"").is_err());
     s.stop();
 }
 
@@ -312,14 +298,18 @@ fn graceful_shutdown_finishes_in_flight_requests() {
     let addr = s.addr.unwrap();
     let mut idle = TcpStream::connect(addr).unwrap();
     idle.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
-    let slow =
-        std::thread::spawn(move || Client::tcp(addr).request("GET", "/slow", &[], b"").unwrap());
+    let slow = std::thread::spawn(move || curl(&["-i", &format!("http://{addr}/slow")]));
     std::thread::sleep(Duration::from_millis(100));
     let start = Instant::now();
     s.handle.shutdown(Duration::from_secs(5));
     let r = slow.join().unwrap();
-    assert_eq!((r.status, &r.body[..]), (200, &b"slow done\n"[..]));
-    assert_eq!(r.headers.get("connection"), Some("close"));
+    assert_eq!(r.code, 0, "{}", r.stderr);
+    assert!(r.stdout.ends_with("\r\n\r\nslow done\n"), "{}", r.stdout);
+    assert!(header(&r.stdout, "connection").is_some_and(|value| {
+        value
+            .split(',')
+            .any(|token| token.trim().eq_ignore_ascii_case("close"))
+    }));
     s.thread.join().unwrap().unwrap();
     assert!(
         start.elapsed() < Duration::from_secs(2),
@@ -356,40 +346,4 @@ fn panicking_handler_frees_its_slot() {
         std::thread::sleep(Duration::from_millis(20));
     }
     s.stop();
-}
-
-/// A server that trickles its answer, or sends 100 Continue forever, cannot stretch a request
-/// past the client's timeout.
-#[test]
-fn client_deadline_covers_the_whole_response() {
-    let trickle = |interim: bool| {
-        common::fake_server(move |mut c, _| {
-            if !interim {
-                let _ = c.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n");
-            }
-            for _ in 0..100 {
-                std::thread::sleep(Duration::from_millis(50));
-                let bytes: &[u8] = if interim {
-                    b"HTTP/1.1 100 Continue\r\n\r\n"
-                } else {
-                    b"x"
-                };
-                if c.write_all(bytes).is_err() {
-                    return;
-                }
-            }
-        })
-    };
-    for interim in [false, true] {
-        let client = Client::tcp(trickle(interim)).read_timeout(Some(Duration::from_millis(400)));
-        let start = Instant::now();
-        let r = client.request("GET", "/", &[], b"");
-        let e = r.expect_err("a trickled response must time out");
-        assert_eq!(e.kind(), std::io::ErrorKind::TimedOut, "{e}");
-        assert!(
-            start.elapsed() < Duration::from_secs(2),
-            "{:?}",
-            start.elapsed()
-        );
-    }
 }

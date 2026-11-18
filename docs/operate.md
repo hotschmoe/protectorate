@@ -45,13 +45,13 @@ always give it the token.
 ```
 sleeve list | sleeve show <sleeve> | sleeve inbox [<sleeve>] | sleeve inbox <sleeve> --drop
 sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
-      [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT | --message-file FILE]
-sleeve send <sleeve> <text...> [--steer | --supersede]
+      [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT | --message-file FILE] [--until-done N]
+sleeve send <sleeve> <text...> [--steer | --supersede] [--until-done N]
 sleeve interrupt|stop|rm|takeover <sleeve>
-sleeve start <sleeve> [--harness H] [--provider P] [--model M]
+sleeve start <sleeve> [--harness H] [--provider P] [--model M] [--until-done N]
 sleeve resleeve <sleeve> --harness H [--provider P] [--model M]
 sleeve transcript <sleeve> [--from SEQ] [--limit N]
-sleeve wait <sleeve> [--until idle|done|blocked|parked|ended|report] [--timeout SECS]
+sleeve wait <sleeve>... [--all | --any] [--until idle|done|blocked|parked|ended|report] [--timeout SECS]
 ```
 
 For `sleeve send` and `envoy send`, `--message-file FILE` replaces the text arguments;
@@ -60,8 +60,24 @@ of long or code-bearing messages. A sleeve reaches a sibling through its parent.
 
 A sleeve is named by its id or its name.
 
-List and show include the oldest queued message's age beside the queue count. `sleeve send`
-reports whether the message was queued or sent for delivery and the queue length at acceptance.
+`--until-done N` on spawn, send or start sends a fixed continuation as the original sender after
+a `STATUS: CONTINUING` settle, at most N times. It stops on DONE, BLOCKED,
+a missing declaration, a usage limit or auth failure, a message from another sender, stop or
+park. The settle and count are journaled, so a restart keeps the remaining rounds. An
+unconfirmed round counts against N; the requester is told it may have applied, and it is not
+silently retried. Exactly-once delivery cannot be promised across a crash during a harness write.
+
+List and show include the oldest queued message's age beside the queue count. They also show the
+latest settled turn's declared status and up to 80 characters of its detail. The API includes
+its turn number, state and full detail.
+A final line `STATUS: DONE`, `STATUS: CONTINUING <remaining work>` or `STATUS: BLOCKED <reason>`
+declares the status; the last two require a nonempty detail. A later turn without a valid final
+status clears it. Turn reports include the declaration. The hub records an owner turn's
+declaration with its settle observation for journal replay. `sleeve send` reports whether the
+message was queued or sent for delivery and the queue length at acceptance.
+Each new transcript turn-settled entry includes its structured status, if declared, in the API.
+Turn reports expose their sleeve, turn and status as structured fields in the inbox API and in
+the delivered transcript entry, including when several reports are batched.
 Queued messages wait for a turn boundary. At a headless turn start, consecutive queued prompts
 are delivered together in FIFO order, with their normal sender headers; a continuation ends
 the batch. For Envoy, a switch between vendor-agent and other senders also ends the batch,
@@ -116,8 +132,11 @@ unaffected. A refused send does not drop anything.
 - **start** starts a stopped or parked sleeve, optionally on another harness. **resleeve** moves a
   sleeve to another harness, with a continuation brief in `.protectorate/BRIEF.md`.
 - **transcript** prints the chat: messages, tool calls and results, approvals, turns.
-- **wait** blocks until the sleeve reaches a state (default `idle`, 600 s) and exits non-zero if
-  it does not. `--until report` returns when that sleeve has mailed since the cursor, and prints
+- **wait** blocks until all named sleeves reach a state (default `idle`, 600 s); `--any`
+  returns when one reaches it. A sleeve that reaches the state stays counted for that wait.
+  It exits non-zero if the requested condition cannot be reached or times out. It prints each
+  sleeve's result; JSON includes the overall result and per-sleeve results. `--until report`
+  returns when the sleeve has mailed since the cursor, and prints
   that report's seq. `--after-seq N` counts only mail with a seq above N. Without it the cursor
   is the waiter's newest message to the sleeve, so the same report releases a later wait again.
   The hub's continuation of a turn after a crash is not mail for that cursor: it is not a
@@ -189,6 +208,7 @@ memory: a hub restart forgets them.
 
 ```
 node ls | node show <node>
+node set <node> --jobs any|owner|none [--note TEXT]
 node add [REGISTRATION]
 node approve <auth_id> [--name NAME] [--fingerprint FP]
 node rename <node> <new-name>
@@ -196,8 +216,12 @@ node rm <node> [--force]
 node update (<node>... | --all) [--version TAG] [--channel stable|dev] [--probation SECS] [--no-wait]
 ```
 
-- **ls** shows each node's OS and arch, link, presence (PRESENT, AWAY or UNKNOWN), last contact and
-  version; **show** adds the inventory and where presence came from.
+- **ls** shows each node's OS and arch, link, presence (PRESENT, AWAY or UNKNOWN), job policy,
+  last contact and version; **show** adds the inventory, policy note and where presence came from.
+- **set** records the job policy in the hub journal. `any` (the default) allows all callers;
+  `owner` allows only the owner and paired devices; `none` refuses all jobs. The optional note
+  replaces the prior note and appears in refusals. Omitting it clears the note. The policy applies
+  to queued jobs as well as new jobs; inventory and node updates continue normally.
 - **add** with no argument prints the join command for a new machine, the hub's control-key
   fingerprint and pending registrations; with the registration text that `join` printed, it
   records it. **approve** registers, tags and names the node. See [install.md](install.md).
@@ -246,7 +270,8 @@ job artifact <job> <path> [--out FILE]
 - `--node` names a node by id or name, and the hub keeps its id: a later rename does not move
   the job, a node not on the tailnet is refused, and a job pinned to a node that is removed
   before it starts fails; `--arch` lets the hub pick an AWAY node of that arch (the
-  least loaded one).
+  least loaded eligible one). Placement skips nodes whose job policy refuses the caller; an
+  explicit `--node` request to such a node is refused.
 - A node refuses to start a job while someone is present or presence is UNKNOWN.
   `--even-if-present` overrides that for one job.
 - If someone arrives mid-job, the job drops to idle priority and keeps running; `--on-present
@@ -289,6 +314,21 @@ expired` until one does. They run every `quota_poll_secs` (60; 0 turns them off)
 refreshed after 5 minutes and becomes stale after 10. A read that finishes after its deadline
 is kept, and ages from when it finished. A response with a malformed usage window,
 or with no window at all, is reported as an error.
+For Codex, the note reports when the subscription limit is reached and credits are available,
+the balance, the estimated hourly decrease between consecutive readings when available, and
+the number of reset credits available. The estimate is not a vendor-provided rate.
+Envoy receives a queued notice when Codex starts or stops using credits. The last notice is
+journaled, so a hub restart does not repeat a transition; an unknown or stale reading does not
+change the reported state.
+Spawn, start and resleeve onto Codex still succeed while it uses credits. The CLI warns and,
+when a fresh reading identifies an eligible alternative with headroom, names that harness. JSON
+responses carry the warning as a field; later sleeve readings do not retain the spawn warning.
+Set `quota_credit_floor` in `config.json` to a non-negative credit balance to park a new Codex
+incarnation when the last known balance is strictly below it. It defaults to unset. The last
+known balance still applies when its reading is stale; without a balance the floor cannot be
+applied. Running incarnations continue. The parked reason is `credit_floor`; after the balance
+is replenished and a new reading arrives, start the sleeve again. Configuration changes require
+a hub restart.
 Resleeve targets are weighted by fresh readings; known-exhausted candidates are skipped, and the
 sleeve parks if all eligible candidates are exhausted. A stale reading keeps its last windows:
 under the usable minimum it counts as exhausted, and with spare left the fallback may still
@@ -468,8 +508,11 @@ continuation brief show the original request, without the hub’s prompt preambl
 `"sleeve_devices": ["/dev/aipu", "/dev/mali0"]`. A path that is not there is skipped and
 the hub log says it was not bound; the sleeve still starts. The list is empty by default,
 so a sleeve sees only the sandbox's own `/dev`. Adding a device requires a hub restart,
-then a new sleeve launch. A replugged device keeps its `/dev/serial/by-id/` name but may
-get a new `ttyUSBn`; restart running sleeves to bind the new node. Inside a sleeve the
+then a new sleeve launch. The hub checks paths once a second; when a missing or replaced node
+appears, running sleeves record a notice naming the path and relaunch with native session
+resume. An idle sleeve relaunches immediately; a working sleeve waits for its next turn
+boundary. A replugged device can keep its `/dev/serial/by-id/` name while getting a new
+`ttyUSBn`. Inside a sleeve the
 device may appear as `nobody:nogroup` and `id` may show `nogroup`; supplementary host
 groups still apply, so this alone does not mean a 0666 udev rule is needed.
 Doctor reports each configured path, resolved node, owner, group, mode and hub read/write access without opening it. At each launch the hub logs the same information and any host processes holding the device; the first prompt lists bound devices and their holders. Processes that cannot be inspected are skipped.
@@ -561,12 +604,21 @@ hub request other than Hello. A node that has not done so within the
 probation window (`--probation`, default 600 s) reverts to its previous binary. The command waits
 for every node unless `--no-wait`. Update the hub first, then one node per OS and arch, then the
 rest. Updates run OS/architecture groups independently, preferring an online idle canary. A busy
-deferred canary gives way to the next node; a failed canary skips its group. A node with a running job waits up to 30 seconds and then is
-deferred; an offline node is deferred. The CLI prints progress and then the results table, and the
+deferred canary gives way to the next node; a failed canary skips its group, labeling those rows
+`SKIPPED`. A node with a running job waits up to 30 seconds and then is
+deferred; an offline node is deferred. Deferred rows are labeled `DEFERRED` in the CLI results
+table; a pending update cancelled before dispatch is labeled `CANCELLED`. The CLI prints progress and then the results table, and the
 hub records progress in events. A lost update reply can be confirmed by Hello and Presence on the
 target release. `--all --no-wait` accepts the rollout in the background and prints
 its event id; follow it with `event list`. A hub restart stops an unfinished rollout. With named nodes `--no-wait` waits for the switch but
 not the return. Once an update is admitted, new jobs answer `busy` until the restart.
+
+The journal retains each deferred target and probation window. `node show <node>` shows its
+pending target; a newer rollout replaces it, and `node update --cancel <node>` drops it. When the
+node returns the hub makes one attempt using the normal switch and confirmation path. An attempt
+interrupted by a hub crash is not sent again: the hub confirms it if the node returns on the target,
+otherwise it remains pending with an uncertain outcome reported in events. Unattempted targets
+survive a hub restart.
 
 A Windows node updates the same way. The SCM cannot run a step before each start or restart a
 service from inside it, so the service runs a supervisor, `protectorate-node supervise --service`,
@@ -624,6 +676,20 @@ Neither installer has run on a real device yet.
 
 ## Devices
 
+The app's event stream resumes a short interruption from its last sequence. After a gap of more
+than 500 retained stream messages, or when that cursor is unavailable, the hub sends a current
+snapshot instead of replaying the gap.
+The app holds the catch-up state until the hub's `live` marker, then displays it in one update.
+The stream sends transcript entries only for open chats; the app reloads those chats after a
+reconnect to fill any gap.
+
+For development, `make test-heavy` runs the large-gap reconnect scenario separately from
+`make test`. To pace its 3,000-entry fake-harness workload across 30 minutes, run
+`PT_RECONNECT_GAP_SECS=1801 cargo test --locked --workspace --test hub stream_large_gap_uses_snapshot -- --ignored --nocapture`.
+One run with one open transcript measured 2,838,984 bytes of backlog message payload versus
+674,268 network bytes received on reconnect, including the transcript reload; the snapshot alone
+was 4,137 bytes. These are synthetic workload measurements, not mobile traffic estimates.
+
 ```
 device list | device add <name> | device pair <code> | device revoke <id>
 ```
@@ -679,4 +745,4 @@ None of these rotate yet.
 
 Tick processing tracks uncertain and probing effects, active jobs, eligible sleeves and pending approvals while retaining terminal records. These indexes are rebuilt during journal replay.
 
-The development gate `make check` runs every check and reports failed steps together. `make test` runs both e2e tests and fuzz seed replay even if either fails. The gate also builds every standalone fuzz workspace. Real-scope e2e tests skip with `SKIP: no systemd user bus` when the user manager is unavailable; test hubs stop their sleeve scopes on teardown.
+The blocking gate is `make check`; `make test` runs its e2e scenarios. `make test-heavy` runs the background e2e suite, every `#[ignore]`d long feature scenario, fuzz seed replay and fuzz builds. Real-scope tests skip without a systemd user bus.

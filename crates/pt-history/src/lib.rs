@@ -48,11 +48,11 @@ pub use source::{Source, SourceKind};
 pub use search::{SNIPPET, brief_query};
 
 /// Drives one extractor over arbitrary lines for the fuzz targets: the first byte picks the
-/// source kind, the rest is split on newlines. Returns the number of docs. Not a stable API.
+/// source kind, the rest is split on newlines. Returns document text. Not a stable API.
 #[doc(hidden)]
-pub fn fuzz_extract(data: &[u8]) -> usize {
+pub fn fuzz_extract(data: &[u8]) -> Vec<String> {
     let Some((&k, rest)) = data.split_first() else {
-        return 0;
+        return Vec::new();
     };
     let kind = SourceKind::ALL[k as usize % SourceKind::ALL.len()];
     let mut st = extract::State::default();
@@ -60,8 +60,8 @@ pub fn fuzz_extract(data: &[u8]) -> usize {
     for l in rest.split(|b| *b == b'\n') {
         extract::line(kind, l, &mut st, &mut out);
     }
-    let mut docs = 0;
-    for item in &out {
+    let mut docs = Vec::new();
+    for item in out {
         if let extract::Item::Doc(d) = item {
             let max = match d.role {
                 Role::ToolCall | Role::ToolError => TOOL_MAX,
@@ -73,7 +73,7 @@ pub fn fuzz_extract(data: &[u8]) -> usize {
                 "doc paths over the tool budget"
             );
             assert!(!d.text.is_empty() || !d.files.is_empty(), "empty doc");
-            docs += 1;
+            docs.push(d.text);
         }
     }
     docs

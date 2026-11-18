@@ -93,6 +93,11 @@ pub enum Obs {
     TurnSettled {
         end: TurnEnd,
     },
+    /// A settle with the final message's declaration, recorded with the observation.
+    TurnSettledStatus {
+        end: TurnEnd,
+        status: Option<DeclaredStatus>,
+    },
     /// A turn started by the harness, independently of a delivered prompt.
     TurnBegan,
     ForeignTurnSettled {
@@ -121,6 +126,33 @@ pub enum Obs {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EventKind {
     MailBatching,
+    DeviceChanged {
+        sleeve: SleeveId,
+        g: Gen,
+        path: String,
+    },
+    PendingNodeUpdate {
+        node: NodeId,
+        version: String,
+        probation_secs: u64,
+    },
+    ClearPendingNodeUpdate {
+        node: NodeId,
+        revision: Option<u64>,
+    },
+    ClaimPendingNodeUpdate {
+        node: NodeId,
+        revision: u64,
+    },
+    ReleasePendingNodeUpdate {
+        node: NodeId,
+        revision: u64,
+    },
+    SetNodeJobs {
+        node: NodeId,
+        jobs: String,
+        note: Option<String>,
+    },
     // Commands from the API (owner, Envoy, agents, sleeves).
     Spawn(SpawnSpec),
     Send {
@@ -133,6 +165,16 @@ pub enum EventKind {
         mode: SendMode,
         /// The sending turn had D9 origin. The recipient is marked, and so are its children.
         d9: bool,
+    },
+    SendUntil {
+        to: SleeveId,
+        request_id: String,
+        from: Party,
+        text: String,
+        mode: SendMode,
+        d9: bool,
+        supersede: bool,
+        limit: u64,
     },
     Supersede {
         to: SleeveId,
@@ -175,6 +217,18 @@ pub enum EventKind {
         target: Option<Target>,
         effort: Option<String>,
     },
+    StartUntil {
+        sleeve: SleeveId,
+        target: Option<Target>,
+        effort: Option<String>,
+        from: Party,
+        limit: u64,
+    },
+    ArmUntil {
+        sleeve: SleeveId,
+        from: Party,
+        limit: u64,
+    },
     Resleeve {
         sleeve: SleeveId,
         target: Option<Target>,
@@ -183,12 +237,22 @@ pub enum EventKind {
     Abandon {
         effect: EffectId,
     },
+    CreditFloor {
+        effect: EffectId,
+        attempt: u32,
+    },
     Viewed {
         sleeve: SleeveId,
     },
     CreateJob {
         request_id: String,
         spec: JobSpec,
+    },
+    CreateNodeJob {
+        request_id: String,
+        spec: JobSpec,
+        node: NodeId,
+        owner: bool,
     },
     CancelJob {
         job: JobId,
@@ -255,6 +319,13 @@ pub enum EventKind {
         node: NodeId,
         epoch: u64,
     },
+    NodeChosenWithPolicy {
+        job: JobId,
+        attempt: u32,
+        node: NodeId,
+        epoch: u64,
+        owner: bool,
+    },
     /// The node a queued job is pinned to is gone from the fleet; a job in any other state is
     /// left alone.
     JobNodeRemoved {
@@ -311,6 +382,13 @@ pub enum EventKind {
         to: SleeveId,
         turn: u64,
         text: String,
+    },
+    ReportStatus {
+        sleeve: SleeveId,
+        to: SleeveId,
+        turn: u64,
+        text: String,
+        status: Option<DeclaredStatus>,
     },
 }
 

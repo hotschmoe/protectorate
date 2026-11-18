@@ -148,7 +148,9 @@ CLI on the hub machine (section 3.1).
   by its children. A send from a marked sleeve marks the recipient, so the mark crosses a relay;
   replay applies the same rule. `sleeve show` reports the mark. Mail from a marked sleeve starts
   an Envoy turn with D9 origin, so the same removals, node jobs and mass spawns wait for the
-  owner. Mail from an unmarked sleeve does not. `Wait --until report` returns when the waited-on
+  owner. Mail from an unmarked sleeve does not. `Wait` accepts several sleeves, waits for all by
+  default or any with `--any`, and retains each reached result during the wait. It returns failure
+  when the requested condition becomes impossible or the deadline passes. `Wait --until report` returns when the waited-on
   sleeve has mailed after the cursor, and it returns that report's seq. `--after-seq` sets the
   cursor; without it the cursor is the waiter's newest message to the sleeve, so the same report
   releases a later wait again. The core's continuation of a turn is not mail
@@ -165,9 +167,29 @@ CLI on the hub machine (section 3.1).
   transcript and git, with no model: how the turn ended, tokens and context, branch, head and
   uncommitted files, commits and diffstat since the task's base commit (the workspace's HEAD at
   the sleeve's first launch), the turn's last test command and its result, notices, and the final
-  message clipped at 2000 bytes with the transcript range for the rest. It skips the mail bound,
-  since the recipient opened the turn, and carries the D9 mark like any mail from the sleeve. A
-  usage-limit or auth settle reports after its continuation. Envoy reports to no one.
+  message clipped at 2000 bytes with the transcript range for the rest. It skips the mail bound
+  since the recipient opened the turn, and carries the D9 mark like any mail from the sleeve.
+  It includes the declared status when the final message ends in `STATUS: DONE`,
+  `STATUS: CONTINUING <remaining work>` or `STATUS: BLOCKED <reason>` (the latter two need a
+  nonempty detail). Sleeve API views expose the latest settled turn's status, turn number and
+  detail; list displays its state and up to 80 characters of its detail. A turn without a valid
+  declaration clears the previous status.
+  New owner-turn settle observations journal the declaration together with the outcome, so the
+  core reconstructs it on replay without consulting the transcript.
+  Each newly stored transcript settle also carries its own structured status in the API, so
+  clients can inspect earlier turns after a later turn changes the sleeve's current status.
+  The report carries its sleeve, turn and status as structured inbox and transcript data,
+  captured when the turn settled and journaled with the report. Batched deliveries retain the
+  metadata of each report.
+  Spawn, send and start accept `--until-done N` for a nonnegative N. A CONTINUING settle sends a
+  fixed continuation as the requesting party, at most N rounds. DONE, BLOCKED, a missing
+  declaration, usage limit, auth failure, another party's message, stop or park ends the loop.
+  The request, settle and allocated rounds are journaled; replay preserves their count. An
+  unconfirmed round remains Uncertain, counts against N, and is not silently retried; the
+  requester is told it may have applied. Exactly-once delivery is not promised because a
+  harness write and its acknowledgement cannot be recorded atomically. A bounded continuation
+  is not mail for report cursors.
+  A usage-limit or auth settle reports after its continuation. Envoy reports to no one.
 - **Envoy's context ceiling.** When an Envoy turn settles with its context at 500k tokens or
   more, the hub sends the core a `Compact` for Envoy; the core takes it once Envoy is idle with
   nothing queued, and the driver sends the harness's own compaction (`/compact` for Claude Code).
@@ -283,8 +305,14 @@ crash, every incarnation goes to Recovering and resumes natively.
     tmpfs or ramfs;
   - host device nodes named in `sleeve_devices` (for example `/dev/aipu` and `/dev/mali0`)
     bound with `--dev-bind` when the path exists; a missing path is skipped and logged, and
-    the sleeve still starts. Config changes require a hub restart; a replug can change the
-    resolved node, so running sleeves must restart. Host supplementary groups still apply
+    the sleeve still starts. Config changes require a hub restart. The hub polls configured
+    paths for a new resolved filesystem node; when one appears, each running sleeve records a
+    notice naming it and relaunches with a native session resume, immediately if idle or at
+    the next turn boundary if working. A path missing at hub startup is watched too. A device
+    removed and still absent is not rebound until it returns. Shared mount propagation does
+    not replace this: a bind of an individual node pins the old inode, while propagating a
+    host directory would expose unlisted devices and requires a separately managed shared
+    allowlist mount and propagation setup. Host supplementary groups still apply
     even when sandbox ownership appears as nobody:nogroup. Doctor and each launch report the
     resolved node, owner, group, mode and hub read/write access without opening it, plus host
     process holders; the first prompt lists bound devices and holders;
@@ -343,9 +371,12 @@ crash, every incarnation goes to Recovering and resumes natively.
 
 ### 3.5 Nodes
 
-- **One kind of node** (D32). Node tiers are gone: the only reason for them was to keep jobs off
-  machines a person is using, and presence detection does that directly. Every node takes jobs
-  when idle and refuses them while someone is at it.
+- **One kind of node** (D32). Presence detection holds work while someone is at the machine.
+  The owner can journal a per-node job policy with `node set <node> --jobs any|owner|none`
+  and an optional `--note TEXT`. The default `any` permits jobs from all callers, `owner`
+  permits only owner jobs, and `none` permits none. Explicit node requests are refused with
+  the policy and note; arch placement skips nodes that refuse the caller. Changes also apply
+  to queued jobs, and survive hub restart. Inventory and rollout are unaffected.
 - **One node binary** per OS. It runs as a system service on Linux and as a LocalSystem service with a
   runner account on Windows. It also builds for Android (Termux), and for macOS once a Mac exists.
   All RPCs are hub-initiated on tailnet port 7475.
@@ -620,11 +651,19 @@ straight from GitHub releases, on the stable or dev channel, as today.
   through one go.mod, so a fleet mid-rollout keeps working.
   Node update runs OS/architecture groups independently, preferring an online idle canary. A
   busy deferred canary gives way to the next candidate; a failed canary skips the rest of its
-  group. A running job holds its node for up to 30 seconds, then the
-  update is deferred. Offline nodes are deferred. Progress is published as node events and the
+  group, whose remaining rows are labeled `SKIPPED`. A running job holds its node for up to 30 seconds, then the
+  update is deferred. Offline nodes are deferred. The CLI labels deferred results `DEFERRED`
+  with the reason. The journal keeps the target and probation window; `node show` displays the
+  target, a newer rollout replaces it, and `node update --cancel <node>` drops it. A pending
+  attempt cancelled before dispatch is labeled `CANCELLED`. On the node's
+  return the hub attempts the same update and confirmation once. The attempt is journaled before
+  sending; after a hub crash an interrupted attempt is confirmed by Hello and Presence on the
+  target, or remains pending as an uncertain outcome without automatic retry.
+  Progress is published as node events and the
   CLI prints it before the final table. A lost update reply can be confirmed by Hello and
   Presence on the target release. `--all --no-wait` accepts the rollout in the background;
-  its rollout id identifies the events; a hub restart stops an unfinished rollout. Named-node `--no-wait` still waits for the switch but
+  its rollout id identifies the events; a hub restart stops an unfinished rollout, while its
+  unattempted targets remain pending. Named-node `--no-wait` still waits for the switch but
   does not wait for the node to return.
 - **Apps, from the hub's release:** `HubInfo.clients` lists the client builds the running
   release's `SHA256SUMS` names (`protectorate-android.apk`,
@@ -673,7 +712,7 @@ backup that recovers a dead hub moves a live one.
 - **GitHub stays the origin.** `gh` is installed and authed on the hub, and the hub alone holds
   the push token. Sleeves push through `protectorate git push` (12b item 6) and get a read-only
   token for `gh` queries. The hub keeps bare mirrors as backup. No Forgejo, GitLab or Woodpecker.
-- **Cross-arch CI** is a hub rule: dispatch `make test` as a node job to each required arch. Plain
+- **Cross-arch CI** is a hub rule: dispatch `make test-heavy` as a node job to each required arch. Plain
   binaries; containers only when a job asks for them.
 - **`doctor`**, on hub and node, checks:
   - harness CLIs present, with versions and install method (D33);
@@ -722,7 +761,19 @@ lasts that long after the fetch: a body that says the window is full and the res
 seconds ago is still that limit. A stamp already long past when the row was fetched counts as
 reset, and so does a window once the grace has ended. The fallback may then spend the row
 because its windows have reset. That is not a missing reading. A reset at or before the epoch
-is no reset time, and the percent still counts. Model-scoped Claude windows (`wk <name>`) stay on the quota row
+is no reset time, and the percent still counts. Codex readings also carry the vendor's credit
+and limit flags, balance, and available reset credits. When the limit is reached and credits
+are available, the row shows the balance and the estimated hourly decrease between consecutive
+readings; the rate is not a vendor claim. Envoy receives one queued notice when Codex begins
+or stops spending credits; its journaled message records the last reported state across hub
+restarts. Unknown and stale readings do not change that state. Spawn, start and resleeve onto
+Codex succeed while it uses credits but return a warning, naming an eligible harness with fresh
+quota headroom when one exists. Optional `quota_credit_floor`, unset by default, parks a new
+Codex incarnation before launch when the last known balance is strictly below the configured
+non-negative value, even when that reading is stale. No known balance leaves it unblocked.
+The reason is `credit_floor`; running incarnations continue, and an owner may start a parked
+sleeve after a replenished balance is read. This decision is journaled for replay. Model-scoped Claude windows
+(`wk <name>`) stay on the quota row
 and gate a candidate of the same family (opus, sonnet, haiku), ignoring case and version
 (`Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus). `opusplan`
 counts as both Opus and Sonnet, so that model is gated by either cap, and a cap whose name
@@ -1030,7 +1081,19 @@ shortcut is also in `REVISIT.md`.
   dev-only fuzz dependencies. There is no SQLite: `pt-history` replaces `rusqlite` (3.7).
 - **The API** is JSON over HTTP:
   - `POST /api/<Method>` carries the request and response bodies;
-  - `GET /api/events` is a WebSocket of state changes;
+  - `GET /api/events` is a WebSocket of state changes. A client resumes with `from_seq`
+    one greater than the last kept sequence it received. If more than 500 kept messages
+    are missing, the cursor is unavailable, or no cursor is supplied, the hub sends a fresh
+    snapshot instead of replaying the gap; its sequence identifies the cursor it covers.
+    Streaming deltas repeat the last kept sequence and are not replayed. A `live` marker
+    follows the replay or snapshot before newer stream messages; its sequence is the last
+    kept sequence at that boundary and does not allocate a new sequence. If a live subscriber
+    falls behind the ring, a snapshot and another `live` marker replace the lost gap. Clients
+    publish the caught-up state only after `live` and discard an interrupted catch-up. Entry
+    messages are sent only for sleeve IDs in the connection's comma-separated `transcripts`
+    query parameter. Other messages retain their original sequence numbers, so clients must
+    allow gaps. A client changes subscriptions by reconnecting and loads each open transcript
+    after `live` to cover the changeover;
   - loopback and unix-socket listeners serve the CLI and sleeves; the trusted-proxy listener serves
     Traefik.
 
@@ -1056,4 +1119,4 @@ shortcut is also in `REVISIT.md`.
 - **Envoy** is a root sleeve running Claude Code headless in `$PROTECTORATE_HOME/envoy/`. That
   directory's own `CLAUDE.md` describes the `protectorate` CLI, so no worked-on repo is touched.
 
-The development gate `make check` runs every check and reports failed steps together. `make test` runs both e2e tests and fuzz seed replay even if either fails. The gate also builds every standalone fuzz workspace. Real-scope e2e tests skip with `SKIP: no systemd user bus` when the user manager is unavailable; test hubs stop their sleeve scopes on teardown.
+The blocking gate is `make check`; `make test` runs its e2e scenarios. `make test-heavy` runs the background e2e suite, every `#[ignore]`d long feature scenario, fuzz seed replay and fuzz builds. Real-scope tests skip without a systemd user bus.

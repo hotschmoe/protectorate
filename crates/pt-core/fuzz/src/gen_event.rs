@@ -58,7 +58,7 @@ fn obs(b: &mut Bytes) -> Obs {
         Verdict::Blocked,
         Verdict::NoMatch,
     ];
-    match b.below(13) {
+    match b.below(14) {
         0 => Obs::Ready {
             session: b.string(),
         },
@@ -80,8 +80,17 @@ fn obs(b: &mut Bytes) -> Obs {
         9 => Obs::Disk { bytes: b.u64() },
         10 => Obs::ForbiddenPath { path: b.string() },
         11 => Obs::TurnBegan,
-        _ => Obs::ForeignTurnSettled {
+        12 => Obs::ForeignTurnSettled {
             end: ENDS[b.below(5) as usize],
+        },
+        _ => Obs::TurnSettledStatus {
+            end: ENDS[b.below(5) as usize],
+            status: match b.below(4) {
+                0 => None,
+                1 => Some(DeclaredStatus::Done),
+                2 => Some(DeclaredStatus::Continuing(b.string())),
+                _ => Some(DeclaredStatus::Blocked(b.string())),
+            },
         },
     }
 }
@@ -107,7 +116,7 @@ pub fn event(b: &mut Bytes) -> Event {
     let j = |b: &mut Bytes| JobId(b.u64());
     let a = |b: &mut Bytes| b.u64() as u32;
     use EventKind as E;
-    let kind = match b.below(37) {
+    let kind = match b.below(50) {
         0 => E::Spawn(SpawnSpec {
             request_id: b.string(),
             name: b.string(),
@@ -290,7 +299,94 @@ pub fn event(b: &mut Bytes) -> Event {
             effect: e(b),
             attempt: a(b),
         },
-        _ => E::MailBatching,
+        36 => E::MailBatching,
+        37 => E::DeviceChanged {
+            sleeve: s(b),
+            g: g(b),
+            path: b.string(),
+        },
+        38 => E::ReportStatus {
+            sleeve: s(b),
+            to: s(b),
+            turn: b.u64(),
+            text: b.string(),
+            status: match b.below(4) {
+                0 => None,
+                1 => Some(DeclaredStatus::Done),
+                2 => Some(DeclaredStatus::Continuing(b.string())),
+                _ => Some(DeclaredStatus::Blocked(b.string())),
+            },
+        },
+        39 => E::SendUntil {
+            to: s(b),
+            request_id: b.string(),
+            from: party(b),
+            text: b.string(),
+            mode: if b.bool() {
+                SendMode::Steer
+            } else {
+                SendMode::Queue
+            },
+            d9: b.bool(),
+            supersede: b.bool(),
+            limit: b.u64(),
+        },
+        40 => E::StartUntil {
+            sleeve: s(b),
+            target: opt(b, target),
+            effort: opt(b, |b| b.string()),
+            from: party(b),
+            limit: b.u64(),
+        },
+        41 => E::ArmUntil {
+            sleeve: s(b),
+            from: party(b),
+            limit: b.u64(),
+        },
+        42 => E::PendingNodeUpdate {
+            node: NodeId(b.u64()),
+            version: b.string(),
+            probation_secs: b.u64(),
+        },
+        43 => E::ClearPendingNodeUpdate {
+            node: NodeId(b.u64()),
+            revision: opt(b, |b| b.u64()),
+        },
+        44 => E::ClaimPendingNodeUpdate {
+            node: NodeId(b.u64()),
+            revision: b.u64(),
+        },
+        45 => E::ReleasePendingNodeUpdate {
+            node: NodeId(b.u64()),
+            revision: b.u64(),
+        },
+        46 => E::SetNodeJobs {
+            node: NodeId(b.u64()),
+            jobs: ["any", "owner", "none"][b.below(3) as usize].to_string(),
+            note: opt(b, |b| b.string()),
+        },
+        47 => E::NodeChosenWithPolicy {
+            job: j(b),
+            attempt: a(b),
+            node: NodeId(b.u64()),
+            epoch: b.u64(),
+            owner: b.bool(),
+        },
+        48 => E::CreditFloor {
+            effect: e(b),
+            attempt: a(b),
+        },
+        _ => E::CreateNodeJob {
+            request_id: b.string(),
+            spec: JobSpec {
+                digest: b.string(),
+                arch: b.string(),
+                command: b.string(),
+                even_if_present: b.bool(),
+            },
+            node: NodeId(b.u64()),
+            owner: b.bool(),
+        },
     };
     Event { at, kind }
 }

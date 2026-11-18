@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 
 use libfuzzer_sys::fuzz_target;
 use pt_journal::codec::{Stop, decode_frames, encode_frame};
-use pt_journal::{HEADER_LEN, Journal};
+use pt_journal::{Cut, CutReason, HEADER_LEN, Journal};
 
 fn dir() -> &'static PathBuf {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -18,6 +18,26 @@ fn dir() -> &'static PathBuf {
 }
 
 fuzz_target!(|data: &[u8]| {
+    let seg = dir().join("segment-00000000000000000000");
+    let header = b"PTJOURNL\x01\0\0\0";
+    let end = data.first().copied().unwrap_or(0) as usize % HEADER_LEN;
+    fs::write(&seg, &header[..end]).expect("write torn header");
+    let (mut journal, rec) = Journal::open(dir()).expect("open torn header");
+    assert!(rec.frames.is_empty());
+    assert_eq!(
+        rec.cut,
+        Some(Cut {
+            offset: 0,
+            dropped: end as u64,
+            reason: CutReason::Header
+        })
+    );
+    journal.append(b"fresh").expect("append after torn header");
+    drop(journal);
+    let (journal, rec) = Journal::open(dir()).expect("reopen after torn header");
+    assert_eq!(rec.frames, [b"fresh"]);
+    drop(journal);
+
     let d = decode_frames(data);
 
     let mut again = Vec::new();
@@ -44,7 +64,6 @@ fuzz_target!(|data: &[u8]| {
     }
 
     // The same bytes as a real segment file: open recovers the same frames and truncates.
-    let seg = dir().join("segment-00000000000000000000");
     let mut file = b"PTJOURNL\x01\0\0\0".to_vec();
     file.extend_from_slice(data);
     fs::write(&seg, &file).expect("write segment");

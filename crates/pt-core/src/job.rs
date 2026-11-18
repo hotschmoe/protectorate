@@ -26,7 +26,7 @@ impl Core<'_> {
         self.st.jobs.get_mut(&id).expect("job exists")
     }
 
-    fn schedule(&mut self, id: JobId) {
+    pub(crate) fn schedule(&mut self, id: JobId) {
         let now = self.now;
         let j = self.job(id);
         j.excluded.retain(|&(_, until)| until > now);

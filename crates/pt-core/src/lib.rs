@@ -71,6 +71,62 @@ impl Core<'_> {
         use EventKind as E;
         match kind {
             E::MailBatching => self.st.mail_batching = true,
+            E::DeviceChanged { sleeve, g, path } => self.device_changed(*sleeve, *g, path),
+            E::CreditFloor { effect, attempt } => self.credit_floor(*effect, *attempt),
+            E::PendingNodeUpdate {
+                node,
+                version,
+                probation_secs,
+            } => {
+                self.st.next_node_update += 1;
+                self.st.pending_node_updates.insert(
+                    *node,
+                    crate::state::PendingNodeUpdate {
+                        revision: self.st.next_node_update,
+                        version: version.clone(),
+                        probation_secs: *probation_secs,
+                        attempted: false,
+                    },
+                );
+                self.reply(Reply::PendingNodeUpdate(self.st.next_node_update));
+            }
+            E::ClearPendingNodeUpdate { node, revision } => {
+                if self
+                    .st
+                    .pending_node_updates
+                    .get(node)
+                    .is_some_and(|p| revision.is_none_or(|revision| p.revision == revision))
+                {
+                    self.st.pending_node_updates.remove(node);
+                }
+                self.reply(Reply::Accepted);
+            }
+            E::ClaimPendingNodeUpdate { node, revision } => {
+                match self.st.pending_node_updates.get_mut(node) {
+                    Some(p) if p.revision == *revision && !p.attempted => {
+                        p.attempted = true;
+                        self.reply(Reply::Accepted);
+                    }
+                    _ => self.reply(Reply::Refused(
+                        Code::FailedPrecondition,
+                        "pending node update changed or was already attempted".into(),
+                    )),
+                }
+            }
+            E::ReleasePendingNodeUpdate { node, revision } => {
+                if let Some(p) = self.st.pending_node_updates.get_mut(node)
+                    && p.revision == *revision
+                {
+                    p.attempted = false;
+                }
+                self.reply(Reply::Accepted);
+            }
+            E::SetNodeJobs { node, jobs, note } => {
+                self.st
+                    .node_jobs
+                    .insert(*node, (jobs.clone(), note.clone()));
+                self.reply(Reply::Accepted);
+            }
             E::Spawn(spec) => self.spawn(spec),
             E::Send {
                 to,
@@ -90,6 +146,28 @@ impl Core<'_> {
                 *d9,
                 true,
                 false,
+                None,
+            ),
+            E::SendUntil {
+                to,
+                request_id,
+                from,
+                text,
+                mode,
+                d9,
+                supersede,
+                limit,
+            } => self.send(
+                *to,
+                request_id,
+                *from,
+                None,
+                text,
+                *mode,
+                *d9,
+                true,
+                *supersede,
+                Some(*limit),
             ),
             E::Supersede {
                 to,
@@ -107,6 +185,7 @@ impl Core<'_> {
                 *d9,
                 true,
                 true,
+                None,
             ),
             E::DropQueued { to, from } => self.drop_queued_cmd(*to, *from),
             E::Report {
@@ -114,7 +193,23 @@ impl Core<'_> {
                 to,
                 turn,
                 text,
-            } => self.report_cmd(*sleeve, *to, *turn, text),
+            } => self.report_cmd(*sleeve, *to, *turn, text, None),
+            E::ReportStatus {
+                sleeve,
+                to,
+                turn,
+                text,
+                status,
+            } => self.report_cmd(
+                *sleeve,
+                *to,
+                *turn,
+                text,
+                Some(TurnReport {
+                    turn: *turn,
+                    status: status.clone(),
+                }),
+            ),
             E::Interrupt { sleeve } => self.interrupt_cmd(*sleeve),
             E::Compact { sleeve } => self.compact_cmd(*sleeve),
             E::RespondApproval {
@@ -135,6 +230,42 @@ impl Core<'_> {
                 target,
                 effort,
             } => self.start_cmd(*sleeve, target.as_ref(), effort.as_deref()),
+            E::StartUntil {
+                sleeve,
+                target,
+                effort,
+                from,
+                limit,
+            } => {
+                let before = self.out.len();
+                self.start_cmd(*sleeve, target.as_ref(), effort.as_deref());
+                if self.out[before..]
+                    .iter()
+                    .any(|i| matches!(i, Intent::Reply(Reply::Accepted)))
+                {
+                    self.sl(*sleeve).until_done = Some(UntilDone {
+                        from: *from,
+                        limit: *limit,
+                        rounds: 0,
+                    });
+                }
+            }
+            E::ArmUntil {
+                sleeve,
+                from,
+                limit,
+            } => {
+                if self.st.sleeve(*sleeve).is_some_and(|s| s.life.live()) {
+                    self.sl(*sleeve).until_done = Some(UntilDone {
+                        from: *from,
+                        limit: *limit,
+                        rounds: 0,
+                    });
+                    self.reply(Reply::Accepted);
+                } else {
+                    self.refuse(Code::FailedPrecondition, "cannot enable until-done");
+                }
+            }
             E::Resleeve {
                 sleeve,
                 target,
@@ -143,10 +274,52 @@ impl Core<'_> {
             E::Abandon { effect } => self.abandon_cmd(*effect),
             E::Viewed { sleeve } => self.viewed_cmd(*sleeve),
             E::CreateJob { request_id, spec } => self.create_job(request_id, spec),
+            E::CreateNodeJob {
+                request_id,
+                spec,
+                node,
+                owner,
+            } => {
+                if !self.st.job_requests.contains_key(request_id)
+                    && let Some((jobs, note)) = self.st.node_jobs.get(node)
+                    && (jobs == "none" || (jobs == "owner" && !owner))
+                {
+                    let why = note.as_ref().map_or_else(String::new, |n| format!(": {n}"));
+                    self.refuse(
+                        Code::FailedPrecondition,
+                        format!("node {} refuses this job (jobs {jobs}){why}", node.0),
+                    );
+                } else {
+                    self.create_job(request_id, spec);
+                }
+            }
             E::CancelJob { job } => self.cancel_job(*job),
             E::AbandonJob { job } => self.abandon_job(*job),
             E::RequeueJob { job } => self.requeue_job(*job),
             E::JobNodeRemoved { job, node } => self.job_node_removed(*job, *node),
+            E::NodeChosenWithPolicy {
+                job,
+                attempt,
+                node,
+                epoch,
+                owner,
+            } => {
+                let allowed = self
+                    .st
+                    .node_jobs
+                    .get(node)
+                    .is_none_or(|(jobs, _)| jobs == "any" || (jobs == "owner" && *owner));
+                if allowed {
+                    self.node_chosen(*job, *attempt, *node, *epoch);
+                } else if self
+                    .st
+                    .jobs
+                    .get(job)
+                    .is_some_and(|j| j.attempt == *attempt && j.state == JobState::Queued)
+                {
+                    self.schedule(*job);
+                }
+            }
 
             E::Dispatched { effect, attempt } => {
                 // The answer lets an executor that asks write only what is still released.

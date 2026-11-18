@@ -1,9 +1,61 @@
 use std::fs;
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 use std::path::Path;
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 use crate::hub::Hub;
 use crate::principal::{CgroupSleeve, cgroup_sleeve, peer_cgroup};
+
+pub fn watch(hub: Arc<Hub>) -> Result<(), String> {
+    if hub.config.sleeve_devices.is_empty() {
+        return Ok(());
+    }
+    let mut identities: Vec<_> = hub
+        .config
+        .sleeve_devices
+        .iter()
+        .map(|p| node_id(p))
+        .collect();
+    thread::Builder::new()
+        .name("pt-devices".into())
+        .spawn(move || {
+            loop {
+                thread::sleep(Duration::from_secs(1));
+                for (path, previous) in hub.config.sleeve_devices.iter().zip(&mut identities) {
+                    let Some(current) = node_id(path) else {
+                        continue;
+                    };
+                    if *previous != Some(current) {
+                        *previous = Some(current);
+                        let view = hub.view();
+                        for s in view.state.sleeves.values() {
+                            if matches!(
+                                s.life,
+                                pt_core::Life::Running
+                                    | pt_core::Life::Launching
+                                    | pt_core::Life::Resleeving
+                            ) {
+                                hub.submit(pt_core::EventKind::DeviceChanged {
+                                    sleeve: s.id,
+                                    g: s.g,
+                                    path: path.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        })
+        .map_err(|e| format!("spawn device watcher: {e}"))?;
+    Ok(())
+}
+
+fn node_id(path: &str) -> Option<(u64, u64)> {
+    let meta = fs::metadata(path).ok()?;
+    Some((meta.dev(), meta.ino()))
+}
 
 pub struct Device {
     pub path: String,

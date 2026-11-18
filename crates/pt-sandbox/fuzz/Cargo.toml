@@ -1,0 +1,21 @@
+[package]
+name = "pt-sandbox-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+pt-sandbox = { path = ".." }
+
+[[bin]]
+name = "mask_paths"
+path = "fuzz_targets/mask_paths.rs"
+test = false
+doc = false
+bench = false

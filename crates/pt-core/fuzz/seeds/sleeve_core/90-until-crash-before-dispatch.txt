@@ -1,0 +1,20 @@
+#scenario 8963541b280c8a0f
+# A continuation whose intent is durable but has no dispatch receipt stays uncertain and counts.
+spawn root /w/a
+run
+obs root ready
+send root m1 until=3
+run
+obs root continuing
+commit
+expect root until_rounds=1 activity=Delivering
+expect-effect until:* state=Intent attempt=1 count=1
+crash
+expect root until_rounds=1
+expect-notice UntilRoundMayHaveApplied count=1
+run
+expect-effect until:* state=Fenced attempt=1 count=1
+obs root ready
+run
+expect-effect until:* state=Fenced attempt=1 count=1
+expect-effect continue:* count=0

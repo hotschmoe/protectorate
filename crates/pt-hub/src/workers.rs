@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use pt_api::{EventKind as Kind, Level, Subscription};
-use pt_core::{EventKind, Harness, Life, ParkReason};
+use pt_core::{EventKind, Harness, Life, ParkReason, Party, Reply, SendMode};
 use pt_doctor::Report;
 use pt_fleet::{Fleet, PollConfig};
 use pt_quota::{Cache, Options, Reader};
@@ -26,6 +26,82 @@ const LOGIN_RENEW_EVERY: Duration = Duration::from_secs(600);
 const HISTORY_POLL: Duration = Duration::from_secs(1);
 /// Longest wait after a failed history commit before the next catch-up.
 const HISTORY_BACKOFF_MAX: Duration = Duration::from_secs(30);
+
+pub fn start_pending_nodes(hub: &Arc<Hub>) {
+    let weak = Arc::downgrade(hub);
+    thread::spawn(move || {
+        let mut previous = std::collections::BTreeMap::<String, u64>::new();
+        let mut eligible = std::collections::BTreeSet::<String>::new();
+        loop {
+            let Some(hub) = weak.upgrade() else { return };
+            if let fleet::Status::Up(up) = hub.fleet.status() {
+                let nodes = up.poller.nodes();
+                let online: std::collections::BTreeSet<_> = nodes
+                    .iter()
+                    .filter(|v| v.node.online)
+                    .map(|v| v.node.id.clone())
+                    .collect();
+                eligible.retain(|id| online.contains(id));
+                previous.retain(|id, _| nodes.iter().any(|v| &v.node.id == id));
+                for view in nodes.iter().filter(|v| v.node.online && v.hello.is_some()) {
+                    let id = view.node.id.clone();
+                    if previous.insert(id.clone(), view.hello_generation)
+                        != Some(view.hello_generation)
+                    {
+                        eligible.insert(id);
+                    }
+                }
+                for view in nodes
+                    .into_iter()
+                    .filter(|v| v.node.online && v.hello.is_some())
+                {
+                    let id = view.node.id.clone();
+                    let Ok(n) = id.parse() else { continue };
+                    let Some(pending) = hub
+                        .view()
+                        .state
+                        .pending_node_updates
+                        .get(&pt_core::NodeId(n))
+                        .cloned()
+                    else {
+                        eligible.remove(&id);
+                        continue;
+                    };
+                    let offline = crate::lock::lock(&hub.node_update_offline)
+                        .get(&id)
+                        .copied()
+                        == Some(pending.revision);
+                    let busy_at = crate::lock::lock(&hub.node_update_busy).get(&id).copied();
+                    if busy_at.is_some_and(|(revision, generation)| {
+                        revision == pending.revision && view.hello_generation <= generation
+                    }) {
+                        eligible.remove(&id);
+                        continue;
+                    }
+                    if !eligible.contains(&id) && !offline {
+                        continue;
+                    }
+                    let mut active = crate::lock::lock(&hub.node_update_active);
+                    if !active.insert(id.clone()) {
+                        continue;
+                    }
+                    drop(active);
+                    eligible.remove(&id);
+                    crate::lock::lock(&hub.node_update_offline).remove(&id);
+                    crate::lock::lock(&hub.node_update_busy).remove(&id);
+                    let hub = Arc::clone(&hub);
+                    let up = up.clone();
+                    thread::spawn(move || {
+                        crate::update::catch_up_node(&hub, &up, view, pending);
+                        crate::lock::lock(&hub.node_update_active).remove(&id);
+                    });
+                }
+            }
+            drop(hub);
+            thread::sleep(Duration::from_secs(1));
+        }
+    });
+}
 
 /// Starts the fleet in the background when one is configured. A configured fleet that cannot
 /// start (no embedded binaries, a bad config, headscale failing) leaves the hub running with
@@ -81,7 +157,7 @@ fn run_fleet(hub: &Arc<Hub>, mut cfg: pt_fleet::Config, net: &Net) -> Result<Up,
     let poller = fleet
         .poll(poll, move |e| {
             if let Some(hub) = weak.upgrade() {
-                hub.fleet.published(&hub.bus, e);
+                hub.fleet.published(&hub.bus, &hub.view().state, e);
             }
         })
         .map_err(|e| {
@@ -110,7 +186,11 @@ fn quota_readers(hub: &Hub) -> Vec<Box<dyn Reader>> {
     if installed(Harness::Codex) {
         out.push(Box::new(pt_quota::codex::Codex {
             home: home.clone(),
-            base_url: None,
+            base_url: if cfg!(debug_assertions) {
+                std::env::var("PT_TEST_CODEX_USAGE_BASE").ok()
+            } else {
+                None
+            },
         }));
     }
     if installed(Harness::Grok) {
@@ -134,6 +214,17 @@ fn quota_readers(hub: &Hub) -> Vec<Box<dyn Reader>> {
 /// `quota_poll_secs` 0 never reads: every row stays `unknown`.
 pub fn start_quotas(hub: &Arc<Hub>) {
     let opts = Options::default();
+    #[cfg(debug_assertions)]
+    let opts = match std::env::var("PT_TEST_QUOTA_TTL_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+    {
+        Some(ms) => Options {
+            ttl: Duration::from_millis(ms),
+            ..opts
+        },
+        None => opts,
+    };
     #[cfg(debug_assertions)]
     let opts = match std::env::var("PT_TEST_QUOTA_STALE_MS")
         .ok()
@@ -183,6 +274,10 @@ pub fn start_quotas(hub: &Arc<Hub>) {
                     };
                     match result {
                         Ok(()) => {
+                            #[cfg(debug_assertions)]
+                            if let Some(path) = std::env::var_os("PT_TEST_QUOTA_RENEWED") {
+                                let _ = std::fs::write(path, b"renewed");
+                            }
                             info!("quota: renewed the idle {sub:?} login through its CLI");
                             cache.reread(sub);
                             cache.refresh(pt_quota::now_ms(), false);
@@ -192,12 +287,70 @@ pub fn start_quotas(hub: &Arc<Hub>) {
                 }
                 hub.quotas
                     .publish(&hub.bus, cache.quotas_with_age(), opts.stale_after);
+                notify_credit_transition(&hub);
                 drop(hub);
                 thread::sleep(Duration::from_secs(every));
             }
         });
     if let Err(e) = started {
         warning!("quota: starting the reader thread: {e}");
+    }
+}
+
+fn notify_credit_transition(hub: &Hub) {
+    let Some(on) = hub
+        .quotas
+        .list()
+        .iter()
+        .find_map(crate::quota::credit_state)
+    else {
+        return;
+    };
+    let view = hub.view();
+    let Some(id) = envoy_id(&view.state) else {
+        return;
+    };
+    let Some(envoy) = view.state.sleeve(id) else {
+        return;
+    };
+    let previous = envoy
+        .messages
+        .iter()
+        .filter_map(|(id, message)| {
+            let state = if id.starts_with("quota:credits:on:") {
+                true
+            } else if id.starts_with("quota:credits:off:") {
+                false
+            } else {
+                return None;
+            };
+            Some((message.seq, state))
+        })
+        .max_by_key(|(seq, _)| *seq)
+        .map(|(_, state)| state);
+    if previous == Some(on) || (previous.is_none() && !on) {
+        return;
+    }
+    let word = if on { "on" } else { "off" };
+    let text = if on {
+        "[quota] Codex subscription limit reached; work is now using account credits."
+    } else {
+        "[quota] Codex work is no longer using account credits."
+    };
+    let result = hub.command(
+        EventKind::Send {
+            to: id,
+            request_id: format!("quota:credits:{word}:{}", view.state.next_msg),
+            from: Party::Owner,
+            agent: None,
+            text: text.to_string(),
+            mode: SendMode::Queue,
+            d9: false,
+        },
+        Duration::from_secs(10),
+    );
+    if !matches!(result, Ok(Reply::Sent { .. } | Reply::Duplicate)) {
+        warning!("quota: could not notify Envoy of Codex credit transition: {result:?}");
     }
 }
 

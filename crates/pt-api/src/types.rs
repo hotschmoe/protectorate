@@ -7,6 +7,11 @@ use pt_json::Value;
 use crate::schema::EpochMs;
 
 api_enums! {
+    pub enum NodeJobs {
+        Any = "any",
+        Owner = "owner",
+        None = "none",
+    }
     pub enum Level {
         Info = "info",
         Warn = "warn",
@@ -18,6 +23,13 @@ api_enums! {
         Envoy = "envoy",
         Root = "root",
         Child = "child",
+    }
+
+    /// A sleeve's declared result on the final line of its turn.
+    pub enum TurnStatusState {
+        Done = "done",
+        Continuing = "continuing",
+        Blocked = "blocked",
     }
 
     /// SPEC 4, sleeve lifecycle.
@@ -291,6 +303,19 @@ api_records! {
 
     /// The durable identity: name, workspace claim, parent link, resleeve policy, budget and
     /// queue.
+    pub struct TurnStatus {
+        pub turn: u64,
+        pub state: TurnStatusState,
+        /// The remaining work or blocking reason, absent for done.
+        pub detail: Option<String>,
+    }
+
+    pub struct QueuedTurnReport {
+        pub sleeve_id: String,
+        pub turn: u64,
+        pub status: Option<TurnStatus>,
+    }
+
     pub struct Sleeve {
         pub id: String,
         pub name: String,
@@ -298,7 +323,7 @@ api_records! {
         pub parent_id: Option<String>,
         pub role: SleeveRole,
         pub lifecycle: Lifecycle,
-        /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed or `g<N>`.
+        /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed, credit_floor or `g<N>`.
         /// A flap after a rejected login is `flapping (<harness> login rejected)`. Envoy whose
         /// own harness doctor refused is `ineligible (<harness>)` until doctor finds it eligible.
         pub park_reason: Option<String>,
@@ -319,6 +344,10 @@ api_records! {
         /// Permanent for this sleeve id. A D9-origin turn spawned it or sent to it, or a
         /// marked sleeve sent to it.
         pub d9: bool = false,
+        /// Status declared by the latest settled turn, absent when it declared none.
+        pub last_status: Option<TurnStatus>,
+        /// Warning returned by spawn; absent from subsequent sleeve readings.
+        pub warning: Option<String>,
     }
 
     /// Token counts the harness reported for one turn.
@@ -434,11 +463,14 @@ api_records! {
         pub online: bool,
         pub last_seen_ms: EpochMs,
         pub node_version: String,
+        pub pending_update: Option<String>,
         pub error: Option<String>,
         /// Absent until the first inventory arrives.
         pub inventory: Option<Inventory>,
         pub sample: Option<Sample>,
         pub presence: Presence,
+        pub jobs: NodeJobs = NodeJobs::Any,
+        pub jobs_note: Option<String>,
     }
 
     pub struct Job {
@@ -487,12 +519,23 @@ api_records! {
         pub length_ms: Option<u64>,
     }
 
+    pub struct QuotaCredits {
+        pub allowed: Option<bool>,
+        pub limit_reached: Option<bool>,
+        pub has_credits: Option<bool>,
+        pub balance: Option<f64>,
+        pub overage_limit_reached: Option<bool>,
+        pub reset_available_count: Option<u64>,
+        pub per_hour: Option<f64>,
+    }
+
     pub struct Quota {
         pub subscription: Subscription,
         pub plan: String,
         pub reading: QuotaReading,
         pub fetched_at_ms: EpochMs,
         pub windows: Vec<QuotaWindow> = Vec::new(),
+        pub credits: Option<QuotaCredits>,
         pub note: String = String::new(),
     }
 
@@ -535,6 +578,8 @@ api_unions! {
             from: String,
             text: String,
             steer: bool = false,
+            /// Reports included in this prompt, including a batch of several reports.
+            reports: Vec<QueuedTurnReport> = Vec::new(),
         },
         PromptAck = "prompt_ack" {
             request_id: String,
@@ -597,6 +642,8 @@ api_unions! {
             native_stop: Option<String>,
             usage: Usage,
             duration_ms: Option<u64>,
+            /// The declaration at the end of this turn's final message, if present.
+            status: Option<TurnStatus>,
         },
         Error = "error" {
             kind: ErrorClass,
@@ -637,12 +684,17 @@ api_unions! {
 
     /// One message of `GET /api/events`. `seq` grows by one per kept message; a streaming
     /// delta repeats the seq of the last kept message and is not replayed on resume. The stream
-    /// starts with `snapshot` unless `from_seq` is given and the hub still holds every message
-    /// from it.
+    /// starts with `snapshot` unless `from_seq` is given, the gap is at most 500 kept messages,
+    /// and the hub still holds every message from it. A `live` marker ends catch-up without
+    /// allocating a sequence; another snapshot and marker replace a gap in a live stream.
     pub enum HubStreamMessage {
         Snapshot = "snapshot" {
             seq: u64,
             state: HubState,
+        },
+        /// Catch-up is complete through this sequence; subsequent messages are live.
+        Live = "live" {
+            seq: u64,
         },
         Workspace = "workspace" {
             seq: u64,

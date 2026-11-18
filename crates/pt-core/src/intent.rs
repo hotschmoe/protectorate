@@ -169,6 +169,7 @@ pub enum Reply {
     ApprovalOpened(String),
     /// Accepted; the result arrives as state changes and notices.
     Accepted,
+    PendingNodeUpdate(u64),
     Sent {
         queued: bool,
         count: u64,
@@ -189,12 +190,18 @@ pub enum Code {
 /// Something a person or a sleeve should hear about.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Notice {
+    DeviceChanged {
+        path: String,
+    },
     MessageRejected {
         request_id: String,
     },
     /// The message's send was fenced or abandoned: it may or may not have reached the harness.
     MessageMayHaveApplied {
         request_id: String,
+    },
+    UntilRoundMayHaveApplied {
+        round: u64,
     },
     EffectUnknowable {
         effect: EffectId,
@@ -321,5 +328,6 @@ pub enum Intent {
         g: Gen,
         turn: u64,
         to: SleeveId,
+        status: Option<DeclaredStatus>,
     },
 }

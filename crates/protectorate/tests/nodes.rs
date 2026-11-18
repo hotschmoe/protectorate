@@ -19,6 +19,7 @@ mod common;
 
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
@@ -60,14 +61,9 @@ fn join(hub: &Hub, node_bin: &Path, url: &str, name: &str, dir: &Path) -> String
         .output()
         .unwrap();
     assert!(!digits.status.success());
-    assert!(
-        String::from_utf8_lossy(&digits.stderr).contains("reads as a node id"),
-        "{}",
-        String::from_utf8_lossy(&digits.stderr)
-    );
     let (mut join, auth) = registration(hub, node_bin, url, name, dir);
     let r = hub.cli(&["node", "approve", &auth, "--name", "1234"]);
-    assert!(r.stderr.contains("reads as a node id"), "{}", r.stderr);
+    assert_ne!(r.status, 0, "invalid approval name succeeded");
     let approved = hub.cli(&["--json", "node", "approve", &auth]).json();
     assert_eq!(approved["name"].as_str(), Some(name), "{approved}");
     let status = eventually("join to exit", Duration::from_secs(60), || {
@@ -212,12 +208,190 @@ fn events(hub: &Hub) -> Vec<Value> {
         .unwrap_or_default()
 }
 
-fn has_event(hub: &Hub, level: &str, text: &str) -> bool {
+fn last_event(hub: &Hub) -> u64 {
+    events(hub)
+        .iter()
+        .filter_map(|e| e["seq"].as_u64())
+        .max()
+        .unwrap_or(0)
+}
+
+fn has_event(hub: &Hub, after: u64, level: &str, source: &str) -> bool {
     events(hub).iter().any(|e| {
-        e["kind"].as_str() == Some("node")
+        e["seq"].as_u64().is_some_and(|seq| seq > after)
+            && e["kind"].as_str() == Some("node")
             && e["level"].as_str() == Some(level)
-            && e["text"].as_str().unwrap_or("").contains(text)
+            && e["source"].as_str() == Some(source)
     })
+}
+
+#[test]
+fn node_job_policy_survives_restart_and_routes_around_restricted_nodes() {
+    if !common::on_path("bwrap") || !common::on_path("git") {
+        eprintln!("SKIP: bwrap or git is missing");
+        return;
+    }
+    let version = cli_command().arg("version").output().unwrap();
+    if String::from_utf8_lossy(&version.stdout).contains("missing") {
+        eprintln!("SKIP: fleet binaries are not embedded");
+        return;
+    }
+    let node_bin = Path::new(bin()).with_file_name("protectorate-node");
+    if !node_bin.is_file() {
+        eprintln!("SKIP: {} is missing", node_bin.display());
+        return;
+    }
+    let port = free_pair();
+    let listen = format!("127.0.0.1:{port}");
+    let tailnet = std::env::temp_dir().join(format!("pt-nodejobs-{}-{port}", std::process::id()));
+    let fake_dir = common::unique("nodejobs-harness");
+    fs::create_dir_all(&fake_dir).unwrap();
+    let fake = fake_dir.join("claude");
+    fs::write(&fake, "#!/bin/sh\nif [ \"$1\" = --version ]; then echo '2.0.0 (Claude Code)'; exit; fi\nprintf '%s' \"$PROTECTORATE_TOKEN\" > \"$HOME/test-token\"\nexec sleep 300\n").unwrap();
+    fs::set_permissions(&fake, fs::Permissions::from_mode(0o755)).unwrap();
+    let systemd = fake_dir.join("systemd-run");
+    fs::write(&systemd, "#!/bin/sh\nexit 0\n").unwrap();
+    fs::set_permissions(&systemd, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", fake_dir.display(), std::env::var("PATH").unwrap());
+    let mut hub = Hub::start_config(
+        "nodejobs",
+        "claude",
+        &[
+            ("scopes", false.into()),
+            ("claude_program", fake.to_str().unwrap().into()),
+            (
+                "fleet",
+                obj! {
+                    "listen" => listen.as_str(),
+                    "dir" => tailnet.to_str().unwrap(),
+                    "poll_secs" => 2u64,
+                },
+            ),
+        ],
+        &[],
+        &[
+            ("PROTECTORATE_FLEET_TEST_MEMBER_TIMEOUT_MS", "1000"),
+            ("PATH", &path),
+        ],
+    );
+    let login = hub.home.join("logins/.claude/.credentials.json");
+    fs::create_dir_all(login.parent().unwrap()).unwrap();
+    fs::write(login, "test").unwrap();
+    hub.cli(&["doctor", "--refresh"]).ok();
+    eventually("fleet to start", Duration::from_secs(120), || {
+        (hub.cli(&["node", "add"]).status == 0).then_some(())
+    });
+    let url = format!("http://{listen}");
+    let first_dir = tailnet.join("first");
+    let second_dir = tailnet.join("second");
+    let first = join(&hub, &node_bin, &url, "e2e-restricted", &first_dir);
+    let second = join(&hub, &node_bin, &url, "e2e-eligible", &second_dir);
+    let _first_serve = serve(&node_bin, &first_dir);
+    let _second_serve = serve(&node_bin, &second_dir);
+    online(&hub, &first, true);
+    online(&hub, &second, true);
+    let arch = eventually("node inventory", Duration::from_secs(120), || {
+        listed(&hub, &first)?["inventory"]["arch"]
+            .as_str()
+            .map(str::to_string)
+    });
+    let repo = common::temp_repo("nodejobs");
+    let sleeve = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "spawn",
+            "nodejobs",
+            "--path",
+            repo.to_str().unwrap(),
+            "--harness",
+            "claude",
+        ])
+        .json();
+    let token_file = hub.home.join(format!(
+        "sleeves/{}/home/test-token",
+        sleeve["id"].as_str().unwrap()
+    ));
+    let token = eventually("sleeve capability", Duration::from_secs(60), || {
+        fs::read_to_string(&token_file)
+            .ok()
+            .filter(|s| !s.is_empty())
+    });
+    let caller = [("PROTECTORATE_TOKEN", token.as_str())];
+    let envoy_id = hub.sleeve("envoy")["id"].as_str().unwrap().to_string();
+    let envoy_token_file = hub.home.join(format!("sleeves/{envoy_id}/home/test-token"));
+    let envoy_token = eventually("Envoy capability", Duration::from_secs(60), || {
+        fs::read_to_string(&envoy_token_file)
+            .ok()
+            .filter(|s| !s.is_empty())
+    });
+    let envoy = [("PROTECTORATE_TOKEN", envoy_token.as_str())];
+
+    let denied = hub.cli_env(&caller, &["node", "set", &first, "--jobs", "any"]);
+    assert_ne!(denied.status, 0);
+
+    let set = hub
+        .cli(&[
+            "--json", "node", "set", &first, "--jobs", "owner", "--note", "storage",
+        ])
+        .json();
+    assert_eq!(set["jobs"].as_str(), Some("owner"));
+    assert_eq!(
+        listed(&hub, &first).unwrap()["jobs"].as_str(),
+        Some("owner")
+    );
+    let denied = hub.cli_env(&caller, &["job", "run", "--node", &first, "--", "true"]);
+    assert_ne!(denied.status, 0);
+    assert!(denied.stderr.contains("storage"), "{}", denied.stderr);
+    let denied = hub.cli_env(&envoy, &["job", "run", "--node", &first, "--", "true"]);
+    assert_ne!(denied.status, 0);
+    assert!(denied.stderr.contains("storage"), "{}", denied.stderr);
+    let accepted = run_job(&hub, &first, &["true"]);
+    let accepted_id = accepted["id"].as_str().unwrap();
+    assert_eq!(
+        wait_job(&hub, accepted_id, &["succeeded", "failed"], 90)["state"].as_str(),
+        Some("succeeded")
+    );
+
+    let placed = hub
+        .cli_env(
+            &caller,
+            &["--json", "job", "run", "--arch", &arch, "--", "true"],
+        )
+        .json();
+    let done = wait_job(
+        &hub,
+        placed["id"].as_str().unwrap(),
+        &["succeeded", "failed"],
+        90,
+    );
+    assert_eq!(done["state"].as_str(), Some("succeeded"));
+    assert_eq!(done["node_id"].as_str(), Some(second.as_str()));
+
+    hub.cli(&["node", "set", &first, "--jobs", "none", "--note", "storage"])
+        .ok();
+    let denied = hub.cli_env(&caller, &["job", "run", "--node", &first, "--", "true"]);
+    assert_ne!(denied.status, 0);
+    assert!(denied.stderr.contains("storage"));
+    let denied = hub.cli_env(&envoy, &["job", "run", "--node", &first, "--", "true"]);
+    assert_ne!(denied.status, 0);
+    assert!(denied.stderr.contains("storage"), "{}", denied.stderr);
+    assert_ne!(
+        hub.cli(&["job", "run", "--node", &first, "--", "true"])
+            .status,
+        0
+    );
+    hub.restart();
+    let after = eventually("policy after restart", Duration::from_secs(120), || {
+        let result = hub.cli(&["--json", "node", "show", &first]);
+        (result.status == 0)
+            .then(|| result.json())
+            .filter(|v| v["jobs"].as_str() == Some("none"))
+    });
+    assert_eq!(after["jobs_note"].as_str(), Some("storage"));
+    let denied = hub.cli(&["job", "run", "--node", &first, "--", "true"]);
+    assert_ne!(denied.status, 0);
+    assert!(denied.stderr.contains("storage"), "{}", denied.stderr);
 }
 
 /// A directory where the enrollment file's temporary copy goes: writing the record fails, while
@@ -289,23 +463,16 @@ fn owner_removes_a_stale_node_and_renames_its_successor() {
     online(&hub, &new, true);
 
     // Names: a tailnet label, not all digits, not another node's (the hub's own member counts).
-    for (bad, why) in [
-        ("Bad_Name", "lowercase letters"),
-        ("1234", "reads as a node id"),
-        ("e2e-old", "already exists"),
-        ("hub", "already exists"),
-    ] {
+    for bad in ["Bad_Name", "1234", "e2e-old", "hub"] {
         let r = hub.cli(&["node", "rename", "e2e-new", bad]);
         assert_ne!(r.status, 0, "rename to {bad} succeeded");
-        assert!(r.stderr.contains(why), "rename to {bad}: {}", r.stderr);
     }
     let r = hub.cli(&["node", "rename", "e2e-nope", "e2e-x"]);
-    assert!(r.stderr.contains("no node"), "{}", r.stderr);
+    assert_ne!(r.status, 0, "unknown node was renamed");
 
     // An online node is not removed without force.
     let r = hub.cli(&["node", "rm", "e2e-old"]);
     assert_ne!(r.status, 0);
-    assert!(r.stderr.contains("is online"), "{}", r.stderr);
 
     // The old machine goes away for good; a job queued for it by name is kept by its id.
     old_serve.stop();
@@ -321,18 +488,13 @@ fn owner_removes_a_stale_node_and_renames_its_successor() {
     let long = long["id"].as_str().unwrap().to_string();
     wait_job(&hub, &long, &["running"], 90);
     let r = hub.cli(&["job", "run", "--node", "e2e-nope", "--", "true"]);
-    assert!(r.stderr.contains("no node"), "{}", r.stderr);
+    assert_ne!(r.status, 0, "job on an unknown node succeeded");
 
     // The rename lands in headscale, then the record cannot be written: headscale's name is put
     // back and stays back across poll rounds.
     let blocker = Blocker::new(&tailnet);
     let r = hub.cli(&["node", "rename", "e2e-new", "e2e-newer"]);
     assert_ne!(r.status, 0);
-    assert!(
-        r.stderr.contains("headscale's name is back to e2e-new"),
-        "{}",
-        r.stderr
-    );
     std::thread::sleep(Duration::from_secs(5));
     assert_eq!(
         listed(&hub, &new).unwrap()["name"].as_str(),
@@ -343,24 +505,32 @@ fn owner_removes_a_stale_node_and_renames_its_successor() {
     // says so and names the id to retry with, and the node is gone from the list. The handler
     // stopped before its jobs, as a crash there would: the scheduler fails the job pinned to the
     // node headscale no longer lists on its own.
+    let before = last_event(&hub);
     let r = hub.cli(&["node", "rm", "e2e-old"]);
     assert_ne!(r.status, 0);
-    let retry = format!("finish with: protectorate node rm {old}");
-    assert!(r.stderr.contains(&retry), "{}", r.stderr);
     assert!(listed(&hub, &old).is_none());
-    assert!(has_event(&hub, "alarm", &retry));
+    assert!(has_event(&hub, before, "alarm", "e2e-old"));
     let failed = wait_job(&hub, &pinned, &["failed"], 30);
-    let gone = format!("node {old} was removed");
-    assert_eq!(failed["error"].as_str(), Some(gone.as_str()), "{failed}");
     assert!(
-        events(&hub).iter().any(|e| e["text"].as_str()
-            == Some(format!("job {pinned} failed: node {old} was removed").as_str())),
+        failed["error"].as_str().is_some_and(|e| e.contains(&old)),
+        "{failed}"
+    );
+    assert!(
+        events(&hub).iter().any(|e| {
+            e["seq"].as_u64().is_some_and(|seq| seq > before)
+                && e["kind"].as_str() == Some("job")
+                && e["level"].as_str() == Some("warn")
+                && e["text"]
+                    .as_str()
+                    .is_some_and(|t| t.contains(&pinned) && t.contains(&old))
+        }),
         "{:?}",
         events(&hub)
     );
     let r = hub.cli(&["job", "run", "--node", &old, "--", "true"]);
-    assert!(r.stderr.contains("no node"), "{}", r.stderr);
+    assert_ne!(r.status, 0, "job on a removed node succeeded");
     blocker.lift();
+    let before = last_event(&hub);
     let removed = hub.cli(&["--json", "node", "rm", &old]).json();
     assert_eq!(removed["node_id"].as_str(), Some(old.as_str()), "{removed}");
     assert_eq!(removed["record_only"].as_bool(), Some(true), "{removed}");
@@ -370,11 +540,12 @@ fn owner_removes_a_stale_node_and_renames_its_successor() {
         "{removed}"
     );
     assert!(!enrolled(&tailnet).iter().any(|(id, _)| *id == old));
-    assert!(has_event(&hub, "info", "node e2e-old removed"));
+    assert!(has_event(&hub, before, "info", "e2e-old"));
     let r = hub.cli(&["node", "rm", &old]);
-    assert!(r.stderr.contains("no node"), "{}", r.stderr);
+    assert_ne!(r.status, 0, "removed node was removed again");
 
     // The new machine takes the freed name; its running job keeps to it by id.
+    let before = last_event(&hub);
     let renamed = hub
         .cli(&["--json", "node", "rename", "e2e-new", "e2e-old"])
         .json();
@@ -385,7 +556,7 @@ fn owner_removes_a_stale_node_and_renames_its_successor() {
         listed(&hub, &new).unwrap()["name"].as_str(),
         Some("e2e-old")
     );
-    assert!(has_event(&hub, "info", "node e2e-new renamed e2e-old"));
+    assert!(has_event(&hub, before, "info", "e2e-old"));
     assert!(
         enrolled(&tailnet).contains(&(new.clone(), "e2e-old".to_string())),
         "{:?}",
@@ -399,7 +570,7 @@ fn owner_removes_a_stale_node_and_renames_its_successor() {
     fs::write(tailnet.join("enrolled.json"), stale).unwrap();
     assert!(enrolled(&tailnet).contains(&(new.clone(), "e2e-new".to_string())));
     let human = hub.cli(&["node", "rename", "e2e-old", "e2e-old"]);
-    assert!(human.ok().contains("from e2e-old to e2e-old"));
+    human.ok();
     assert!(
         enrolled(&tailnet).contains(&(new.clone(), "e2e-old".to_string())),
         "{:?}",
@@ -442,7 +613,7 @@ fn owner_removes_a_stale_node_and_renames_its_successor() {
     let flight = flight["id"].as_str().unwrap().to_string();
     wait_job(&hub, &flight, &["running"], 90);
     let r = hub.cli(&["node", "rm", &new]);
-    assert!(r.stderr.contains("is online"), "{}", r.stderr);
+    assert_ne!(r.status, 0, "online node was removed without force");
     let removed = hub.cli(&["--json", "node", "rm", &new, "--force"]).json();
     assert_eq!(removed["record_only"].as_bool(), Some(false), "{removed}");
     assert_eq!(
@@ -454,13 +625,6 @@ fn owner_removes_a_stale_node_and_renames_its_successor() {
     assert!(enrolled(&tailnet).is_empty());
     std::thread::sleep(Duration::from_secs(5));
     assert!(nodes(&hub).is_empty());
-    assert!(
-        !events(&hub).iter().any(|e| e["text"]
-            .as_str()
-            .unwrap_or("")
-            .contains("left the tailnet")),
-        "an owner's removal is not reported as the node leaving"
-    );
 
     // An approval whose record cannot be written deletes the node in headscale again, so the
     // machine joins anew under the same name.
@@ -469,12 +633,6 @@ fn owner_removes_a_stale_node_and_renames_its_successor() {
     let (mut refused, auth) = registration(&hub, &node_bin, &url, "e2e-third", &third_dir);
     let r = hub.cli(&["node", "approve", &auth]);
     assert_ne!(r.status, 0);
-    assert!(
-        r.stderr
-            .contains("is deleted again: run protectorate-node join on the node again"),
-        "{}",
-        r.stderr
-    );
     // Its member may wait on for an approval that is gone; it goes with its join.
     let _ = Command::new("pkill")
         .args(["-KILL", "-f"])

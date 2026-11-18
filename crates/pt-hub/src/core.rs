@@ -209,7 +209,7 @@ fn announce_changes(hub: &Hub, before: &View, after: &View) {
     }
     for j in after.state.jobs.values() {
         if before.state.jobs.get(&j.id) != Some(j) {
-            let job = crate::jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes());
+            let job = crate::jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes(), &after.state);
             hub.bus.push(|seq| HubStreamMessage::Job { seq, job });
         }
     }
@@ -229,6 +229,7 @@ fn notice_text(view: &View, n: &Notice) -> (Kind, Level, String) {
             .map_or_else(|| id.0.to_string(), |s| s.name.clone())
     };
     match n {
+        Notice::DeviceChanged { path } => (Kind::Sleeve, Level::Info, format!("device {path} changed; relaunching at the next turn boundary")),
         Notice::MessageRejected { request_id } => (
             Kind::Mail,
             Level::Warn,
@@ -238,6 +239,11 @@ fn notice_text(view: &View, n: &Notice) -> (Kind, Level, String) {
             Kind::Mail,
             Level::Warn,
             format!("message {request_id} may or may not have reached the harness"),
+        ),
+        Notice::UntilRoundMayHaveApplied { round } => (
+            Kind::Mail,
+            Level::Warn,
+            format!("until-done round {round} may have applied; it will not be silently retried"),
         ),
         Notice::EffectUnknowable { effect } => (
             Kind::Hub,
@@ -380,6 +386,7 @@ fn notify(hub: &Hub, view: &View, to: Party, sleeve: Option<SleeveId>, n: &Notic
             Note {
                 harness: None,
                 level: Some(level),
+                reports: Vec::new(),
             },
         );
     }

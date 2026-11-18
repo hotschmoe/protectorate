@@ -19,7 +19,7 @@ use crate::model::*;
 
 pub const FORMAT: u8 = 1;
 /// Highest event tag this binary reads. Any incompatible encoding must get a new event tag.
-pub const MAX_EVENT_TAG: u8 = 46;
+pub const MAX_EVENT_TAG: u8 = 59;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -490,6 +490,22 @@ impl Wire for Obs {
                 w.push(4);
                 end.put(w);
             }
+            Obs::TurnSettledStatus { end, status } => {
+                w.push(14);
+                end.put(w);
+                match status {
+                    None => w.push(0),
+                    Some(DeclaredStatus::Done) => w.push(1),
+                    Some(DeclaredStatus::Continuing(detail)) => {
+                        w.push(2);
+                        detail.put(w);
+                    }
+                    Some(DeclaredStatus::Blocked(detail)) => {
+                        w.push(3);
+                        detail.put(w);
+                    }
+                }
+            }
             Obs::TurnBegan => w.push(12),
             Obs::ForeignTurnSettled { end } => {
                 w.push(13);
@@ -519,7 +535,7 @@ impl Wire for Obs {
         }
     }
     fn get(r: &mut Reader) -> Result<Self, DecodeError> {
-        Ok(match r.tag("observation", 13)? {
+        Ok(match r.tag("observation", 14)? {
             0 => Obs::Ready {
                 session: Wire::get(r)?,
             },
@@ -551,7 +567,16 @@ impl Wire for Obs {
                 ask: Some(Wire::get(r)?),
             },
             12 => Obs::TurnBegan,
-            _ => Obs::ForeignTurnSettled { end: Wire::get(r)? },
+            13 => Obs::ForeignTurnSettled { end: Wire::get(r)? },
+            _ => Obs::TurnSettledStatus {
+                end: Wire::get(r)?,
+                status: match r.tag("declared status", 3)? {
+                    0 => None,
+                    1 => Some(DeclaredStatus::Done),
+                    2 => Some(DeclaredStatus::Continuing(Wire::get(r)?)),
+                    _ => Some(DeclaredStatus::Blocked(Wire::get(r)?)),
+                },
+            },
         })
     }
 }
@@ -574,6 +599,69 @@ impl Wire for EventKind {
         use EventKind as E;
         match self {
             E::MailBatching => w.push(46),
+            E::DeviceChanged { sleeve, g, path } => {
+                w.push(47);
+                sleeve.put(w);
+                g.put(w);
+                path.put(w);
+            }
+            E::PendingNodeUpdate {
+                node,
+                version,
+                probation_secs,
+            } => {
+                w.push(53);
+                node.put(w);
+                version.put(w);
+                probation_secs.put(w);
+            }
+            E::ClearPendingNodeUpdate { node, revision } => {
+                w.push(54);
+                node.put(w);
+                revision.put(w);
+            }
+            E::ClaimPendingNodeUpdate { node, revision } => {
+                w.push(55);
+                node.put(w);
+                revision.put(w);
+            }
+            E::ReleasePendingNodeUpdate { node, revision } => {
+                w.push(56);
+                node.put(w);
+                revision.put(w);
+            }
+            E::SetNodeJobs { node, jobs, note } => {
+                w.push(57);
+                node.put(w);
+                jobs.put(w);
+                note.put(w);
+            }
+            E::CreateNodeJob {
+                request_id,
+                spec,
+                node,
+                owner,
+            } => {
+                w.push(59);
+                request_id.put(w);
+                spec.put(w);
+                node.put(w);
+                owner.put(w);
+            }
+            E::NodeChosenWithPolicy {
+                job,
+                attempt,
+                node,
+                epoch,
+                owner,
+            } => {
+                w.push(58);
+                job.put(w);
+                attempt.put(w);
+                node.put(w);
+                epoch.put(w);
+                owner.put(w);
+            }
             E::Spawn(spec) => {
                 // Bit 0: an effort string follows. Bit 1: this spawn marks D9. Bit 2: Envoy
                 // asked for it. Tag 38 exists only with bit 1 or 2 set, so a tag 0 or 32 event
@@ -702,6 +790,11 @@ impl Wire for EventKind {
             E::Abandon { effect } => {
                 w.push(9);
                 effect.put(w);
+            }
+            E::CreditFloor { effect, attempt } => {
+                w.push(52);
+                effect.put(w);
+                attempt.put(w);
             }
             E::Viewed { sleeve } => {
                 w.push(10);
@@ -902,6 +995,75 @@ impl Wire for EventKind {
                 to.put(w);
                 turn.put(w);
                 text.put(w);
+            }
+            E::ReportStatus {
+                sleeve,
+                to,
+                turn,
+                text,
+                status,
+            } => {
+                w.push(48);
+                sleeve.put(w);
+                to.put(w);
+                turn.put(w);
+                text.put(w);
+                match status {
+                    None => w.push(0),
+                    Some(DeclaredStatus::Done) => w.push(1),
+                    Some(DeclaredStatus::Continuing(detail)) => {
+                        w.push(2);
+                        detail.put(w);
+                    }
+                    Some(DeclaredStatus::Blocked(detail)) => {
+                        w.push(3);
+                        detail.put(w);
+                    }
+                }
+            }
+            E::SendUntil {
+                to,
+                request_id,
+                from,
+                text,
+                mode,
+                d9,
+                supersede,
+                limit,
+            } => {
+                w.push(49);
+                to.put(w);
+                request_id.put(w);
+                from.put(w);
+                text.put(w);
+                mode.put(w);
+                d9.put(w);
+                supersede.put(w);
+                limit.put(w);
+            }
+            E::StartUntil {
+                sleeve,
+                target,
+                effort,
+                from,
+                limit,
+            } => {
+                w.push(50);
+                sleeve.put(w);
+                target.put(w);
+                effort.put(w);
+                from.put(w);
+                limit.put(w);
+            }
+            E::ArmUntil {
+                sleeve,
+                from,
+                limit,
+            } => {
+                w.push(51);
+                sleeve.put(w);
+                from.put(w);
+                limit.put(w);
             }
         }
     }
@@ -1127,6 +1289,84 @@ impl Wire for EventKind {
                 from: Wire::get(r)?,
             },
             46 => E::MailBatching,
+            47 => E::DeviceChanged {
+                sleeve: Wire::get(r)?,
+                g: Wire::get(r)?,
+                path: Wire::get(r)?,
+            },
+            48 => E::ReportStatus {
+                sleeve: Wire::get(r)?,
+                to: Wire::get(r)?,
+                turn: Wire::get(r)?,
+                text: Wire::get(r)?,
+                status: match r.tag("declared status", 3)? {
+                    0 => None,
+                    1 => Some(DeclaredStatus::Done),
+                    2 => Some(DeclaredStatus::Continuing(Wire::get(r)?)),
+                    _ => Some(DeclaredStatus::Blocked(Wire::get(r)?)),
+                },
+            },
+            49 => E::SendUntil {
+                to: Wire::get(r)?,
+                request_id: Wire::get(r)?,
+                from: Wire::get(r)?,
+                text: Wire::get(r)?,
+                mode: Wire::get(r)?,
+                d9: Wire::get(r)?,
+                supersede: Wire::get(r)?,
+                limit: Wire::get(r)?,
+            },
+            50 => E::StartUntil {
+                sleeve: Wire::get(r)?,
+                target: Wire::get(r)?,
+                effort: Wire::get(r)?,
+                from: Wire::get(r)?,
+                limit: Wire::get(r)?,
+            },
+            51 => E::ArmUntil {
+                sleeve: Wire::get(r)?,
+                from: Wire::get(r)?,
+                limit: Wire::get(r)?,
+            },
+            52 => E::CreditFloor {
+                effect: Wire::get(r)?,
+                attempt: Wire::get(r)?,
+            },
+            53 => E::PendingNodeUpdate {
+                node: Wire::get(r)?,
+                version: Wire::get(r)?,
+                probation_secs: Wire::get(r)?,
+            },
+            54 => E::ClearPendingNodeUpdate {
+                node: Wire::get(r)?,
+                revision: Wire::get(r)?,
+            },
+            55 => E::ClaimPendingNodeUpdate {
+                node: Wire::get(r)?,
+                revision: Wire::get(r)?,
+            },
+            56 => E::ReleasePendingNodeUpdate {
+                node: Wire::get(r)?,
+                revision: Wire::get(r)?,
+            },
+            57 => E::SetNodeJobs {
+                node: Wire::get(r)?,
+                jobs: Wire::get(r)?,
+                note: Wire::get(r)?,
+            },
+            58 => E::NodeChosenWithPolicy {
+                job: Wire::get(r)?,
+                attempt: Wire::get(r)?,
+                node: Wire::get(r)?,
+                epoch: Wire::get(r)?,
+                owner: Wire::get(r)?,
+            },
+            59 => E::CreateNodeJob {
+                request_id: Wire::get(r)?,
+                spec: Wire::get(r)?,
+                node: Wire::get(r)?,
+                owner: Wire::get(r)?,
+            },
             _ => return Err(DecodeError::UnknownTag { what: "event", tag }),
         })
     }

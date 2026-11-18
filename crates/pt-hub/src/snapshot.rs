@@ -20,7 +20,18 @@ pub fn hub_info(hub: &Hub) -> api::HubInfo {
 /// What the poller last learned of every node; none while the fleet is off or down.
 pub fn nodes(hub: &Hub) -> Vec<api::Node> {
     match hub.fleet.status() {
-        Status::Up(up) => up.poller.nodes().into_iter().map(|v| v.node).collect(),
+        Status::Up(up) => {
+            let view = hub.view();
+            up.poller
+                .nodes()
+                .into_iter()
+                .map(|v| {
+                    let mut node = v.node;
+                    crate::jobs::decorate_node(&view.state, &mut node);
+                    node
+                })
+                .collect()
+        }
         _ => Vec::new(),
     }
 }
@@ -61,7 +72,7 @@ pub fn state(
         jobs: st
             .jobs
             .values()
-            .map(|j| crate::jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes()))
+            .map(|j| crate::jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes(), st))
             .collect(),
         quotas: hub.quotas.list(),
         events: hub.bus.recent_events(SNAPSHOT_EVENTS),

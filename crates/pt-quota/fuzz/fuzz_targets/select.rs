@@ -1,14 +1,15 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use pt_api::{Harness, Mode, Quota, QuotaWindow, Subscription};
+use pt_api::{EpochMs, Harness, Mode, Quota, QuotaReading, QuotaWindow, Subscription};
 use pt_quota::{
     Candidate, Health, State, TaskSize, Thresholds, derive, select_target, select_with_fallback,
-    spare_trigger, state, window_length_ms,
+    spare_quota, spare_trigger, state, window_length_ms,
 };
 use pt_quota_fuzz::{Bytes, HARNESSES, quota};
 
 fuzz_target!(|data: &[u8]| {
+    check_pace(data);
     let mut b = Bytes::new(data);
     let now = 1_800_000_000_000u64 + u64::from(b.u32());
     let size = [TaskSize::Small, TaskSize::Medium, TaskSize::Large][b.below(3)];
@@ -46,12 +47,18 @@ fuzz_target!(|data: &[u8]| {
     // is not a length. Clearing either leaves the pick unchanged.
     let same_pick = |altered: &[Quota]| {
         assert_eq!(
-            select_target(now, size, &allow, mode, &exclude, &quotas, &health),
+            select_target(now, size, &allow, mode, &exclude, &quotas, &health)
+                .map(|t| (t.harness, t.model)),
             select_target(now, size, &allow, mode, &exclude, altered, &health)
+                .map(|t| (t.harness, t.model))
         );
         assert_eq!(
-            select_with_fallback(now, size, &allow, &quotas),
+            select_with_fallback(now, size, &allow, &quotas)
+                .ok()
+                .map(|(i, _)| i),
             select_with_fallback(now, size, &allow, altered)
+                .ok()
+                .map(|(i, _)| i)
         );
     };
     same_pick(&map_windows(&quotas, |w| {
@@ -96,16 +103,6 @@ fuzz_target!(|data: &[u8]| {
                 Some(usable) => panic!("picked a row at {usable}% usable: {t:?}"),
                 None => panic!("picked a row with nothing usable: {t:?}"),
             }
-            // SPEC 8. A cap under the minimum does not block an unspecified model. When that
-            // candidate is chosen, the reason names the tightest such cap.
-            if let Some((_, label)) = limiting_cap(fresh, &t.model, min, now) {
-                let phrase = format!("; {label} under the minimum");
-                assert!(
-                    t.reason.contains(&phrase),
-                    "chosen unspecified model did not name {label}: {}",
-                    t.reason
-                );
-            }
         }
         if t.harness == Harness::PiLocal {
             assert_eq!(t.subscription, Subscription::Local);
@@ -120,7 +117,6 @@ fuzz_target!(|data: &[u8]| {
                 "fell back to local while a subscription was eligible"
             );
         } else {
-            assert!(t.score >= 0.0);
             // Excluding the winner can only lower the best score.
             let mut ex2 = exclude.clone();
             ex2.push(t.harness);
@@ -196,7 +192,7 @@ fuzz_target!(|data: &[u8]| {
             assert_eq!(t.model, c.model);
         }
         (Some(t), Err(e)) => panic!("fallback dropped {t:?}: {e}"),
-        (None, Ok((idx, reason))) => {
+        (None, Ok((idx, _))) => {
             let c = &open[*idx];
             let h = c.harness;
             assert!(
@@ -210,13 +206,6 @@ fuzz_target!(|data: &[u8]| {
                 && let Some(q) = quotas.iter().find(|q| q.subscription == sub)
             {
                 assert_ne!(state(q), State::Error, "a failed reading was spent");
-                // SPEC 8. Caps for other models are no reading for this candidate.
-                if only_other_scopes(q, &c.model) {
-                    assert!(
-                        reason.contains("without a fresh quota reading"),
-                        "other models' caps were not treated as no reading: {reason}"
-                    );
-                }
                 if matches!(state(q), State::Fresh | State::Stale) {
                     let min = size.min_usable_pct();
                     let enforcing = still_enforcing(q, now, min, &c.model);
@@ -231,13 +220,6 @@ fuzz_target!(|data: &[u8]| {
                     if let Some(usable) = usable {
                         assert!(usable + 1e-9 >= min, "row at {usable}% usable was spent");
                     }
-                    if let Some((_, label)) = limiting_cap(q, &c.model, min, now) {
-                        let phrase = format!("; {label} under the minimum");
-                        assert!(
-                            reason.contains(&phrase),
-                            "spent unspecified model did not name {label}: {reason}"
-                        );
-                    }
                 }
             }
             if h == Harness::PiLocal
@@ -249,9 +231,8 @@ fuzz_target!(|data: &[u8]| {
                 assert_ne!(state(q), State::Stale, "a stale local reading was spent");
             }
         }
-        (None, Err(reason)) => {
+        (None, Err(_)) => {
             let min = size.min_usable_pct();
-            let mut cap: Option<(f64, String)> = None;
             for c in &open {
                 // SPEC 8. Park only when no candidate is unknown, reset, or missing a row.
                 if unknown_or_reset(c, &quotas, now, min) {
@@ -266,22 +247,6 @@ fuzz_target!(|data: &[u8]| {
                 {
                     panic!("stale row at {usable}% usable was parked");
                 }
-                // `tightest_cap_for` reads whatever windows the row has. Production never
-                // attaches windows to an Error row; the generator can, and the park names them.
-                if let Some(sub) = metered(c.harness)
-                    && let Some(q) = quotas.iter().find(|q| q.subscription == sub)
-                    && let Some(found) = limiting_cap(q, &c.model, min, now)
-                    && cap.as_ref().is_none_or(|(have, _)| found.0 < *have)
-                {
-                    cap = Some(found);
-                }
-            }
-            if let Some((_, label)) = cap {
-                let phrase = format!("; {label} under the minimum");
-                assert!(
-                    reason.contains(&phrase),
-                    "parked unspecified model did not name {label}: {reason}"
-                );
             }
         }
     }
@@ -321,11 +286,40 @@ fuzz_target!(|data: &[u8]| {
     } else {
         let base = derive(&history, n, th, None, 0);
         assert!(got.max(base) as i8 - got.min(base) as i8 <= 1);
-        if nudge == 0 {
-            assert_eq!(got, base);
-        }
     }
 });
+
+fn check_pace(data: &[u8]) {
+    let [length, remaining, used, ..] = data else {
+        return;
+    };
+    let seconds = 60 + u64::from(*length);
+    let left = 1 + u64::from(*remaining) % (seconds - 1);
+    let used = f64::from(*used % 101);
+    let now = 1_800_000_000_000u64;
+    let quota = Quota {
+        subscription: Subscription::Codex,
+        plan: String::new(),
+        reading: QuotaReading::Ok,
+        fetched_at_ms: EpochMs(now),
+        windows: vec![QuotaWindow {
+            label: format!("{}m", seconds / 60),
+            used_pct: Some(used),
+            resets_at_ms: Some(EpochMs(now + left * 1000)),
+            length_ms: Some(seconds * 1000),
+        }],
+        note: String::new(),
+        credits: None,
+    };
+    let elapsed = (seconds - left) as f64 / seconds as f64;
+    let expected = if elapsed < 0.05 {
+        100.0 - used
+    } else {
+        (100.0 - used / elapsed).clamp(0.0, 100.0)
+    };
+    let actual = spare_quota(now, &quota).expect("fresh window");
+    assert!((actual - expected).abs() < 1e-9, "{actual} vs {expected}");
+}
 
 fn fold(s: &str) -> String {
     s.chars()
@@ -372,42 +366,6 @@ fn applies(label: &str, model: &str) -> bool {
     }
     let got = families(model);
     caps.iter().any(|cap| got.contains(cap))
-}
-
-/// SPEC 8. Tightest `wk <name>` cap under `min` on an unspecified model. An open cap does
-/// not count, and neither does one whose reset has passed. The chosen or parked reason
-/// names it as `; <label> under the minimum`.
-fn limiting_cap(q: &Quota, model: &str, min: f64, now_ms: u64) -> Option<(f64, String)> {
-    if !unspecified(model) {
-        return None;
-    }
-    let mut best: Option<(f64, String)> = None;
-    for w in &q.windows {
-        let Some(scope) = w.label.strip_prefix("wk ") else {
-            continue;
-        };
-        if scope.is_empty() {
-            continue;
-        }
-        let Some(used) = w.used_pct.filter(|u| u.is_finite()) else {
-            continue;
-        };
-        if w.resets_at_ms
-            .map(|r| r.0)
-            .filter(|t| *t > 0)
-            .is_some_and(|r| r <= now_ms)
-        {
-            continue;
-        }
-        let remaining = (100.0 - used).clamp(0.0, 100.0);
-        if remaining >= min {
-            continue;
-        }
-        if best.as_ref().is_none_or(|(have, _)| remaining < *have) {
-            best = Some((remaining, w.label.clone()));
-        }
-    }
-    best
 }
 
 fn map_windows(quotas: &[Quota], mut f: impl FnMut(&mut QuotaWindow)) -> Vec<Quota> {

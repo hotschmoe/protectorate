@@ -126,6 +126,7 @@ fn park_text(life: &Life) -> String {
         }
         ParkReason::Flapping(None) => "flapping".into(),
         ParkReason::BriefUnconfirmed => "brief_unconfirmed".into(),
+        ParkReason::CreditFloor => "credit_floor".into(),
         ParkReason::Guard(g) => format!("g{}", g.number()),
         ParkReason::Ineligible { harness } => format!("ineligible ({})", harness_name(*harness)),
     }
@@ -223,6 +224,48 @@ impl Runner {
         let arg = |i: usize| words.get(i).copied().ok_or("missing argument".to_string());
         use EventKind as E;
         match words[0] {
+            "pending-node" => {
+                self.sim.apply(E::PendingNodeUpdate {
+                    node: NodeId(num(arg(1)?)?),
+                    version: arg(2)?.into(),
+                    probation_secs: num(arg(3)?)?,
+                });
+            }
+            "clear-pending-node" => {
+                self.sim.apply(E::ClearPendingNodeUpdate {
+                    node: NodeId(num(arg(1)?)?),
+                    revision: words.get(2).map(|s| num(s)).transpose()?,
+                });
+            }
+            "claim-pending-node" => {
+                self.sim.apply(E::ClaimPendingNodeUpdate {
+                    node: NodeId(num(arg(1)?)?),
+                    revision: num(arg(2)?)?,
+                });
+            }
+            "release-pending-node" => {
+                self.sim.apply(E::ReleasePendingNodeUpdate {
+                    node: NodeId(num(arg(1)?)?),
+                    revision: num(arg(2)?)?,
+                });
+            }
+            "expect-pending-node" if self.checked => {
+                let node = NodeId(num(arg(1)?)?);
+                let pending = self.sim.st.pending_node_updates.get(&node);
+                if arg(2)? == "none" {
+                    if pending.is_some() {
+                        return Err("pending target exists".into());
+                    }
+                } else {
+                    let pending = pending.ok_or("pending target missing")?;
+                    if pending.version != arg(2)? || pending.revision != num(arg(3)?)?
+                        || pending.probation_secs != num(arg(4)?)?
+                        || pending.attempted != flag("attempted")
+                    {
+                        return Err(format!("unexpected pending target: {pending:?}"));
+                    }
+                }
+            }
             "mail-batching" => {
                 self.sim.apply(E::MailBatching);
             }
@@ -270,7 +313,22 @@ impl Runner {
                     None => (Party::Owner, None),
                 };
                 let id = arg(2)?;
-                let event = if flag("supersede") {
+                let event = if let Some(limit) = kv("until") {
+                    E::SendUntil {
+                        to,
+                        request_id: id.into(),
+                        from,
+                        text: format!("text of {id}"),
+                        mode: if flag("steer") {
+                            SendMode::Steer
+                        } else {
+                            SendMode::Queue
+                        },
+                        d9: flag("d9"),
+                        supersede: flag("supersede"),
+                        limit: num(limit)?,
+                    }
+                } else if flag("supersede") {
                     E::Supersede {
                         to,
                         request_id: id.into(),
@@ -385,6 +443,10 @@ impl Runner {
                     "resolved" => Obs::ApprovalResolved { id: v.into() },
                     "began" => Obs::TurnBegan,
                     "foreign-settled" => Obs::ForeignTurnSettled { end: TurnEnd::Done },
+                    "continuing" => Obs::TurnSettledStatus {
+                        end: TurnEnd::Done,
+                        status: Some(DeclaredStatus::Continuing("remaining".into())),
+                    },
                     "settled" => Obs::TurnSettled {
                         end: match v {
                             "" | "done" => TurnEnd::Done,
@@ -692,7 +754,7 @@ impl Runner {
             }
             "expect-approval" if self.checked => self.expect_approval(&words)?,
             "expect" | "expect-batch" | "expect-effect" | "expect-job" | "expect-none"
-            | "expect-approval" | "expect-notice" | "expect-reply" => {}
+            | "expect-approval" | "expect-notice" | "expect-reply" | "expect-pending-node" => {}
             w => return Err(format!("unknown command {w}")),
         }
         Ok(())
@@ -767,6 +829,10 @@ impl Runner {
                 "turn_seq" => s.turn_seq.to_string(),
                 "turn_from" => variant(&s.turn_from),
                 "auto_continue" => s.auto_continue.map_or("none".into(), |n| n.to_string()),
+                "until_rounds" => s
+                    .until_done
+                    .as_ref()
+                    .map_or("none".into(), |u| u.rounds.to_string()),
                 "effort" => s.effort.clone().unwrap_or("none".into()),
                 "agent" => s.turn_agent.clone().unwrap_or_else(|| "none".into()),
                 "d9" => s.d9.to_string(),

@@ -10,7 +10,8 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "=0.4.13"
 pt-json = { path = ".." }
-serde_json = { version = "=1.0.154", features = ["float_roundtrip"] }
+serde = "=1.0.229"
+serde_json = { version = "=1.0.154", features = ["float_roundtrip", "unbounded_depth"] }
 
 [workspace]
 

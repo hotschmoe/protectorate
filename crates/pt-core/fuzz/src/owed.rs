@@ -20,6 +20,25 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
             mode,
             ..
         } => on_send(owed, prev, *to, request_id, *from, text, *mode),
+        E::SendUntil {
+            to,
+            request_id,
+            from,
+            text,
+            mode,
+            supersede,
+            ..
+        } => {
+            let mut state = prev.clone();
+            if *supersede && let Some(s) = state.sleeves.get_mut(to) {
+                s.queue.retain(|key| {
+                    !s.messages
+                        .get(key)
+                        .is_some_and(|m| m.from == *from && m.kind == MsgKind::Prompt)
+                });
+            }
+            on_send(owed, &state, *to, request_id, *from, text, *mode);
+        }
         E::Supersede {
             to,
             request_id,
@@ -55,11 +74,29 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
             turn,
             text,
         } => on_report(owed, prev, *sleeve, *to, *turn, text),
+        E::ReportStatus {
+            sleeve,
+            to,
+            turn,
+            text,
+            ..
+        } => on_report(owed, prev, *sleeve, *to, *turn, text),
         E::Stop { sleeve } => on_stop(owed, prev, *sleeve, false),
         E::Remove { sleeve } => on_stop(owed, prev, *sleeve, true),
         E::Start { sleeve, target, .. } => on_start_cmd(owed, prev, *sleeve, target.as_ref()),
+        E::StartUntil { sleeve, target, .. } => on_start_cmd(owed, prev, *sleeve, target.as_ref()),
         E::Resleeve { sleeve, target, .. } => on_resleeve(owed, prev, *sleeve, target.as_ref()),
         E::Abandon { effect } => on_abandon(owed, prev, *effect),
+        E::CreditFloor { effect, attempt } => {
+            if let Some(e) = prev.effects.get(effect)
+                && e.attempt == *attempt && e.state == EffectState::Intent
+                && let EffectKind::StartIncarnation { sleeve, g, target, .. } = &e.kind
+                && target.harness == Harness::Codex
+                && prev.sleeves.get(sleeve).is_some_and(|s| s.g == *g && s.proc == Proc::Starting(*effect))
+            {
+                clear(owed, *sleeve);
+            }
+        }
         E::Acked {
             effect, attempt, ..
         } => {
@@ -101,7 +138,14 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
         E::Tick => on_tick(owed, prev, now),
         E::HubRecovered => on_recovered(owed, prev),
         E::Continue { sleeve, text } => on_continue(owed, prev, *sleeve, text),
-        E::MailBatching
+        E::ArmUntil { .. }
+        | E::MailBatching
+        | E::DeviceChanged { .. }
+        | E::PendingNodeUpdate { .. }
+        | E::ClearPendingNodeUpdate { .. }
+        | E::ClaimPendingNodeUpdate { .. }
+        | E::ReleasePendingNodeUpdate { .. }
+        | E::SetNodeJobs { .. }
         | E::Spawn(_)
         | E::Interrupt { .. }
         | E::Compact { .. }
@@ -109,6 +153,7 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
         | E::RequestApproval { .. }
         | E::Viewed { .. }
         | E::CreateJob { .. }
+        | E::CreateNodeJob { .. }
         | E::CancelJob { .. }
         | E::AbandonJob { .. }
         | E::RequeueJob { .. }
@@ -116,6 +161,7 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
         | E::Unwritten { .. }
         | E::Launched { .. }
         | E::NodeChosen { .. }
+        | E::NodeChosenWithPolicy { .. }
         | E::JobNodeRemoved { .. }
         | E::JobStatus { .. }
         | E::ArtifactsChecked { .. }
@@ -137,6 +183,7 @@ fn deliverable(st: &State, s: &Sleeve) -> bool {
     s.life == Life::Running
         && s.proc == Proc::Up
         && !s.probing
+        && !s.device_refresh
         && matches!(s.activity, Activity::Idle { .. })
         && s.target.mode == Mode::Headless
         && matches!(
@@ -271,13 +318,21 @@ fn on_exit(
     if s.g != g || s.proc == Proc::Down {
         return;
     }
+    if s.device_refresh && s.stop_at.is_some() && matches!(s.life, Life::Running | Life::Launching)
+    {
+        return;
+    }
     let was = s.foreign.as_ref().map_or(&s.activity, |f| &f.previous);
     let turn = s
         .foreign
         .as_ref()
         .map_or(s.turn.as_ref(), |f| f.native.as_ref());
     let delivery_sent = matches!(was, Activity::Delivering { effect } if prev.effects.get(effect).map(|e| e.state) != Some(EffectState::Intent));
-    let interrupted = *was != Activity::Interrupting
+    let uncertain_until = matches!(was, Activity::Delivering { effect } if prev.effects.get(effect).is_some_and(|e| {
+        e.state != EffectState::Intent && matches!(e.kind, EffectKind::SendPrompt { kind: MsgKind::Until { .. }, .. })
+    }));
+    let interrupted = !uncertain_until
+        && *was != Activity::Interrupting
         && (turn.is_some()
             || s.desync_during_turn
             || delivery_sent
@@ -464,6 +519,8 @@ fn on_send(
             mode,
             state: MsgState::Queued,
             seq: prev.next_msg,
+            report: None,
+            until_done: None,
         },
     );
     note_dequeue(owed, prev, &queued);
@@ -610,7 +667,9 @@ fn on_obs(
     match obs {
         Obs::Ready { .. } => on_ready(owed, prev, &live),
         Obs::Progress { tool } => on_progress(owed, prev, &live, *tool, now),
-        Obs::TurnSettled { end } => on_settled(owed, prev, &live, *end),
+        Obs::TurnSettled { end } | Obs::TurnSettledStatus { end, .. } => {
+            on_settled(owed, prev, &live, *end)
+        }
         Obs::CompactDone => on_compact_done(owed, prev, &live),
         Obs::Usage { tokens } => on_usage(owed, prev, &live, *tokens),
         Obs::Disk { bytes } => {

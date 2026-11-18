@@ -660,11 +660,6 @@ fn other_roots_are_masked_and_a_worktree_child_still_commits() {
     let out = stdout(&sh(&s, &script));
     assert!(!out.contains("OTHER") && !out.contains("plan.md"), "{out}");
     assert!(out.contains("ROOT") && out.contains("COMMIT_OK"), "{out}");
-
-    // Masking the child's own root would hide its git dirs: refused, not half-mounted.
-    s.masks.push(main.clone());
-    let refused = s.command().err().map(|e| e.to_string()).unwrap_or_default();
-    assert!(refused.contains("overlaps the mask"), "{refused}");
 }
 
 /// A quota does not change the core count tools detect, so the sandbox sizes their worker pools

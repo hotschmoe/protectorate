@@ -217,6 +217,7 @@ pt_json::record! {
         pub local_url: String = String::new(),
         /// How often the quota readers run (each reading is kept 5 min); 0 never reads.
         pub quota_poll_secs: u64 = 60,
+        pub quota_credit_floor: Option<f64>,
         /// The history index (SPEC 3.7). It is derived and holds log text, so keep it private
         /// and out of backups. Empty means `<home>/history`.
         pub history_dir: String = String::new(),
@@ -312,6 +313,17 @@ impl Config {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("{}: sleeve memory limits must be positive", path.display()),
+                    ));
+                }
+                if c.quota_credit_floor
+                    .is_some_and(|n| !n.is_finite() || n < 0.0)
+                {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "{}: quota_credit_floor must be a non-negative number",
+                            path.display()
+                        ),
                     ));
                 }
                 Ok(c)

@@ -496,6 +496,12 @@ fn unsent_messages(prev: &State, st: &State) {
             if dropped_continue {
                 continue;
             }
+            if matches!(pm.kind, MsgKind::Until { .. })
+                && s.until_done.is_none()
+                && m == Some(MsgState::Rejected)
+            {
+                continue;
+            }
             assert!(
                 matches!(
                     m,

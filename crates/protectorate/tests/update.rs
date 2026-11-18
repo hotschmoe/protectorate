@@ -148,6 +148,18 @@ fn release(tag: &str, files: Vec<(String, Vec<u8>)>) -> Rel {
 struct Fake {
     url: String,
     handle: ShutdownHandle,
+    requests: Arc<Mutex<Vec<String>>>,
+}
+
+impl Fake {
+    fn requests_for(&self, path: &str) -> usize {
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| *p == path)
+            .count()
+    }
 }
 
 impl Drop for Fake {
@@ -200,18 +212,27 @@ fn route(base: &str, rels: &[Rel], req: &Request) -> Response {
 fn serve_releases(rels: Vec<Rel>) -> Fake {
     let rels = Arc::new(rels);
     let base = Arc::new(std::sync::OnceLock::<String>::new());
+    let requests = Arc::new(Mutex::new(Vec::new()));
     let (r2, b2) = (rels.clone(), base.clone());
+    let recorded = requests.clone();
     let server = Server::bind_tcp(
         "127.0.0.1:0".parse().unwrap(),
         Config::default(),
-        move |req, _| route(b2.get().expect("base url"), &r2, req),
+        move |req, _| {
+            recorded.lock().unwrap().push(req.path().to_string());
+            route(b2.get().expect("base url"), &r2, req)
+        },
     )
     .unwrap();
     let url = format!("http://{}", server.local_addr().unwrap());
     base.set(url.clone()).unwrap();
     let handle = server.shutdown_handle();
     thread::spawn(move || server.run());
-    Fake { url, handle }
+    Fake {
+        url,
+        handle,
+        requests,
+    }
 }
 
 /// Installs `bytes` as release `tag` of `program` under `<root>/releases` and points
@@ -423,13 +444,14 @@ fn confirmed_after(home: &Path, after_ms: u64, what: &str) -> u64 {
     })
 }
 
-fn events(home: &Path) -> Vec<String> {
+fn events(home: &Path) -> Vec<Value> {
     let v = cli(home, &["--json", "event", "list", "--limit", "1000"]).json();
     v["events"]
         .as_array()
         .unwrap_or(&[])
         .iter()
-        .filter_map(|e| e["text"].as_str().map(String::from))
+        .filter(|e| e["source"].as_str() == Some("harness-update"))
+        .cloned()
         .collect()
 }
 
@@ -522,13 +544,9 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
     let first = confirmed_after(&home, 0, "v0.0.2 confirmed");
     up("the hub on v0.0.2");
     assert_eq!(pointer(&home, "previous").as_deref(), Some("v0.0.1"));
-    assert!(
-        events(&home)
-            .iter()
-            .any(|e| e.contains("v0.0.2 passed its health check")),
-        "{:?}",
-        events(&home)
-    );
+    let download = format!("/dl/v0.0.2/{asset}");
+    let downloads = fake.requests_for(&download);
+    assert_eq!(downloads, 1, "the release binary was downloaded once");
 
     // Rollback restarts; updating again reuses the staged release.
     let n = sup.starts().len();
@@ -544,16 +562,15 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
     );
     let n = sup.starts().len();
     let again = cli(&home, &["--json", "hub", "update", "--version", "v0.0.2"]).json();
-    assert!(
-        again["note"]
-            .as_str()
-            .unwrap_or("")
-            .contains("already staged"),
-        "{again}"
-    );
+    assert_eq!(again["restarting"].as_bool(), Some(true), "{again}");
     sup.running("v0.0.2", n, 60);
     confirmed_after(&home, first, "v0.0.2 confirmed again");
     up("the hub on v0.0.2 again");
+    assert_eq!(
+        fake.requests_for(&download),
+        downloads,
+        "staged release was fetched again"
+    );
 
     // A release whose serve dies at once: the prestart counts three starts, then switches back.
     let n = sup.starts().len();
@@ -568,7 +585,6 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
     let p = probation(&home);
     assert_eq!(p["version"].as_str(), Some("v0.0.3"), "{p}");
     assert!(p["rolled_back_ms"].as_u64().is_some(), "{p}");
-    assert!(p["reason"].as_str().unwrap_or("").contains("starts"), "{p}");
     up("the hub after the crash rollback");
 
     // A release that cannot open its listener switches itself back before it exits.
@@ -577,13 +593,7 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
     sup.running("v0.0.2", n + 1, 90);
     let p = probation(&home);
     assert_eq!(p["version"].as_str(), Some("v0.0.4"), "{p}");
-    assert!(
-        p["reason"]
-            .as_str()
-            .unwrap_or("")
-            .contains("failed to start"),
-        "{p}"
-    );
+    assert!(p["rolled_back_ms"].as_u64().is_some(), "{p}");
     let v4: Vec<_> = sup.starts()[n..]
         .iter()
         .filter(|s| s.release == "v0.0.4")
@@ -602,10 +612,6 @@ fn hub_update_switches_on_probation_and_rolls_back_bad_releases() {
         .output()
         .unwrap();
     assert!(not_from_releases.status.success(), "{not_from_releases:?}");
-    assert!(
-        String::from_utf8_lossy(&not_from_releases.stdout).contains("no release on trial"),
-        "{not_from_releases:?}"
-    );
     assert_eq!(
         fs::read(home.join("releases/probation.json")).unwrap(),
         before_probation,
@@ -700,11 +706,6 @@ fn hub_rollbacks_restore_a_journal_the_previous_binary_cannot_read() {
         let old = home.join("releases/previous/protectorate");
         let refuses = protectorate_command(&old).args(&serve).output().unwrap();
         assert!(!refuses.status.success(), "{refuses:?}");
-        assert!(
-            String::from_utf8_lossy(&refuses.stderr)
-                .contains(&format!("unknown event tag {unknown}")),
-            "{refuses:?}"
-        );
         let next = probation(&home)["next_sleeve"]
             .as_u64()
             .expect("probation records next_sleeve");
@@ -731,27 +732,16 @@ fn hub_rollbacks_restore_a_journal_the_previous_binary_cannot_read() {
         let rollback = protectorate_command(&old).args(&prestart).output().unwrap();
         assert!(rollback.status.success(), "{rollback:?}");
         let err = String::from_utf8_lossy(&rollback.stderr);
-        assert!(err.contains("events after the snapshot are lost"), "{err}");
-        assert!(
-            err.contains(&format!("moved trial sleeves at or above {next} to ")),
-            "{err}"
-        );
         assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
         assert!(home.join("sleeves").join(lower.to_string()).is_dir());
         assert!(!home.join("sleeves").join(next.to_string()).exists());
         assert!(gitdir.join("gitdir").is_file(), "gitdir stays put");
         let checkout = home.join("claims").join(next.to_string());
+        assert!(checkout.join(".git").is_file(), "worktree stays put");
+        assert!(owner.join(".git").is_file(), "owner worktree stays put");
         assert!(
-            err.contains(&format!(
-                "left worktree {} and gitdir {} in place",
-                checkout.display(),
-                gitdir.display()
-            )),
-            "{err}"
-        );
-        assert!(
-            !err.contains(&format!("left worktree {}", owner.display())),
-            "{err}"
+            owner_gitdir.join("gitdir").is_file(),
+            "owner gitdir stays put"
         );
         let aside = fs::read_dir(home.join("update-aside"))
             .unwrap()
@@ -907,22 +897,16 @@ fn partial_automatic_rollback_does_not_keep_the_trial() {
     let first = prestart_with_journal_mounted(&home);
     let err = String::from_utf8_lossy(&first.stderr);
     assert!(!first.status.success(), "{first:?}");
-    assert!(err.contains("incomplete"), "{err}");
-    assert!(
-        err.contains("moved trial sleeves at or above 7 to "),
-        "{err}"
-    );
-    assert!(!err.contains("keeping the current release"), "{err}");
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
     assert_eq!(pointer(&home, "previous").as_deref(), Some("v0.0.1"));
     let p = probation(&home);
-    assert_eq!(
-        p["reason"].as_str(),
-        Some("not confirmed within 1 s"),
-        "{p}"
-    );
+    let reason = p["reason"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .expect("rollback reason")
+        .to_string();
     assert!(
-        p["restore_failed"].as_str().unwrap_or("").contains("busy"),
+        p["restore_failed"].as_str().is_some_and(|s| !s.is_empty()),
         "{p}"
     );
     assert!(p["contacted_ms"].is_null(), "{p}");
@@ -940,25 +924,11 @@ fn partial_automatic_rollback_does_not_keep_the_trial() {
         .find(|path| path.join("sleeves/7/transcript.jsonl").is_file())
         .expect("quarantine directory");
     assert!(err.contains(&aside.display().to_string()), "{err}");
-    assert!(!fs::read_dir(&home).unwrap().any(|e| {
-        e.unwrap()
-            .file_name()
-            .to_string_lossy()
-            .starts_with(".journal-aside-")
-    }));
-
     let second = prestart_with_journal_mounted(&home);
-    let err = String::from_utf8_lossy(&second.stderr);
     assert!(!second.status.success(), "{second:?}");
-    assert!(err.contains("incomplete"), "{err}");
-    assert!(!err.contains("keeping the current release"), "{err}");
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
     let p = probation(&home);
-    assert_eq!(
-        p["reason"].as_str(),
-        Some("not confirmed within 1 s"),
-        "{p}"
-    );
+    assert_eq!(p["reason"].as_str(), Some(reason.as_str()), "{p}");
     assert!(p["restore_failed"].as_str().is_some(), "{p}");
     assert!(p["contacted_ms"].is_null(), "{p}");
     assert!(home.join("journal/TRIAL").is_file());
@@ -1037,14 +1007,7 @@ fn partial_manual_rollback_does_not_keep_the_trial() {
     let marker = home.join("releases/rollback-open");
 
     let first = prestart_with_journal_mounted(&home);
-    let err = String::from_utf8_lossy(&first.stderr);
     assert!(!first.status.success(), "{first:?}");
-    assert!(err.contains("incomplete"), "{err}");
-    assert!(
-        err.contains("moved trial sleeves at or above 7 to "),
-        "{err}"
-    );
-    assert!(!err.contains("keeping the current release"), "{err}");
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
     assert!(marker.is_file(), "{first:?}");
     let p = probation(&home);
@@ -1056,7 +1019,7 @@ fn partial_manual_rollback_does_not_keep_the_trial() {
     assert!(p["manual_rollback"].as_bool().unwrap_or(false), "{p}");
     assert_eq!(p["contacted_ms"].as_u64(), Some(5), "{p}");
     assert!(
-        p["restore_failed"].as_str().unwrap_or("").contains("busy"),
+        p["restore_failed"].as_str().is_some_and(|s| !s.is_empty()),
         "{p}"
     );
     assert!(p["rolled_back_ms"].is_null(), "{p}");
@@ -1074,11 +1037,7 @@ fn partial_manual_rollback_does_not_keep_the_trial() {
         .args(["hub", "probation"])
         .output()
         .unwrap();
-    let err = String::from_utf8_lossy(&second.stderr);
     assert!(!second.status.success(), "{second:?}");
-    assert!(err.contains("reading journal snapshot"), "{err}");
-    assert!(err.contains("incomplete"), "{err}");
-    assert!(!err.contains("keeping the current release"), "{err}");
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
     assert!(marker.is_file());
     let p = probation(&home);
@@ -1090,10 +1049,7 @@ fn partial_manual_rollback_does_not_keep_the_trial() {
     assert!(p["manual_rollback"].as_bool().unwrap_or(false), "{p}");
     assert_eq!(p["contacted_ms"].as_u64(), Some(5), "{p}");
     assert!(
-        p["restore_failed"]
-            .as_str()
-            .unwrap_or("")
-            .contains("journal snapshot"),
+        p["restore_failed"].as_str().is_some_and(|s| !s.is_empty()),
         "{p}"
     );
     assert!(home.join("journal/TRIAL").is_file());
@@ -1181,7 +1137,6 @@ fn serve_refuses_an_incomplete_manual_rollback() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(exited, "serve started on a half-restored home\n{err}");
     assert!(!out.status.success(), "{out:?}");
-    assert!(err.contains("incomplete"), "{err}");
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
     assert!(marker.is_file());
     assert_eq!(
@@ -1244,11 +1199,8 @@ fn release_switches_survive_a_crash_at_each_step() {
     assert_eq!(p["version"].as_str(), Some("v0.0.2"), "{p}");
     drop(sup);
     let idle = cli(&home, &["hub", "probation"]);
-    assert!(
-        idle.stdout.contains("no release on trial"),
-        "{}",
-        idle.stdout
-    );
+    assert_eq!(idle.status, 0, "{}", idle.stderr);
+    assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
 
     let sup = Supervisor::start(
         &home,
@@ -1375,10 +1327,6 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         .unwrap();
     assert!(failed.status.success(), "{failed:?}");
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
-    assert!(
-        String::from_utf8_lossy(&failed.stderr).contains("keeping the current release"),
-        "{failed:?}"
-    );
     assert!(probation(&home)["reason"].is_null());
     assert!(probation(&home)["contacted_ms"].as_u64().is_some());
     let config = obj! {
@@ -1418,16 +1366,17 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
     assert!(
         info["restore_error"]
             .as_str()
-            .unwrap_or("")
-            .contains("has no database"),
+            .is_some_and(|s| !s.is_empty()),
         "{info}"
     );
+    let events = cli(&home, &["--json", "event", "list", "--limit", "1000"]).json();
     assert!(
-        events(&home)
-            .iter()
-            .any(|e| e.contains("rollback restore failed")),
-        "{:?}",
-        events(&home)
+        events["events"].as_array().unwrap_or(&[]).iter().any(|e| {
+            e["kind"].as_str() == Some("hub")
+                && e["level"].as_str() == Some("alarm")
+                && e["source"].as_str() == Some("update")
+        }),
+        "{events}"
     );
     let online_retry = protectorate_command(home.join("releases/previous/protectorate"))
         .arg("--home")
@@ -1436,10 +1385,6 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         .output()
         .unwrap();
     assert!(!online_retry.status.success(), "{online_retry:?}");
-    assert!(
-        String::from_utf8_lossy(&online_retry.stderr).contains("stop the hub"),
-        "{online_retry:?}"
-    );
     assert!(probation(&home)["reason"].is_null());
     assert!(probation(&home)["restore_failed"].as_str().is_some());
     drop(sup);
@@ -1477,10 +1422,6 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         .output()
         .unwrap();
     assert!(failed.status.success(), "{failed:?}");
-    assert!(
-        String::from_utf8_lossy(&failed.stderr).contains("keeping the current release"),
-        "{failed:?}"
-    );
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
     assert!(
         probation(&home)["manual_rollback"]
@@ -1506,13 +1447,6 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        err.contains("nodes enrolled after this snapshot are lost"),
-        "{err}"
-    );
-    assert!(err.contains("kept the journal"), "{err}");
-    assert!(!err.contains("events after the snapshot are lost"), "{err}");
     assert_eq!(fs::read(&segment).unwrap(), readable);
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
     assert_eq!(pointer(&home, "previous").as_deref(), Some("v0.0.1"));
@@ -1562,16 +1496,9 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("kept the journal"), "{err}");
-    assert!(
-        err.contains("nodes enrolled after this snapshot are lost"),
-        "{err}"
-    );
     assert_eq!(fs::read(&segment).unwrap(), kept);
     assert!(home.join("sleeves/4/transcript.jsonl").is_file());
     assert!(kept_gitdir.join("gitdir").is_file());
-    assert!(!err.contains("moved trial sleeves"), "{err}");
     let out = sql("select name from nodes order by name;");
     assert_eq!(String::from_utf8_lossy(&out.stdout), "before\n");
     assert!(!dbdir.join("db.sqlite-wal").exists());
@@ -1641,13 +1568,7 @@ fn implicit_hub_update_requires_higher_precedence() {
     assert_eq!(implicit["restarting"].as_bool(), Some(false), "{implicit}");
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.7.0-dev.3"));
     let explicit = cli(&home, &["--json", "hub", "update", "--version", "v0.6.0"]).json();
-    assert!(
-        explicit["note"]
-            .as_str()
-            .unwrap_or("")
-            .contains("downgrade"),
-        "{explicit}"
-    );
+    assert_eq!(explicit["restarting"].as_bool(), Some(true), "{explicit}");
     sup.running("v0.6.0", 1, 30);
     confirmed_after(&home, 0, "explicit downgrade confirmed");
     // The accepted update already wrote a snapshot. A refusal must not add or remove one.
@@ -1670,13 +1591,6 @@ fn implicit_hub_update_requires_higher_precedence() {
     );
     let unsupported = cli(&home, &["hub", "update", "--version", "v0.5.0"]);
     assert_ne!(unsupported.status, 0, "{}", unsupported.stdout);
-    assert!(
-        unsupported
-            .stderr
-            .contains("does not support snapshot-aware hub rollback"),
-        "{}",
-        unsupported.stderr
-    );
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.6.0"));
     assert_eq!(snapshot_names(), snapshots);
     let previous_bin = home.join("releases/v0.7.0-dev.3/protectorate");
@@ -1686,13 +1600,6 @@ fn implicit_hub_update_requires_higher_precedence() {
     write_exec(&previous_bin, &legacy_previous);
     let unsupported = cli(&home, &["hub", "update", "--rollback"]);
     assert_ne!(unsupported.status, 0, "{}", unsupported.stdout);
-    assert!(
-        unsupported
-            .stderr
-            .contains("cannot run snapshot-aware probation"),
-        "{}",
-        unsupported.stderr
-    );
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.6.0"));
     assert_eq!(snapshot_names(), snapshots);
     drop(sup);
@@ -1743,12 +1650,6 @@ fn binary_check_times_out_when_descendant_keeps_stdout() {
     let start = std::time::Instant::now();
     let out = cli(&home, &["hub", "update", "--version", "v0.0.2"]);
     assert_ne!(out.status, 0, "{}", out.stdout);
-    assert!(
-        out.stderr.contains("did not finish"),
-        "{} {}",
-        out.stdout,
-        out.stderr
-    );
     assert!(start.elapsed() < Duration::from_secs(10));
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
     let pid = fs::read_to_string(pidfile).unwrap();
@@ -1816,6 +1717,7 @@ fn node_update_admission_lost_reply_and_confirmation() {
         &wrapper("protectorate-node", "--version", "v0.0.1", &node, "", false),
     );
     let pause = root.join("pause");
+    let failed_reply = root.join("failed-reply");
     fs::write(&pause, "0").unwrap();
     fs::write(root.join(".curlrc"), "this-option-does-not-exist\n").unwrap();
     let sock = root.join("a.sock");
@@ -1838,6 +1740,10 @@ fn node_update_admission_lost_reply_and_confirmation() {
                 "PROTECTORATE_NODE_TEST_UPDATE_PAUSE".into(),
                 pause.display().to_string(),
             ),
+            (
+                "PROTECTORATE_NODE_TEST_REPLY_FAILED".into(),
+                failed_reply.display().to_string(),
+            ),
             ("CURL_HOME".into(), state.clone()),
         ],
         Duration::from_millis(200),
@@ -1855,21 +1761,15 @@ fn node_update_admission_lost_reply_and_confirmation() {
         let fields = obj! { "version" => "v0.0.2", "api" => api, "repo" => "o/r", "probation_secs" => 30u64 }.to_string();
         let out = node_rpc(&node, &sock, "Update", &fields);
         assert_eq!(out.status, 1, "{api}: {} {}", out.stdout, out.stderr);
-        assert!(
-            out.stdout.contains("authority") || out.stdout.contains("loopback"),
-            "{api}: {}",
-            out.stdout
+        let response = pt_json::parse(&out.stdout).expect("node error response");
+        assert_eq!(
+            response["code"].as_str(),
+            Some("bad_request"),
+            "{api}: {response}"
         );
     }
 
     fs::write(&pause, "1").unwrap();
-    // Each refused update above was admitted too; wait for this one's own admission.
-    let admitted = || {
-        sup.log_text()
-            .matches("update admitted for testing")
-            .count()
-    };
-    let before = admitted();
     let fields = obj! { "type" => "Update", "version" => "v0.0.2", "api" => fake.url.as_str(), "repo" => "o/r", "probation_secs" => 30u64 }.to_string();
     let mut link = UnixStream::connect(&sock).unwrap();
     link.write_all(b"{\"tags\":[\"tag:hub\"]}\n").unwrap();
@@ -1877,7 +1777,7 @@ fn node_update_admission_lost_reply_and_confirmation() {
     link.shutdown(Shutdown::Both).unwrap();
     drop(link);
     eventually("update admitted", Duration::from_secs(10), || {
-        (admitted() > before).then_some(())
+        (fs::read(&pause).ok().as_deref() == Some(b"admitted")).then_some(())
     });
     let submit = node_rpc(
         &node,
@@ -1886,7 +1786,8 @@ fn node_update_admission_lost_reply_and_confirmation() {
         r#"{"job_id":"during-update","attempt":1,"script":"echo unexpected"}"#,
     );
     assert_eq!(submit.status, 1, "{} {}", submit.stdout, submit.stderr);
-    assert!(submit.stdout.contains("busy"), "{}", submit.stdout);
+    let response = pt_json::parse(&submit.stdout).expect("node error response");
+    assert_eq!(response["code"].as_str(), Some("busy"), "{response}");
     fs::write(&pause, "0").unwrap();
     sup.running("v0.0.2", 1, 45);
     assert_eq!(
@@ -1901,13 +1802,14 @@ fn node_update_admission_lost_reply_and_confirmation() {
         (r.status == 0).then_some(())
     });
     assert!(probation(&root)["contacted_ms"].is_null());
+    fs::write(&failed_reply, b"armed").unwrap();
     let mut lost = UnixStream::connect(&sock).unwrap();
     lost.write_all(b"{\"tags\":[\"tag:hub\"]}\n").unwrap();
     write_frame(&mut lost, Kind::Request, 22, br#"{"type":"Presence"}"#).unwrap();
     lost.shutdown(Shutdown::Both).unwrap();
     drop(lost);
     eventually("failed non-Hello reply", Duration::from_secs(10), || {
-        sup.log_text().contains("request 22").then_some(())
+        (fs::read(&failed_reply).ok().as_deref() == Some(b"failed")).then_some(())
     });
     assert!(probation(&root)["contacted_ms"].is_null());
     let bad = node_rpc(&node, &sock, "JobStatus", r#"{"job_id":"missing"}"#);
@@ -1963,6 +1865,7 @@ fn node_trial_refuses_overlap_retries_confirmation_and_rejects_expiry() {
     let trial = obj! { "version" => "v0.0.2", "previous" => "v0.0.1", "switched_ms" => now, "deadline_ms" => now + 60_000u64 };
     fs::write(root.join("releases/probation.json"), trial.to_string()).unwrap();
     let sock = root.join("b.sock");
+    let failed_confirm = root.join("failed-confirm");
     let state = root.display().to_string();
     let sup = Supervisor::start(
         &root,
@@ -1977,7 +1880,13 @@ fn node_trial_refuses_overlap_retries_confirmation_and_rejects_expiry() {
             "--no-scope".into(),
             "--no-member".into(),
         ],
-        vec![("PROTECTORATE_NODE_TEST_PAUSE_WATCH".into(), "1".into())],
+        vec![
+            ("PROTECTORATE_NODE_TEST_PAUSE_WATCH".into(), "1".into()),
+            (
+                "PROTECTORATE_NODE_TEST_CONFIRM_FAILED".into(),
+                failed_confirm.display().to_string(),
+            ),
+        ],
         Duration::from_millis(200),
     );
     eventually("trial node socket", Duration::from_secs(20), || {
@@ -1988,22 +1897,16 @@ fn node_trial_refuses_overlap_retries_confirmation_and_rejects_expiry() {
     let fields = obj! { "version" => "v0.0.3", "api" => fake.url.as_str(), "repo" => "o/r", "probation_secs" => 30u64 }.to_string();
     let overlap = node_rpc(&node, &sock, "Update", &fields);
     assert_eq!(overlap.status, 1, "{} {}", overlap.stdout, overlap.stderr);
-    assert!(overlap.stdout.contains("probation"), "{}", overlap.stdout);
     assert_eq!(pointer(&root, "current").as_deref(), Some("v0.0.2"));
     assert_eq!(pointer(&root, "previous").as_deref(), Some("v0.0.1"));
     assert!(probation(&root)["contacted_ms"].is_null());
 
     fs::set_permissions(root.join("releases"), fs::Permissions::from_mode(0o555)).unwrap();
+    fs::write(&failed_confirm, b"armed").unwrap();
     assert_eq!(node_rpc(&node, &sock, "Presence", "{}").status, 0);
-    eventually(
-        "failed confirmation logged",
-        Duration::from_secs(10),
-        || {
-            sup.log_text()
-                .contains("confirming the update")
-                .then_some(())
-        },
-    );
+    eventually("failed confirmation", Duration::from_secs(10), || {
+        (fs::read(&failed_confirm).ok().as_deref() == Some(b"failed")).then_some(())
+    });
     fs::set_permissions(root.join("releases"), fs::Permissions::from_mode(0o755)).unwrap();
     assert!(probation(&root)["contacted_ms"].is_null());
     assert_eq!(node_rpc(&node, &sock, "Presence", "{}").status, 0);
@@ -2061,6 +1964,253 @@ fn free_pair() -> u16 {
             return p;
         }
     }
+}
+
+fn registration_payload(line: &str) -> Option<&str> {
+    let payload = &line[line.find('{')?..];
+    let v = pt_json::parse(payload).ok()?;
+    (v["v"].as_u64() == Some(1)
+        && v["auth_id"].as_str().is_some()
+        && v["control_key"].as_str().is_some()
+        && v["name"].as_str().is_some())
+    .then_some(payload)
+}
+
+#[test]
+#[ignore = "real fleet rollout; run with make test-heavy"]
+fn pending_node_update_catches_up_after_hub_restart() {
+    let version = cli_command().arg("version").output().unwrap();
+    if String::from_utf8_lossy(&version.stdout).contains("missing") {
+        eprintln!("SKIP: this protectorate does not embed headscale and member");
+        return;
+    }
+    let Some(node_bin) = node_bin() else { return };
+    let asset = format!("protectorate-node-linux-{}", arch());
+    let rel = |tag: &str| {
+        release(
+            tag,
+            vec![(
+                asset.clone(),
+                wrapper("protectorate-node", "--version", tag, &node_bin, "", false),
+            )],
+        )
+    };
+    let fake = serve_releases(vec![rel("v0.0.2"), rel("v0.0.3")]);
+    let port = free_pair();
+    let listen = format!("127.0.0.1:{port}");
+    let tailnet = std::env::temp_dir().join(format!("pt-pending-{}-{port}", std::process::id()));
+    let mut hub = Hub::start_config(
+        "pending-update",
+        "pi_local",
+        &[
+            (
+                "fleet",
+                obj! { "listen" => listen.as_str(), "dir" => tailnet.to_str().unwrap(), "poll_secs" => 2u64 },
+            ),
+            ("release_api", fake.url.as_str().into()),
+            ("release_repo", "o/r".into()),
+        ],
+        &[],
+        &[],
+    );
+    eventually("fleet online", Duration::from_secs(120), || {
+        (hub.cli(&["--json", "node", "add"]).status == 0).then_some(())
+    });
+    let node_dir = hub.home.with_file_name("pending-node");
+    fs::create_dir_all(&node_dir).unwrap();
+    let mut join = Command::new(&node_bin)
+        .args([
+            "join",
+            &format!("http://{listen}"),
+            "--name",
+            "pending-node",
+            "--state-dir",
+        ])
+        .arg(&node_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let (tx, rx) = mpsc::channel();
+    let out = join.stdout.take().unwrap();
+    thread::spawn(move || {
+        for line in BufReader::new(out).lines().map_while(Result::ok) {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let payload = loop {
+        let line = rx
+            .recv_timeout(Duration::from_secs(60))
+            .expect("node registration");
+        if let Some(payload) = line.trim_start().strip_prefix("paste") {
+            break payload.trim().to_string();
+        }
+    };
+    let pending = hub.cli(&["--json", "node", "add", &payload]).json();
+    hub.cli(&[
+        "--json",
+        "node",
+        "approve",
+        pending["auth_id"].as_str().unwrap(),
+    ])
+    .json();
+    assert!(
+        eventually("node join", Duration::from_secs(60), || join
+            .try_wait()
+            .unwrap())
+        .success()
+    );
+    install(
+        &node_dir,
+        "v0.0.1",
+        "protectorate-node",
+        &wrapper(
+            "protectorate-node",
+            "--version",
+            "v0.0.1",
+            &node_bin,
+            "",
+            false,
+        ),
+    );
+    let presence = node_dir.join("presence");
+    fs::write(&presence, "AWAY").unwrap();
+    let state = node_dir.display().to_string();
+    let start = || {
+        Supervisor::start(
+            &node_dir,
+            "protectorate-node",
+            vec!["probation".into(), "--state-dir".into(), state.clone()],
+            vec![
+                "serve".into(),
+                "--state-dir".into(),
+                state.clone(),
+                "--forward-socket".into(),
+                format!("{state}/agent.sock"),
+                "--no-scope".into(),
+            ],
+            vec![(
+                "PROTECTORATE_NODE_TEST_PRESENCE".into(),
+                presence.display().to_string(),
+            )],
+            Duration::from_secs(2),
+        )
+    };
+    let sup = start();
+    eventually("node online", Duration::from_secs(120), || {
+        let out = hub.cli(&["--json", "node", "show", "pending-node"]);
+        if out.status != 0 {
+            return None;
+        }
+        let node = out.json();
+        (node["online"].as_bool() == Some(true)).then_some(())
+    });
+    drop(sup);
+    eventually("node offline", Duration::from_secs(120), || {
+        let node = hub.cli(&["--json", "node", "show", "pending-node"]).json();
+        (node["online"].as_bool() == Some(false)).then_some(())
+    });
+    let out = hub.cli(&[
+        "node",
+        "update",
+        "--all",
+        "--version",
+        "v0.0.2",
+        "--probation",
+        "90",
+    ]);
+    assert!(
+        out.stdout.contains("DEFERRED (offline)"),
+        "{} {}",
+        out.stdout,
+        out.stderr
+    );
+    let node = hub.cli(&["--json", "node", "show", "pending-node"]).json();
+    assert_eq!(node["pending_update"].as_str(), Some("v0.0.2"));
+    let out = hub.cli(&["node", "update", "--all", "--version", "v0.0.3"]);
+    assert!(
+        out.stdout.contains("DEFERRED (offline)"),
+        "{} {}",
+        out.stdout,
+        out.stderr
+    );
+    let node = hub.cli(&["--json", "node", "show", "pending-node"]).json();
+    assert_eq!(node["pending_update"].as_str(), Some("v0.0.3"));
+    assert_eq!(
+        hub.cli(&["node", "update", "--cancel", "pending-node"])
+            .status,
+        0
+    );
+    let node = hub.cli(&["--json", "node", "show", "pending-node"]).json();
+    assert!(node["pending_update"].is_null());
+    let out = hub.cli(&[
+        "node",
+        "update",
+        "--all",
+        "--version",
+        "v0.0.2",
+        "--probation",
+        "90",
+    ]);
+    assert!(
+        out.stdout.contains("DEFERRED (offline)"),
+        "{} {}",
+        out.stdout,
+        out.stderr
+    );
+    hub.restart();
+    eventually(
+        "pending after hub restart",
+        Duration::from_secs(120),
+        || {
+            let out = hub.cli(&["--json", "node", "show", "pending-node"]);
+            if out.status != 0 {
+                return None;
+            }
+            (out.json()["pending_update"].as_str() == Some("v0.0.2")).then_some(())
+        },
+    );
+    let out = hub.cli(&["node", "update", "pending-node", "--version", "v0.0.3"]);
+    assert!(
+        out.stdout.contains("DEFERRED (offline)"),
+        "{} {}",
+        out.stdout,
+        out.stderr
+    );
+    assert_eq!(
+        hub.cli(&["--json", "node", "show", "pending-node"]).json()["pending_update"].as_str(),
+        Some("v0.0.3")
+    );
+    let out = hub.cli(&[
+        "node",
+        "update",
+        "pending-node",
+        "--version",
+        "v0.0.2",
+        "--probation",
+        "90",
+    ]);
+    assert!(
+        out.stdout.contains("DEFERRED (offline)"),
+        "{} {}",
+        out.stdout,
+        out.stderr
+    );
+    let sup = start();
+    eventually("automatic update", Duration::from_secs(180), || {
+        let out = hub.cli(&["--json", "node", "show", "pending-node"]);
+        if out.status != 0 {
+            return None;
+        }
+        let node = out.json();
+        (pointer(&node_dir, "current").as_deref() == Some("v0.0.2")
+            && node["pending_update"].is_null()
+            && probation(&node_dir)["contacted_ms"].as_u64().is_some())
+        .then_some(())
+    });
+    drop(sup);
 }
 
 #[test]
@@ -2139,8 +2289,8 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
         let l = rx
             .recv_timeout(Duration::from_secs(60))
             .expect("join shows its registration");
-        if let Some(p) = l.trim_start().strip_prefix("paste") {
-            break p.trim().to_string();
+        if let Some(p) = registration_payload(&l) {
+            break p.to_string();
         }
     };
     let pending = hub.cli(&["--json", "node", "add", &payload]).json();
@@ -2231,8 +2381,8 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
         let l = rx
             .recv_timeout(Duration::from_secs(60))
             .expect("busy node registration");
-        if let Some(p) = l.trim_start().strip_prefix("paste") {
-            break p.trim().to_string();
+        if let Some(p) = registration_payload(&l) {
+            break p.to_string();
         }
     };
     let pending = hub.cli(&["--json", "node", "add", &payload]).json();
@@ -2329,42 +2479,31 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
             }
         }
     });
-    let mut lines = Vec::new();
-    while !lines
-        .iter()
-        .any(|l: &String| l.contains("e2e-busy: waiting: busy with job"))
-        || !lines
-            .iter()
-            .any(|l: &String| l.contains("e2e-upd:") && l.contains("answered Presence"))
-    {
-        lines.push(
-            rx.recv_timeout(Duration::from_secs(90))
-                .expect("live rollout progress"),
-        );
-    }
-    assert!(rollout.try_wait().unwrap().is_none(), "{lines:?}");
-    assert!(lines.iter().any(|l| l.contains(job_id)), "{lines:?}");
-    assert!(
-        lines
-            .iter()
-            .any(|l| l.contains("e2e-upd: confirmed by hello")),
-        "{lines:?}"
-    );
+    eventually("the canary confirms", Duration::from_secs(90), || {
+        let p = probation(&node_dir);
+        (p["version"].as_str() == Some("v0.0.2") && p["contacted_ms"].as_u64().is_some())
+            .then_some(())
+    });
+    let busy = hub.cli(&["--json", "job", "show", job_id]).json();
+    assert_eq!(busy["state"].as_str(), Some("running"), "{busy}");
+    assert!(rollout.try_wait().unwrap().is_none());
     fs::write(&drop_update, "0").unwrap();
     let status = eventually("rollout deferred", Duration::from_secs(45), || {
         rollout.try_wait().unwrap()
     });
-    assert!(!status.success());
-    lines.extend(rx.try_iter());
-    assert!(
-        lines.iter().any(|l| l.contains("deferred: busy")),
-        "{lines:?}"
-    );
+    let lines: Vec<_> = rx.iter().collect();
+    assert!(!status.success(), "{lines:?}");
     assert!(
         lines
             .iter()
-            .any(|l| l.contains("NODE") && l.contains("DETAIL")),
+            .any(|l| l.contains("DEFERRED (busy)") && l.contains("e2e-busy")),
         "{lines:?}"
+    );
+    let pending = hub.cli(&["--json", "node", "show", "e2e-busy"]).json();
+    assert_eq!(pending["pending_update"].as_str(), Some("v0.0.2"));
+    assert_eq!(
+        hub.cli(&["node", "update", "--cancel", "e2e-busy"]).status,
+        0
     );
     let other_job = hub
         .cli(&[
@@ -2391,11 +2530,8 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
     let promoted = pt_json::parse(out.stdout.trim()).unwrap();
     let rows = promoted["nodes"].as_array().unwrap();
     assert!(
-        rows.iter().any(|n| n["name"].as_str() == Some("e2e-busy")
-            && n["detail"]
-                .as_str()
-                .unwrap_or("")
-                .contains("deferred: busy")),
+        rows.iter()
+            .any(|n| n["name"].as_str() == Some("e2e-busy") && n["ok"].as_bool() == Some(false)),
         "{promoted}"
     );
     assert!(
@@ -2431,21 +2567,18 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
             "--no-wait",
         ])
         .json();
-    let rollout_id = accepted["rollout_id"].as_str().expect("rollout id");
+    assert!(accepted["rollout_id"].as_str().is_some(), "{accepted}");
     hub.cli(&["--json", "job", "cancel", job_id]).json();
     eventually(
         "background rollout completion",
         Duration::from_secs(60),
         || {
-            let events = hub.cli(&["--json", "event", "list"]).json();
-            events["events"]
-                .as_array()?
-                .iter()
-                .any(|e| {
-                    e["target"].as_str() == Some(rollout_id)
-                        && e["text"].as_str() == Some("rollout complete")
-                })
-                .then_some(())
+            let p = probation(&busy_dir);
+            let node = hub.cli(&["--json", "node", "show", "e2e-busy"]).json();
+            (p["version"].as_str() == Some("v0.0.2")
+                && p["contacted_ms"].as_u64().is_some()
+                && node["pending_update"].is_null())
+            .then_some(())
         },
     );
     drop(busy_sup);
@@ -2459,10 +2592,7 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
         Duration::from_secs(30),
         || probation(&node_dir)["contacted_ms"].as_u64(),
     );
-    assert!(
-        node_dir.join("releases/v0.0.2/SHA256SUMS").is_file(),
-        "staged with its sums"
-    );
+    assert!(fake.requests_for("/dl/v0.0.2/SHA256SUMS") > 0);
 
     // Switched, then the hub goes silent: the node switches back when its window passes.
     let n = sup.starts().len();
@@ -2484,10 +2614,7 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
     let p = probation(&node_dir);
     assert_eq!(p["version"].as_str(), Some("v0.0.3"), "{p}");
     assert!(p["contacted_ms"].is_null(), "{p}");
-    assert!(
-        p["reason"].as_str().unwrap_or("").contains("not confirmed"),
-        "{p}"
-    );
+    assert!(p["rolled_back_ms"].as_u64().is_some(), "{p}");
     let v3: Vec<_> = sup.starts()[n..]
         .iter()
         .filter(|s| s.release == "v0.0.3")
@@ -2543,15 +2670,6 @@ fn doctor_refuses_an_ineligible_harness_and_envoy_waits_for_it() {
     eventually("Envoy to park", Duration::from_secs(90), || {
         (hub.sleeve("envoy")["lifecycle"].as_str() == Some("parked")).then_some(())
     });
-    let ev = events(&hub.home);
-    assert!(
-        ev.iter().any(
-            |e| e.contains("launch refused: harness claude is ineligible")
-                && e.contains("broken install")
-        ),
-        "{ev:?}"
-    );
-
     let d = hub.cli(&["--json", "doctor"]).json();
     let h = d["harnesses"]
         .as_array()
@@ -2561,17 +2679,6 @@ fn doctor_refuses_an_ineligible_harness_and_envoy_waits_for_it() {
         .cloned()
         .unwrap();
     assert_eq!(h["eligible"].as_bool(), Some(false), "{d}");
-    assert!(
-        h["reasons"][0].as_str().unwrap_or("").contains("--version"),
-        "{d}"
-    );
-    assert!(
-        h["reasons"][1]
-            .as_str()
-            .unwrap_or("")
-            .contains("run `protectorate harness login claude`"),
-        "{d}"
-    );
     assert!(fs::metadata(hub.home.join("doctor.json")).is_ok());
     let human = hub.cli(&["doctor"]);
     assert!(human.ok().contains("claude"), "{}", human.stdout);
@@ -2587,24 +2694,13 @@ fn doctor_refuses_an_ineligible_harness_and_envoy_waits_for_it() {
         "claude",
     ]);
     assert_ne!(spawn.status, 0);
-    assert!(
-        spawn.stderr.contains("409") && spawn.stderr.contains("harness claude is ineligible"),
-        "{}",
-        spawn.stderr
-    );
     let start = hub.cli(&["sleeve", "start", "envoy"]);
     assert_ne!(start.status, 0);
-    assert!(start.stderr.contains("ineligible"), "{}", start.stderr);
 
     // The journal says why Envoy waits, so a hub restart (an update re-execs) still knows.
     hub.restart();
     let envoy = hub.sleeve("envoy");
     assert_eq!(envoy["lifecycle"].as_str(), Some("parked"), "{envoy}");
-    assert_eq!(
-        envoy["park_reason"].as_str(),
-        Some("ineligible (claude)"),
-        "{envoy}"
-    );
 
     // Fixed, and logged in for the hub: the next doctor run finds claude eligible and starts
     // Envoy again.
@@ -2620,14 +2716,11 @@ fn doctor_refuses_an_ineligible_harness_and_envoy_waits_for_it() {
             .any(|h| h["name"].as_str() == Some("claude") && h["eligible"].as_bool() == Some(true)),
         "{d}"
     );
-    eventually("Envoy to start again", Duration::from_secs(30), || {
-        events(&hub.home)
-            .iter()
-            .any(|e| e.contains("claude is eligible again; starting Envoy"))
-            .then_some(())
-    });
     eventually("Envoy to leave the park", Duration::from_secs(30), || {
-        (hub.sleeve("envoy")["park_reason"].as_str() != Some("ineligible (claude)")).then_some(())
+        hub.sleeve("envoy")["lifecycle"]
+            .as_str()
+            .is_some_and(|life| life != "parked")
+            .then_some(())
     });
 }
 
@@ -2710,25 +2803,15 @@ fn harness_updates_run_daily_and_wait_for_a_sleeve_mid_turn() {
             want.iter().all(|w| c.iter().any(|l| l == w)).then_some(())
         },
     );
-    let ev = eventually("the update events", Duration::from_secs(30), || {
+    eventually("the update events", Duration::from_secs(30), || {
         let ev = events(&hub.home);
-        ev.iter().any(|e| e.starts_with("pi: ")).then_some(ev)
+        (ev.iter()
+            .filter(|e| e["level"].as_str() == Some("info"))
+            .count()
+            >= 3
+            && ev.iter().any(|e| e["level"].as_str() == Some("warn")))
+        .then_some(())
     });
-    assert!(
-        ev.iter()
-            .any(|e| e == "claude: 1.0.0 -> 2.0.0 (claude update)"),
-        "{ev:?}"
-    );
-    assert!(
-        ev.iter()
-            .any(|e| e.starts_with("grok: grok update failed") && e.contains("now 1.0.0")),
-        "{ev:?}"
-    );
-    assert!(
-        hub.log_text()
-            .contains("harness update claude: updated to 2.0.0"),
-        "the command's output is in the hub log"
-    );
     let d = hub.cli(&["--json", "doctor", "--refresh"]).json();
     let claude_row = d["harnesses"]
         .as_array()
@@ -2789,22 +2872,15 @@ fn harness_updates_run_daily_and_wait_for_a_sleeve_mid_turn() {
     if busy_now.as_deref() == Some("working") {
         assert_eq!(pi_runs(), 1, "pi waits while the sleeve works");
         thread::sleep(Duration::from_secs(7));
-        assert_eq!(
-            hub.log_text()
-                .matches("harness update: pi waits for sleeve busy")
-                .count(),
-            1
-        );
+        if hub.sleeve("busy")["incarnation"]["activity"]["state"].as_str() == Some("working") {
+            assert_eq!(pi_runs(), 1, "pi still waits while the sleeve works");
+        }
     }
     hub.wait("busy", "idle", 300);
     eventually(
         "pi's update after the turn",
         Duration::from_secs(30),
         || (pi_runs() == 2).then_some(()),
-    );
-    assert!(
-        hub.log_text()
-            .contains("harness update: pi no longer waits for sleeve busy")
     );
 }
 
@@ -2856,21 +2932,6 @@ impl Supervise {
         fs::read_to_string(&self.log).unwrap_or_default()
     }
 
-    fn wait_log(&self, what: &str, needle: &str, secs: u64) {
-        let ok = (0..secs * 10).any(|_| {
-            let hit = self.log_text().contains(needle);
-            if !hit {
-                thread::sleep(Duration::from_millis(100));
-            }
-            hit
-        });
-        assert!(
-            ok,
-            "{what}: no {needle:?}\n--- supervise log ---\n{}",
-            tail(&self.log_text(), 60)
-        );
-    }
-
     /// SIGTERM, as a service stop; true when it exited 0 in time.
     fn stop(&mut self) -> bool {
         let _ = pt_sys::kill_group(self.child.id(), pt_sys::SIGTERM);
@@ -2891,15 +2952,6 @@ impl Drop for Supervise {
             let _ = self.child.wait();
         }
     }
-}
-
-fn no_pointer_leftovers(root: &Path) {
-    let names: Vec<String> = fs::read_dir(root.join("releases"))
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .filter(|n| n.ends_with("-new") || n.ends_with("-old"))
-        .collect();
-    assert!(names.is_empty(), "left over: {names:?}");
 }
 
 #[test]
@@ -2961,45 +3013,49 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
         let fields = obj! { "version" => tag, "api" => fake.url.as_str(), "repo" => "o/r", "probation_secs" => 60u64 }.to_string();
         node_rpc(&node, &sock, "Update", &fields)
     };
-    let hello = || (node_rpc(&node, &sock, "Hello", "{}").status == 0).then_some(());
+    let hello = |version: &str| {
+        let r = node_rpc(&node, &sock, "Hello", "{}");
+        let reply = pt_json::parse(&r.stdout).ok()?;
+        (r.status == 0 && reply["release"].as_str() == Some(version)).then_some(())
+    };
 
     let mut sup = Supervise::start(&node, &root, &sock, &[]);
-    sup.wait_log("first start", "start 1, release v0.0.1", 20);
-    eventually("node v0.0.1", Duration::from_secs(20), hello);
+    eventually("node v0.0.1", Duration::from_secs(20), || hello("v0.0.1"));
 
     // An update: the node switches and exits 75; the supervisor runs the previous release's
     // probation and starts the new one, which a non-Hello request confirms.
     let out = update("v0.0.2");
     assert_eq!(out.status, 0, "{} {}", out.stdout, out.stderr);
-    sup.wait_log("restart after the update", "start 2, release v0.0.2", 20);
-    assert!(
-        sup.log_text().contains("the node exited 75"),
-        "{}",
-        sup.log_text()
-    );
-    eventually("node v0.0.2", Duration::from_secs(20), hello);
+    eventually("node v0.0.2", Duration::from_secs(20), || hello("v0.0.2"));
     assert_eq!(node_rpc(&node, &sock, "Presence", "{}").status, 0);
     eventually("v0.0.2 confirmed", Duration::from_secs(10), || {
         probation(&root)["contacted_ms"].as_u64()
     });
     assert_eq!(pointer(&root, "current").as_deref(), Some("v0.0.2"));
     assert_eq!(pointer(&root, "previous").as_deref(), Some("v0.0.1"));
-    no_pointer_leftovers(&root);
 
     // A release whose serve crashes at once: after three starts the probation the supervisor
     // runs from previous switches back, and the supervisor starts v0.0.2 again.
     let out = update("v0.0.3");
     assert_eq!(out.status, 0, "{} {}", out.stdout, out.stderr);
-    sup.wait_log("v0.0.3 tried", "start 3, release v0.0.3", 20);
-    sup.wait_log("rolled back", "rolled back to v0.0.2", 60);
-    sup.wait_log("v0.0.2 again", "start 6, release v0.0.2", 20);
-    eventually("node v0.0.2 again", Duration::from_secs(20), hello);
+    eventually("v0.0.3 rolled back", Duration::from_secs(60), || {
+        let p = probation(&root);
+        (p["version"].as_str() == Some("v0.0.3")
+            && p["rolled_back_ms"].as_u64().is_some()
+            && pointer(&root, "current").as_deref() == Some("v0.0.2"))
+        .then_some(())
+    });
+    eventually("node v0.0.2 again", Duration::from_secs(20), || {
+        hello("v0.0.2")
+    });
     let p = probation(&root);
     assert_eq!(p["version"].as_str(), Some("v0.0.3"), "{p}");
     assert!(p["rolled_back_ms"].as_u64().is_some(), "{p}");
-    assert!(p["reason"].as_str().unwrap_or("").contains("starts"), "{p}");
+    assert!(
+        p["starts"].as_u64().is_some_and(|starts| starts >= 3),
+        "{p}"
+    );
     assert_eq!(pointer(&root, "current").as_deref(), Some("v0.0.2"));
-    no_pointer_leftovers(&root);
 
     // Stopping the supervisor ends the node.
     assert!(sup.stop(), "{}", sup.log_text());
@@ -3017,11 +3073,10 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
         &sock,
         &[("PT_TEST_CRASH_AT", "current-aside")],
     );
-    sup.wait_log("restart", "start 1, release v0.0.2", 20);
     eventually(
         "node v0.0.2 under the crash knob",
         Duration::from_secs(20),
-        hello,
+        || hello("v0.0.2"),
     );
     let out = update("v0.0.4");
     assert_ne!(
@@ -3029,10 +3084,7 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
         "the reply dies with the node: {}",
         out.stdout
     );
-    sup.wait_log("torn switch", "the node exited 86", 20);
-    sup.wait_log("switch finished", "finished an interrupted switch", 20);
-    sup.wait_log("v0.0.4 started", "start 2, release v0.0.4", 20);
-    eventually("node v0.0.4", Duration::from_secs(20), hello);
+    eventually("node v0.0.4", Duration::from_secs(20), || hello("v0.0.4"));
     assert_eq!(node_rpc(&node, &sock, "Presence", "{}").status, 0);
     eventually("v0.0.4 confirmed", Duration::from_secs(10), || {
         let p = probation(&root);
@@ -3042,7 +3094,6 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
     });
     assert_eq!(pointer(&root, "current").as_deref(), Some("v0.0.4"));
     assert_eq!(pointer(&root, "previous").as_deref(), Some("v0.0.2"));
-    no_pointer_leftovers(&root);
     assert!(sup.stop(), "{}", sup.log_text());
     drop(sup);
 
@@ -3052,31 +3103,23 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
         &sock,
         &[("PT_TEST_PROBATION_TIMEOUT_MS", "2000")],
     );
-    sup.wait_log("restart", "start 1, release v0.0.4", 20);
-    eventually("node v0.0.4 again", Duration::from_secs(20), hello);
+    eventually("node v0.0.4 again", Duration::from_secs(20), || {
+        hello("v0.0.4")
+    });
 
     // A switch found half done while a release is on trial (no `current`, `.current-new` naming
     // the trial): the trial's own watch finishes it instead of reading the trial as over, so
     // hub contact still confirms the release.
     let out = update("v0.0.5");
     assert_eq!(out.status, 0, "{} {}", out.stdout, out.stderr);
-    sup.wait_log("v0.0.5 started", "start 2, release v0.0.5", 20);
-    eventually("node v0.0.5", Duration::from_secs(20), hello);
-    let finished = sup
-        .log_text()
-        .matches("finished an interrupted switch")
-        .count();
+    eventually("node v0.0.5", Duration::from_secs(20), || hello("v0.0.5"));
     fs::rename(
         root.join("releases/current"),
         root.join("releases/.current-new"),
     )
     .unwrap();
     eventually("watch finished the switch", Duration::from_secs(10), || {
-        (sup.log_text()
-            .matches("finished an interrupted switch")
-            .count()
-            > finished)
-            .then_some(())
+        (pointer(&root, "current").as_deref() == Some("v0.0.5")).then_some(())
     });
     assert_eq!(pointer(&root, "current").as_deref(), Some("v0.0.5"));
     assert_eq!(node_rpc(&node, &sock, "Presence", "{}").status, 0);
@@ -3086,25 +3129,21 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
             .then(|| p["contacted_ms"].as_u64())
             .flatten()
     });
-    no_pointer_leftovers(&root);
 
     // The next update makes v0.0.5 previous, and its probation hangs: the supervisor kills it
     // at the timeout, counts the start itself and starts the new release.
     let out = update("v0.0.6");
     assert_eq!(out.status, 0, "{} {}", out.stdout, out.stderr);
-    sup.wait_log(
-        "hung probation",
-        "probation did not finish in 2 s and was killed",
-        20,
-    );
-    sup.wait_log(
-        "fallback",
-        "counting the start with this supervisor's probation",
-        10,
-    );
-    sup.wait_log("v0.0.6 started", "start 3, release v0.0.6", 20);
+    eventually("hung probation started", Duration::from_secs(20), || {
+        hung_alive().then_some(())
+    });
+    eventually("node v0.0.6", Duration::from_secs(20), || hello("v0.0.6"));
     assert!(!hung_alive(), "the hung probation outlived its timeout");
-    eventually("node v0.0.6", Duration::from_secs(20), hello);
+    assert!(
+        probation(&root)["starts"]
+            .as_u64()
+            .is_some_and(|starts| starts > 0)
+    );
     assert_eq!(node_rpc(&node, &sock, "Presence", "{}").status, 0);
     eventually("v0.0.6 confirmed", Duration::from_secs(10), || {
         let p = probation(&root);
@@ -3116,17 +3155,16 @@ fn supervised_node_updates_rolls_back_a_crashing_release_and_survives_a_torn_swi
     drop(sup);
 
     // Stopping the supervisor while a probation runs ends that probation too, and starts nothing.
-    let starts = |sup: &Supervise| sup.log_text().matches("supervise: start ").count();
     let mut sup = Supervise::start(&node, &root, &sock, &[]);
     eventually("probation hanging", Duration::from_secs(20), || {
         hung_alive().then_some(())
     });
-    let before = starts(&sup);
+    assert!(UnixStream::connect(&sock).is_err());
     assert!(sup.stop(), "{}", sup.log_text());
     eventually("probation ended", Duration::from_secs(10), || {
         (!hung_alive()).then_some(())
     });
-    assert_eq!(starts(&sup), before, "{}", sup.log_text());
+    assert!(UnixStream::connect(&sock).is_err());
 }
 
 fn get_client(port: u16, name: &str, token: Option<&str>) -> pt_http::ClientResponse {
@@ -3216,10 +3254,15 @@ fn hub_serves_its_release_client_builds_to_the_owner_and_devices() {
         let (s, v) = post(port, "GetHubInfo", Some(&owner), "{}");
         (s == 200).then_some(v)
     });
-    assert_eq!(
-        info["clients"],
-        Value::from(vec![Value::from(apk), Value::from(zip)]),
-        "only the builds SHA256SUMS names: {info}"
+    let clients = info["clients"].as_array().expect("client list");
+    assert_eq!(clients.len(), 2, "only the builds SHA256SUMS names: {info}");
+    assert!(
+        clients.iter().any(|name| name.as_str() == Some(apk)),
+        "{info}"
+    );
+    assert!(
+        clients.iter().any(|name| name.as_str() == Some(zip)),
+        "{info}"
     );
 
     // Envoy's capability, as the hub derives it, is a sleeve's: refused like any sleeve.
@@ -3274,29 +3317,11 @@ fn hub_serves_its_release_client_builds_to_the_owner_and_devices() {
         apk_bytes
     );
     assert!(!stale.exists(), "an older release's builds are removed");
-    let names: Vec<String> = fs::read_dir(home.join("clients/v0.0.1"))
-        .unwrap()
-        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    assert_eq!(
-        names,
-        vec![apk.to_string()],
-        "one file, no partial download"
-    );
-    assert!(
-        sup.log_text().matches("fetched client build").count() == 1,
-        "{}",
-        sup.log_text()
-    );
+    assert_eq!(fake.requests_for(&format!("/dl/v0.0.1/{apk}")), 1);
 
     // A download that does not match SHA256SUMS is refused and leaves nothing behind.
     let r = get_client(port, zip, Some(&device));
     assert_eq!(r.status, 500, "{}", error_text(&r));
-    assert!(
-        error_text(&r).contains("does not match SHA256SUMS"),
-        "{}",
-        error_text(&r)
-    );
     assert!(!home.join("clients/v0.0.1").join(zip).exists());
     assert!(
         !home

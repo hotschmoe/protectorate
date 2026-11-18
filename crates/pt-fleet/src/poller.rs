@@ -53,6 +53,7 @@ pub struct NodeView {
     pub node: Node,
     /// The agent's own answer to Hello: its node id, version and job journal epoch.
     pub hello: Option<HelloReply>,
+    pub hello_generation: u64,
     /// The tailnet address the poller dials.
     pub ip: Option<String>,
     /// The last round's error, while the node is unreachable.
@@ -273,6 +274,12 @@ fn refresh(
 ) -> Vec<Gone> {
     let status = s.fleet.status();
     if let Err(e) = &status {
+        #[cfg(debug_assertions)]
+        if let Some(path) = std::env::var_os("PROTECTORATE_FLEET_TEST_STATUS_FAILURE")
+            && std::fs::read(&path).ok().as_deref() == Some(b"armed")
+        {
+            let _ = std::fs::write(path, b"failed");
+        }
         eprintln!("pt-fleet: poller: {e}");
     }
     for n in nodes {
@@ -358,12 +365,16 @@ fn poll_node(s: &Shared, link: &Link, id: u64) {
             online: false,
             last_seen_ms: EpochMs(0),
             node_version: String::new(),
+            pending_update: None,
             error: None,
             inventory: None,
             sample: None,
             presence: view::unknown_presence(),
+            jobs: pt_api::NodeJobs::Any,
+            jobs_note: None,
         },
         hello: None,
+        hello_generation: 0,
         ip: None,
         error: None,
     };
@@ -437,6 +448,7 @@ fn round(
         c.set_timeout(s.cfg.call_timeout)
             .map_err(|e| e.to_string())?;
         let hello = c.hello().map_err(|e| e.to_string())?;
+        view.hello_generation = view.hello_generation.saturating_add(1);
         view.node.node_version = hello.node_version.clone();
         view.hello = Some(hello);
         c.require_compatible().map_err(|e| e.to_string())?;

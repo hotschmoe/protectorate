@@ -39,7 +39,7 @@ T _or<T>(Object? v, T fallback, T Function(Object?) f) =>
 /// The hub took the action. `approval_id` is set when a code rule made it wait for the
 /// owner first.
 final class Accepted {
-  const Accepted({this.approvalId});
+  const Accepted({this.approvalId, this.warning});
 
   factory Accepted.fromJson(Object? json) {
     final j = _object(json, 'Accepted');
@@ -48,13 +48,17 @@ final class Accepted {
         j['approval_id'],
         (e0) => _string(e0, 'Accepted.approval_id'),
       ),
+      warning: _opt(j['warning'], (e0) => _string(e0, 'Accepted.warning')),
     );
   }
 
   final String? approvalId;
 
+  final String? warning;
+
   Map<String, Object?> toJson() => {
     if (approvalId case final v?) 'approval_id': v,
+    if (warning case final v?) 'warning': v,
   };
 }
 
@@ -975,6 +979,7 @@ final class EntryUserMessage extends Entry {
     required this.from,
     required this.text,
     this.steer = false,
+    this.reports = const <QueuedTurnReport>[],
   });
 
   factory EntryUserMessage._fromMap(Map<String, Object?> j) => EntryUserMessage(
@@ -982,6 +987,11 @@ final class EntryUserMessage extends Entry {
     from: _string(j['from'], 'EntryUserMessage.from'),
     text: _string(j['text'], 'EntryUserMessage.text'),
     steer: _or(j['steer'], false, (e0) => _bool(e0, 'EntryUserMessage.steer')),
+    reports: _or(
+      j['reports'],
+      const <QueuedTurnReport>[],
+      (e0) => _list(e0, 'EntryUserMessage.reports', QueuedTurnReport.fromJson),
+    ),
   );
 
   final String requestId;
@@ -993,6 +1003,9 @@ final class EntryUserMessage extends Entry {
 
   final bool steer;
 
+  /// Reports included in this prompt, including a batch of several reports.
+  final List<QueuedTurnReport> reports;
+
   @override
   Map<String, Object?> toJson() => {
     'type': 'user_message',
@@ -1000,6 +1013,7 @@ final class EntryUserMessage extends Entry {
     'from': from,
     'text': text,
     'steer': steer,
+    'reports': [for (final e0 in reports) e0.toJson()],
   };
 }
 
@@ -1316,6 +1330,7 @@ final class EntryTurnSettled extends Entry {
     this.nativeStop,
     required this.usage,
     this.durationMs,
+    this.status,
   });
 
   factory EntryTurnSettled._fromMap(Map<String, Object?> j) => EntryTurnSettled(
@@ -1329,6 +1344,7 @@ final class EntryTurnSettled extends Entry {
       j['duration_ms'],
       (e0) => _int(e0, 'EntryTurnSettled.duration_ms'),
     ),
+    status: _opt(j['status'], TurnStatus.fromJson),
   );
 
   final Stop stop;
@@ -1339,6 +1355,9 @@ final class EntryTurnSettled extends Entry {
 
   final int? durationMs;
 
+  /// The declaration at the end of this turn's final message, if present.
+  final TurnStatus? status;
+
   @override
   Map<String, Object?> toJson() => {
     'type': 'turn_settled',
@@ -1346,6 +1365,7 @@ final class EntryTurnSettled extends Entry {
     if (nativeStop case final v?) 'native_stop': v,
     'usage': usage.toJson(),
     if (durationMs case final v?) 'duration_ms': v,
+    if (status case final v?) 'status': v.toJson(),
   };
 }
 
@@ -2524,8 +2544,9 @@ final class HubState {
 
 /// One message of `GET /api/events`. `seq` grows by one per kept message; a streaming
 /// delta repeats the seq of the last kept message and is not replayed on resume. The stream
-/// starts with `snapshot` unless `from_seq` is given and the hub still holds every message
-/// from it.
+/// starts with `snapshot` unless `from_seq` is given, the gap is at most 500 kept messages,
+/// and the hub still holds every message from it. A `live` marker ends catch-up without
+/// allocating a sequence; another snapshot and marker replace a gap in a live stream.
 sealed class HubStreamMessage {
   const HubStreamMessage();
 
@@ -2533,6 +2554,7 @@ sealed class HubStreamMessage {
     final j = _object(json, 'HubStreamMessage');
     return switch (j['type']) {
       'snapshot' => HubStreamMessageSnapshot._fromMap(j),
+      'live' => HubStreamMessageLive._fromMap(j),
       'workspace' => HubStreamMessageWorkspace._fromMap(j),
       'sleeve' => HubStreamMessageSleeve._fromMap(j),
       'sleeve_removed' => HubStreamMessageSleeveRemoved._fromMap(j),
@@ -2573,6 +2595,20 @@ final class HubStreamMessageSnapshot extends HubStreamMessage {
     'seq': seq,
     'state': state.toJson(),
   };
+}
+
+/// Catch-up is complete through this sequence; subsequent messages are live.
+final class HubStreamMessageLive extends HubStreamMessage {
+  const HubStreamMessageLive({required this.seq});
+
+  factory HubStreamMessageLive._fromMap(Map<String, Object?> j) =>
+      HubStreamMessageLive(seq: _int(j['seq'], 'HubStreamMessageLive.seq'));
+
+  @override
+  final int seq;
+
+  @override
+  Map<String, Object?> toJson() => {'type': 'live', 'seq': seq};
 }
 
 final class HubStreamMessageWorkspace extends HubStreamMessage {
@@ -3659,10 +3695,13 @@ final class Node {
     required this.online,
     required this.lastSeen,
     required this.nodeVersion,
+    this.pendingUpdate,
     this.error,
     this.inventory,
     this.sample,
     required this.presence,
+    this.jobs = NodeJobs.any,
+    this.jobsNote,
   });
 
   factory Node.fromJson(Object? json) {
@@ -3673,10 +3712,16 @@ final class Node {
       online: _bool(j['online'], 'Node.online'),
       lastSeen: _time(j['last_seen_ms'], 'Node.last_seen_ms'),
       nodeVersion: _string(j['node_version'], 'Node.node_version'),
+      pendingUpdate: _opt(
+        j['pending_update'],
+        (e0) => _string(e0, 'Node.pending_update'),
+      ),
       error: _opt(j['error'], (e0) => _string(e0, 'Node.error')),
       inventory: _opt(j['inventory'], Inventory.fromJson),
       sample: _opt(j['sample'], Sample.fromJson),
       presence: Presence.fromJson(j['presence']),
+      jobs: _or(j['jobs'], NodeJobs.any, NodeJobs.fromJson),
+      jobsNote: _opt(j['jobs_note'], (e0) => _string(e0, 'Node.jobs_note')),
     );
   }
 
@@ -3690,6 +3735,8 @@ final class Node {
 
   final String nodeVersion;
 
+  final String? pendingUpdate;
+
   final String? error;
 
   /// Absent until the first inventory arrives.
@@ -3699,17 +3746,46 @@ final class Node {
 
   final Presence presence;
 
+  final NodeJobs jobs;
+
+  final String? jobsNote;
+
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
     'online': online,
     'last_seen_ms': lastSeen.millisecondsSinceEpoch,
     'node_version': nodeVersion,
+    if (pendingUpdate case final v?) 'pending_update': v,
     if (error case final v?) 'error': v,
     if (inventory case final v?) 'inventory': v.toJson(),
     if (sample case final v?) 'sample': v.toJson(),
     'presence': presence.toJson(),
+    'jobs': jobs.toJson(),
+    if (jobsNote case final v?) 'jobs_note': v,
   };
+}
+
+enum NodeJobs {
+  any('any'),
+  owner('owner'),
+  none('none'),
+
+  /// A value this client does not know.
+  unknown('unknown');
+
+  const NodeJobs(this.wire);
+
+  final String wire;
+
+  static NodeJobs fromJson(Object? json) {
+    for (final v in values) {
+      if (v.wire == json) return v;
+    }
+    return unknown;
+  }
+
+  String toJson() => wire;
 }
 
 final class NodeList {
@@ -4044,6 +4120,7 @@ final class QueuedMessage {
     required this.sender,
     required this.queuedAt,
     required this.text,
+    this.report,
   });
 
   factory QueuedMessage.fromJson(Object? json) {
@@ -4052,6 +4129,7 @@ final class QueuedMessage {
       sender: _string(j['sender'], 'QueuedMessage.sender'),
       queuedAt: _time(j['queued_at_ms'], 'QueuedMessage.queued_at_ms'),
       text: _string(j['text'], 'QueuedMessage.text'),
+      report: _opt(j['report'], QueuedTurnReport.fromJson),
     );
   }
 
@@ -4061,10 +4139,43 @@ final class QueuedMessage {
 
   final String text;
 
+  /// Present for a turn report, including when it declared no status.
+  final QueuedTurnReport? report;
+
   Map<String, Object?> toJson() => {
     'sender': sender,
     'queued_at_ms': queuedAt.millisecondsSinceEpoch,
     'text': text,
+    if (report case final v?) 'report': v.toJson(),
+  };
+}
+
+final class QueuedTurnReport {
+  const QueuedTurnReport({
+    required this.sleeveId,
+    required this.turn,
+    this.status,
+  });
+
+  factory QueuedTurnReport.fromJson(Object? json) {
+    final j = _object(json, 'QueuedTurnReport');
+    return QueuedTurnReport(
+      sleeveId: _string(j['sleeve_id'], 'QueuedTurnReport.sleeve_id'),
+      turn: _int(j['turn'], 'QueuedTurnReport.turn'),
+      status: _opt(j['status'], TurnStatus.fromJson),
+    );
+  }
+
+  final String sleeveId;
+
+  final int turn;
+
+  final TurnStatus? status;
+
+  Map<String, Object?> toJson() => {
+    'sleeve_id': sleeveId,
+    'turn': turn,
+    if (status case final v?) 'status': v.toJson(),
   };
 }
 
@@ -4075,6 +4186,7 @@ final class Quota {
     required this.reading,
     required this.fetchedAt,
     this.windows = const <QuotaWindow>[],
+    this.credits,
     this.note = '',
   });
 
@@ -4090,6 +4202,7 @@ final class Quota {
         const <QuotaWindow>[],
         (e0) => _list(e0, 'Quota.windows', QuotaWindow.fromJson),
       ),
+      credits: _opt(j['credits'], QuotaCredits.fromJson),
       note: _or(j['note'], '', (e0) => _string(e0, 'Quota.note')),
     );
   }
@@ -4104,6 +4217,8 @@ final class Quota {
 
   final List<QuotaWindow> windows;
 
+  final QuotaCredits? credits;
+
   final String note;
 
   Map<String, Object?> toJson() => {
@@ -4112,7 +4227,72 @@ final class Quota {
     'reading': reading.toJson(),
     'fetched_at_ms': fetchedAt.millisecondsSinceEpoch,
     'windows': [for (final e0 in windows) e0.toJson()],
+    if (credits case final v?) 'credits': v.toJson(),
     'note': note,
+  };
+}
+
+final class QuotaCredits {
+  const QuotaCredits({
+    this.allowed,
+    this.limitReached,
+    this.hasCredits,
+    this.balance,
+    this.overageLimitReached,
+    this.resetAvailableCount,
+    this.perHour,
+  });
+
+  factory QuotaCredits.fromJson(Object? json) {
+    final j = _object(json, 'QuotaCredits');
+    return QuotaCredits(
+      allowed: _opt(j['allowed'], (e0) => _bool(e0, 'QuotaCredits.allowed')),
+      limitReached: _opt(
+        j['limit_reached'],
+        (e0) => _bool(e0, 'QuotaCredits.limit_reached'),
+      ),
+      hasCredits: _opt(
+        j['has_credits'],
+        (e0) => _bool(e0, 'QuotaCredits.has_credits'),
+      ),
+      balance: _opt(j['balance'], (e0) => _double(e0, 'QuotaCredits.balance')),
+      overageLimitReached: _opt(
+        j['overage_limit_reached'],
+        (e0) => _bool(e0, 'QuotaCredits.overage_limit_reached'),
+      ),
+      resetAvailableCount: _opt(
+        j['reset_available_count'],
+        (e0) => _int(e0, 'QuotaCredits.reset_available_count'),
+      ),
+      perHour: _opt(
+        j['per_hour'],
+        (e0) => _double(e0, 'QuotaCredits.per_hour'),
+      ),
+    );
+  }
+
+  final bool? allowed;
+
+  final bool? limitReached;
+
+  final bool? hasCredits;
+
+  final double? balance;
+
+  final bool? overageLimitReached;
+
+  final int? resetAvailableCount;
+
+  final double? perHour;
+
+  Map<String, Object?> toJson() => {
+    if (allowed case final v?) 'allowed': v,
+    if (limitReached case final v?) 'limit_reached': v,
+    if (hasCredits case final v?) 'has_credits': v,
+    if (balance case final v?) 'balance': v,
+    if (overageLimitReached case final v?) 'overage_limit_reached': v,
+    if (resetAvailableCount case final v?) 'reset_available_count': v,
+    if (perHour case final v?) 'per_hour': v,
   };
 }
 
@@ -4670,6 +4850,7 @@ final class SendMessageRequest {
     required this.text,
     this.delivery = Delivery.queue,
     this.supersede = false,
+    this.untilDone,
   });
 
   factory SendMessageRequest.fromJson(Object? json) {
@@ -4683,6 +4864,10 @@ final class SendMessageRequest {
         false,
         (e0) => _bool(e0, 'SendMessageRequest.supersede'),
       ),
+      untilDone: _opt(
+        j['until_done'],
+        (e0) => _int(e0, 'SendMessageRequest.until_done'),
+      ),
     );
   }
 
@@ -4694,11 +4879,14 @@ final class SendMessageRequest {
 
   final bool supersede;
 
+  final int? untilDone;
+
   Map<String, Object?> toJson() => {
     'sleeve_id': sleeveId,
     'text': text,
     'delivery': delivery.toJson(),
     'supersede': supersede,
+    if (untilDone case final v?) 'until_done': v,
   };
 }
 
@@ -4732,8 +4920,35 @@ final class Sent {
   };
 }
 
-/// The durable identity: name, workspace claim, parent link, resleeve policy, budget and
-/// queue.
+final class SetNodeJobsRequest {
+  const SetNodeJobsRequest({
+    required this.nodeId,
+    required this.jobs,
+    this.note,
+  });
+
+  factory SetNodeJobsRequest.fromJson(Object? json) {
+    final j = _object(json, 'SetNodeJobsRequest');
+    return SetNodeJobsRequest(
+      nodeId: _string(j['node_id'], 'SetNodeJobsRequest.node_id'),
+      jobs: NodeJobs.fromJson(j['jobs']),
+      note: _opt(j['note'], (e0) => _string(e0, 'SetNodeJobsRequest.note')),
+    );
+  }
+
+  final String nodeId;
+
+  final NodeJobs jobs;
+
+  final String? note;
+
+  Map<String, Object?> toJson() => {
+    'node_id': nodeId,
+    'jobs': jobs.toJson(),
+    if (note case final v?) 'note': v,
+  };
+}
+
 final class Sleeve {
   const Sleeve({
     required this.id,
@@ -4753,6 +4968,8 @@ final class Sleeve {
     this.budgetUsed,
     this.budgetLimit,
     this.d9 = false,
+    this.lastStatus,
+    this.warning,
   });
 
   factory Sleeve.fromJson(Object? json) {
@@ -4791,6 +5008,8 @@ final class Sleeve {
         (e0) => _int(e0, 'Sleeve.budget_limit'),
       ),
       d9: _or(j['d9'], false, (e0) => _bool(e0, 'Sleeve.d9')),
+      lastStatus: _opt(j['last_status'], TurnStatus.fromJson),
+      warning: _opt(j['warning'], (e0) => _string(e0, 'Sleeve.warning')),
     );
   }
 
@@ -4806,7 +5025,7 @@ final class Sleeve {
 
   final Lifecycle lifecycle;
 
-  /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed or `g<N>`.
+  /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed, credit_floor or `g<N>`.
   /// A flap after a rejected login is `flapping (<harness> login rejected)`. Envoy whose
   /// own harness doctor refused is `ineligible (<harness>)` until doctor finds it eligible.
   final String? parkReason;
@@ -4838,6 +5057,12 @@ final class Sleeve {
   /// marked sleeve sent to it.
   final bool d9;
 
+  /// Status declared by the latest settled turn, absent when it declared none.
+  final TurnStatus? lastStatus;
+
+  /// Warning returned by spawn; absent from subsequent sleeve readings.
+  final String? warning;
+
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
@@ -4857,6 +5082,8 @@ final class Sleeve {
     if (budgetUsed case final v?) 'budget_used': v,
     if (budgetLimit case final v?) 'budget_limit': v,
     'd9': d9,
+    if (lastStatus case final v?) 'last_status': v.toJson(),
+    if (warning case final v?) 'warning': v,
   };
 }
 
@@ -4932,6 +5159,7 @@ final class SpawnSleeveRequest {
     this.resleeveTo = const <Harness>[],
     this.message,
     this.budget,
+    this.untilDone,
   });
 
   factory SpawnSleeveRequest.fromJson(Object? json) {
@@ -4969,6 +5197,10 @@ final class SpawnSleeveRequest {
         (e0) => _string(e0, 'SpawnSleeveRequest.message'),
       ),
       budget: _opt(j['budget'], (e0) => _int(e0, 'SpawnSleeveRequest.budget')),
+      untilDone: _opt(
+        j['until_done'],
+        (e0) => _int(e0, 'SpawnSleeveRequest.until_done'),
+      ),
     );
   }
 
@@ -5007,6 +5239,8 @@ final class SpawnSleeveRequest {
   /// Tokens; a root's count includes its children's (G10).
   final int? budget;
 
+  final int? untilDone;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'harness': harness.toJson(),
@@ -5021,6 +5255,7 @@ final class SpawnSleeveRequest {
     'resleeve_to': [for (final e0 in resleeveTo) e0.toJson()],
     if (message case final v?) 'message': v,
     if (budget case final v?) 'budget': v,
+    if (untilDone case final v?) 'until_done': v,
   };
 }
 
@@ -5032,6 +5267,7 @@ final class StartSleeveRequest {
     this.model,
     this.provider,
     this.effort,
+    this.untilDone,
   });
 
   factory StartSleeveRequest.fromJson(Object? json) {
@@ -5048,6 +5284,10 @@ final class StartSleeveRequest {
         j['effort'],
         (e0) => _string(e0, 'StartSleeveRequest.effort'),
       ),
+      untilDone: _opt(
+        j['until_done'],
+        (e0) => _int(e0, 'StartSleeveRequest.until_done'),
+      ),
     );
   }
 
@@ -5061,12 +5301,15 @@ final class StartSleeveRequest {
 
   final String? effort;
 
+  final int? untilDone;
+
   Map<String, Object?> toJson() => {
     'sleeve_id': sleeveId,
     if (target case final v?) 'target': v.toJson(),
     if (model case final v?) 'model': v,
     if (provider case final v?) 'provider': v,
     if (effort case final v?) 'effort': v,
+    if (untilDone case final v?) 'until_done': v,
   };
 }
 
@@ -5227,6 +5470,57 @@ final class Transcript {
   };
 }
 
+/// The durable identity: name, workspace claim, parent link, resleeve policy, budget and
+/// queue.
+final class TurnStatus {
+  const TurnStatus({required this.turn, required this.state, this.detail});
+
+  factory TurnStatus.fromJson(Object? json) {
+    final j = _object(json, 'TurnStatus');
+    return TurnStatus(
+      turn: _int(j['turn'], 'TurnStatus.turn'),
+      state: TurnStatusState.fromJson(j['state']),
+      detail: _opt(j['detail'], (e0) => _string(e0, 'TurnStatus.detail')),
+    );
+  }
+
+  final int turn;
+
+  final TurnStatusState state;
+
+  /// The remaining work or blocking reason, absent for done.
+  final String? detail;
+
+  Map<String, Object?> toJson() => {
+    'turn': turn,
+    'state': state.toJson(),
+    if (detail case final v?) 'detail': v,
+  };
+}
+
+/// A sleeve's declared result on the final line of its turn.
+enum TurnStatusState {
+  done('done'),
+  continuing('continuing'),
+  blocked('blocked'),
+
+  /// A value this client does not know.
+  unknown('unknown');
+
+  const TurnStatusState(this.wire);
+
+  final String wire;
+
+  static TurnStatusState fromJson(Object? json) {
+    for (final v in values) {
+      if (v.wire == json) return v;
+    }
+    return unknown;
+  }
+
+  String toJson() => wire;
+}
+
 final class UpdateHarnessesRequest {
   const UpdateHarnessesRequest({this.programs = const <String>[]});
 
@@ -5302,6 +5596,7 @@ final class UpdateHubRequest {
 
 final class UpdateNodesRequest {
   const UpdateNodesRequest({
+    this.cancel,
     this.nodes = const <String>[],
     this.all = false,
     this.version,
@@ -5314,6 +5609,10 @@ final class UpdateNodesRequest {
   factory UpdateNodesRequest.fromJson(Object? json) {
     final j = _object(json, 'UpdateNodesRequest');
     return UpdateNodesRequest(
+      cancel: _opt(
+        j['cancel'],
+        (e0) => _string(e0, 'UpdateNodesRequest.cancel'),
+      ),
       nodes: _or(
         j['nodes'],
         const <String>[],
@@ -5345,6 +5644,9 @@ final class UpdateNodesRequest {
     );
   }
 
+  /// Cancel the pending update for this node, without starting a rollout.
+  final String? cancel;
+
   /// By id or name; leave empty with `all`.
   final List<String> nodes;
 
@@ -5367,6 +5669,7 @@ final class UpdateNodesRequest {
   final String? rolloutId;
 
   Map<String, Object?> toJson() => {
+    if (cancel case final v?) 'cancel': v,
     'nodes': nodes,
     'all': all,
     if (version case final v?) 'version': v,
@@ -5439,8 +5742,9 @@ final class Usage {
 
 final class WaitRequest {
   const WaitRequest({
-    required this.sleeveId,
+    required this.sleeveIds,
     required this.until,
+    this.any = false,
     this.timeoutMs = 60000,
     this.afterSeq,
   });
@@ -5448,8 +5752,13 @@ final class WaitRequest {
   factory WaitRequest.fromJson(Object? json) {
     final j = _object(json, 'WaitRequest');
     return WaitRequest(
-      sleeveId: _string(j['sleeve_id'], 'WaitRequest.sleeve_id'),
+      sleeveIds: _list(
+        j['sleeve_ids'],
+        'WaitRequest.sleeve_ids',
+        (e0) => _string(e0, 'WaitRequest.sleeve_ids[]'),
+      ),
       until: WaitUntil.fromJson(j['until']),
+      any: _or(j['any'], false, (e0) => _bool(e0, 'WaitRequest.any')),
       timeoutMs: _or(
         j['timeout_ms'],
         60000,
@@ -5459,9 +5768,12 @@ final class WaitRequest {
     );
   }
 
-  final String sleeveId;
+  final List<String> sleeveIds;
 
   final WaitUntil until;
+
+  /// Return when any sleeve reaches the condition; otherwise wait for all.
+  final bool any;
 
   /// The hub caps it.
   final int timeoutMs;
@@ -5471,26 +5783,56 @@ final class WaitRequest {
   final int? afterSeq;
 
   Map<String, Object?> toJson() => {
-    'sleeve_id': sleeveId,
+    'sleeve_ids': sleeveIds,
     'until': until.toJson(),
+    'any': any,
     'timeout_ms': timeoutMs,
     if (afterSeq case final v?) 'after_seq': v,
   };
 }
 
 final class WaitResult {
-  const WaitResult({required this.reached, required this.sleeve, this.seq});
+  const WaitResult({required this.reached, required this.sleeves});
 
   factory WaitResult.fromJson(Object? json) {
     final j = _object(json, 'WaitResult');
     return WaitResult(
       reached: _bool(j['reached'], 'WaitResult.reached'),
-      sleeve: Sleeve.fromJson(j['sleeve']),
-      seq: _opt(j['seq'], (e0) => _int(e0, 'WaitResult.seq')),
+      sleeves: _list(
+        j['sleeves'],
+        'WaitResult.sleeves',
+        WaitSleeveResult.fromJson,
+      ),
     );
   }
 
-  /// False when the timeout came first.
+  /// Whether the requested all/any condition was reached.
+  final bool reached;
+
+  final List<WaitSleeveResult> sleeves;
+
+  Map<String, Object?> toJson() => {
+    'reached': reached,
+    'sleeves': [for (final e0 in sleeves) e0.toJson()],
+  };
+}
+
+final class WaitSleeveResult {
+  const WaitSleeveResult({
+    required this.reached,
+    required this.sleeve,
+    this.seq,
+  });
+
+  factory WaitSleeveResult.fromJson(Object? json) {
+    final j = _object(json, 'WaitSleeveResult');
+    return WaitSleeveResult(
+      reached: _bool(j['reached'], 'WaitSleeveResult.reached'),
+      sleeve: Sleeve.fromJson(j['sleeve']),
+      seq: _opt(j['seq'], (e0) => _int(e0, 'WaitSleeveResult.seq')),
+    );
+  }
+
   final bool reached;
 
   final Sleeve sleeve;
@@ -5635,10 +5977,17 @@ final class HubApi {
     return parse(jsonDecode(r.body));
   }
 
-  /// State changes, starting with a snapshot unless the hub still holds every message from
-  /// `fromSeq`. The stream ends when the socket closes; reconnect with the last seq + 1.
-  Stream<HubStreamMessage> events({int? fromSeq}) => openSocket(
-    _url('/api/events', {if (fromSeq != null) 'from_seq': '$fromSeq'}),
+  /// State changes, starting with a snapshot when the resume gap is unavailable or too large.
+  /// A live marker ends catch-up; reconnect with the last applied sequence + 1.
+  /// Entry messages are sent only for the transcript IDs named on this connection.
+  Stream<HubStreamMessage> events({
+    int? fromSeq,
+    Iterable<String> transcripts = const [],
+  }) => openSocket(
+    _url('/api/events', {
+      if (fromSeq != null) 'from_seq': '$fromSeq',
+      if (transcripts.isNotEmpty) 'transcripts': transcripts.join(','),
+    }),
     token,
   ).map((text) => HubStreamMessage.fromJson(jsonDecode(text)));
 
@@ -5723,6 +6072,10 @@ final class HubApi {
   /// `POST /api/GetNode`, scope `sleeve`.
   Future<Node> getNode(NodeRef request) =>
       _call('GetNode', request.toJson(), Node.fromJson);
+
+  /// `POST /api/SetNodeJobs`, scope `owner`.
+  Future<Node> setNodeJobs(SetNodeJobsRequest request) =>
+      _call('SetNodeJobs', request.toJson(), Node.fromJson);
 
   /// `POST /api/GetEnrollment`, scope `owner`.
   Future<Enrollment> getEnrollment([Empty request = const Empty()]) =>

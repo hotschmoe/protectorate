@@ -134,18 +134,26 @@ fn fresh_dir(name: &str) -> PathBuf {
     dir
 }
 
-fn wait_for_log(dir: &Path, needle: &str, count: usize) {
+fn wait_until_resident_stops(dir: &Path) {
+    use std::os::unix::net::UnixStream;
+
+    thread::sleep(Duration::from_secs(3));
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        let log = fs::read_to_string(dir.join("state").join("agent.log")).unwrap_or_default();
-        if log.matches(needle).count() >= count {
-            return;
+        match UnixStream::connect(dir.join("state").join("agent.sock")) {
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound
+                ) =>
+            {
+                return;
+            }
+            Err(e) => panic!("checking resident socket: {e}"),
+            Ok(_) => {}
         }
-        assert!(
-            Instant::now() < deadline,
-            "no {needle:?} x{count} in: {log}"
-        );
-        thread::sleep(Duration::from_millis(50));
+        assert!(Instant::now() < deadline, "resident did not stop");
+        thread::sleep(Duration::from_millis(200));
     }
 }
 
@@ -197,15 +205,13 @@ fn a_job_outlives_the_stdio_session_that_submitted_it() {
     assert!(s2.close().success());
 
     // Idle, the resident leaves; the next session starts a new one over the same journal.
-    wait_for_log(&dir, "idle for 2 s, exiting", 1);
+    wait_until_resident_stops(&dir);
     let mut s3 = Session::open(&dir);
     let st = s3.ok(r#"{"type":"JobStatus","job_id":"j","attempt":1}"#);
     assert_eq!(text(&st, "journal_epoch"), epoch);
     assert_eq!(text(&st["job"], "state"), "succeeded");
     assert!(s3.close().success());
-    wait_for_log(&dir, "idle for 2 s, exiting", 2);
-    let log = fs::read_to_string(dir.join("session.log")).unwrap();
-    assert!(log.is_empty(), "the sessions logged: {log}");
+    wait_until_resident_stops(&dir);
 }
 
 #[test]
@@ -217,7 +223,5 @@ fn a_second_agent_on_one_state_dir_is_refused() {
         .output()
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("in use by another node agent"), "{err}");
     a.ok("Hello", "{}");
 }

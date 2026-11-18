@@ -10,6 +10,38 @@ use crate::home::Config;
 use crate::transcript::{Line, Transcripts};
 use crate::view::View;
 
+pub fn declared_status(turn: u64, status: &pt_core::DeclaredStatus) -> api::TurnStatus {
+    let (state, detail) = match status {
+        pt_core::DeclaredStatus::Done => (api::TurnStatusState::Done, None),
+        pt_core::DeclaredStatus::Continuing(detail) => {
+            (api::TurnStatusState::Continuing, Some(detail.clone()))
+        }
+        pt_core::DeclaredStatus::Blocked(detail) => {
+            (api::TurnStatusState::Blocked, Some(detail.clone()))
+        }
+    };
+    api::TurnStatus {
+        turn,
+        state,
+        detail,
+    }
+}
+
+pub fn queued_report(message: &pt_core::Message) -> Option<api::QueuedTurnReport> {
+    let pt_core::Party::Sleeve(id) = message.from else {
+        return None;
+    };
+    let report = message.report.as_ref()?;
+    Some(api::QueuedTurnReport {
+        sleeve_id: id.0.to_string(),
+        turn: report.turn,
+        status: report
+            .status
+            .as_ref()
+            .map(|s| declared_status(report.turn, s)),
+    })
+}
+
 pub fn harness_from(s: &str) -> Option<Harness> {
     Some(match s {
         "claude" => Harness::Claude,
@@ -113,6 +145,7 @@ pub fn park_wire(r: ParkReason) -> String {
         ParkReason::Flapping(Some(h)) => format!("flapping ({} login rejected)", h.as_str()),
         ParkReason::Flapping(None) => "flapping".into(),
         ParkReason::BriefUnconfirmed => "brief_unconfirmed".into(),
+        ParkReason::CreditFloor => "credit_floor".into(),
         ParkReason::Guard(g) => format!("g{}", g.number()),
         ParkReason::Ineligible { harness } => format!("ineligible ({})", harness.as_str()),
     }
@@ -218,6 +251,8 @@ pub fn sleeve(
         budget_used: s.budget.map(|_| s.used),
         budget_limit: s.budget,
         d9: s.d9,
+        last_status: stats.last_status,
+        warning: None,
     }
 }
 
@@ -327,6 +362,7 @@ pub fn chat_entry(sleeve: SleeveId, l: &Line, delta: bool) -> api::ChatEntry {
             from: from.clone(),
             text: text.clone(),
             steer: *steer,
+            reports: l.reports.clone(),
         },
         D::PromptAck {
             request_id,
@@ -435,6 +471,7 @@ pub fn chat_entry(sleeve: SleeveId, l: &Line, delta: bool) -> api::ChatEntry {
                 context_window: usage.context_window,
             },
             duration_ms: *duration_ms,
+            status: l.status.clone(),
         },
         D::Error { class, text } => A::Error {
             kind: error_class(*class),

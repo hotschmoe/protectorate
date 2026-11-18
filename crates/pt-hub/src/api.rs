@@ -108,6 +108,7 @@ pub fn call(hub: &Arc<Hub>, who: &Principal, name: &str, body: &Value) -> Result
         Decide => decide,
         ListNodes => list_nodes,
         GetNode => get_node,
+        SetNodeJobs => set_node_jobs,
         GetEnrollment => get_enrollment,
         AddNode => add_node,
         ApproveNode => approve_node,
@@ -295,6 +296,7 @@ fn get_inbox(c: &Ctx<'_>, r: api::InboxRequest) -> Result<api::Inbox> {
                     sender,
                     queued_at_ms: api::EpochMs(m.queued_at),
                     text: m.text.clone(),
+                    report: wire::queued_report(m),
                 }
             })
             .collect(),
@@ -719,6 +721,7 @@ fn worktree_taken(root: &str, path: &Path) -> Result<bool> {
 
 fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
     let hub = c.hub;
+    let warning = credit_warning(hub, wire::core_harness(r.harness));
     let view = hub.view();
     let st = &view.state;
     if r.name.is_empty() {
@@ -919,20 +922,98 @@ fn spawn(c: &Ctx<'_>, r: api::SpawnSleeveRequest) -> Result<api::Sleeve> {
         Err(e) => return Err(after_create(hub, &path, commit.as_deref(), e)),
     };
     if let Some(text) = r.message.filter(|t| !t.is_empty()) {
+        let request_id = new_request(c, "")?;
+        let text = prefix(&view.state, c.who, "", &text);
         command(
             hub,
-            EventKind::Send {
-                to: id,
-                request_id: new_request(c, "")?,
+            if let Some(limit) = r.until_done {
+                EventKind::SendUntil {
+                    to: id,
+                    request_id,
+                    from: c.who.party(),
+                    text,
+                    mode: SendMode::Queue,
+                    d9,
+                    supersede: false,
+                    limit,
+                }
+            } else {
+                EventKind::Send {
+                    to: id,
+                    request_id,
+                    from: c.who.party(),
+                    agent: None,
+                    text,
+                    mode: SendMode::Queue,
+                    d9,
+                }
+            },
+        )?;
+    } else if let Some(limit) = r.until_done {
+        command(
+            hub,
+            EventKind::ArmUntil {
+                sleeve: id,
                 from: c.who.party(),
-                agent: None,
-                text: prefix(&view.state, c.who, "", &text),
-                mode: SendMode::Queue,
-                d9,
+                limit,
             },
         )?;
     }
-    sleeve_view(hub, id)
+    let mut sleeve = sleeve_view(hub, id)?;
+    sleeve.warning = warning;
+    Ok(sleeve)
+}
+
+fn credit_warning(hub: &Hub, harness: pt_core::Harness) -> Option<String> {
+    if harness != pt_core::Harness::Codex {
+        return None;
+    }
+    let quotas = hub.quotas.list();
+    if !quotas
+        .iter()
+        .any(|q| crate::quota::credit_state(q) == Some(true))
+    {
+        return None;
+    }
+    let candidates: Vec<pt_quota::Candidate> = [
+        pt_core::Harness::Claude,
+        pt_core::Harness::Grok,
+        pt_core::Harness::PiLocal,
+    ]
+    .into_iter()
+    .filter(|h| hub.doctor.check(&hub.config, *h).is_ok())
+    .map(|h| pt_quota::Candidate {
+        harness: wire::api_harness(h),
+        model: String::new(),
+    })
+    .collect();
+    let alternative = pt_quota::select_target(
+        now_ms(),
+        pt_quota::TaskSize::Medium,
+        &candidates,
+        api::Mode::Headless,
+        &[],
+        &quotas,
+        &[],
+    );
+    let below_floor = hub.config.quota_credit_floor.is_some_and(|floor| {
+        quotas.iter().any(|q| {
+            q.subscription == api::Subscription::Codex
+                && q.credits
+                    .as_ref()
+                    .and_then(|c| c.balance)
+                    .is_some_and(|b| b < floor)
+        })
+    });
+    let mut text = if below_floor {
+        "Codex subscription limit reached; this work will park below quota_credit_floor".to_string()
+    } else {
+        "Codex subscription limit reached; this work will use account credits".to_string()
+    };
+    if let Some(target) = alternative {
+        text.push_str(&format!("; {} has quota headroom", target.harness));
+    }
+    Some(text)
 }
 
 /// What the harness reads: mail from a sleeve and agent messages are marked (Envoy's CLAUDE.md
@@ -1003,7 +1084,22 @@ fn send_message(c: &Ctx<'_>, r: api::SendMessageRequest) -> Result<api::Sent> {
         matches!(from, Party::Sleeve(id) if view.state.sleeve(id).is_some_and(|s| s.d9));
     let reply = command(
         c.hub,
-        if r.supersede {
+        if let Some(limit) = r.until_done {
+            EventKind::SendUntil {
+                to: id,
+                request_id: request_id.clone(),
+                from,
+                text: prefix(&view.state, c.who, "", &r.text),
+                mode: if r.delivery == api::Delivery::Steer {
+                    SendMode::Steer
+                } else {
+                    SendMode::Queue
+                },
+                d9: marks_d9(c.hub, c.who) || sender_marked,
+                supersede: r.supersede,
+                limit,
+            }
+        } else if r.supersede {
             EventKind::Supersede {
                 to: id,
                 request_id: request_id.clone(),
@@ -1038,7 +1134,10 @@ fn interrupt(c: &Ctx<'_>, r: api::SleeveRef) -> Result<api::Empty> {
 fn stop(c: &Ctx<'_>, r: api::SleeveRef) -> Result<api::Accepted> {
     let id = target_sleeve(c, &c.hub.view(), &r.sleeve_id)?;
     command(c.hub, EventKind::Stop { sleeve: id })?;
-    Ok(api::Accepted { approval_id: None })
+    Ok(api::Accepted {
+        approval_id: None,
+        warning: None,
+    })
 }
 
 fn remove(c: &Ctx<'_>, r: api::SleeveRef) -> Result<api::Accepted> {
@@ -1047,7 +1146,10 @@ fn remove(c: &Ctx<'_>, r: api::SleeveRef) -> Result<api::Accepted> {
     let name = view.state.sleeve(id).map_or("", |s| s.name.as_str());
     let approval_id = rule::gate(c.hub, c.who, Guarded::Remove(name))?;
     command(c.hub, EventKind::Remove { sleeve: id })?;
-    Ok(api::Accepted { approval_id })
+    Ok(api::Accepted {
+        approval_id,
+        warning: None,
+    })
 }
 
 fn optional_target(
@@ -1081,20 +1183,40 @@ fn start(c: &Ctx<'_>, r: api::StartSleeveRequest) -> Result<api::Accepted> {
     } else {
         optional_target(c.hub, r.target, r.provider, r.model)
     };
+    let warning = credit_warning(
+        c.hub,
+        target
+            .as_ref()
+            .map_or(view.state.sleeves[&id].target.harness, |t| t.harness),
+    );
     command(
         c.hub,
-        EventKind::Start {
-            sleeve: id,
-            target,
-            effort: r.effort.filter(|e| !e.is_empty()),
+        if let Some(limit) = r.until_done {
+            EventKind::StartUntil {
+                sleeve: id,
+                target,
+                effort: r.effort.filter(|e| !e.is_empty()),
+                from: c.who.party(),
+                limit,
+            }
+        } else {
+            EventKind::Start {
+                sleeve: id,
+                target,
+                effort: r.effort.filter(|e| !e.is_empty()),
+            }
         },
     )?;
-    Ok(api::Accepted { approval_id: None })
+    Ok(api::Accepted {
+        approval_id: None,
+        warning,
+    })
 }
 
 fn resleeve(c: &Ctx<'_>, r: api::ResleeveRequest) -> Result<api::Accepted> {
     let id = target_sleeve(c, &c.hub.view(), &r.sleeve_id)?;
     let target = optional_target(c.hub, Some(r.target), r.provider, r.model);
+    let warning = credit_warning(c.hub, wire::core_harness(r.target));
     command(
         c.hub,
         EventKind::Resleeve {
@@ -1103,7 +1225,10 @@ fn resleeve(c: &Ctx<'_>, r: api::ResleeveRequest) -> Result<api::Accepted> {
             effort: r.effort.filter(|e| !e.is_empty()),
         },
     )?;
-    Ok(api::Accepted { approval_id: None })
+    Ok(api::Accepted {
+        approval_id: None,
+        warning,
+    })
 }
 
 fn takeover(_: &Ctx<'_>, _: api::SleeveRef) -> Result<api::Empty> {
@@ -1223,9 +1348,9 @@ fn list_nodes(c: &Ctx<'_>, _: api::Empty) -> Result<api::NodeList> {
     if matches!(c.hub.fleet.status(), FleetStatus::Off) {
         return Ok(api::NodeList { nodes: Vec::new() });
     }
-    let up = fleet(c.hub)?;
+    fleet(c.hub)?;
     Ok(api::NodeList {
-        nodes: up.poller.nodes().into_iter().map(|v| v.node).collect(),
+        nodes: crate::snapshot::nodes(c.hub),
     })
 }
 
@@ -1276,7 +1401,39 @@ fn resolve_node(up: &Up, s: &str, records: bool) -> Result<(u64, String)> {
 }
 
 fn get_node(c: &Ctx<'_>, r: api::NodeRef) -> Result<api::Node> {
-    Ok(find_node(&fleet(c.hub)?, &r.node_id)?.node)
+    let mut node = find_node(&fleet(c.hub)?, &r.node_id)?.node;
+    crate::jobs::decorate_node(&c.hub.view().state, &mut node);
+    if let Ok(id) = node.id.parse::<u64>() {
+        node.pending_update = c
+            .hub
+            .view()
+            .state
+            .pending_node_updates
+            .get(&pt_core::NodeId(id))
+            .map(|p| p.version.clone());
+    }
+    Ok(node)
+}
+
+fn set_node_jobs(c: &Ctx<'_>, r: api::SetNodeJobsRequest) -> Result<api::Node> {
+    let up = fleet(c.hub)?;
+    let mut node = find_node(&up, &r.node_id)?.node;
+    let id = node.id.parse().map_err(internal)?;
+    match command(
+        c.hub,
+        EventKind::SetNodeJobs {
+            node: pt_core::NodeId(id),
+            jobs: r.jobs.to_string(),
+            note: r.note,
+        },
+    )? {
+        Reply::Accepted => {
+            crate::jobs::decorate_node(&c.hub.view().state, &mut node);
+            c.hub.fleet.renamed(&c.hub.bus, node.clone());
+            Ok(node)
+        }
+        other => Err(internal(format!("SetNodeJobs answered {other:?}"))),
+    }
 }
 
 fn pending_node(p: &pt_fleet::Pending, fp: &str) -> api::PendingNode {
@@ -1508,7 +1665,9 @@ fn rename_node(c: &Ctx<'_>, r: api::RenameNodeRequest) -> Result<api::RenamedNod
     })?;
     if n.name != from {
         if let Some(v) = up.poller.node(&id.to_string()) {
-            c.hub.fleet.renamed(&c.hub.bus, v.node);
+            let mut node = v.node;
+            crate::jobs::decorate_node(&c.hub.view().state, &mut node);
+            c.hub.fleet.renamed(&c.hub.bus, node);
         }
         let text = format!("node {from} renamed {}", n.name);
         info!("{text} (headscale node {id})");
@@ -1561,7 +1720,7 @@ fn job_view(hub: &Hub, id: pt_core::JobId) -> Result<api::Job> {
     view.state
         .jobs
         .get(&id)
-        .map(|j| crate::jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes()))
+        .map(|j| crate::jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes(), &view.state))
         .ok_or_else(|| err(ErrorCode::NotFound, format!("job {} is gone", id.0)))
 }
 
@@ -1621,6 +1780,16 @@ fn run_job(c: &Ctx<'_>, r: api::RunJobRequest) -> Result<api::Job> {
     let (target, on) = match r.target {
         api::JobTarget::Node { node_id } => {
             let (id, name) = resolve_node(&up, &node_id, false)?;
+            let owner = matches!(c.who, Principal::Owner | Principal::Device(_));
+            let view = c.hub.view();
+            if !crate::jobs::allows(&view.state, &id.to_string(), owner) {
+                let (policy, note) = crate::jobs::node_policy(&view.state, &id.to_string());
+                let why = note.map_or_else(String::new, |n| format!(": {n}"));
+                return Err(err(
+                    ErrorCode::Forbidden,
+                    format!("node {name} refuses this job (jobs {policy}){why}"),
+                ));
+            }
             if let Some(e) = up
                 .poller
                 .node(&id.to_string())
@@ -1661,7 +1830,16 @@ fn run_job(c: &Ctx<'_>, r: api::RunJobRequest) -> Result<api::Job> {
     };
     let spec = req.spec(r.even_if_present);
     let request_id = new_id("job:")?;
-    match command(c.hub, EventKind::CreateJob { request_id, spec })? {
+    let event = match &req.target {
+        api::JobTarget::Node { node_id } => EventKind::CreateNodeJob {
+            request_id,
+            spec,
+            node: pt_core::NodeId(node_id.parse().map_err(internal)?),
+            owner: req.sleeve.is_none(),
+        },
+        api::JobTarget::Arch { .. } => EventKind::CreateJob { request_id, spec },
+    };
+    match command(c.hub, event)? {
         Reply::JobCreated(id) => job_view(c.hub, id),
         other => Err(internal(format!("CreateJob answered {other:?}"))),
     }
@@ -1685,7 +1863,7 @@ fn list_jobs(c: &Ctx<'_>, r: api::ListJobsRequest) -> Result<api::JobList> {
         .filter(|j| node.is_none_or(|n| j.node.map(|x| x.0) == Some(n)))
         .filter(|j| job_visible(&view.state, c.who, JobRequest::of(&j.spec).as_ref()))
         .take(limit)
-        .map(|j| crate::jobs::view_with_nodes(&c.hub.jobs, j, &c.hub.fleet.nodes()))
+        .map(|j| crate::jobs::view_with_nodes(&c.hub.jobs, j, &c.hub.fleet.nodes(), &view.state))
         .collect();
     jobs.reverse();
     Ok(api::JobList {
@@ -2229,46 +2407,75 @@ fn upward_report(
 
 fn wait(c: &Ctx<'_>, r: api::WaitRequest) -> Result<api::WaitResult> {
     let deadline = Instant::now() + timeout(r.timeout_ms);
-    if r.until == api::WaitUntil::Report {
-        let view = c.hub.view();
-        let resolved = find(&view.state, &r.sleeve_id).ok();
-        if r.sleeve_id == crate::envoy::ENVOY
-            || resolved.is_some_and(|id| envoy_id(&view.state) == Some(id))
-        {
+    if r.sleeve_ids.is_empty() {
+        return Err(err(ErrorCode::Invalid, "wait requires at least one sleeve"));
+    }
+    let view = c.hub.view();
+    let mut ids = Vec::new();
+    for name in &r.sleeve_ids {
+        if r.until == api::WaitUntil::Report && name == crate::envoy::ENVOY {
             return Err(err(
                 ErrorCode::Invalid,
                 "Envoy never sends as a sleeve; wait for a sleeve",
             ));
         }
-        let id = target_sleeve(c, &view, &r.sleeve_id)?;
-        let waiter = c.who.party();
-        let after = r.after_seq;
-        let got = wait_for(c.hub, deadline, |v| {
-            if let Some(seq) = upward_report(&v.state, id, waiter, after) {
-                return Some(Some(seq));
-            }
-            let s = v.state.sleeve(id)?;
-            matches!(s.life, Life::Stopped | Life::Removed | Life::Parked(_)).then_some(None)
-        });
-        return Ok(api::WaitResult {
-            reached: got.as_ref().is_some_and(Option::is_some),
-            sleeve: sleeve_view(c.hub, id)?,
-            seq: got.flatten(),
-        });
-    }
-    let id = target_sleeve(c, &c.hub.view(), &r.sleeve_id)?;
-    let got = wait_for(c.hub, deadline, |v| {
-        if reached(&v.state, id, r.until) {
-            return Some(true);
+        let id = target_sleeve(c, &view, name)?;
+        if r.until == api::WaitUntil::Report && envoy_id(&view.state) == Some(id) {
+            return Err(err(
+                ErrorCode::Invalid,
+                "Envoy never sends as a sleeve; wait for a sleeve",
+            ));
         }
-        // A sleeve that stopped or parked never gets there: answer instead of hanging.
-        let s = v.state.sleeve(id)?;
-        matches!(s.life, Life::Stopped | Life::Removed | Life::Parked(_)).then_some(false)
-    });
+        if ids.contains(&id) {
+            return Err(err(ErrorCode::Invalid, "duplicate sleeve in wait"));
+        }
+        ids.push(id);
+    }
+    let mut outcomes = vec![None; ids.len()];
+    let waiter = c.who.party();
+    let got =
+        wait_for(c.hub, deadline, |v| {
+            for (i, &id) in ids.iter().enumerate() {
+                if outcomes[i].is_some() {
+                    continue;
+                }
+                let seq = (r.until == api::WaitUntil::Report)
+                    .then(|| upward_report(&v.state, id, waiter, r.after_seq))
+                    .flatten();
+                if seq.is_some() || reached(&v.state, id, r.until) {
+                    outcomes[i] = Some((true, seq));
+                } else if v.state.sleeve(id).is_some_and(|s| {
+                    matches!(s.life, Life::Stopped | Life::Removed | Life::Parked(_))
+                }) {
+                    outcomes[i] = Some((false, None));
+                }
+            }
+            let successes = outcomes
+                .iter()
+                .filter(|o| matches!(o, Some((true, _))))
+                .count();
+            let finished = outcomes.iter().filter(|o| o.is_some()).count();
+            if r.any {
+                (successes > 0 || finished == ids.len()).then_some(successes > 0)
+            } else {
+                (finished == ids.len() || successes < finished).then_some(successes == ids.len())
+            }
+        });
+    let sleeves = ids
+        .into_iter()
+        .zip(outcomes)
+        .map(|(id, outcome)| {
+            let (reached, seq) = outcome.unwrap_or((false, None));
+            Ok(api::WaitSleeveResult {
+                reached,
+                sleeve: sleeve_view(c.hub, id)?,
+                seq,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok(api::WaitResult {
-        reached: got == Some(true),
-        sleeve: sleeve_view(c.hub, id)?,
-        seq: None,
+        reached: got.unwrap_or(false),
+        sleeves,
     })
 }
 
@@ -2634,6 +2841,36 @@ fn update_hub(c: &Ctx<'_>, r: api::UpdateHubRequest) -> Result<api::HubUpdate> {
 }
 
 fn update_nodes(c: &Ctx<'_>, r: api::UpdateNodesRequest) -> Result<api::NodeUpdates> {
+    if let Some(name) = &r.cancel {
+        if r.all
+            || !r.nodes.is_empty()
+            || r.version.is_some()
+            || r.channel.is_some()
+            || r.probation_secs.is_some()
+            || r.no_wait
+        {
+            return Err(err(
+                ErrorCode::Invalid,
+                "--cancel takes one node and no rollout options",
+            ));
+        }
+        let node = find_node(&fleet(c.hub)?, name)?.node;
+        let id = node.id.parse().map_err(internal)?;
+        command(
+            c.hub,
+            EventKind::ClearPendingNodeUpdate {
+                node: pt_core::NodeId(id),
+                revision: None,
+            },
+        )?;
+        lock(&c.hub.node_update_offline).remove(&node.id);
+        lock(&c.hub.node_update_busy).remove(&node.id);
+        return Ok(api::NodeUpdates {
+            version: String::new(),
+            nodes: Vec::new(),
+            rollout_id: None,
+        });
+    }
     if r.all && r.no_wait {
         let rollout = crate::update::prepare_nodes(c.hub, &r)?;
         let hub = Arc::clone(c.hub);

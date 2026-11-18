@@ -142,6 +142,7 @@ api_records! {
         pub message: Option<String>,
         /// Tokens; a root's count includes its children's (G10).
         pub budget: Option<u64>,
+        pub until_done: Option<u64>,
     }
 
     pub struct SendMessageRequest {
@@ -149,6 +150,7 @@ api_records! {
         pub text: String,
         pub delivery: Delivery = Delivery::Queue,
         pub supersede: bool = false,
+        pub until_done: Option<u64>,
     }
 
     /// A message the hub took; its `user_message` and `prompt_ack` entries carry this id.
@@ -166,6 +168,8 @@ api_records! {
         pub sender: String,
         pub queued_at_ms: EpochMs,
         pub text: String,
+        /// Present for a turn report, including when it declared no status.
+        pub report: Option<QueuedTurnReport>,
     }
 
     pub struct Inbox {
@@ -180,6 +184,7 @@ api_records! {
     /// owner first.
     pub struct Accepted {
         pub approval_id: Option<String>,
+        pub warning: Option<String>,
     }
 
     /// Starts a stopped or parked sleeve again, on its own target unless one is named.
@@ -189,6 +194,7 @@ api_records! {
         pub model: Option<String>,
         pub provider: Option<String>,
         pub effort: Option<String>,
+        pub until_done: Option<u64>,
     }
 
     pub struct ResleeveRequest {
@@ -218,6 +224,12 @@ api_records! {
 
     pub struct NodeRef {
         pub node_id: String,
+    }
+
+    pub struct SetNodeJobsRequest {
+        pub node_id: String,
+        pub jobs: NodeJobs,
+        pub note: Option<String>,
     }
 
     pub struct RunJobRequest {
@@ -410,8 +422,10 @@ api_records! {
     }
 
     pub struct WaitRequest {
-        pub sleeve_id: String,
+        pub sleeve_ids: Vec<String>,
         pub until: WaitUntil,
+        /// Return when any sleeve reaches the condition; otherwise wait for all.
+        pub any: bool = false,
         /// The hub caps it.
         pub timeout_ms: u64 = 60_000,
         /// `until=report` only. Count mail with a seq above this. Absent uses the waiter's
@@ -420,7 +434,12 @@ api_records! {
     }
 
     pub struct WaitResult {
-        /// False when the timeout came first.
+        /// Whether the requested all/any condition was reached.
+        pub reached: bool,
+        pub sleeves: Vec<WaitSleeveResult>,
+    }
+
+    pub struct WaitSleeveResult {
         pub reached: bool,
         pub sleeve: Sleeve,
         /// The newest report seq that satisfied `until=report`. Absent otherwise.
@@ -624,6 +643,8 @@ api_records! {
     }
 
     pub struct UpdateNodesRequest {
+        /// Cancel the pending update for this node, without starting a rollout.
+        pub cancel: Option<String>,
         /// By id or name; leave empty with `all`.
         pub nodes: Vec<String> = Vec::new(),
         /// Every online node, one canary per OS and arch first.
@@ -709,6 +730,7 @@ api_methods! {
     ListNodes(Empty) -> NodeList: Sleeve,
     /// By headscale id or name.
     GetNode(NodeRef) -> Node: Sleeve,
+    SetNodeJobs(SetNodeJobsRequest) -> Node: Owner,
     GetEnrollment(Empty) -> Enrollment: Owner,
     /// Records a registration the owner scanned or pasted, for `ApproveNode`.
     AddNode(AddNodeRequest) -> PendingNode: Owner,

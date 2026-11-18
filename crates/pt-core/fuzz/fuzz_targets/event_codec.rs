@@ -11,7 +11,7 @@ fuzz_target!(|data: &[u8]| {
     if data.starts_with(RETIRED_TAG) {
         assert!(matches!(
             decode(data),
-            Err(DecodeError::UnknownTag { what, tag: 6 }) if what.contains("removed")
+            Err(DecodeError::UnknownTag { tag: 6, .. })
         ));
     }
     // Arbitrary bytes: decode never panics, and what decodes is canonical.

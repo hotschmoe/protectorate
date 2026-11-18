@@ -71,6 +71,36 @@ fn arch(a: &str) -> &str {
     }
 }
 
+pub fn node_policy(state: &pt_core::State, node: &str) -> (api::NodeJobs, Option<String>) {
+    let policy = node
+        .parse()
+        .ok()
+        .and_then(|id| state.node_jobs.get(&pt_core::NodeId(id)));
+    match policy {
+        Some((jobs, note)) => {
+            let jobs = match jobs.as_str() {
+                "owner" => api::NodeJobs::Owner,
+                "none" => api::NodeJobs::None,
+                _ => api::NodeJobs::Any,
+            };
+            (jobs, note.clone())
+        }
+        None => (api::NodeJobs::Any, None),
+    }
+}
+
+pub fn decorate_node(state: &pt_core::State, node: &mut api::Node) {
+    (node.jobs, node.jobs_note) = node_policy(state, &node.id);
+}
+
+pub fn allows(state: &pt_core::State, node: &str, owner: bool) -> bool {
+    match node_policy(state, node).0 {
+        api::NodeJobs::Any => true,
+        api::NodeJobs::Owner => owner,
+        api::NodeJobs::None => false,
+    }
+}
+
 pub fn matches_target(node: &pt_fleet::NodeView, target: &api::JobTarget) -> bool {
     node.node.online
         && node.error.is_none()
@@ -85,12 +115,19 @@ pub fn held_for_presence(state: api::PresenceState, even_if_present: bool) -> bo
     !even_if_present && state != api::PresenceState::Away
 }
 
-pub fn view_with_nodes(store: &JobStore, j: &Job, nodes: &[pt_fleet::NodeView]) -> api::Job {
+pub fn view_with_nodes(
+    store: &JobStore,
+    j: &Job,
+    nodes: &[pt_fleet::NodeView],
+    state: &pt_core::State,
+) -> api::Job {
     let mut job = view(store, j);
     if job.state == api::JobState::Queued {
+        let owner = JobRequest::of(&j.spec).is_some_and(|r| r.sleeve.is_none());
         let candidates: Vec<_> = nodes
             .iter()
             .filter(|n| matches_target(n, &job.target))
+            .filter(|n| allows(state, &n.node.id, owner))
             .collect();
         if !candidates.is_empty()
             && candidates

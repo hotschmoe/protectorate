@@ -233,6 +233,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<crate::update::Trial>) -> Resu
     if !state.mail_batching {
         hub.submit(EventKind::MailBatching);
     }
+    crate::sleeve_devices::watch(hub.clone())?;
     let writer_hub = hub.clone();
     thread::Builder::new()
         .name("pt-stream".into())
@@ -291,6 +292,7 @@ fn run(o: ServeOptions, home: Home, trial: Option<crate::update::Trial>) -> Resu
     crate::hardware::start(&hub);
     crate::workers::start_harness_updates(&hub);
     crate::workers::start_fleet(&hub, o.fleet, o.net);
+    crate::workers::start_pending_nodes(&hub);
     crate::workers::start_quotas(&hub);
     crate::workers::start_history(&hub);
 

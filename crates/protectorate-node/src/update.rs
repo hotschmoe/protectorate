@@ -21,6 +21,14 @@ use pt_update::{MAX_TRIAL_STARTS, Source, Store, Verdict};
 /// The exit status that asks the service manager for a restart on `releases/current`.
 pub const RESTART_CODE: i32 = 75;
 const PROGRAM: &str = "protectorate-node";
+#[cfg(debug_assertions)]
+pub(crate) fn mark_test_failure(variable: &str) {
+    if let Some(path) = std::env::var_os(variable)
+        && fs::read(&path).ok().as_deref() == Some(b"armed")
+    {
+        let _ = fs::write(path, b"failed");
+    }
+}
 /// The `--version` line of a binary that keeps the supervisor's start contract: it runs as
 /// `releases/current/protectorate-node serve`, exits [`RESTART_CODE`] to be restarted, and
 /// switches release pointers on Windows.
@@ -123,7 +131,11 @@ impl Releases {
                 );
             }
             Ok(false) => {}
-            Err(e) => eprintln!("protectorate-node: confirming the update: {e}"),
+            Err(e) => {
+                #[cfg(debug_assertions)]
+                mark_test_failure("PROTECTORATE_NODE_TEST_CONFIRM_FAILED");
+                eprintln!("protectorate-node: confirming the update: {e}");
+            }
         }
     }
 
@@ -166,8 +178,11 @@ impl Releases {
         #[cfg(debug_assertions)]
         if let Some(path) = std::env::var_os("PROTECTORATE_NODE_TEST_UPDATE_PAUSE") {
             eprintln!("protectorate-node: update admitted for testing");
+            if std::fs::read(&path).ok().as_deref() == Some(b"1") {
+                let _ = std::fs::write(&path, b"admitted");
+            }
             let until = std::time::Instant::now() + Duration::from_secs(20);
-            while std::fs::read_to_string(&path).is_ok_and(|s| s.trim() == "1")
+            while std::fs::read(&path).ok().as_deref() == Some(b"admitted")
                 && std::time::Instant::now() < until
             {
                 thread::sleep(Duration::from_millis(20));
