@@ -309,6 +309,7 @@ fn check_pace(data: &[u8]) {
             length_ms: Some(seconds * 1000),
         }],
         note: String::new(),
+        credits: None,
     };
     let elapsed = (seconds - left) as f64 / seconds as f64;
     let expected = if elapsed < 0.05 {
