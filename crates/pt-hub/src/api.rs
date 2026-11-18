@@ -1276,7 +1276,17 @@ fn resolve_node(up: &Up, s: &str, records: bool) -> Result<(u64, String)> {
 }
 
 fn get_node(c: &Ctx<'_>, r: api::NodeRef) -> Result<api::Node> {
-    Ok(find_node(&fleet(c.hub)?, &r.node_id)?.node)
+    let mut node = find_node(&fleet(c.hub)?, &r.node_id)?.node;
+    if let Ok(id) = node.id.parse::<u64>() {
+        node.pending_update = c
+            .hub
+            .view()
+            .state
+            .pending_node_updates
+            .get(&pt_core::NodeId(id))
+            .map(|p| p.version.clone());
+    }
+    Ok(node)
 }
 
 fn pending_node(p: &pt_fleet::Pending, fp: &str) -> api::PendingNode {
@@ -2634,6 +2644,36 @@ fn update_hub(c: &Ctx<'_>, r: api::UpdateHubRequest) -> Result<api::HubUpdate> {
 }
 
 fn update_nodes(c: &Ctx<'_>, r: api::UpdateNodesRequest) -> Result<api::NodeUpdates> {
+    if let Some(name) = &r.cancel {
+        if r.all
+            || !r.nodes.is_empty()
+            || r.version.is_some()
+            || r.channel.is_some()
+            || r.probation_secs.is_some()
+            || r.no_wait
+        {
+            return Err(err(
+                ErrorCode::Invalid,
+                "--cancel takes one node and no rollout options",
+            ));
+        }
+        let node = find_node(&fleet(c.hub)?, name)?.node;
+        let id = node.id.parse().map_err(internal)?;
+        command(
+            c.hub,
+            EventKind::ClearPendingNodeUpdate {
+                node: pt_core::NodeId(id),
+                revision: None,
+            },
+        )?;
+        lock(&c.hub.node_update_offline).remove(&node.id);
+        lock(&c.hub.node_update_busy).remove(&node.id);
+        return Ok(api::NodeUpdates {
+            version: String::new(),
+            nodes: Vec::new(),
+            rollout_id: None,
+        });
+    }
     if r.all && r.no_wait {
         let rollout = crate::update::prepare_nodes(c.hub, &r)?;
         let hub = Arc::clone(c.hub);

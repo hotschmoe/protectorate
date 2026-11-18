@@ -654,6 +654,7 @@ fn node_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
     )? {
         "update" => {
             let req = api::UpdateNodesRequest {
+                cancel: a.flag("--cancel").map(String::from),
                 nodes: a.words.get(2..).unwrap_or(&[]).to_vec(),
                 all: a.has("--all"),
                 version: a.flag("--version").map(String::from),
@@ -673,8 +674,24 @@ fn node_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                     None
                 },
             };
-            if req.all == !req.nodes.is_empty() {
+            if req.cancel.is_none() && req.all == !req.nodes.is_empty() {
                 return Err(Fail::Usage("node update needs node names or --all".into()));
+            }
+            if req.cancel.is_some() {
+                if req.all
+                    || !req.nodes.is_empty()
+                    || req.version.is_some()
+                    || req.channel.is_some()
+                    || req.probation_secs.is_some()
+                    || req.no_wait
+                {
+                    return Err(Fail::Usage(
+                        "--cancel takes one node and no rollout options".into(),
+                    ));
+                }
+                let v = c.call::<m::UpdateNodes>(&req)?;
+                o.show(&v, |_| println!("Pending node update cancelled."));
+                return Ok(());
             }
             let v = if !req.no_wait && !o.json {
                 let latest = c.call::<m::ListEvents>(&api::ListEventsRequest {
@@ -740,8 +757,14 @@ fn node_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                             n.to.clone(),
                             if n.ok {
                                 "ok"
+                            } else if n.detail.starts_with("deferred: busy") {
+                                "DEFERRED (busy)"
                             } else if n.detail.starts_with("deferred:") {
-                                "DEFERRED"
+                                "DEFERRED (offline)"
+                            } else if n.detail.starts_with("skipped:") {
+                                "SKIPPED"
+                            } else if n.detail.starts_with("pending node update ") {
+                                "CANCELLED"
                             } else {
                                 "FAILED"
                             }
@@ -767,6 +790,9 @@ fn node_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
             let v = c.call::<m::GetNode>(&req)?;
             o.show(&v, |n| {
                 node_rows(std::slice::from_ref(n));
+                if let Some(version) = &n.pending_update {
+                    println!("pending update {version}");
+                }
                 if let Some(i) = &n.inventory {
                     println!(
                         "host {} {} {}, {} {} threads, {} MiB RAM",

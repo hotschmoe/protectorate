@@ -1543,6 +1543,7 @@ pub struct NodeRollout {
     probation: u64,
     results: Vec<api::NodeUpdate>,
     todo: Vec<Target>,
+    revisions: std::collections::BTreeMap<String, u64>,
 }
 
 impl NodeRollout {
@@ -1565,7 +1566,9 @@ pub fn prepare_nodes(hub: &Hub, r: &api::UpdateNodesRequest) -> Result<NodeRollo
             .iter()
             .find(|v| &v.node.id == name || &v.node.name == name)
             .ok_or_else(|| err(ErrorCode::NotFound, format!("no node {name:?}")))?;
-        if let Some(e) = v.protocol_error() {
+        if v.node.online
+            && let Some(e) = v.protocol_error()
+        {
             return Err(err(ErrorCode::Unavailable, e.to_string()));
         }
     }
@@ -1642,20 +1645,80 @@ pub fn prepare_nodes(hub: &Hub, r: &api::UpdateNodesRequest) -> Result<NodeRollo
                 .iter()
                 .find(|v| &v.node.id == n || &v.node.name == n)
                 .ok_or_else(|| err(ErrorCode::NotFound, format!("no node {n:?}")))?;
-            todo.push(target(v).ok_or_else(|| {
-                err(
-                    ErrorCode::Unavailable,
-                    format!("node {n} has not answered Hello yet"),
-                )
-            })?);
+            match target(v) {
+                Some(t) => todo.push(t),
+                None => results.push(failed(
+                    &v.node.id,
+                    &v.node.name,
+                    "",
+                    &tag,
+                    if v.node.online {
+                        "no hello yet"
+                    } else {
+                        "deferred: offline"
+                    },
+                )),
+            }
         }
     }
+    let ids: std::collections::BTreeSet<String> = todo
+        .iter()
+        .map(|t| t.id.clone())
+        .chain(results.iter().map(|r| r.node_id.clone()))
+        .collect();
+    let mut active = lock(&hub.node_update_active);
+    if ids.iter().any(|id| active.contains(id)) {
+        return Err(err(ErrorCode::Conflict, "a node update is already running"));
+    }
+    active.extend(ids.iter().cloned());
+    {
+        let mut offline = lock(&hub.node_update_offline);
+        let mut busy = lock(&hub.node_update_busy);
+        for id in &ids {
+            offline.remove(id);
+            busy.remove(id);
+        }
+    }
+    let mut revisions = std::collections::BTreeMap::new();
+    for id in &ids {
+        let node = pt_core::NodeId(
+            id.parse()
+                .map_err(|e| err(ErrorCode::Internal, format!("invalid node id: {e}")))?,
+        );
+        let reply = crate::command::command(
+            hub,
+            pt_core::EventKind::PendingNodeUpdate {
+                node,
+                version: tag.clone(),
+                probation_secs: probation,
+            },
+        );
+        match reply {
+            Ok(pt_core::Reply::PendingNodeUpdate(revision)) => {
+                revisions.insert(id.clone(), revision);
+            }
+            Ok(_) => {
+                for id in &ids {
+                    active.remove(id);
+                }
+                return Err(err(ErrorCode::Internal, "unexpected pending update reply"));
+            }
+            Err(e) => {
+                for id in &ids {
+                    active.remove(id);
+                }
+                return Err(e);
+            }
+        }
+    }
+    drop(active);
     Ok(NodeRollout {
         up,
         rel,
         probation,
         results,
         todo,
+        revisions,
     })
 }
 
@@ -1671,6 +1734,7 @@ pub fn run_nodes(hub: &Hub, r: api::UpdateNodesRequest, rollout: NodeRollout) ->
         probation,
         mut results,
         todo,
+        revisions,
     } = rollout;
     let tag = rel.tag.clone();
     let progress = |name: &str, text: &str| {
@@ -1722,6 +1786,7 @@ pub fn run_nodes(hub: &Hub, r: api::UpdateNodesRequest, rollout: NodeRollout) ->
             let rel = &rel;
             let up = &up;
             let r = &r;
+            let revisions = &revisions;
             scope.spawn(move || {
                 let mut canary_failed = false;
                 let mut canary_passed = false;
@@ -1742,10 +1807,10 @@ pub fn run_nodes(hub: &Hub, r: api::UpdateNodesRequest, rollout: NodeRollout) ->
                     let cmp = Version::parse(tag)
                         .zip(Version::parse(&t.release))
                         .map(|(to, from)| to.cmp(&from));
-                    let res = if let Some(error) = &t.protocol_error {
-                        Err(error.clone())
-                    } else if !t.online {
+                    let res = if !t.online {
                         Err("deferred: offline".into())
+                    } else if let Some(error) = &t.protocol_error {
+                        Err(error.clone())
                     } else if t.ip.is_empty() {
                         Err("deferred: no node address".into())
                     } else if r.version.is_none() && cmp.is_none() {
@@ -1759,7 +1824,7 @@ pub fn run_nodes(hub: &Hub, r: api::UpdateNodesRequest, rollout: NodeRollout) ->
                             t.release
                         ))
                     } else {
-                        wait_for_node_jobs(hub, &t, progress)
+                        wait_for_node_jobs(hub, &t, revisions[&t.id], progress)
                             .and_then(|deadline| {
                                 update_one(
                                     hub,
@@ -1767,6 +1832,7 @@ pub fn run_nodes(hub: &Hub, r: api::UpdateNodesRequest, rollout: NodeRollout) ->
                                     rel,
                                     &t,
                                     (probation, r.no_wait, deadline),
+                                    revisions[&t.id],
                                     progress,
                                 )
                             })
@@ -1780,6 +1846,12 @@ pub fn run_nodes(hub: &Hub, r: api::UpdateNodesRequest, rollout: NodeRollout) ->
                     };
                     let line = match &res {
                         Ok(d) => format!("node {}: {} -> {tag}: {d}", t.name, t.release),
+                        Err(e) if e.starts_with("deferred:") => {
+                            format!("node {}: update to {tag} {e}", t.name)
+                        }
+                        Err(e) if e.starts_with("pending node update ") => {
+                            format!("node {}: update to {tag}: {e}", t.name)
+                        }
                         Err(e) => format!("node {}: update to {tag} failed: {e}", t.name),
                     };
                     let level = if res.is_ok() {
@@ -1809,8 +1881,9 @@ pub fn run_nodes(hub: &Hub, r: api::UpdateNodesRequest, rollout: NodeRollout) ->
                             });
                         }
                         Err(e) => {
-                            canary_failed =
-                                !canary_passed && !e.starts_with("deferred: busy with job ");
+                            canary_failed = !canary_passed
+                                && !e.starts_with("deferred:")
+                                && !e.starts_with("pending node update ");
                             lock(done).push(failed(&t.id, &t.name, &t.release, tag, &e));
                         }
                     }
@@ -1819,6 +1892,61 @@ pub fn run_nodes(hub: &Hub, r: api::UpdateNodesRequest, rollout: NodeRollout) ->
         }
     });
     results.extend(done.into_inner().unwrap_or_else(|p| p.into_inner()));
+    for row in &results {
+        let Some(&revision) = revisions.get(&row.node_id) else {
+            continue;
+        };
+        let Ok(id) = row.node_id.parse() else {
+            continue;
+        };
+        let node = pt_core::NodeId(id);
+        let kind = if row.detail.starts_with("deferred:") {
+            pt_core::EventKind::ReleasePendingNodeUpdate { node, revision }
+        } else {
+            pt_core::EventKind::ClearPendingNodeUpdate {
+                node,
+                revision: Some(revision),
+            }
+        };
+        if let Err(e) = crate::command::command(hub, kind) {
+            warning!(
+                "node update: cannot journal result for {}: {}",
+                row.name,
+                e.message
+            );
+        } else if row.detail.starts_with("deferred: offline")
+            || row.detail.starts_with("deferred: no node address")
+        {
+            let mut offline = lock(&hub.node_update_offline);
+            if hub
+                .view()
+                .state
+                .pending_node_updates
+                .get(&node)
+                .is_some_and(|p| p.revision == revision)
+            {
+                offline.insert(row.node_id.clone(), revision);
+            }
+        } else if row.detail.starts_with("deferred: busy") {
+            let mut busy = lock(&hub.node_update_busy);
+            if hub
+                .view()
+                .state
+                .pending_node_updates
+                .get(&node)
+                .is_some_and(|p| p.revision == revision)
+                && let Some(view) = up.poller.node(&row.node_id)
+            {
+                busy.insert(row.node_id.clone(), (revision, view.hello_generation));
+            }
+        }
+    }
+    {
+        let mut active = lock(&hub.node_update_active);
+        for id in revisions.keys() {
+            active.remove(id);
+        }
+    }
     if let Some(id) = &r.rollout_id {
         hub.bus.event(
             Kind::Node,
@@ -1838,12 +1966,22 @@ pub fn run_nodes(hub: &Hub, r: api::UpdateNodesRequest, rollout: NodeRollout) ->
 fn wait_for_node_jobs(
     hub: &Hub,
     t: &Target,
+    revision: u64,
     progress: &impl Fn(&str, &str),
 ) -> Result<Instant, String> {
     let deadline = Instant::now() + NODE_BUSY_WAIT;
     let mut reported = None;
     loop {
         let view = hub.view();
+        let node = pt_core::NodeId(t.id.parse().map_err(|e| format!("invalid node id: {e}"))?);
+        if !view
+            .state
+            .pending_node_updates
+            .get(&node)
+            .is_some_and(|p| p.revision == revision)
+        {
+            return Err("pending node update was cancelled or replaced".into());
+        }
         let job = view
             .state
             .jobs
@@ -1895,19 +2033,37 @@ fn update_one(
     rel: &Release,
     t: &Target,
     options: (u64, bool, Instant),
+    revision: u64,
     progress: &impl Fn(&str, &str),
 ) -> Result<String, String> {
     let (probation, no_wait, busy_deadline) = options;
     let ext = if t.os == "windows" { ".exe" } else { "" };
     let asset = format!("protectorate-node-{}-{}{ext}", t.os, t.arch);
     rel.asset(&asset).map_err(|e| e.message)?;
-    let mut c = up.fleet.connect(&t.ip).map_err(|e| e.to_string())?;
+    let mut c = up
+        .fleet
+        .connect(&t.ip)
+        .map_err(|e| format!("deferred: offline ({e})"))?;
     c.set_timeout(NODE_CALL_TIMEOUT)
         .map_err(|e| e.to_string())?;
-    c.require_compatible().map_err(|e| e.to_string())?;
-    if c.hello().map_err(|e| e.to_string())?.release.as_deref() == Some(rel.tag.as_str()) {
+    c.require_compatible().map_err(|e| match e {
+        pt_fleet::Error::Protocol { .. } => e.to_string(),
+        _ => format!("deferred: offline ({e})"),
+    })?;
+    if c.hello()
+        .map_err(|e| format!("deferred: offline ({e})"))?
+        .release
+        .as_deref()
+        == Some(rel.tag.as_str())
+    {
         return Ok("already on it".into());
     }
+    let node = pt_core::NodeId(t.id.parse().map_err(|e| format!("invalid node id: {e}"))?);
+    crate::command::command(
+        hub,
+        pt_core::EventKind::ClaimPendingNodeUpdate { node, revision },
+    )
+    .map_err(|e| e.message)?;
     let request = msg::Update {
         version: rel.tag.clone(),
         api: hub.config.release_api.clone(),
@@ -1934,7 +2090,7 @@ fn update_one(
                         })
                         .map(|job| job.job_id);
                     let Some(job) = job else {
-                        break Err((true, format!("deferred: {}", r.message)));
+                        break Err((true, format!("deferred: busy ({})", r.message)));
                     };
                     if reported.as_ref() != Some(&job) {
                         let _ = tx.send(Ok(format!("waiting: busy with job {job}")));
@@ -2054,4 +2210,91 @@ fn update_one(
         "{switched}, but it did not come back on {}: {last}",
         rel.tag
     ))
+}
+
+pub fn catch_up_node(
+    hub: &Hub,
+    up: &crate::fleet::Up,
+    view: pt_fleet::NodeView,
+    pending: pt_core::PendingNodeUpdate,
+) {
+    let id = view.node.id.clone();
+    let name = view.node.name.clone();
+    let node = match id.parse::<u64>() {
+        Ok(id) => pt_core::NodeId(id),
+        Err(_) => return,
+    };
+    let Some(hello) = view.hello else { return };
+    let progress = |_: &str, text: &str| {
+        hub.bus
+            .event(Kind::Node, Level::Info, "node-update", &name, text);
+    };
+    let result = if pending.attempted {
+        if hello.release.as_deref() == Some(pending.version.as_str()) {
+            Ok("confirmed by hello and presence after hub restart".into())
+        } else {
+            Err("update outcome uncertain after hub restart".into())
+        }
+    } else {
+        let target = Target {
+            id: id.clone(),
+            name: name.clone(),
+            ip: view.ip.unwrap_or_default(),
+            os: hello.os,
+            arch: asset_arch(&hello.arch).into(),
+            release: hello.release.unwrap_or(hello.node_version),
+            online: true,
+            protocol_error: None,
+        };
+        source(hub)
+            .and_then(|src| release(hub, &src, Some(&pending.version), None))
+            .map_err(|e| e.message)
+            .and_then(|rel| {
+                wait_for_node_jobs(hub, &target, pending.revision, &progress).and_then(|deadline| {
+                    update_one(
+                        hub,
+                        up,
+                        &rel,
+                        &target,
+                        (pending.probation_secs, false, deadline),
+                        pending.revision,
+                        &progress,
+                    )
+                })
+            })
+    };
+    let detail = match &result {
+        Ok(s) | Err(s) => s,
+    };
+    hub.bus.event(
+        Kind::Node,
+        if result.is_ok() {
+            Level::Info
+        } else {
+            Level::Warn
+        },
+        &name,
+        "owner",
+        &format!("pending update to {}: {detail}", pending.version),
+    );
+    if detail == "update outcome uncertain after hub restart" {
+        return;
+    }
+    let kind = if detail.starts_with("deferred:") {
+        pt_core::EventKind::ReleasePendingNodeUpdate {
+            node,
+            revision: pending.revision,
+        }
+    } else {
+        pt_core::EventKind::ClearPendingNodeUpdate {
+            node,
+            revision: Some(pending.revision),
+        }
+    };
+    if let Err(e) = crate::command::command(hub, kind) {
+        warning!(
+            "node update: cannot journal result for {name}: {}",
+            e.message
+        );
+    }
 }

@@ -53,6 +53,7 @@ pub struct NodeView {
     pub node: Node,
     /// The agent's own answer to Hello: its node id, version and job journal epoch.
     pub hello: Option<HelloReply>,
+    pub hello_generation: u64,
     /// The tailnet address the poller dials.
     pub ip: Option<String>,
     /// The last round's error, while the node is unreachable.
@@ -358,12 +359,14 @@ fn poll_node(s: &Shared, link: &Link, id: u64) {
             online: false,
             last_seen_ms: EpochMs(0),
             node_version: String::new(),
+            pending_update: None,
             error: None,
             inventory: None,
             sample: None,
             presence: view::unknown_presence(),
         },
         hello: None,
+        hello_generation: 0,
         ip: None,
         error: None,
     };
@@ -437,6 +440,7 @@ fn round(
         c.set_timeout(s.cfg.call_timeout)
             .map_err(|e| e.to_string())?;
         let hello = c.hello().map_err(|e| e.to_string())?;
+        view.hello_generation = view.hello_generation.saturating_add(1);
         view.node.node_version = hello.node_version.clone();
         view.hello = Some(hello);
         c.require_compatible().map_err(|e| e.to_string())?;

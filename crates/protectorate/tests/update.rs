@@ -2064,6 +2064,243 @@ fn free_pair() -> u16 {
 }
 
 #[test]
+#[ignore = "real fleet rollout; run with make test-heavy"]
+fn pending_node_update_catches_up_after_hub_restart() {
+    let version = cli_command().arg("version").output().unwrap();
+    if String::from_utf8_lossy(&version.stdout).contains("missing") {
+        eprintln!("SKIP: this protectorate does not embed headscale and member");
+        return;
+    }
+    let Some(node_bin) = node_bin() else { return };
+    let asset = format!("protectorate-node-linux-{}", arch());
+    let rel = |tag: &str| {
+        release(
+            tag,
+            vec![(
+                asset.clone(),
+                wrapper("protectorate-node", "--version", tag, &node_bin, "", false),
+            )],
+        )
+    };
+    let fake = serve_releases(vec![rel("v0.0.2"), rel("v0.0.3")]);
+    let port = free_pair();
+    let listen = format!("127.0.0.1:{port}");
+    let tailnet = std::env::temp_dir().join(format!("pt-pending-{}-{port}", std::process::id()));
+    let mut hub = Hub::start_config(
+        "pending-update",
+        "pi_local",
+        &[
+            (
+                "fleet",
+                obj! { "listen" => listen.as_str(), "dir" => tailnet.to_str().unwrap(), "poll_secs" => 2u64 },
+            ),
+            ("release_api", fake.url.as_str().into()),
+            ("release_repo", "o/r".into()),
+        ],
+        &[],
+        &[],
+    );
+    eventually("fleet online", Duration::from_secs(120), || {
+        (hub.cli(&["--json", "node", "add"]).status == 0).then_some(())
+    });
+    let node_dir = hub.home.with_file_name("pending-node");
+    fs::create_dir_all(&node_dir).unwrap();
+    let mut join = Command::new(&node_bin)
+        .args([
+            "join",
+            &format!("http://{listen}"),
+            "--name",
+            "pending-node",
+            "--state-dir",
+        ])
+        .arg(&node_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let (tx, rx) = mpsc::channel();
+    let out = join.stdout.take().unwrap();
+    thread::spawn(move || {
+        for line in BufReader::new(out).lines().map_while(Result::ok) {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let payload = loop {
+        let line = rx
+            .recv_timeout(Duration::from_secs(60))
+            .expect("node registration");
+        if let Some(payload) = line.trim_start().strip_prefix("paste") {
+            break payload.trim().to_string();
+        }
+    };
+    let pending = hub.cli(&["--json", "node", "add", &payload]).json();
+    hub.cli(&[
+        "--json",
+        "node",
+        "approve",
+        pending["auth_id"].as_str().unwrap(),
+    ])
+    .json();
+    assert!(
+        eventually("node join", Duration::from_secs(60), || join
+            .try_wait()
+            .unwrap())
+        .success()
+    );
+    install(
+        &node_dir,
+        "v0.0.1",
+        "protectorate-node",
+        &wrapper(
+            "protectorate-node",
+            "--version",
+            "v0.0.1",
+            &node_bin,
+            "",
+            false,
+        ),
+    );
+    let presence = node_dir.join("presence");
+    fs::write(&presence, "AWAY").unwrap();
+    let state = node_dir.display().to_string();
+    let start = || {
+        Supervisor::start(
+            &node_dir,
+            "protectorate-node",
+            vec!["probation".into(), "--state-dir".into(), state.clone()],
+            vec![
+                "serve".into(),
+                "--state-dir".into(),
+                state.clone(),
+                "--forward-socket".into(),
+                format!("{state}/agent.sock"),
+                "--no-scope".into(),
+            ],
+            vec![(
+                "PROTECTORATE_NODE_TEST_PRESENCE".into(),
+                presence.display().to_string(),
+            )],
+            Duration::from_secs(2),
+        )
+    };
+    let sup = start();
+    eventually("node online", Duration::from_secs(120), || {
+        let out = hub.cli(&["--json", "node", "show", "pending-node"]);
+        if out.status != 0 {
+            return None;
+        }
+        let node = out.json();
+        (node["online"].as_bool() == Some(true)).then_some(())
+    });
+    drop(sup);
+    eventually("node offline", Duration::from_secs(120), || {
+        let node = hub.cli(&["--json", "node", "show", "pending-node"]).json();
+        (node["online"].as_bool() == Some(false)).then_some(())
+    });
+    let out = hub.cli(&[
+        "node",
+        "update",
+        "--all",
+        "--version",
+        "v0.0.2",
+        "--probation",
+        "90",
+    ]);
+    assert!(
+        out.stdout.contains("DEFERRED (offline)"),
+        "{} {}",
+        out.stdout,
+        out.stderr
+    );
+    let node = hub.cli(&["--json", "node", "show", "pending-node"]).json();
+    assert_eq!(node["pending_update"].as_str(), Some("v0.0.2"));
+    let out = hub.cli(&["node", "update", "--all", "--version", "v0.0.3"]);
+    assert!(
+        out.stdout.contains("DEFERRED (offline)"),
+        "{} {}",
+        out.stdout,
+        out.stderr
+    );
+    let node = hub.cli(&["--json", "node", "show", "pending-node"]).json();
+    assert_eq!(node["pending_update"].as_str(), Some("v0.0.3"));
+    assert_eq!(
+        hub.cli(&["node", "update", "--cancel", "pending-node"])
+            .status,
+        0
+    );
+    let node = hub.cli(&["--json", "node", "show", "pending-node"]).json();
+    assert!(node["pending_update"].is_null());
+    let out = hub.cli(&[
+        "node",
+        "update",
+        "--all",
+        "--version",
+        "v0.0.2",
+        "--probation",
+        "90",
+    ]);
+    assert!(
+        out.stdout.contains("DEFERRED (offline)"),
+        "{} {}",
+        out.stdout,
+        out.stderr
+    );
+    hub.restart();
+    eventually(
+        "pending after hub restart",
+        Duration::from_secs(120),
+        || {
+            let out = hub.cli(&["--json", "node", "show", "pending-node"]);
+            if out.status != 0 {
+                return None;
+            }
+            (out.json()["pending_update"].as_str() == Some("v0.0.2")).then_some(())
+        },
+    );
+    let out = hub.cli(&["node", "update", "pending-node", "--version", "v0.0.3"]);
+    assert!(
+        out.stdout.contains("DEFERRED (offline)"),
+        "{} {}",
+        out.stdout,
+        out.stderr
+    );
+    assert_eq!(
+        hub.cli(&["--json", "node", "show", "pending-node"]).json()["pending_update"].as_str(),
+        Some("v0.0.3")
+    );
+    let out = hub.cli(&[
+        "node",
+        "update",
+        "pending-node",
+        "--version",
+        "v0.0.2",
+        "--probation",
+        "90",
+    ]);
+    assert!(
+        out.stdout.contains("DEFERRED (offline)"),
+        "{} {}",
+        out.stdout,
+        out.stderr
+    );
+    let sup = start();
+    eventually("automatic update", Duration::from_secs(180), || {
+        let out = hub.cli(&["--json", "node", "show", "pending-node"]);
+        if out.status != 0 {
+            return None;
+        }
+        let node = out.json();
+        (pointer(&node_dir, "current").as_deref() == Some("v0.0.2")
+            && node["pending_update"].is_null()
+            && probation(&node_dir)["contacted_ms"].as_u64().is_some())
+        .then_some(())
+    });
+    drop(sup);
+}
+
+#[test]
 fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
     let version = cli_command().arg("version").output().unwrap();
     if String::from_utf8_lossy(&version.stdout).contains("missing") {
@@ -2363,8 +2600,14 @@ fn node_update_is_confirmed_by_the_hub_and_rolled_back_without_it() {
     assert!(
         lines
             .iter()
-            .any(|l| l.contains("DEFERRED") && l.contains("e2e-busy")),
+            .any(|l| l.contains("DEFERRED (busy)") && l.contains("e2e-busy")),
         "{lines:?}"
+    );
+    let pending = hub.cli(&["--json", "node", "show", "e2e-busy"]).json();
+    assert_eq!(pending["pending_update"].as_str(), Some("v0.0.2"));
+    assert_eq!(
+        hub.cli(&["node", "update", "--cancel", "e2e-busy"]).status,
+        0
     );
     assert!(
         lines

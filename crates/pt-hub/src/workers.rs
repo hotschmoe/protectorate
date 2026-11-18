@@ -27,6 +27,82 @@ const HISTORY_POLL: Duration = Duration::from_secs(1);
 /// Longest wait after a failed history commit before the next catch-up.
 const HISTORY_BACKOFF_MAX: Duration = Duration::from_secs(30);
 
+pub fn start_pending_nodes(hub: &Arc<Hub>) {
+    let weak = Arc::downgrade(hub);
+    thread::spawn(move || {
+        let mut previous = std::collections::BTreeMap::<String, u64>::new();
+        let mut eligible = std::collections::BTreeSet::<String>::new();
+        loop {
+            let Some(hub) = weak.upgrade() else { return };
+            if let fleet::Status::Up(up) = hub.fleet.status() {
+                let nodes = up.poller.nodes();
+                let online: std::collections::BTreeSet<_> = nodes
+                    .iter()
+                    .filter(|v| v.node.online)
+                    .map(|v| v.node.id.clone())
+                    .collect();
+                eligible.retain(|id| online.contains(id));
+                previous.retain(|id, _| nodes.iter().any(|v| &v.node.id == id));
+                for view in nodes.iter().filter(|v| v.node.online && v.hello.is_some()) {
+                    let id = view.node.id.clone();
+                    if previous.insert(id.clone(), view.hello_generation)
+                        != Some(view.hello_generation)
+                    {
+                        eligible.insert(id);
+                    }
+                }
+                for view in nodes
+                    .into_iter()
+                    .filter(|v| v.node.online && v.hello.is_some())
+                {
+                    let id = view.node.id.clone();
+                    let Ok(n) = id.parse() else { continue };
+                    let Some(pending) = hub
+                        .view()
+                        .state
+                        .pending_node_updates
+                        .get(&pt_core::NodeId(n))
+                        .cloned()
+                    else {
+                        eligible.remove(&id);
+                        continue;
+                    };
+                    let offline = crate::lock::lock(&hub.node_update_offline)
+                        .get(&id)
+                        .copied()
+                        == Some(pending.revision);
+                    let busy_at = crate::lock::lock(&hub.node_update_busy).get(&id).copied();
+                    if busy_at.is_some_and(|(revision, generation)| {
+                        revision == pending.revision && view.hello_generation <= generation
+                    }) {
+                        eligible.remove(&id);
+                        continue;
+                    }
+                    if !eligible.contains(&id) && !offline {
+                        continue;
+                    }
+                    let mut active = crate::lock::lock(&hub.node_update_active);
+                    if !active.insert(id.clone()) {
+                        continue;
+                    }
+                    drop(active);
+                    eligible.remove(&id);
+                    crate::lock::lock(&hub.node_update_offline).remove(&id);
+                    crate::lock::lock(&hub.node_update_busy).remove(&id);
+                    let hub = Arc::clone(&hub);
+                    let up = up.clone();
+                    thread::spawn(move || {
+                        crate::update::catch_up_node(&hub, &up, view, pending);
+                        crate::lock::lock(&hub.node_update_active).remove(&id);
+                    });
+                }
+            }
+            drop(hub);
+            thread::sleep(Duration::from_secs(1));
+        }
+    });
+}
+
 /// Starts the fleet in the background when one is configured. A configured fleet that cannot
 /// start (no embedded binaries, a bad config, headscale failing) leaves the hub running with
 /// node and job methods answering `unavailable` and the reason.
