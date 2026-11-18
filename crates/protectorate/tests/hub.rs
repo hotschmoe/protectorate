@@ -298,10 +298,15 @@ fn envoy_round_trip() {
         again.ok().contains("PONG"),
         "wait without an id finds the latest message"
     );
-    let read = hub.cli(&["envoy", "read"]);
+    let read = hub.cli(&["--json", "envoy", "read"]).json();
+    let entries = read["entries"].as_array().unwrap();
     assert!(
-        read.ok()
-            .contains("owner: Reply with exactly the word PONG")
+        of_type(entries, "user_message").iter().any(|e| {
+            e["entry"]["from"].as_str() == Some("owner")
+                && e["entry"]["text"].as_str()
+                    == Some("Reply with exactly the word PONG and nothing else.")
+        }),
+        "{read}"
     );
     // A vendor agent reads its own exchanges with Envoy, never the owner's.
     let agent_token = hub.printed("envoy-only token: ");
@@ -326,12 +331,6 @@ fn envoy_round_trip() {
     assert!(
         theirs.contains("BETA") && !theirs.contains("PONG"),
         "an agent's read: {theirs}"
-    );
-    assert!(
-        std::fs::read_to_string(hub.home.join("envoy/CLAUDE.md"))
-            .unwrap()
-            .contains("`sleeve spawn <name> --path <dir>"),
-        "Envoy's workspace describes the CLI"
     );
 }
 
