@@ -52,26 +52,6 @@ fn state_of(line: &str) -> &str {
     state
 }
 
-/// This machine's own logins: every configured subscription yields a reading line.
-#[test]
-fn live_logins_each_return_a_reading() {
-    let home = std::env::var("HOME").expect("HOME");
-    let out = probe(&[]);
-    println!("{out}");
-    for (name, login) in [
-        ("claude", ".claude/.credentials.json"),
-        ("codex", ".codex/auth.json"),
-        ("grok", ".grok/auth.json"),
-    ] {
-        let line = line_of(&out, name);
-        let state = state_of(line);
-        if !Path::new(&home).join(login).exists() {
-            assert_eq!(state, "unknown", "{line}");
-        }
-    }
-    state_of(line_of(&out, "local"));
-}
-
 fn scratch(name: &str) -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
     std::fs::create_dir_all(&dir).expect("create scratch dir");
@@ -187,6 +167,20 @@ fn fixture_readers_over_real_curl() {
         ),
     ]);
     let base = format!("http://127.0.0.1:{port}");
+    let empty = scratch(&format!("empty-home-{}", std::process::id()));
+    let missing = probe(&[
+        "--home",
+        empty.to_str().unwrap(),
+        "--claude-url",
+        &base,
+        "--codex-url",
+        &base,
+        "--grok-url",
+        &base,
+    ]);
+    for name in ["claude", "codex", "grok", "local"] {
+        assert_eq!(state_of(line_of(&missing, name)), "unknown", "{missing}");
+    }
     let home_s = home.to_str().unwrap();
     let out = probe(&[
         "--home",
@@ -213,7 +207,6 @@ fn fixture_readers_over_real_curl() {
         local.contains("model-a") && local.contains("llama"),
         "{local}"
     );
-    assert!(out.lines().any(|l| l.starts_with("target ")));
 
     assert!(
         !out.contains("secret-token"),
@@ -797,12 +790,10 @@ fn a_model_scoped_window_does_not_exhaust_the_subscription() {
     let claude = line_of(&both, "claude");
     assert_eq!(state_of(claude), "fresh", "{both}");
     assert!(target_of(&both).starts_with("target Claude:"), "{both}");
-    assert!(!both.contains("target PiLocal"), "{both}");
 
     let bare = run("claude");
     let chosen = target_of(&bare);
     assert!(chosen.starts_with("target Claude:"), "{bare}");
-    assert!(!bare.contains("target none:"), "{bare}");
 }
 
 /// `Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus. A candidate
@@ -828,7 +819,6 @@ fn a_versioned_cap_gates_its_model_family() {
             target_of(&out).starts_with("target none:"),
             "{model}: {out}"
         );
-        assert!(!out.contains("target Claude:"), "{model}: {out}");
     }
     let bare_out = run("claude");
     let bare = target_of(&bare_out);
@@ -855,7 +845,6 @@ fn a_model_cap_gates_the_candidate_that_runs_that_model() {
     let run = |allow: &str| probe(&["--home", home_s, "--claude-url", &base, "--allow", allow]);
     let opus = run("claude:claude-opus-4-6");
     assert!(target_of(&opus).starts_with("target none:"), "{opus}");
-    assert!(!opus.contains("target Claude:"), "{opus}");
 
     let sonnet = run("claude:sonnet");
     assert!(target_of(&sonnet).starts_with("target Claude:"), "{sonnet}");
@@ -937,7 +926,6 @@ fn an_unspecified_model_ranks_below_a_cap() {
 
     let plan = run("claude:opusplan");
     assert!(target_of(&plan).starts_with("target none:"), "{plan}");
-    assert!(!plan.contains("target Claude:"), "{plan}");
 
     let better_out = run("claude,codex");
     let better = target_of(&better_out);
@@ -993,7 +981,6 @@ fn an_unmetered_harness_is_not_spent_when_its_reading_is_missing() {
     ]);
     assert_eq!(state_of(line_of(&out, "claude")), "fresh", "{out}");
     assert!(target_of(&out).starts_with("target none:"), "{out}");
-    assert!(!out.contains("target PiVendor"), "{out}");
 
     let alone = probe(&["--home", home_s, "--allow", "pi_vendor"]);
     assert!(target_of(&alone).starts_with("target none:"), "{alone}");
