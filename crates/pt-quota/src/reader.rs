@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use pt_api::{QuotaWindow, Subscription};
+use pt_api::{QuotaCredits, QuotaWindow, Subscription};
 
 use crate::error::Result;
 
@@ -9,6 +9,7 @@ use crate::error::Result;
 pub struct Snapshot {
     pub plan: String,
     pub windows: Vec<QuotaWindow>,
+    pub credits: Option<QuotaCredits>,
     pub note: String,
 }
 

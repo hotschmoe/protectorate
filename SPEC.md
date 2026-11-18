@@ -750,7 +750,19 @@ lasts that long after the fetch: a body that says the window is full and the res
 seconds ago is still that limit. A stamp already long past when the row was fetched counts as
 reset, and so does a window once the grace has ended. The fallback may then spend the row
 because its windows have reset. That is not a missing reading. A reset at or before the epoch
-is no reset time, and the percent still counts. Model-scoped Claude windows (`wk <name>`) stay on the quota row
+is no reset time, and the percent still counts. Codex readings also carry the vendor's credit
+and limit flags, balance, and available reset credits. When the limit is reached and credits
+are available, the row shows the balance and the estimated hourly decrease between consecutive
+readings; the rate is not a vendor claim. Envoy receives one queued notice when Codex begins
+or stops spending credits; its journaled message records the last reported state across hub
+restarts. Unknown and stale readings do not change that state. Spawn, start and resleeve onto
+Codex succeed while it uses credits but return a warning, naming an eligible harness with fresh
+quota headroom when one exists. Optional `quota_credit_floor`, unset by default, parks a new
+Codex incarnation before launch when the last known balance is strictly below the configured
+non-negative value, even when that reading is stale. No known balance leaves it unblocked.
+The reason is `credit_floor`; running incarnations continue, and an owner may start a parked
+sleeve after a replenished balance is read. This decision is journaled for replay. Model-scoped Claude windows
+(`wk <name>`) stay on the quota row
 and gate a candidate of the same family (opus, sonnet, haiku), ignoring case and version
 (`Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus). `opusplan`
 counts as both Opus and Sonnet, so that model is gated by either cap, and a cap whose name

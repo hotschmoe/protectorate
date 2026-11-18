@@ -39,7 +39,7 @@ T _or<T>(Object? v, T fallback, T Function(Object?) f) =>
 /// The hub took the action. `approval_id` is set when a code rule made it wait for the
 /// owner first.
 final class Accepted {
-  const Accepted({this.approvalId});
+  const Accepted({this.approvalId, this.warning});
 
   factory Accepted.fromJson(Object? json) {
     final j = _object(json, 'Accepted');
@@ -48,13 +48,17 @@ final class Accepted {
         j['approval_id'],
         (e0) => _string(e0, 'Accepted.approval_id'),
       ),
+      warning: _opt(j['warning'], (e0) => _string(e0, 'Accepted.warning')),
     );
   }
 
   final String? approvalId;
 
+  final String? warning;
+
   Map<String, Object?> toJson() => {
     if (approvalId case final v?) 'approval_id': v,
+    if (warning case final v?) 'warning': v,
   };
 }
 
@@ -4126,6 +4130,7 @@ final class Quota {
     required this.reading,
     required this.fetchedAt,
     this.windows = const <QuotaWindow>[],
+    this.credits,
     this.note = '',
   });
 
@@ -4141,6 +4146,7 @@ final class Quota {
         const <QuotaWindow>[],
         (e0) => _list(e0, 'Quota.windows', QuotaWindow.fromJson),
       ),
+      credits: _opt(j['credits'], QuotaCredits.fromJson),
       note: _or(j['note'], '', (e0) => _string(e0, 'Quota.note')),
     );
   }
@@ -4155,6 +4161,8 @@ final class Quota {
 
   final List<QuotaWindow> windows;
 
+  final QuotaCredits? credits;
+
   final String note;
 
   Map<String, Object?> toJson() => {
@@ -4163,7 +4171,72 @@ final class Quota {
     'reading': reading.toJson(),
     'fetched_at_ms': fetchedAt.millisecondsSinceEpoch,
     'windows': [for (final e0 in windows) e0.toJson()],
+    if (credits case final v?) 'credits': v.toJson(),
     'note': note,
+  };
+}
+
+final class QuotaCredits {
+  const QuotaCredits({
+    this.allowed,
+    this.limitReached,
+    this.hasCredits,
+    this.balance,
+    this.overageLimitReached,
+    this.resetAvailableCount,
+    this.perHour,
+  });
+
+  factory QuotaCredits.fromJson(Object? json) {
+    final j = _object(json, 'QuotaCredits');
+    return QuotaCredits(
+      allowed: _opt(j['allowed'], (e0) => _bool(e0, 'QuotaCredits.allowed')),
+      limitReached: _opt(
+        j['limit_reached'],
+        (e0) => _bool(e0, 'QuotaCredits.limit_reached'),
+      ),
+      hasCredits: _opt(
+        j['has_credits'],
+        (e0) => _bool(e0, 'QuotaCredits.has_credits'),
+      ),
+      balance: _opt(j['balance'], (e0) => _double(e0, 'QuotaCredits.balance')),
+      overageLimitReached: _opt(
+        j['overage_limit_reached'],
+        (e0) => _bool(e0, 'QuotaCredits.overage_limit_reached'),
+      ),
+      resetAvailableCount: _opt(
+        j['reset_available_count'],
+        (e0) => _int(e0, 'QuotaCredits.reset_available_count'),
+      ),
+      perHour: _opt(
+        j['per_hour'],
+        (e0) => _double(e0, 'QuotaCredits.per_hour'),
+      ),
+    );
+  }
+
+  final bool? allowed;
+
+  final bool? limitReached;
+
+  final bool? hasCredits;
+
+  final double? balance;
+
+  final bool? overageLimitReached;
+
+  final int? resetAvailableCount;
+
+  final double? perHour;
+
+  Map<String, Object?> toJson() => {
+    if (allowed case final v?) 'allowed': v,
+    if (limitReached case final v?) 'limit_reached': v,
+    if (hasCredits case final v?) 'has_credits': v,
+    if (balance case final v?) 'balance': v,
+    if (overageLimitReached case final v?) 'overage_limit_reached': v,
+    if (resetAvailableCount case final v?) 'reset_available_count': v,
+    if (perHour case final v?) 'per_hour': v,
   };
 }
 
@@ -4811,6 +4884,7 @@ final class Sleeve {
     this.budgetLimit,
     this.d9 = false,
     this.lastStatus,
+    this.warning,
   });
 
   factory Sleeve.fromJson(Object? json) {
@@ -4850,6 +4924,7 @@ final class Sleeve {
       ),
       d9: _or(j['d9'], false, (e0) => _bool(e0, 'Sleeve.d9')),
       lastStatus: _opt(j['last_status'], TurnStatus.fromJson),
+      warning: _opt(j['warning'], (e0) => _string(e0, 'Sleeve.warning')),
     );
   }
 
@@ -4865,7 +4940,7 @@ final class Sleeve {
 
   final Lifecycle lifecycle;
 
-  /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed or `g<N>`.
+  /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed, credit_floor or `g<N>`.
   /// A flap after a rejected login is `flapping (<harness> login rejected)`. Envoy whose
   /// own harness doctor refused is `ineligible (<harness>)` until doctor finds it eligible.
   final String? parkReason;
@@ -4900,6 +4975,9 @@ final class Sleeve {
   /// Status declared by the latest settled turn, absent when it declared none.
   final TurnStatus? lastStatus;
 
+  /// Warning returned by spawn; absent from subsequent sleeve readings.
+  final String? warning;
+
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
@@ -4920,6 +4998,7 @@ final class Sleeve {
     if (budgetLimit case final v?) 'budget_limit': v,
     'd9': d9,
     if (lastStatus case final v?) 'last_status': v.toJson(),
+    if (warning case final v?) 'warning': v,
   };
 }
 

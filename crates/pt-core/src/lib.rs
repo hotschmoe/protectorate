@@ -72,6 +72,7 @@ impl Core<'_> {
         match kind {
             E::MailBatching => self.st.mail_batching = true,
             E::DeviceChanged { sleeve, g, path } => self.device_changed(*sleeve, *g, path),
+            E::CreditFloor { effect, attempt } => self.credit_floor(*effect, *attempt),
             E::Spawn(spec) => self.spawn(spec),
             E::Send {
                 to,

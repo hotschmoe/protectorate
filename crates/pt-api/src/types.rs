@@ -318,7 +318,7 @@ api_records! {
         pub parent_id: Option<String>,
         pub role: SleeveRole,
         pub lifecycle: Lifecycle,
-        /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed or `g<N>`.
+        /// Parked only: provision, no_target, launch, flapping, brief_unconfirmed, credit_floor or `g<N>`.
         /// A flap after a rejected login is `flapping (<harness> login rejected)`. Envoy whose
         /// own harness doctor refused is `ineligible (<harness>)` until doctor finds it eligible.
         pub park_reason: Option<String>,
@@ -341,6 +341,8 @@ api_records! {
         pub d9: bool = false,
         /// Status declared by the latest settled turn, absent when it declared none.
         pub last_status: Option<TurnStatus>,
+        /// Warning returned by spawn; absent from subsequent sleeve readings.
+        pub warning: Option<String>,
     }
 
     /// Token counts the harness reported for one turn.
@@ -509,12 +511,23 @@ api_records! {
         pub length_ms: Option<u64>,
     }
 
+    pub struct QuotaCredits {
+        pub allowed: Option<bool>,
+        pub limit_reached: Option<bool>,
+        pub has_credits: Option<bool>,
+        pub balance: Option<f64>,
+        pub overage_limit_reached: Option<bool>,
+        pub reset_available_count: Option<u64>,
+        pub per_hour: Option<f64>,
+    }
+
     pub struct Quota {
         pub subscription: Subscription,
         pub plan: String,
         pub reading: QuotaReading,
         pub fetched_at_ms: EpochMs,
         pub windows: Vec<QuotaWindow> = Vec::new(),
+        pub credits: Option<QuotaCredits>,
         pub note: String = String::new(),
     }
 

@@ -308,6 +308,21 @@ expired` until one does. They run every `quota_poll_secs` (60; 0 turns them off)
 refreshed after 5 minutes and becomes stale after 10. A read that finishes after its deadline
 is kept, and ages from when it finished. A response with a malformed usage window,
 or with no window at all, is reported as an error.
+For Codex, the note reports when the subscription limit is reached and credits are available,
+the balance, the estimated hourly decrease between consecutive readings when available, and
+the number of reset credits available. The estimate is not a vendor-provided rate.
+Envoy receives a queued notice when Codex starts or stops using credits. The last notice is
+journaled, so a hub restart does not repeat a transition; an unknown or stale reading does not
+change the reported state.
+Spawn, start and resleeve onto Codex still succeed while it uses credits. The CLI warns and,
+when a fresh reading identifies an eligible alternative with headroom, names that harness. JSON
+responses carry the warning as a field; later sleeve readings do not retain the spawn warning.
+Set `quota_credit_floor` in `config.json` to a non-negative credit balance to park a new Codex
+incarnation when the last known balance is strictly below it. It defaults to unset. The last
+known balance still applies when its reading is stale; without a balance the floor cannot be
+applied. Running incarnations continue. The parked reason is `credit_floor`; after the balance
+is replenished and a new reading arrives, start the sleeve again. Configuration changes require
+a hub restart.
 Resleeve targets are weighted by fresh readings; known-exhausted candidates are skipped, and the
 sleeve parks if all eligible candidates are exhausted. A stale reading keeps its last windows:
 under the usable minimum it counts as exhausted, and with spare left the fallback may still

@@ -285,6 +285,7 @@ pub enum ParkReason {
     /// `Some` is the login rejected when the flap was an auth failure. Other flaps carry `None`.
     Flapping(Option<Harness>),
     BriefUnconfirmed,
+    CreditFloor,
     Guard(Guardrail),
     /// Doctor refused Envoy's own harness. Envoy waits for a doctor run that finds it eligible.
     Ineligible {

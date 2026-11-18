@@ -19,6 +19,36 @@ pub(crate) enum Report {
 }
 
 impl Core<'_> {
+    pub(crate) fn credit_floor(&mut self, id: EffectId, attempt: u32) {
+        let Some(e) = self.st.effects.get(&id) else {
+            return;
+        };
+        if e.attempt != attempt || e.state != EffectState::Intent {
+            return;
+        }
+        let EffectKind::StartIncarnation {
+            sleeve,
+            g,
+            ref target,
+            ..
+        } = e.kind
+        else {
+            return;
+        };
+        if target.harness != Harness::Codex
+            || self
+                .st
+                .sleeves
+                .get(&sleeve)
+                .is_none_or(|s| s.g != g || s.proc != Proc::Starting(id))
+        {
+            return;
+        }
+        self.set_effect(id, EffectState::Rejected);
+        self.park(sleeve, ParkReason::CreditFloor);
+        self.on_effect(id, None);
+    }
+
     /// Records a new effect in Intent and emits it for execution after the fsync.
     pub(crate) fn new_effect(&mut self, kind: EffectKind, key: String) -> EffectId {
         let id = EffectId(self.st.next_effect);

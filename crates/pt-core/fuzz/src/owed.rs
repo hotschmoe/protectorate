@@ -87,6 +87,16 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
         E::StartUntil { sleeve, target, .. } => on_start_cmd(owed, prev, *sleeve, target.as_ref()),
         E::Resleeve { sleeve, target, .. } => on_resleeve(owed, prev, *sleeve, target.as_ref()),
         E::Abandon { effect } => on_abandon(owed, prev, *effect),
+        E::CreditFloor { effect, attempt } => {
+            if let Some(e) = prev.effects.get(effect)
+                && e.attempt == *attempt && e.state == EffectState::Intent
+                && let EffectKind::StartIncarnation { sleeve, g, target, .. } = &e.kind
+                && target.harness == Harness::Codex
+                && prev.sleeves.get(sleeve).is_some_and(|s| s.g == *g && s.proc == Proc::Starting(*effect))
+            {
+                clear(owed, *sleeve);
+            }
+        }
         E::Acked {
             effect, attempt, ..
         } => {

@@ -215,6 +215,10 @@ pub enum EventKind {
     Abandon {
         effect: EffectId,
     },
+    CreditFloor {
+        effect: EffectId,
+        attempt: u32,
+    },
     Viewed {
         sleeve: SleeveId,
     },

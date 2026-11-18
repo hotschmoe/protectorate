@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use pt_api::Subscription;
+use pt_api::{QuotaCredits, Subscription};
 use pt_json::Value;
 
 use crate::http::{self, Get};
@@ -92,6 +92,31 @@ pub fn parse_usage(body: &[u8]) -> Result<Snapshot> {
             .to_string(),
         ..Snapshot::default()
     };
+    if ["credits", "rate_limit", "rate_limit_reset_credits"]
+        .iter()
+        .any(|key| v.get(key).is_some_and(|c| c.as_object().is_some()))
+    {
+        let boolean = |p: &str| v.pointer(p).and_then(Value::as_bool);
+        let balance = v
+            .pointer("/credits/balance")
+            .and_then(|b| {
+                b.as_f64()
+                    .or_else(|| b.as_str().and_then(|s| s.parse().ok()))
+            })
+            .filter(|n: &f64| n.is_finite() && *n >= 0.0);
+        snap.credits = Some(QuotaCredits {
+            allowed: boolean("/rate_limit/allowed"),
+            limit_reached: boolean("/rate_limit/limit_reached"),
+            has_credits: boolean("/credits/has_credits"),
+            balance,
+            overage_limit_reached: boolean("/credits/overage_limit_reached"),
+            reset_available_count: v
+                .pointer("/rate_limit_reset_credits/available_count")
+                .and_then(Value::as_i64)
+                .and_then(|n| u64::try_from(n).ok()),
+            per_hour: None,
+        });
+    }
     for key in ["primary_window", "secondary_window"] {
         let Some(w) = v
             .pointer(&format!("/rate_limit/{key}"))

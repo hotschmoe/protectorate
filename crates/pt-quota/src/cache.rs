@@ -161,7 +161,19 @@ impl Slot {
         count_failure: bool,
     ) {
         match result {
-            Ok(snap) => {
+            Ok(mut snap) => {
+                if let (Some(current), Some((previous, _, previous_at))) =
+                    (&mut snap.credits, &self.good)
+                    && let (Some(balance), Some(old)) = (
+                        current.balance,
+                        previous.credits.as_ref().and_then(|c| c.balance),
+                    )
+                {
+                    let elapsed = at.saturating_duration_since(*previous_at).as_secs_f64();
+                    if elapsed > 0.0 && balance <= old {
+                        current.per_hour = Some((old - balance) * 3600.0 / elapsed);
+                    }
+                }
                 self.last_attempt = Some(at);
                 self.good = Some((snap, now_ms, at));
                 self.failures = 0;
@@ -223,6 +235,7 @@ impl Slot {
                     reading,
                     fetched_at_ms: EpochMs(0),
                     windows: Vec::new(),
+                    credits: None,
                     note,
                 },
                 None,
@@ -238,6 +251,32 @@ impl Slot {
         } else {
             snap.note.clone()
         };
+        if let Some(credits) = &snap.credits {
+            let mut parts = Vec::new();
+            if credits.allowed == Some(false)
+                && credits.limit_reached == Some(true)
+                && credits.has_credits == Some(true)
+                && credits.overage_limit_reached != Some(true)
+            {
+                let balance = credits
+                    .balance
+                    .map_or_else(|| "unknown".to_string(), |b| b.to_string());
+                let mut text = format!("limit reached, on credits: balance {balance}");
+                if let Some(rate) = credits.per_hour {
+                    text.push_str(&format!(", about {rate:.0} an hour"));
+                }
+                parts.push(text);
+            }
+            if let Some(count) = credits.reset_available_count {
+                parts.push(format!("reset credits available: {count}"));
+            }
+            if !parts.is_empty() {
+                if !note.is_empty() {
+                    note.push_str("; ");
+                }
+                note.push_str(&parts.join("; "));
+            }
+        }
         if let Some(e) = &self.last_err {
             note = if note.is_empty() {
                 format!("last read failed: {e}")
@@ -256,6 +295,7 @@ impl Slot {
                 },
                 fetched_at_ms: EpochMs(*fetched),
                 windows: snap.windows.clone(),
+                credits: snap.credits.clone(),
                 note,
             },
             Some(age),

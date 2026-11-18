@@ -184,6 +184,7 @@ api_records! {
     /// owner first.
     pub struct Accepted {
         pub approval_id: Option<String>,
+        pub warning: Option<String>,
     }
 
     /// Starts a stopped or parked sleeve again, on its own target unless one is named.

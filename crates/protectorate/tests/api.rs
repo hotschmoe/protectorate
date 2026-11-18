@@ -923,6 +923,300 @@ for line in sys.stdin:
 }
 
 #[test]
+#[ignore = "heavy quota integration"]
+fn codex_credit_readings() {
+    use std::io::Read;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}", server.local_addr().unwrap());
+    let count = Arc::new(AtomicUsize::new(0));
+    let requests = Arc::clone(&count);
+    let on_credits = Arc::new(AtomicBool::new(true));
+    let server_on_credits = Arc::clone(&on_credits);
+    let fake_bin = unique("codex-credit-bin");
+    std::fs::create_dir_all(&fake_bin).unwrap();
+    std::os::unix::fs::symlink("/bin/true", fake_bin.join("systemd-run")).unwrap();
+    let fake_pi = fake_bin.join("pi");
+    std::fs::write(&fake_pi, r##"#!/usr/bin/python3
+import json, sys
+if '--version' in sys.argv:
+    print('0.0.0')
+    sys.exit(0)
+flag = '--session-id' if '--session-id' in sys.argv else '--session'
+session = sys.argv[sys.argv.index(flag) + 1]
+for line in sys.stdin:
+    request = json.loads(line)
+    command = request['type']
+    data = {'sessionId': session} if command == 'get_state' else {'disposition': 'handled'}
+    print(json.dumps({'type': 'response', 'id': request['id'], 'command': command, 'success': True, 'data': data}), flush=True)
+"##).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&fake_pi, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let path = format!(
+        "{}:{}",
+        fake_bin.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    std::thread::spawn(move || {
+        for stream in server.incoming().flatten() {
+            let mut stream = stream;
+            let mut request = [0u8; 4096];
+            let n = stream.read(&mut request).unwrap_or(0);
+            if String::from_utf8_lossy(&request[..n]).starts_with("GET /v1/models ") {
+                let body = r#"{"data":[{"id":"stand-in"}]}"#;
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                continue;
+            }
+            let balance = if requests.fetch_add(1, Ordering::SeqCst) == 0 {
+                "1000"
+            } else {
+                "990"
+            };
+            let on = server_on_credits.load(Ordering::SeqCst);
+            let body = format!(
+                r#"{{"plan_type":"pro","rate_limit":{{"allowed":{},"limit_reached":{on},"primary_window":{{"used_percent":100,"limit_window_seconds":604800,"reset_at":4102444800}}}},"credits":{{"has_credits":true,"balance":"{balance}","overage_limit_reached":false}},"rate_limit_reset_credits":{{"available_count":2}}}}"#,
+                !on
+            );
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+        }
+    });
+    let mut hub = Hub::start_config(
+        "codex-credits",
+        "claude",
+        &[
+            ("quota_poll_secs", 1u64.into()),
+            ("scopes", false.into()),
+            ("codex_program", "/bin/true".into()),
+            ("pi_program", fake_pi.to_str().unwrap().into()),
+            ("pi_local_provider", "stand-in".into()),
+            ("pi_local_model", "stand-in".into()),
+            ("local_url", url.as_str().into()),
+            ("claude_program", "/nonexistent/program".into()),
+            ("grok_program", "/nonexistent/program".into()),
+        ],
+        &[],
+        &[
+            ("PT_TEST_CODEX_USAGE_BASE", &url),
+            ("PT_TEST_QUOTA_TTL_MS", "1000"),
+            ("PATH", &path),
+        ],
+    );
+    let login = hub.home.join("logins/.codex");
+    std::fs::create_dir_all(&login).unwrap();
+    std::fs::write(
+        login.join("auth.json"),
+        r#"{"tokens":{"access_token":"test-token"}}"#,
+    )
+    .unwrap();
+    let pi_login = hub.home.join("logins/.pi/agent");
+    std::fs::create_dir_all(&pi_login).unwrap();
+    std::fs::write(
+        pi_login.join("models.json"),
+        r#"{"providers":{"stand-in":{}}}"#,
+    )
+    .unwrap();
+    hub.restart();
+    eventually("two Codex credit readings", Duration::from_secs(30), || {
+        let list = hub.cli(&["--json", "quota", "list"]).json();
+        let rows = list["quotas"].as_array()?;
+        let row = rows
+            .iter()
+            .find(|q| q["subscription"].as_str() == Some("codex"))?;
+        (rows.iter().any(|q| {
+            q["subscription"].as_str() == Some("local") && q["reading"].as_str() == Some("ok")
+        }) && row["credits"]["per_hour"].as_f64().is_some()
+            && row["credits"]["balance"].as_f64() == Some(990.0))
+        .then_some(())
+    });
+    let display = hub.cli(&["quota", "list"]);
+    assert!(
+        display
+            .ok()
+            .contains("limit reached, on credits: balance 990")
+    );
+    assert!(display.stdout.contains("reset credits available: 2"));
+    assert!(display.stdout.contains("an hour"));
+    hub.cli(&["doctor", "--refresh"]).ok();
+    let workspace = unique("codex-credit-workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let spawned = hub.cli(&[
+        "sleeve",
+        "spawn",
+        "credit-worker",
+        "--harness",
+        "codex",
+        "--path",
+        workspace.to_str().unwrap(),
+    ]);
+    spawned.ok();
+    assert!(
+        spawned.stderr.contains("will use account credits"),
+        "{}",
+        spawned.stderr
+    );
+    assert!(
+        spawned.stderr.contains("pi_local has quota headroom"),
+        "{}",
+        spawned.stderr
+    );
+    hub.wait("credit-worker", "idle", 60);
+    let moved = hub.cli(&["sleeve", "resleeve", "credit-worker", "--harness", "codex"]);
+    moved.ok();
+    assert!(
+        moved.stderr.contains("will use account credits"),
+        "{}",
+        moved.stderr
+    );
+    hub.cli(&["sleeve", "stop", "credit-worker"]).ok();
+    hub.wait("credit-worker", "ended", 60);
+    let started = hub.cli(&["sleeve", "start", "credit-worker", "--harness", "codex"]);
+    started.ok();
+    assert!(
+        started.stderr.contains("will use account credits"),
+        "{}",
+        started.stderr
+    );
+    let inbox = || hub.cli(&["--json", "sleeve", "inbox", "envoy"]).json();
+    eventually("Envoy credit notice", Duration::from_secs(15), || {
+        let messages = inbox();
+        (messages["messages"]
+            .as_array()?
+            .iter()
+            .filter(|m| {
+                m["text"]
+                    .as_str()
+                    .is_some_and(|s| s.contains("now using account credits"))
+            })
+            .count()
+            == 1)
+            .then_some(())
+    });
+    on_credits.store(false, Ordering::SeqCst);
+    eventually("Envoy credit reset notice", Duration::from_secs(15), || {
+        let messages = inbox();
+        (messages["messages"]
+            .as_array()?
+            .iter()
+            .filter(|m| {
+                m["text"]
+                    .as_str()
+                    .is_some_and(|s| s.contains("no longer using account credits"))
+            })
+            .count()
+            == 1)
+            .then_some(())
+    });
+    hub.restart();
+    std::thread::sleep(Duration::from_secs(3));
+    let messages = hub.cli(&["--json", "sleeve", "inbox", "envoy"]).json();
+    let notices = messages["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| {
+            m["text"]
+                .as_str()
+                .is_some_and(|s| s.starts_with("[quota] Codex"))
+        })
+        .count();
+    assert_eq!(
+        notices, 2,
+        "one notice per transition across restart: {messages}"
+    );
+    let config_path = hub.home.join("config.json");
+    let mut config = pt_json::parse(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    config
+        .as_object_mut()
+        .unwrap()
+        .insert("quota_credit_floor", 991u64);
+    std::fs::write(config_path, config.to_string()).unwrap();
+    hub.restart();
+    eventually(
+        "credit balance after restart",
+        Duration::from_secs(15),
+        || {
+            let list = hub.cli(&["--json", "quota", "list"]).json();
+            list["quotas"]
+                .as_array()?
+                .iter()
+                .any(|q| {
+                    q["subscription"].as_str() == Some("codex")
+                        && q["credits"]["balance"].as_f64() == Some(990.0)
+                })
+                .then_some(())
+        },
+    );
+    let floor_workspace = unique("codex-floor-workspace");
+    std::fs::create_dir_all(&floor_workspace).unwrap();
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "floor-worker",
+        "--harness",
+        "codex",
+        "--path",
+        floor_workspace.to_str().unwrap(),
+    ])
+    .ok();
+    eventually(
+        "worker parked at credit floor",
+        Duration::from_secs(30),
+        || {
+            let sleeve = hub.sleeve("floor-worker");
+            (sleeve["park_reason"].as_str() == Some("credit_floor")).then_some(())
+        },
+    );
+    hub.restart();
+    assert_eq!(
+        hub.sleeve("floor-worker")["park_reason"].as_str(),
+        Some("credit_floor")
+    );
+    on_credits.store(true, Ordering::SeqCst);
+    eventually(
+        "credit spending after restart",
+        Duration::from_secs(15),
+        || {
+            let list = hub.cli(&["--json", "quota", "list"]).json();
+            list["quotas"]
+                .as_array()?
+                .iter()
+                .any(|q| {
+                    q["subscription"].as_str() == Some("codex")
+                        && q["credits"]["limit_reached"].as_bool() == Some(true)
+                })
+                .then_some(())
+        },
+    );
+    let started = hub.cli(&["sleeve", "start", "floor-worker"]);
+    started.ok();
+    assert!(
+        started
+            .stderr
+            .contains("will park below quota_credit_floor"),
+        "{}",
+        started.stderr
+    );
+    eventually(
+        "restart parked at credit floor",
+        Duration::from_secs(15),
+        || {
+            (hub.sleeve("floor-worker")["park_reason"].as_str() == Some("credit_floor"))
+                .then_some(())
+        },
+    );
+}
+
+#[test]
 fn quota_readers_run() {
     let models = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let models_port = models.local_addr().unwrap().port();
