@@ -67,17 +67,19 @@ fn prompts_and_discovery_stay_inside_the_root() {
     let claude = home.join(".claude/projects/project");
     write(
         &claude.join("real.jsonl"),
-        concat!(
-            "{\"type\":\"user\",\"message\":{\"content\":\"<div>visiblemarker</div>\"}}\n",
-            "{\"type\":\"user\",\"message\":{\"content\":\"<system-reminder>wrappermarker</system-reminder>\"}}\n"
-        ),
+        "{\"type\":\"user\",\"message\":{\"content\":\"<div>visiblemarker</div>\"}}\n",
+    );
+    write(
+        &claude.join("wrapper.jsonl"),
+        "{\"type\":\"user\",\"message\":{\"content\":\"<system-reminder>wrappermarker</system-reminder>\"}}\n",
     );
     write(
         &home.join(".codex/sessions/rollout-aaaaaaaa-0000-4000-8000-000000000001.jsonl"),
-        concat!(
-            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<3 secondmarker\"}]}}\n",
-            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<environment_context>wrappermarker</environment_context>\"}]}}\n"
-        ),
+        "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<3 secondmarker\"}]}}\n",
+    );
+    write(
+        &home.join(".codex/sessions/rollout-aaaaaaaa-0000-4000-8000-000000000002.jsonl"),
+        "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<environment_context>wrappermarker</environment_context>\"}]}}\n",
     );
     let outside = dir.join("outside");
     write(
@@ -86,9 +88,10 @@ fn prompts_and_discovery_stay_inside_the_root() {
     );
     symlink(outside.join("stolen.jsonl"), claude.join("file-link.jsonl")).unwrap();
     symlink(&outside, claude.join("dir-link")).unwrap();
-    let out = run(
+    let index = dir.join("index");
+    run(
         &home,
-        &dir.join("index"),
+        &index,
         &[
             "visiblemarker",
             "secondmarker",
@@ -97,18 +100,17 @@ fn prompts_and_discovery_stay_inside_the_root() {
         ],
         None,
     );
-    let stdout = String::from_utf8(out.stdout).unwrap();
-    for query in ["visiblemarker", "secondmarker"] {
-        assert!(
-            stdout.contains(&format!("query \"{query}\": top 1")),
-            "{stdout}"
-        );
-    }
-    for query in ["wrappermarker", "linktargetmarker"] {
-        assert!(
-            stdout.contains(&format!("query \"{query}\": top 0")),
-            "{stdout}"
-        );
+    for (session, expected) in [
+        ("real", 1),
+        ("wrapper", 0),
+        ("aaaaaaaa-0000-4000-8000-000000000001", 1),
+        ("aaaaaaaa-0000-4000-8000-000000000002", 0),
+        ("file-link", 0),
+        ("stolen", 0),
+    ] {
+        let (ids, _, more) = read_page(&index.join("a"), session, None);
+        assert_eq!(ids.len(), expected, "{session}: {ids:?}");
+        assert!(!more);
     }
 }
 
@@ -229,6 +231,19 @@ fn small_budget_keeps_the_newest_lines_across_two_sessions() {
     write(&old_path, &old);
     write(&new_path, &claude_user(&new_text));
     write(&tail_path, &claude_user(tail_text));
+    let uncapped = dir.join("uncapped");
+    run(&home, &uncapped, &["smalllivedoc"], None);
+    let page = |root: &Path, session: &str| {
+        let (ids, _, more) = read_page(&root.join("a"), session, None);
+        assert!(!more);
+        ids
+    };
+    let original_old = page(&uncapped, "a-old");
+    let original_new = page(&uncapped, "b-new");
+    let original_tail = page(&uncapped, "c-tail");
+    assert_eq!(original_old.len(), 4);
+    assert_eq!(original_new.len(), 1);
+    assert_eq!(original_tail.len(), 1);
     let index = dir.join("index");
     let out = Command::new(PROBE)
         .args([
@@ -256,19 +271,9 @@ fn small_budget_keeps_the_newest_lines_across_two_sessions() {
     let stdout = String::from_utf8(out.stdout).unwrap();
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(out.status.success(), "stdout: {stdout}\nstderr: {stderr}");
-    assert!(
-        stdout.contains("query \"oldsessiondoc\": top 0"),
-        "{stdout}"
-    );
-    assert!(stdout.contains("query \"smalllivedoc\": top 3"), "{stdout}");
-    assert!(
-        stdout.contains("query \"newsessiondoc\": top 1"),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains("query \"tailsessiondoc\": top 1"),
-        "{stdout}"
-    );
+    assert_eq!(page(&index, "a-old"), original_old[1..]);
+    assert_eq!(page(&index, "b-new"), original_new);
+    assert_eq!(page(&index, "c-tail"), original_tail);
 }
 
 /// One page of `session` from the probe: doc ids, their turns, and whether another page remains.
