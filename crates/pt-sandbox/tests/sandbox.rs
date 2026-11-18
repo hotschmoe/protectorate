@@ -405,27 +405,45 @@ fn worktree_hooks_are_read_only() {
     let (main, wt) = worktree(&base, "pt-hooks-test");
     let dirs = resolve_git_dirs(&wt, &main).unwrap();
     assert_eq!(dirs.len(), 2, "{dirs:?}");
+    assert_eq!(resolve_git_dirs(&wt, &wt).unwrap(), dirs);
 
-    let mut s = spec("hooks", &base);
-    s.workspace = wt.clone();
-    s.tmp_size_bytes = 16 << 20;
-    s.git_dirs = dirs.clone();
-    let hooks_main = dirs[1].join("hooks");
-    let hooks_wt = dirs[0].join("hooks");
-    fs::create_dir_all(&hooks_wt).unwrap();
-    let script = format!(
-        "echo x > {m}/pre-commit 2>/dev/null || echo MAIN_HOOKS_RO; \
-         echo x > {w}/pre-commit 2>/dev/null || echo WT_HOOKS_RO; \
-         git -c user.name=t -c user.email=t@t commit -q --allow-empty -m child && echo COMMIT_OK",
-        m = hooks_main.display(),
-        w = hooks_wt.display()
-    );
-    let out = stdout(&sh(&s, &script));
-    for ok in ["MAIN_HOOKS_RO", "WT_HOOKS_RO", "COMMIT_OK"] {
-        assert!(out.contains(ok), "missing {ok}:\n{out}");
+    for (name, workspace, git_dirs) in [
+        ("root", main.clone(), Vec::new()),
+        ("child", wt.clone(), dirs.clone()),
+    ] {
+        let mut s = spec(name, &base);
+        s.workspace = workspace;
+        s.tmp_size_bytes = 16 << 20;
+        s.git_dirs = git_dirs;
+        let protected = if name == "root" {
+            vec![main.join(".git")]
+        } else {
+            dirs.clone()
+        };
+        for dir in protected {
+            let script = format!(
+                "! (echo x > '{0}/config') && ! (echo x > '{0}/config.worktree') && ! (echo x > '{0}/hooks/x') && ! (echo x > '{0}/info/attributes')",
+                dir.display()
+            );
+            assert!(sh(&s, &script).status.success(), "{name}: {dir:?}");
+        }
+        if name == "root" {
+            let sibling = format!("! (echo x > '{}/config.worktree')", dirs[0].display());
+            assert!(sh(&s, &sibling).status.success());
+        }
+        let script = r#"set -e; export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t; \
+            original=$(git branch --show-current); branch=pt-test-$$; \
+            echo change > sandbox-test-file; git add sandbox-test-file; git commit -qm test; \
+            git branch "$branch"; git checkout -q "$branch"; \
+            echo more >> sandbox-test-file; git stash -q; git stash pop -q; git add sandbox-test-file; git commit -qm more; \
+            git rebase -q "$original"; git checkout -q "$original"; git merge -q "$branch"; git log -1 --oneline"#;
+        let out = sh(&s, script);
+        assert!(
+            out.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
-    assert!(!hooks_main.join("pre-commit").exists());
-    assert!(!hooks_wt.join("pre-commit").exists());
 }
 
 /// A worktree child rewrites its own `.git` file: to `/`, to the owner's home, and to a fake git
