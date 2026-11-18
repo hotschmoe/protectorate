@@ -81,7 +81,7 @@ fn run_fleet(hub: &Arc<Hub>, mut cfg: pt_fleet::Config, net: &Net) -> Result<Up,
     let poller = fleet
         .poll(poll, move |e| {
             if let Some(hub) = weak.upgrade() {
-                hub.fleet.published(&hub.bus, e);
+                hub.fleet.published(&hub.bus, &hub.view().state, e);
             }
         })
         .map_err(|e| {

@@ -19,7 +19,7 @@ use crate::model::*;
 
 pub const FORMAT: u8 = 1;
 /// Highest event tag this binary reads. Any incompatible encoding must get a new event tag.
-pub const MAX_EVENT_TAG: u8 = 46;
+pub const MAX_EVENT_TAG: u8 = 49;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -574,6 +574,38 @@ impl Wire for EventKind {
         use EventKind as E;
         match self {
             E::MailBatching => w.push(46),
+            E::SetNodeJobs { node, jobs, note } => {
+                w.push(47);
+                node.put(w);
+                jobs.put(w);
+                note.put(w);
+            }
+            E::CreateNodeJob {
+                request_id,
+                spec,
+                node,
+                owner,
+            } => {
+                w.push(49);
+                request_id.put(w);
+                spec.put(w);
+                node.put(w);
+                owner.put(w);
+            }
+            E::NodeChosenWithPolicy {
+                job,
+                attempt,
+                node,
+                epoch,
+                owner,
+            } => {
+                w.push(48);
+                job.put(w);
+                attempt.put(w);
+                node.put(w);
+                epoch.put(w);
+                owner.put(w);
+            }
             E::Spawn(spec) => {
                 // Bit 0: an effort string follows. Bit 1: this spawn marks D9. Bit 2: Envoy
                 // asked for it. Tag 38 exists only with bit 1 or 2 set, so a tag 0 or 32 event
@@ -1127,6 +1159,24 @@ impl Wire for EventKind {
                 from: Wire::get(r)?,
             },
             46 => E::MailBatching,
+            47 => E::SetNodeJobs {
+                node: Wire::get(r)?,
+                jobs: Wire::get(r)?,
+                note: Wire::get(r)?,
+            },
+            48 => E::NodeChosenWithPolicy {
+                job: Wire::get(r)?,
+                attempt: Wire::get(r)?,
+                node: Wire::get(r)?,
+                epoch: Wire::get(r)?,
+                owner: Wire::get(r)?,
+            },
+            49 => E::CreateNodeJob {
+                request_id: Wire::get(r)?,
+                spec: Wire::get(r)?,
+                node: Wire::get(r)?,
+                owner: Wire::get(r)?,
+            },
             _ => return Err(DecodeError::UnknownTag { what: "event", tag }),
         })
     }

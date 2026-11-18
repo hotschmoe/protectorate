@@ -108,6 +108,7 @@ pub fn call(hub: &Arc<Hub>, who: &Principal, name: &str, body: &Value) -> Result
         Decide => decide,
         ListNodes => list_nodes,
         GetNode => get_node,
+        SetNodeJobs => set_node_jobs,
         GetEnrollment => get_enrollment,
         AddNode => add_node,
         ApproveNode => approve_node,
@@ -1223,9 +1224,9 @@ fn list_nodes(c: &Ctx<'_>, _: api::Empty) -> Result<api::NodeList> {
     if matches!(c.hub.fleet.status(), FleetStatus::Off) {
         return Ok(api::NodeList { nodes: Vec::new() });
     }
-    let up = fleet(c.hub)?;
+    fleet(c.hub)?;
     Ok(api::NodeList {
-        nodes: up.poller.nodes().into_iter().map(|v| v.node).collect(),
+        nodes: crate::snapshot::nodes(c.hub),
     })
 }
 
@@ -1276,7 +1277,30 @@ fn resolve_node(up: &Up, s: &str, records: bool) -> Result<(u64, String)> {
 }
 
 fn get_node(c: &Ctx<'_>, r: api::NodeRef) -> Result<api::Node> {
-    Ok(find_node(&fleet(c.hub)?, &r.node_id)?.node)
+    let mut node = find_node(&fleet(c.hub)?, &r.node_id)?.node;
+    crate::jobs::decorate_node(&c.hub.view().state, &mut node);
+    Ok(node)
+}
+
+fn set_node_jobs(c: &Ctx<'_>, r: api::SetNodeJobsRequest) -> Result<api::Node> {
+    let up = fleet(c.hub)?;
+    let mut node = find_node(&up, &r.node_id)?.node;
+    let id = node.id.parse().map_err(internal)?;
+    match command(
+        c.hub,
+        EventKind::SetNodeJobs {
+            node: pt_core::NodeId(id),
+            jobs: r.jobs.to_string(),
+            note: r.note,
+        },
+    )? {
+        Reply::Accepted => {
+            crate::jobs::decorate_node(&c.hub.view().state, &mut node);
+            c.hub.fleet.renamed(&c.hub.bus, node.clone());
+            Ok(node)
+        }
+        other => Err(internal(format!("SetNodeJobs answered {other:?}"))),
+    }
 }
 
 fn pending_node(p: &pt_fleet::Pending, fp: &str) -> api::PendingNode {
@@ -1508,7 +1532,9 @@ fn rename_node(c: &Ctx<'_>, r: api::RenameNodeRequest) -> Result<api::RenamedNod
     })?;
     if n.name != from {
         if let Some(v) = up.poller.node(&id.to_string()) {
-            c.hub.fleet.renamed(&c.hub.bus, v.node);
+            let mut node = v.node;
+            crate::jobs::decorate_node(&c.hub.view().state, &mut node);
+            c.hub.fleet.renamed(&c.hub.bus, node);
         }
         let text = format!("node {from} renamed {}", n.name);
         info!("{text} (headscale node {id})");
@@ -1561,7 +1587,7 @@ fn job_view(hub: &Hub, id: pt_core::JobId) -> Result<api::Job> {
     view.state
         .jobs
         .get(&id)
-        .map(|j| crate::jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes()))
+        .map(|j| crate::jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes(), &view.state))
         .ok_or_else(|| err(ErrorCode::NotFound, format!("job {} is gone", id.0)))
 }
 
@@ -1621,6 +1647,16 @@ fn run_job(c: &Ctx<'_>, r: api::RunJobRequest) -> Result<api::Job> {
     let (target, on) = match r.target {
         api::JobTarget::Node { node_id } => {
             let (id, name) = resolve_node(&up, &node_id, false)?;
+            let owner = matches!(c.who, Principal::Owner | Principal::Device(_));
+            let view = c.hub.view();
+            if !crate::jobs::allows(&view.state, &id.to_string(), owner) {
+                let (policy, note) = crate::jobs::node_policy(&view.state, &id.to_string());
+                let why = note.map_or_else(String::new, |n| format!(": {n}"));
+                return Err(err(
+                    ErrorCode::Forbidden,
+                    format!("node {name} refuses this job (jobs {policy}){why}"),
+                ));
+            }
             if let Some(e) = up
                 .poller
                 .node(&id.to_string())
@@ -1661,7 +1697,16 @@ fn run_job(c: &Ctx<'_>, r: api::RunJobRequest) -> Result<api::Job> {
     };
     let spec = req.spec(r.even_if_present);
     let request_id = new_id("job:")?;
-    match command(c.hub, EventKind::CreateJob { request_id, spec })? {
+    let event = match &req.target {
+        api::JobTarget::Node { node_id } => EventKind::CreateNodeJob {
+            request_id,
+            spec,
+            node: pt_core::NodeId(node_id.parse().map_err(internal)?),
+            owner: req.sleeve.is_none(),
+        },
+        api::JobTarget::Arch { .. } => EventKind::CreateJob { request_id, spec },
+    };
+    match command(c.hub, event)? {
         Reply::JobCreated(id) => job_view(c.hub, id),
         other => Err(internal(format!("CreateJob answered {other:?}"))),
     }
@@ -1685,7 +1730,7 @@ fn list_jobs(c: &Ctx<'_>, r: api::ListJobsRequest) -> Result<api::JobList> {
         .filter(|j| node.is_none_or(|n| j.node.map(|x| x.0) == Some(n)))
         .filter(|j| job_visible(&view.state, c.who, JobRequest::of(&j.spec).as_ref()))
         .take(limit)
-        .map(|j| crate::jobs::view_with_nodes(&c.hub.jobs, j, &c.hub.fleet.nodes()))
+        .map(|j| crate::jobs::view_with_nodes(&c.hub.jobs, j, &c.hub.fleet.nodes(), &view.state))
         .collect();
     jobs.reverse();
     Ok(api::JobList {

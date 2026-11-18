@@ -614,6 +614,7 @@ fn node_rows(nodes: &[api::Node]) {
                 inv.map_or("-".into(), |i| format!("{}/{}", i.os, i.arch)),
                 if n.online { "up" } else { "down" }.into(),
                 n.presence.state.to_string(),
+                n.jobs.to_string(),
                 ago(n.last_seen_ms),
                 if n.node_version.is_empty() {
                     "-".into()
@@ -626,7 +627,7 @@ fn node_rows(nodes: &[api::Node]) {
         .collect();
     table(
         &[
-            "ID", "NAME", "OS/ARCH", "LINK", "PRESENCE", "SEEN", "VERSION", "ERROR",
+            "ID", "NAME", "OS/ARCH", "LINK", "PRESENCE", "JOBS", "SEEN", "VERSION", "ERROR",
         ],
         &rows,
     );
@@ -760,6 +761,9 @@ fn node_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
             let v = c.call::<m::GetNode>(&req)?;
             o.show(&v, |n| {
                 node_rows(std::slice::from_ref(n));
+                if let Some(note) = &n.jobs_note {
+                    println!("jobs note: {note}");
+                }
                 if let Some(i) = &n.inventory {
                     println!(
                         "host {} {} {}, {} {} threads, {} MiB RAM",
@@ -780,6 +784,18 @@ fn node_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
                     if p.source.is_empty() { "-" } else { &p.source }
                 );
             });
+        }
+        "set" => {
+            let jobs = a
+                .flag("--jobs")
+                .ok_or_else(|| "--jobs is required".to_string())?;
+            let req = api::SetNodeJobsRequest {
+                node_id: a.word(2, "a node")?.to_string(),
+                jobs: word_enum(jobs, "jobs policy")?,
+                note: a.flag("--note").map(str::to_string),
+            };
+            let node = c.call::<m::SetNodeJobs>(&req)?;
+            o.show(&node, |n| node_rows(std::slice::from_ref(n)));
         }
         "add" => {
             if a.words.len() <= 2 {

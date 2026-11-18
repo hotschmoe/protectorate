@@ -77,7 +77,8 @@ const USAGE: &str = "usage: protectorate [--home DIR] [--socket PATH] [--json] <
   sleeve wait <sleeve> [--until idle|done|blocked|parked|ended|report]
         [--after-seq N] [--timeout SECS]
   approval list [--pending] | approval decide <id> allow|allow-session|deny
-  node ls | node show <node> | node add [REGISTRATION] | node approve <auth_id>
+  node ls | node show <node> | node set <node> --jobs any|owner|none [--note TEXT]
+  node add [REGISTRATION] | node approve <auth_id>
         [--name NAME] [--fingerprint FP]
   node rename <node> <new-name> | node rm <node> [--force]
   node update (<node>... | --all) [--version TAG] [--channel stable|dev] [--probation SECS]

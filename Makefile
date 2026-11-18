@@ -26,7 +26,7 @@ CARGO_VERSION := PROTECTORATE_BUILD_VERSION='$(VERSION)'
 -include .env.e2e
 export PT_E2E_PI_PROVIDER PT_E2E_PI_MODEL PT_RELEASE_WIN_HOST PT_RELEASE_WIN_DIR ZIG PT_RELEASE_REPO
 
-.PHONY: build release release-assets release-snapshot release-publish web test test-paid check fmt-check clippy check-deps check-levels check-gen check-version check-fuzz gen fmt app-check version
+.PHONY: build release release-assets release-snapshot release-publish web test test-heavy test-paid check fmt-check clippy check-deps check-levels check-gen check-version check-fuzz gen fmt app-check version
 
 DART ?= dart
 FLUTTER ?= flutter
@@ -71,6 +71,9 @@ test:
 	@failed=""; $(CARGO_VERSION) sh scripts/test.sh || failed="$$failed e2e"; \
 	  $(CARGO_VERSION) sh scripts/replay-seeds.sh || failed="$$failed seeds"; \
 	  if [ -n "$$failed" ]; then echo "test failed:$$failed"; exit 1; fi
+
+test-heavy:
+	$(CARGO_VERSION) cargo test --locked --workspace --test nodes node_job_policy_survives_restart_and_routes_around_restricted_nodes -- --ignored
 
 # Also runs the Claude, Codex and Grok e2e tests, which spend a few small turns of quota.
 test-paid:

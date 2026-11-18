@@ -75,7 +75,7 @@ fn epoch(s: &str) -> u64 {
 fn stream(hub: &Hub, job: JobId) {
     let v = hub.view();
     if let Some(j) = v.state.jobs.get(&job) {
-        let job = jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes());
+        let job = jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes(), &v.state);
         hub.bus.push(|seq| HubStreamMessage::Job { seq, job });
     }
 }
@@ -167,6 +167,7 @@ impl JobExec {
 /// unless the job may run while someone is present, not excluded; the least loaded wins.
 fn choose(
     nodes: &[pt_fleet::NodeView],
+    state: &pt_core::State,
     req: &JobRequest,
     even_if_present: bool,
     exclude: &[NodeId],
@@ -174,6 +175,7 @@ fn choose(
     nodes
         .iter()
         .filter(|v| jobs::matches_target(v, &req.target))
+        .filter(|v| jobs::allows(state, &v.node.id, req.sleeve.is_none()))
         .filter_map(|v| Some((v, v.node.id.parse::<u64>().ok()?, v.hello.as_ref()?)))
         .filter(|(_, id, _)| !exclude.contains(&NodeId(*id)))
         .filter(|(v, ..)| !jobs::held_for_presence(v.node.presence.state, even_if_present))
@@ -236,14 +238,15 @@ fn scheduler(hub: &Hub, rx: &Receiver<Intent>) {
                 unseen.push((*job, node));
                 return true;
             }
-            match choose(&nodes, &req, j.spec.even_if_present, exclude) {
+            match choose(&nodes, &view.state, &req, j.spec.even_if_present, exclude) {
                 Some((node, epoch)) => {
                     info!("job {}: attempt {} on node {}", job.0, j.attempt, node.0);
-                    hub.submit(EventKind::NodeChosen {
+                    hub.submit(EventKind::NodeChosenWithPolicy {
                         job: *job,
                         attempt: j.attempt,
                         node,
                         epoch,
+                        owner: req.sleeve.is_none(),
                     });
                     false
                 }

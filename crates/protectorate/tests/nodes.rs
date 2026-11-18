@@ -220,6 +220,112 @@ fn has_event(hub: &Hub, level: &str, text: &str) -> bool {
     })
 }
 
+#[test]
+#[ignore = "heavy fleet test"]
+fn node_job_policy_survives_restart_and_routes_around_restricted_nodes() {
+    if !common::have_runtime() {
+        return;
+    }
+    let version = cli_command().arg("version").output().unwrap();
+    if String::from_utf8_lossy(&version.stdout).contains("missing") {
+        eprintln!("SKIP: fleet binaries are not embedded");
+        return;
+    }
+    let node_bin = Path::new(bin()).with_file_name("protectorate-node");
+    if !node_bin.is_file() {
+        eprintln!("SKIP: {} is missing", node_bin.display());
+        return;
+    }
+    let port = free_pair();
+    let listen = format!("127.0.0.1:{port}");
+    let tailnet = std::env::temp_dir().join(format!("pt-nodejobs-{}-{port}", std::process::id()));
+    let mut hub = Hub::start_config(
+        "nodejobs",
+        "pi_local",
+        &[(
+            "fleet",
+            obj! {
+                "listen" => listen.as_str(),
+                "dir" => tailnet.to_str().unwrap(),
+                "poll_secs" => 2u64,
+            },
+        )],
+        &[],
+        &[("PROTECTORATE_FLEET_TEST_MEMBER_TIMEOUT_MS", "1000")],
+    );
+    eventually("fleet to start", Duration::from_secs(120), || {
+        (hub.cli(&["node", "add"]).status == 0).then_some(())
+    });
+    let url = format!("http://{listen}");
+    let first_dir = tailnet.join("first");
+    let second_dir = tailnet.join("second");
+    let first = join(&hub, &node_bin, &url, "e2e-restricted", &first_dir);
+    let second = join(&hub, &node_bin, &url, "e2e-eligible", &second_dir);
+    let _first_serve = serve(&node_bin, &first_dir);
+    let _second_serve = serve(&node_bin, &second_dir);
+    online(&hub, &first, true);
+    online(&hub, &second, true);
+    let arch = eventually("node inventory", Duration::from_secs(120), || {
+        listed(&hub, &first)?["inventory"]["arch"]
+            .as_str()
+            .map(str::to_string)
+    });
+    let repo = common::temp_repo("nodejobs");
+    let sleeve = hub.spawn_pi("nodejobs", &repo);
+    let token = hub.sleeve_token(sleeve["id"].as_str().unwrap(), 1);
+    let caller = [("PROTECTORATE_TOKEN", token.as_str())];
+
+    let denied = hub.cli_env(&caller, &["node", "set", &first, "--jobs", "any"]);
+    assert_ne!(denied.status, 0);
+
+    let set = hub
+        .cli(&[
+            "--json", "node", "set", &first, "--jobs", "owner", "--note", "storage",
+        ])
+        .json();
+    assert_eq!(set["jobs"].as_str(), Some("owner"));
+    let denied = hub.cli_env(&caller, &["job", "run", "--node", &first, "--", "true"]);
+    assert_ne!(denied.status, 0);
+    assert!(denied.stderr.contains("storage"), "{}", denied.stderr);
+    let accepted = run_job(&hub, &first, &["true"]);
+    let accepted_id = accepted["id"].as_str().unwrap();
+    assert_eq!(
+        wait_job(&hub, accepted_id, &["succeeded", "failed"], 90)["state"].as_str(),
+        Some("succeeded")
+    );
+
+    let placed = hub
+        .cli_env(
+            &caller,
+            &["--json", "job", "run", "--arch", &arch, "--", "true"],
+        )
+        .json();
+    let done = wait_job(
+        &hub,
+        placed["id"].as_str().unwrap(),
+        &["succeeded", "failed"],
+        90,
+    );
+    assert_eq!(done["state"].as_str(), Some("succeeded"));
+    assert_eq!(done["node_id"].as_str(), Some(second.as_str()));
+
+    hub.cli(&["node", "set", &first, "--jobs", "none", "--note", "storage"])
+        .ok();
+    let denied = hub.cli_env(&caller, &["job", "run", "--node", &first, "--", "true"]);
+    assert_ne!(denied.status, 0);
+    assert!(denied.stderr.contains("storage"));
+    assert_ne!(
+        hub.cli(&["job", "run", "--node", &first, "--", "true"])
+            .status,
+        0
+    );
+    hub.restart();
+    let after = eventually("policy after restart", Duration::from_secs(120), || {
+        listed(&hub, &first).filter(|v| v["jobs"].as_str() == Some("none"))
+    });
+    assert_eq!(after["jobs_note"].as_str(), Some("storage"));
+}
+
 /// A directory where the enrollment file's temporary copy goes: writing the record fails, while
 /// reading it and every headscale call still work.
 struct Blocker(PathBuf);

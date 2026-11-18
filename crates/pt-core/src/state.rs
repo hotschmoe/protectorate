@@ -10,6 +10,7 @@ use crate::model::*;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct State {
     pub mail_batching: bool,
+    pub node_jobs: BTreeMap<NodeId, (String, Option<String>)>,
     /// The latest event time seen.
     pub now: Millis,
     pub next_sleeve: u64,

@@ -102,6 +102,7 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
         E::HubRecovered => on_recovered(owed, prev),
         E::Continue { sleeve, text } => on_continue(owed, prev, *sleeve, text),
         E::MailBatching
+        | E::SetNodeJobs { .. }
         | E::Spawn(_)
         | E::Interrupt { .. }
         | E::Compact { .. }
@@ -109,6 +110,7 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
         | E::RequestApproval { .. }
         | E::Viewed { .. }
         | E::CreateJob { .. }
+        | E::CreateNodeJob { .. }
         | E::CancelJob { .. }
         | E::AbandonJob { .. }
         | E::RequeueJob { .. }
@@ -116,6 +118,7 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
         | E::Unwritten { .. }
         | E::Launched { .. }
         | E::NodeChosen { .. }
+        | E::NodeChosenWithPolicy { .. }
         | E::JobNodeRemoved { .. }
         | E::JobStatus { .. }
         | E::ArtifactsChecked { .. }

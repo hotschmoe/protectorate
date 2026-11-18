@@ -220,6 +220,12 @@ api_records! {
         pub node_id: String,
     }
 
+    pub struct SetNodeJobsRequest {
+        pub node_id: String,
+        pub jobs: NodeJobs,
+        pub note: Option<String>,
+    }
+
     pub struct RunJobRequest {
         pub target: JobTarget,
         pub argv: Vec<String>,
@@ -709,6 +715,7 @@ api_methods! {
     ListNodes(Empty) -> NodeList: Sleeve,
     /// By headscale id or name.
     GetNode(NodeRef) -> Node: Sleeve,
+    SetNodeJobs(SetNodeJobsRequest) -> Node: Owner,
     GetEnrollment(Empty) -> Enrollment: Owner,
     /// Records a registration the owner scanned or pasted, for `ApproveNode`.
     AddNode(AddNodeRequest) -> PendingNode: Owner,

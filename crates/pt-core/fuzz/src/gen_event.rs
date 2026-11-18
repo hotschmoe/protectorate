@@ -107,7 +107,7 @@ pub fn event(b: &mut Bytes) -> Event {
     let j = |b: &mut Bytes| JobId(b.u64());
     let a = |b: &mut Bytes| b.u64() as u32;
     use EventKind as E;
-    let kind = match b.below(37) {
+    let kind = match b.below(40) {
         0 => E::Spawn(SpawnSpec {
             request_id: b.string(),
             name: b.string(),
@@ -290,7 +290,30 @@ pub fn event(b: &mut Bytes) -> Event {
             effect: e(b),
             attempt: a(b),
         },
-        _ => E::MailBatching,
+        36 => E::MailBatching,
+        37 => E::SetNodeJobs {
+            node: NodeId(b.u64()),
+            jobs: ["any", "owner", "none"][b.below(3) as usize].to_string(),
+            note: opt(b, |b| b.string()),
+        },
+        38 => E::NodeChosenWithPolicy {
+            job: j(b),
+            attempt: a(b),
+            node: NodeId(b.u64()),
+            epoch: b.u64(),
+            owner: b.bool(),
+        },
+        _ => E::CreateNodeJob {
+            request_id: b.string(),
+            spec: JobSpec {
+                digest: b.string(),
+                arch: b.string(),
+                command: b.string(),
+                even_if_present: b.bool(),
+            },
+            node: NodeId(b.u64()),
+            owner: b.bool(),
+        },
     };
     Event { at, kind }
 }

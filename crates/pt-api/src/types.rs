@@ -7,6 +7,11 @@ use pt_json::Value;
 use crate::schema::EpochMs;
 
 api_enums! {
+    pub enum NodeJobs {
+        Any = "any",
+        Owner = "owner",
+        None = "none",
+    }
     pub enum Level {
         Info = "info",
         Warn = "warn",
@@ -439,6 +444,8 @@ api_records! {
         pub inventory: Option<Inventory>,
         pub sample: Option<Sample>,
         pub presence: Presence,
+        pub jobs: NodeJobs = NodeJobs::Any,
+        pub jobs_note: Option<String>,
     }
 
     pub struct Job {

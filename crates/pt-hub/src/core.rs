@@ -209,7 +209,7 @@ fn announce_changes(hub: &Hub, before: &View, after: &View) {
     }
     for j in after.state.jobs.values() {
         if before.state.jobs.get(&j.id) != Some(j) {
-            let job = crate::jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes());
+            let job = crate::jobs::view_with_nodes(&hub.jobs, j, &hub.fleet.nodes(), &after.state);
             hub.bus.push(|seq| HubStreamMessage::Job { seq, job });
         }
     }

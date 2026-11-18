@@ -189,6 +189,7 @@ memory: a hub restart forgets them.
 
 ```
 node ls | node show <node>
+node set <node> --jobs any|owner|none [--note TEXT]
 node add [REGISTRATION]
 node approve <auth_id> [--name NAME] [--fingerprint FP]
 node rename <node> <new-name>
@@ -196,8 +197,12 @@ node rm <node> [--force]
 node update (<node>... | --all) [--version TAG] [--channel stable|dev] [--probation SECS] [--no-wait]
 ```
 
-- **ls** shows each node's OS and arch, link, presence (PRESENT, AWAY or UNKNOWN), last contact and
-  version; **show** adds the inventory and where presence came from.
+- **ls** shows each node's OS and arch, link, presence (PRESENT, AWAY or UNKNOWN), job policy,
+  last contact and version; **show** adds the inventory, policy note and where presence came from.
+- **set** records the job policy in the hub journal. `any` (the default) allows all callers;
+  `owner` allows only the owner and paired devices; `none` refuses all jobs. The optional note
+  replaces the prior note and appears in refusals. Omitting it clears the note. The policy applies
+  to queued jobs as well as new jobs; inventory and node updates continue normally.
 - **add** with no argument prints the join command for a new machine, the hub's control-key
   fingerprint and pending registrations; with the registration text that `join` printed, it
   records it. **approve** registers, tags and names the node. See [install.md](install.md).
@@ -246,7 +251,8 @@ job artifact <job> <path> [--out FILE]
 - `--node` names a node by id or name, and the hub keeps its id: a later rename does not move
   the job, a node not on the tailnet is refused, and a job pinned to a node that is removed
   before it starts fails; `--arch` lets the hub pick an AWAY node of that arch (the
-  least loaded one).
+  least loaded eligible one). Placement skips nodes whose job policy refuses the caller; an
+  explicit `--node` request to such a node is refused.
 - A node refuses to start a job while someone is present or presence is UNKNOWN.
   `--even-if-present` overrides that for one job.
 - If someone arrives mid-job, the job drops to idle priority and keeps running; `--on-present

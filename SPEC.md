@@ -343,9 +343,12 @@ crash, every incarnation goes to Recovering and resumes natively.
 
 ### 3.5 Nodes
 
-- **One kind of node** (D32). Node tiers are gone: the only reason for them was to keep jobs off
-  machines a person is using, and presence detection does that directly. Every node takes jobs
-  when idle and refuses them while someone is at it.
+- **One kind of node** (D32). Presence detection holds work while someone is at the machine.
+  The owner can journal a per-node job policy with `node set <node> --jobs any|owner|none`
+  and an optional `--note TEXT`. The default `any` permits jobs from all callers, `owner`
+  permits only owner jobs, and `none` permits none. Explicit node requests are refused with
+  the policy and note; arch placement skips nodes that refuse the caller. Changes also apply
+  to queued jobs, and survive hub restart. Inventory and rollout are unaffected.
 - **One node binary** per OS. It runs as a system service on Linux and as a LocalSystem service with a
   runner account on Windows. It also builds for Android (Termux), and for macOS once a Mac exists.
   All RPCs are hub-initiated on tailnet port 7475.

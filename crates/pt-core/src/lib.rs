@@ -71,6 +71,12 @@ impl Core<'_> {
         use EventKind as E;
         match kind {
             E::MailBatching => self.st.mail_batching = true,
+            E::SetNodeJobs { node, jobs, note } => {
+                self.st
+                    .node_jobs
+                    .insert(*node, (jobs.clone(), note.clone()));
+                self.reply(Reply::Accepted);
+            }
             E::Spawn(spec) => self.spawn(spec),
             E::Send {
                 to,
@@ -143,10 +149,52 @@ impl Core<'_> {
             E::Abandon { effect } => self.abandon_cmd(*effect),
             E::Viewed { sleeve } => self.viewed_cmd(*sleeve),
             E::CreateJob { request_id, spec } => self.create_job(request_id, spec),
+            E::CreateNodeJob {
+                request_id,
+                spec,
+                node,
+                owner,
+            } => {
+                if !self.st.job_requests.contains_key(request_id)
+                    && let Some((jobs, note)) = self.st.node_jobs.get(node)
+                    && (jobs == "none" || (jobs == "owner" && !owner))
+                {
+                    let why = note.as_ref().map_or_else(String::new, |n| format!(": {n}"));
+                    self.refuse(
+                        Code::FailedPrecondition,
+                        format!("node {} refuses this job (jobs {jobs}){why}", node.0),
+                    );
+                } else {
+                    self.create_job(request_id, spec);
+                }
+            }
             E::CancelJob { job } => self.cancel_job(*job),
             E::AbandonJob { job } => self.abandon_job(*job),
             E::RequeueJob { job } => self.requeue_job(*job),
             E::JobNodeRemoved { job, node } => self.job_node_removed(*job, *node),
+            E::NodeChosenWithPolicy {
+                job,
+                attempt,
+                node,
+                epoch,
+                owner,
+            } => {
+                let allowed = self
+                    .st
+                    .node_jobs
+                    .get(node)
+                    .is_none_or(|(jobs, _)| jobs == "any" || (jobs == "owner" && *owner));
+                if allowed {
+                    self.node_chosen(*job, *attempt, *node, *epoch);
+                } else if self
+                    .st
+                    .jobs
+                    .get(job)
+                    .is_some_and(|j| j.attempt == *attempt && j.state == JobState::Queued)
+                {
+                    self.schedule(*job);
+                }
+            }
 
             E::Dispatched { effect, attempt } => {
                 // The answer lets an executor that asks write only what is still released.
