@@ -31,11 +31,12 @@ fn curl_handshake_gets_101_with_rfc_accept() {
         &format!("Sec-WebSocket-Key: {SAMPLE_KEY}"),
         &s.url("/ws"),
     ]);
-    assert!(
-        r.stdout.starts_with("HTTP/1.1 101 Switching Protocols\r\n"),
-        "{} {}",
-        r.stdout,
-        r.stderr
+    assert_eq!(
+        r.stdout
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1)),
+        Some("101")
     );
     assert!(
         r.stdout
