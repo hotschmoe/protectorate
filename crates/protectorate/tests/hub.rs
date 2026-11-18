@@ -930,6 +930,85 @@ for line in sys.stdin:
 }
 
 #[test]
+#[ignore = "heavy reconnect scenario"]
+fn stream_large_gap_uses_snapshot() {
+    if !on_path("bwrap") || !on_path("python3") || !on_path("git") {
+        return;
+    }
+    let dir = unique("stream-gap");
+    std::fs::create_dir_all(&dir).unwrap();
+    let fake = dir.join("claude");
+    write_script(&dir.join("systemd-run"), "exit 0");
+    write_script(
+        &fake,
+        r#"if [ "$1" = --version ]; then echo '2.0.0 (Claude Code)'; exit; fi
+exec python3 -u -c '
+import json, os, time
+while not os.path.exists("start-burst"): time.sleep(0.05)
+for n in range(1600):
+    print(json.dumps({"type":"assistant", "message":{"id":str(n), "content":[{"type":"text", "text":"activity " + str(n) + " x" * 100}]}}), flush=True)
+while True: time.sleep(1)
+' "$@""#,
+    );
+    let port = free_port();
+    let listen = format!("127.0.0.1:{port}");
+    let path = format!("{}:{}", dir.display(), std::env::var("PATH").unwrap());
+    let hub = Hub::start_config(
+        "stream-gap",
+        "claude",
+        &[
+            ("scopes", false.into()),
+            ("claude_program", fake.to_str().unwrap().into()),
+        ],
+        &["--listen", &listen],
+        &[("PATH", &path)],
+    );
+    let login = hub.home.join("logins/.claude/.credentials.json");
+    std::fs::create_dir_all(login.parent().unwrap()).unwrap();
+    std::fs::write(login, "test").unwrap();
+    hub.cli(&["doctor", "--refresh"]).ok();
+    let repo = temp_repo("stream-gap");
+    hub.cli(&[
+        "sleeve",
+        "spawn",
+        "worker",
+        "--path",
+        repo.to_str().unwrap(),
+        "--harness",
+        "claude",
+    ])
+    .ok();
+    hub.wait("worker", "idle", 60);
+    let owner = hub.printed("owner token (shown once): ");
+    let auth = format!("?access_token={owner}");
+    let mut before = ws(port, &auth, &[]).unwrap();
+    let start = next(&mut before)["seq"].as_u64().unwrap();
+    drop(before);
+    let mut measure = ws(port, &auth, &[]).unwrap();
+    let _ = next(&mut measure);
+    std::fs::write(repo.join("start-burst"), "go").unwrap();
+    let messages = until(&mut measure, "entry", |m| {
+        m["entry"]["entry"]["text"]
+            .as_str()
+            .is_some_and(|s| s.starts_with("activity 1599"))
+    });
+    let backlog_bytes: usize = messages.iter().map(|m| m.to_string().len()).sum();
+    let mut resumed = ws(port, &format!("{auth}&from_seq={}", start + 1), &[]).unwrap();
+    let snapshot = next(&mut resumed);
+    assert_eq!(snapshot["type"].as_str(), Some("snapshot"));
+    assert!(snapshot["seq"].as_u64().unwrap() > start + 500);
+    eprintln!(
+        "reconnect snapshot: {} bytes; observed backlog: {backlog_bytes} bytes",
+        snapshot.to_string().len()
+    );
+    assert!(
+        snapshot.to_string().len() * 4 < backlog_bytes,
+        "snapshot {} backlog {backlog_bytes}",
+        snapshot.to_string().len()
+    );
+}
+
+#[test]
 fn envoy_wait_ignores_a_foreign_result_before_the_prompt_echo() {
     if !on_path("bwrap") || !on_path("python3") || !on_path("git") {
         return;

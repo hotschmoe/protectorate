@@ -1030,7 +1030,11 @@ shortcut is also in `REVISIT.md`.
   dev-only fuzz dependencies. There is no SQLite: `pt-history` replaces `rusqlite` (3.7).
 - **The API** is JSON over HTTP:
   - `POST /api/<Method>` carries the request and response bodies;
-  - `GET /api/events` is a WebSocket of state changes;
+  - `GET /api/events` is a WebSocket of state changes. A client resumes with `from_seq`
+    one greater than the last kept sequence it received. If more than 500 kept messages
+    are missing, the cursor is unavailable, or no cursor is supplied, the hub sends a fresh
+    snapshot instead of replaying the gap; its sequence identifies the cursor it covers.
+    Streaming deltas repeat the last kept sequence and are not replayed;
   - loopback and unix-socket listeners serve the CLI and sleeves; the trusted-proxy listener serves
     Traefik.
 

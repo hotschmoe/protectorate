@@ -624,6 +624,13 @@ Neither installer has run on a real device yet.
 
 ## Devices
 
+The app's event stream resumes a short interruption from its last sequence. After a gap of more
+than 500 retained stream messages, or when that cursor is unavailable, the hub sends a current
+snapshot instead of replaying the gap.
+
+For development, `make test-heavy` runs the large-gap reconnect scenario separately from
+`make test`.
+
 ```
 device list | device add <name> | device pair <code> | device revoke <id>
 ```

@@ -637,8 +637,8 @@ api_unions! {
 
     /// One message of `GET /api/events`. `seq` grows by one per kept message; a streaming
     /// delta repeats the seq of the last kept message and is not replayed on resume. The stream
-    /// starts with `snapshot` unless `from_seq` is given and the hub still holds every message
-    /// from it.
+    /// starts with `snapshot` unless `from_seq` is given, the gap is at most 500 kept messages,
+    /// and the hub still holds every message from it.
     pub enum HubStreamMessage {
         Snapshot = "snapshot" {
             seq: u64,

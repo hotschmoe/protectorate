@@ -270,6 +270,9 @@ impl Bus {
     /// still holds every kept message from there on (or `from_seq` is the next seq).
     pub fn resume(&self, from_seq: u64) -> Option<Resume> {
         let r = lock(&self.ring);
+        if r.durable_seq.saturating_sub(from_seq) >= 500 {
+            return None;
+        }
         if from_seq == r.durable_seq + 1 {
             return Some(Resume::Ring(r.durable));
         }
