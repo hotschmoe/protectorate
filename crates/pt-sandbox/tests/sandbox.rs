@@ -401,7 +401,7 @@ fn worktree_hooks_are_read_only() {
         eprintln!("SKIP: no systemd user bus");
         return;
     }
-    let base = fixture("hooks");
+    let base = fixture(&format!("hooks-{}", std::process::id()));
     let (main, wt) = worktree(&base, "pt-hooks-test");
     let dirs = resolve_git_dirs(&wt, &main).unwrap();
     assert_eq!(dirs.len(), 2, "{dirs:?}");
@@ -432,7 +432,7 @@ fn worktree_hooks_are_read_only() {
             assert!(sh(&s, &sibling).status.success());
         }
         let script = r#"set -e; export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t; \
-            original=$(git branch --show-current); branch=pt-test-$$; \
+            original=$(git branch --show-current); branch=pt-test-$(basename "$(git rev-parse --show-toplevel)"); \
             echo change > sandbox-test-file; git add sandbox-test-file; git commit -qm test; \
             git branch "$branch"; git checkout -q "$branch"; \
             echo more >> sandbox-test-file; git stash -q; git stash pop -q; git add sandbox-test-file; git commit -qm more; \
