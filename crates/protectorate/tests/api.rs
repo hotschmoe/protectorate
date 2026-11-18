@@ -933,12 +933,14 @@ for line in sys.stdin:
 fn codex_credit_readings() {
     use std::io::Read;
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", server.local_addr().unwrap());
     let count = Arc::new(AtomicUsize::new(0));
     let requests = Arc::clone(&count);
+    let on_credits = Arc::new(AtomicBool::new(true));
+    let server_on_credits = Arc::clone(&on_credits);
     std::thread::spawn(move || {
         for stream in server.incoming().flatten() {
             let mut stream = stream;
@@ -949,8 +951,10 @@ fn codex_credit_readings() {
             } else {
                 "990"
             };
+            let on = server_on_credits.load(Ordering::SeqCst);
             let body = format!(
-                r#"{{"plan_type":"pro","rate_limit":{{"allowed":false,"limit_reached":true,"primary_window":{{"used_percent":100,"limit_window_seconds":604800,"reset_at":4102444800}}}},"credits":{{"has_credits":true,"balance":"{balance}","overage_limit_reached":false}},"rate_limit_reset_credits":{{"available_count":2}}}}"#
+                r#"{{"plan_type":"pro","rate_limit":{{"allowed":{},"limit_reached":{on},"primary_window":{{"used_percent":100,"limit_window_seconds":604800,"reset_at":4102444800}}}},"credits":{{"has_credits":true,"balance":"{balance}","overage_limit_reached":false}},"rate_limit_reset_credits":{{"available_count":2}}}}"#,
+                !on
             );
             let _ = write!(
                 stream,
@@ -1000,6 +1004,53 @@ fn codex_credit_readings() {
     );
     assert!(display.stdout.contains("reset credits available: 2"));
     assert!(display.stdout.contains("an hour"));
+    let inbox = || hub.cli(&["--json", "sleeve", "inbox", "envoy"]).json();
+    eventually("Envoy credit notice", Duration::from_secs(15), || {
+        let messages = inbox();
+        (messages["messages"]
+            .as_array()?
+            .iter()
+            .filter(|m| {
+                m["text"]
+                    .as_str()
+                    .is_some_and(|s| s.contains("now using account credits"))
+            })
+            .count()
+            == 1)
+            .then_some(())
+    });
+    on_credits.store(false, Ordering::SeqCst);
+    eventually("Envoy credit reset notice", Duration::from_secs(15), || {
+        let messages = inbox();
+        (messages["messages"]
+            .as_array()?
+            .iter()
+            .filter(|m| {
+                m["text"]
+                    .as_str()
+                    .is_some_and(|s| s.contains("no longer using account credits"))
+            })
+            .count()
+            == 1)
+            .then_some(())
+    });
+    hub.restart();
+    std::thread::sleep(Duration::from_secs(3));
+    let messages = hub.cli(&["--json", "sleeve", "inbox", "envoy"]).json();
+    let notices = messages["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|m| {
+            m["text"]
+                .as_str()
+                .is_some_and(|s| s.starts_with("[quota] Codex"))
+        })
+        .count();
+    assert_eq!(
+        notices, 2,
+        "one notice per transition across restart: {messages}"
+    );
 }
 
 #[test]

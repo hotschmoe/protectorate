@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use pt_api::{EventKind as Kind, Level, Subscription};
-use pt_core::{EventKind, Harness, Life, ParkReason};
+use pt_core::{EventKind, Harness, Life, ParkReason, Party, Reply, SendMode};
 use pt_doctor::Report;
 use pt_fleet::{Fleet, PollConfig};
 use pt_quota::{Cache, Options, Reader};
@@ -207,12 +207,70 @@ pub fn start_quotas(hub: &Arc<Hub>) {
                 }
                 hub.quotas
                     .publish(&hub.bus, cache.quotas_with_age(), opts.stale_after);
+                notify_credit_transition(&hub);
                 drop(hub);
                 thread::sleep(Duration::from_secs(every));
             }
         });
     if let Err(e) = started {
         warning!("quota: starting the reader thread: {e}");
+    }
+}
+
+fn notify_credit_transition(hub: &Hub) {
+    let Some(on) = hub
+        .quotas
+        .list()
+        .iter()
+        .find_map(crate::quota::credit_state)
+    else {
+        return;
+    };
+    let view = hub.view();
+    let Some(id) = envoy_id(&view.state) else {
+        return;
+    };
+    let Some(envoy) = view.state.sleeve(id) else {
+        return;
+    };
+    let previous = envoy
+        .messages
+        .iter()
+        .filter_map(|(id, message)| {
+            let state = if id.starts_with("quota:credits:on:") {
+                true
+            } else if id.starts_with("quota:credits:off:") {
+                false
+            } else {
+                return None;
+            };
+            Some((message.seq, state))
+        })
+        .max_by_key(|(seq, _)| *seq)
+        .map(|(_, state)| state);
+    if previous == Some(on) || (previous.is_none() && !on) {
+        return;
+    }
+    let word = if on { "on" } else { "off" };
+    let text = if on {
+        "[quota] Codex subscription limit reached; work is now using account credits."
+    } else {
+        "[quota] Codex work is no longer using account credits."
+    };
+    let result = hub.command(
+        EventKind::Send {
+            to: id,
+            request_id: format!("quota:credits:{word}:{}", view.state.next_msg),
+            from: Party::Owner,
+            agent: None,
+            text: text.to_string(),
+            mode: SendMode::Queue,
+            d9: false,
+        },
+        Duration::from_secs(10),
+    );
+    if !matches!(result, Ok(Reply::Sent { .. } | Reply::Duplicate)) {
+        warning!("quota: could not notify Envoy of Codex credit transition: {result:?}");
     }
 }
 

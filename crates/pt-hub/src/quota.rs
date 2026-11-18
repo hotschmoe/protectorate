@@ -11,6 +11,28 @@ use pt_quota::Options;
 use crate::bus::Bus;
 use crate::lock::lock;
 
+pub fn credit_state(q: &api::Quota) -> Option<bool> {
+    if q.subscription != api::Subscription::Codex || q.reading != api::QuotaReading::Ok {
+        return None;
+    }
+    let c = q.credits.as_ref()?;
+    if c.allowed == Some(true)
+        || c.limit_reached == Some(false)
+        || c.has_credits == Some(false)
+        || c.overage_limit_reached == Some(true)
+    {
+        Some(false)
+    } else if c.allowed == Some(false)
+        && c.limit_reached == Some(true)
+        && c.has_credits == Some(true)
+        && c.overage_limit_reached != Some(true)
+    {
+        Some(true)
+    } else {
+        None
+    }
+}
+
 pub struct Quotas {
     last: Mutex<Published>,
 }

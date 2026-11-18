@@ -292,6 +292,9 @@ or with no window at all, is reported as an error.
 For Codex, the note reports when the subscription limit is reached and credits are available,
 the balance, the estimated hourly decrease between consecutive readings when available, and
 the number of reset credits available. The estimate is not a vendor-provided rate.
+Envoy receives a queued notice when Codex starts or stops using credits. The last notice is
+journaled, so a hub restart does not repeat a transition; an unknown or stale reading does not
+change the reported state.
 Resleeve targets are weighted by fresh readings; known-exhausted candidates are skipped, and the
 sleeve parks if all eligible candidates are exhausted. A stale reading keeps its last windows:
 under the usable minimum it counts as exhausted, and with spare left the fallback may still

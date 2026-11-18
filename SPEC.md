@@ -725,7 +725,10 @@ because its windows have reset. That is not a missing reading. A reset at or bef
 is no reset time, and the percent still counts. Codex readings also carry the vendor's credit
 and limit flags, balance, and available reset credits. When the limit is reached and credits
 are available, the row shows the balance and the estimated hourly decrease between consecutive
-readings; the rate is not a vendor claim. Model-scoped Claude windows (`wk <name>`) stay on the quota row
+readings; the rate is not a vendor claim. Envoy receives one queued notice when Codex begins
+or stops spending credits; its journaled message records the last reported state across hub
+restarts. Unknown and stale readings do not change that state. Model-scoped Claude windows
+(`wk <name>`) stay on the quota row
 and gate a candidate of the same family (opus, sonnet, haiku), ignoring case and version
 (`Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus). `opusplan`
 counts as both Opus and Sonnet, so that model is gated by either cap, and a cap whose name
