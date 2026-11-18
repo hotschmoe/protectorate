@@ -540,30 +540,42 @@ fn sleeve_cmd(c: &Client, a: &Args, o: &Out) -> Result<(), Fail> {
         }
         "wait" => {
             let t = secs(a, 600)?;
+            if a.has("--all") && a.has("--any") {
+                return Err(Fail::Usage("--all and --any are mutually exclusive".into()));
+            }
+            a.word(2, "a sleeve")?;
             let req = api::WaitRequest {
-                sleeve_id: a.word(2, "a sleeve")?.to_string(),
+                sleeve_ids: a.words[2..].to_vec(),
                 until: word_enum(a.flag("--until").unwrap_or("idle"), "--until")?,
+                any: a.has("--any"),
                 timeout_ms: t * 1000,
                 after_seq: a.num("--after-seq")?,
             };
             let v = c.call_for::<m::Wait>(&req, Duration::from_secs(t))?;
             o.show(&v, |v| {
-                let life = v.sleeve.lifecycle;
-                let act = v
-                    .sleeve
-                    .incarnation
-                    .as_ref()
-                    .map_or("-".into(), |i| i.activity.state.to_string());
-                let seq = v.seq.map(|s| format!(", seq {s}")).unwrap_or_default();
-                println!(
-                    "{}: {life}, {act}{seq}",
-                    if v.reached { "reached" } else { "not reached" }
-                );
+                for item in &v.sleeves {
+                    let life = item.sleeve.lifecycle;
+                    let act = item
+                        .sleeve
+                        .incarnation
+                        .as_ref()
+                        .map_or("-".into(), |i| i.activity.state.to_string());
+                    let seq = item.seq.map(|s| format!(", seq {s}")).unwrap_or_default();
+                    println!(
+                        "{}: {}: {life}, {act}{seq}",
+                        if item.reached {
+                            "reached"
+                        } else {
+                            "not reached"
+                        },
+                        item.sleeve.name
+                    );
+                }
             });
             if !v.reached {
                 return Err(Fail::Other(format!(
-                    "wait: {} did not reach {}",
-                    v.sleeve.name, req.until
+                    "wait: requested sleeves did not reach {}",
+                    req.until
                 )));
             }
         }

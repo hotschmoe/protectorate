@@ -410,8 +410,10 @@ api_records! {
     }
 
     pub struct WaitRequest {
-        pub sleeve_id: String,
+        pub sleeve_ids: Vec<String>,
         pub until: WaitUntil,
+        /// Return when any sleeve reaches the condition; otherwise wait for all.
+        pub any: bool = false,
         /// The hub caps it.
         pub timeout_ms: u64 = 60_000,
         /// `until=report` only. Count mail with a seq above this. Absent uses the waiter's
@@ -420,7 +422,12 @@ api_records! {
     }
 
     pub struct WaitResult {
-        /// False when the timeout came first.
+        /// Whether the requested all/any condition was reached.
+        pub reached: bool,
+        pub sleeves: Vec<WaitSleeveResult>,
+    }
+
+    pub struct WaitSleeveResult {
         pub reached: bool,
         pub sleeve: Sleeve,
         /// The newest report seq that satisfied `until=report`. Absent otherwise.

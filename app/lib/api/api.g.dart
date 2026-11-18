@@ -5439,8 +5439,9 @@ final class Usage {
 
 final class WaitRequest {
   const WaitRequest({
-    required this.sleeveId,
+    required this.sleeveIds,
     required this.until,
+    this.any = false,
     this.timeoutMs = 60000,
     this.afterSeq,
   });
@@ -5448,8 +5449,13 @@ final class WaitRequest {
   factory WaitRequest.fromJson(Object? json) {
     final j = _object(json, 'WaitRequest');
     return WaitRequest(
-      sleeveId: _string(j['sleeve_id'], 'WaitRequest.sleeve_id'),
+      sleeveIds: _list(
+        j['sleeve_ids'],
+        'WaitRequest.sleeve_ids',
+        (e0) => _string(e0, 'WaitRequest.sleeve_ids[]'),
+      ),
       until: WaitUntil.fromJson(j['until']),
+      any: _or(j['any'], false, (e0) => _bool(e0, 'WaitRequest.any')),
       timeoutMs: _or(
         j['timeout_ms'],
         60000,
@@ -5459,9 +5465,12 @@ final class WaitRequest {
     );
   }
 
-  final String sleeveId;
+  final List<String> sleeveIds;
 
   final WaitUntil until;
+
+  /// Return when any sleeve reaches the condition; otherwise wait for all.
+  final bool any;
 
   /// The hub caps it.
   final int timeoutMs;
@@ -5471,26 +5480,56 @@ final class WaitRequest {
   final int? afterSeq;
 
   Map<String, Object?> toJson() => {
-    'sleeve_id': sleeveId,
+    'sleeve_ids': sleeveIds,
     'until': until.toJson(),
+    'any': any,
     'timeout_ms': timeoutMs,
     if (afterSeq case final v?) 'after_seq': v,
   };
 }
 
 final class WaitResult {
-  const WaitResult({required this.reached, required this.sleeve, this.seq});
+  const WaitResult({required this.reached, required this.sleeves});
 
   factory WaitResult.fromJson(Object? json) {
     final j = _object(json, 'WaitResult');
     return WaitResult(
       reached: _bool(j['reached'], 'WaitResult.reached'),
-      sleeve: Sleeve.fromJson(j['sleeve']),
-      seq: _opt(j['seq'], (e0) => _int(e0, 'WaitResult.seq')),
+      sleeves: _list(
+        j['sleeves'],
+        'WaitResult.sleeves',
+        WaitSleeveResult.fromJson,
+      ),
     );
   }
 
-  /// False when the timeout came first.
+  /// Whether the requested all/any condition was reached.
+  final bool reached;
+
+  final List<WaitSleeveResult> sleeves;
+
+  Map<String, Object?> toJson() => {
+    'reached': reached,
+    'sleeves': [for (final e0 in sleeves) e0.toJson()],
+  };
+}
+
+final class WaitSleeveResult {
+  const WaitSleeveResult({
+    required this.reached,
+    required this.sleeve,
+    this.seq,
+  });
+
+  factory WaitSleeveResult.fromJson(Object? json) {
+    final j = _object(json, 'WaitSleeveResult');
+    return WaitSleeveResult(
+      reached: _bool(j['reached'], 'WaitSleeveResult.reached'),
+      sleeve: Sleeve.fromJson(j['sleeve']),
+      seq: _opt(j['seq'], (e0) => _int(e0, 'WaitSleeveResult.seq')),
+    );
+  }
+
   final bool reached;
 
   final Sleeve sleeve;

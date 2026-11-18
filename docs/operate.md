@@ -51,7 +51,7 @@ sleeve interrupt|stop|rm|takeover <sleeve>
 sleeve start <sleeve> [--harness H] [--provider P] [--model M]
 sleeve resleeve <sleeve> --harness H [--provider P] [--model M]
 sleeve transcript <sleeve> [--from SEQ] [--limit N]
-sleeve wait <sleeve> [--until idle|done|blocked|parked|ended|report] [--timeout SECS]
+sleeve wait <sleeve>... [--all | --any] [--until idle|done|blocked|parked|ended|report] [--timeout SECS]
 ```
 
 For `sleeve send` and `envoy send`, `--message-file FILE` replaces the text arguments;
@@ -116,8 +116,11 @@ unaffected. A refused send does not drop anything.
 - **start** starts a stopped or parked sleeve, optionally on another harness. **resleeve** moves a
   sleeve to another harness, with a continuation brief in `.protectorate/BRIEF.md`.
 - **transcript** prints the chat: messages, tool calls and results, approvals, turns.
-- **wait** blocks until the sleeve reaches a state (default `idle`, 600 s) and exits non-zero if
-  it does not. `--until report` returns when that sleeve has mailed since the cursor, and prints
+- **wait** blocks until all named sleeves reach a state (default `idle`, 600 s); `--any`
+  returns when one reaches it. A sleeve that reaches the state stays counted for that wait.
+  It exits non-zero if the requested condition cannot be reached or times out. It prints each
+  sleeve's result; JSON includes the overall result and per-sleeve results. `--until report`
+  returns when the sleeve has mailed since the cursor, and prints
   that report's seq. `--after-seq N` counts only mail with a seq above N. Without it the cursor
   is the waiter's newest message to the sleeve, so the same report releases a later wait again.
   The hub's continuation of a turn after a crash is not mail for that cursor: it is not a

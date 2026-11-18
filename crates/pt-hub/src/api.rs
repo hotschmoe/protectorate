@@ -2229,46 +2229,75 @@ fn upward_report(
 
 fn wait(c: &Ctx<'_>, r: api::WaitRequest) -> Result<api::WaitResult> {
     let deadline = Instant::now() + timeout(r.timeout_ms);
-    if r.until == api::WaitUntil::Report {
-        let view = c.hub.view();
-        let resolved = find(&view.state, &r.sleeve_id).ok();
-        if r.sleeve_id == crate::envoy::ENVOY
-            || resolved.is_some_and(|id| envoy_id(&view.state) == Some(id))
-        {
+    if r.sleeve_ids.is_empty() {
+        return Err(err(ErrorCode::Invalid, "wait requires at least one sleeve"));
+    }
+    let view = c.hub.view();
+    let mut ids = Vec::new();
+    for name in &r.sleeve_ids {
+        if r.until == api::WaitUntil::Report && name == crate::envoy::ENVOY {
             return Err(err(
                 ErrorCode::Invalid,
                 "Envoy never sends as a sleeve; wait for a sleeve",
             ));
         }
-        let id = target_sleeve(c, &view, &r.sleeve_id)?;
-        let waiter = c.who.party();
-        let after = r.after_seq;
-        let got = wait_for(c.hub, deadline, |v| {
-            if let Some(seq) = upward_report(&v.state, id, waiter, after) {
-                return Some(Some(seq));
-            }
-            let s = v.state.sleeve(id)?;
-            matches!(s.life, Life::Stopped | Life::Removed | Life::Parked(_)).then_some(None)
-        });
-        return Ok(api::WaitResult {
-            reached: got.as_ref().is_some_and(Option::is_some),
-            sleeve: sleeve_view(c.hub, id)?,
-            seq: got.flatten(),
-        });
-    }
-    let id = target_sleeve(c, &c.hub.view(), &r.sleeve_id)?;
-    let got = wait_for(c.hub, deadline, |v| {
-        if reached(&v.state, id, r.until) {
-            return Some(true);
+        let id = target_sleeve(c, &view, name)?;
+        if r.until == api::WaitUntil::Report && envoy_id(&view.state) == Some(id) {
+            return Err(err(
+                ErrorCode::Invalid,
+                "Envoy never sends as a sleeve; wait for a sleeve",
+            ));
         }
-        // A sleeve that stopped or parked never gets there: answer instead of hanging.
-        let s = v.state.sleeve(id)?;
-        matches!(s.life, Life::Stopped | Life::Removed | Life::Parked(_)).then_some(false)
-    });
+        if ids.contains(&id) {
+            return Err(err(ErrorCode::Invalid, "duplicate sleeve in wait"));
+        }
+        ids.push(id);
+    }
+    let mut outcomes = vec![None; ids.len()];
+    let waiter = c.who.party();
+    let got =
+        wait_for(c.hub, deadline, |v| {
+            for (i, &id) in ids.iter().enumerate() {
+                if outcomes[i].is_some() {
+                    continue;
+                }
+                let seq = (r.until == api::WaitUntil::Report)
+                    .then(|| upward_report(&v.state, id, waiter, r.after_seq))
+                    .flatten();
+                if seq.is_some() || reached(&v.state, id, r.until) {
+                    outcomes[i] = Some((true, seq));
+                } else if v.state.sleeve(id).is_some_and(|s| {
+                    matches!(s.life, Life::Stopped | Life::Removed | Life::Parked(_))
+                }) {
+                    outcomes[i] = Some((false, None));
+                }
+            }
+            let successes = outcomes
+                .iter()
+                .filter(|o| matches!(o, Some((true, _))))
+                .count();
+            let finished = outcomes.iter().filter(|o| o.is_some()).count();
+            if r.any {
+                (successes > 0 || finished == ids.len()).then_some(successes > 0)
+            } else {
+                (finished == ids.len() || successes < finished).then_some(successes == ids.len())
+            }
+        });
+    let sleeves = ids
+        .into_iter()
+        .zip(outcomes)
+        .map(|(id, outcome)| {
+            let (reached, seq) = outcome.unwrap_or((false, None));
+            Ok(api::WaitSleeveResult {
+                reached,
+                sleeve: sleeve_view(c.hub, id)?,
+                seq,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     Ok(api::WaitResult {
-        reached: got == Some(true),
-        sleeve: sleeve_view(c.hub, id)?,
-        seq: None,
+        reached: got.unwrap_or(false),
+        sleeves,
     })
 }
 

@@ -2140,6 +2140,40 @@ for line in sys.stdin:
     );
     hub.wait("envoy", "idle", 60);
     assert_eq!(reports().len(), 1, "the owner's turn reported to Envoy");
+    hub.wait("worker", "idle", 60);
+    let all = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "wait",
+            "envoy",
+            "worker",
+            "--all",
+            "--timeout",
+            "5",
+        ])
+        .json();
+    assert_eq!(all["reached"].as_bool(), Some(true));
+    assert_eq!(all["sleeves"].as_array().unwrap().len(), 2);
+    hub.cli(&["sleeve", "stop", "worker"]).ok();
+    hub.wait("worker", "ended", 60);
+    let any = hub
+        .cli(&[
+            "--json",
+            "sleeve",
+            "wait",
+            "worker",
+            "envoy",
+            "--any",
+            "--timeout",
+            "5",
+        ])
+        .json();
+    assert_eq!(any["reached"].as_bool(), Some(true));
+    assert_eq!(any["sleeves"][0]["reached"].as_bool(), Some(false));
+    assert_eq!(any["sleeves"][1]["reached"].as_bool(), Some(true));
+    let all = hub.cli(&["sleeve", "wait", "worker", "envoy", "--timeout", "5"]);
+    assert_ne!(all.status, 0, "all must fail when one sleeve stopped");
 }
 
 /// An Envoy turn that settles past the context ceiling gets the harness's own `/compact`

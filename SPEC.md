@@ -148,7 +148,9 @@ CLI on the hub machine (section 3.1).
   by its children. A send from a marked sleeve marks the recipient, so the mark crosses a relay;
   replay applies the same rule. `sleeve show` reports the mark. Mail from a marked sleeve starts
   an Envoy turn with D9 origin, so the same removals, node jobs and mass spawns wait for the
-  owner. Mail from an unmarked sleeve does not. `Wait --until report` returns when the waited-on
+  owner. Mail from an unmarked sleeve does not. `Wait` accepts several sleeves, waits for all by
+  default or any with `--any`, and retains each reached result during the wait. It returns failure
+  when the requested condition becomes impossible or the deadline passes. `Wait --until report` returns when the waited-on
   sleeve has mailed after the cursor, and it returns that report's seq. `--after-seq` sets the
   cursor; without it the cursor is the waiter's newest message to the sleeve, so the same report
   releases a later wait again. The core's continuation of a turn is not mail
