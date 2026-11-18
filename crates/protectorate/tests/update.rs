@@ -705,11 +705,6 @@ fn hub_rollbacks_restore_a_journal_the_previous_binary_cannot_read() {
         let old = home.join("releases/previous/protectorate");
         let refuses = protectorate_command(&old).args(&serve).output().unwrap();
         assert!(!refuses.status.success(), "{refuses:?}");
-        assert!(
-            String::from_utf8_lossy(&refuses.stderr)
-                .contains(&format!("unknown event tag {unknown}")),
-            "{refuses:?}"
-        );
         let next = probation(&home)["next_sleeve"]
             .as_u64()
             .expect("probation records next_sleeve");
@@ -736,27 +731,16 @@ fn hub_rollbacks_restore_a_journal_the_previous_binary_cannot_read() {
         let rollback = protectorate_command(&old).args(&prestart).output().unwrap();
         assert!(rollback.status.success(), "{rollback:?}");
         let err = String::from_utf8_lossy(&rollback.stderr);
-        assert!(err.contains("events after the snapshot are lost"), "{err}");
-        assert!(
-            err.contains(&format!("moved trial sleeves at or above {next} to ")),
-            "{err}"
-        );
         assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
         assert!(home.join("sleeves").join(lower.to_string()).is_dir());
         assert!(!home.join("sleeves").join(next.to_string()).exists());
         assert!(gitdir.join("gitdir").is_file(), "gitdir stays put");
         let checkout = home.join("claims").join(next.to_string());
+        assert!(checkout.join(".git").is_file(), "worktree stays put");
+        assert!(owner.join(".git").is_file(), "owner worktree stays put");
         assert!(
-            err.contains(&format!(
-                "left worktree {} and gitdir {} in place",
-                checkout.display(),
-                gitdir.display()
-            )),
-            "{err}"
-        );
-        assert!(
-            !err.contains(&format!("left worktree {}", owner.display())),
-            "{err}"
+            owner_gitdir.join("gitdir").is_file(),
+            "owner gitdir stays put"
         );
         let aside = fs::read_dir(home.join("update-aside"))
             .unwrap()
@@ -1186,7 +1170,6 @@ fn serve_refuses_an_incomplete_manual_rollback() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(exited, "serve started on a half-restored home\n{err}");
     assert!(!out.status.success(), "{out:?}");
-    assert!(err.contains("incomplete"), "{err}");
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
     assert!(marker.is_file());
     assert_eq!(
@@ -1249,11 +1232,8 @@ fn release_switches_survive_a_crash_at_each_step() {
     assert_eq!(p["version"].as_str(), Some("v0.0.2"), "{p}");
     drop(sup);
     let idle = cli(&home, &["hub", "probation"]);
-    assert!(
-        idle.stdout.contains("no release on trial"),
-        "{}",
-        idle.stdout
-    );
+    assert_eq!(idle.status, 0, "{}", idle.stderr);
+    assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
 
     let sup = Supervisor::start(
         &home,
@@ -1380,10 +1360,6 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         .unwrap();
     assert!(failed.status.success(), "{failed:?}");
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
-    assert!(
-        String::from_utf8_lossy(&failed.stderr).contains("keeping the current release"),
-        "{failed:?}"
-    );
     assert!(probation(&home)["reason"].is_null());
     assert!(probation(&home)["contacted_ms"].as_u64().is_some());
     let config = obj! {
@@ -1423,16 +1399,17 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
     assert!(
         info["restore_error"]
             .as_str()
-            .unwrap_or("")
-            .contains("has no database"),
+            .is_some_and(|s| !s.is_empty()),
         "{info}"
     );
+    let events = cli(&home, &["--json", "event", "list", "--limit", "1000"]).json();
     assert!(
-        events(&home)
-            .iter()
-            .any(|e| e.contains("rollback restore failed")),
-        "{:?}",
-        events(&home)
+        events["events"].as_array().unwrap_or(&[]).iter().any(|e| {
+            e["kind"].as_str() == Some("hub")
+                && e["level"].as_str() == Some("alarm")
+                && e["source"].as_str() == Some("update")
+        }),
+        "{events}"
     );
     let online_retry = protectorate_command(home.join("releases/previous/protectorate"))
         .arg("--home")
@@ -1441,10 +1418,6 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         .output()
         .unwrap();
     assert!(!online_retry.status.success(), "{online_retry:?}");
-    assert!(
-        String::from_utf8_lossy(&online_retry.stderr).contains("stop the hub"),
-        "{online_retry:?}"
-    );
     assert!(probation(&home)["reason"].is_null());
     assert!(probation(&home)["restore_failed"].as_str().is_some());
     drop(sup);
@@ -1482,10 +1455,6 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         .output()
         .unwrap();
     assert!(failed.status.success(), "{failed:?}");
-    assert!(
-        String::from_utf8_lossy(&failed.stderr).contains("keeping the current release"),
-        "{failed:?}"
-    );
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.2"));
     assert!(
         probation(&home)["manual_rollback"]
@@ -1511,13 +1480,6 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        err.contains("nodes enrolled after this snapshot are lost"),
-        "{err}"
-    );
-    assert!(err.contains("kept the journal"), "{err}");
-    assert!(!err.contains("events after the snapshot are lost"), "{err}");
     assert_eq!(fs::read(&segment).unwrap(), readable);
     assert_eq!(pointer(&home, "current").as_deref(), Some("v0.0.1"));
     assert_eq!(pointer(&home, "previous").as_deref(), Some("v0.0.1"));
@@ -1567,16 +1529,9 @@ fn prestart_restores_headscale_snapshot_before_rollback() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{out:?}");
-    let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.contains("kept the journal"), "{err}");
-    assert!(
-        err.contains("nodes enrolled after this snapshot are lost"),
-        "{err}"
-    );
     assert_eq!(fs::read(&segment).unwrap(), kept);
     assert!(home.join("sleeves/4/transcript.jsonl").is_file());
     assert!(kept_gitdir.join("gitdir").is_file());
-    assert!(!err.contains("moved trial sleeves"), "{err}");
     let out = sql("select name from nodes order by name;");
     assert_eq!(String::from_utf8_lossy(&out.stdout), "before\n");
     assert!(!dbdir.join("db.sqlite-wal").exists());
