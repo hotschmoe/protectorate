@@ -34,15 +34,17 @@ pt_json::record! {
         pub harness: Option<Harness>,
         pub level: Option<Level>,
         pub status: Option<TurnStatus>,
+        pub reports: Vec<pt_api::QueuedTurnReport> = Vec::new(),
         pub entry: Entry,
     }
 }
 
 /// What `Store::append` takes besides the entry.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Note {
     pub harness: Option<Harness>,
     pub level: Option<Level>,
+    pub reports: Vec<pt_api::QueuedTurnReport>,
 }
 
 /// Facts the sleeve listing shows, folded from the entries as they arrive.
@@ -264,6 +266,7 @@ impl Store {
             harness: note.harness,
             level: note.level,
             status,
+            reports: note.reports,
             entry,
         };
         let mut line = e.to_json().to_string();

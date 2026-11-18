@@ -69,6 +69,8 @@ status clears it. Turn reports include the declaration. The hub records an owner
 declaration with its settle observation for journal replay. `sleeve send` reports whether the
 message was queued or sent for delivery and the queue length at acceptance.
 Each new transcript turn-settled entry includes its structured status, if declared, in the API.
+Turn reports expose their sleeve, turn and status as structured fields in the inbox API and in
+the delivered transcript entry, including when several reports are batched.
 Queued messages wait for a turn boundary. At a headless turn start, consecutive queued prompts
 are delivered together in FIFO order, with their normal sender headers; a continuation ends
 the batch. For Envoy, a switch between vendor-agent and other senders also ends the batch,

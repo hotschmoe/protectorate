@@ -178,6 +178,9 @@ CLI on the hub machine (section 3.1).
   core reconstructs it on replay without consulting the transcript.
   Each newly stored transcript settle also carries its own structured status in the API, so
   clients can inspect earlier turns after a later turn changes the sleeve's current status.
+  The report carries its sleeve, turn and status as structured inbox and transcript data,
+  captured when the turn settled and journaled with the report. Batched deliveries retain the
+  metadata of each report.
   A usage-limit or auth settle reports after its continuation. Envoy reports to no one.
 - **Envoy's context ceiling.** When an Envoy turn settles with its context at 500k tokens or
   more, the hub sends the core a `Compact` for Envoy; the core takes it once Envoy is idle with

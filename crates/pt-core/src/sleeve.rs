@@ -947,6 +947,7 @@ impl Core<'_> {
                     mode,
                     state,
                     seq,
+                    report: None,
                 },
             );
         };
@@ -1212,7 +1213,14 @@ impl Core<'_> {
 
     /// Queues the hub's turn report as mail from `sid`, once per turn. It skips the mail bound,
     /// since the recipient opened that turn, and marks like any mail from the sleeve.
-    pub(crate) fn report_cmd(&mut self, sid: SleeveId, to: SleeveId, turn: u64, text: &str) {
+    pub(crate) fn report_cmd(
+        &mut self,
+        sid: SleeveId,
+        to: SleeveId,
+        turn: u64,
+        text: &str,
+        report: Option<TurnReport>,
+    ) {
         let Some(s) = self.st.sleeve(sid) else {
             return;
         };
@@ -1241,6 +1249,12 @@ impl Core<'_> {
             false,
             false,
         );
+        if let Some(report) = report
+            && self.st.sleeve(to).is_some()
+            && let Some(message) = self.sl(to).messages.get_mut(&request_id)
+        {
+            message.report = Some(report);
+        }
     }
 
     fn is_envoy(&self, id: SleeveId) -> bool {
@@ -1824,6 +1838,7 @@ impl Core<'_> {
                         g,
                         turn,
                         to,
+                        status: self.st.sleeves[&sid].last_status.clone(),
                     });
                 }
                 self.return_steer(sid);
@@ -2110,6 +2125,7 @@ impl Core<'_> {
                 mode: SendMode::Queue,
                 state: MsgState::Queued,
                 seq: msg_seq,
+                report: None,
             },
         );
         self.sl(sid).queue.push_back(key);

@@ -55,6 +55,13 @@ pub fn note(owed: &mut BTreeMap<SleeveId, u64>, prev: &State, kind: &EventKind, 
             turn,
             text,
         } => on_report(owed, prev, *sleeve, *to, *turn, text),
+        E::ReportStatus {
+            sleeve,
+            to,
+            turn,
+            text,
+            ..
+        } => on_report(owed, prev, *sleeve, *to, *turn, text),
         E::Stop { sleeve } => on_stop(owed, prev, *sleeve, false),
         E::Remove { sleeve } => on_stop(owed, prev, *sleeve, true),
         E::Start { sleeve, target, .. } => on_start_cmd(owed, prev, *sleeve, target.as_ref()),
@@ -464,6 +471,7 @@ fn on_send(
             mode,
             state: MsgState::Queued,
             seq: prev.next_msg,
+            report: None,
         },
     );
     note_dequeue(owed, prev, &queued);

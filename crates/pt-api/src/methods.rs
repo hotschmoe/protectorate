@@ -166,6 +166,8 @@ api_records! {
         pub sender: String,
         pub queued_at_ms: EpochMs,
         pub text: String,
+        /// Present for a turn report, including when it declared no status.
+        pub report: Option<QueuedTurnReport>,
     }
 
     pub struct Inbox {

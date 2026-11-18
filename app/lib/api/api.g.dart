@@ -975,6 +975,7 @@ final class EntryUserMessage extends Entry {
     required this.from,
     required this.text,
     this.steer = false,
+    this.reports = const <QueuedTurnReport>[],
   });
 
   factory EntryUserMessage._fromMap(Map<String, Object?> j) => EntryUserMessage(
@@ -982,6 +983,11 @@ final class EntryUserMessage extends Entry {
     from: _string(j['from'], 'EntryUserMessage.from'),
     text: _string(j['text'], 'EntryUserMessage.text'),
     steer: _or(j['steer'], false, (e0) => _bool(e0, 'EntryUserMessage.steer')),
+    reports: _or(
+      j['reports'],
+      const <QueuedTurnReport>[],
+      (e0) => _list(e0, 'EntryUserMessage.reports', QueuedTurnReport.fromJson),
+    ),
   );
 
   final String requestId;
@@ -993,6 +999,9 @@ final class EntryUserMessage extends Entry {
 
   final bool steer;
 
+  /// Reports included in this prompt, including a batch of several reports.
+  final List<QueuedTurnReport> reports;
+
   @override
   Map<String, Object?> toJson() => {
     'type': 'user_message',
@@ -1000,6 +1009,7 @@ final class EntryUserMessage extends Entry {
     'from': from,
     'text': text,
     'steer': steer,
+    'reports': [for (final e0 in reports) e0.toJson()],
   };
 }
 
@@ -4050,6 +4060,7 @@ final class QueuedMessage {
     required this.sender,
     required this.queuedAt,
     required this.text,
+    this.report,
   });
 
   factory QueuedMessage.fromJson(Object? json) {
@@ -4058,6 +4069,7 @@ final class QueuedMessage {
       sender: _string(j['sender'], 'QueuedMessage.sender'),
       queuedAt: _time(j['queued_at_ms'], 'QueuedMessage.queued_at_ms'),
       text: _string(j['text'], 'QueuedMessage.text'),
+      report: _opt(j['report'], QueuedTurnReport.fromJson),
     );
   }
 
@@ -4067,10 +4079,43 @@ final class QueuedMessage {
 
   final String text;
 
+  /// Present for a turn report, including when it declared no status.
+  final QueuedTurnReport? report;
+
   Map<String, Object?> toJson() => {
     'sender': sender,
     'queued_at_ms': queuedAt.millisecondsSinceEpoch,
     'text': text,
+    if (report case final v?) 'report': v.toJson(),
+  };
+}
+
+final class QueuedTurnReport {
+  const QueuedTurnReport({
+    required this.sleeveId,
+    required this.turn,
+    this.status,
+  });
+
+  factory QueuedTurnReport.fromJson(Object? json) {
+    final j = _object(json, 'QueuedTurnReport');
+    return QueuedTurnReport(
+      sleeveId: _string(j['sleeve_id'], 'QueuedTurnReport.sleeve_id'),
+      turn: _int(j['turn'], 'QueuedTurnReport.turn'),
+      status: _opt(j['status'], TurnStatus.fromJson),
+    );
+  }
+
+  final String sleeveId;
+
+  final int turn;
+
+  final TurnStatus? status;
+
+  Map<String, Object?> toJson() => {
+    'sleeve_id': sleeveId,
+    'turn': turn,
+    if (status case final v?) 'status': v.toJson(),
   };
 }
 

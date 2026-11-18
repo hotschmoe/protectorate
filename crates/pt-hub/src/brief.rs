@@ -454,7 +454,13 @@ fn build(hub: &Hub, view: &View, workdir: &Path, spec: &Spec<'_>, entries: &[Lin
 /// The report of owner turn `turn`, which `s` just settled, from what the hub saw: how the turn
 /// ended, its tokens, the last test command and its result, notices, the final message, and
 /// the commits and diff since the task's base commit.
-pub fn report(hub: &Hub, s: &Sleeve, workdir: &Path, turn: u64) -> String {
+pub fn report(
+    hub: &Hub,
+    s: &Sleeve,
+    workdir: &Path,
+    turn: u64,
+    status: Option<&pt_core::DeclaredStatus>,
+) -> String {
     let entries = hub.transcripts.last(s.id, REPORT_SCAN).unwrap_or_default();
     let end = entries
         .iter()
@@ -570,15 +576,17 @@ pub fn report(hub: &Hub, s: &Sleeve, workdir: &Path, turn: u64) -> String {
         Entry::AssistantText { text, .. } => Some(text.as_str()),
         _ => None,
     });
+    if let Some(status) = status {
+        let status = wire::declared_status(turn, status);
+        let _ = writeln!(
+            b,
+            "Declared status: {}{}.",
+            status.state,
+            status.detail.map_or(String::new(), |d| format!(": {d}"))
+        );
+    }
     match last {
         Some(t) => {
-            if let Some((state, detail)) = crate::transcript::turn_status(t) {
-                let _ = writeln!(
-                    b,
-                    "Declared status: {state}{}.",
-                    detail.map_or(String::new(), |d| format!(": {d}"))
-                );
-            }
             let _ = writeln!(
                 b,
                 "Final message:\n> {}",

@@ -295,6 +295,7 @@ fn get_inbox(c: &Ctx<'_>, r: api::InboxRequest) -> Result<api::Inbox> {
                     sender,
                     queued_at_ms: api::EpochMs(m.queued_at),
                     text: m.text.clone(),
+                    report: wire::queued_report(m),
                 }
             })
             .collect(),

@@ -114,7 +114,23 @@ impl Core<'_> {
                 to,
                 turn,
                 text,
-            } => self.report_cmd(*sleeve, *to, *turn, text),
+            } => self.report_cmd(*sleeve, *to, *turn, text, None),
+            E::ReportStatus {
+                sleeve,
+                to,
+                turn,
+                text,
+                status,
+            } => self.report_cmd(
+                *sleeve,
+                *to,
+                *turn,
+                text,
+                Some(TurnReport {
+                    turn: *turn,
+                    status: status.clone(),
+                }),
+            ),
             E::Interrupt { sleeve } => self.interrupt_cmd(*sleeve),
             E::Compact { sleeve } => self.compact_cmd(*sleeve),
             E::RespondApproval {

@@ -321,5 +321,6 @@ pub enum Intent {
         g: Gen,
         turn: u64,
         to: SleeveId,
+        status: Option<DeclaredStatus>,
     },
 }

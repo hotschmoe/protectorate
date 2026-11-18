@@ -255,6 +255,13 @@ pub struct Message {
     pub state: MsgState,
     /// Order among accepted messages. Replay assigns the same numbers.
     pub seq: u64,
+    pub report: Option<TurnReport>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TurnReport {
+    pub turn: u64,
+    pub status: Option<DeclaredStatus>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

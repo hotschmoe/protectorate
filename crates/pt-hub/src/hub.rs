@@ -287,6 +287,7 @@ impl Hub {
             harness: None,
             level: None,
             status: None,
+            reports: Vec::new(),
             entry,
         };
         let entry = wire::chat_entry(id, &line, true);

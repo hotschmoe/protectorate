@@ -19,7 +19,7 @@ use crate::model::*;
 
 pub const FORMAT: u8 = 1;
 /// Highest event tag this binary reads. Any incompatible encoding must get a new event tag.
-pub const MAX_EVENT_TAG: u8 = 46;
+pub const MAX_EVENT_TAG: u8 = 47;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -928,6 +928,31 @@ impl Wire for EventKind {
                 turn.put(w);
                 text.put(w);
             }
+            E::ReportStatus {
+                sleeve,
+                to,
+                turn,
+                text,
+                status,
+            } => {
+                w.push(47);
+                sleeve.put(w);
+                to.put(w);
+                turn.put(w);
+                text.put(w);
+                match status {
+                    None => w.push(0),
+                    Some(DeclaredStatus::Done) => w.push(1),
+                    Some(DeclaredStatus::Continuing(detail)) => {
+                        w.push(2);
+                        detail.put(w);
+                    }
+                    Some(DeclaredStatus::Blocked(detail)) => {
+                        w.push(3);
+                        detail.put(w);
+                    }
+                }
+            }
         }
     }
 
@@ -1152,6 +1177,18 @@ impl Wire for EventKind {
                 from: Wire::get(r)?,
             },
             46 => E::MailBatching,
+            47 => E::ReportStatus {
+                sleeve: Wire::get(r)?,
+                to: Wire::get(r)?,
+                turn: Wire::get(r)?,
+                text: Wire::get(r)?,
+                status: match r.tag("declared status", 3)? {
+                    0 => None,
+                    1 => Some(DeclaredStatus::Done),
+                    2 => Some(DeclaredStatus::Continuing(Wire::get(r)?)),
+                    _ => Some(DeclaredStatus::Blocked(Wire::get(r)?)),
+                },
+            },
             _ => return Err(DecodeError::UnknownTag { what: "event", tag }),
         })
     }

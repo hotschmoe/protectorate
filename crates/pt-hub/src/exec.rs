@@ -610,15 +610,26 @@ impl SleeveExec {
                 self.submit(EventKind::Continue { sleeve, text });
             }
             Intent::Report {
-                sleeve, turn, to, ..
+                sleeve,
+                turn,
+                to,
+                status,
+                ..
             } => {
                 if let Some(s) = view.state.sleeve(sleeve) {
-                    let text = crate::brief::report(&self.hub, s, &workdir(&self.hub, s), turn);
-                    self.hub.submit(EventKind::Report {
+                    let text = crate::brief::report(
+                        &self.hub,
+                        s,
+                        &workdir(&self.hub, s),
+                        turn,
+                        status.as_ref(),
+                    );
+                    self.hub.submit(EventKind::ReportStatus {
                         sleeve,
                         to,
                         turn,
                         text,
+                        status,
                     });
                 }
             }
@@ -1560,6 +1571,27 @@ impl Pump {
             hub.delta(id, g.0, ev.time_ms, entry);
             return false;
         }
+        let reports = if let Entry::UserMessage { request_id, .. } = &entry
+            && let Some(expected) = self.expects.get(request_id)
+        {
+            let view = hub.view();
+            match (
+                view.state.effects.get(&expected.effect),
+                view.state.sleeve(id),
+            ) {
+                (Some(effect), Some(sleeve)) => match &effect.kind {
+                    EffectKind::SendPrompt { request_ids, .. } => request_ids
+                        .iter()
+                        .filter_map(|key| sleeve.messages.get(key))
+                        .filter_map(wire::queued_report)
+                        .collect(),
+                    _ => Vec::new(),
+                },
+                _ => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
         self.prompt_reports(hub, &entry);
         let before = self.prev_error.take();
         let mut obs = Vec::new();
@@ -1669,6 +1701,7 @@ impl Pump {
         let note = Note {
             harness: matches!(entry, Entry::SessionInfo { .. }).then_some(harness),
             level: None,
+            reports,
         };
         // Stored before the core hears of it, so a settled view always has its text on disk.
         hub.record(id, g.0, ev.time_ms, entry, note);

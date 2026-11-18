@@ -2051,6 +2051,9 @@ for line in sys.stdin:
     if msg.get("type") != "user": continue
     msg["isReplay"] = True
     emit(msg)
+    if "hold report inbox" in line:
+        import time
+        time.sleep(15)
     if "do the work" in line:
         open("a.txt", "w").write("a\n")
         subprocess.run(g + ["add", "a.txt"], check=True)
@@ -2112,11 +2115,39 @@ for line in sys.stdin:
             .collect()
     };
 
+    hub.send("envoy", "hold report inbox");
+    eventually("Envoy is working", Duration::from_secs(30), || {
+        (hub.sleeve("envoy")["incarnation"]["activity"]["state"].as_str() == Some("working"))
+            .then_some(())
+    });
     hub.cli_env(&as_envoy, &["sleeve", "send", "worker", "do the work"])
         .ok();
+    let queued = eventually("structured queued report", Duration::from_secs(10), || {
+        let inbox = hub.cli(&["--json", "sleeve", "inbox", "envoy"]).json();
+        inbox["messages"]
+            .as_array()?
+            .iter()
+            .find(|m| m["report"]["turn"].as_u64() == Some(1))
+            .cloned()
+    });
+    assert_eq!(
+        queued["report"]["status"]["state"].as_str(),
+        Some("continuing")
+    );
+    assert_eq!(
+        queued["report"]["status"]["detail"].as_str(),
+        Some("more work")
+    );
     let (from, report) = eventually("the turn report", Duration::from_secs(60), || {
         reports().pop()
     });
+    let transcript = hub.transcript("envoy");
+    let structured = of_type(&transcript, "user_message")
+        .into_iter()
+        .find_map(|entry| entry["entry"]["reports"].as_array()?.first().cloned())
+        .expect("delivered report metadata");
+    assert_eq!(structured["status"]["state"].as_str(), Some("continuing"));
+    assert_eq!(structured["status"]["detail"].as_str(), Some("more work"));
     assert!(
         from.contains("worker"),
         "the report is mail from the worker: {from}"
@@ -2183,6 +2214,15 @@ for line in sys.stdin:
     );
     hub.wait("worker", "idle", 60);
     hub.restart();
+    let entries = hub.transcript("envoy");
+    assert!(of_type(&entries, "user_message").iter().any(|entry| {
+        entry["entry"]["reports"].as_array().is_some_and(|reports| {
+            reports.iter().any(|report| {
+                report["status"]["state"].as_str() == Some("continuing")
+                    && report["status"]["detail"].as_str() == Some("more work")
+            })
+        })
+    }));
     assert_eq!(
         hub.sleeve("worker")["last_status"]["state"].as_str(),
         Some("blocked")
@@ -2276,6 +2316,23 @@ for line in sys.stdin:
     );
     let replayed = pt_core::replay(&events);
     assert_eq!(replayed.sleeves[&id].last_status, None);
+    let envoy = replayed
+        .sleeves
+        .values()
+        .find(|s| s.name == "envoy")
+        .unwrap();
+    let report = envoy
+        .messages
+        .get(&format!("report:{}:1", id.0))
+        .unwrap()
+        .report
+        .as_ref()
+        .unwrap();
+    assert_eq!(report.turn, 1);
+    assert_eq!(
+        report.status,
+        Some(pt_core::DeclaredStatus::Continuing("more work".into()))
+    );
     let through_blocked: Vec<_> = events.iter().take_while(|event| !matches!(&event.kind,
         pt_core::EventKind::Observed { sleeve, obs: pt_core::Obs::TurnSettledStatus { status: None, .. }, .. } if *sleeve == id
     )).collect();

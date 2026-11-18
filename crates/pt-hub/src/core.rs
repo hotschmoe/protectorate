@@ -380,6 +380,7 @@ fn notify(hub: &Hub, view: &View, to: Party, sleeve: Option<SleeveId>, n: &Notic
             Note {
                 harness: None,
                 level: Some(level),
+                reports: Vec::new(),
             },
         );
     }

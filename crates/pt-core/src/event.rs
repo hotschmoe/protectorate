@@ -317,6 +317,13 @@ pub enum EventKind {
         turn: u64,
         text: String,
     },
+    ReportStatus {
+        sleeve: SleeveId,
+        to: SleeveId,
+        turn: u64,
+        text: String,
+        status: Option<DeclaredStatus>,
+    },
 }
 
 /// What target selection answered.

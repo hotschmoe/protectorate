@@ -305,6 +305,12 @@ api_records! {
         pub detail: Option<String>,
     }
 
+    pub struct QueuedTurnReport {
+        pub sleeve_id: String,
+        pub turn: u64,
+        pub status: Option<TurnStatus>,
+    }
+
     pub struct Sleeve {
         pub id: String,
         pub name: String,
@@ -551,6 +557,8 @@ api_unions! {
             from: String,
             text: String,
             steer: bool = false,
+            /// Reports included in this prompt, including a batch of several reports.
+            reports: Vec<QueuedTurnReport> = Vec::new(),
         },
         PromptAck = "prompt_ack" {
             request_id: String,
