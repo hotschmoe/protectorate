@@ -253,6 +253,9 @@ fn api_surface() {
     let snap = next(&mut s1);
     assert_eq!(snap["type"].as_str(), Some("snapshot"), "{snap}");
     let start = snap["seq"].as_u64().unwrap();
+    let live = next_raw(&mut s1);
+    assert_eq!(live["type"].as_str(), Some("live"));
+    assert_eq!(live["seq"].as_u64(), Some(start));
     assert_eq!(snap["state"]["seq"].as_u64(), Some(start));
     assert_eq!(snap["state"]["hub"]["name"].as_str(), Some("protectorate"));
     let info = eventually("hub inventory and sample", Duration::from_secs(40), || {
@@ -306,6 +309,13 @@ fn api_surface() {
     let update_seq = updates.last().unwrap()["seq"].as_u64().unwrap();
     let mut resumed = ws(port, &format!("{auth}&from_seq={update_seq}"), &[]).unwrap();
     assert_eq!(next(&mut resumed), *updates.last().unwrap());
+    let replay_live = loop {
+        let m = next_raw(&mut resumed);
+        if m["type"].as_str() == Some("live") {
+            break m;
+        }
+    };
+    assert!(replay_live["seq"].as_u64().unwrap() >= update_seq);
     let phone = pair(port, &owner, "phone");
     let seen = until(&mut s1, "event", |m| {
         m["event"]["text"].as_str() == Some("device phone paired")

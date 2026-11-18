@@ -94,8 +94,8 @@ final class HubApi {
     return parse(jsonDecode(r.body));
   }
 
-  /// State changes, starting with a snapshot unless the hub still holds every message from
-  /// `fromSeq`. The stream ends when the socket closes; reconnect with the last seq + 1.
+  /// State changes, starting with a snapshot when the resume gap is unavailable or too large.
+  /// A live marker ends catch-up; reconnect with the last applied sequence + 1.
   Stream<HubStreamMessage> events({int? fromSeq}) => openSocket(
     _url('/api/events', {if (fromSeq != null) 'from_seq': '$fromSeq'}),
     token,

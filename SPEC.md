@@ -1034,7 +1034,11 @@ shortcut is also in `REVISIT.md`.
     one greater than the last kept sequence it received. If more than 500 kept messages
     are missing, the cursor is unavailable, or no cursor is supplied, the hub sends a fresh
     snapshot instead of replaying the gap; its sequence identifies the cursor it covers.
-    Streaming deltas repeat the last kept sequence and are not replayed;
+    Streaming deltas repeat the last kept sequence and are not replayed. A `live` marker
+    follows the replay or snapshot before newer stream messages; its sequence is the last
+    kept sequence at that boundary and does not allocate a new sequence. If a live subscriber
+    falls behind the ring, a snapshot and another `live` marker replace the lost gap. Clients
+    publish the caught-up state only after `live` and discard an interrupted catch-up;
   - loopback and unix-socket listeners serve the CLI and sleeves; the trusted-proxy listener serves
     Traefik.
 

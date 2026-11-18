@@ -2525,7 +2525,8 @@ final class HubState {
 /// One message of `GET /api/events`. `seq` grows by one per kept message; a streaming
 /// delta repeats the seq of the last kept message and is not replayed on resume. The stream
 /// starts with `snapshot` unless `from_seq` is given, the gap is at most 500 kept messages,
-/// and the hub still holds every message from it.
+/// and the hub still holds every message from it. A `live` marker ends catch-up without
+/// allocating a sequence; another snapshot and marker replace a gap in a live stream.
 sealed class HubStreamMessage {
   const HubStreamMessage();
 
@@ -2533,6 +2534,7 @@ sealed class HubStreamMessage {
     final j = _object(json, 'HubStreamMessage');
     return switch (j['type']) {
       'snapshot' => HubStreamMessageSnapshot._fromMap(j),
+      'live' => HubStreamMessageLive._fromMap(j),
       'workspace' => HubStreamMessageWorkspace._fromMap(j),
       'sleeve' => HubStreamMessageSleeve._fromMap(j),
       'sleeve_removed' => HubStreamMessageSleeveRemoved._fromMap(j),
@@ -2573,6 +2575,20 @@ final class HubStreamMessageSnapshot extends HubStreamMessage {
     'seq': seq,
     'state': state.toJson(),
   };
+}
+
+/// Catch-up is complete through this sequence; subsequent messages are live.
+final class HubStreamMessageLive extends HubStreamMessage {
+  const HubStreamMessageLive({required this.seq});
+
+  factory HubStreamMessageLive._fromMap(Map<String, Object?> j) =>
+      HubStreamMessageLive(seq: _int(j['seq'], 'HubStreamMessageLive.seq'));
+
+  @override
+  final int seq;
+
+  @override
+  Map<String, Object?> toJson() => {'type': 'live', 'seq': seq};
 }
 
 final class HubStreamMessageWorkspace extends HubStreamMessage {
@@ -5635,8 +5651,8 @@ final class HubApi {
     return parse(jsonDecode(r.body));
   }
 
-  /// State changes, starting with a snapshot unless the hub still holds every message from
-  /// `fromSeq`. The stream ends when the socket closes; reconnect with the last seq + 1.
+  /// State changes, starting with a snapshot when the resume gap is unavailable or too large.
+  /// A live marker ends catch-up; reconnect with the last applied sequence + 1.
   Stream<HubStreamMessage> events({int? fromSeq}) => openSocket(
     _url('/api/events', {if (fromSeq != null) 'from_seq': '$fromSeq'}),
     token,

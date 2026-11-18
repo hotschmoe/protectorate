@@ -300,12 +300,16 @@ fn static_file(req: &Request, web: &Web) -> Response {
 }
 
 /// The snapshot message, and the bus position it covers.
-fn snapshot(hub: &Hub) -> (u64, String) {
+fn snapshot(hub: &Hub) -> (u64, u64, String) {
     let (seq, pos) = hub.bus.mark();
     let view = hub.view();
     let state = crate::snapshot::state(hub, &view, seq, &|_| true);
     let msg = HubStreamMessage::Snapshot { seq, state };
-    (pos, msg.to_json().to_string())
+    (seq, pos, msg.to_json().to_string())
+}
+
+fn live(writer: &pt_http::WsWriter, seq: u64) -> std::io::Result<()> {
+    writer.send_text(&HubStreamMessage::Live { seq }.to_json().to_string())
 }
 
 /// The WebSocket fan-out: replays from `from_seq` while the ring or the stream log still holds
@@ -329,8 +333,6 @@ fn events(
             }
             flag.store(true, Ordering::SeqCst);
         });
-        // Deltas up to here belong to messages the client already has or is about to replay.
-        let replay_to = hub.bus.pos();
         let start = match from.and_then(|f| hub.bus.resume(f)) {
             Some(Resume::Ring(pos)) => Some(pos),
             Some(Resume::Log {
@@ -345,24 +347,39 @@ fn events(
             }),
             None => None,
         };
-        let (mut cursor, replay_to) = match start {
-            Some(pos) => (pos, replay_to),
+        // Deltas up to here belong to messages the client already has or is about to replay.
+        let (replay_seq, replay_to) = hub.bus.mark();
+        let (mut cursor, replay_to, live_seq) = match start {
+            Some(pos) => (pos, replay_to, replay_seq),
             None => {
-                let (pos, text) = snapshot(&hub);
+                let (seq, pos, text) = snapshot(&hub);
                 if writer.send_text(&text).is_err() {
                     return;
                 }
-                (pos, 0)
+                (pos, pos, seq)
             }
         };
+        let mut catching_up = true;
         while !closed.load(Ordering::SeqCst) {
             if !still() {
                 let _ = writer.close(1008, "no longer authorized");
                 return;
             }
+            if catching_up && cursor >= replay_to {
+                if live(&writer, live_seq).is_err() {
+                    return;
+                }
+                catching_up = false;
+            }
             match hub.bus.since(cursor, Duration::from_secs(1)) {
                 Since::Items(items) => {
                     for i in items {
+                        if catching_up && i.pos > replay_to {
+                            if live(&writer, live_seq).is_err() {
+                                return;
+                            }
+                            catching_up = false;
+                        }
                         cursor = i.pos;
                         if !i.kept && i.pos <= replay_to {
                             continue;
@@ -373,11 +390,15 @@ fn events(
                     }
                 }
                 Since::Gap => {
-                    let (pos, text) = snapshot(&hub);
+                    let (seq, pos, text) = snapshot(&hub);
                     if writer.send_text(&text).is_err() {
                         return;
                     }
                     cursor = pos;
+                    if live(&writer, seq).is_err() {
+                        return;
+                    }
+                    catching_up = false;
                 }
             }
         }

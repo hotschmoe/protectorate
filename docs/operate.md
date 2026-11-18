@@ -627,6 +627,7 @@ Neither installer has run on a real device yet.
 The app's event stream resumes a short interruption from its last sequence. After a gap of more
 than 500 retained stream messages, or when that cursor is unavailable, the hub sends a current
 snapshot instead of replaying the gap.
+The app holds the catch-up state until the hub's `live` marker, then displays it in one update.
 
 For development, `make test-heavy` runs the large-gap reconnect scenario separately from
 `make test`.

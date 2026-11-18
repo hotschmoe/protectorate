@@ -997,6 +997,9 @@ while True: time.sleep(1)
     let snapshot = next(&mut resumed);
     assert_eq!(snapshot["type"].as_str(), Some("snapshot"));
     assert!(snapshot["seq"].as_u64().unwrap() > start + 500);
+    let live = next_raw(&mut resumed);
+    assert_eq!(live["type"].as_str(), Some("live"));
+    assert_eq!(live["seq"], snapshot["seq"]);
     eprintln!(
         "reconnect snapshot: {} bytes; observed backlog: {backlog_bytes} bytes",
         snapshot.to_string().len()

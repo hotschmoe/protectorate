@@ -556,6 +556,15 @@ pub fn ws(port: u16, query: &str, headers: &[(&str, &str)]) -> std::io::Result<p
 }
 
 pub fn next(ws: &mut pt_http::WebSocket) -> Value {
+    loop {
+        let m = next_raw(ws);
+        if m["type"].as_str() != Some("live") {
+            return m;
+        }
+    }
+}
+
+pub fn next_raw(ws: &mut pt_http::WebSocket) -> Value {
     next_for(ws, "a stream message")
 }
 
@@ -583,6 +592,9 @@ pub fn until(ws: &mut pt_http::WebSocket, kind: &str, pick: impl Fn(&Value) -> b
             current_diagnostic()
         );
         let m = next_for(ws, &format!("a {kind} message"));
+        if m["type"].as_str() == Some("live") {
+            continue;
+        }
         let hit = m["type"].as_str() == Some(kind) && pick(&m);
         seen.push(m);
         if hit {
