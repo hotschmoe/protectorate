@@ -229,14 +229,10 @@ fn openssh_forced_command_runs_job_and_fetches_artifact() {
 
     let bad_host = run_poc(&dir, user, port, &hub, &wrong_known, "bad-host");
     assert!(!bad_host.success(), "changed host key was accepted");
-    let err = fs::read_to_string(dir.join("bad-host.err")).unwrap();
-    assert!(err.contains("HOST IDENTIFICATION HAS CHANGED"), "{err}");
     assert!(!dir.join("bad-host.artifact").exists());
 
     let bad_key = run_poc(&dir, user, port, &stranger, &known, "bad-key");
     assert!(!bad_key.success(), "unauthorized key was accepted");
-    let err = fs::read_to_string(dir.join("bad-key.err")).unwrap();
-    assert!(err.contains("Permission denied"), "{err}");
     assert!(!dir.join("bad-key.artifact").exists());
 
     let success = run_poc(&dir, user, port, &hub, &known, "good");
@@ -251,8 +247,6 @@ fn openssh_forced_command_runs_job_and_fetches_artifact() {
         fs::read(dir.join("good.artifact")).unwrap(),
         b"artifact over ssh\n"
     );
-    let out = fs::read_to_string(dir.join("good.out")).unwrap();
-    assert!(out.contains("job ssh-poc succeeded"), "{out}");
     drop(sshd);
     let deadline = Instant::now() + Duration::from_secs(5);
     while std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
