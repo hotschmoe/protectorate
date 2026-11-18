@@ -1,6 +1,6 @@
 #!/bin/sh
 # Replays every committed fuzz seed through the real fuzz targets, so a fixed crash or a seed
-# that encodes an edge case stays checked by `make test`. Each crates/*/fuzz is its own
+# that encodes an edge case stays checked by `make test-heavy`. Each crates/*/fuzz is its own
 # workspace; its targets are built with plain cargo (libFuzzer's runtime only executes the
 # files it is handed, it does not fuzz) and every seed of the crate goes through every target
 # of the crate. A panic aborts the target and fails the run.
@@ -25,13 +25,15 @@ layout() {
         pt-drivers) echo "claude codex grok pi" ;;
         pt-embed) echo "inflate" ;;
         pt-frame) echo "decode reply request roundtrip" ;;
-        pt-hash) echo "-" ;;
+        pt-hash) echo "differential" ;;
         pt-history) echo "extract_lines segment tail tokenize" ;;
-        pt-http) echo "request ws_frame" ;;
-        pt-journal) echo "-" ;;
+        pt-http) echo "client_deadline client_exchange request ws_frame" ;;
+        pt-journal) echo "recovery" ;;
         pt-json) echo "files" ;;
         pt-qr) echo "encode" ;;
         pt-quota) echo "claude codex grok local select" ;;
+        pt-sandbox) echo "paths" ;;
+        pt-sys) echo "pdeath" ;;
         pt-update) echo "sums tags" ;;
         *) return 1 ;;
     esac
@@ -42,7 +44,7 @@ fail() {
     exit 1
 }
 
-crates="pt-api pt-core pt-drivers pt-embed pt-frame pt-hash pt-history pt-http pt-journal pt-json pt-qr pt-quota pt-update"
+crates="pt-api pt-core pt-drivers pt-embed pt-frame pt-hash pt-history pt-http pt-journal pt-json pt-qr pt-quota pt-sandbox pt-sys pt-update"
 
 for dir in crates/*/fuzz; do
     crate=$(basename "$(dirname "$dir")")

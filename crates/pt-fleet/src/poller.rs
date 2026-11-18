@@ -273,6 +273,12 @@ fn refresh(
 ) -> Vec<Gone> {
     let status = s.fleet.status();
     if let Err(e) = &status {
+        #[cfg(debug_assertions)]
+        if let Some(path) = std::env::var_os("PROTECTORATE_FLEET_TEST_STATUS_FAILURE")
+            && std::fs::read(&path).ok().as_deref() == Some(b"armed")
+        {
+            let _ = std::fs::write(path, b"failed");
+        }
         eprintln!("pt-fleet: poller: {e}");
     }
     for n in nodes {

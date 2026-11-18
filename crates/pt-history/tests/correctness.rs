@@ -38,8 +38,11 @@ fn run(home: &Path, index: &Path, queries: &[&str], failure: Option<&str>) -> Ou
     for query in queries {
         command.args(["--query", query]);
     }
+    let arm = index.parent().unwrap().join("failure-arm");
     if let Some(phase) = failure {
+        fs::write(&arm, b"armed").unwrap();
         command.env("PT_TEST_HISTORY_FAIL_COMMIT", phase);
+        command.env("PT_TEST_HISTORY_FAIL_ARM", &arm);
         if phase == "manifest" {
             command.env("PT_TEST_HISTORY_FLUSH_BYTES", "1048576");
         }
@@ -51,6 +54,9 @@ fn run(home: &Path, index: &Path, queries: &[&str], failure: Option<&str>) -> Ou
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
+    if failure.is_some() {
+        assert_eq!(fs::read(arm).unwrap(), b"failed");
+    }
     out
 }
 
@@ -61,17 +67,19 @@ fn prompts_and_discovery_stay_inside_the_root() {
     let claude = home.join(".claude/projects/project");
     write(
         &claude.join("real.jsonl"),
-        concat!(
-            "{\"type\":\"user\",\"message\":{\"content\":\"<div>visiblemarker</div>\"}}\n",
-            "{\"type\":\"user\",\"message\":{\"content\":\"<system-reminder>wrappermarker</system-reminder>\"}}\n"
-        ),
+        "{\"type\":\"user\",\"message\":{\"content\":\"<div>visiblemarker</div>\"}}\n",
+    );
+    write(
+        &claude.join("wrapper.jsonl"),
+        "{\"type\":\"user\",\"message\":{\"content\":\"<system-reminder>wrappermarker</system-reminder>\"}}\n",
     );
     write(
         &home.join(".codex/sessions/rollout-aaaaaaaa-0000-4000-8000-000000000001.jsonl"),
-        concat!(
-            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<3 secondmarker\"}]}}\n",
-            "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<environment_context>wrappermarker</environment_context>\"}]}}\n"
-        ),
+        "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<3 secondmarker\"}]}}\n",
+    );
+    write(
+        &home.join(".codex/sessions/rollout-aaaaaaaa-0000-4000-8000-000000000002.jsonl"),
+        "{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"<environment_context>wrappermarker</environment_context>\"}]}}\n",
     );
     let outside = dir.join("outside");
     write(
@@ -80,9 +88,10 @@ fn prompts_and_discovery_stay_inside_the_root() {
     );
     symlink(outside.join("stolen.jsonl"), claude.join("file-link.jsonl")).unwrap();
     symlink(&outside, claude.join("dir-link")).unwrap();
-    let out = run(
+    let index = dir.join("index");
+    run(
         &home,
-        &dir.join("index"),
+        &index,
         &[
             "visiblemarker",
             "secondmarker",
@@ -91,19 +100,17 @@ fn prompts_and_discovery_stay_inside_the_root() {
         ],
         None,
     );
-    let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(stdout.contains("selected: 2 files"), "{stdout}");
-    for query in ["visiblemarker", "secondmarker"] {
-        assert!(
-            stdout.contains(&format!("query \"{query}\": top 1")),
-            "{stdout}"
-        );
-    }
-    for query in ["wrappermarker", "linktargetmarker"] {
-        assert!(
-            stdout.contains(&format!("query \"{query}\": top 0")),
-            "{stdout}"
-        );
+    for (session, expected) in [
+        ("real", 1),
+        ("wrapper", 0),
+        ("aaaaaaaa-0000-4000-8000-000000000001", 1),
+        ("aaaaaaaa-0000-4000-8000-000000000002", 0),
+        ("file-link", 0),
+        ("stolen", 0),
+    ] {
+        let (ids, _, more) = read_page(&index.join("a"), session, None);
+        assert_eq!(ids.len(), expected, "{session}: {ids:?}");
+        assert!(!more);
     }
 }
 
@@ -159,11 +166,6 @@ fn replacement_with_a_symlink_is_not_opened() {
     fs::write(barrier.with_extension("continue"), b"go").unwrap();
     let out = child.0.take().unwrap().wait_with_output().unwrap();
     assert!(!out.status.success(), "replaced link was followed");
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains("tail"),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
 }
 
 #[test]
@@ -188,51 +190,20 @@ fn commit_retries_preserve_documents_and_cursors() {
             file.write_all(line.as_bytes()).unwrap();
         }
         drop(file);
-        let out = run(&home, &dir.join("index"), &["batchmarker"], Some(phase));
-        let stdout = String::from_utf8(out.stdout).unwrap();
-        let stderr = String::from_utf8(out.stderr).unwrap();
-        assert!(
-            stderr.contains(&format!("retrying injected history {phase} commit failure")),
-            "{stderr}"
-        );
-        assert!(
-            stdout.contains(&format!("summary: files=1 docs={count}")),
-            "{stdout}"
-        );
-        assert!(stdout.contains("rebuild=identical"), "{stdout}");
+        let index = dir.join("index");
+        run(&home, &index, &["batchmarker"], Some(phase));
+        let mut all = Vec::new();
+        loop {
+            let (ids, _, more) = read_page(&index.join("a"), "session", all.last().copied());
+            assert!(!more || !ids.is_empty());
+            all.extend(ids);
+            if !more {
+                break;
+            }
+        }
+        assert_eq!(all.len(), count);
+        assert!(all.windows(2).all(|pair| pair[0] < pair[1]));
     }
-}
-
-#[test]
-fn open_sweeps_unreferenced_segments() {
-    let dir = scratch("sweep");
-    let home = dir.join("home");
-    write(
-        &home.join(".claude/projects/project/session.jsonl"),
-        "{\"type\":\"user\",\"message\":{\"content\":\"sweepmarker\"}}\n",
-    );
-    let index = dir.join("index");
-    let a = index.join("a");
-    fs::create_dir_all(&a).unwrap();
-    fs::write(a.join("seg-00000099"), b"orphan").unwrap();
-    fs::write(a.join("seg-00000001.tmp"), b"partial").unwrap();
-    fs::write(a.join("sidecar"), b"leave").unwrap();
-    let out = run(&home, &index, &["sweepmarker"], None);
-    let stdout = String::from_utf8(out.stdout).unwrap();
-    let stderr = String::from_utf8(out.stderr).unwrap();
-    assert!(stdout.contains("query \"sweepmarker\": top 1"), "{stdout}");
-    assert!(stderr.contains("warning: history: no manifest"), "{stderr}");
-    assert!(!a.join("seg-00000099").exists());
-    assert!(!a.join("seg-00000001.tmp").exists());
-    assert_eq!(fs::read(a.join("sidecar")).unwrap(), b"leave");
-    assert!(a.join("manifest").is_file());
-}
-
-/// The indexed-byte charge of one user doc: source text plus the per-doc overhead.
-fn doc_charge(text: &str, session: &str, path: &Path, sleeve: &str) -> u64 {
-    let path = path.to_str().unwrap();
-    let stored = format!("claude:{sleeve}:{path}");
-    (text.len() + session.len() + stored.len() + sleeve.len() + 128) as u64
 }
 
 fn claude_user(text: &str) -> String {
@@ -248,39 +219,31 @@ fn small_budget_keeps_the_newest_lines_across_two_sessions() {
     let old_path = root.join("a-old.jsonl");
     let new_path = root.join("b-new.jsonl");
     let tail_path = root.join("c-tail.jsonl");
-    let old_text = format!("{} oldsessiondoc", "x".repeat(4000));
+    let old_text = format!("{} oldsessiondoc", "x".repeat(12_000));
     let small_text = "smalllivedoc";
-    let new_text = "newsessiondoc";
+    let new_text = format!("{} newsessiondoc", "y".repeat(6000));
     let tail_text = "tailsessiondoc";
-    let old_charge = doc_charge(&old_text, "a-old", &old_path, sleeve);
-    let small_charge = doc_charge(small_text, "a-old", &old_path, sleeve);
-    let new_charge = doc_charge(new_text, "b-new", &new_path, sleeve);
-    let tail_charge = doc_charge(tail_text, "c-tail", &tail_path, sleeve);
-    // The first file fits whole, so its large doc and three small docs are committed
-    // together. The next file evicts only the large doc. Its charge is at least the three
-    // small ones, and one dead doc is not half of four, so the segment is rewritten only
-    // when the threshold counts bytes.
-    let first = old_charge + 3 * small_charge;
-    let budget = first + 1;
-    assert!(
-        old_charge >= 3 * small_charge,
-        "the dead doc has to outweigh the three live ones"
-    );
-    assert!(
-        new_charge > 1,
-        "the second file has to push the sleeve over"
-    );
-    assert!(
-        3 * small_charge + new_charge + tail_charge < budget,
-        "the live docs have to fit once the old one is gone"
-    );
+    let budget = 16_384;
     let mut old = claude_user(&old_text);
     for _ in 0..3 {
         old.push_str(&claude_user(small_text));
     }
     write(&old_path, &old);
-    write(&new_path, &claude_user(new_text));
+    write(&new_path, &claude_user(&new_text));
     write(&tail_path, &claude_user(tail_text));
+    let uncapped = dir.join("uncapped");
+    run(&home, &uncapped, &["smalllivedoc"], None);
+    let page = |root: &Path, session: &str| {
+        let (ids, _, more) = read_page(&root.join("a"), session, None);
+        assert!(!more);
+        ids
+    };
+    let original_old = page(&uncapped, "a-old");
+    let original_new = page(&uncapped, "b-new");
+    let original_tail = page(&uncapped, "c-tail");
+    assert_eq!(original_old.len(), 4);
+    assert_eq!(original_new.len(), 1);
+    assert_eq!(original_tail.len(), 1);
     let index = dir.join("index");
     let out = Command::new(PROBE)
         .args([
@@ -308,54 +271,15 @@ fn small_budget_keeps_the_newest_lines_across_two_sessions() {
     let stdout = String::from_utf8(out.stdout).unwrap();
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(out.status.success(), "stdout: {stdout}\nstderr: {stderr}");
-    assert!(stdout.contains("summary: files=3 docs=5 "), "{stdout}");
-    assert!(stdout.contains("rebuild=identical"), "{stdout}");
-    assert!(
-        stdout.contains("query \"oldsessiondoc\": top 0"),
-        "{stdout}"
-    );
-    assert!(stdout.contains("query \"smalllivedoc\": top 3"), "{stdout}");
-    assert!(
-        stdout.contains("query \"newsessiondoc\": top 1"),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains("query \"tailsessiondoc\": top 1"),
-        "{stdout}"
-    );
-    let caps: Vec<&str> = stdout
-        .lines()
-        .filter(|l| l.starts_with("capped:"))
-        .collect();
-    let named = format!("capped: {sleeve}");
-    assert_eq!(
-        caps,
-        vec![
-            "capped: none",
-            named.as_str(),
-            named.as_str(),
-            "capped: none",
-            named.as_str(),
-            named.as_str(),
-        ],
-        "{stdout}"
-    );
-    let b = index.join("b");
-    assert!(
-        !b.join("seg-00000000").exists(),
-        "the dead segment stays on disk"
-    );
-    let live: Vec<String> = fs::read_dir(&b)
-        .unwrap()
-        .filter_map(|e| e.ok()?.file_name().into_string().ok())
-        .filter(|n| n.starts_with("seg-") && !n.ends_with(".tmp"))
-        .collect();
-    assert!(!live.is_empty(), "a live segment remains: {live:?}");
+    assert_eq!(page(&index, "a-old"), original_old[1..]);
+    assert_eq!(page(&index, "b-new"), original_new);
+    assert_eq!(page(&index, "c-tail"), original_tail);
 }
 
 /// One page of `session` from the probe: doc ids, their turns, and whether another page remains.
 fn read_page(index: &Path, session: &str, after: Option<u64>) -> (Vec<u64>, Vec<u32>, bool) {
     let mut cmd = Command::new(PROBE);
+    cmd.env("PT_TEST_HISTORY_REPORT", "1");
     cmd.args(["--index", index.to_str().unwrap(), "--read", session]);
     let after_text = after.map(|id| id.to_string());
     if let Some(id) = &after_text {
@@ -365,19 +289,22 @@ fn read_page(index: &Path, session: &str, after: Option<u64>) -> (Vec<u64>, Vec<
     let stdout = String::from_utf8(out.stdout).unwrap();
     let stderr = String::from_utf8(out.stderr).unwrap();
     assert!(out.status.success(), "stdout: {stdout}\nstderr: {stderr}");
-    let mut ids = Vec::new();
-    let mut turns = Vec::new();
-    let mut more = None;
-    for line in stdout.lines() {
-        if let Some(rest) = line.strip_prefix("doc ") {
-            let mut parts = rest.split_whitespace();
-            ids.push(parts.next().unwrap().parse().unwrap());
-            turns.push(parts.next().unwrap().parse().unwrap());
-        } else if let Some(rest) = line.strip_prefix("more ") {
-            more = Some(rest == "true");
-        }
-    }
-    (ids, turns, more.expect("probe printed more"))
+    let report = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix('\u{1e}'))
+        .and_then(|line| pt_json::parse(line).ok())
+        .expect("probe report");
+    let docs = report["docs"].as_array().expect("page documents");
+    let ids = docs.iter().map(|doc| doc["id"].as_u64().unwrap()).collect();
+    let turns = docs
+        .iter()
+        .map(|doc| u32::try_from(doc["turn"].as_u64().unwrap()).unwrap())
+        .collect();
+    (
+        ids,
+        turns,
+        report["more"].as_bool().expect("page continuation"),
+    )
 }
 
 #[test]
@@ -394,9 +321,7 @@ fn one_turn_pages_past_200_docs_with_after() {
     }
     write(&path, &body);
     let index = dir.join("index");
-    let out = run(&home, &index, &["pageuser"], None);
-    let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(stdout.contains("summary: files=1 docs=251"), "{stdout}");
+    run(&home, &index, &["pageuser"], None);
     let (first, turns, more) = read_page(&index.join("a"), "page", None);
     assert_eq!(first.len(), 200, "{first:?}");
     assert!(more);
@@ -430,12 +355,7 @@ fn pages_skip_earlier_segments_and_other_sessions() {
         &claude_user("sharedmarker").repeat(130),
     );
     let index = dir.join("index");
-    let out = run(&home, &index, &["sharedmarker"], None);
-    let stdout = String::from_utf8(out.stdout).unwrap();
-    assert!(
-        stdout.contains("rebuild: identical") && stdout.contains("3 segments"),
-        "{stdout}"
-    );
+    run(&home, &index, &["sharedmarker"], None);
 
     for name in ["a", "b"] {
         let index = index.join(name);

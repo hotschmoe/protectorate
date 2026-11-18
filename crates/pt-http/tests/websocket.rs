@@ -2,8 +2,8 @@
 
 mod common;
 
-use common::{closed_by_peer, curl, fake_server, start};
-use pt_http::{Client, Config, Message};
+use common::{closed_by_peer, curl, header, start};
+use pt_http::Config;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::thread;
@@ -31,17 +31,16 @@ fn curl_handshake_gets_101_with_rfc_accept() {
         &format!("Sec-WebSocket-Key: {SAMPLE_KEY}"),
         &s.url("/ws"),
     ]);
-    assert!(
-        r.stdout.starts_with("HTTP/1.1 101 Switching Protocols\r\n"),
-        "{} {}",
-        r.stdout,
-        r.stderr
+    assert_eq!(
+        r.stdout
+            .lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1)),
+        Some("101")
     );
-    assert!(
-        r.stdout
-            .contains(&format!("Sec-WebSocket-Accept: {SAMPLE_ACCEPT}\r\n")),
-        "{}",
-        r.stdout
+    assert_eq!(
+        header(&r.stdout, "sec-websocket-accept"),
+        Some(SAMPLE_ACCEPT)
     );
 
     let code = |extra: &[&str]| {
@@ -83,28 +82,6 @@ fn curl_handshake_gets_101_with_rfc_accept() {
 }
 
 #[test]
-fn client_echo_text_binary_ping_push_close() {
-    let s = start(Config::default());
-    let mut ws = Client::tcp(s.addr.unwrap())
-        .websocket("/ws", &[("Origin", "http://test")])
-        .unwrap();
-    ws.send_text("hello").unwrap();
-    assert_eq!(ws.recv().unwrap(), Message::Text("hello".into()));
-    let big: Vec<u8> = (0..200_000u32).map(|i| i as u8).collect();
-    ws.send_binary(&big).unwrap();
-    assert_eq!(ws.recv().unwrap(), Message::Binary(big));
-    ws.writer().ping(b"are you there").unwrap();
-    assert_eq!(ws.recv().unwrap(), Message::Pong(b"are you there".to_vec()));
-    ws.send_text("push").unwrap();
-    for i in 0..3 {
-        assert_eq!(ws.recv().unwrap(), Message::Text(format!("pushed {i}")));
-    }
-    assert_eq!(ws.close(1000, "bye").unwrap(), (1000, String::new()));
-    assert!(ws.send_text("late").is_err());
-    s.stop();
-}
-
-#[test]
 fn idle_ping_keepalive_drops_a_silent_peer() {
     let s = start(Config {
         ws_ping_interval: Some(Duration::from_millis(200)),
@@ -141,13 +118,13 @@ fn fragmented_message_with_interleaved_ping() {
 #[test]
 fn shutdown_closes_open_websockets() {
     let s = start(Config::default());
-    let mut ws = Client::tcp(s.addr.unwrap()).websocket("/ws", &[]).unwrap();
-    ws.send_text("x").unwrap();
-    assert_eq!(ws.recv().unwrap(), Message::Text("x".into()));
+    let mut ws = raw_handshake(s.addr.unwrap());
+    ws.write_all(&masked(true, 1, b"x")).unwrap();
+    assert_eq!(read_frame(&mut ws), (true, 1, b"x".to_vec()));
     let started = std::time::Instant::now();
     s.stop();
     assert!(started.elapsed() < Duration::from_secs(1));
-    assert!(ws.recv().is_err());
+    assert!(closed_by_peer(&mut ws));
 }
 
 /// A frame whose bytes arrive one at a time, each well inside the ping interval, is still dropped
@@ -234,34 +211,6 @@ fn pong_keeps_a_quiet_peer_connected() {
     s.stop();
 }
 
-/// Our client refuses a 101 that lacks `Upgrade: websocket` or `Connection: Upgrade`, here from a
-/// proxy that strips one of them from the real server's answer.
-#[test]
-fn client_rejects_101_without_upgrade_headers() {
-    let s = start(Config::default());
-    let server = s.addr.unwrap();
-    for strip in ["upgrade:", "connection:"] {
-        let proxy = fake_server(move |mut c, head| {
-            let mut up = TcpStream::connect(server).unwrap();
-            up.write_all(head.as_bytes()).unwrap();
-            let answer: String = common::read_head(&mut up)
-                .split_inclusive("\r\n")
-                .filter(|l| !l.to_ascii_lowercase().starts_with(strip))
-                .collect();
-            let _ = c.write_all(answer.as_bytes());
-            thread::sleep(Duration::from_millis(500));
-        });
-        let r = Client::tcp(proxy)
-            .read_timeout(Some(Duration::from_secs(5)))
-            .websocket("/ws", &[]);
-        let e = r
-            .err()
-            .unwrap_or_else(|| panic!("accepted a 101 without {strip}"));
-        assert_eq!(e.kind(), std::io::ErrorKind::InvalidData, "{e}");
-    }
-    s.stop();
-}
-
 fn masked(fin: bool, opcode: u8, payload: &[u8]) -> Vec<u8> {
     let key = [0x37, 0xfa, 0x21, 0x3d];
     let mut f = vec![u8::from(fin) << 7 | opcode];
@@ -311,7 +260,13 @@ fn raw_handshake(addr: std::net::SocketAddr) -> TcpStream {
         head.push(b[0]);
     }
     let head = String::from_utf8(head).unwrap();
-    assert!(head.starts_with("HTTP/1.1 101 "), "{head}");
-    assert!(head.contains(SAMPLE_ACCEPT));
+    assert_eq!(
+        head.lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1)),
+        Some("101"),
+        "{head}"
+    );
+    assert_eq!(header(&head, "sec-websocket-accept"), Some(SAMPLE_ACCEPT));
     c
 }

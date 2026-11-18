@@ -13,10 +13,21 @@ use miniz_oxide::inflate::decompress_to_vec_with_limit;
 
 const LIMIT: usize = 1 << 20;
 
+fn crc32_reference(data: &[u8]) -> u32 {
+    let mut crc = !0u32;
+    for &byte in data {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0xedb8_8320 & 0u32.wrapping_sub(crc & 1));
+        }
+    }
+    !crc
+}
+
 fn gzip(deflated: &[u8], data: &[u8]) -> Vec<u8> {
     let mut g = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255];
     g.extend_from_slice(deflated);
-    g.extend_from_slice(&pt_embed::crc32(data).to_le_bytes());
+    g.extend_from_slice(&crc32_reference(data).to_le_bytes());
     g.extend_from_slice(&(data.len() as u32).to_le_bytes());
     g
 }
@@ -44,11 +55,13 @@ fuzz_target!(|input: &[u8]| {
         }
         1 => {
             let packed = compress_to_vec(data, mode / 3 % 11);
-            let (out, used) = pt_embed::inflate(&packed, LIMIT).expect("miniz_oxide's output inflates");
+            let (out, used) =
+                pt_embed::inflate(&packed, LIMIT).expect("miniz_oxide's output inflates");
             assert_eq!(out, data);
             assert_eq!(used, packed.len());
         }
         _ => {
+            assert_eq!(pt_embed::crc32(data), crc32_reference(data));
             let mut stored = Vec::new();
             for (i, c) in data.chunks(1000).enumerate() {
                 let last = (i + 1) * 1000 >= data.len();
@@ -67,10 +80,16 @@ fuzz_target!(|input: &[u8]| {
                 let n = bad.len();
                 bad[n - 8] ^= 1;
                 assert!(pt_embed::gunzip(&bad, LIMIT).is_err(), "a bad CRC passed");
-                assert!(pt_embed::gunzip(&g[..n - 1], LIMIT).is_err(), "a cut trailer passed");
+                assert!(
+                    pt_embed::gunzip(&g[..n - 1], LIMIT).is_err(),
+                    "a cut trailer passed"
+                );
                 let mut more = g.clone();
                 more.push(0);
-                assert!(pt_embed::gunzip(&more, LIMIT).is_err(), "trailing data passed");
+                assert!(
+                    pt_embed::gunzip(&more, LIMIT).is_err(),
+                    "trailing data passed"
+                );
             }
         }
     }

@@ -183,6 +183,10 @@ pub fn start_quotas(hub: &Arc<Hub>) {
                     };
                     match result {
                         Ok(()) => {
+                            #[cfg(debug_assertions)]
+                            if let Some(path) = std::env::var_os("PT_TEST_QUOTA_RENEWED") {
+                                let _ = std::fs::write(path, b"renewed");
+                            }
                             info!("quota: renewed the idle {sub:?} login through its CLI");
                             cache.reread(sub);
                             cache.refresh(pt_quota::now_ms(), false);

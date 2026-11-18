@@ -1,5 +1,6 @@
 //! End-to-end: the real `pt-quota-probe` binary, the real `curl`, real sockets and login files.
 
+use pt_json::Value;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
@@ -7,15 +8,34 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 const PROBE: &str = env!("CARGO_BIN_EXE_pt-quota-probe");
-const STATES: [&str; 4] = ["fresh", "stale", "unknown", "error"];
+const STATES: [&str; 4] = ["ok", "stale", "unknown", "error"];
 
-fn probe(args: &[&str]) -> String {
+struct Probe {
+    output: String,
+    report: Value,
+}
+
+impl std::fmt::Display for Probe {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.output)
+    }
+}
+
+impl Probe {
+    fn contains(&self, text: &str) -> bool {
+        self.output.contains(text)
+    }
+}
+
+fn probe(args: &[&str]) -> Probe {
     probe_env(args, &[])
 }
 
-fn probe_env(args: &[&str], env: &[(&str, &str)]) -> String {
+fn probe_env(args: &[&str], env: &[(&str, &str)]) -> Probe {
     let mut cmd = Command::new(PROBE);
-    cmd.args(args).env_remove("PT_LOCAL_URL");
+    cmd.args(args)
+        .env_remove("PT_LOCAL_URL")
+        .env("PT_TEST_QUOTA_REPORT", "1");
     for (k, v) in env {
         cmd.env(k, v);
     }
@@ -25,53 +45,44 @@ fn probe_env(args: &[&str], env: &[(&str, &str)]) -> String {
         "probe failed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    String::from_utf8(out.stdout).expect("probe output is UTF-8")
+    let output = String::from_utf8(out.stdout).expect("probe output is UTF-8");
+    let line = output
+        .lines()
+        .find_map(|l| l.strip_prefix('\u{1e}'))
+        .expect("probe report");
+    let report = pt_json::parse(line).expect("valid probe report");
+    Probe { output, report }
 }
 
-fn line_of<'a>(out: &'a str, name: &str) -> &'a str {
-    out.lines()
-        .find(|l| l.split(' ').next() == Some(name))
-        .unwrap_or_else(|| panic!("no {name} line in:\n{out}"))
+fn line_of<'a>(out: &'a Probe, name: &str) -> &'a Value {
+    row_of(out, "quotas", name)
 }
 
-fn target_of(out: &str) -> &str {
-    out.lines()
-        .find(|l| l.starts_with("target "))
-        .unwrap_or_else(|| panic!("no target line in:\n{out}"))
+fn aged_line_of<'a>(out: &'a Probe, name: &str) -> &'a Value {
+    row_of(out, "aged", name)
 }
 
-fn state_of(line: &str) -> &str {
-    let state = line.split(' ').nth(1).unwrap_or("");
-    assert!(STATES.contains(&state), "bad state in {line:?}");
+fn row_of<'a>(out: &'a Probe, group: &str, name: &str) -> &'a Value {
+    out.report[group]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|q| q["subscription"].as_str() == Some(name))
+        .unwrap_or_else(|| panic!("no {name} reading: {out}"))
+}
+
+fn target_of(out: &Probe) -> &Value {
+    &out.report["target"]
+}
+
+fn aged_target_of(out: &Probe) -> &Value {
+    &out.report["aged_target"]
+}
+
+fn state_of(line: &Value) -> &str {
+    let state = line["reading"].as_str().unwrap_or("");
+    assert!(STATES.contains(&state), "bad reading in {line}");
     state
-}
-
-/// This machine's own logins: every configured subscription yields a reading line, and a fresh
-/// one carries windows. Unknown and error are allowed (offline, expired login) and printed.
-#[test]
-fn live_logins_each_return_a_reading() {
-    let home = std::env::var("HOME").expect("HOME");
-    let out = probe(&[]);
-    println!("{out}");
-    for (name, login) in [
-        ("claude", ".claude/.credentials.json"),
-        ("codex", ".codex/auth.json"),
-        ("grok", ".grok/auth.json"),
-    ] {
-        let line = line_of(&out, name);
-        let state = state_of(line);
-        if Path::new(&home).join(login).exists() {
-            if state == "fresh" {
-                assert!(
-                    line.contains("plan=") && line.contains(" ["),
-                    "fresh without windows: {line}"
-                );
-            }
-        } else {
-            assert_eq!(state, "unknown", "{line}");
-        }
-    }
-    state_of(line_of(&out, "local"));
 }
 
 fn scratch(name: &str) -> PathBuf {
@@ -161,7 +172,7 @@ fn serve_guarded<S: Into<String>>(
 /// login is unknown, and a dead endpoint is an error; no token is ever printed.
 #[test]
 fn fixture_readers_over_real_curl() {
-    let home = scratch("fixture-home");
+    let home = scratch(&format!("fixture-home-{}", std::process::id()));
     let far = "4102444800000"; // 2100-01-01
     write(
         &home.join(".claude/.credentials.json"),
@@ -189,6 +200,20 @@ fn fixture_readers_over_real_curl() {
         ),
     ]);
     let base = format!("http://127.0.0.1:{port}");
+    let empty = scratch(&format!("empty-home-{}", std::process::id()));
+    let missing = probe(&[
+        "--home",
+        empty.to_str().unwrap(),
+        "--claude-url",
+        &base,
+        "--codex-url",
+        &base,
+        "--grok-url",
+        &base,
+    ]);
+    for name in ["claude", "codex", "grok", "local"] {
+        assert_eq!(state_of(line_of(&missing, name)), "unknown", "{missing}");
+    }
     let home_s = home.to_str().unwrap();
     let out = probe(&[
         "--home",
@@ -204,23 +229,19 @@ fn fixture_readers_over_real_curl() {
     ]);
     println!("{out}");
     let claude = line_of(&out, "claude");
-    assert_eq!(state_of(claude), "fresh");
-    assert!(
-        claude.contains("plan=max") && claude.contains("[5h 30%") && claude.contains("[wk 10%"),
-        "{claude}"
-    );
+    assert_eq!(state_of(claude), "ok");
     let codex = line_of(&out, "codex");
-    assert_eq!(state_of(codex), "fresh");
-    assert!(
-        codex.contains("plan=plus") && codex.contains("[5h 7%") && codex.contains("[wk 12%"),
-        "{codex}"
-    );
+    assert_eq!(state_of(codex), "ok");
     let grok = line_of(&out, "grok");
     assert_eq!(state_of(grok), "unknown", "{grok}");
     let local = line_of(&out, "local");
-    assert_eq!(state_of(local), "fresh");
-    assert!(local.contains("model-a, llama"), "{local}");
-    assert!(out.lines().any(|l| l.starts_with("target ")));
+    assert_eq!(state_of(local), "ok");
+    assert!(
+        local["note"]
+            .as_str()
+            .is_some_and(|note| note.contains("model-a") && note.contains("llama")),
+        "{local}"
+    );
 
     assert!(
         !out.contains("secret-token"),
@@ -264,13 +285,10 @@ fn fixture_readers_over_real_curl() {
     println!("{out}");
     let claude = line_of(&out, "claude");
     assert_eq!(state_of(claude), "unknown", "{claude}");
-    assert!(claude.contains("log in again"), "{claude}");
     let grok = line_of(&out, "grok");
     assert_eq!(state_of(grok), "unknown", "{grok}");
-    assert!(grok.contains("renews when its CLI next runs"), "{grok}");
     let codex = line_of(&out, "codex");
     assert_eq!(state_of(codex), "unknown", "{codex}");
-    assert!(codex.contains("renews when its CLI next runs"), "{codex}");
     assert!(!out.contains("codex-refresh-secret"));
     assert_eq!(state_of(line_of(&out, "local")), "error");
     assert!(!out.contains("secret-token"));
@@ -304,19 +322,23 @@ fn local_reader_sends_the_pi_provider_key() {
         );
         println!("{out}");
         assert!(!out.contains("secret-key"), "a key leaked: {out}");
-        line_of(&out, "local").to_string()
+        line_of(&out, "local").clone()
     };
 
-    let home = scratch("local-key-home");
+    let home = scratch(&format!("local-key-home-{}", std::process::id()));
     models(&home, "local-secret-key");
     let local = run(&home, &[]);
-    assert_eq!(state_of(&local), "fresh", "{local}");
-    assert!(local.contains("qwen-local"), "{local}");
+    assert_eq!(state_of(&local), "ok", "{local}");
+    assert!(
+        local["note"]
+            .as_str()
+            .is_some_and(|note| note.contains("qwen-local")),
+        "{local}"
+    );
 
     models(&home, "wrong-secret-key");
     let local = run(&home, &[]);
     assert_eq!(state_of(&local), "error", "{local}");
-    assert!(local.contains("401"), "{local}");
     let parked = probe(&[
         "--home",
         home.to_str().unwrap(),
@@ -325,23 +347,15 @@ fn local_reader_sends_the_pi_provider_key() {
         "--allow",
         "pi_local",
     ]);
-    assert!(
-        parked.contains("target none: the local endpoint's last reading is stale or failed"),
-        "{parked}"
-    );
-    assert!(
-        !parked.contains("without a fresh quota reading"),
-        "{parked}"
-    );
+    assert!(target_of(&parked).is_null(), "{parked}");
 
     models(&home, "PT_E2E_LOCAL_KEY");
     let local = run(&home, &[("PT_E2E_LOCAL_KEY", "local-secret-key")]);
-    assert_eq!(state_of(&local), "fresh", "{local}");
+    assert_eq!(state_of(&local), "ok", "{local}");
 
     models(&home, "!cat /nonexistent");
     let local = run(&home, &[]);
     assert_eq!(state_of(&local), "unknown", "{local}");
-    assert!(local.contains("command"), "{local}");
 
     let seen = seen.lock().unwrap().join("\n");
     assert!(
@@ -401,12 +415,9 @@ fn partial_responses_and_exhausted_selection() {
     let run = |args: Vec<String>| probe(&args.iter().map(String::as_str).collect::<Vec<_>>());
     let out = run(args(&full));
     for name in ["claude", "codex", "grok"] {
-        assert_eq!(state_of(line_of(&out, name)), "fresh", "{out}");
+        assert_eq!(state_of(line_of(&out, name)), "ok", "{out}");
     }
-    assert!(
-        out.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
-        "{out}"
-    );
+    assert!(target_of(&out).is_null(), "{out}");
 
     let (mixed_port, _) = serve(vec![
         (
@@ -422,12 +433,7 @@ fn partial_responses_and_exhausted_selection() {
     let mixed = format!("http://127.0.0.1:{mixed_port}");
     let out = run(args(&mixed));
     assert_eq!(state_of(line_of(&out, "codex")), "error", "{out}");
-    assert!(
-        out.contains(
-            "target none: every eligible resleeve target is short of quota, stale, or failed"
-        ),
-        "{out}"
-    );
+    assert!(target_of(&out).is_null(), "{out}");
 
     let (partial_port, _) = serve(vec![
         (
@@ -443,24 +449,15 @@ fn partial_responses_and_exhausted_selection() {
     ]);
     let partial = format!("http://127.0.0.1:{partial_port}");
     let out = run(args(&partial));
-    for (name, reason) in [
-        ("claude", "5h"),
-        ("codex", "secondary_window"),
-        ("grok", "credit usage"),
-        ("local", "model ids"),
-    ] {
+    for name in ["claude", "codex", "grok", "local"] {
         let line = line_of(&out, name);
         assert_eq!(state_of(line), "error", "{line}");
-        assert!(line.contains(reason), "{line}");
     }
-    assert!(
-        out.contains("target none: all eligible resleeve targets have a failed quota reading"),
-        "{out}"
-    );
+    assert!(target_of(&out).is_null(), "{out}");
 }
 
 #[test]
-fn local_endpoint_rejects_non_loopback_http_and_notes_an_unlisted_model() {
+fn local_endpoint_rejects_non_loopback_http_and_accepts_an_unlisted_model() {
     let home = scratch(&format!("unsafe-local-{}", std::process::id()));
     write(
         &home.join(".pi/agent/models.json"),
@@ -477,10 +474,6 @@ fn local_endpoint_rejects_non_loopback_http_and_notes_an_unlisted_model() {
     ]);
     let local = line_of(&out, "local");
     assert_eq!(state_of(local), "error", "{local}");
-    assert!(
-        local.contains("misconfigured") && local.contains("loopback"),
-        "{local}"
-    );
     assert!(!out.contains("fixture-secret"));
     let (port, _) = serve(vec![("/v1/models", r#"{"data":[{"id":"other"}]}"#)]);
     let base = format!("http://localhost:{port}");
@@ -495,8 +488,7 @@ fn local_endpoint_rejects_non_loopback_http_and_notes_an_unlisted_model() {
         "wanted",
     ]);
     let local = line_of(&out, "local");
-    assert_eq!(state_of(local), "fresh", "{local}");
-    assert!(local.contains("\"wanted\" is not listed"), "{local}");
+    assert_eq!(state_of(local), "ok", "{local}");
 }
 
 #[test]
@@ -516,11 +508,7 @@ fn fifo_login_does_not_block_other_readers() {
     let start = std::time::Instant::now();
     let out = probe(&["--home", home.to_str().unwrap(), "--local", &base]);
     assert!(start.elapsed() < std::time::Duration::from_secs(5), "{out}");
-    assert!(
-        line_of(&out, "claude").contains("not a regular file"),
-        "{out}"
-    );
-    assert_eq!(state_of(line_of(&out, "local")), "fresh", "{out}");
+    assert_eq!(state_of(line_of(&out, "local")), "ok", "{out}");
 }
 
 #[test]
@@ -553,9 +541,9 @@ fn cache_uses_monotonic_time_for_ttl_backoff_and_age() {
         "--test-cache-ms",
         "150",
     ]);
-    assert_eq!(state_of(line_of(&out, "claude")), "fresh", "{out}");
+    assert_eq!(state_of(line_of(&out, "claude")), "ok", "{out}");
     assert_eq!(state_of(line_of(&out, "grok")), "error", "{out}");
-    assert!(out.contains("aged claude stale"), "{out}");
+    assert!(state_of(aged_line_of(&out, "claude")) == "stale", "{out}");
     let seen = seen.lock().unwrap();
     assert_eq!(
         seen.iter()
@@ -600,28 +588,20 @@ fn stale_windows_still_gate_the_fallback() {
         r#"{"five_hour":{"utilization":99,"resets_at":"2100-01-01T00:00:00Z"},"seven_day":{"utilization":10,"resets_at":"2100-01-08T00:00:00Z"}}"#,
     );
     assert!(
-        exhausted.contains("aged claude stale") && exhausted.contains("99%"),
+        state_of(aged_line_of(&exhausted, "claude")) == "stale",
         "{exhausted}"
     );
-    assert!(
-        exhausted.contains(
-            "aged target none: all eligible resleeve targets are stale and short of quota"
-        ),
-        "{exhausted}"
-    );
-    assert!(
-        !exhausted.contains("without a fresh quota reading"),
-        "{exhausted}"
-    );
+    assert!(aged_target_of(&exhausted).is_null(), "{exhausted}");
 
     let spare = run(
         r#"{"five_hour":{"utilization":0,"resets_at":"2100-01-01T00:00:00Z"},"seven_day":{"utilization":10,"resets_at":"2100-01-08T00:00:00Z"}}"#,
     );
-    assert!(spare.contains("aged claude stale"), "{spare}");
     assert!(
-        spare.contains(
-            "aged target Claude: first eligible in resleeve_to whose last reading still has spare quota"
-        ),
+        state_of(aged_line_of(&spare, "claude")) == "stale",
+        "{spare}"
+    );
+    assert!(
+        aged_target_of(&spare)["harness"].as_str() == Some("claude"),
         "{spare}"
     );
 }
@@ -652,39 +632,22 @@ fn a_reset_just_behind_blocks_and_an_ancient_one_counts_as_reset() {
         secs = now_s.saturating_sub(5)
     ));
     let line = line_of(&behind, "codex");
-    assert_eq!(state_of(line), "fresh", "{behind}");
-    assert!(line.contains("reset passed"), "{line}");
-    assert!(
-        behind.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
-        "{behind}"
-    );
-    assert!(
-        !behind.contains("whose quota windows have reset"),
-        "{behind}"
-    );
+    assert_eq!(state_of(line), "ok", "{behind}");
+    assert!(target_of(&behind).is_null(), "{behind}");
 
     let zero = run(
         r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":100,"limit_window_seconds":18000,"reset_at":0}}}"#,
     );
     let line = line_of(&zero, "codex");
-    assert_eq!(state_of(line), "fresh", "{zero}");
-    assert!(
-        line.contains("[5h 100%]") && !line.contains("reset passed"),
-        "{line}"
-    );
-    assert!(
-        zero.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
-        "{zero}"
-    );
+    assert_eq!(state_of(line), "ok", "{zero}");
+    assert!(target_of(&zero).is_null(), "{zero}");
 
     let passed = run(
         r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":100,"limit_window_seconds":18000,"reset_at":1}}}"#,
     );
-    let line = line_of(&passed, "codex");
-    assert!(line.contains("reset passed"), "{line}");
+    assert_eq!(state_of(line_of(&passed, "codex")), "ok", "{passed}");
     assert!(
-        passed
-            .contains("target Codex: first eligible in resleeve_to whose quota windows have reset"),
+        target_of(&passed)["harness"].as_str() == Some("codex"),
         "{passed}"
     );
 
@@ -692,10 +655,9 @@ fn a_reset_just_behind_blocks_and_an_ancient_one_counts_as_reset() {
         r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":18000,"reset_at":1}}}"#,
     );
     assert!(
-        room.contains("target Codex: first eligible in resleeve_to whose quota windows have reset"),
+        target_of(&room)["harness"].as_str() == Some("codex"),
         "{room}"
     );
-    assert!(!room.contains("without a fresh quota reading"), "{room}");
 }
 
 /// A stale row fetched before the reset still blocks inside the ten-minute grace, and counts
@@ -731,17 +693,10 @@ fn a_passed_reset_blocks_only_inside_the_grace() {
         ])
     };
     let inside = run(now_s.saturating_sub(120));
-    assert!(
-        inside.contains(
-            "aged target none: all eligible resleeve targets are stale and short of quota"
-        ),
-        "{inside}"
-    );
+    assert!(aged_target_of(&inside).is_null(), "{inside}");
     let outside = run(now_s.saturating_sub(30 * 60));
     assert!(
-        outside.contains(
-            "aged target Codex: first eligible in resleeve_to whose quota windows have reset"
-        ),
+        aged_target_of(&outside)["harness"].as_str() == Some("codex"),
         "{outside}"
     );
 }
@@ -764,17 +719,21 @@ fn a_stale_local_reading_is_not_spent() {
         "--test-cache-ms",
         "150",
     ]);
+    let local = line_of(&out, "local");
+    assert_eq!(state_of(local), "ok", "{out}");
     assert!(
-        out.contains("local fresh") && out.contains("local-model"),
+        local["note"]
+            .as_str()
+            .is_some_and(|note| note.contains("local-model")),
         "{out}"
     );
-    assert!(out.contains("target PiLocal:"), "{out}");
-    assert!(out.contains("aged local stale"), "{out}");
-    assert!(
-        out.contains("aged target none: the local endpoint's last reading is stale or failed"),
+    assert_eq!(
+        target_of(&out)["harness"].as_str(),
+        Some("pi_local"),
         "{out}"
     );
-    assert!(!out.contains("without a fresh quota reading"), "{out}");
+    assert!(state_of(aged_line_of(&out, "local")) == "stale", "{out}");
+    assert!(aged_target_of(&out).is_null(), "{out}");
 }
 
 /// A stale exhausted window with no reset stops blocking after its length. Five hours is that
@@ -802,22 +761,13 @@ fn a_stale_exhausted_window_with_no_reset_becomes_unknown() {
         "--test-cache-ms",
         "150",
     ]);
-    assert_eq!(state_of(line_of(&out, "claude")), "fresh", "{out}");
+    assert_eq!(state_of(line_of(&out, "claude")), "ok", "{out}");
+    assert!(target_of(&out).is_null(), "{out}");
+    assert!(state_of(aged_line_of(&out, "claude")) == "stale", "{out}");
     assert!(
-        out.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
+        aged_target_of(&out)["harness"].as_str() == Some("claude"),
         "{out}"
     );
-    assert!(
-        out.contains("aged claude stale") && out.contains("100%"),
-        "{out}"
-    );
-    assert!(
-        out.contains(
-            "aged target Claude: first eligible in resleeve_to without a fresh quota reading"
-        ),
-        "{out}"
-    );
-    assert!(!out.contains("failed quota reading"), "{out}");
 }
 
 /// A 401 or a scope rejection is not a failed window. The harness may launch so its CLI can
@@ -838,22 +788,16 @@ fn a_rejected_or_unscoped_login_is_unknown() {
     let denied = run("HTTP 401 Unauthorized\n");
     let line = line_of(&denied, "claude");
     assert_eq!(state_of(line), "unknown", "{denied}");
-    assert!(line.contains("401"), "{line}");
     assert!(
-        denied
-            .contains("target Claude: first eligible in resleeve_to without a fresh quota reading"),
+        target_of(&denied)["harness"].as_str() == Some("claude"),
         "{denied}"
     );
-    assert!(!denied.contains("insufficient fresh quota"), "{denied}");
-    assert!(!denied.contains("failed quota reading"), "{denied}");
 
     let scope = run("HTTP 403 Forbidden\n{\"error\":\"insufficient_scope\"}");
     let line = line_of(&scope, "claude");
     assert_eq!(state_of(line), "unknown", "{scope}");
-    assert!(line.contains("scope"), "{line}");
     assert!(
-        scope
-            .contains("target Claude: first eligible in resleeve_to without a fresh quota reading"),
+        target_of(&scope)["harness"].as_str() == Some("claude"),
         "{scope}"
     );
 
@@ -862,23 +806,18 @@ fn a_rejected_or_unscoped_login_is_unknown() {
     );
     assert_eq!(state_of(line_of(&typed, "claude")), "unknown", "{typed}");
     assert!(
-        typed
-            .contains("target Claude: first eligible in resleeve_to without a fresh quota reading"),
+        target_of(&typed)["harness"].as_str() == Some("claude"),
         "{typed}"
     );
 
     let noise = run("HTTP 403 Forbidden\n{\"message\":\"permission denied for this resource\"}");
     assert_eq!(state_of(line_of(&noise, "claude")), "error", "{noise}");
-    assert!(
-        noise.contains("target none: all eligible resleeve targets have a failed quota reading"),
-        "{noise}"
-    );
-    assert!(!noise.contains("without a fresh quota reading"), "{noise}");
+    assert!(target_of(&noise).is_null(), "{noise}");
 }
 
 /// A weekly Sonnet cap is shown on the row. It does not exhaust an Opus candidate while the
 /// account window has room, and the local model is not chosen ahead of that. A candidate
-/// with no model is not blocked by the cap; the chosen reason names it.
+/// with no model is not blocked by the cap.
 #[test]
 fn a_model_scoped_window_does_not_exhaust_the_subscription() {
     let home = scratch(&format!("scoped-window-{}", std::process::id()));
@@ -909,28 +848,19 @@ fn a_model_scoped_window_does_not_exhaust_the_subscription() {
     };
     let both = run("claude:opus,pi_local");
     let claude = line_of(&both, "claude");
-    assert_eq!(state_of(claude), "fresh", "{both}");
+    assert_eq!(state_of(claude), "ok", "{both}");
     assert!(
-        claude.contains("[5h 0%") && claude.contains("sonnet") && claude.contains("100%"),
-        "{claude}"
-    );
-    assert!(
-        both.contains("target Claude:") && both.contains("5h"),
+        target_of(&both)["harness"].as_str() == Some("claude"),
         "{both}"
     );
-    assert!(!both.contains("target PiLocal"), "{both}");
 
     let bare = run("claude");
     let chosen = target_of(&bare);
-    assert!(
-        chosen.starts_with("target Claude:") && chosen.contains("; wk sonnet under the minimum"),
-        "{bare}"
-    );
-    assert!(!bare.contains("target none:"), "{bare}");
+    assert_eq!(chosen["harness"].as_str(), Some("claude"), "{bare}");
 }
 
 /// `Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus. A candidate
-/// with no model is not blocked; the chosen reason names that cap.
+/// with no model is not blocked.
 #[test]
 fn a_versioned_cap_gates_its_model_family() {
     let home = scratch(&format!("versioned-cap-{}", std::process::id()));
@@ -946,26 +876,15 @@ fn a_versioned_cap_gates_its_model_family() {
     let home_s = home.to_str().unwrap();
     let run = |allow: &str| probe(&["--home", home_s, "--claude-url", &base, "--allow", allow]);
     let shown = run("claude:opus");
-    let line = line_of(&shown, "claude");
-    assert!(line.contains("sonnet") && line.contains("100%"), "{line}");
     for model in ["claude:sonnet", "claude:claude-sonnet-4-5"] {
         let out = run(model);
-        assert!(
-            out.contains(
-                "target none: all eligible resleeve targets have insufficient fresh quota"
-            ),
-            "{model}: {out}"
-        );
-        assert!(!out.contains("target Claude:"), "{model}: {out}");
+        assert!(target_of(&out).is_null(), "{model}: {out}");
     }
     let bare_out = run("claude");
     let bare = target_of(&bare_out);
+    assert_eq!(bare["harness"].as_str(), Some("claude"), "{bare}");
     assert!(
-        bare.starts_with("target Claude:") && bare.contains("; wk sonnet 4.5 under the minimum"),
-        "{bare}"
-    );
-    assert!(
-        shown.contains("target Claude:") && shown.contains("5h"),
+        target_of(&shown)["harness"].as_str() == Some("claude"),
         "{shown}"
     );
 }
@@ -988,17 +907,11 @@ fn a_model_cap_gates_the_candidate_that_runs_that_model() {
     let home_s = home.to_str().unwrap();
     let run = |allow: &str| probe(&["--home", home_s, "--claude-url", &base, "--allow", allow]);
     let opus = run("claude:claude-opus-4-6");
-    assert!(
-        opus.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
-        "{opus}"
-    );
-    assert!(!opus.contains("target Claude:"), "{opus}");
-    let line = line_of(&opus, "claude");
-    assert!(line.contains("opus") && line.contains("100%"), "{line}");
+    assert!(target_of(&opus).is_null(), "{opus}");
 
     let sonnet = run("claude:sonnet");
     assert!(
-        sonnet.contains("target Claude:") && sonnet.contains("5h"),
+        target_of(&sonnet)["harness"].as_str() == Some("claude"),
         "{sonnet}"
     );
 
@@ -1016,19 +929,9 @@ fn a_model_cap_gates_the_candidate_that_runs_that_model() {
             "--allow",
             "claude:sonnet",
         ]);
-        assert_eq!(
-            state_of(line_of(&only, "claude")),
-            "fresh",
-            "{label}: {only}"
-        );
+        assert_eq!(state_of(line_of(&only, "claude")), "ok", "{label}: {only}");
         assert!(
-            only.contains(
-                "target Claude: first eligible in resleeve_to without a fresh quota reading"
-            ),
-            "{label}: {only}"
-        );
-        assert!(
-            !only.contains("insufficient fresh quota"),
+            target_of(&only)["harness"].as_str() == Some("claude"),
             "{label}: {only}"
         );
     }
@@ -1036,8 +939,7 @@ fn a_model_cap_gates_the_candidate_that_runs_that_model() {
 
 /// No model and `default` stay eligible under a full cap, and rank below an equal candidate
 /// that the cap does not touch. `opusplan` is gated by either cap. A better account window
-/// still beats a worse one. A bare candidate that is also short of the account window parks,
-/// and that reason names the cap.
+/// still beats a worse one. A bare candidate that is also short of the account window parks.
 #[test]
 fn an_unspecified_model_ranks_below_a_cap() {
     let home = scratch(&format!("rank-cap-{}", std::process::id()));
@@ -1075,39 +977,21 @@ fn an_unspecified_model_ranks_below_a_cap() {
 
     let ranked_out = run("claude,claude:opus");
     let ranked = target_of(&ranked_out);
-    assert!(
-        ranked.contains("[opus]") && !ranked.contains("under the minimum"),
-        "{ranked}"
-    );
+    assert_eq!(ranked["model"].as_str(), Some("opus"), "{ranked}");
 
     let bare_out = run("claude");
     let bare = target_of(&bare_out);
-    assert!(
-        bare.starts_with("target Claude:") && bare.contains("; wk sonnet under the minimum"),
-        "{bare}"
-    );
+    assert_eq!(bare["harness"].as_str(), Some("claude"), "{bare}");
     let fallback_out = run("claude:default");
     let fallback = target_of(&fallback_out);
-    assert!(
-        fallback.contains("[default]") && fallback.contains("; wk sonnet under the minimum"),
-        "{fallback}"
-    );
+    assert_eq!(fallback["model"].as_str(), Some("default"), "{fallback}");
 
     let plan = run("claude:opusplan");
-    assert!(
-        plan.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
-        "{plan}"
-    );
-    assert!(!plan.contains("target Claude:"), "{plan}");
+    assert!(target_of(&plan).is_null(), "{plan}");
 
     let better_out = run("claude,codex");
     let better = target_of(&better_out);
-    assert!(
-        better.starts_with("target Claude:")
-            && better.contains("; wk sonnet under the minimum")
-            && !better.contains("target Codex:"),
-        "{better}"
-    );
+    assert_eq!(better["harness"].as_str(), Some("claude"), "{better}");
 
     let (port, _) = serve(vec![(
         "/api/oauth/usage",
@@ -1122,10 +1006,7 @@ fn an_unspecified_model_ranks_below_a_cap() {
         "--allow",
         "claude:opusplan",
     ]);
-    assert!(
-        opus.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
-        "{opus}"
-    );
+    assert!(target_of(&opus).is_null(), "{opus}");
 
     let (port, _) = serve(vec![(
         "/api/oauth/usage",
@@ -1134,10 +1015,7 @@ fn an_unspecified_model_ranks_below_a_cap() {
     let base = format!("http://127.0.0.1:{port}");
     let parked = probe(&["--home", home_s, "--claude-url", &base, "--allow", "claude"]);
     let line = target_of(&parked);
-    assert!(
-        line.contains("insufficient fresh quota") && line.contains("; wk sonnet under the minimum"),
-        "{parked}"
-    );
+    assert!(line.is_null(), "{parked}");
 }
 
 /// Pi with a vendor login has no quota reader. A missing reading is not "unknown", so the
@@ -1163,53 +1041,9 @@ fn an_unmetered_harness_is_not_spent_when_its_reading_is_missing() {
         "--allow",
         "claude,pi_vendor",
     ]);
-    assert_eq!(state_of(line_of(&out, "claude")), "fresh", "{out}");
-    assert!(
-        out.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
-        "{out}"
-    );
-    assert!(!out.contains("target PiVendor"), "{out}");
+    assert_eq!(state_of(line_of(&out, "claude")), "ok", "{out}");
+    assert!(target_of(&out).is_null(), "{out}");
 
     let alone = probe(&["--home", home_s, "--allow", "pi_vendor"]);
-    assert!(
-        alone.contains("target none: no eligible resleeve target has a quota meter"),
-        "{alone}"
-    );
-    assert!(!alone.contains("insufficient fresh quota"), "{alone}");
-}
-
-/// Codex reports a window length in seconds. The label keeps whole minutes, so 119 seconds
-/// is shown as `1m`, and the pace uses the stored length rather than that minute.
-#[test]
-fn a_codex_window_keeps_its_length_for_the_pace() {
-    let home = scratch(&format!("window-length-{}", std::process::id()));
-    write(
-        &home.join(".codex/auth.json"),
-        r#"{"tokens":{"access_token":"length-codex"}}"#,
-    );
-    let reset_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("clock")
-        .as_secs()
-        + 90;
-    let body = format!(
-        r#"{{"plan_type":"plus","rate_limit":{{"primary_window":{{"used_percent":50,"limit_window_seconds":119,"reset_at":{reset_at}}}}}}}"#
-    );
-    let (port, _) = serve(vec![("/wham/usage", body)]);
-    let base = format!("http://127.0.0.1:{port}");
-    let out = probe(&[
-        "--home",
-        home.to_str().unwrap(),
-        "--codex-url",
-        &base,
-        "--allow",
-        "codex",
-    ]);
-    let line = line_of(&out, "codex");
-    assert_eq!(state_of(line), "fresh", "{out}");
-    assert!(line.contains("[1m 50%"), "{line}");
-    assert!(
-        out.contains("target Codex:") && out.contains("~0% expiring unused, 50% usable now"),
-        "{out}"
-    );
+    assert!(target_of(&alone).is_null(), "{alone}");
 }

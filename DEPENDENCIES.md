@@ -24,8 +24,8 @@ A bump is a hand-picked change to this file and `Cargo.lock` in the same commit.
 | getrandom | 0.4.3 | jobserver dependency (lockfile entry) |
 | cfg-if | 1.0.5 | getrandom dependency |
 | r-efi | 6.0.0 | getrandom dependency on UEFI targets (lockfile entry) |
-| serde_json | 1.0.154 | reference parser for pt-json's parse_diff target (feature float_roundtrip) |
-| serde | 1.0.229 | serde_json dependency |
+| serde_json | 1.0.154 | reference parser for pt-json's parse_diff target (features float_roundtrip and unbounded_depth) |
+| serde | 1.0.229 | serde_json dependency and bounded reference deserialization for pt-json fuzzing |
 | serde_core | 1.0.229 | serde_json dependency |
 | serde_derive | 1.0.229 | serde dependency |
 | proc-macro2 | 1.0.107 | serde_derive dependency |

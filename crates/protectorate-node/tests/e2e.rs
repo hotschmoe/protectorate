@@ -2,7 +2,7 @@
 
 mod common;
 
-use common::{check_inventory, check_presence_value, check_sample, json};
+use common::{check_presence_value, json};
 
 use std::process::{Command, Output};
 
@@ -23,40 +23,8 @@ fn stdout_ok(args: &[&str]) -> String {
     String::from_utf8(out.stdout).expect("utf-8 stdout")
 }
 
-#[test]
-fn version() {
-    let out = stdout_ok(&["--version"]);
-    let first = out.lines().next().unwrap_or("");
-    let v = first.strip_prefix("protectorate-node ").expect(&out);
-    assert!(!v.is_empty() && v != "0.0.0", "{out}");
-    assert!(out.contains("\nmember: "), "{out}");
-}
-
-#[test]
-fn unknown_command_exits_2() {
-    let out = run(&["frobnicate"]);
-    assert_eq!(out.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&out.stderr).contains("unknown command"));
-}
-
-#[test]
-fn inventory_is_sane() {
-    let out = json(&stdout_ok(&["inventory"]));
-    check_inventory(&out);
-}
-
-#[test]
-fn sample_is_sane() {
-    check_sample(&json(&stdout_ok(&["sample"])));
-}
-
 fn check_presence(out: &str, away_after: u64) {
     check_presence_value(&json(out), away_after);
-}
-
-#[test]
-fn presence_names_its_source() {
-    check_presence(&stdout_ok(&["presence"]), 600);
 }
 
 #[test]

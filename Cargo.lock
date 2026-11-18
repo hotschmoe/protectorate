@@ -199,7 +199,6 @@ name = "pt-update"
 version = "0.0.0"
 dependencies = [
  "pt-hash",
- "pt-http",
  "pt-json",
  "pt-sys",
 ]

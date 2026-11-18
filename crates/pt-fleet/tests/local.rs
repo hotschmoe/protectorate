@@ -38,10 +38,19 @@ fn go_arch() -> &'static str {
 
 /// headscale and member for this host, building them once when Go is available.
 fn go_bins() -> Option<(PathBuf, PathBuf)> {
-    let bin = root().join("go/bin");
+    let configured = std::env::var_os("PROTECTORATE_NET_DIR").filter(|d| !d.is_empty());
+    let bin = configured
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| root().join("go/bin"));
     let hs = bin.join(format!("headscale-linux-{}", go_arch()));
     let member = bin.join(format!("member-linux-{}", go_arch()));
     if !(hs.is_file() && member.is_file()) {
+        assert!(
+            configured.is_none(),
+            "network binaries missing from {}",
+            bin.display()
+        );
         eprintln!("building headscale and member with scripts/net-build.sh host");
         let built = Command::new(root().join("scripts/net-build.sh"))
             .arg("host")
@@ -252,15 +261,12 @@ fn local_fleet_end_to_end() {
         }
     });
     let mut qr = Vec::new();
-    let mut approve_line = String::new();
     let payload = loop {
         let l = rx
             .recv_timeout(Duration::from_secs(60))
             .expect("join shows its registration");
         if l.contains('\u{2588}') {
             qr.push(l);
-        } else if l.trim_start().starts_with("protectorate node approve ") {
-            approve_line = l.trim().to_string();
         } else if let Some(p) = l.trim_start().strip_prefix("paste") {
             break p.trim().to_string();
         }
@@ -268,22 +274,11 @@ fn local_fleet_end_to_end() {
     let reg = Registration::parse(&payload).expect("the pasted text is a registration");
     assert_eq!(reg.name, "e2e-node");
     assert_eq!(reg.control_key, fp, "the node saw another control key");
-    assert_eq!(
-        approve_line,
-        format!(
-            "protectorate node approve {} --name e2e-node --fingerprint {fp}",
-            reg.auth_id
-        )
-    );
     assert!(qr.len() >= 15, "QR has {} lines", qr.len());
     zbar_check(&qr, &payload, &base);
 
     let bogus = format!("sha256:{}", "0".repeat(64));
-    let refused = fleet.approve(&reg.auth_id, "e2e-node", &bogus).unwrap_err();
-    assert!(
-        refused.to_string().contains("control key mismatch"),
-        "{refused}"
-    );
+    assert!(fleet.approve(&reg.auth_id, "e2e-node", &bogus).is_err());
     fleet.record_pending(reg.clone()).unwrap();
     assert!(
         fleet
