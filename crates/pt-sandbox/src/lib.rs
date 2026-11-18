@@ -50,7 +50,7 @@ pub struct SandboxSpec {
     pub ro_paths: Vec<PathBuf>,
     /// Never `/`. A writable path may hold masked paths; the masks still apply inside it.
     pub rw_paths: Vec<PathBuf>,
-    /// Git dirs of a child worktree (see `resolve_git_dirs`): bound writable, with `hooks/` over
+    /// Git dirs of a linked worktree (see `resolve_git_dirs`): bound writable, with metadata over
     /// them read-only so a sleeve cannot plant a hook that runs outside the sandbox. They may not
     /// overlap a mask.
     pub git_dirs: Vec<PathBuf>,
@@ -292,11 +292,65 @@ impl SandboxSpec {
         for p in &self.rw_paths {
             add(p, Kind::Rw, "writable path")?;
         }
-        for g in &self.git_dirs {
+        let mut git_dirs = self.git_dirs.clone();
+        let dot = self.workspace.join(".git");
+        if dot.is_dir() {
+            git_dirs.push(dot);
+        }
+        for g in &git_dirs {
             add(g, Kind::Rw, "git dir")?;
-            let hooks = g.join("hooks");
-            if hooks.is_dir() {
-                add(&hooks, Kind::Ro, "git hooks dir")?;
+            if g.join("objects").is_dir() {
+                let worktrees = g.join("worktrees");
+                fs::create_dir_all(&worktrees)
+                    .map_err(|e| Error(format!("create {}: {e}", worktrees.display())))?;
+                if fs::symlink_metadata(&worktrees)
+                    .map_err(|e| Error(e.to_string()))?
+                    .file_type()
+                    .is_symlink()
+                {
+                    return err(format!(
+                        "sandbox git metadata {} is a symlink",
+                        worktrees.display()
+                    ));
+                }
+                add(&worktrees, Kind::Ro, "git worktrees")?;
+            }
+            for name in ["hooks", "info"] {
+                let path = g.join(name);
+                fs::create_dir_all(&path)
+                    .map_err(|e| Error(format!("create {}: {e}", path.display())))?;
+                if fs::symlink_metadata(&path)
+                    .map_err(|e| Error(e.to_string()))?
+                    .file_type()
+                    .is_symlink()
+                {
+                    return err(format!(
+                        "sandbox git metadata {} is a symlink",
+                        path.display()
+                    ));
+                }
+                add(&path, Kind::Ro, "git metadata")?;
+            }
+            for name in ["config", "config.worktree"] {
+                let path = g.join(name);
+                if !path.exists() {
+                    fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&path)
+                        .map_err(|e| Error(format!("create {}: {e}", path.display())))?;
+                }
+                if fs::symlink_metadata(&path)
+                    .map_err(|e| Error(e.to_string()))?
+                    .file_type()
+                    .is_symlink()
+                {
+                    return err(format!(
+                        "sandbox git metadata {} is a symlink",
+                        path.display()
+                    ));
+                }
+                add(&path, Kind::Ro, "git metadata")?;
             }
         }
         // Git dirs come from files a sleeve can rewrite, so they may not overlap a mask at all.
