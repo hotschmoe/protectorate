@@ -4019,4 +4019,3 @@ fn transcript_pages_skip_torn_and_corrupt_lines() {
     assert_eq!(seqs, [asked, answered], "{v}");
     assert_eq!(v["more"].as_bool(), Some(true), "{v}");
 }
-
