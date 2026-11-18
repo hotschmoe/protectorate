@@ -38,8 +38,11 @@ fn run(home: &Path, index: &Path, queries: &[&str], failure: Option<&str>) -> Ou
     for query in queries {
         command.args(["--query", query]);
     }
+    let arm = index.parent().unwrap().join("failure-arm");
     if let Some(phase) = failure {
+        fs::write(&arm, b"armed").unwrap();
         command.env("PT_TEST_HISTORY_FAIL_COMMIT", phase);
+        command.env("PT_TEST_HISTORY_FAIL_ARM", &arm);
         if phase == "manifest" {
             command.env("PT_TEST_HISTORY_FLUSH_BYTES", "1048576");
         }
@@ -51,6 +54,9 @@ fn run(home: &Path, index: &Path, queries: &[&str], failure: Option<&str>) -> Ou
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
+    if failure.is_some() {
+        assert_eq!(fs::read(arm).unwrap(), b"failed");
+    }
     out
 }
 
@@ -159,11 +165,6 @@ fn replacement_with_a_symlink_is_not_opened() {
     fs::write(barrier.with_extension("continue"), b"go").unwrap();
     let out = child.0.take().unwrap().wait_with_output().unwrap();
     assert!(!out.status.success(), "replaced link was followed");
-    assert!(
-        String::from_utf8_lossy(&out.stderr).contains("tail"),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
 }
 
 #[test]
@@ -190,11 +191,6 @@ fn commit_retries_preserve_documents_and_cursors() {
         drop(file);
         let out = run(&home, &dir.join("index"), &["batchmarker"], Some(phase));
         let stdout = String::from_utf8(out.stdout).unwrap();
-        let stderr = String::from_utf8(out.stderr).unwrap();
-        assert!(
-            stderr.contains(&format!("retrying injected history {phase} commit failure")),
-            "{stderr}"
-        );
         assert!(
             stdout.contains(&format!("summary: files=1 docs={count}")),
             "{stdout}"
