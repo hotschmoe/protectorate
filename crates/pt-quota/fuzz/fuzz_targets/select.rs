@@ -1,14 +1,15 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use pt_api::{Harness, Mode, Quota, QuotaWindow, Subscription};
+use pt_api::{EpochMs, Harness, Mode, Quota, QuotaReading, QuotaWindow, Subscription};
 use pt_quota::{
     Candidate, Health, State, TaskSize, Thresholds, derive, select_target, select_with_fallback,
-    spare_trigger, state, window_length_ms,
+    spare_quota, spare_trigger, state, window_length_ms,
 };
 use pt_quota_fuzz::{Bytes, HARNESSES, quota};
 
 fuzz_target!(|data: &[u8]| {
+    check_pace(data);
     let mut b = Bytes::new(data);
     let now = 1_800_000_000_000u64 + u64::from(b.u32());
     let size = [TaskSize::Small, TaskSize::Medium, TaskSize::Large][b.below(3)];
@@ -46,12 +47,18 @@ fuzz_target!(|data: &[u8]| {
     // is not a length. Clearing either leaves the pick unchanged.
     let same_pick = |altered: &[Quota]| {
         assert_eq!(
-            select_target(now, size, &allow, mode, &exclude, &quotas, &health),
+            select_target(now, size, &allow, mode, &exclude, &quotas, &health)
+                .map(|t| (t.harness, t.model)),
             select_target(now, size, &allow, mode, &exclude, altered, &health)
+                .map(|t| (t.harness, t.model))
         );
         assert_eq!(
-            select_with_fallback(now, size, &allow, &quotas),
+            select_with_fallback(now, size, &allow, &quotas)
+                .ok()
+                .map(|(i, _)| i),
             select_with_fallback(now, size, &allow, altered)
+                .ok()
+                .map(|(i, _)| i)
         );
     };
     same_pick(&map_windows(&quotas, |w| {
@@ -281,6 +288,37 @@ fuzz_target!(|data: &[u8]| {
         assert!(got.max(base) as i8 - got.min(base) as i8 <= 1);
     }
 });
+
+fn check_pace(data: &[u8]) {
+    let [length, remaining, used, ..] = data else {
+        return;
+    };
+    let seconds = 60 + u64::from(*length);
+    let left = 1 + u64::from(*remaining) % (seconds - 1);
+    let used = f64::from(*used % 101);
+    let now = 1_800_000_000_000u64;
+    let quota = Quota {
+        subscription: Subscription::Codex,
+        plan: String::new(),
+        reading: QuotaReading::Ok,
+        fetched_at_ms: EpochMs(now),
+        windows: vec![QuotaWindow {
+            label: format!("{}m", seconds / 60),
+            used_pct: Some(used),
+            resets_at_ms: Some(EpochMs(now + left * 1000)),
+            length_ms: Some(seconds * 1000),
+        }],
+        note: String::new(),
+    };
+    let elapsed = (seconds - left) as f64 / seconds as f64;
+    let expected = if elapsed < 0.05 {
+        100.0 - used
+    } else {
+        (100.0 - used / elapsed).clamp(0.0, 100.0)
+    };
+    let actual = spare_quota(now, &quota).expect("fresh window");
+    assert!((actual - expected).abs() < 1e-9, "{actual} vs {expected}");
+}
 
 fn fold(s: &str) -> String {
     s.chars()

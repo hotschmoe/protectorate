@@ -40,6 +40,12 @@ fn target_of(out: &str) -> &str {
         .unwrap_or_else(|| panic!("no target line in:\n{out}"))
 }
 
+fn aged_target_of(out: &str) -> &str {
+    out.lines()
+        .find(|l| l.starts_with("aged target "))
+        .unwrap_or_else(|| panic!("no aged target line in:\n{out}"))
+}
+
 fn state_of(line: &str) -> &str {
     let state = line.split(' ').nth(1).unwrap_or("");
     assert!(STATES.contains(&state), "bad state in {line:?}");
@@ -325,14 +331,7 @@ fn local_reader_sends_the_pi_provider_key() {
         "--allow",
         "pi_local",
     ]);
-    assert!(
-        parked.contains("target none: the local endpoint's last reading is stale or failed"),
-        "{parked}"
-    );
-    assert!(
-        !parked.contains("without a fresh quota reading"),
-        "{parked}"
-    );
+    assert!(target_of(&parked).starts_with("target none:"), "{parked}");
 
     models(&home, "PT_E2E_LOCAL_KEY");
     let local = run(&home, &[("PT_E2E_LOCAL_KEY", "local-secret-key")]);
@@ -403,10 +402,7 @@ fn partial_responses_and_exhausted_selection() {
     for name in ["claude", "codex", "grok"] {
         assert_eq!(state_of(line_of(&out, name)), "fresh", "{out}");
     }
-    assert!(
-        out.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
-        "{out}"
-    );
+    assert!(target_of(&out).starts_with("target none:"), "{out}");
 
     let (mixed_port, _) = serve(vec![
         (
@@ -422,12 +418,7 @@ fn partial_responses_and_exhausted_selection() {
     let mixed = format!("http://127.0.0.1:{mixed_port}");
     let out = run(args(&mixed));
     assert_eq!(state_of(line_of(&out, "codex")), "error", "{out}");
-    assert!(
-        out.contains(
-            "target none: every eligible resleeve target is short of quota, stale, or failed"
-        ),
-        "{out}"
-    );
+    assert!(target_of(&out).starts_with("target none:"), "{out}");
 
     let (partial_port, _) = serve(vec![
         (
@@ -443,24 +434,15 @@ fn partial_responses_and_exhausted_selection() {
     ]);
     let partial = format!("http://127.0.0.1:{partial_port}");
     let out = run(args(&partial));
-    for (name, reason) in [
-        ("claude", "5h"),
-        ("codex", "secondary_window"),
-        ("grok", "credit usage"),
-        ("local", "model ids"),
-    ] {
+    for name in ["claude", "codex", "grok", "local"] {
         let line = line_of(&out, name);
         assert_eq!(state_of(line), "error", "{line}");
-        assert!(line.contains(reason), "{line}");
     }
-    assert!(
-        out.contains("target none: all eligible resleeve targets have a failed quota reading"),
-        "{out}"
-    );
+    assert!(target_of(&out).starts_with("target none:"), "{out}");
 }
 
 #[test]
-fn local_endpoint_rejects_non_loopback_http_and_notes_an_unlisted_model() {
+fn local_endpoint_rejects_non_loopback_http_and_accepts_an_unlisted_model() {
     let home = scratch(&format!("unsafe-local-{}", std::process::id()));
     write(
         &home.join(".pi/agent/models.json"),
@@ -477,10 +459,6 @@ fn local_endpoint_rejects_non_loopback_http_and_notes_an_unlisted_model() {
     ]);
     let local = line_of(&out, "local");
     assert_eq!(state_of(local), "error", "{local}");
-    assert!(
-        local.contains("misconfigured") && local.contains("loopback"),
-        "{local}"
-    );
     assert!(!out.contains("fixture-secret"));
     let (port, _) = serve(vec![("/v1/models", r#"{"data":[{"id":"other"}]}"#)]);
     let base = format!("http://localhost:{port}");
@@ -496,7 +474,6 @@ fn local_endpoint_rejects_non_loopback_http_and_notes_an_unlisted_model() {
     ]);
     let local = line_of(&out, "local");
     assert_eq!(state_of(local), "fresh", "{local}");
-    assert!(local.contains("\"wanted\" is not listed"), "{local}");
 }
 
 #[test]
@@ -516,10 +493,6 @@ fn fifo_login_does_not_block_other_readers() {
     let start = std::time::Instant::now();
     let out = probe(&["--home", home.to_str().unwrap(), "--local", &base]);
     assert!(start.elapsed() < std::time::Duration::from_secs(5), "{out}");
-    assert!(
-        line_of(&out, "claude").contains("not a regular file"),
-        "{out}"
-    );
     assert_eq!(state_of(line_of(&out, "local")), "fresh", "{out}");
 }
 
@@ -604,13 +577,7 @@ fn stale_windows_still_gate_the_fallback() {
         "{exhausted}"
     );
     assert!(
-        exhausted.contains(
-            "aged target none: all eligible resleeve targets are stale and short of quota"
-        ),
-        "{exhausted}"
-    );
-    assert!(
-        !exhausted.contains("without a fresh quota reading"),
+        aged_target_of(&exhausted).starts_with("aged target none:"),
         "{exhausted}"
     );
 
@@ -619,9 +586,7 @@ fn stale_windows_still_gate_the_fallback() {
     );
     assert!(spare.contains("aged claude stale"), "{spare}");
     assert!(
-        spare.contains(
-            "aged target Claude: first eligible in resleeve_to whose last reading still has spare quota"
-        ),
+        aged_target_of(&spare).starts_with("aged target Claude:"),
         "{spare}"
     );
 }
@@ -653,49 +618,25 @@ fn a_reset_just_behind_blocks_and_an_ancient_one_counts_as_reset() {
     ));
     let line = line_of(&behind, "codex");
     assert_eq!(state_of(line), "fresh", "{behind}");
-    assert!(line.contains("reset passed"), "{line}");
-    assert!(
-        behind.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
-        "{behind}"
-    );
-    assert!(
-        !behind.contains("whose quota windows have reset"),
-        "{behind}"
-    );
+    assert!(target_of(&behind).starts_with("target none:"), "{behind}");
 
     let zero = run(
         r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":100,"limit_window_seconds":18000,"reset_at":0}}}"#,
     );
     let line = line_of(&zero, "codex");
     assert_eq!(state_of(line), "fresh", "{zero}");
-    assert!(
-        line.contains("[5h 100%]") && !line.contains("reset passed"),
-        "{line}"
-    );
-    assert!(
-        zero.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
-        "{zero}"
-    );
+    assert!(target_of(&zero).starts_with("target none:"), "{zero}");
 
     let passed = run(
         r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":100,"limit_window_seconds":18000,"reset_at":1}}}"#,
     );
-    let line = line_of(&passed, "codex");
-    assert!(line.contains("reset passed"), "{line}");
-    assert!(
-        passed
-            .contains("target Codex: first eligible in resleeve_to whose quota windows have reset"),
-        "{passed}"
-    );
+    assert_eq!(state_of(line_of(&passed, "codex")), "fresh", "{passed}");
+    assert!(target_of(&passed).starts_with("target Codex:"), "{passed}");
 
     let room = run(
         r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":0,"limit_window_seconds":18000,"reset_at":1}}}"#,
     );
-    assert!(
-        room.contains("target Codex: first eligible in resleeve_to whose quota windows have reset"),
-        "{room}"
-    );
-    assert!(!room.contains("without a fresh quota reading"), "{room}");
+    assert!(target_of(&room).starts_with("target Codex:"), "{room}");
 }
 
 /// A stale row fetched before the reset still blocks inside the ten-minute grace, and counts
@@ -732,16 +673,12 @@ fn a_passed_reset_blocks_only_inside_the_grace() {
     };
     let inside = run(now_s.saturating_sub(120));
     assert!(
-        inside.contains(
-            "aged target none: all eligible resleeve targets are stale and short of quota"
-        ),
+        aged_target_of(&inside).starts_with("aged target none:"),
         "{inside}"
     );
     let outside = run(now_s.saturating_sub(30 * 60));
     assert!(
-        outside.contains(
-            "aged target Codex: first eligible in resleeve_to whose quota windows have reset"
-        ),
+        aged_target_of(&outside).starts_with("aged target Codex:"),
         "{outside}"
     );
 }
@@ -771,10 +708,9 @@ fn a_stale_local_reading_is_not_spent() {
     assert!(out.contains("target PiLocal:"), "{out}");
     assert!(out.contains("aged local stale"), "{out}");
     assert!(
-        out.contains("aged target none: the local endpoint's last reading is stale or failed"),
+        aged_target_of(&out).starts_with("aged target none:"),
         "{out}"
     );
-    assert!(!out.contains("without a fresh quota reading"), "{out}");
 }
 
 /// A stale exhausted window with no reset stops blocking after its length. Five hours is that
@@ -803,21 +739,15 @@ fn a_stale_exhausted_window_with_no_reset_becomes_unknown() {
         "150",
     ]);
     assert_eq!(state_of(line_of(&out, "claude")), "fresh", "{out}");
-    assert!(
-        out.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
-        "{out}"
-    );
+    assert!(target_of(&out).starts_with("target none:"), "{out}");
     assert!(
         out.contains("aged claude stale") && out.contains("100%"),
         "{out}"
     );
     assert!(
-        out.contains(
-            "aged target Claude: first eligible in resleeve_to without a fresh quota reading"
-        ),
+        aged_target_of(&out).starts_with("aged target Claude:"),
         "{out}"
     );
-    assert!(!out.contains("failed quota reading"), "{out}");
 }
 
 /// A 401 or a scope rejection is not a failed window. The harness may launch so its CLI can
@@ -838,47 +768,27 @@ fn a_rejected_or_unscoped_login_is_unknown() {
     let denied = run("HTTP 401 Unauthorized\n");
     let line = line_of(&denied, "claude");
     assert_eq!(state_of(line), "unknown", "{denied}");
-    assert!(line.contains("401"), "{line}");
-    assert!(
-        denied
-            .contains("target Claude: first eligible in resleeve_to without a fresh quota reading"),
-        "{denied}"
-    );
-    assert!(!denied.contains("insufficient fresh quota"), "{denied}");
-    assert!(!denied.contains("failed quota reading"), "{denied}");
+    assert!(target_of(&denied).starts_with("target Claude:"), "{denied}");
 
     let scope = run("HTTP 403 Forbidden\n{\"error\":\"insufficient_scope\"}");
     let line = line_of(&scope, "claude");
     assert_eq!(state_of(line), "unknown", "{scope}");
-    assert!(line.contains("scope"), "{line}");
-    assert!(
-        scope
-            .contains("target Claude: first eligible in resleeve_to without a fresh quota reading"),
-        "{scope}"
-    );
+    assert!(target_of(&scope).starts_with("target Claude:"), "{scope}");
 
     let typed = run(
         "HTTP 403 Forbidden\n{\"error\":{\"type\":\"permission_error\",\"message\":\"permission denied\"}}",
     );
     assert_eq!(state_of(line_of(&typed, "claude")), "unknown", "{typed}");
-    assert!(
-        typed
-            .contains("target Claude: first eligible in resleeve_to without a fresh quota reading"),
-        "{typed}"
-    );
+    assert!(target_of(&typed).starts_with("target Claude:"), "{typed}");
 
     let noise = run("HTTP 403 Forbidden\n{\"message\":\"permission denied for this resource\"}");
     assert_eq!(state_of(line_of(&noise, "claude")), "error", "{noise}");
-    assert!(
-        noise.contains("target none: all eligible resleeve targets have a failed quota reading"),
-        "{noise}"
-    );
-    assert!(!noise.contains("without a fresh quota reading"), "{noise}");
+    assert!(target_of(&noise).starts_with("target none:"), "{noise}");
 }
 
 /// A weekly Sonnet cap is shown on the row. It does not exhaust an Opus candidate while the
 /// account window has room, and the local model is not chosen ahead of that. A candidate
-/// with no model is not blocked by the cap; the chosen reason names it.
+/// with no model is not blocked by the cap.
 #[test]
 fn a_model_scoped_window_does_not_exhaust_the_subscription() {
     let home = scratch(&format!("scoped-window-{}", std::process::id()));
@@ -922,15 +832,12 @@ fn a_model_scoped_window_does_not_exhaust_the_subscription() {
 
     let bare = run("claude");
     let chosen = target_of(&bare);
-    assert!(
-        chosen.starts_with("target Claude:") && chosen.contains("; wk sonnet under the minimum"),
-        "{bare}"
-    );
+    assert!(chosen.starts_with("target Claude:"), "{bare}");
     assert!(!bare.contains("target none:"), "{bare}");
 }
 
 /// `Sonnet 4.5` gates `sonnet` and `claude-sonnet-4-5`, and does not gate Opus. A candidate
-/// with no model is not blocked; the chosen reason names that cap.
+/// with no model is not blocked.
 #[test]
 fn a_versioned_cap_gates_its_model_family() {
     let home = scratch(&format!("versioned-cap-{}", std::process::id()));
@@ -951,19 +858,14 @@ fn a_versioned_cap_gates_its_model_family() {
     for model in ["claude:sonnet", "claude:claude-sonnet-4-5"] {
         let out = run(model);
         assert!(
-            out.contains(
-                "target none: all eligible resleeve targets have insufficient fresh quota"
-            ),
+            target_of(&out).starts_with("target none:"),
             "{model}: {out}"
         );
         assert!(!out.contains("target Claude:"), "{model}: {out}");
     }
     let bare_out = run("claude");
     let bare = target_of(&bare_out);
-    assert!(
-        bare.starts_with("target Claude:") && bare.contains("; wk sonnet 4.5 under the minimum"),
-        "{bare}"
-    );
+    assert!(bare.starts_with("target Claude:"), "{bare}");
     assert!(
         shown.contains("target Claude:") && shown.contains("5h"),
         "{shown}"
@@ -988,10 +890,7 @@ fn a_model_cap_gates_the_candidate_that_runs_that_model() {
     let home_s = home.to_str().unwrap();
     let run = |allow: &str| probe(&["--home", home_s, "--claude-url", &base, "--allow", allow]);
     let opus = run("claude:claude-opus-4-6");
-    assert!(
-        opus.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
-        "{opus}"
-    );
+    assert!(target_of(&opus).starts_with("target none:"), "{opus}");
     assert!(!opus.contains("target Claude:"), "{opus}");
     let line = line_of(&opus, "claude");
     assert!(line.contains("opus") && line.contains("100%"), "{line}");
@@ -1022,13 +921,7 @@ fn a_model_cap_gates_the_candidate_that_runs_that_model() {
             "{label}: {only}"
         );
         assert!(
-            only.contains(
-                "target Claude: first eligible in resleeve_to without a fresh quota reading"
-            ),
-            "{label}: {only}"
-        );
-        assert!(
-            !only.contains("insufficient fresh quota"),
+            target_of(&only).starts_with("target Claude:"),
             "{label}: {only}"
         );
     }
@@ -1036,8 +929,7 @@ fn a_model_cap_gates_the_candidate_that_runs_that_model() {
 
 /// No model and `default` stay eligible under a full cap, and rank below an equal candidate
 /// that the cap does not touch. `opusplan` is gated by either cap. A better account window
-/// still beats a worse one. A bare candidate that is also short of the account window parks,
-/// and that reason names the cap.
+/// still beats a worse one. A bare candidate that is also short of the account window parks.
 #[test]
 fn an_unspecified_model_ranks_below_a_cap() {
     let home = scratch(&format!("rank-cap-{}", std::process::id()));
@@ -1075,39 +967,22 @@ fn an_unspecified_model_ranks_below_a_cap() {
 
     let ranked_out = run("claude,claude:opus");
     let ranked = target_of(&ranked_out);
-    assert!(
-        ranked.contains("[opus]") && !ranked.contains("under the minimum"),
-        "{ranked}"
-    );
+    assert!(ranked.ends_with("[opus]"), "{ranked}");
 
     let bare_out = run("claude");
     let bare = target_of(&bare_out);
-    assert!(
-        bare.starts_with("target Claude:") && bare.contains("; wk sonnet under the minimum"),
-        "{bare}"
-    );
+    assert!(bare.starts_with("target Claude:"), "{bare}");
     let fallback_out = run("claude:default");
     let fallback = target_of(&fallback_out);
-    assert!(
-        fallback.contains("[default]") && fallback.contains("; wk sonnet under the minimum"),
-        "{fallback}"
-    );
+    assert!(fallback.ends_with("[default]"), "{fallback}");
 
     let plan = run("claude:opusplan");
-    assert!(
-        plan.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
-        "{plan}"
-    );
+    assert!(target_of(&plan).starts_with("target none:"), "{plan}");
     assert!(!plan.contains("target Claude:"), "{plan}");
 
     let better_out = run("claude,codex");
     let better = target_of(&better_out);
-    assert!(
-        better.starts_with("target Claude:")
-            && better.contains("; wk sonnet under the minimum")
-            && !better.contains("target Codex:"),
-        "{better}"
-    );
+    assert!(better.starts_with("target Claude:"), "{better}");
 
     let (port, _) = serve(vec![(
         "/api/oauth/usage",
@@ -1122,10 +997,7 @@ fn an_unspecified_model_ranks_below_a_cap() {
         "--allow",
         "claude:opusplan",
     ]);
-    assert!(
-        opus.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
-        "{opus}"
-    );
+    assert!(target_of(&opus).starts_with("target none:"), "{opus}");
 
     let (port, _) = serve(vec![(
         "/api/oauth/usage",
@@ -1134,10 +1006,7 @@ fn an_unspecified_model_ranks_below_a_cap() {
     let base = format!("http://127.0.0.1:{port}");
     let parked = probe(&["--home", home_s, "--claude-url", &base, "--allow", "claude"]);
     let line = target_of(&parked);
-    assert!(
-        line.contains("insufficient fresh quota") && line.contains("; wk sonnet under the minimum"),
-        "{parked}"
-    );
+    assert!(line.starts_with("target none:"), "{parked}");
 }
 
 /// Pi with a vendor login has no quota reader. A missing reading is not "unknown", so the
@@ -1164,52 +1033,9 @@ fn an_unmetered_harness_is_not_spent_when_its_reading_is_missing() {
         "claude,pi_vendor",
     ]);
     assert_eq!(state_of(line_of(&out, "claude")), "fresh", "{out}");
-    assert!(
-        out.contains("target none: all eligible resleeve targets have insufficient fresh quota"),
-        "{out}"
-    );
+    assert!(target_of(&out).starts_with("target none:"), "{out}");
     assert!(!out.contains("target PiVendor"), "{out}");
 
     let alone = probe(&["--home", home_s, "--allow", "pi_vendor"]);
-    assert!(
-        alone.contains("target none: no eligible resleeve target has a quota meter"),
-        "{alone}"
-    );
-    assert!(!alone.contains("insufficient fresh quota"), "{alone}");
-}
-
-/// Codex reports a window length in seconds. The label keeps whole minutes, so 119 seconds
-/// is shown as `1m`, and the pace uses the stored length rather than that minute.
-#[test]
-fn a_codex_window_keeps_its_length_for_the_pace() {
-    let home = scratch(&format!("window-length-{}", std::process::id()));
-    write(
-        &home.join(".codex/auth.json"),
-        r#"{"tokens":{"access_token":"length-codex"}}"#,
-    );
-    let reset_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("clock")
-        .as_secs()
-        + 90;
-    let body = format!(
-        r#"{{"plan_type":"plus","rate_limit":{{"primary_window":{{"used_percent":50,"limit_window_seconds":119,"reset_at":{reset_at}}}}}}}"#
-    );
-    let (port, _) = serve(vec![("/wham/usage", body)]);
-    let base = format!("http://127.0.0.1:{port}");
-    let out = probe(&[
-        "--home",
-        home.to_str().unwrap(),
-        "--codex-url",
-        &base,
-        "--allow",
-        "codex",
-    ]);
-    let line = line_of(&out, "codex");
-    assert_eq!(state_of(line), "fresh", "{out}");
-    assert!(line.contains("[1m 50%"), "{line}");
-    assert!(
-        out.contains("target Codex:") && out.contains("~0% expiring unused, 50% usable now"),
-        "{out}"
-    );
+    assert!(target_of(&alone).starts_with("target none:"), "{alone}");
 }
