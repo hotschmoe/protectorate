@@ -2590,7 +2590,10 @@ fn doctor_refuses_an_ineligible_harness_and_envoy_waits_for_it() {
         "{d}"
     );
     eventually("Envoy to leave the park", Duration::from_secs(30), || {
-        (hub.sleeve("envoy")["lifecycle"].as_str() != Some("parked")).then_some(())
+        hub.sleeve("envoy")["lifecycle"]
+            .as_str()
+            .is_some_and(|life| life != "parked")
+            .then_some(())
     });
 }
 
