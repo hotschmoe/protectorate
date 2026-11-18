@@ -944,6 +944,22 @@ fn codex_credit_readings() {
     let fake_bin = unique("codex-credit-bin");
     std::fs::create_dir_all(&fake_bin).unwrap();
     std::os::unix::fs::symlink("/bin/true", fake_bin.join("systemd-run")).unwrap();
+    let fake_pi = fake_bin.join("pi");
+    std::fs::write(&fake_pi, r##"#!/usr/bin/python3
+import json, sys
+if '--version' in sys.argv:
+    print('0.0.0')
+    sys.exit(0)
+flag = '--session-id' if '--session-id' in sys.argv else '--session'
+session = sys.argv[sys.argv.index(flag) + 1]
+for line in sys.stdin:
+    request = json.loads(line)
+    command = request['type']
+    data = {'sessionId': session} if command == 'get_state' else {'disposition': 'handled'}
+    print(json.dumps({'type': 'response', 'id': request['id'], 'command': command, 'success': True, 'data': data}), flush=True)
+"##).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&fake_pi, std::fs::Permissions::from_mode(0o700)).unwrap();
     let path = format!(
         "{}:{}",
         fake_bin.display(),
@@ -987,7 +1003,7 @@ fn codex_credit_readings() {
             ("quota_poll_secs", 1u64.into()),
             ("scopes", false.into()),
             ("codex_program", "/bin/true".into()),
-            ("pi_program", "/bin/true".into()),
+            ("pi_program", fake_pi.to_str().unwrap().into()),
             ("pi_local_provider", "stand-in".into()),
             ("pi_local_model", "stand-in".into()),
             ("local_url", url.as_str().into()),
@@ -1058,6 +1074,23 @@ fn codex_credit_readings() {
         spawned.stderr.contains("pi_local has quota headroom"),
         "{}",
         spawned.stderr
+    );
+    hub.wait("credit-worker", "idle", 60);
+    let moved = hub.cli(&["sleeve", "resleeve", "credit-worker", "--harness", "codex"]);
+    moved.ok();
+    assert!(
+        moved.stderr.contains("will use account credits"),
+        "{}",
+        moved.stderr
+    );
+    hub.cli(&["sleeve", "stop", "credit-worker"]).ok();
+    hub.wait("credit-worker", "ended", 60);
+    let started = hub.cli(&["sleeve", "start", "credit-worker", "--harness", "codex"]);
+    started.ok();
+    assert!(
+        started.stderr.contains("will use account credits"),
+        "{}",
+        started.stderr
     );
     let inbox = || hub.cli(&["--json", "sleeve", "inbox", "envoy"]).json();
     eventually("Envoy credit notice", Duration::from_secs(15), || {
@@ -1153,6 +1186,39 @@ fn codex_credit_readings() {
     assert_eq!(
         hub.sleeve("floor-worker")["park_reason"].as_str(),
         Some("credit_floor")
+    );
+    on_credits.store(true, Ordering::SeqCst);
+    eventually(
+        "credit spending after restart",
+        Duration::from_secs(15),
+        || {
+            let list = hub.cli(&["--json", "quota", "list"]).json();
+            list["quotas"]
+                .as_array()?
+                .iter()
+                .any(|q| {
+                    q["subscription"].as_str() == Some("codex")
+                        && q["credits"]["limit_reached"].as_bool() == Some(true)
+                })
+                .then_some(())
+        },
+    );
+    let started = hub.cli(&["sleeve", "start", "floor-worker"]);
+    started.ok();
+    assert!(
+        started
+            .stderr
+            .contains("will park below quota_credit_floor"),
+        "{}",
+        started.stderr
+    );
+    eventually(
+        "restart parked at credit floor",
+        Duration::from_secs(15),
+        || {
+            (hub.sleeve("floor-worker")["park_reason"].as_str() == Some("credit_floor"))
+                .then_some(())
+        },
     );
 }
 

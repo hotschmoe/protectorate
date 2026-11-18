@@ -4,21 +4,27 @@
 # whose tests take turns on the local model (their source calls have_runtime or reads
 # PT_E2E_PI_*) run one at a time in a lane of their own: one endpoint serves them all, and
 # side by side their turns time out. A failing binary's output is printed; every log stays in
-# <target>/test-logs. The e2e tests' homes from the last run stay in <target>/tmp.
+# <target>/test-logs/run-<pid>-<n>. E2e test homes stay in <target>/tmp.
 #
 #   sh scripts/test.sh            PT_TEST_JOBS (default half the cores) binaries at once
 set -eu
 
 jobs=${PT_TEST_JOBS:-$(( $(nproc) / 2 > 1 ? $(nproc) / 2 : 1 ))}
 target=${CARGO_TARGET_DIR:-target}
-logs=$target/test-logs
 times=$target/test-times
-mkdir -p "$logs"
-rm -f "$logs"/*.log "$logs"/failed "$logs"/times.new
-touch "$times" "$logs/failed" "$logs/times.new"
-# The e2e tests leave their homes in CARGO_TARGET_TMPDIR (<target>/tmp), about 20 GiB after a
-# week of runs. Each run clears the last one's before the build, which recreates the dir.
-rm -rf --one-file-system "$target/tmp"
+mkdir -p "$target/test-logs"
+n=0
+while ! mkdir "$target/test-logs/run-$$-$n" 2>/dev/null; do n=$((n + 1)); done
+logs=$target/test-logs/run-$$-$n
+for previous in "$target"/test-logs/run-*/times.new; do
+    [ -s "$previous" ] || continue
+    if [ ! -f "$times" ] || [ "$previous" -nt "$times" ]; then times=$previous; fi
+done
+if [ ! -f "$times" ]; then
+    times=$logs/baseline
+    touch "$times"
+fi
+touch "$logs/failed" "$logs/times.new"
 
 # Doctests are left out: the workspace has none, and building them costs a rustdoc per crate.
 PROTECTORATE_BUILD_VERSION=${PROTECTORATE_BUILD_VERSION:-dev} cargo test --locked --workspace \
@@ -62,7 +68,6 @@ xargs -L 1 sh -c "$run" "$logs" <"$logs/model" &
 lane=$!
 xargs -P "$(( jobs > 2 ? jobs - 1 : 1 ))" -L 1 sh -c "$run" "$logs" <"$logs/rest"
 wait "$lane"
-mv "$logs/times.new" "$times"
 
 total=$(wc -l <"$logs/order")
 passed=$(cat "$logs"/*.log | awk '/^test result:/ { s += $4 } END { print s + 0 }')
