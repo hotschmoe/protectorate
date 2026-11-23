@@ -9,9 +9,9 @@ Protectorate drives upstream CLIs exclusively via their official machine-readabl
 - **`antigravity`** (`antigravity.zig`): `agy --input-format stream-json --output-format stream-json` (`event: init / step_update / result`, subtracting cumulative session usage counters per turn and signalling interrupts with `SIGINT`)
 - **`pi`** (`pi.zig`): `--mode rpc` JSONL (`get_state`, `prompt`, `steer`, `abort`, `compact`)
 
-Each adapter translates raw protocol lines into normalized `DriverEntry` events (`session_info`, `assistant_text`, `reasoning`, `tool_call`, `tool_result`, `approval_request`, `turn_started`, `turn_settled`) through `protocol.Out`, coalescing streaming deltas and capping block/output sizes (`max_block = 1 MiB`).
+Each adapter translates raw protocol lines into normalized `DriverEntry` events (`session_info`, `assistant_text`, `reasoning`, `tool_call`, `tool_result`, `approval_request`, `compaction`, `turn_started`, `turn_settled`) through `protocol.Out`, coalescing streaming deltas and capping block/output sizes (`max_block = 1 MiB`).
 
-`drivers/session.zig` wraps a spawned child process with dedicated stdout NDJSON and bounded 16 KiB stderr ring threads, releasing `Session.mu` prior to delivering callbacks to eliminate lock-order inversions with `hub/runtime.zig`.
+`drivers/session.zig` wraps a spawned child process with dedicated stdout NDJSON and bounded 16 KiB stderr ring threads, exposes `compact()` for native in-session compaction (`claude`, `pi`, with automatic handoff resleeve fallback for other harnesses), and releases `Session.mu` prior to delivering callbacks to eliminate lock-order inversions with `hub/runtime.zig`. Worktree sleeves provision isolated checkouts (`<hub_home>/worktrees/<id>` on `pt/<id>`) separate from the base repo path, and `hub/runtime.zig` monitors configured `sleeve_devices` paths for attach/detach transitions.
 
 ## Cross-Platform Guardrails & Sandboxing (`src/sandbox/`)
 

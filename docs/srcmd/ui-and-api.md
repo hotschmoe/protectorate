@@ -14,4 +14,6 @@ At build time `pt-embed-web` pre-compresses `app/build/web` files with gzip (`st
 
 ## CLI & Envoy MCP (`src/cli/`)
 
-`cli/commands.zig` provides the operator CLI (`serve`, `status`, `doctor`, `pair`, `token`, `sleeve`, `node`, `job`, `history`, `quota`, `rpc`). `protectorate --envoy` / `mcp` (`src/cli/mcp.zig`) serves JSON-RPC 2.0 over stdio exposing Envoy tools (`spawn_sleeve`, `send_message`, `get_transcript`, `wait_sleeve`, `run_job`, `search_history`, etc.).
+`cli/commands.zig` provides the operator CLI (`serve`, `status`, `doctor`, `pair`, `token`, `quota`, `sleeve list|attach|stop|rm|prompt|transcript`, `node list|join-token|add|approve|update`, `hub update`, `harness update`, `job list|get|cancel|logs`, `history search`, `rpc`). All query and status commands render aligned human-readable tables by default and emit machine JSON with `--json`. `sleeve attach <id>` invokes `TakeoverTerminal` to release the hub's managed driver and hands off directly to the interactive harness CLI in the user's terminal.
+
+`hub/api_dispatch.zig` and `hub/runtime.zig` enforce D9 owner-approval gating on Envoy action calls (`SpawnSleeve` past `d9_spawn_limit`, `RemoveSleeve`, `GitPush`, `RunJob`), block `EnvoyWait` on turn settlement and extract the Envoy transcript reply, and orchestrate fleet rollouts via `UpdateNodes` and harness updates via `UpdateHarnesses`. `protectorate --envoy` / `mcp` (`src/cli/mcp.zig`) serves JSON-RPC 2.0 over stdio exposing Envoy tools (`spawn_sleeve`, `send_message`, `get_transcript`, `wait_sleeve`, `run_job`, `search_history`, etc.).

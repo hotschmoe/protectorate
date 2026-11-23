@@ -95,11 +95,15 @@ pub const Runtime = struct {
     meta_mu: std.Io.Mutex = .init,
     workspaces: std.StringHashMapUnmanaged(schema.Workspace) = .empty,
     sessions: std.StringHashMapUnmanaged(*DriverHandle) = .empty,
+    worktree_bases: std.StringHashMapUnmanaged([]const u8) = .empty,
+    device_inodes: std.StringHashMapUnmanaged(?u64) = .empty,
     pending_nodes: std.StringHashMapUnmanaged(PendingReg) = .empty,
     node_tele: std.StringHashMapUnmanaged(NodeTelemetry) = .empty,
     job_meta: std.StringHashMapUnmanaged(JobMeta) = .empty,
     hub_events: std.ArrayList(schema.HubEvent) = .empty,
     next_hub_event_seq: u64 = 1,
+    d9_turn_id: u64 = 0,
+    d9_turn_spawns: u32 = 0,
     next_id_seq: std.atomic.Value(u64) = .init(1),
     host_inventory: ?msg.Inventory = null,
     cached_quotas: []schema.Quota = &.{},
@@ -193,6 +197,10 @@ pub const Runtime = struct {
         errdefer rt.fleet_srv.stop_and_deinit();
 
         try rt.recover_after_replay();
+        if (rest_err == null) {
+            u_store.mark_healthy(gpa, io, hh.releases_path) catch {};
+        }
+        rt.init_sleeve_devices();
         rt.load_host_info();
         rt.refresh_quotas_sync();
         _ = rt.history.ingest_roots(null, hh.transcripts_path);
@@ -246,6 +254,17 @@ pub const Runtime = struct {
         {
             self.meta_mu.lockUncancelable(self.io);
             self.workspaces.deinit(self.gpa);
+            var wbit = self.worktree_bases.iterator();
+            while (wbit.next()) |e| {
+                self.gpa.free(e.key_ptr.*);
+                self.gpa.free(e.value_ptr.*);
+            }
+            self.worktree_bases.deinit(self.gpa);
+            var dit = self.device_inodes.iterator();
+            while (dit.next()) |e| {
+                self.gpa.free(e.key_ptr.*);
+            }
+            self.device_inodes.deinit(self.gpa);
             var pit = self.pending_nodes.iterator();
             while (pit.next()) |e| {
                 self.gpa.free(e.key_ptr.*);
@@ -430,7 +449,23 @@ pub const Runtime = struct {
     fn execute_intent(self: *Runtime, ia: std.mem.Allocator, it: intent.Intent) void {
         switch (it) {
             .provision_worktree => |p| {
-                git.provision_worktree(self.gpa, self.io, p.path, p.path, "main") catch |err| {
+                var base_repo: []const u8 = p.path;
+                {
+                    self.meta_mu.lockUncancelable(self.io);
+                    if (self.worktree_bases.get(p.sleeve_id)) |b| {
+                        base_repo = ia.dupe(u8, b) catch p.path;
+                    }
+                    self.meta_mu.unlock(self.io);
+                }
+                var branch_name: []const u8 = "main";
+                {
+                    self.state_mu.lockUncancelable(self.io);
+                    if (self.core_state.sleeves.get(p.sleeve_id)) |sl| {
+                        if (sl.branch) |br| branch_name = ia.dupe(u8, br) catch "main";
+                    }
+                    self.state_mu.unlock(self.io);
+                }
+                git.provision_worktree(self.gpa, self.io, base_repo, p.path, branch_name) catch |err| {
                     self.commit(.{ .provision_failed = .{ .sleeve_id = p.sleeve_id, .reason = @errorName(err) } }) catch {};
                     return;
                 };
@@ -520,7 +555,77 @@ pub const Runtime = struct {
             .emit_notice => |en| {
                 self.record_hub_event(.guardrail, en.code, en.sleeve_id, en.text, .warn);
             },
-            .notify_parent, .compact_incarnation, .send_node_update => {},
+            .notify_parent => |np| {
+                var deliver = false;
+                var child_name: []const u8 = np.child_id;
+                {
+                    self.state_mu.lockUncancelable(self.io);
+                    if (self.core_state.sleeves.get(np.parent_id)) |psl| {
+                        if (psl.lifecycle != .removed and psl.lifecycle != .parked) deliver = true;
+                    }
+                    if (self.core_state.sleeves.get(np.child_id)) |csl| {
+                        child_name = ia.dupe(u8, csl.name) catch np.child_id;
+                    }
+                    self.state_mu.unlock(self.io);
+                }
+                if (deliver) {
+                    const rid = self.gen_id(ia, "rep") catch "";
+                    const st_str: []const u8 = if (np.status) |s| s.to_wire() else "settled";
+                    const txt = std.fmt.allocPrint(ia, "[child report from {s}] turn={d} status={s}", .{
+                        child_name,
+                        np.turn,
+                        st_str,
+                    }) catch "[child report]";
+                    self.commit(.{ .prompt_enqueued = .{
+                        .sleeve_id = np.parent_id,
+                        .request_id = rid,
+                        .from = child_name,
+                        .kind = .report,
+                        .mode = .queue,
+                        .text = txt,
+                    } }) catch {};
+                }
+            },
+            .compact_incarnation => |ci| {
+                if (self.get_driver(ci.sleeve_id)) |dh| {
+                    if (dh.g == ci.g) {
+                        if (dh.sess.compact()) |_| {} else |err| {
+                            if (err == error.Unsupported) {
+                                var cur_h: ?model.Harness = null;
+                                {
+                                    self.state_mu.lockUncancelable(self.io);
+                                    if (self.core_state.sleeves.get(ci.sleeve_id)) |sl| {
+                                        if (sl.inc) |inc| cur_h = inc.harness;
+                                    }
+                                    self.state_mu.unlock(self.io);
+                                }
+                                if (cur_h) |h| {
+                                    brief.write_handoff(
+                                        self.gpa,
+                                        self.io,
+                                        self.hub_home.briefs_path,
+                                        ci.sleeve_id,
+                                        ci.g,
+                                        .handoff,
+                                        "Context ceiling reached; auto-handoff",
+                                    ) catch {};
+                                    self.commit(.{ .resleeve_requested = .{
+                                        .sleeve_id = ci.sleeve_id,
+                                        .harness = h,
+                                        .by = .system,
+                                        .cause = .handoff,
+                                    } }) catch {};
+                                }
+                            } else {
+                                self.record_hub_event(.sleeve, "compact", ci.sleeve_id, @errorName(err), .warn);
+                            }
+                        }
+                    }
+                }
+            },
+            .send_node_update => |snu| {
+                self.send_node_update_async(snu.rollout_id, snu.node_id, snu.version);
+            },
         }
     }
 
@@ -886,6 +991,21 @@ pub const Runtime = struct {
                 }) catch null;
                 if (ce) |c| self.stream_hub.publish_raw(.{ .entry = .{ .seq = 0, .sleeve_id = dh.sleeve_id, .entry = c } });
             },
+            .compaction => |cp| {
+                self.commit(.{ .compacted = .{
+                    .sleeve_id = dh.sleeve_id,
+                    .g = dh.g,
+                    .tokens_after = cp.tokens_after orelse 0,
+                } }) catch {};
+                const ce = self.transcripts.append(dh.sleeve_id, dh.g, dh.turn_id, ev.time_ms, .{
+                    .compaction = .{
+                        .trigger = cp.trigger,
+                        .tokens_before = cp.tokens_before,
+                        .tokens_after = cp.tokens_after,
+                    },
+                }) catch null;
+                if (ce) |c| self.stream_hub.publish_raw(.{ .entry = .{ .seq = 0, .sleeve_id = dh.sleeve_id, .entry = c } });
+            },
             else => {},
         }
     }
@@ -1103,6 +1223,7 @@ pub const Runtime = struct {
             self.poll_inflight_jobs();
             if (ticks % 5 == 0) {
                 self.fleet_srv.sweep_stale(20_000);
+                self.poll_sleeve_devices();
             }
             if (ticks % 10 == 0) {
                 self.commit(.{ .tick = .{} }) catch {};
@@ -1168,13 +1289,35 @@ pub const Runtime = struct {
         self.meta_mu.lockUncancelable(self.io);
         defer self.meta_mu.unlock(self.io);
 
-        var tel = self.node_tele.get(node_id) orelse NodeTelemetry{};
+        const gop = self.node_tele.getOrPut(self.gpa, node_id) catch return;
+        if (!gop.found_existing) {
+            gop.key_ptr.* = a.dupe(u8, node_id) catch return;
+            gop.value_ptr.* = NodeTelemetry{};
+        }
+        var tel = gop.value_ptr.*;
         if (hello.inventory) |inv| {
             const tc: []msg.Toolchain = a.alloc(msg.Toolchain, inv.toolchains.len) catch &.{};
             for (inv.toolchains, 0..) |t, i| {
                 tc[i] = .{
                     .name = a.dupe(u8, t.name) catch "",
                     .version = a.dupe(u8, t.version) catch "",
+                };
+            }
+            const gpus: []msg.Gpu = a.alloc(msg.Gpu, inv.gpus.len) catch &.{};
+            for (inv.gpus, 0..) |g, i| {
+                gpus[i] = .{
+                    .name = a.dupe(u8, g.name) catch "",
+                    .driver = a.dupe(u8, g.driver) catch "",
+                    .vram_bytes = g.vram_bytes,
+                    .util_pct = g.util_pct,
+                };
+            }
+            const disks: []msg.Disk = a.alloc(msg.Disk, inv.disks.len) catch &.{};
+            for (inv.disks, 0..) |d, i| {
+                disks[i] = .{
+                    .mount = a.dupe(u8, d.mount) catch "",
+                    .size_bytes = d.size_bytes,
+                    .free_bytes = d.free_bytes,
                 };
             }
             tel.inventory = .{
@@ -1185,6 +1328,8 @@ pub const Runtime = struct {
                 .cpu_model = a.dupe(u8, inv.cpu_model) catch "",
                 .cpu_count = inv.cpu_count,
                 .ram_bytes = inv.ram_bytes,
+                .gpus = gpus,
+                .disks = disks,
                 .toolchains = tc,
                 .collected_at_ms = inv.collected_at_ms,
             };
@@ -1197,8 +1342,7 @@ pub const Runtime = struct {
             .source = a.dupe(u8, hello.presence.source) catch "",
             .sampled_at_ms = hello.presence.sampled_at_ms,
         };
-        const k = a.dupe(u8, node_id) catch return;
-        self.node_tele.put(self.gpa, k, tel) catch {};
+        gop.value_ptr.* = tel;
     }
 
     pub fn record_hub_event(
@@ -1260,6 +1404,20 @@ pub const Runtime = struct {
                 if (self.view_approval(arena, a.approval_id) catch null) |av| {
                     self.stream_hub.publish_raw(.{ .approval = .{ .seq = 0, .approval = av } });
                 }
+            },
+            .approval_expired => |a| {
+                if (self.view_approval(arena, a.approval_id) catch null) |av| {
+                    self.stream_hub.publish_raw(.{ .approval = .{ .seq = 0, .approval = av } });
+                }
+            },
+            .rollout_started => |r| {
+                self.record_hub_event(.node, "rollout", r.rollout_id, r.version, .info);
+            },
+            .rollout_node_result => |r| {
+                self.record_hub_event(.node, r.node_id, r.rollout_id, r.detail, if (r.ok) .info else .warn);
+            },
+            .rollout_cancelled => |r| {
+                self.record_hub_event(.node, "rollout", r.rollout_id, "cancelled", .warn);
             },
             else => {},
         }
@@ -1390,8 +1548,21 @@ pub const Runtime = struct {
 
         if (tel) |t| {
             if (t.inventory) |inv| {
-                var tcs = try arena.alloc(schema.Toolchain, inv.toolchains.len);
+                const tcs = try arena.alloc(schema.Toolchain, inv.toolchains.len);
                 for (inv.toolchains, 0..) |tc, i| tcs[i] = .{ .name = tc.name, .version = tc.version };
+                const gpus = try arena.alloc(schema.Gpu, inv.gpus.len);
+                for (inv.gpus, 0..) |g, i| gpus[i] = .{
+                    .name = g.name,
+                    .driver = g.driver,
+                    .vram_bytes = g.vram_bytes,
+                    .util_pct = g.util_pct,
+                };
+                const disks = try arena.alloc(schema.Disk, inv.disks.len);
+                for (inv.disks, 0..) |d, i| disks[i] = .{
+                    .mount = d.mount,
+                    .size_bytes = d.size_bytes,
+                    .free_bytes = d.free_bytes,
+                };
                 inv_s = .{
                     .hostname = inv.hostname,
                     .os = inv.os,
@@ -1400,6 +1571,8 @@ pub const Runtime = struct {
                     .cpu_model = inv.cpu_model,
                     .cpu_count = inv.cpu_count,
                     .ram_bytes = inv.ram_bytes,
+                    .gpus = gpus,
+                    .disks = disks,
                     .toolchains = tcs,
                     .collected_at_ms = .{ .ms = inv.collected_at_ms },
                 };
@@ -1492,6 +1665,464 @@ pub const Runtime = struct {
             .cwd = if (jm) |m| m.cwd else null,
             .artifacts = if (jm) |m| m.artifacts else &.{},
         };
+    }
+
+    pub fn register_worktree_base(self: *Runtime, sleeve_id: []const u8, base_repo: []const u8) !void {
+        self.meta_mu.lockUncancelable(self.io);
+        defer self.meta_mu.unlock(self.io);
+        const v_dup = try self.gpa.dupe(u8, base_repo);
+        errdefer self.gpa.free(v_dup);
+        const gop = try self.worktree_bases.getOrPut(self.gpa, sleeve_id);
+        if (gop.found_existing) {
+            self.gpa.free(gop.value_ptr.*);
+            gop.value_ptr.* = v_dup;
+        } else {
+            errdefer _ = self.worktree_bases.remove(sleeve_id);
+            gop.key_ptr.* = try self.gpa.dupe(u8, sleeve_id);
+            gop.value_ptr.* = v_dup;
+        }
+    }
+
+    pub fn takeover_sleeve(self: *Runtime, arena: std.mem.Allocator, sleeve_id: []const u8) !void {
+        _ = arena;
+        var cur_g: model.Gen = 0;
+        var need_stop = false;
+        {
+            self.state_mu.lockUncancelable(self.io);
+            defer self.state_mu.unlock(self.io);
+            const sl = self.core_state.sleeves.get(sleeve_id) orelse return error.NotFound;
+            if (sl.lifecycle == .removed) return error.InvalidState;
+            cur_g = if (sl.inc) |inc| inc.g else sl.next_g;
+            need_stop = sl.lifecycle != .stopped and sl.lifecycle != .parked;
+        }
+
+        const at_ms = std.Io.Clock.real.now(self.io).toMilliseconds();
+        const ce = self.transcripts.append(sleeve_id, cur_g, 0, at_ms, .{
+            .notice = .{
+                .level = .info,
+                .code = "takeover",
+                .text = "terminal takeover initiated; releasing managed driver",
+            },
+        }) catch null;
+        if (ce) |c| {
+            self.stream_hub.publish_raw(.{ .entry = .{ .seq = 0, .sleeve_id = sleeve_id, .entry = c } });
+        }
+        self.record_hub_event(.sleeve, "takeover", sleeve_id, "terminal takeover handoff", .info);
+
+        if (need_stop) {
+            brief.write_handoff(
+                self.gpa,
+                self.io,
+                self.hub_home.briefs_path,
+                sleeve_id,
+                cur_g,
+                .manual,
+                "Terminal takeover handoff",
+            ) catch {};
+            try self.commit(.{ .stop_requested = .{ .sleeve_id = sleeve_id, .by = .owner } });
+        }
+    }
+
+    pub const D9Action = enum {
+        spawn_sleeve,
+        remove_sleeve,
+        run_job,
+        git_push,
+    };
+
+    pub fn gate_d9(
+        self: *Runtime,
+        arena: std.mem.Allocator,
+        principal: ?home.Principal,
+        action: D9Action,
+        summary: []const u8,
+    ) !?[]const u8 {
+        if (principal == null or principal.? != .envoy) return null;
+
+        var envoy_d9 = false;
+        var cur_g: model.Gen = 0;
+        var cur_turn: u64 = 0;
+        {
+            self.state_mu.lockUncancelable(self.io);
+            defer self.state_mu.unlock(self.io);
+            if (self.core_state.sleeves.get("envoy")) |sl| {
+                envoy_d9 = sl.d9;
+                if (sl.inc) |inc| {
+                    cur_g = inc.g;
+                    cur_turn = inc.turn;
+                }
+            }
+        }
+        if (!envoy_d9) return null;
+
+        if (action == .spawn_sleeve) {
+            self.meta_mu.lockUncancelable(self.io);
+            defer self.meta_mu.unlock(self.io);
+            if (self.d9_turn_id != cur_turn) {
+                self.d9_turn_id = cur_turn;
+                self.d9_turn_spawns = 0;
+            }
+            if (self.d9_turn_spawns < self.hub_home.config.d9_spawn_limit) {
+                self.d9_turn_spawns += 1;
+                return null;
+            }
+        }
+
+        const app_id = try self.gen_id(arena, "d9");
+        const title: []const u8 = switch (action) {
+            .spawn_sleeve => "Envoy spawn over D9 limit",
+            .remove_sleeve => "Envoy remove sleeve (D9)",
+            .run_job => "Envoy run job (D9)",
+            .git_push => "Envoy git push (D9)",
+        };
+        try self.commit(.{ .approval_requested = .{
+            .approval_id = app_id,
+            .sleeve_id = "envoy",
+            .g = cur_g,
+            .kind = .action,
+            .title = title,
+            .summary = summary,
+            .is_d9 = true,
+        } });
+        self.record_hub_event(.approval, "d9", "envoy", summary, .warn);
+
+        const wait_secs = @max(@as(u64, 1), @min(self.hub_home.config.d9_approval_timeout_secs, 600));
+        const deadline = std.Io.Clock.real.now(self.io).toMilliseconds() + @as(i64, @intCast(wait_secs * 1_000));
+        var cursor: u64 = 0;
+        while (true) {
+            {
+                self.state_mu.lockUncancelable(self.io);
+                defer self.state_mu.unlock(self.io);
+                if (self.core_state.approvals.get(app_id)) |ap| {
+                    switch (ap.state) {
+                        .approved => return try arena.dupe(u8, app_id),
+                        .denied, .cancelled, .fenced, .abandoned, .expired => return error.ApprovalDenied,
+                        .pending => {},
+                    }
+                } else return error.ApprovalDenied;
+            }
+            const now = std.Io.Clock.real.now(self.io).toMilliseconds();
+            if (now >= deadline) {
+                self.commit(.{ .approval_expired = .{ .approval_id = app_id } }) catch {};
+                return error.ApprovalTimeout;
+            }
+            const ws = try self.stream_hub.wait_since(arena, cursor, @min(500, deadline - now));
+            cursor = ws.last_seq;
+        }
+    }
+
+    pub fn update_harnesses(
+        self: *Runtime,
+        arena: std.mem.Allocator,
+        programs: []const []const u8,
+    ) ![]schema.HarnessUpdate {
+        const rep = try doctor.run_checks(arena, self.io, self.env.get("HOME"));
+        var list: std.ArrayList(schema.HarnessUpdate) = .empty;
+        for (rep.harnesses) |h| {
+            if (programs.len > 0) {
+                var matched = false;
+                for (programs) |want| {
+                    if (std.mem.eql(u8, want, h.name) or (h.path.len > 0 and std.mem.eql(u8, want, h.path))) {
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched) continue;
+            }
+            if (!h.present) {
+                try list.append(arena, .{ .program = h.name, .state = .skipped, .detail = "not installed" });
+                continue;
+            }
+            if (h.update.len == 0) {
+                try list.append(arena, .{ .program = h.name, .state = .skipped, .detail = "no update command" });
+                continue;
+            }
+            var in_use = false;
+            {
+                self.state_mu.lockUncancelable(self.io);
+                defer self.state_mu.unlock(self.io);
+                var sit = self.core_state.sleeves.iterator();
+                while (sit.next()) |se| {
+                    const sl = se.value_ptr.*;
+                    if (sl.lifecycle == .running or sl.lifecycle == .launching or sl.lifecycle == .recovering) {
+                        if (sl.inc) |inc| {
+                            const match_h = switch (inc.harness) {
+                                .claude => std.mem.eql(u8, h.name, "claude"),
+                                .codex => std.mem.eql(u8, h.name, "codex"),
+                                .grok => std.mem.eql(u8, h.name, "grok"),
+                                .antigravity => std.mem.eql(u8, h.name, "antigravity"),
+                                .pi_vendor, .pi_local => std.mem.eql(u8, h.name, "pi"),
+                            };
+                            if (match_h) {
+                                in_use = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if (in_use) {
+                try list.append(arena, .{ .program = h.name, .state = .deferred, .detail = "active sleeve using harness" });
+                continue;
+            }
+            const res = std.process.run(arena, self.io, .{
+                .argv = h.update,
+                .stdout_limit = .limited(64 * 1024),
+                .stderr_limit = .limited(64 * 1024),
+            }) catch |err| {
+                const detail = @errorName(err);
+                try list.append(arena, .{ .program = h.name, .state = .skipped, .detail = detail });
+                self.record_hub_event(.hub, "harness", h.name, detail, .warn);
+                continue;
+            };
+            const raw = if (res.stdout.len > 0) res.stdout else res.stderr;
+            const first_line = std.mem.trim(u8, std.mem.sliceTo(raw, '\n'), " \t\r");
+            if (res.term.success()) {
+                const detail = if (std.mem.find(u8, raw, "up to date") != null or
+                    std.mem.find(u8, raw, "already") != null or
+                    std.mem.find(u8, raw, "latest") != null)
+                    "up to date"
+                else if (first_line.len > 0)
+                    try arena.dupe(u8, first_line)
+                else
+                    "updated";
+                try list.append(arena, .{ .program = h.name, .state = .started, .detail = detail });
+                self.record_hub_event(.hub, "harness", h.name, detail, .info);
+            } else {
+                const base = if (first_line.len > 0) first_line else "update command failed";
+                const detail = try std.fmt.allocPrint(arena, "failed: {s}", .{base});
+                try list.append(arena, .{ .program = h.name, .state = .skipped, .detail = detail });
+                self.record_hub_event(.hub, "harness", h.name, detail, .warn);
+            }
+        }
+        return list.items;
+    }
+
+    pub fn start_and_wait_node_rollout(
+        self: *Runtime,
+        arena: std.mem.Allocator,
+        req: schema.UpdateNodesRequest,
+    ) !schema.NodeUpdates {
+        const target_ver = req.version orelse version.version;
+        var targets: std.ArrayList([]const u8) = .empty;
+        {
+            self.state_mu.lockUncancelable(self.io);
+            defer self.state_mu.unlock(self.io);
+            if (req.all or req.nodes.len == 0) {
+                var nit = self.core_state.nodes.iterator();
+                while (nit.next()) |e| {
+                    const n = e.value_ptr.*;
+                    if (n.approved and !n.removed) {
+                        try targets.append(arena, try arena.dupe(u8, n.id));
+                    }
+                }
+            } else {
+                for (req.nodes) |want| {
+                    var nit = self.core_state.nodes.iterator();
+                    while (nit.next()) |e| {
+                        const n = e.value_ptr.*;
+                        if (!n.approved or n.removed) continue;
+                        if (std.mem.eql(u8, n.id, want) or std.mem.eql(u8, n.name, want)) {
+                            try targets.append(arena, try arena.dupe(u8, n.id));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (targets.items.len == 0) {
+            return .{ .version = target_ver, .nodes = &.{} };
+        }
+
+        const rid = req.rollout_id orelse try self.gen_id(arena, "ro");
+        const cursor_start = self.stream_hub.current_seq();
+        try self.commit(.{ .rollout_started = .{
+            .rollout_id = rid,
+            .version = target_ver,
+            .node_ids = targets.items,
+        } });
+
+        if (!req.no_wait) {
+            const deadline = std.Io.Clock.real.now(self.io).toMilliseconds() + 30_000;
+            var cursor = cursor_start;
+            while (true) {
+                var all_done = true;
+                {
+                    self.state_mu.lockUncancelable(self.io);
+                    defer self.state_mu.unlock(self.io);
+                    if (self.core_state.rollouts.get(rid)) |ro| {
+                        if (!ro.cancelled) {
+                            for (ro.nodes.items) |rn| {
+                                if (!rn.done) {
+                                    all_done = false;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (all_done) break;
+                const now = std.Io.Clock.real.now(self.io).toMilliseconds();
+                if (now >= deadline) break;
+                const ws = try self.stream_hub.wait_since(arena, cursor, @min(500, deadline - now));
+                cursor = ws.last_seq;
+            }
+        }
+
+        const nodes_out = try self.collect_rollout_updates(arena, rid);
+        return .{
+            .version = target_ver,
+            .nodes = nodes_out,
+            .rollout_id = rid,
+        };
+    }
+
+    pub fn collect_rollout_updates(
+        self: *Runtime,
+        arena: std.mem.Allocator,
+        rollout_id: []const u8,
+    ) ![]schema.NodeUpdate {
+        self.state_mu.lockUncancelable(self.io);
+        defer self.state_mu.unlock(self.io);
+        const ro = self.core_state.rollouts.get(rollout_id) orelse return &.{};
+        var out: std.ArrayList(schema.NodeUpdate) = .empty;
+        for (ro.nodes.items) |rn| {
+            const nr = self.core_state.nodes.get(rn.node_id);
+            const nname = if (nr) |n| n.name else rn.node_id;
+            const nver = if (nr) |n| n.version else "";
+            const detail = if (!rn.done)
+                (if (ro.cancelled) "cancelled" else "in_progress")
+            else
+                rn.detail;
+            try out.append(arena, .{
+                .node_id = try arena.dupe(u8, rn.node_id),
+                .name = try arena.dupe(u8, nname),
+                .from = try arena.dupe(u8, nver),
+                .to = try arena.dupe(u8, ro.version),
+                .ok = rn.ok,
+                .detail = try arena.dupe(u8, detail),
+            });
+        }
+        return out.items;
+    }
+
+    fn send_node_update_async(self: *Runtime, rollout_id: []const u8, node_id: []const u8, target_ver: []const u8) void {
+        const Arg = struct { rt: *Runtime, rollout_id: []const u8, node_id: []const u8, target_ver: []const u8 };
+        const arg = self.gpa.create(Arg) catch return;
+        arg.* = .{
+            .rt = self,
+            .rollout_id = self.gpa.dupe(u8, rollout_id) catch {
+                self.gpa.destroy(arg);
+                return;
+            },
+            .node_id = self.gpa.dupe(u8, node_id) catch {
+                self.gpa.free(arg.rollout_id);
+                self.gpa.destroy(arg);
+                return;
+            },
+            .target_ver = self.gpa.dupe(u8, target_ver) catch {
+                self.gpa.free(arg.rollout_id);
+                self.gpa.free(arg.node_id);
+                self.gpa.destroy(arg);
+                return;
+            },
+        };
+        const t = std.Thread.spawn(.{}, struct {
+            fn run(a_ptr: *Arg) void {
+                defer {
+                    a_ptr.rt.gpa.free(a_ptr.rollout_id);
+                    a_ptr.rt.gpa.free(a_ptr.node_id);
+                    a_ptr.rt.gpa.free(a_ptr.target_ver);
+                    a_ptr.rt.gpa.destroy(a_ptr);
+                }
+                var arena_st = std.heap.ArenaAllocator.init(a_ptr.rt.gpa);
+                defer arena_st.deinit();
+                const arena = arena_st.allocator();
+
+                const ch = a_ptr.rt.hub_home.config.update_channel;
+                const rep = a_ptr.rt.fleet_srv.send_update(arena, a_ptr.node_id, .{
+                    .version = a_ptr.target_ver,
+                    .channel = ch,
+                    .rollout_id = a_ptr.rollout_id,
+                }) catch |err| {
+                    a_ptr.rt.commit(.{ .rollout_node_result = .{
+                        .rollout_id = a_ptr.rollout_id,
+                        .node_id = a_ptr.node_id,
+                        .ok = false,
+                        .detail = @errorName(err),
+                    } }) catch {};
+                    return;
+                };
+                a_ptr.rt.commit(.{ .rollout_node_result = .{
+                    .rollout_id = a_ptr.rollout_id,
+                    .node_id = a_ptr.node_id,
+                    .ok = rep.ok,
+                    .detail = rep.detail,
+                } }) catch {};
+            }
+        }.run, .{arg}) catch {
+            self.gpa.free(arg.rollout_id);
+            self.gpa.free(arg.node_id);
+            self.gpa.free(arg.target_ver);
+            self.gpa.destroy(arg);
+            return;
+        };
+        t.detach();
+    }
+
+    fn init_sleeve_devices(self: *Runtime) void {
+        if (self.hub_home.config.sleeve_devices.len == 0) return;
+        self.meta_mu.lockUncancelable(self.io);
+        defer self.meta_mu.unlock(self.io);
+        for (self.hub_home.config.sleeve_devices) |dp| {
+            const k = self.gpa.dupe(u8, dp) catch continue;
+            self.device_inodes.put(self.gpa, k, stat_device_inode(self.io, dp)) catch {
+                self.gpa.free(k);
+            };
+        }
+    }
+
+    fn poll_sleeve_devices(self: *Runtime) void {
+        if (self.hub_home.config.sleeve_devices.len == 0) return;
+        var ev_msgs: [16]struct { path: []const u8, code: []const u8, level: schema.Level } = undefined;
+        var ev_n: usize = 0;
+        {
+            self.meta_mu.lockUncancelable(self.io);
+            defer self.meta_mu.unlock(self.io);
+            for (self.hub_home.config.sleeve_devices) |dp| {
+                const cur = stat_device_inode(self.io, dp);
+                const gop = self.device_inodes.getOrPut(self.gpa, dp) catch continue;
+                if (!gop.found_existing) {
+                    gop.key_ptr.* = self.gpa.dupe(u8, dp) catch dp;
+                    gop.value_ptr.* = cur;
+                    continue;
+                }
+                const prev = gop.value_ptr.*;
+                if (prev != cur) {
+                    gop.value_ptr.* = cur;
+                    if (ev_n < ev_msgs.len) {
+                        if (prev == null and cur != null) {
+                            ev_msgs[ev_n] = .{ .path = dp, .code = "device_attached", .level = .info };
+                            ev_n += 1;
+                        } else if (prev != null and cur == null) {
+                            ev_msgs[ev_n] = .{ .path = dp, .code = "device_detached", .level = .warn };
+                            ev_n += 1;
+                        } else if (prev != null and cur != null) {
+                            ev_msgs[ev_n] = .{ .path = dp, .code = "device_reattached", .level = .info };
+                            ev_n += 1;
+                        }
+                    }
+                }
+            }
+        }
+        for (ev_msgs[0..ev_n]) |em| {
+            self.record_hub_event(.guardrail, em.code, em.path, em.code, em.level);
+        }
+    }
+
+    pub fn stat_device_inode(io: std.Io, path: []const u8) ?u64 {
+        const st = std.Io.Dir.cwd().statFile(io, path, .{}) catch return null;
+        return @intCast(st.inode);
     }
 
     pub fn advertise_addrs(self: *Runtime, arena: std.mem.Allocator) ![]const []const u8 {

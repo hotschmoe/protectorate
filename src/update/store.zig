@@ -99,9 +99,6 @@ pub fn stage_and_apply(
     releases_dir_path: []const u8,
     info: ReleaseInfo,
 ) !void {
-    var rel_dir = try std.Io.Dir.cwd().createDirPathOpen(io, releases_dir_path, .{});
-    defer rel_dir.close(io);
-
     var client: std.http.Client = .{ .allocator = gpa, .io = io };
     defer client.deinit();
 
@@ -140,43 +137,112 @@ pub fn stage_and_apply(
     });
     if (pkg_res.status != .ok) return error.HttpFailed;
 
-    if (!version.verify_sha256(pkg_aw.written(), &want_hex)) {
+    try stage_archive_bytes(gpa, io, releases_dir_path, info.tag, info.asset_name, &want_hex, pkg_aw.written());
+}
+
+pub fn stage_from_url(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    releases_dir_path: []const u8,
+    tag: []const u8,
+    url: []const u8,
+    expected_hex: []const u8,
+) !void {
+    var client: std.http.Client = .{ .allocator = gpa, .io = io };
+    defer client.deinit();
+
+    var pkg_aw: std.Io.Writer.Allocating = .init(gpa);
+    defer pkg_aw.deinit();
+    const pkg_res = try client.fetch(.{
+        .location = .{ .url = url },
+        .method = .GET,
+        .extra_headers = &.{.{ .name = "user-agent", .value = "protectorate" }},
+        .response_writer = &pkg_aw.writer,
+    });
+    if (pkg_res.status != .ok) return error.HttpFailed;
+
+    const clean_url = std.mem.sliceTo(url, '?');
+    const asset_name = std.fs.path.basename(clean_url);
+    try stage_archive_bytes(gpa, io, releases_dir_path, tag, asset_name, expected_hex, pkg_aw.written());
+}
+
+pub fn stage_archive_bytes(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    releases_dir_path: []const u8,
+    tag: []const u8,
+    asset_name: []const u8,
+    expected_hex: []const u8,
+    bytes: []const u8,
+) !void {
+    if (!version.verify_sha256(bytes, expected_hex)) {
         return error.ChecksumMismatch;
     }
 
-    const stage_name = try std.fmt.allocPrint(gpa, "{s}.staging", .{info.tag});
+    var rel_dir = try std.Io.Dir.cwd().createDirPathOpen(io, releases_dir_path, .{});
+    defer rel_dir.close(io);
+
+    const stage_name = try std.fmt.allocPrint(gpa, "{s}.staging", .{tag});
     defer gpa.free(stage_name);
     var stage_dir = try rel_dir.createDirPathOpen(io, stage_name, .{});
     defer stage_dir.close(io);
 
-    if (std.mem.endsWith(u8, info.asset_name, ".tar.gz")) {
-        var in_r = std.Io.Reader.fixed(pkg_aw.written());
+    if (std.mem.endsWith(u8, asset_name, ".tar.gz") or std.mem.endsWith(u8, asset_name, ".tgz")) {
+        var in_r = std.Io.Reader.fixed(bytes);
         var flate_buf: [std.compress.flate.max_window_len]u8 = undefined;
         var decomp: std.compress.flate.Decompress = .init(&in_r, .gzip, &flate_buf);
         try std.tar.extract(io, stage_dir, &decomp.reader, .{});
+    } else if (std.mem.endsWith(u8, asset_name, ".zip")) {
+        const tmp_zip = ".pt-stage.zip";
+        try stage_dir.writeFile(io, .{ .sub_path = tmp_zip, .data = bytes });
+        defer stage_dir.deleteFile(io, tmp_zip) catch {};
+        var zf = try stage_dir.openFile(io, tmp_zip, .{});
+        defer zf.close(io);
+        var rbuf: [16 * 1024]u8 = undefined;
+        var zfr = zf.reader(io, &rbuf);
+        try std.zip.extract(stage_dir, &zfr, .{ .allow_backslashes = true });
     } else {
-        try stage_dir.writeFile(io, .{ .sub_path = info.asset_name, .data = pkg_aw.written() });
+        try stage_dir.writeFile(io, .{ .sub_path = asset_name, .data = bytes });
     }
+
+    rel_dir.deleteTree(io, tag) catch {};
+    try std.Io.Dir.rename(rel_dir, stage_name, rel_dir, tag, io);
+    _ = try activate_staged(gpa, io, releases_dir_path, tag);
+}
+
+pub fn activate_staged(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    releases_dir_path: []const u8,
+    tag: []const u8,
+) !bool {
+    var rel_dir = std.Io.Dir.cwd().openDir(io, releases_dir_path, .{}) catch return false;
+    defer rel_dir.close(io);
+
+    var tag_dir = rel_dir.openDir(io, tag, .{}) catch return false;
+    tag_dir.close(io);
 
     const prev_active = read_marker(gpa, io, rel_dir, "current.txt");
     defer if (prev_active) |p| gpa.free(p);
 
-    try std.Io.Dir.rename(rel_dir, stage_name, rel_dir, info.tag, io);
     if (prev_active) |p| {
-        try rel_dir.writeFile(io, .{ .sub_path = "previous.txt", .data = p });
+        if (!std.mem.eql(u8, p, tag)) {
+            try rel_dir.writeFile(io, .{ .sub_path = "previous.txt", .data = p });
+        }
     }
-    try rel_dir.writeFile(io, .{ .sub_path = "current.txt", .data = info.tag });
+    try rel_dir.writeFile(io, .{ .sub_path = "current.txt", .data = tag });
 
     if (builtin.os.tag != .windows) {
         rel_dir.deleteFile(io, "current") catch {};
-        std.Io.Dir.symLink(rel_dir, io, info.tag, "current", .{ .is_directory = true }) catch {};
+        std.Io.Dir.symLink(rel_dir, io, tag, "current", .{ .is_directory = true }) catch {};
     }
 
     try write_probation(gpa, io, rel_dir, .{
-        .active = info.tag,
+        .active = tag,
         .previous = prev_active,
         .healthy = false,
     });
+    return true;
 }
 
 pub fn mark_healthy(gpa: std.mem.Allocator, io: std.Io, releases_dir_path: []const u8) !void {

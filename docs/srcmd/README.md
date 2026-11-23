@@ -1,6 +1,6 @@
 # Protectorate (Zig 0.17.1 Rewrite)
 
-Protectorate is an orchestrator for long-running AI coding agent sleeves (`claude`, `codex`, `grok`, `pi`) and remote fleet nodes (`protectorate-node`), written in Zig 0.17.1 using TigerStyle invariants, Deterministic Simulation Testing (VOPR), zero external Zig dependencies (`std` only), and an embedded Flutter web/mobile UI.
+Protectorate is an orchestrator for long-running AI coding agent sleeves (`claude`, `codex`, `grok`, `antigravity`/`agy`, `pi`) and remote fleet nodes (`protectorate-node`), written in Zig 0.17.1 using TigerStyle invariants, Deterministic Simulation Testing (VOPR), zero external Zig dependencies (`std` only), and an embedded Flutter web/mobile UI.
 
 ## Module Architecture & Strict Tiering
 

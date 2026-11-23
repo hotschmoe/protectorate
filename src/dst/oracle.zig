@@ -31,6 +31,7 @@ const CoreWorld = struct {
     approval_ids: std.ArrayList([]const u8) = .empty,
     node_ids: std.ArrayList([]const u8) = .empty,
     job_ids: std.ArrayList([]const u8) = .empty,
+    rollout_ids: std.ArrayList([]const u8) = .empty,
     envoy_created: bool = false,
 
     fn init(gpa: std.mem.Allocator, rng: std.Random) CoreWorld {
@@ -52,6 +53,8 @@ const CoreWorld = struct {
         self.node_ids.deinit(self.gpa);
         for (self.job_ids.items) |s| self.gpa.free(s);
         self.job_ids.deinit(self.gpa);
+        for (self.rollout_ids.items) |s| self.gpa.free(s);
+        self.rollout_ids.deinit(self.gpa);
         self.st.deinit();
     }
 
@@ -150,6 +153,52 @@ const CoreWorld = struct {
                 .verify_job => |vj| {
                     const still = self.rng.boolean();
                     _ = try self.apply_checked(.{ .job_verified = .{ .job_id = vj.job_id, .still_running = still, .exit_code = if (still) null else @as(i32, 0) } }, &sub_intents);
+                },
+                .notify_parent => |np| {
+                    if (self.st.sleeves.get(np.child_id)) |csl| {
+                        tiger.assert(csl.parent_id != null and std.mem.eql(u8, csl.parent_id.?, np.parent_id));
+                    }
+                    if (self.st.sleeves.get(np.parent_id)) |psl| {
+                        if (psl.lifecycle != .removed and psl.lifecycle != .parked) {
+                            const req_id = try std.fmt.allocPrint(self.gpa, "mail-rep-{d}", .{self.next_id});
+                            defer self.gpa.free(req_id);
+                            self.next_id += 1;
+                            _ = try self.apply_checked(.{ .prompt_enqueued = .{
+                                .sleeve_id = np.parent_id,
+                                .request_id = req_id,
+                                .from = np.child_id,
+                                .kind = .report,
+                                .mode = .queue,
+                                .text = "child report",
+                            } }, &sub_intents);
+                        }
+                    }
+                },
+                .compact_incarnation => |ci| {
+                    if (self.rng.boolean()) {
+                        _ = try self.apply_checked(.{ .compacted = .{
+                            .sleeve_id = ci.sleeve_id,
+                            .g = ci.g,
+                            .tokens_after = 50_000,
+                        } }, &sub_intents);
+                    } else {
+                        _ = try self.apply_checked(.{ .resleeve_requested = .{
+                            .sleeve_id = ci.sleeve_id,
+                            .harness = .claude,
+                            .by = .system,
+                            .cause = .handoff,
+                        } }, &sub_intents);
+                    }
+                },
+                .send_node_update => |snu| {
+                    if (self.rng.uintLessThan(u8, 4) != 0) {
+                        _ = try self.apply_checked(.{ .rollout_node_result = .{
+                            .rollout_id = snu.rollout_id,
+                            .node_id = snu.node_id,
+                            .ok = self.rng.uintLessThan(u8, 4) != 0,
+                            .detail = "ok",
+                        } }, &sub_intents);
+                    }
                 },
                 else => {},
             }
@@ -305,7 +354,7 @@ const CoreWorld = struct {
                             .approval_id = aid,
                             .sleeve_id = sid,
                             .g = inc.g,
-                            .kind = .tool,
+                            .kind = if (sl.d9 and self.rng.boolean()) .action else .tool,
                             .title = "bash",
                             .summary = "run command",
                             .is_d9 = sl.d9,
@@ -407,7 +456,36 @@ const CoreWorld = struct {
                     _ = try self.apply_checked(.{ .removed = .{ .sleeve_id = sid } }, &intents);
                 }
             },
+            14 => {
+                // Rollout exercise: start rollout across approved nodes or cancel an existing rollout.
+                if (self.rollout_ids.items.len > 0 and self.rng.boolean()) {
+                    const rid = self.rollout_ids.items[self.rng.uintLessThan(usize, self.rollout_ids.items.len)];
+                    _ = try self.apply_checked(.{ .rollout_cancelled = .{ .rollout_id = rid } }, &intents);
+                } else if (self.node_ids.items.len > 0) {
+                    const max_pick = @min(self.node_ids.items.len, 3);
+                    const count = 1 + self.rng.uintLessThan(usize, max_pick);
+                    const off = self.rng.uintLessThan(usize, self.node_ids.items.len);
+                    var nbuf: [3][]const u8 = undefined;
+                    for (0..count) |i| {
+                        nbuf[i] = self.node_ids.items[(off + i) % self.node_ids.items.len];
+                    }
+                    const rid = try std.fmt.allocPrint(self.gpa, "ro-{d}", .{self.next_id});
+                    self.next_id += 1;
+                    if (try self.apply_checked(.{ .rollout_started = .{
+                        .rollout_id = rid,
+                        .version = "v0.8.0",
+                        .node_ids = nbuf[0..count],
+                    } }, &intents)) {
+                        try self.rollout_ids.append(self.gpa, rid);
+                    } else {
+                        self.gpa.free(rid);
+                    }
+                }
+            },
             else => {
+                if (self.rng.uintLessThan(u8, 3) == 0) {
+                    self.now_ms += model.approval_timeout_ms + 100;
+                }
                 _ = try self.apply_checked(.{ .tick = .{} }, &intents);
             },
         }
@@ -463,10 +541,13 @@ fn check_invariants(gpa: std.mem.Allocator, st: *const state.State) void {
         }
     }
 
-    // I3: No pending tool approval for a superseded generation.
+    // I3 + D9: No pending tool approval for superseded generation; D9 approval requires owner.
     var ait = st.approvals.iterator();
     while (ait.next()) |e| {
         const app = e.value_ptr.*;
+        if (app.is_d9 and app.state == .approved) {
+            tiger.assert(app.decided_by == .owner);
+        }
         if (app.state == .pending) {
             if (st.sleeves.get(app.sleeve_id)) |sl| {
                 if (sl.inc) |inc| {
@@ -499,6 +580,16 @@ fn check_invariants(gpa: std.mem.Allocator, st: *const state.State) void {
         const actual = counts.get(parent.id) orelse 0;
         tiger.assert(actual == parent.children_active);
         tiger.assert(actual <= model.max_children);
+    }
+
+    // I6: Rollouts reference known nodes.
+    var rit = st.rollouts.iterator();
+    while (rit.next()) |re| {
+        const ro = re.value_ptr.*;
+        tiger.assert(ro.id.len > 0);
+        for (ro.nodes.items) |rn| {
+            tiger.assert(st.nodes.contains(rn.node_id));
+        }
     }
 }
 

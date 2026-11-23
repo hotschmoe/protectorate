@@ -384,6 +384,40 @@ pub const FleetServer = struct {
         };
     }
 
+    pub fn send_update(
+        self: *FleetServer,
+        arena: std.mem.Allocator,
+        node_id: []const u8,
+        upd: msg.Update,
+    ) !msg.UpdateReply {
+        const ps = self.get_peer(node_id) orelse return error.NodeOffline;
+        defer ps.release();
+        const res = try ps.call_rpc(.{ .update = upd }, 30_000);
+        defer {
+            self.gpa.free(res.payload);
+            self.gpa.free(res.chunks);
+        }
+        if (res.kind == .err) return error.RemoteError;
+        return try msg.decode_arena(msg.UpdateReply, arena, res.payload);
+    }
+
+    pub fn upload_update(
+        self: *FleetServer,
+        arena: std.mem.Allocator,
+        node_id: []const u8,
+        up: msg.UploadUpdate,
+    ) !msg.UploadUpdateReply {
+        const ps = self.get_peer(node_id) orelse return error.NodeOffline;
+        defer ps.release();
+        const res = try ps.call_rpc(.{ .upload_update = up }, 30_000);
+        defer {
+            self.gpa.free(res.payload);
+            self.gpa.free(res.chunks);
+        }
+        if (res.kind == .err) return error.RemoteError;
+        return try msg.decode_arena(msg.UploadUpdateReply, arena, res.payload);
+    }
+
     pub fn build_join_token(arena: std.mem.Allocator, hub_pub: [32]u8, addrs: []const []const u8) ![]u8 {
         const chars = "0123456789abcdef";
         var hex: [64]u8 = undefined;

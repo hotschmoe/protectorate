@@ -6,7 +6,11 @@
 
 - `join <ptjoin1:...>`: Decodes the base64url enrollment token, pins the hub X25519 public key + fingerprint, creates a `0o600` private key (`node_key.hex`) if absent, and outputs the node's static public key for owner approval.
 - `authorize`: Tests the `Noise_IK` handshake + `Hello` RPC against the hub and marks `authorized = true` once approved.
-- `serve [--stdio]`: Connects to the hub over TCP (with exponential backoff reconnect across `addrs`) or raw stdin/stdout (`--stdio`).
+- `serve [--stdio]`: Connects to the hub over TCP (with Happy-Eyeballs roaming dialing across `addrs` and exponential backoff reconnect) or raw stdin/stdout (`--stdio`).
+
+## Telemetry & Self-Updates (`src/node/sys.zig`, `src/update/store.zig`)
+
+`node/sys.zig` collects cross-platform hardware inventory, live CPU/RAM samples, mounted/fixed disks (`statfs` on Linux, `GetLogicalDriveStringsW`/`GetDiskFreeSpaceExW` on Windows), GPUs (`nvidia-smi`/DRM sysfs on Linux, Display Class registry on Windows), harness/toolchain probes (including `agy`), and user presence (`loginctl` on Linux, `GetLastInputInfo` on Windows, or `PROTECTORATE_NODE_TEST_PRESENCE` file override). `update/store.zig` verifies SHA-256 checksums, stages `.tar.gz` or `.zip` (`std.zip.extract`) releases, supports chunked `.upload_update` and `.update` RPCs on the node, and marks probation releases healthy after clean journal replay on hub startup.
 
 ## Execution & Artifacts (`src/node/runner.zig`)
 

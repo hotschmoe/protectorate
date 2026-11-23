@@ -64,9 +64,9 @@ pub fn main(init: std.process.Init) !u8 {
         const tok = if (positionals.items.len > 1) positionals.items[1] else null;
         return serve.cmd_join(init.gpa, init.io, home_path, tok, hub_addr_opt, hub_key_opt, name_opt);
     } else if (std.mem.eql(u8, sub, "authorize")) {
-        return serve.cmd_authorize(init.gpa, init.io, home_path);
+        return serve.cmd_authorize(init.gpa, init.io, init.environ_map, home_path);
     } else if (std.mem.eql(u8, sub, "serve")) {
-        return serve.cmd_serve(init.gpa, init.io, home_path, stdio_mode);
+        return serve.cmd_serve(init.gpa, init.io, init.environ_map, home_path, stdio_mode);
     } else if (std.mem.eql(u8, sub, "status")) {
         return serve.cmd_status(init.gpa, init.io, home_path);
     } else if (std.mem.eql(u8, sub, "doctor")) {

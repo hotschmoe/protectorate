@@ -280,6 +280,22 @@ pub const Session = struct {
         for (evs) |ev| self.on_event(self.ctx, ev);
     }
 
+    pub fn compact(self: *Session) !void {
+        const evs = blk: {
+            self.mu.lockUncancelable(self.io);
+            defer self.mu.unlock(self.io);
+            self.out.now_ms = std.Io.Clock.real.now(self.io).toMilliseconds();
+            switch (self.impl) {
+                .claude => |*c| try c.compact(&self.out),
+                .pi => |*p| try p.compact(&self.out),
+                .codex, .grok, .antigravity => return error.Unsupported,
+            }
+            break :blk try self.take_pending_locked();
+        };
+        defer self.gpa.free(evs);
+        for (evs) |ev| self.on_event(self.ctx, ev);
+    }
+
     pub fn kill_and_destroy(self: *Session) void {
         self.stopping.store(true, .release);
         self.mu.lockUncancelable(self.io);

@@ -7,6 +7,8 @@ const noise = @import("../net/noise.zig");
 const frame = @import("../net/frame.zig");
 const msg = @import("../net/msg.zig");
 const transport = @import("../net/transport.zig");
+const u_ver = @import("../update/version.zig");
+const u_store = @import("../update/store.zig");
 const sys = @import("sys.zig");
 const runner = @import("runner.zig");
 
@@ -180,7 +182,12 @@ pub fn cmd_join(
     return 0;
 }
 
-pub fn cmd_authorize(gpa: std.mem.Allocator, io: std.Io, home_path: []const u8) !u8 {
+pub fn cmd_authorize(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+    home_path: []const u8,
+) !u8 {
     var arena_st = std.heap.ArenaAllocator.init(gpa);
     defer arena_st.deinit();
     const arena = arena_st.allocator();
@@ -204,7 +211,7 @@ pub fn cmd_authorize(gpa: std.mem.Allocator, io: std.Io, home_path: []const u8) 
             var conn = res_conn.conn;
             defer conn.deinit();
 
-            try send_hello_sync(gpa, arena, &conn, &cfg, inv, io);
+            try send_hello_sync(gpa, arena, &conn, &cfg, inv, io, env);
             cfg.authorized = true;
             try save_config(gpa, io, home_path, cfg);
             const chosen = eps.items[res_conn.addr_index];
@@ -248,7 +255,13 @@ pub fn cmd_status(gpa: std.mem.Allocator, io: std.Io, home_path: []const u8) !u8
     return 0;
 }
 
-pub fn cmd_serve(gpa: std.mem.Allocator, io: std.Io, home_path: []const u8, stdio_mode: bool) !u8 {
+pub fn cmd_serve(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    env: ?*const std.process.Environ.Map,
+    home_path: []const u8,
+    stdio_mode: bool,
+) !u8 {
     var arena_st = std.heap.ArenaAllocator.init(gpa);
     defer arena_st.deinit();
     const arena = arena_st.allocator();
@@ -276,7 +289,7 @@ pub fn cmd_serve(gpa: std.mem.Allocator, io: std.Io, home_path: []const u8, stdi
             hub_pub,
         );
         defer conn.deinit();
-        try run_session(gpa, io, &conn, &cfg, inv, &run_mgr);
+        try run_session(gpa, io, home_path, env, &conn, &cfg, inv, &run_mgr);
         return 0;
     }
 
@@ -293,7 +306,7 @@ pub fn cmd_serve(gpa: std.mem.Allocator, io: std.Io, home_path: []const u8, stdi
                 var conn = res_conn.conn;
                 backoff_ms = 500;
                 const chosen = eps.items[res_conn.addr_index];
-                run_session(gpa, io, &conn, &cfg, inv, &run_mgr) catch |err| {
+                run_session(gpa, io, home_path, env, &conn, &cfg, inv, &run_mgr) catch |err| {
                     print_err(io, "session {s}:{d} ended: {s}\n", .{ chosen.host, chosen.port, @errorName(err) }) catch {};
                 };
                 conn.deinit();
@@ -310,6 +323,8 @@ pub fn cmd_serve(gpa: std.mem.Allocator, io: std.Io, home_path: []const u8, stdi
 const SessionCtx = struct {
     gpa: std.mem.Allocator,
     io: std.Io,
+    home_path: []const u8,
+    env: ?*const std.process.Environ.Map,
     conn: *transport.NoiseConn,
     tx_mu: std.Io.Mutex = .init,
     closed: std.atomic.Value(bool) = .init(false),
@@ -324,6 +339,7 @@ fn send_hello_sync(
     cfg: *const NodeConfig,
     inv: msg.Inventory,
     io: std.Io,
+    env: ?*const std.process.Environ.Map,
 ) !void {
     const req: msg.Request = .{ .hello = .{
         .node_id = cfg.node_id,
@@ -331,7 +347,7 @@ fn send_hello_sync(
         .addrs = cfg.addrs,
         .inventory = inv,
         .sample = sys.collect_sample(io),
-        .presence = sys.collect_presence(io),
+        .presence = sys.collect_presence(io, env),
     } };
     try conn.send_json(.request, 2, req);
     var rep = try conn.recv_frame();
@@ -345,6 +361,8 @@ fn send_hello_sync(
 fn run_session(
     gpa: std.mem.Allocator,
     io: std.Io,
+    home_path: []const u8,
+    env: ?*const std.process.Environ.Map,
     conn: *transport.NoiseConn,
     cfg: *const NodeConfig,
     inv: msg.Inventory,
@@ -352,11 +370,13 @@ fn run_session(
 ) !void {
     var hello_arena_st = std.heap.ArenaAllocator.init(gpa);
     defer hello_arena_st.deinit();
-    try send_hello_sync(gpa, hello_arena_st.allocator(), conn, cfg, inv, io);
+    try send_hello_sync(gpa, hello_arena_st.allocator(), conn, cfg, inv, io, env);
 
     var sctx = SessionCtx{
         .gpa = gpa,
         .io = io,
+        .home_path = home_path,
+        .env = env,
         .conn = conn,
         .last_rx_ms = .init(std.Io.Clock.awake.now(io).toMilliseconds()),
         .cfg = cfg,
@@ -382,7 +402,7 @@ fn run_session(
                     .node_version = version.version,
                     .addrs = ctx.cfg.addrs,
                     .sample = sys.collect_sample(ctx.io),
-                    .presence = sys.collect_presence(ctx.io),
+                    .presence = sys.collect_presence(ctx.io, ctx.env),
                 } };
                 ctx.tx_mu.lockUncancelable(ctx.io);
                 ctx.conn.send_json(.request, next_id, req) catch {
@@ -518,18 +538,139 @@ fn handle_request(
                 try sctx.conn.send_json(.err, req_id, msg.ErrorReply{ .code = .not_found, .message = "artifact not found" });
             }
         },
-        .update, .upload_update => {
+        .update => |upd| {
+            const rel_dir = try std.fs.path.join(arena, &.{ sctx.home_path, "releases" });
+            const target = upd.version orelse version.version;
+            var ok = true;
+            var detail: []const u8 = "up to date";
+
+            if (upd.url) |u| {
+                const sha = upd.sha256 orelse {
+                    sctx.tx_mu.lockUncancelable(sctx.io);
+                    defer sctx.tx_mu.unlock(sctx.io);
+                    try sctx.conn.send_json(.err, req_id, msg.ErrorReply{
+                        .code = .invalid,
+                        .message = "update url requires sha256",
+                    });
+                    return;
+                };
+                u_store.stage_from_url(sctx.gpa, sctx.io, rel_dir, target, u, sha) catch |err| {
+                    ok = false;
+                    detail = @errorName(err);
+                };
+                if (ok) detail = "staged from url";
+            } else if (upd.version != null and (u_store.activate_staged(sctx.gpa, sctx.io, rel_dir, target) catch false)) {
+                detail = "activated staged release";
+            } else {
+                const ch: u_ver.Channel = if (upd.channel != null and std.mem.eql(u8, upd.channel.?, "dev")) .dev else .stable;
+                const latest = u_store.check_latest(arena, sctx.io, "hotschmoe/protectorate", ch, version.version) catch null;
+                if (latest) |rel| {
+                    u_store.stage_and_apply(sctx.gpa, sctx.io, rel_dir, rel) catch |err| {
+                        ok = false;
+                        detail = @errorName(err);
+                    };
+                    if (ok) detail = "staged from github";
+                } else {
+                    detail = "already on latest release";
+                }
+            }
+
             sctx.tx_mu.lockUncancelable(sctx.io);
             defer sctx.tx_mu.unlock(sctx.io);
             try sctx.conn.send_json(.response, req_id, msg.UpdateReply{
-                .ok = false,
+                .ok = ok,
                 .from = version.version,
-                .to = version.version,
-                .detail = "remote update not staged",
+                .to = target,
+                .detail = detail,
+                .restarting = false,
+            });
+        },
+        .upload_update => |uu| {
+            if (!is_safe_name(uu.rollout_id) or !is_safe_name(uu.version)) {
+                sctx.tx_mu.lockUncancelable(sctx.io);
+                defer sctx.tx_mu.unlock(sctx.io);
+                try sctx.conn.send_json(.err, req_id, msg.ErrorReply{
+                    .code = .invalid,
+                    .message = "invalid rollout_id or version",
+                });
+                return;
+            }
+            if ((uu.hex.len % 2) != 0) {
+                sctx.tx_mu.lockUncancelable(sctx.io);
+                defer sctx.tx_mu.unlock(sctx.io);
+                try sctx.conn.send_json(.err, req_id, msg.ErrorReply{
+                    .code = .invalid,
+                    .message = "odd hex length",
+                });
+                return;
+            }
+
+            const rel_dir_path = try std.fs.path.join(arena, &.{ sctx.home_path, "releases" });
+            var rel_dir = try std.Io.Dir.cwd().createDirPathOpen(sctx.io, rel_dir_path, .{});
+            defer rel_dir.close(sctx.io);
+
+            const part_name = try std.fmt.allocPrint(arena, "{s}.part", .{uu.rollout_id});
+            const chunk = try arena.alloc(u8, uu.hex.len / 2);
+            _ = std.fmt.hexToBytes(chunk, uu.hex) catch {
+                sctx.tx_mu.lockUncancelable(sctx.io);
+                defer sctx.tx_mu.unlock(sctx.io);
+                try sctx.conn.send_json(.err, req_id, msg.ErrorReply{
+                    .code = .invalid,
+                    .message = "bad hex chunk",
+                });
+                return;
+            };
+
+            var pf = if (uu.offset == 0)
+                try rel_dir.createFile(sctx.io, part_name, .{ .read = true, .truncate = true })
+            else
+                rel_dir.openFile(sctx.io, part_name, .{ .mode = .read_write }) catch
+                    try rel_dir.createFile(sctx.io, part_name, .{ .read = true, .truncate = false });
+            errdefer pf.close(sctx.io);
+            if (chunk.len > 0) {
+                try pf.writePositionalAll(sctx.io, chunk, uu.offset);
+            }
+            const written = uu.offset + chunk.len;
+            pf.close(sctx.io);
+
+            var ready = false;
+            if (uu.eof) {
+                const full = try rel_dir.readFileAlloc(sctx.io, part_name, arena, .limited(128 << 20));
+                if (!u_ver.verify_sha256(full, uu.sha256)) {
+                    rel_dir.deleteFile(sctx.io, part_name) catch {};
+                    sctx.tx_mu.lockUncancelable(sctx.io);
+                    defer sctx.tx_mu.unlock(sctx.io);
+                    try sctx.conn.send_json(.err, req_id, msg.ErrorReply{
+                        .code = .invalid,
+                        .message = "upload sha256 mismatch",
+                    });
+                    return;
+                }
+                const asset_name = try std.fmt.allocPrint(arena, "protectorate-node-{s}", .{u_store.host_asset_suffix()});
+                try u_store.stage_archive_bytes(sctx.gpa, sctx.io, rel_dir_path, uu.version, asset_name, uu.sha256, full);
+                rel_dir.deleteFile(sctx.io, part_name) catch {};
+                ready = true;
+            }
+
+            sctx.tx_mu.lockUncancelable(sctx.io);
+            defer sctx.tx_mu.unlock(sctx.io);
+            try sctx.conn.send_json(.response, req_id, msg.UploadUpdateReply{
+                .received_bytes = written,
+                .ready = ready,
+                .sha256 = if (ready) uu.sha256 else null,
             });
         },
         .hello => {},
     }
+}
+
+fn is_safe_name(s: []const u8) bool {
+    if (s.len == 0 or s.len > 128) return false;
+    if (std.mem.eql(u8, s, ".") or std.mem.eql(u8, s, "..")) return false;
+    for (s) |c| {
+        if (c == '/' or c == '\\' or c == 0) return false;
+    }
+    return true;
 }
 
 fn split_host_port(addr: []const u8, default_port: u16) ?struct { host: []const u8, port: u16 } {

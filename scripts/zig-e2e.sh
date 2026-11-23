@@ -485,4 +485,158 @@ done
 "$REL/x86_64-linux-musl/protectorate" --version
 "$REL/x86_64-linux-musl/protectorate-node" --version
 echo "E2E 5 PASSED"
-echo "ALL 5 ZIG E2E SCENARIOS PASSED"
+
+echo "=== E2E 6: Parity Checks (Presence, Disks, UpdateNodes, Worktrees, Takeover, CLI Tables) ==="
+HUB6="$TMP_ROOT/hub6"
+NODE6="$TMP_ROOT/node6"
+LOG6="$TMP_ROOT/hub6.log"
+PRES_FILE="$TMP_ROOT/pres6.txt"
+echo "AWAY" > "$PRES_FILE"
+
+"$PT" serve --home "$HUB6" --listen 127.0.0.1:0 --fleet-listen 127.0.0.1:0 --no-sandbox >"$LOG6" 2>&1 &
+PID6=$!
+PIDS+=("$PID6")
+wait_for_listen "$LOG6"
+LINE6="$(grep 'protectorate listening ' "$LOG6" | head -n1)"
+HTTP6="$(extract_port "$LINE6" http)"
+FLEET6="$(extract_port "$LINE6" fleet)"
+TOK6="$("$PT" token --home "$HUB6" | sed -n 's/^owner=//p')"
+
+ENROLL6="$(rpc_post "$HTTP6" "$TOK6" GetEnrollment '{}')"
+JTOK6="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["control_key"])' <<<"$ENROLL6")"
+JOUT6="$("$PT_NODE" --home "$NODE6" join "$JTOK6" --name e2e-node-6)"
+NKEY6="$(sed -n 's/^  node_key: *//p' <<<"$JOUT6")"
+python3 - "$NODE6/config.json" "$FLEET6" <<'PY'
+import json, sys
+p, port = sys.argv[1], sys.argv[2]
+with open(p) as f:
+    cfg = json.load(f)
+cfg["addrs"] = [f"127.0.0.1:{port}"]
+with open(p, "w") as f:
+    json.dump(cfg, f, indent=2)
+PY
+
+ADD6="$(rpc_post "$HTTP6" "$TOK6" AddNode "{\"registration\":\"e2e-node-6:${NKEY6}\"}")"
+AID6="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["auth_id"])' <<<"$ADD6")"
+rpc_post "$HTTP6" "$TOK6" ApproveNode "{\"auth_id\":\"${AID6}\",\"name\":\"e2e-node-6\"}" >/dev/null
+
+PROTECTORATE_NODE_TEST_PRESENCE="$PRES_FILE" "$PT_NODE" --home "$NODE6" authorize >/dev/null
+PROTECTORATE_NODE_TEST_PRESENCE="$PRES_FILE" "$PT_NODE" --home "$NODE6" serve >"$TMP_ROOT/node6.log" 2>&1 &
+NPID6=$!
+PIDS+=("$NPID6")
+
+TELE6_OK=0
+for _ in $(seq 1 50); do
+  NJ6="$(rpc_post "$HTTP6" "$TOK6" ListNodes '{}')"
+  if python3 -c '
+import json, sys
+nid = sys.argv[1]
+ns = [n for n in json.load(sys.stdin)["nodes"] if n["id"] == nid and n["online"] and n.get("inventory")]
+if not ns:
+    sys.exit(1)
+n = ns[0]
+inv = n["inventory"]
+tcs = {t["name"] for t in inv.get("toolchains", [])}
+if len(inv.get("disks", [])) < 1 or "git" not in tcs:
+    sys.exit(1)
+if n.get("presence", {}).get("state") != "away":
+    sys.exit(1)
+sys.exit(0)
+' "$AID6" <<<"$NJ6"
+  then
+    TELE6_OK=1
+    break
+  fi
+  sleep 0.2
+done
+if [[ "$TELE6_OK" -ne 1 ]]; then
+  echo "node 6 did not report disks/git toolchain/away presence" >&2
+  exit 1
+fi
+
+echo "PRESENT" > "$PRES_FILE"
+PRES_OK=0
+for _ in $(seq 1 40); do
+  NJ6B="$(rpc_post "$HTTP6" "$TOK6" ListNodes '{}')"
+  if python3 -c '
+import json, sys
+nid = sys.argv[1]
+ns = [n for n in json.load(sys.stdin)["nodes"] if n["id"] == nid]
+sys.exit(0 if ns and ns[0].get("presence", {}).get("state") == "present" else 1)
+' "$AID6" <<<"$NJ6B"
+  then
+    PRES_OK=1
+    break
+  fi
+  sleep 0.25
+done
+if [[ "$PRES_OK" -ne 1 ]]; then
+  echo "node 6 presence override did not flip to present" >&2
+  exit 1
+fi
+
+RO6="$(rpc_post "$HTTP6" "$TOK6" UpdateNodes '{"nodes":["e2e-node-6"],"version":"v0.7.0"}')"
+python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d.get("rollout_id"), d
+assert len(d.get("nodes", [])) == 1 and d["nodes"][0]["node_id"] == sys.argv[1], d
+' "$AID6" <<<"$RO6"
+
+REPO6="$TMP_ROOT/repo6"
+mkdir -p "$REPO6"
+git -C "$REPO6" init -b main >/dev/null
+git -C "$REPO6" config user.email "e2e@protectorate.local"
+git -C "$REPO6" config user.name "Protectorate E2E"
+echo "hi" > "$REPO6/README.md"
+git -C "$REPO6" add README.md
+git -C "$REPO6" commit -m init >/dev/null
+
+WT_RESP="$(rpc_post "$HTTP6" "$TOK6" SpawnSleeve "{\"name\":\"wt6\",\"harness\":\"pi_local\",\"path\":\"${REPO6}\",\"view\":\"worktree\"}")"
+read -r WT_ID WT_PATH <<<"$(python3 -c '
+import json, sys
+s = json.load(sys.stdin)
+assert s["path"] != sys.argv[1], s
+assert s.get("branch", "").startswith("pt/"), s
+print(s["id"], s["path"])
+' "$REPO6" <<<"$WT_RESP")"
+
+WT_OK=0
+for _ in $(seq 1 30); do
+  if git -C "$WT_PATH" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    WT_OK=1
+    break
+  fi
+  sleep 0.1
+done
+if [[ "$WT_OK" -ne 1 ]]; then
+  echo "worktree was not provisioned at $WT_PATH" >&2
+  exit 1
+fi
+
+TO_RESP="$(rpc_post "$HTTP6" "$TOK6" TakeoverTerminal "{\"sleeve_id\":\"${WT_ID}\"}")"
+if [[ "$TO_RESP" != "{}" ]]; then
+  echo "expected empty JSON object from TakeoverTerminal, got $TO_RESP" >&2
+  exit 1
+fi
+rpc_post "$HTTP6" "$TOK6" GetTranscript "{\"sleeve_id\":\"${WT_ID}\"}" | grep -q 'takeover'
+rpc_post "$HTTP6" "$TOK6" RemoveSleeve "{\"sleeve_id\":\"${WT_ID}\"}" >/dev/null
+for _ in $(seq 1 30); do
+  if [[ ! -d "$WT_PATH" ]]; then break; fi
+  sleep 0.1
+done
+if [[ -d "$WT_PATH" ]]; then
+  echo "worktree $WT_PATH was not removed" >&2
+  exit 1
+fi
+
+"$PT" doctor | grep -q 'HARNESS'
+"$PT" doctor --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert len(d["harnesses"]) >= 5'
+"$PT" --url "http://127.0.0.1:${HTTP6}" --token "$TOK6" status | grep -q 'hub='
+"$PT" --url "http://127.0.0.1:${HTTP6}" --token "$TOK6" status --json | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "sleeves" in d and "nodes" in d'
+"$PT" --url "http://127.0.0.1:${HTTP6}" --token "$TOK6" node list | grep -q 'e2e-node-6'
+
+kill "$NPID6" "$PID6" >/dev/null 2>&1 || true
+wait "$NPID6" "$PID6" >/dev/null 2>&1 || true
+echo "E2E 6 PASSED"
+echo "ALL 6 ZIG E2E SCENARIOS PASSED"

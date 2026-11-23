@@ -13,12 +13,18 @@ pub fn run_checks(
     var harnesses: std.ArrayList(schema.DoctorHarness) = .empty;
     var problems: std.ArrayList([]const u8) = .empty;
 
-    const specs = [_]struct { name: []const u8, bin: []const u8, cred_rel: []const u8, install: []const u8 }{
-        .{ .name = "claude", .bin = "claude", .cred_rel = ".claude/.credentials.json", .install = "npm i -g @anthropic-ai/claude-code" },
-        .{ .name = "codex", .bin = "codex", .cred_rel = ".codex/auth.json", .install = "npm i -g @openai/codex" },
-        .{ .name = "grok", .bin = "grok", .cred_rel = ".grok/auth.json", .install = "npm i -g @vibe-kit/grok-cli" },
-        .{ .name = "antigravity", .bin = "agy", .cred_rel = ".gemini", .install = "https://antigravity.google/docs/getting-started" },
-        .{ .name = "pi", .bin = "pi", .cred_rel = ".pi/agent/models.json", .install = "npm i -g @mariozechner/pi-coding-agent" },
+    const specs = [_]struct {
+        name: []const u8,
+        bin: []const u8,
+        cred_rel: []const u8,
+        install: []const u8,
+        update: []const []const u8,
+    }{
+        .{ .name = "claude", .bin = "claude", .cred_rel = ".claude/.credentials.json", .install = "npm i -g @anthropic-ai/claude-code", .update = &.{ "claude", "update" } },
+        .{ .name = "codex", .bin = "codex", .cred_rel = ".codex/auth.json", .install = "npm i -g @openai/codex", .update = &.{ "codex", "update" } },
+        .{ .name = "grok", .bin = "grok", .cred_rel = ".grok/auth.json", .install = "npm i -g @vibe-kit/grok-cli", .update = &.{ "grok", "update" } },
+        .{ .name = "antigravity", .bin = "agy", .cred_rel = ".gemini", .install = "https://antigravity.google/docs/getting-started", .update = &.{ "agy", "update" } },
+        .{ .name = "pi", .bin = "pi", .cred_rel = ".pi/agent/models.json", .install = "npm i -g @mariozechner/pi-coding-agent", .update = &.{ "pi", "update", "self" } },
     };
 
     for (specs) |sp| {
@@ -52,6 +58,7 @@ pub fn run_checks(
             .login = login,
             .eligible = present and login,
             .reasons = reasons.items,
+            .update = sp.update,
         });
     }
 

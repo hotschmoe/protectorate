@@ -25,29 +25,68 @@ pub fn provision_worktree(
         gpa.free(cg.stdout);
         gpa.free(cg.stderr);
         if (is_git) {
+            if (std.fs.path.dirname(wt_path)) |pd| {
+                std.Io.Dir.cwd().createDirPath(io, pd) catch {};
+            }
             const res = try std.process.run(gpa, io, .{
                 .argv = &.{ "git", "-C", base_repo, "worktree", "add", "-b", branch_name, wt_path },
                 .stdout_limit = .limited(64 * 1024),
                 .stderr_limit = .limited(64 * 1024),
             });
-            defer {
-                gpa.free(res.stdout);
-                gpa.free(res.stderr);
-            }
-            if (res.term.success()) return;
+            const ok1 = res.term.success();
+            gpa.free(res.stdout);
+            gpa.free(res.stderr);
+            if (ok1) return;
+
+            const res2 = try std.process.run(gpa, io, .{
+                .argv = &.{ "git", "-C", base_repo, "worktree", "add", wt_path, branch_name },
+                .stdout_limit = .limited(64 * 1024),
+                .stderr_limit = .limited(64 * 1024),
+            });
+            const ok2 = res2.term.success();
+            gpa.free(res2.stdout);
+            gpa.free(res2.stderr);
+            if (ok2) return;
         }
     }
     try std.Io.Dir.cwd().createDirPath(io, wt_path);
 }
 
 pub fn remove_worktree(gpa: std.mem.Allocator, io: std.Io, wt_path: []const u8) void {
+    var common_dir: ?[]const u8 = null;
+    defer if (common_dir) |cd| gpa.free(cd);
+
+    if (std.process.run(gpa, io, .{
+        .argv = &.{ "git", "-C", wt_path, "rev-parse", "--git-common-dir" },
+        .stdout_limit = .limited(8192),
+        .stderr_limit = .limited(8192),
+    })) |cg| {
+        defer {
+            gpa.free(cg.stdout);
+            gpa.free(cg.stderr);
+        }
+        if (cg.term.success()) {
+            const tr = std.mem.trim(u8, cg.stdout, " \t\r\n");
+            if (tr.len > 0) {
+                common_dir = if (std.fs.path.isAbsolute(tr))
+                    gpa.dupe(u8, tr) catch null
+                else
+                    std.fs.path.join(gpa, &.{ wt_path, tr }) catch null;
+            }
+        }
+    } else |_| {}
+
+    const repo_ctx = common_dir orelse wt_path;
     const res = std.process.run(gpa, io, .{
-        .argv = &.{ "git", "-C", wt_path, "worktree", "remove", "--force", wt_path },
+        .argv = &.{ "git", "-C", repo_ctx, "worktree", "remove", "--force", wt_path },
         .stdout_limit = .limited(16 * 1024),
         .stderr_limit = .limited(16 * 1024),
-    }) catch return;
-    gpa.free(res.stdout);
-    gpa.free(res.stderr);
+    }) catch null;
+    if (res) |r| {
+        gpa.free(r.stdout);
+        gpa.free(r.stderr);
+    }
+    std.Io.Dir.cwd().deleteTree(io, wt_path) catch {};
 }
 
 pub fn current_branch(arena: std.mem.Allocator, io: std.Io, workdir: []const u8) ?[]const u8 {

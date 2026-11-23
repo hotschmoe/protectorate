@@ -92,7 +92,10 @@ pub fn dispatch(
         return ok_json(rt.gpa, tx);
     } else if (std.mem.eql(u8, method, "SpawnSleeve")) {
         const req = schema.decode_arena(schema.SpawnSleeveRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
-        const path = req.new_path orelse req.path orelse return err_json(rt.gpa, .invalid, "path required");
+        const base_path = req.path orelse req.new_path orelse return err_json(rt.gpa, .invalid, "path required");
+        if (rt.gate_d9(a, principal, .spawn_sleeve, req.name)) |_| {} else |err| {
+            return map_d9_err(rt.gpa, err);
+        }
         const sid = try rt.gen_id(a, "slv");
         const ws_id = try rt.gen_id(a, "ws");
         const layout: model.Layout = if (req.view) |v| switch (v) {
@@ -100,15 +103,23 @@ pub fn dispatch(
             .worktree => .worktree,
             .unknown => .shared,
         } else .shared;
-        try rt.register_workspace(ws_id, req.name, path);
+        var sl_path: []const u8 = base_path;
+        var sl_branch: ?[]const u8 = null;
+        if (layout == .worktree) {
+            sl_path = if (req.new_path) |np| np else try std.fs.path.join(a, &.{ rt.hub_home.root_path, "worktrees", sid });
+            sl_branch = try std.fmt.allocPrint(a, "pt/{s}", .{sid});
+            try rt.register_worktree_base(sid, base_path);
+        }
+        try rt.register_workspace(ws_id, req.name, base_path);
         rt.commit(.{ .sleeve_created = .{
             .sleeve_id = sid,
             .name = req.name,
             .role = if (req.parent_id != null) .child else .root,
-            .path = path,
+            .path = sl_path,
             .workspace_id = ws_id,
             .parent_id = req.parent_id,
             .layout = layout,
+            .branch = sl_branch,
             .budget_limit = req.budget,
             .until_done = req.until_done orelse 0,
         } }) catch |err| return map_commit_err(rt.gpa, err);
@@ -198,6 +209,9 @@ pub fn dispatch(
         return ok_json(rt.gpa, schema.Accepted{});
     } else if (std.mem.eql(u8, method, "RemoveSleeve")) {
         const req = schema.decode_arena(schema.SleeveRef, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        if (rt.gate_d9(a, principal, .remove_sleeve, req.sleeve_id)) |_| {} else |err| {
+            return map_d9_err(rt.gpa, err);
+        }
         rt.commit(.{ .removed = .{ .sleeve_id = req.sleeve_id } }) catch |err| return map_commit_err(rt.gpa, err);
         return ok_json(rt.gpa, schema.Accepted{});
     } else if (std.mem.eql(u8, method, "Resleeve")) {
@@ -213,13 +227,18 @@ pub fn dispatch(
         } }) catch |err| return map_commit_err(rt.gpa, err);
         return ok_json(rt.gpa, schema.Accepted{});
     } else if (std.mem.eql(u8, method, "TakeoverTerminal")) {
-        return err_json(rt.gpa, .unavailable, "takeover terminal is not implemented");
+        const req = schema.decode_arena(schema.SleeveRef, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        rt.takeover_sleeve(a, req.sleeve_id) catch |err| return map_commit_err(rt.gpa, err);
+        return ok_json(rt.gpa, schema.Empty{});
     } else if (std.mem.eql(u8, method, "GitPush")) {
         const req = schema.decode_arena(schema.GitPushRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
         const sv = (try rt.view_sleeve(a, req.sleeve_id)) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
-        const res = git.push(a, rt.io, req.sleeve_id, sv.path, req.remote, req.branch, req.force) catch |err| {
+        const summary = try std.fmt.allocPrint(a, "{s} {s}", .{ req.remote orelse "origin", req.branch orelse (sv.branch orelse "HEAD") });
+        const d9_app = rt.gate_d9(a, principal, .git_push, summary) catch |err| return map_d9_err(rt.gpa, err);
+        var res = git.push(a, rt.io, req.sleeve_id, sv.path, req.remote, req.branch, req.force) catch |err| {
             return err_json(rt.gpa, .invalid, @errorName(err));
         };
+        if (d9_app) |aid| res.approval_id = aid;
         return ok_json(rt.gpa, res);
     } else if (std.mem.eql(u8, method, "ListApprovals")) {
         const req = schema.decode_arena(schema.ListApprovalsRequest, a, body) catch schema.ListApprovalsRequest{};
@@ -377,6 +396,10 @@ pub fn dispatch(
     } else if (std.mem.eql(u8, method, "RunJob")) {
         const req = schema.decode_arena(schema.RunJobRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
         if (req.argv.len == 0) return err_json(rt.gpa, .invalid, "argv must not be empty");
+        const job_summary = try std.mem.join(a, " ", req.argv);
+        if (rt.gate_d9(a, principal, .run_job, job_summary)) |_| {} else |err| {
+            return map_d9_err(rt.gpa, err);
+        }
         const jid = try rt.gen_id(a, "job");
         const jid_d = try rt.gpa.dupe(u8, jid);
         const log_path = try std.fmt.allocPrint(rt.gpa, "{s}/{s}.log", .{ rt.hub_home.artifacts_path, jid });
@@ -548,9 +571,51 @@ pub fn dispatch(
         return ok_json(rt.gpa, schema.Sent{ .request_id = rid, .queued = true, .queue_length = 1 });
     } else if (std.mem.eql(u8, method, "EnvoyWait")) {
         const req = schema.decode_arena(schema.EnvoyWaitRequest, a, body) catch schema.EnvoyWaitRequest{};
+        const deadline = std.Io.Clock.real.now(rt.io).toMilliseconds() + @as(i64, @intCast(@min(req.timeout_ms, 60_000)));
+        var cursor: u64 = 0;
+        var settled = false;
+        while (true) {
+            {
+                rt.state_mu.lockUncancelable(rt.io);
+                defer rt.state_mu.unlock(rt.io);
+                if (rt.core_state.sleeves.get("envoy")) |sl| {
+                    if (req.request_id) |rid| {
+                        var pending = false;
+                        for (sl.queued.items) |qi| {
+                            if (std.mem.eql(u8, qi.request_id, rid)) {
+                                pending = true;
+                                break;
+                            }
+                        }
+                        if (!pending) {
+                            if (sl.inc) |inc| {
+                                const same_req = if (inc.delivered_request_id) |dr| std.mem.eql(u8, dr, rid) else false;
+                                if (!same_req and inc.activity == .idle and sl.queued.items.len == 0) {
+                                    settled = true;
+                                }
+                            } else {
+                                settled = true;
+                            }
+                        }
+                    } else {
+                        settled = (sl.lifecycle == .stopped or sl.lifecycle == .parked) or
+                            (sl.inc != null and sl.inc.?.activity == .idle and sl.queued.items.len == 0);
+                    }
+                } else {
+                    settled = true;
+                }
+            }
+            if (settled) break;
+            const now = std.Io.Clock.real.now(rt.io).toMilliseconds();
+            if (now >= deadline) break;
+            const ws = try rt.stream_hub.wait_since(a, cursor, @min(500, deadline - now));
+            cursor = ws.last_seq;
+        }
+        const reply_text = extract_envoy_reply(a, rt, req.request_id);
         return ok_json(rt.gpa, schema.EnvoyReply{
             .request_id = req.request_id orelse "",
-            .settled = true,
+            .settled = settled,
+            .text = reply_text,
             .seq = rt.stream_hub.current_seq(),
         });
     } else if (std.mem.eql(u8, method, "EnvoyRead")) {
@@ -679,46 +744,77 @@ pub fn dispatch(
         }
         return ok_json(rt.gpa, schema.HistoryRead{ .docs = docs, .more = rr.more });
     } else if (std.mem.eql(u8, method, "GetDoctor")) {
-        const rep = try doctor.run_checks(a, rt.io, rt.env.get("HOME"));
+        var rep = try doctor.run_checks(a, rt.io, rt.env.get("HOME"));
+        if (rt.hub_home.config.sleeve_devices.len > 0) {
+            var devs: std.ArrayList([]const u8) = .empty;
+            var probs: std.ArrayList([]const u8) = .empty;
+            try probs.appendSlice(a, rep.problems);
+            for (rt.hub_home.config.sleeve_devices) |dp| {
+                if (runtime.Runtime.stat_device_inode(rt.io, dp)) |ino| {
+                    try devs.append(a, try std.fmt.allocPrint(a, "{s}: present (ino {d})", .{ dp, ino }));
+                } else {
+                    try devs.append(a, try std.fmt.allocPrint(a, "{s}: missing", .{dp}));
+                    try probs.append(a, try std.fmt.allocPrint(a, "sleeve device missing: {s}", .{dp}));
+                }
+            }
+            rep.sleeve_devices = devs.items;
+            rep.problems = probs.items;
+        }
         return ok_json(rt.gpa, rep);
     } else if (std.mem.eql(u8, method, "UpdateHarnesses")) {
         const req = schema.decode_arena(schema.UpdateHarnessesRequest, a, body) catch schema.UpdateHarnessesRequest{};
-        var list: std.ArrayList(schema.HarnessUpdate) = .empty;
-        for (req.programs) |prog| {
-            try list.append(a, .{ .program = prog, .state = .skipped, .detail = "manual update required" });
-        }
-        return ok_json(rt.gpa, schema.HarnessUpdates{ .programs = list.items });
+        const progs = try rt.update_harnesses(a, req.programs);
+        return ok_json(rt.gpa, schema.HarnessUpdates{ .programs = progs });
     } else if (std.mem.eql(u8, method, "UpdateHub")) {
         const req = schema.decode_arena(schema.UpdateHubRequest, a, body) catch schema.UpdateHubRequest{};
+        const cur_ver = @import("../version.zig").version;
         if (req.rollback) {
             const target = u_store.rollback(a, rt.io, rt.hub_home.releases_path) catch {
                 return err_json(rt.gpa, .not_found, "no previous release");
             };
-            return ok_json(rt.gpa, schema.HubUpdate{ .target = target, .available = true });
+            rt.record_hub_event(.hub, "hub_update", target, "rolled back release", .warn);
+            return ok_json(rt.gpa, schema.HubUpdate{ .current = cur_ver, .target = target, .available = true });
         }
-        const ch: u_ver.Channel = if (req.channel != null and req.channel.? == .dev) .dev else .stable;
-        const latest = try u_store.check_latest(a, rt.io, rt.hub_home.config.update_repo, ch, @import("../version.zig").version);
+        if (req.version) |want_ver| {
+            if (!req.check and (u_store.activate_staged(rt.gpa, rt.io, rt.hub_home.releases_path, want_ver) catch false)) {
+                rt.record_hub_event(.hub, "hub_update", want_ver, "activated staged release", .info);
+                return ok_json(rt.gpa, schema.HubUpdate{ .current = cur_ver, .target = want_ver, .available = true });
+            }
+        }
+        const cfg_ch: u_ver.Channel = if (std.mem.eql(u8, rt.hub_home.config.update_channel, "dev")) .dev else .stable;
+        const ch: u_ver.Channel = if (req.channel) |rc| (if (rc == .dev) .dev else .stable) else cfg_ch;
+        const latest = try u_store.check_latest(a, rt.io, rt.hub_home.config.update_repo, ch, cur_ver);
         if (latest) |rel| {
             if (!req.check) {
                 try u_store.stage_and_apply(rt.gpa, rt.io, rt.hub_home.releases_path, rel);
+                rt.record_hub_event(.hub, "hub_update", rel.tag, "staged hub update", .info);
             }
             return ok_json(rt.gpa, schema.HubUpdate{
-                .current = @import("../version.zig").version,
+                .current = cur_ver,
                 .target = rel.tag,
                 .available = true,
             });
         }
         return ok_json(rt.gpa, schema.HubUpdate{
-            .current = @import("../version.zig").version,
-            .target = @import("../version.zig").version,
+            .current = cur_ver,
+            .target = cur_ver,
             .available = false,
         });
     } else if (std.mem.eql(u8, method, "UpdateNodes")) {
         const req = schema.decode_arena(schema.UpdateNodesRequest, a, body) catch schema.UpdateNodesRequest{};
-        return ok_json(rt.gpa, schema.NodeUpdates{
-            .version = req.version orelse @import("../version.zig").version,
-            .nodes = &.{},
-        });
+        const cur_ver = @import("../version.zig").version;
+        if (req.cancel) |cid| {
+            rt.commit(.{ .rollout_cancelled = .{ .rollout_id = cid } }) catch |err| return map_commit_err(rt.gpa, err);
+            rt.record_hub_event(.node, "node_rollout", cid, "rollout cancelled", .warn);
+            const updates = try rt.collect_rollout_updates(a, cid);
+            return ok_json(rt.gpa, schema.NodeUpdates{
+                .version = req.version orelse cur_ver,
+                .nodes = updates,
+                .rollout_id = cid,
+            });
+        }
+        const res = try rt.start_and_wait_node_rollout(a, req);
+        return ok_json(rt.gpa, res);
     } else if (std.mem.eql(u8, method, "ListDevices")) {
         const devs = try rt.hub_home.list_devices(a);
         return ok_json(rt.gpa, schema.DeviceList{ .devices = devs });
@@ -756,6 +852,59 @@ fn map_commit_err(gpa: std.mem.Allocator, err: anyerror) !DispatchResult {
         error.DuplicateId, error.WorkspaceConflict, error.InvalidState => err_json(gpa, .conflict, @errorName(err)),
         else => err_json(gpa, .invalid, @errorName(err)),
     };
+}
+
+fn map_d9_err(gpa: std.mem.Allocator, err: anyerror) !DispatchResult {
+    return switch (err) {
+        error.ApprovalDenied => err_json(gpa, .forbidden, "owner denied D9 action"),
+        error.ApprovalTimeout => err_json(gpa, .unavailable, "timed out waiting for D9 owner approval"),
+        else => err_json(gpa, .internal, @errorName(err)),
+    };
+}
+
+fn extract_envoy_reply(arena: std.mem.Allocator, rt: *runtime.Runtime, request_id: ?[]const u8) []const u8 {
+    const tx = rt.transcripts.read(arena, "envoy", 0, null) catch return "";
+    if (tx.entries.len == 0) return "";
+    var start_idx: usize = 0;
+    if (request_id) |want_id| {
+        if (want_id.len > 0) {
+            var k = tx.entries.len;
+            while (k > 0) {
+                k -= 1;
+                switch (tx.entries[k].entry) {
+                    .user_message => |um| {
+                        if (std.mem.eql(u8, um.request_id, want_id)) {
+                            start_idx = k + 1;
+                            break;
+                        }
+                    },
+                    else => {},
+                }
+            }
+        }
+    } else {
+        var k = tx.entries.len;
+        while (k > 0) {
+            k -= 1;
+            switch (tx.entries[k].entry) {
+                .turn_started => {
+                    start_idx = k + 1;
+                    break;
+                },
+                else => {},
+            }
+        }
+    }
+    var out: std.ArrayList(u8) = .empty;
+    for (tx.entries[start_idx..]) |ce| {
+        switch (ce.entry) {
+            .assistant_text => |at| {
+                out.appendSlice(arena, at.text) catch {};
+            },
+            else => {},
+        }
+    }
+    return out.items;
 }
 
 fn parse_registration(reg: []const u8) ?struct { name: []const u8, hex: [64]u8 } {

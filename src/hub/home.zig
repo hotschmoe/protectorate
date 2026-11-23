@@ -27,6 +27,9 @@ pub const ConfigFile = struct {
     no_sandbox: bool = false,
     update_repo: []const u8 = "hotschmoe/protectorate",
     update_channel: []const u8 = "stable",
+    d9_spawn_limit: u32 = 3,
+    d9_approval_timeout_secs: u64 = 300,
+    sleeve_devices: []const []const u8 = &.{},
 };
 
 const AuthFile = struct {
@@ -161,6 +164,8 @@ pub const HubHome = struct {
         self.gpa.free(self.config.advertise_addrs);
         self.gpa.free(self.config.update_repo);
         self.gpa.free(self.config.update_channel);
+        for (self.config.sleeve_devices) |d| self.gpa.free(d);
+        self.gpa.free(self.config.sleeve_devices);
     }
 
     fn load_or_create_auth(self: *HubHome, root_dir: std.Io.Dir, dev_token: ?[]const u8) !void {
@@ -384,6 +389,8 @@ fn load_or_create_config(gpa: std.mem.Allocator, io: std.Io, root_dir: std.Io.Di
 
     const adv = gpa.alloc([]const u8, cf.advertise_addrs.len) catch return def;
     for (cf.advertise_addrs, 0..) |a, i| adv[i] = gpa.dupe(u8, a) catch "";
+    const devs = gpa.alloc([]const u8, cf.sleeve_devices.len) catch return def;
+    for (cf.sleeve_devices, 0..) |d, i| devs[i] = gpa.dupe(u8, d) catch "";
 
     gpa.free(def.hub_name);
     gpa.free(def.listen_addr);
@@ -400,6 +407,9 @@ fn load_or_create_config(gpa: std.mem.Allocator, io: std.Io, root_dir: std.Io.Di
         .no_sandbox = cf.no_sandbox,
         .update_repo = gpa.dupe(u8, cf.update_repo) catch "",
         .update_channel = gpa.dupe(u8, cf.update_channel) catch "",
+        .d9_spawn_limit = cf.d9_spawn_limit,
+        .d9_approval_timeout_secs = cf.d9_approval_timeout_secs,
+        .sleeve_devices = devs,
     };
 }
 
