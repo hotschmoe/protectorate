@@ -418,6 +418,96 @@ pub const FleetServer = struct {
         return try msg.decode_arena(msg.UploadUpdateReply, arena, res.payload);
     }
 
+    pub fn ack_job(self: *FleetServer, arena: std.mem.Allocator, node_id: []const u8, job_id: []const u8) !msg.AckJobReply {
+        const ps = self.get_peer(node_id) orelse return error.NodeOffline;
+        defer ps.release();
+        const res = try ps.call_rpc(.{ .ack_job = .{ .job_id = job_id } }, 10_000);
+        defer {
+            self.gpa.free(res.payload);
+            self.gpa.free(res.chunks);
+        }
+        if (res.kind == .err) return error.RemoteError;
+        return try msg.decode_arena(msg.AckJobReply, arena, res.payload);
+    }
+
+    pub fn acquire_lease(
+        self: *FleetServer,
+        arena: std.mem.Allocator,
+        node_id: []const u8,
+        req: msg.AcquireLease,
+    ) !msg.LeaseReply {
+        const ps = self.get_peer(node_id) orelse return error.NodeOffline;
+        defer ps.release();
+        const extra: u32 = if (req.wait_ms) |w| @intCast(@min(@as(i64, 300_000), @max(@as(i64, 0), w))) else 0;
+        const res = try ps.call_rpc(.{ .acquire_lease = req }, 15_000 + extra);
+        defer {
+            self.gpa.free(res.payload);
+            self.gpa.free(res.chunks);
+        }
+        if (res.kind == .err) return error.RemoteError;
+        return try msg.decode_arena(msg.LeaseReply, arena, res.payload);
+    }
+
+    pub fn renew_lease(self: *FleetServer, arena: std.mem.Allocator, node_id: []const u8, req: msg.RenewLease) !msg.LeaseReply {
+        const ps = self.get_peer(node_id) orelse return error.NodeOffline;
+        defer ps.release();
+        const res = try ps.call_rpc(.{ .renew_lease = req }, 10_000);
+        defer {
+            self.gpa.free(res.payload);
+            self.gpa.free(res.chunks);
+        }
+        if (res.kind == .err) return error.RemoteError;
+        return try msg.decode_arena(msg.LeaseReply, arena, res.payload);
+    }
+
+    pub fn release_lease(self: *FleetServer, arena: std.mem.Allocator, node_id: []const u8, req: msg.ReleaseLease) !msg.ReleaseLeaseReply {
+        const ps = self.get_peer(node_id) orelse return error.NodeOffline;
+        defer ps.release();
+        const res = try ps.call_rpc(.{ .release_lease = req }, 15_000);
+        defer {
+            self.gpa.free(res.payload);
+            self.gpa.free(res.chunks);
+        }
+        if (res.kind == .err) return error.RemoteError;
+        return try msg.decode_arena(msg.ReleaseLeaseReply, arena, res.payload);
+    }
+
+    pub fn verify_epoch(self: *FleetServer, arena: std.mem.Allocator, node_id: []const u8, req: msg.VerifyEpoch) !msg.VerifyEpochReply {
+        const ps = self.get_peer(node_id) orelse return error.NodeOffline;
+        defer ps.release();
+        const res = try ps.call_rpc(.{ .verify_epoch = req }, 10_000);
+        defer {
+            self.gpa.free(res.payload);
+            self.gpa.free(res.chunks);
+        }
+        if (res.kind == .err) return error.RemoteError;
+        return try msg.decode_arena(msg.VerifyEpochReply, arena, res.payload);
+    }
+
+    pub fn list_leases(self: *FleetServer, arena: std.mem.Allocator, node_id: []const u8) !msg.AdmissionStatus {
+        const ps = self.get_peer(node_id) orelse return error.NodeOffline;
+        defer ps.release();
+        const res = try ps.call_rpc(.{ .list_leases = .{} }, 10_000);
+        defer {
+            self.gpa.free(res.payload);
+            self.gpa.free(res.chunks);
+        }
+        if (res.kind == .err) return error.RemoteError;
+        return try msg.decode_arena(msg.AdmissionStatus, arena, res.payload);
+    }
+
+    pub fn clear_quarantine(self: *FleetServer, arena: std.mem.Allocator, node_id: []const u8) !msg.ClearQuarantineReply {
+        const ps = self.get_peer(node_id) orelse return error.NodeOffline;
+        defer ps.release();
+        const res = try ps.call_rpc(.{ .clear_quarantine = .{} }, 10_000);
+        defer {
+            self.gpa.free(res.payload);
+            self.gpa.free(res.chunks);
+        }
+        if (res.kind == .err) return error.RemoteError;
+        return try msg.decode_arena(msg.ClearQuarantineReply, arena, res.payload);
+    }
+
     pub fn build_join_token(arena: std.mem.Allocator, hub_pub: [32]u8, addrs: []const []const u8) ![]u8 {
         const chars = "0123456789abcdef";
         var hex: [64]u8 = undefined;

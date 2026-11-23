@@ -276,6 +276,29 @@ pub const JobState = enum {
     }
 };
 
+pub const LeaseMode = enum {
+    shared,
+    exclusive,
+    unknown,
+    pub fn jsonParseFromValue(a: std.mem.Allocator, s: std.json.Value, o: std.json.ParseOptions) !LeaseMode {
+        _ = a;
+        _ = o;
+        return wire_enum_parse(LeaseMode, s);
+    }
+};
+
+pub const LeaseState = enum {
+    active,
+    collecting,
+    fencing,
+    unknown,
+    pub fn jsonParseFromValue(a: std.mem.Allocator, s: std.json.Value, o: std.json.ParseOptions) !LeaseState {
+        _ = a;
+        _ = o;
+        return wire_enum_parse(LeaseState, s);
+    }
+};
+
 pub const Level = enum {
     info,
     warn,
@@ -1045,6 +1068,8 @@ pub const Node = struct {
     online: bool,
     last_seen_ms: TimeMs,
     node_version: []const u8,
+    boot_id: []const u8 = "",
+    quarantined: ?[]const u8 = null,
     pending_update: ?[]const u8 = null,
     @"error": ?[]const u8 = null,
     inventory: ?Inventory = null,
@@ -1117,6 +1142,9 @@ pub const Job = struct {
     log_bytes: u64 = 0,
     cwd: ?[]const u8 = null,
     artifacts: []const JobArtifact = &.{},
+    boot_id: ?[]const u8 = null,
+    epoch: ?u64 = null,
+    lease_id: ?[]const u8 = null,
 };
 
 pub const QuotaCredits = struct {
@@ -1319,6 +1347,13 @@ pub const RunJobRequest = struct {
     on_present: OnPresent = .idle,
     maintenance: bool = false,
     timeout_secs: ?u64 = null,
+    exclusive: bool = false,
+    slots: u32 = 1,
+    long_slots: u32 = 0,
+    mem_bytes: u64 = 0,
+    wait_ms: ?u64 = null,
+    lease_ttl_ms: ?u64 = null,
+    parent_epoch: ?u64 = null,
 };
 
 pub const SearchHistoryRequest = struct {
@@ -1432,6 +1467,111 @@ pub const WaitRequest = struct {
     any: bool = false,
     timeout_ms: u64 = 30_000,
     after_seq: ?u64 = null,
+};
+
+pub const AcquireLeaseRequest = struct {
+    node_id: []const u8,
+    holder_id: []const u8 = "owner",
+    exclusive: bool = false,
+    slots: u32 = 1,
+    long_slots: u32 = 0,
+    mem_bytes: u64 = 0,
+    ttl_ms: ?u64 = null,
+    wait_ms: ?u64 = null,
+    parent_epoch: ?u64 = null,
+};
+
+pub const ClearQuarantineResult = struct {
+    node_id: []const u8,
+    cleared: bool,
+    quarantined: ?[]const u8 = null,
+    detail: []const u8 = "",
+};
+
+pub const LeaseGrant = struct {
+    ok: bool,
+    node_id: []const u8,
+    boot_id: []const u8 = "",
+    lease_id: []const u8 = "",
+    epoch: u64 = 0,
+    parent_epoch: ?u64 = null,
+    deadline_ms: ?TimeMs = null,
+    reason: []const u8 = "",
+};
+
+pub const LeaseInfo = struct {
+    lease_id: []const u8,
+    epoch: u64,
+    parent_epoch: ?u64 = null,
+    holder_id: []const u8,
+    job_id: ?[]const u8 = null,
+    mode: LeaseMode,
+    state: LeaseState,
+    slots: u32,
+    long_slots: u32,
+    mem_bytes: u64,
+    deadline_ms: TimeMs,
+};
+
+pub const TicketInfo = struct {
+    ticket_id: []const u8,
+    seq: u64,
+    holder_id: []const u8,
+    mode: LeaseMode,
+    slots: u32,
+    long_slots: u32,
+    mem_bytes: u64,
+    wait_deadline_ms: TimeMs,
+    lease_deadline_ms: TimeMs,
+};
+
+pub const NodeAdmission = struct {
+    node_id: []const u8,
+    boot_id: []const u8,
+    next_epoch: u64,
+    slots_total: u32,
+    slots_used: u32,
+    long_slots_total: u32,
+    long_slots_used: u32,
+    mem_margin_bytes: u64,
+    mem_reserved_bytes: u64,
+    mem_avail_bytes: u64,
+    quarantined: ?[]const u8 = null,
+    grants: []const LeaseInfo = &.{},
+    queue: []const TicketInfo = &.{},
+};
+
+pub const ReleaseLeaseRequest = struct {
+    node_id: []const u8,
+    lease_id: []const u8,
+    epoch: u64,
+};
+
+pub const ReleaseLeaseResult = struct {
+    ok: bool,
+    fenced: bool = false,
+    quarantined: ?[]const u8 = null,
+};
+
+pub const RenewLeaseRequest = struct {
+    node_id: []const u8,
+    lease_id: []const u8,
+    epoch: u64,
+};
+
+pub const VerifyEpochRequest = struct {
+    node_id: []const u8,
+    boot_id: []const u8,
+    epoch: u64,
+};
+
+pub const VerifyEpochResult = struct {
+    valid: bool,
+    boot_id: []const u8 = "",
+    state: ?LeaseState = null,
+    expires_in_ms: ?i64 = null,
+    quarantined: ?[]const u8 = null,
+    reason: []const u8 = "",
 };
 
 pub const HubStreamMessageSnapshot = struct {
@@ -1624,6 +1764,12 @@ pub const methods = [_]MethodSpec{
     .{ .name = "AddDevice", .dart_name = "addDevice", .scope = .owner, .Req = AddDeviceRequest, .Resp = PairingCode },
     .{ .name = "PairDevice", .dart_name = "pairDevice", .scope = .public, .Req = PairDeviceRequest, .Resp = PairedDevice },
     .{ .name = "RevokeDevice", .dart_name = "revokeDevice", .scope = .owner, .Req = DeviceRef, .Resp = Empty },
+    .{ .name = "AcquireLease", .dart_name = "acquireLease", .scope = .sleeve, .Req = AcquireLeaseRequest, .Resp = LeaseGrant },
+    .{ .name = "RenewLease", .dart_name = "renewLease", .scope = .sleeve, .Req = RenewLeaseRequest, .Resp = LeaseGrant },
+    .{ .name = "ReleaseLease", .dart_name = "releaseLease", .scope = .sleeve, .Req = ReleaseLeaseRequest, .Resp = ReleaseLeaseResult },
+    .{ .name = "VerifyEpoch", .dart_name = "verifyEpoch", .scope = .sleeve, .Req = VerifyEpochRequest, .Resp = VerifyEpochResult },
+    .{ .name = "GetNodeAdmission", .dart_name = "getNodeAdmission", .scope = .sleeve, .Req = NodeRef, .Resp = NodeAdmission },
+    .{ .name = "ClearNodeQuarantine", .dart_name = "clearNodeQuarantine", .scope = .owner, .Req = NodeRef, .Resp = ClearQuarantineResult },
 };
 
 pub const wire_enums = .{
@@ -1642,6 +1788,8 @@ pub const wire_enums = .{
     HistoryMode,
     HistoryRole,
     JobState,
+    LeaseMode,
+    LeaseState,
     Level,
     Lifecycle,
     Mode,
@@ -1668,6 +1816,7 @@ pub const wire_unions = .{
 
 pub const wire_records = .{
     Accepted,
+    AcquireLeaseRequest,
     Activity,
     AddDeviceRequest,
     AddNodeRequest,
@@ -1677,6 +1826,7 @@ pub const wire_records = .{
     ApproveNodeRequest,
     ApprovedNode,
     ChatEntry,
+    ClearQuarantineResult,
     DecideRequest,
     Device,
     DeviceList,
@@ -1754,11 +1904,14 @@ pub const wire_records = .{
     JobRef,
     JobTargetArch,
     JobTargetNode,
+    LeaseGrant,
+    LeaseInfo,
     ListApprovalsRequest,
     ListEventsRequest,
     ListJobsRequest,
     MarkEventsReadRequest,
     Node,
+    NodeAdmission,
     NodeList,
     NodeRef,
     NodeUpdate,
@@ -1775,10 +1928,13 @@ pub const wire_records = .{
     QuotaList,
     QuotaWindow,
     ReadHistoryRequest,
+    ReleaseLeaseRequest,
+    ReleaseLeaseResult,
     RemoveNodeRequest,
     RemovedNode,
     RenameNodeRequest,
     RenamedNode,
+    RenewLeaseRequest,
     ResleeveRequest,
     RunJobRequest,
     Sample,
@@ -1791,6 +1947,7 @@ pub const wire_records = .{
     SleeveRef,
     SpawnSleeveRequest,
     StartSleeveRequest,
+    TicketInfo,
     Toolchain,
     Transcript,
     TurnStatus,
@@ -1798,6 +1955,8 @@ pub const wire_records = .{
     UpdateHubRequest,
     UpdateNodesRequest,
     Usage,
+    VerifyEpochRequest,
+    VerifyEpochResult,
     WaitRequest,
     WaitResult,
     WaitSleeveResult,

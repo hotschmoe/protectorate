@@ -33,6 +33,8 @@ pub const NodeTelemetry = struct {
     inventory: ?msg.Inventory = null,
     sample: ?msg.Sample = null,
     presence: msg.Presence = .{ .state = .unknown },
+    boot_id: []const u8 = "",
+    quarantined: ?[]const u8 = null,
     last_error: ?[]const u8 = null,
     pending_update: ?[]const u8 = null,
 };
@@ -59,6 +61,17 @@ pub const JobMeta = struct {
     ended_at_ms: ?i64 = null,
     held_reason: ?[]const u8 = null,
     approval_id: ?[]const u8 = null,
+    timeout_secs: ?u64 = null,
+    exclusive: bool = false,
+    slots: u32 = 1,
+    long_slots: u32 = 0,
+    mem_bytes: u64 = 0,
+    wait_ms: ?i64 = null,
+    lease_ttl_ms: ?i64 = null,
+    parent_epoch: ?u64 = null,
+    boot_id: ?[]const u8 = null,
+    epoch: ?u64 = null,
+    lease_id: ?[]const u8 = null,
 };
 
 const DriverHandle = struct {
@@ -1067,6 +1080,14 @@ pub const Runtime = struct {
                             .argv = dupe_str_slice(arena, jm.argv),
                             .cwd = if (jm.cwd) |c| try_dupe(arena, c) else null,
                             .artifacts = dupe_str_slice(arena, jm.decl_artifacts),
+                            .timeout_secs = jm.timeout_secs,
+                            .exclusive = jm.exclusive,
+                            .slots = jm.slots,
+                            .long_slots = jm.long_slots,
+                            .mem_bytes = jm.mem_bytes,
+                            .wait_ms = jm.wait_ms,
+                            .lease_ttl_ms = jm.lease_ttl_ms,
+                            .parent_epoch = jm.parent_epoch,
                         };
                         found = true;
                     }
@@ -1074,7 +1095,7 @@ pub const Runtime = struct {
                 }
                 if (!found) return;
 
-                _ = a_ptr.rt.fleet_srv.submit_job(arena, a_ptr.node_id, sj) catch |err| {
+                const rep = a_ptr.rt.fleet_srv.submit_job(arena, a_ptr.node_id, sj) catch |err| {
                     a_ptr.rt.commit(.{ .job_failed = .{
                         .job_id = a_ptr.job_id,
                         .attempt = 1,
@@ -1082,6 +1103,17 @@ pub const Runtime = struct {
                     } }) catch {};
                     return;
                 };
+                {
+                    a_ptr.rt.meta_mu.lockUncancelable(a_ptr.rt.io);
+                    if (a_ptr.rt.job_meta.getPtr(a_ptr.job_id)) |jm| {
+                        const ca = a_ptr.rt.core_state.alloc();
+                        if (rep.boot_id) |bid| jm.boot_id = ca.dupe(u8, bid) catch jm.boot_id;
+                        if (rep.epoch) |ep| jm.epoch = ep;
+                        if (rep.lease_id) |lid| jm.lease_id = ca.dupe(u8, lid) catch jm.lease_id;
+                        jm.held_reason = if (rep.held_reason) |hr| (ca.dupe(u8, hr) catch jm.held_reason) else null;
+                    }
+                    a_ptr.rt.meta_mu.unlock(a_ptr.rt.io);
+                }
                 a_ptr.rt.commit(.{ .job_submitted = .{
                     .job_id = a_ptr.job_id,
                     .node_id = a_ptr.node_id,
@@ -1127,8 +1159,10 @@ pub const Runtime = struct {
                 }
                 var arena_st = std.heap.ArenaAllocator.init(a_ptr.rt.gpa);
                 defer arena_st.deinit();
-                _ = a_ptr.rt.fleet_srv.cancel_job(arena_st.allocator(), a_ptr.node_id, a_ptr.job_id) catch {};
-                a_ptr.rt.commit(.{ .job_cancelled = .{ .job_id = a_ptr.job_id } }) catch {};
+                _ = a_ptr.rt.fleet_srv.cancel_job(arena_st.allocator(), a_ptr.node_id, a_ptr.job_id) catch {
+                    a_ptr.rt.commit(.{ .job_cancelled = .{ .job_id = a_ptr.job_id } }) catch {};
+                    return;
+                };
             }
         }.run, .{arg}) catch {
             self.gpa.free(arg.job_id);
@@ -1163,6 +1197,17 @@ pub const Runtime = struct {
 
         for (pairs.items) |pr| {
             const info = self.fleet_srv.job_status(a, pr.node_id, pr.id) catch continue;
+            {
+                self.meta_mu.lockUncancelable(self.io);
+                if (self.job_meta.getPtr(pr.id)) |jm| {
+                    const ca = self.core_state.alloc();
+                    if (info.boot_id) |bid| jm.boot_id = ca.dupe(u8, bid) catch jm.boot_id;
+                    if (info.epoch) |ep| jm.epoch = ep;
+                    if (info.lease_id) |lid| jm.lease_id = ca.dupe(u8, lid) catch jm.lease_id;
+                    jm.held_reason = if (info.held_reason) |hr| (ca.dupe(u8, hr) catch jm.held_reason) else null;
+                }
+                self.meta_mu.unlock(self.io);
+            }
             if (info.log_bytes > 0) {
                 if (self.fleet_srv.fetch_log(a, pr.node_id, pr.id, 0, 1024 * 1024)) |lres| {
                     var lp_opt: ?[]const u8 = null;
@@ -1178,8 +1223,9 @@ pub const Runtime = struct {
                 } else |_| {}
             }
 
-            if (info.state == .succeeded or info.state == .failed or info.state == .cancelled or info.state == .interrupted) {
+            if (info.state == .succeeded or info.state == .failed or info.state == .cancelled or info.state == .interrupted or info.state == .lost) {
                 var arts_list: std.ArrayList(schema.JobArtifact) = .empty;
+                var collection_ok = true;
                 for (info.artifacts) |ar| {
                     if (self.fleet_srv.fetch_artifact(a, pr.node_id, pr.id, ar.path, self.hub_home.artifacts_path)) |verified| {
                         arts_list.append(a, .{
@@ -1187,7 +1233,9 @@ pub const Runtime = struct {
                             .size_bytes = verified.size_bytes,
                             .sha256 = if (verified.sha256) |s| (self.core_state.dupe_str(s) catch s) else null,
                         }) catch {};
-                    } else |_| {}
+                    } else |_| {
+                        collection_ok = false;
+                    }
                 }
                 {
                     self.meta_mu.lockUncancelable(self.io);
@@ -1201,10 +1249,15 @@ pub const Runtime = struct {
                     }
                     self.meta_mu.unlock(self.io);
                 }
+                _ = self.fleet_srv.ack_job(a, pr.node_id, pr.id) catch {};
                 if (info.state == .cancelled) {
                     self.commit(.{ .job_cancelled = .{ .job_id = pr.id } }) catch {};
                 } else if (info.state == .interrupted) {
                     self.commit(.{ .job_interrupted = .{ .job_id = pr.id, .attempt = 1 } }) catch {};
+                } else if (info.state == .lost) {
+                    self.commit(.{ .job_failed = .{ .job_id = pr.id, .attempt = 1, .err = info.@"error" orelse "lost on node" } }) catch {};
+                } else if (info.state == .succeeded and !collection_ok) {
+                    self.commit(.{ .job_failed = .{ .job_id = pr.id, .attempt = 1, .err = "artifact collection failed" } }) catch {};
                 } else if (info.exit_code) |ec| {
                     self.commit(.{ .job_completed = .{ .job_id = pr.id, .attempt = 1, .exit_code = ec } }) catch {};
                 } else {
@@ -1335,6 +1388,8 @@ pub const Runtime = struct {
             };
         }
         if (hello.sample) |smp| tel.sample = smp;
+        if (hello.boot_id.len > 0) tel.boot_id = a.dupe(u8, hello.boot_id) catch tel.boot_id;
+        tel.quarantined = if (hello.quarantined) |q| (a.dupe(u8, q) catch tel.quarantined) else null;
         tel.presence = .{
             .state = hello.presence.state,
             .idle_secs = hello.presence.idle_secs,
@@ -1343,6 +1398,22 @@ pub const Runtime = struct {
             .sampled_at_ms = hello.presence.sampled_at_ms,
         };
         gop.value_ptr.* = tel;
+    }
+
+    pub fn resolve_node_id(self: *Runtime, arena: std.mem.Allocator, id_or_name: []const u8) ?[]const u8 {
+        self.state_mu.lockUncancelable(self.io);
+        defer self.state_mu.unlock(self.io);
+        if (self.core_state.nodes.contains(id_or_name)) {
+            return arena.dupe(u8, id_or_name) catch null;
+        }
+        var it = self.core_state.nodes.iterator();
+        while (it.next()) |e| {
+            const n = e.value_ptr.*;
+            if (std.mem.eql(u8, n.name, id_or_name)) {
+                return arena.dupe(u8, n.id) catch null;
+            }
+        }
+        return null;
     }
 
     pub fn record_hub_event(
@@ -1605,6 +1676,8 @@ pub const Runtime = struct {
             .online = n.online,
             .last_seen_ms = .{ .ms = n.last_seen_ms },
             .node_version = try arena.dupe(u8, n.version),
+            .boot_id = if (tel) |t| try arena.dupe(u8, t.boot_id) else "",
+            .quarantined = if (tel) |t| (if (t.quarantined) |q| try arena.dupe(u8, q) else null) else null,
             .inventory = inv_s,
             .sample = smp_s,
             .presence = pres_s,
@@ -1664,6 +1737,9 @@ pub const Runtime = struct {
             .log_bytes = if (jm) |m| m.log_bytes else 0,
             .cwd = if (jm) |m| m.cwd else null,
             .artifacts = if (jm) |m| m.artifacts else &.{},
+            .boot_id = if (jm) |m| m.boot_id else null,
+            .epoch = if (jm) |m| m.epoch else null,
+            .lease_id = if (jm) |m| m.lease_id else null,
         };
     }
 

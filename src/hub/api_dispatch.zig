@@ -2,6 +2,7 @@ const std = @import("std");
 const tiger = @import("../tiger.zig");
 const schema = @import("../api/schema.zig");
 const model = @import("../core/model.zig");
+const msg = @import("../net/msg.zig");
 const noise = @import("../net/noise.zig");
 const h_seg = @import("../history/segment.zig");
 const h_ext = @import("../history/extract.zig");
@@ -25,8 +26,8 @@ fn ok_json(gpa: std.mem.Allocator, value: anytype) !DispatchResult {
     };
 }
 
-fn err_json(gpa: std.mem.Allocator, code: schema.ErrorCode, msg: []const u8) !DispatchResult {
-    const body = schema.ErrorBody{ .@"error" = .{ .code = code, .message = msg } };
+fn err_json(gpa: std.mem.Allocator, code: schema.ErrorCode, message: []const u8) !DispatchResult {
+    const body = schema.ErrorBody{ .@"error" = .{ .code = code, .message = message } };
     return .{
         .status = code.http_status(),
         .body_json = try schema.encode_alloc(gpa, body),
@@ -411,7 +412,7 @@ pub fn dispatch(
         for (req.artifacts, 0..) |s, i| arts_c[i] = try ca.dupe(u8, s);
 
         const target_copy: schema.JobTarget = switch (req.target) {
-            .node => |n| .{ .node = .{ .node_id = try ca.dupe(u8, n.node_id) } },
+            .node => |n| .{ .node = .{ .node_id = rt.resolve_node_id(ca, n.node_id) orelse try ca.dupe(u8, n.node_id) } },
             .arch => |ar| .{ .arch = .{ .arch = try ca.dupe(u8, ar.arch) } },
             .unknown => .{ .arch = .{ .arch = "x86_64" } },
         };
@@ -425,10 +426,18 @@ pub fn dispatch(
                 .decl_artifacts = arts_c,
                 .log_path = log_path,
                 .started_at_ms = std.Io.Clock.real.now(rt.io).toMilliseconds(),
+                .timeout_secs = req.timeout_secs,
+                .exclusive = req.exclusive,
+                .slots = if (req.slots == 0) 1 else req.slots,
+                .long_slots = req.long_slots,
+                .mem_bytes = req.mem_bytes,
+                .wait_ms = if (req.wait_ms) |w| @intCast(w) else null,
+                .lease_ttl_ms = if (req.lease_ttl_ms) |t| @intCast(t) else null,
+                .parent_epoch = req.parent_epoch,
             });
         }
 
-        const tnode: ?[]const u8 = switch (req.target) {
+        const tnode: ?[]const u8 = switch (target_copy) {
             .node => |n| n.node_id,
             else => null,
         };
@@ -815,6 +824,137 @@ pub fn dispatch(
         }
         const res = try rt.start_and_wait_node_rollout(a, req);
         return ok_json(rt.gpa, res);
+    } else if (std.mem.eql(u8, method, "AcquireLease")) {
+        const req = schema.decode_arena(schema.AcquireLeaseRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        const nid = rt.resolve_node_id(a, req.node_id) orelse return err_json(rt.gpa, .not_found, "node not found");
+        const rep = rt.fleet_srv.acquire_lease(a, nid, .{
+            .holder_id = req.holder_id,
+            .exclusive = req.exclusive,
+            .slots = if (req.slots == 0 and !req.exclusive) 1 else req.slots,
+            .long_slots = req.long_slots,
+            .mem_bytes = req.mem_bytes,
+            .ttl_ms = if (req.ttl_ms) |t| @intCast(t) else null,
+            .wait_ms = if (req.wait_ms) |w| @intCast(w) else null,
+            .parent_epoch = req.parent_epoch,
+        }) catch |err| return map_fleet_err(rt.gpa, err);
+        return ok_json(rt.gpa, schema.LeaseGrant{
+            .ok = rep.ok,
+            .node_id = nid,
+            .boot_id = rep.boot_id,
+            .lease_id = rep.lease_id,
+            .epoch = rep.epoch,
+            .parent_epoch = rep.parent_epoch,
+            .deadline_ms = if (rep.deadline_ms > 0) .{ .ms = rep.deadline_ms } else null,
+            .reason = rep.reason,
+        });
+    } else if (std.mem.eql(u8, method, "RenewLease")) {
+        const req = schema.decode_arena(schema.RenewLeaseRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        const nid = rt.resolve_node_id(a, req.node_id) orelse return err_json(rt.gpa, .not_found, "node not found");
+        const rep = rt.fleet_srv.renew_lease(a, nid, .{
+            .lease_id = req.lease_id,
+            .epoch = req.epoch,
+        }) catch |err| return map_fleet_err(rt.gpa, err);
+        return ok_json(rt.gpa, schema.LeaseGrant{
+            .ok = rep.ok,
+            .node_id = nid,
+            .boot_id = rep.boot_id,
+            .lease_id = rep.lease_id,
+            .epoch = rep.epoch,
+            .parent_epoch = rep.parent_epoch,
+            .deadline_ms = if (rep.deadline_ms > 0) .{ .ms = rep.deadline_ms } else null,
+            .reason = rep.reason,
+        });
+    } else if (std.mem.eql(u8, method, "ReleaseLease")) {
+        const req = schema.decode_arena(schema.ReleaseLeaseRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        const nid = rt.resolve_node_id(a, req.node_id) orelse return err_json(rt.gpa, .not_found, "node not found");
+        const rep = rt.fleet_srv.release_lease(a, nid, .{
+            .lease_id = req.lease_id,
+            .epoch = req.epoch,
+        }) catch |err| return map_fleet_err(rt.gpa, err);
+        return ok_json(rt.gpa, schema.ReleaseLeaseResult{
+            .ok = rep.ok,
+            .fenced = rep.fenced,
+            .quarantined = rep.quarantined,
+        });
+    } else if (std.mem.eql(u8, method, "VerifyEpoch")) {
+        const req = schema.decode_arena(schema.VerifyEpochRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        const nid = rt.resolve_node_id(a, req.node_id) orelse return err_json(rt.gpa, .not_found, "node not found");
+        const rep = rt.fleet_srv.verify_epoch(a, nid, .{
+            .boot_id = req.boot_id,
+            .epoch = req.epoch,
+        }) catch |err| return map_fleet_err(rt.gpa, err);
+        return ok_json(rt.gpa, schema.VerifyEpochResult{
+            .valid = rep.valid,
+            .boot_id = rep.boot_id,
+            .state = if (rep.state) |st| map_lease_state(st) else null,
+            .expires_in_ms = rep.expires_in_ms,
+            .quarantined = rep.quarantined,
+            .reason = rep.reason,
+        });
+    } else if (std.mem.eql(u8, method, "GetNodeAdmission")) {
+        const req = schema.decode_arena(schema.NodeRef, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        const nid = rt.resolve_node_id(a, req.node_id) orelse return err_json(rt.gpa, .not_found, "node not found");
+        const st = rt.fleet_srv.list_leases(a, nid) catch |err| return map_fleet_err(rt.gpa, err);
+        const grants = try a.alloc(schema.LeaseInfo, st.grants.len);
+        for (st.grants, 0..) |g, i| {
+            grants[i] = .{
+                .lease_id = g.lease_id,
+                .epoch = g.epoch,
+                .parent_epoch = g.parent_epoch,
+                .holder_id = g.holder_id,
+                .job_id = g.job_id,
+                .mode = if (g.mode == .exclusive) .exclusive else .shared,
+                .state = map_lease_state(g.state),
+                .slots = g.slots,
+                .long_slots = g.long_slots,
+                .mem_bytes = g.mem_bytes,
+                .deadline_ms = .{ .ms = g.deadline_ms },
+            };
+        }
+        const queue = try a.alloc(schema.TicketInfo, st.queue.len);
+        for (st.queue, 0..) |t, i| {
+            queue[i] = .{
+                .ticket_id = t.ticket_id,
+                .seq = t.seq,
+                .holder_id = t.holder_id,
+                .mode = if (t.mode == .exclusive) .exclusive else .shared,
+                .slots = t.slots,
+                .long_slots = t.long_slots,
+                .mem_bytes = t.mem_bytes,
+                .wait_deadline_ms = .{ .ms = t.wait_deadline_ms },
+                .lease_deadline_ms = .{ .ms = t.lease_deadline_ms },
+            };
+        }
+        return ok_json(rt.gpa, schema.NodeAdmission{
+            .node_id = nid,
+            .boot_id = st.boot_id,
+            .next_epoch = st.next_epoch,
+            .slots_total = st.slots_total,
+            .slots_used = st.slots_used,
+            .long_slots_total = st.long_slots_total,
+            .long_slots_used = st.long_slots_used,
+            .mem_margin_bytes = st.mem_margin_bytes,
+            .mem_reserved_bytes = st.mem_reserved_bytes,
+            .mem_avail_bytes = st.mem_avail_bytes,
+            .quarantined = st.quarantined,
+            .grants = grants,
+            .queue = queue,
+        });
+    } else if (std.mem.eql(u8, method, "ClearNodeQuarantine")) {
+        const req = schema.decode_arena(schema.NodeRef, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        const nid = rt.resolve_node_id(a, req.node_id) orelse return err_json(rt.gpa, .not_found, "node not found");
+        const rep = rt.fleet_srv.clear_quarantine(a, nid) catch |err| return map_fleet_err(rt.gpa, err);
+        if (rep.ok and rep.quarantined == null) {
+            rt.meta_mu.lockUncancelable(rt.io);
+            if (rt.node_tele.getPtr(nid)) |tel| tel.quarantined = null;
+            rt.meta_mu.unlock(rt.io);
+        }
+        return ok_json(rt.gpa, schema.ClearQuarantineResult{
+            .node_id = nid,
+            .cleared = rep.cleared,
+            .quarantined = rep.quarantined,
+            .detail = rep.detail,
+        });
     } else if (std.mem.eql(u8, method, "ListDevices")) {
         const devs = try rt.hub_home.list_devices(a);
         return ok_json(rt.gpa, schema.DeviceList{ .devices = devs });
@@ -859,6 +999,22 @@ fn map_d9_err(gpa: std.mem.Allocator, err: anyerror) !DispatchResult {
         error.ApprovalDenied => err_json(gpa, .forbidden, "owner denied D9 action"),
         error.ApprovalTimeout => err_json(gpa, .unavailable, "timed out waiting for D9 owner approval"),
         else => err_json(gpa, .internal, @errorName(err)),
+    };
+}
+
+fn map_fleet_err(gpa: std.mem.Allocator, err: anyerror) !DispatchResult {
+    return switch (err) {
+        error.NodeOffline => err_json(gpa, .unavailable, "node is offline"),
+        error.RemoteError => err_json(gpa, .invalid, "node rejected request"),
+        else => err_json(gpa, .internal, @errorName(err)),
+    };
+}
+
+fn map_lease_state(st: msg.LeaseState) schema.LeaseState {
+    return switch (st) {
+        .active => .active,
+        .collecting => .collecting,
+        .fencing => .fencing,
     };
 }
 

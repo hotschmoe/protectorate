@@ -369,6 +369,45 @@ enum JobState {
   String toJson() => wire;
 }
 
+enum LeaseMode {
+  shared('shared'),
+  exclusive('exclusive'),
+  unknown('unknown');
+
+  const LeaseMode(this.wire);
+
+  final String wire;
+
+  static LeaseMode fromJson(Object? json) {
+    for (final v in values) {
+      if (v.wire == json) return v;
+    }
+    return unknown;
+  }
+
+  String toJson() => wire;
+}
+
+enum LeaseState {
+  active('active'),
+  collecting('collecting'),
+  fencing('fencing'),
+  unknown('unknown');
+
+  const LeaseState(this.wire);
+
+  final String wire;
+
+  static LeaseState fromJson(Object? json) {
+    for (final v in values) {
+      if (v.wire == json) return v;
+    }
+    return unknown;
+  }
+
+  String toJson() => wire;
+}
+
 enum Level {
   info('info'),
   warn('warn'),
@@ -1736,6 +1775,65 @@ final class Accepted {
   };
 }
 
+final class AcquireLeaseRequest {
+  const AcquireLeaseRequest({
+    required this.nodeId,
+    this.holderId = '',
+    this.exclusive = false,
+    this.slots = 1,
+    this.longSlots = 0,
+    this.memBytes = 0,
+    this.ttlMs,
+    this.waitMs,
+    this.parentEpoch,
+  });
+
+  factory AcquireLeaseRequest.fromJson(Object? json) {
+    final j = _object(json, 'AcquireLeaseRequest');
+    return AcquireLeaseRequest(
+      nodeId: _string(j['node_id'], 'AcquireLeaseRequest.node_id'),
+      holderId: _or(j['holder_id'], '', (e0) => _string(e0, 'AcquireLeaseRequest.holder_id')),
+      exclusive: _or(j['exclusive'], false, (e0) => _bool(e0, 'AcquireLeaseRequest.exclusive')),
+      slots: _or(j['slots'], 1, (e0) => _int(e0, 'AcquireLeaseRequest.slots')),
+      longSlots: _or(j['long_slots'], 0, (e0) => _int(e0, 'AcquireLeaseRequest.long_slots')),
+      memBytes: _or(j['mem_bytes'], 0, (e0) => _int(e0, 'AcquireLeaseRequest.mem_bytes')),
+      ttlMs: _opt(j['ttl_ms'], (e0) => _int(e0, 'AcquireLeaseRequest.ttl_ms')),
+      waitMs: _opt(j['wait_ms'], (e0) => _int(e0, 'AcquireLeaseRequest.wait_ms')),
+      parentEpoch: _opt(j['parent_epoch'], (e0) => _int(e0, 'AcquireLeaseRequest.parent_epoch')),
+    );
+  }
+
+  final String nodeId;
+
+  final String holderId;
+
+  final bool exclusive;
+
+  final int slots;
+
+  final int longSlots;
+
+  final int memBytes;
+
+  final int? ttlMs;
+
+  final int? waitMs;
+
+  final int? parentEpoch;
+
+  Map<String, Object?> toJson() => {
+    'node_id': nodeId,
+    'holder_id': holderId,
+    'exclusive': exclusive,
+    'slots': slots,
+    'long_slots': longSlots,
+    'mem_bytes': memBytes,
+    if (ttlMs case final v?) 'ttl_ms': v,
+    if (waitMs case final v?) 'wait_ms': v,
+    if (parentEpoch case final v?) 'parent_epoch': v,
+  };
+}
+
 final class Activity {
   const Activity({
     required this.state,
@@ -2039,6 +2137,40 @@ final class ChatEntry {
     'turn': turn,
     'at_ms': at.millisecondsSinceEpoch,
     'entry': entry.toJson(),
+  };
+}
+
+final class ClearQuarantineResult {
+  const ClearQuarantineResult({
+    required this.nodeId,
+    required this.cleared,
+    this.quarantined,
+    this.detail = '',
+  });
+
+  factory ClearQuarantineResult.fromJson(Object? json) {
+    final j = _object(json, 'ClearQuarantineResult');
+    return ClearQuarantineResult(
+      nodeId: _string(j['node_id'], 'ClearQuarantineResult.node_id'),
+      cleared: _bool(j['cleared'], 'ClearQuarantineResult.cleared'),
+      quarantined: _opt(j['quarantined'], (e0) => _string(e0, 'ClearQuarantineResult.quarantined')),
+      detail: _or(j['detail'], '', (e0) => _string(e0, 'ClearQuarantineResult.detail')),
+    );
+  }
+
+  final String nodeId;
+
+  final bool cleared;
+
+  final String? quarantined;
+
+  final String detail;
+
+  Map<String, Object?> toJson() => {
+    'node_id': nodeId,
+    'cleared': cleared,
+    if (quarantined case final v?) 'quarantined': v,
+    'detail': detail,
   };
 }
 
@@ -3455,6 +3587,9 @@ final class Job {
     this.logBytes = 0,
     this.cwd,
     this.artifacts = const <JobArtifact>[],
+    this.bootId,
+    this.epoch,
+    this.leaseId,
   });
 
   factory Job.fromJson(Object? json) {
@@ -3479,6 +3614,9 @@ final class Job {
       logBytes: _or(j['log_bytes'], 0, (e0) => _int(e0, 'Job.log_bytes')),
       cwd: _opt(j['cwd'], (e0) => _string(e0, 'Job.cwd')),
       artifacts: _or(j['artifacts'], const <JobArtifact>[], (e0) => _list(e0, 'Job.artifacts', JobArtifact.fromJson)),
+      bootId: _opt(j['boot_id'], (e0) => _string(e0, 'Job.boot_id')),
+      epoch: _opt(j['epoch'], (e0) => _int(e0, 'Job.epoch')),
+      leaseId: _opt(j['lease_id'], (e0) => _string(e0, 'Job.lease_id')),
     );
   }
 
@@ -3520,6 +3658,12 @@ final class Job {
 
   final List<JobArtifact> artifacts;
 
+  final String? bootId;
+
+  final int? epoch;
+
+  final String? leaseId;
+
   Map<String, Object?> toJson() => {
     'id': id,
     if (nodeId case final v?) 'node_id': v,
@@ -3540,6 +3684,9 @@ final class Job {
     'log_bytes': logBytes,
     if (cwd case final v?) 'cwd': v,
     'artifacts': [for (final e in artifacts) e.toJson()],
+    if (bootId case final v?) 'boot_id': v,
+    if (epoch case final v?) 'epoch': v,
+    if (leaseId case final v?) 'lease_id': v,
   };
 }
 
@@ -3708,6 +3855,129 @@ final class JobRef {
   };
 }
 
+final class LeaseGrant {
+  const LeaseGrant({
+    required this.ok,
+    required this.nodeId,
+    this.bootId = '',
+    this.leaseId = '',
+    this.epoch = 0,
+    this.parentEpoch,
+    this.deadline,
+    this.reason = '',
+  });
+
+  factory LeaseGrant.fromJson(Object? json) {
+    final j = _object(json, 'LeaseGrant');
+    return LeaseGrant(
+      ok: _bool(j['ok'], 'LeaseGrant.ok'),
+      nodeId: _string(j['node_id'], 'LeaseGrant.node_id'),
+      bootId: _or(j['boot_id'], '', (e0) => _string(e0, 'LeaseGrant.boot_id')),
+      leaseId: _or(j['lease_id'], '', (e0) => _string(e0, 'LeaseGrant.lease_id')),
+      epoch: _or(j['epoch'], 0, (e0) => _int(e0, 'LeaseGrant.epoch')),
+      parentEpoch: _opt(j['parent_epoch'], (e0) => _int(e0, 'LeaseGrant.parent_epoch')),
+      deadline: _opt(j['deadline_ms'], (e0) => _time(e0, 'LeaseGrant.deadline_ms')),
+      reason: _or(j['reason'], '', (e0) => _string(e0, 'LeaseGrant.reason')),
+    );
+  }
+
+  final bool ok;
+
+  final String nodeId;
+
+  final String bootId;
+
+  final String leaseId;
+
+  final int epoch;
+
+  final int? parentEpoch;
+
+  final DateTime? deadline;
+
+  final String reason;
+
+  Map<String, Object?> toJson() => {
+    'ok': ok,
+    'node_id': nodeId,
+    'boot_id': bootId,
+    'lease_id': leaseId,
+    'epoch': epoch,
+    if (parentEpoch case final v?) 'parent_epoch': v,
+    if (deadline case final v?) 'deadline_ms': v.millisecondsSinceEpoch,
+    'reason': reason,
+  };
+}
+
+final class LeaseInfo {
+  const LeaseInfo({
+    required this.leaseId,
+    required this.epoch,
+    this.parentEpoch,
+    required this.holderId,
+    this.jobId,
+    required this.mode,
+    required this.state,
+    required this.slots,
+    required this.longSlots,
+    required this.memBytes,
+    required this.deadline,
+  });
+
+  factory LeaseInfo.fromJson(Object? json) {
+    final j = _object(json, 'LeaseInfo');
+    return LeaseInfo(
+      leaseId: _string(j['lease_id'], 'LeaseInfo.lease_id'),
+      epoch: _int(j['epoch'], 'LeaseInfo.epoch'),
+      parentEpoch: _opt(j['parent_epoch'], (e0) => _int(e0, 'LeaseInfo.parent_epoch')),
+      holderId: _string(j['holder_id'], 'LeaseInfo.holder_id'),
+      jobId: _opt(j['job_id'], (e0) => _string(e0, 'LeaseInfo.job_id')),
+      mode: LeaseMode.fromJson(j['mode']),
+      state: LeaseState.fromJson(j['state']),
+      slots: _int(j['slots'], 'LeaseInfo.slots'),
+      longSlots: _int(j['long_slots'], 'LeaseInfo.long_slots'),
+      memBytes: _int(j['mem_bytes'], 'LeaseInfo.mem_bytes'),
+      deadline: _time(j['deadline_ms'], 'LeaseInfo.deadline_ms'),
+    );
+  }
+
+  final String leaseId;
+
+  final int epoch;
+
+  final int? parentEpoch;
+
+  final String holderId;
+
+  final String? jobId;
+
+  final LeaseMode mode;
+
+  final LeaseState state;
+
+  final int slots;
+
+  final int longSlots;
+
+  final int memBytes;
+
+  final DateTime deadline;
+
+  Map<String, Object?> toJson() => {
+    'lease_id': leaseId,
+    'epoch': epoch,
+    if (parentEpoch case final v?) 'parent_epoch': v,
+    'holder_id': holderId,
+    if (jobId case final v?) 'job_id': v,
+    'mode': mode.toJson(),
+    'state': state.toJson(),
+    'slots': slots,
+    'long_slots': longSlots,
+    'mem_bytes': memBytes,
+    'deadline_ms': deadline.millisecondsSinceEpoch,
+  };
+}
+
 final class ListApprovalsRequest {
   const ListApprovalsRequest({
     this.pendingOnly = false,
@@ -3801,6 +4071,8 @@ final class Node {
     required this.online,
     required this.lastSeen,
     required this.nodeVersion,
+    this.bootId = '',
+    this.quarantined,
     this.pendingUpdate,
     this.error,
     this.inventory,
@@ -3818,6 +4090,8 @@ final class Node {
       online: _bool(j['online'], 'Node.online'),
       lastSeen: _time(j['last_seen_ms'], 'Node.last_seen_ms'),
       nodeVersion: _string(j['node_version'], 'Node.node_version'),
+      bootId: _or(j['boot_id'], '', (e0) => _string(e0, 'Node.boot_id')),
+      quarantined: _opt(j['quarantined'], (e0) => _string(e0, 'Node.quarantined')),
       pendingUpdate: _opt(j['pending_update'], (e0) => _string(e0, 'Node.pending_update')),
       error: _opt(j['error'], (e0) => _string(e0, 'Node.error')),
       inventory: _opt(j['inventory'], Inventory.fromJson),
@@ -3837,6 +4111,10 @@ final class Node {
   final DateTime lastSeen;
 
   final String nodeVersion;
+
+  final String bootId;
+
+  final String? quarantined;
 
   final String? pendingUpdate;
 
@@ -3858,6 +4136,8 @@ final class Node {
     'online': online,
     'last_seen_ms': lastSeen.millisecondsSinceEpoch,
     'node_version': nodeVersion,
+    'boot_id': bootId,
+    if (quarantined case final v?) 'quarantined': v,
     if (pendingUpdate case final v?) 'pending_update': v,
     if (error case final v?) 'error': v,
     if (inventory case final v?) 'inventory': v.toJson(),
@@ -3865,6 +4145,85 @@ final class Node {
     'presence': presence.toJson(),
     'jobs': jobs.toJson(),
     if (jobsNote case final v?) 'jobs_note': v,
+  };
+}
+
+final class NodeAdmission {
+  const NodeAdmission({
+    required this.nodeId,
+    required this.bootId,
+    required this.nextEpoch,
+    required this.slotsTotal,
+    required this.slotsUsed,
+    required this.longSlotsTotal,
+    required this.longSlotsUsed,
+    required this.memMarginBytes,
+    required this.memReservedBytes,
+    required this.memAvailBytes,
+    this.quarantined,
+    this.grants = const <LeaseInfo>[],
+    this.queue = const <TicketInfo>[],
+  });
+
+  factory NodeAdmission.fromJson(Object? json) {
+    final j = _object(json, 'NodeAdmission');
+    return NodeAdmission(
+      nodeId: _string(j['node_id'], 'NodeAdmission.node_id'),
+      bootId: _string(j['boot_id'], 'NodeAdmission.boot_id'),
+      nextEpoch: _int(j['next_epoch'], 'NodeAdmission.next_epoch'),
+      slotsTotal: _int(j['slots_total'], 'NodeAdmission.slots_total'),
+      slotsUsed: _int(j['slots_used'], 'NodeAdmission.slots_used'),
+      longSlotsTotal: _int(j['long_slots_total'], 'NodeAdmission.long_slots_total'),
+      longSlotsUsed: _int(j['long_slots_used'], 'NodeAdmission.long_slots_used'),
+      memMarginBytes: _int(j['mem_margin_bytes'], 'NodeAdmission.mem_margin_bytes'),
+      memReservedBytes: _int(j['mem_reserved_bytes'], 'NodeAdmission.mem_reserved_bytes'),
+      memAvailBytes: _int(j['mem_avail_bytes'], 'NodeAdmission.mem_avail_bytes'),
+      quarantined: _opt(j['quarantined'], (e0) => _string(e0, 'NodeAdmission.quarantined')),
+      grants: _or(j['grants'], const <LeaseInfo>[], (e0) => _list(e0, 'NodeAdmission.grants', LeaseInfo.fromJson)),
+      queue: _or(j['queue'], const <TicketInfo>[], (e0) => _list(e0, 'NodeAdmission.queue', TicketInfo.fromJson)),
+    );
+  }
+
+  final String nodeId;
+
+  final String bootId;
+
+  final int nextEpoch;
+
+  final int slotsTotal;
+
+  final int slotsUsed;
+
+  final int longSlotsTotal;
+
+  final int longSlotsUsed;
+
+  final int memMarginBytes;
+
+  final int memReservedBytes;
+
+  final int memAvailBytes;
+
+  final String? quarantined;
+
+  final List<LeaseInfo> grants;
+
+  final List<TicketInfo> queue;
+
+  Map<String, Object?> toJson() => {
+    'node_id': nodeId,
+    'boot_id': bootId,
+    'next_epoch': nextEpoch,
+    'slots_total': slotsTotal,
+    'slots_used': slotsUsed,
+    'long_slots_total': longSlotsTotal,
+    'long_slots_used': longSlotsUsed,
+    'mem_margin_bytes': memMarginBytes,
+    'mem_reserved_bytes': memReservedBytes,
+    'mem_avail_bytes': memAvailBytes,
+    if (quarantined case final v?) 'quarantined': v,
+    'grants': [for (final e in grants) e.toJson()],
+    'queue': [for (final e in queue) e.toJson()],
   };
 }
 
@@ -4402,6 +4761,64 @@ final class ReadHistoryRequest {
   };
 }
 
+final class ReleaseLeaseRequest {
+  const ReleaseLeaseRequest({
+    required this.nodeId,
+    required this.leaseId,
+    required this.epoch,
+  });
+
+  factory ReleaseLeaseRequest.fromJson(Object? json) {
+    final j = _object(json, 'ReleaseLeaseRequest');
+    return ReleaseLeaseRequest(
+      nodeId: _string(j['node_id'], 'ReleaseLeaseRequest.node_id'),
+      leaseId: _string(j['lease_id'], 'ReleaseLeaseRequest.lease_id'),
+      epoch: _int(j['epoch'], 'ReleaseLeaseRequest.epoch'),
+    );
+  }
+
+  final String nodeId;
+
+  final String leaseId;
+
+  final int epoch;
+
+  Map<String, Object?> toJson() => {
+    'node_id': nodeId,
+    'lease_id': leaseId,
+    'epoch': epoch,
+  };
+}
+
+final class ReleaseLeaseResult {
+  const ReleaseLeaseResult({
+    required this.ok,
+    this.fenced = false,
+    this.quarantined,
+  });
+
+  factory ReleaseLeaseResult.fromJson(Object? json) {
+    final j = _object(json, 'ReleaseLeaseResult');
+    return ReleaseLeaseResult(
+      ok: _bool(j['ok'], 'ReleaseLeaseResult.ok'),
+      fenced: _or(j['fenced'], false, (e0) => _bool(e0, 'ReleaseLeaseResult.fenced')),
+      quarantined: _opt(j['quarantined'], (e0) => _string(e0, 'ReleaseLeaseResult.quarantined')),
+    );
+  }
+
+  final bool ok;
+
+  final bool fenced;
+
+  final String? quarantined;
+
+  Map<String, Object?> toJson() => {
+    'ok': ok,
+    'fenced': fenced,
+    if (quarantined case final v?) 'quarantined': v,
+  };
+}
+
 final class RemoveNodeRequest {
   const RemoveNodeRequest({
     required this.nodeId,
@@ -4518,6 +4935,35 @@ final class RenamedNode {
   };
 }
 
+final class RenewLeaseRequest {
+  const RenewLeaseRequest({
+    required this.nodeId,
+    required this.leaseId,
+    required this.epoch,
+  });
+
+  factory RenewLeaseRequest.fromJson(Object? json) {
+    final j = _object(json, 'RenewLeaseRequest');
+    return RenewLeaseRequest(
+      nodeId: _string(j['node_id'], 'RenewLeaseRequest.node_id'),
+      leaseId: _string(j['lease_id'], 'RenewLeaseRequest.lease_id'),
+      epoch: _int(j['epoch'], 'RenewLeaseRequest.epoch'),
+    );
+  }
+
+  final String nodeId;
+
+  final String leaseId;
+
+  final int epoch;
+
+  Map<String, Object?> toJson() => {
+    'node_id': nodeId,
+    'lease_id': leaseId,
+    'epoch': epoch,
+  };
+}
+
 final class ResleeveRequest {
   const ResleeveRequest({
     required this.sleeveId,
@@ -4567,6 +5013,13 @@ final class RunJobRequest {
     this.onPresent = OnPresent.idle,
     this.maintenance = false,
     this.timeoutSecs,
+    this.exclusive = false,
+    this.slots = 1,
+    this.longSlots = 0,
+    this.memBytes = 0,
+    this.waitMs,
+    this.leaseTtlMs,
+    this.parentEpoch,
   });
 
   factory RunJobRequest.fromJson(Object? json) {
@@ -4580,6 +5033,13 @@ final class RunJobRequest {
       onPresent: j['on_present'] == null ? OnPresent.idle : OnPresent.fromJson(j['on_present']),
       maintenance: _or(j['maintenance'], false, (e0) => _bool(e0, 'RunJobRequest.maintenance')),
       timeoutSecs: _opt(j['timeout_secs'], (e0) => _int(e0, 'RunJobRequest.timeout_secs')),
+      exclusive: _or(j['exclusive'], false, (e0) => _bool(e0, 'RunJobRequest.exclusive')),
+      slots: _or(j['slots'], 1, (e0) => _int(e0, 'RunJobRequest.slots')),
+      longSlots: _or(j['long_slots'], 0, (e0) => _int(e0, 'RunJobRequest.long_slots')),
+      memBytes: _or(j['mem_bytes'], 0, (e0) => _int(e0, 'RunJobRequest.mem_bytes')),
+      waitMs: _opt(j['wait_ms'], (e0) => _int(e0, 'RunJobRequest.wait_ms')),
+      leaseTtlMs: _opt(j['lease_ttl_ms'], (e0) => _int(e0, 'RunJobRequest.lease_ttl_ms')),
+      parentEpoch: _opt(j['parent_epoch'], (e0) => _int(e0, 'RunJobRequest.parent_epoch')),
     );
   }
 
@@ -4599,6 +5059,20 @@ final class RunJobRequest {
 
   final int? timeoutSecs;
 
+  final bool exclusive;
+
+  final int slots;
+
+  final int longSlots;
+
+  final int memBytes;
+
+  final int? waitMs;
+
+  final int? leaseTtlMs;
+
+  final int? parentEpoch;
+
   Map<String, Object?> toJson() => {
     'target': target.toJson(),
     'argv': argv,
@@ -4608,6 +5082,13 @@ final class RunJobRequest {
     'on_present': onPresent.toJson(),
     'maintenance': maintenance,
     if (timeoutSecs case final v?) 'timeout_secs': v,
+    'exclusive': exclusive,
+    'slots': slots,
+    'long_slots': longSlots,
+    'mem_bytes': memBytes,
+    if (waitMs case final v?) 'wait_ms': v,
+    if (leaseTtlMs case final v?) 'lease_ttl_ms': v,
+    if (parentEpoch case final v?) 'parent_epoch': v,
   };
 }
 
@@ -5081,6 +5562,65 @@ final class StartSleeveRequest {
   };
 }
 
+final class TicketInfo {
+  const TicketInfo({
+    required this.ticketId,
+    required this.seq,
+    required this.holderId,
+    required this.mode,
+    required this.slots,
+    required this.longSlots,
+    required this.memBytes,
+    required this.waitDeadline,
+    required this.leaseDeadline,
+  });
+
+  factory TicketInfo.fromJson(Object? json) {
+    final j = _object(json, 'TicketInfo');
+    return TicketInfo(
+      ticketId: _string(j['ticket_id'], 'TicketInfo.ticket_id'),
+      seq: _int(j['seq'], 'TicketInfo.seq'),
+      holderId: _string(j['holder_id'], 'TicketInfo.holder_id'),
+      mode: LeaseMode.fromJson(j['mode']),
+      slots: _int(j['slots'], 'TicketInfo.slots'),
+      longSlots: _int(j['long_slots'], 'TicketInfo.long_slots'),
+      memBytes: _int(j['mem_bytes'], 'TicketInfo.mem_bytes'),
+      waitDeadline: _time(j['wait_deadline_ms'], 'TicketInfo.wait_deadline_ms'),
+      leaseDeadline: _time(j['lease_deadline_ms'], 'TicketInfo.lease_deadline_ms'),
+    );
+  }
+
+  final String ticketId;
+
+  final int seq;
+
+  final String holderId;
+
+  final LeaseMode mode;
+
+  final int slots;
+
+  final int longSlots;
+
+  final int memBytes;
+
+  final DateTime waitDeadline;
+
+  final DateTime leaseDeadline;
+
+  Map<String, Object?> toJson() => {
+    'ticket_id': ticketId,
+    'seq': seq,
+    'holder_id': holderId,
+    'mode': mode.toJson(),
+    'slots': slots,
+    'long_slots': longSlots,
+    'mem_bytes': memBytes,
+    'wait_deadline_ms': waitDeadline.millisecondsSinceEpoch,
+    'lease_deadline_ms': leaseDeadline.millisecondsSinceEpoch,
+  };
+}
+
 final class Toolchain {
   const Toolchain({
     required this.name,
@@ -5316,6 +5856,79 @@ final class Usage {
     if (costUsd case final v?) 'cost_usd': v,
     if (contextTokens case final v?) 'context_tokens': v,
     if (contextWindow case final v?) 'context_window': v,
+  };
+}
+
+final class VerifyEpochRequest {
+  const VerifyEpochRequest({
+    required this.nodeId,
+    required this.bootId,
+    required this.epoch,
+  });
+
+  factory VerifyEpochRequest.fromJson(Object? json) {
+    final j = _object(json, 'VerifyEpochRequest');
+    return VerifyEpochRequest(
+      nodeId: _string(j['node_id'], 'VerifyEpochRequest.node_id'),
+      bootId: _string(j['boot_id'], 'VerifyEpochRequest.boot_id'),
+      epoch: _int(j['epoch'], 'VerifyEpochRequest.epoch'),
+    );
+  }
+
+  final String nodeId;
+
+  final String bootId;
+
+  final int epoch;
+
+  Map<String, Object?> toJson() => {
+    'node_id': nodeId,
+    'boot_id': bootId,
+    'epoch': epoch,
+  };
+}
+
+final class VerifyEpochResult {
+  const VerifyEpochResult({
+    required this.valid,
+    this.bootId = '',
+    this.state,
+    this.expiresInMs,
+    this.quarantined,
+    this.reason = '',
+  });
+
+  factory VerifyEpochResult.fromJson(Object? json) {
+    final j = _object(json, 'VerifyEpochResult');
+    return VerifyEpochResult(
+      valid: _bool(j['valid'], 'VerifyEpochResult.valid'),
+      bootId: _or(j['boot_id'], '', (e0) => _string(e0, 'VerifyEpochResult.boot_id')),
+      state: _opt(j['state'], LeaseState.fromJson),
+      expiresInMs: _opt(j['expires_in_ms'], (e0) => _int(e0, 'VerifyEpochResult.expires_in_ms')),
+      quarantined: _opt(j['quarantined'], (e0) => _string(e0, 'VerifyEpochResult.quarantined')),
+      reason: _or(j['reason'], '', (e0) => _string(e0, 'VerifyEpochResult.reason')),
+    );
+  }
+
+  final bool valid;
+
+  final String bootId;
+
+  final LeaseState? state;
+
+  final int? expiresInMs;
+
+  final String? quarantined;
+
+  final String reason;
+
+  Map<String, Object?> toJson() => {
+    'valid': valid,
+    'boot_id': bootId,
+    if (state case final v?) 'state': v.toJson(),
+    if (expiresInMs case final v?) 'expires_in_ms': v,
+    if (quarantined case final v?) 'quarantined': v,
+    'reason': reason,
   };
 }
 
@@ -5692,5 +6305,29 @@ final class HubApi {
   /// `POST /api/RevokeDevice`, scope `owner`.
   Future<Empty> revokeDevice(DeviceRef request) =>
       _call('RevokeDevice', request.toJson(), Empty.fromJson);
+
+  /// `POST /api/AcquireLease`, scope `sleeve`.
+  Future<LeaseGrant> acquireLease(AcquireLeaseRequest request) =>
+      _call('AcquireLease', request.toJson(), LeaseGrant.fromJson);
+
+  /// `POST /api/RenewLease`, scope `sleeve`.
+  Future<LeaseGrant> renewLease(RenewLeaseRequest request) =>
+      _call('RenewLease', request.toJson(), LeaseGrant.fromJson);
+
+  /// `POST /api/ReleaseLease`, scope `sleeve`.
+  Future<ReleaseLeaseResult> releaseLease(ReleaseLeaseRequest request) =>
+      _call('ReleaseLease', request.toJson(), ReleaseLeaseResult.fromJson);
+
+  /// `POST /api/VerifyEpoch`, scope `sleeve`.
+  Future<VerifyEpochResult> verifyEpoch(VerifyEpochRequest request) =>
+      _call('VerifyEpoch', request.toJson(), VerifyEpochResult.fromJson);
+
+  /// `POST /api/GetNodeAdmission`, scope `sleeve`.
+  Future<NodeAdmission> getNodeAdmission(NodeRef request) =>
+      _call('GetNodeAdmission', request.toJson(), NodeAdmission.fromJson);
+
+  /// `POST /api/ClearNodeQuarantine`, scope `owner`.
+  Future<ClearQuarantineResult> clearNodeQuarantine(NodeRef request) =>
+      _call('ClearNodeQuarantine', request.toJson(), ClearQuarantineResult.fromJson);
 
 }

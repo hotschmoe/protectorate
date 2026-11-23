@@ -532,6 +532,39 @@ fn read_total_ram(io: std.Io) u64 {
     return std.process.totalSystemMemory() catch 0;
 }
 
+pub fn read_mem_avail_bytes(io: std.Io) u64 {
+    if (comptime builtin.os.tag == .windows) {
+        var ms: WinSys.MEMORYSTATUSEX = .{};
+        if (WinSys.GlobalMemoryStatusEx(&ms) != 0) return ms.ullAvailPhys;
+        return 0;
+    }
+    if (comptime builtin.os.tag == .linux) {
+        var mbuf: [4096]u8 = undefined;
+        if (read_small_file(io, "/proc/meminfo", &mbuf)) |mtxt| {
+            var lines = std.mem.splitScalar(u8, mtxt, '\n');
+            while (lines.next()) |line| {
+                if (std.mem.startsWith(u8, line, "MemAvailable:")) {
+                    if (parse_kb_line(line["MemAvailable:".len..])) |v| return v;
+                }
+            }
+        }
+    }
+    return read_total_ram(io);
+}
+
+pub fn read_boot_id(arena: std.mem.Allocator, io: std.Io) ![]const u8 {
+    if (comptime builtin.os.tag == .linux) {
+        var bbuf: [128]u8 = undefined;
+        if (read_small_file(io, "/proc/sys/kernel/random/boot_id", &bbuf)) |raw| {
+            const tr = std.mem.trim(u8, raw, " \t\r\n");
+            if (tr.len > 0) return arena.dupe(u8, tr);
+        }
+    }
+    const real_s: i64 = @divFloor(std.Io.Clock.real.now(io).toMilliseconds(), 10_000);
+    const awake_s: i64 = @divFloor(std.Io.Clock.awake.now(io).toMilliseconds(), 10_000);
+    return std.fmt.allocPrint(arena, "boot-{d}", .{real_s - awake_s});
+}
+
 fn read_os_version(arena: std.mem.Allocator, io: std.Io) ![]const u8 {
     if (comptime builtin.os.tag == .windows) {
         const sub = "SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion";

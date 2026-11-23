@@ -36,9 +36,21 @@ const WinJob = if (builtin.os.tag == .windows) struct {
         PeakJobMemoryUsed: w.SIZE_T = 0,
     };
 
+    const JobObjectBasicAccountingInformation: c_int = 1;
     const JobObjectExtendedLimitInformation: c_int = 9;
     const JOB_OBJECT_LIMIT_JOB_MEMORY: w.DWORD = 0x00000200;
     const JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE: w.DWORD = 0x00002000;
+
+    const JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = extern struct {
+        TotalUserTime: i64 = 0,
+        TotalKernelTime: i64 = 0,
+        ThisPeriodTotalUserTime: i64 = 0,
+        ThisPeriodTotalKernelTime: i64 = 0,
+        TotalPageFaultCount: w.DWORD = 0,
+        TotalProcesses: w.DWORD = 0,
+        ActiveProcesses: w.DWORD = 0,
+        TotalTerminatedProcesses: w.DWORD = 0,
+    };
 
     extern "kernel32" fn CreateJobObjectW(
         lpJobAttributes: ?*anyopaque,
@@ -52,6 +64,14 @@ const WinJob = if (builtin.os.tag == .windows) struct {
         cbJobObjectInformationLength: w.DWORD,
     ) callconv(.winapi) c_int;
 
+    extern "kernel32" fn QueryInformationJobObject(
+        hJob: ?w.HANDLE,
+        JobObjectInformationClass: c_int,
+        lpJobObjectInformation: *anyopaque,
+        cbJobObjectInformationLength: w.DWORD,
+        lpReturnLength: ?*w.DWORD,
+    ) callconv(.winapi) c_int;
+
     extern "kernel32" fn AssignProcessToJobObject(
         hJob: w.HANDLE,
         hProcess: w.HANDLE,
@@ -63,9 +83,14 @@ const WinJob = if (builtin.os.tag == .windows) struct {
     ) callconv(.winapi) c_int;
 } else struct {};
 
+var next_cg_seq: std.atomic.Value(u64) = .init(0);
+
 pub const ProcessGuard = struct {
     pgid: if (builtin.os.tag == .windows) void else ?std.posix.pid_t = if (builtin.os.tag == .windows) {} else null,
     job: if (builtin.os.tag == .windows) ?std.os.windows.HANDLE else void = if (builtin.os.tag == .windows) null else {},
+    gpa: ?std.mem.Allocator = null,
+    tag: ?[]u8 = null,
+    cgroup_path: if (builtin.os.tag == .linux) ?[]u8 else void = if (builtin.os.tag == .linux) null else {},
 
     pub fn init(memory_max_bytes: ?u64) ProcessGuard {
         if (comptime builtin.os.tag == .windows) {
@@ -92,6 +117,21 @@ pub const ProcessGuard = struct {
         return .{};
     }
 
+    pub fn init_fenced(
+        gpa: std.mem.Allocator,
+        io: std.Io,
+        tag: []const u8,
+        memory_max_bytes: ?u64,
+    ) ProcessGuard {
+        var g = init(memory_max_bytes);
+        g.gpa = gpa;
+        g.tag = gpa.dupe(u8, tag) catch null;
+        if (comptime builtin.os.tag == .linux) {
+            g.cgroup_path = create_job_cgroup(gpa, io, tag, memory_max_bytes);
+        }
+        return g;
+    }
+
     pub fn attach(self: *ProcessGuard, child_id: ?std.process.Child.Id) void {
         const cid = child_id orelse return;
         if (comptime builtin.os.tag == .windows) {
@@ -100,6 +140,19 @@ pub const ProcessGuard = struct {
             }
         } else {
             self.pgid = cid;
+        }
+    }
+
+    pub fn attach_with_io(self: *ProcessGuard, io: std.Io, child_id: ?std.process.Child.Id) void {
+        self.attach(child_id);
+        if (comptime builtin.os.tag == .linux) {
+            const cid = child_id orelse return;
+            const cg = self.cgroup_path orelse return;
+            var dir = std.Io.Dir.cwd().openDir(io, cg, .{}) catch return;
+            defer dir.close(io);
+            var buf: [32]u8 = undefined;
+            const s = std.fmt.bufPrint(&buf, "{d}\n", .{cid}) catch return;
+            dir.writeFile(io, .{ .sub_path = "cgroup.procs", .data = s }) catch {};
         }
     }
 
@@ -116,6 +169,88 @@ pub const ProcessGuard = struct {
         }
     }
 
+    pub fn fence_and_confirm(self: *ProcessGuard, io: std.Io, timeout_ms: i64) bool {
+        if (comptime builtin.os.tag == .windows) {
+            const j = self.job orelse return true;
+            _ = WinJob.TerminateJobObject(j, 1);
+            const deadline = std.Io.Clock.awake.now(io).toMilliseconds() + @max(@as(i64, 100), timeout_ms);
+            while (true) {
+                var acct: WinJob.JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = .{};
+                const ok = WinJob.QueryInformationJobObject(
+                    j,
+                    WinJob.JobObjectBasicAccountingInformation,
+                    &acct,
+                    @sizeOf(WinJob.JOBOBJECT_BASIC_ACCOUNTING_INFORMATION),
+                    null,
+                );
+                if (ok == 0) return false;
+                if (acct.ActiveProcesses == 0) return true;
+                if (std.Io.Clock.awake.now(io).toMilliseconds() >= deadline) return false;
+                _ = WinJob.TerminateJobObject(j, 1);
+                io.sleep(.fromMilliseconds(20), .awake) catch return false;
+            }
+        }
+
+        const deadline = std.Io.Clock.awake.now(io).toMilliseconds() + @max(@as(i64, 100), timeout_ms);
+        while (true) {
+            self.kill_all_posix(io);
+            if (!self.any_alive_posix(io)) return true;
+            if (std.Io.Clock.awake.now(io).toMilliseconds() >= deadline) return false;
+            io.sleep(.fromMilliseconds(25), .awake) catch return false;
+        }
+    }
+
+    fn kill_all_posix(self: *ProcessGuard, io: std.Io) void {
+        if (comptime builtin.os.tag == .windows) return;
+        self.terminate();
+        if (comptime builtin.os.tag == .linux) {
+            if (self.cgroup_path) |cg| {
+                if (std.Io.Dir.cwd().openDir(io, cg, .{})) |dir_val| {
+                    var dir = dir_val;
+                    defer dir.close(io);
+                    dir.writeFile(io, .{ .sub_path = "cgroup.kill", .data = "1\n" }) catch {};
+                    var procs_buf: [8192]u8 = undefined;
+                    if (read_small_file_in_dir(io, dir, "cgroup.procs", &procs_buf)) |raw| {
+                        var it = std.mem.tokenizeAny(u8, raw, " \t\r\n");
+                        while (it.next()) |tok| {
+                            const pid = std.fmt.parseInt(std.posix.pid_t, tok, 10) catch continue;
+                            if (pid > 1) std.posix.kill(pid, .KILL) catch {};
+                        }
+                    }
+                } else |_| {}
+            }
+            _ = scan_and_kill_proc(io, self.pgid, self.tag, true);
+        }
+    }
+
+    fn any_alive_posix(self: *ProcessGuard, io: std.Io) bool {
+        if (comptime builtin.os.tag == .windows) return false;
+        if (comptime builtin.os.tag == .linux) {
+            if (self.cgroup_path) |cg| {
+                if (std.Io.Dir.cwd().openDir(io, cg, .{})) |dir_val| {
+                    var dir = dir_val;
+                    defer dir.close(io);
+                    var pbuf: [2048]u8 = undefined;
+                    if (read_small_file_in_dir(io, dir, "cgroup.procs", &pbuf)) |raw| {
+                        if (std.mem.trim(u8, raw, " \t\r\n").len > 0) return true;
+                    }
+                    var ebuf: [512]u8 = undefined;
+                    if (read_small_file_in_dir(io, dir, "cgroup.events", &ebuf)) |ev| {
+                        if (std.mem.findPos(u8, ev, 0, "populated 1") != null) return true;
+                    }
+                } else |_| {}
+            }
+            if (scan_and_kill_proc(io, self.pgid, self.tag, false)) return true;
+            return false;
+        }
+        if (self.pgid) |pid| {
+            if (std.posix.kill(-pid, @as(std.posix.SIG, @enumFromInt(0)))) |_| {
+                return true;
+            } else |_| {}
+        }
+        return false;
+    }
+
     pub fn deinit(self: *ProcessGuard) void {
         if (comptime builtin.os.tag == .windows) {
             if (self.job) |j| {
@@ -124,9 +259,186 @@ pub const ProcessGuard = struct {
             }
         } else {
             self.pgid = null;
+            if (comptime builtin.os.tag == .linux) {
+                if (self.cgroup_path) |cg| {
+                    var z_buf: [512]u8 = undefined;
+                    if (cg.len < z_buf.len) {
+                        @memcpy(z_buf[0..cg.len], cg);
+                        z_buf[cg.len] = 0;
+                        _ = std.os.linux.rmdir(@ptrCast(&z_buf));
+                    }
+                    if (self.gpa) |gpa| {
+                        gpa.free(cg);
+                    }
+                    self.cgroup_path = null;
+                }
+            }
         }
+        if (self.gpa) |gpa| {
+            if (self.tag) |t| gpa.free(t);
+        }
+        self.tag = null;
+        self.gpa = null;
     }
 };
+
+fn read_small_file_abs(io: std.Io, path: []const u8, buf: []u8) ?[]const u8 {
+    var f = std.Io.Dir.cwd().openFile(io, path, .{}) catch return null;
+    defer f.close(io);
+    const n = f.readPositionalAll(io, buf, 0) catch return null;
+    return buf[0..n];
+}
+
+fn read_small_file_in_dir(io: std.Io, dir: std.Io.Dir, sub_path: []const u8, buf: []u8) ?[]const u8 {
+    var f = dir.openFile(io, sub_path, .{}) catch return null;
+    defer f.close(io);
+    const n = f.readPositionalAll(io, buf, 0) catch return null;
+    return buf[0..n];
+}
+
+fn create_job_cgroup(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    tag: []const u8,
+    memory_max_bytes: ?u64,
+) ?[]u8 {
+    if (comptime builtin.os.tag != .linux) return null;
+    var cg_buf: [2048]u8 = undefined;
+    const raw = read_small_file_abs(io, "/proc/self/cgroup", &cg_buf) orelse return null;
+    var rel_cg: ?[]const u8 = null;
+    var lines = std.mem.splitScalar(u8, raw, '\n');
+    while (lines.next()) |line| {
+        const tr = std.mem.trim(u8, line, " \t\r");
+        if (std.mem.startsWith(u8, tr, "0::")) {
+            rel_cg = tr[3..];
+            break;
+        }
+    }
+    const rel = rel_cg orelse return null;
+    const cur_dir = if (std.mem.eql(u8, rel, "/") or rel.len == 0)
+        gpa.dupe(u8, "/sys/fs/cgroup") catch return null
+    else
+        std.fmt.allocPrint(gpa, "/sys/fs/cgroup{s}", .{rel}) catch return null;
+    defer gpa.free(cur_dir);
+
+    var safe_buf: [48]u8 = undefined;
+    var safe_len: usize = 0;
+    for (tag) |c| {
+        if (safe_len >= safe_buf.len) break;
+        const ok = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '.' or c == '_' or c == '-';
+        safe_buf[safe_len] = if (ok) c else '_';
+        safe_len += 1;
+    }
+    if (safe_len == 0) {
+        safe_buf[0..3].* = "job".*;
+        safe_len = 3;
+    }
+    const safe_tag = safe_buf[0..safe_len];
+    const seq = next_cg_seq.fetchAdd(1, .monotonic);
+
+    const cand1 = std.fmt.allocPrint(gpa, "{s}/pt-{d}-{s}", .{ cur_dir, seq, safe_tag }) catch return null;
+    if (try_open_job_cgroup(io, cand1, memory_max_bytes)) return cand1;
+    gpa.free(cand1);
+
+    if (std.fs.path.dirname(cur_dir)) |parent| {
+        if (std.mem.startsWith(u8, parent, "/sys/fs/cgroup/")) {
+            const cand2 = std.fmt.allocPrint(gpa, "{s}/pt-{d}-{s}", .{ parent, seq, safe_tag }) catch return null;
+            if (try_open_job_cgroup(io, cand2, memory_max_bytes)) return cand2;
+            gpa.free(cand2);
+        }
+    }
+    return null;
+}
+
+fn try_open_job_cgroup(io: std.Io, path: []const u8, memory_max_bytes: ?u64) bool {
+    var d = std.Io.Dir.cwd().createDirPathOpen(io, path, .{}) catch return false;
+    defer d.close(io);
+    var pf = d.openFile(io, "cgroup.procs", .{ .mode = .read_write }) catch {
+        var z_buf: [512]u8 = undefined;
+        if (path.len < z_buf.len) {
+            @memcpy(z_buf[0..path.len], path);
+            z_buf[path.len] = 0;
+            _ = std.os.linux.rmdir(@ptrCast(&z_buf));
+        }
+        return false;
+    };
+    pf.close(io);
+    if (memory_max_bytes) |lim| {
+        if (lim > 0) {
+            var mbuf: [32]u8 = undefined;
+            if (std.fmt.bufPrint(&mbuf, "{d}\n", .{lim})) |ms| {
+                d.writeFile(io, .{ .sub_path = "memory.max", .data = ms }) catch {};
+            } else |_| {}
+        }
+    }
+    return true;
+}
+
+fn scan_and_kill_proc(
+    io: std.Io,
+    pgid_opt: ?std.posix.pid_t,
+    tag_opt: ?[]const u8,
+    do_kill: bool,
+) bool {
+    if (comptime builtin.os.tag != .linux) return false;
+    var proc_dir = std.Io.Dir.cwd().openDir(io, "/proc", .{ .iterate = true }) catch return false;
+    defer proc_dir.close(io);
+
+    const self_pid: std.posix.pid_t = @intCast(std.os.linux.getpid());
+    var found_live = false;
+    var it = proc_dir.iterate();
+    while (it.next(io) catch null) |ent| {
+        if (ent.kind != .directory) continue;
+        const pid = std.fmt.parseInt(std.posix.pid_t, ent.name, 10) catch continue;
+        if (pid <= 1 or pid == self_pid) continue;
+
+        var stat_path_buf: [64]u8 = undefined;
+        const stat_sub = std.fmt.bufPrint(&stat_path_buf, "{d}/stat", .{pid}) catch continue;
+        var stat_buf: [1024]u8 = undefined;
+        const stat_raw = read_small_file_in_dir(io, proc_dir, stat_sub, &stat_buf) orelse continue;
+        const rp = std.mem.findScalarLast(u8, stat_raw, ')') orelse continue;
+        if (rp + 1 >= stat_raw.len) continue;
+        var tok_it = std.mem.tokenizeScalar(u8, std.mem.trimStart(u8, stat_raw[rp + 1 ..], " "), ' ');
+        const state_tok = tok_it.next() orelse continue;
+        if (state_tok.len > 0 and state_tok[0] == 'Z') continue;
+        _ = tok_it.next() orelse continue; // ppid
+        const pgrp_tok = tok_it.next() orelse continue;
+        const pgrp = std.fmt.parseInt(std.posix.pid_t, pgrp_tok, 10) catch -1;
+
+        var matches = false;
+        if (pgid_opt) |want_pgid| {
+            if (pgrp == want_pgid) matches = true;
+        }
+        if (!matches) {
+            if (tag_opt) |tag| {
+                var env_path_buf: [64]u8 = undefined;
+                const env_sub = std.fmt.bufPrint(&env_path_buf, "{d}/environ", .{pid}) catch continue;
+                var env_buf: [16 * 1024]u8 = undefined;
+                if (read_small_file_in_dir(io, proc_dir, env_sub, &env_buf)) |eraw| {
+                    var needle_buf: [192]u8 = undefined;
+                    if (std.fmt.bufPrint(&needle_buf, "PROTECTORATE_JOB_ID={s}", .{tag})) |needle| {
+                        var eit = std.mem.splitScalar(u8, eraw, 0);
+                        while (eit.next()) |kv| {
+                            if (std.mem.eql(u8, kv, needle)) {
+                                matches = true;
+                                break;
+                            }
+                        }
+                    } else |_| {}
+                }
+            }
+        }
+        if (matches) {
+            found_live = true;
+            if (do_kill) {
+                std.posix.kill(pid, .KILL) catch {};
+            } else {
+                return true;
+            }
+        }
+    }
+    return found_live;
+}
 
 pub fn probe_landlock() bool {
     if (comptime builtin.os.tag != .linux) return false;

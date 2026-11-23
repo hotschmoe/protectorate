@@ -1,7 +1,9 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const s_exec = @import("sandbox/exec.zig");
 const version = @import("version.zig");
 const doctor = @import("doctor/doctor.zig");
+const msg = @import("net/msg.zig");
 const serve = @import("node/serve.zig");
 
 pub fn main(init: std.process.Init) !u8 {
@@ -14,6 +16,7 @@ pub fn main(init: std.process.Init) !u8 {
         return try s_exec.run_guard_trampoline(init, args[2..]);
     }
     var home_override: ?[]const u8 = null;
+    var sock_override: ?[]const u8 = null;
     var stdio_mode = false;
     var name_opt: ?[]const u8 = null;
     var hub_addr_opt: ?[]const u8 = null;
@@ -37,6 +40,9 @@ pub fn main(init: std.process.Init) !u8 {
         } else if (std.mem.eql(u8, arg, "--home") and i + 1 < args.len) {
             i += 1;
             home_override = args[i];
+        } else if (std.mem.eql(u8, arg, "--sock") and i + 1 < args.len) {
+            i += 1;
+            sock_override = args[i];
         } else if (std.mem.eql(u8, arg, "--name") and i + 1 < args.len) {
             i += 1;
             name_opt = args[i];
@@ -77,14 +83,124 @@ pub fn main(init: std.process.Init) !u8 {
         try w.interface.writeByte('\n');
         try w.interface.flush();
         return 0;
+    } else if (std.mem.eql(u8, sub, "lease")) {
+        return cmd_local_lease(arena, init, home_path, sock_override, positionals.items[1..]);
     }
 
     try print_usage(init.io);
     return 2;
 }
 
+fn cmd_local_lease(
+    arena: std.mem.Allocator,
+    init: std.process.Init,
+    home_path: []const u8,
+    sock_override: ?[]const u8,
+    rest: []const []const u8,
+) !u8 {
+    if (comptime builtin.os.tag == .windows) {
+        var eb: [256]u8 = undefined;
+        var ew = std.Io.File.stderr().writer(init.io, &eb);
+        try ew.interface.writeAll("local admission socket is only available on POSIX nodes; use hub RPC on Windows\n");
+        try ew.interface.flush();
+        return 2;
+    }
+    if (rest.len == 0) {
+        try print_usage(init.io);
+        return 2;
+    }
+
+    const sock_path = sock_override orelse
+        init.environ_map.get("PROTECTORATE_ADMISSION_SOCK") orelse
+        try std.fs.path.join(arena, &.{ home_path, "admission.sock" });
+
+    const op = rest[0];
+    const req: msg.Request = if (std.mem.eql(u8, op, "list"))
+        .{ .list_leases = .{} }
+    else if (std.mem.eql(u8, op, "unquarantine"))
+        .{ .clear_quarantine = .{} }
+    else if (std.mem.eql(u8, op, "acquire")) blk: {
+        var al = msg.AcquireLease{ .holder_id = "local" };
+        var idx: usize = 1;
+        while (idx < rest.len) : (idx += 1) {
+            const f = rest[idx];
+            if (std.mem.eql(u8, f, "--exclusive")) {
+                al.exclusive = true;
+            } else if (std.mem.eql(u8, f, "--holder") and idx + 1 < rest.len) {
+                idx += 1;
+                al.holder_id = rest[idx];
+            } else if (std.mem.eql(u8, f, "--slots") and idx + 1 < rest.len) {
+                idx += 1;
+                al.slots = std.fmt.parseInt(u32, rest[idx], 10) catch 1;
+            } else if (std.mem.eql(u8, f, "--long-slots") and idx + 1 < rest.len) {
+                idx += 1;
+                al.long_slots = std.fmt.parseInt(u32, rest[idx], 10) catch 0;
+            } else if (std.mem.eql(u8, f, "--mem-mib") and idx + 1 < rest.len) {
+                idx += 1;
+                const mib = std.fmt.parseInt(u64, rest[idx], 10) catch 0;
+                al.mem_bytes = mib * 1024 * 1024;
+            } else if (std.mem.eql(u8, f, "--parent-epoch") and idx + 1 < rest.len) {
+                idx += 1;
+                al.parent_epoch = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+            } else if (std.mem.eql(u8, f, "--ttl-ms") and idx + 1 < rest.len) {
+                idx += 1;
+                al.ttl_ms = std.fmt.parseInt(i64, rest[idx], 10) catch null;
+            } else if (std.mem.eql(u8, f, "--wait-ms") and idx + 1 < rest.len) {
+                idx += 1;
+                al.wait_ms = std.fmt.parseInt(i64, rest[idx], 10) catch null;
+            }
+        }
+        break :blk .{ .acquire_lease = al };
+    } else if (std.mem.eql(u8, op, "renew") and rest.len >= 3) blk: {
+        const ep = std.fmt.parseInt(u64, rest[2], 10) catch return 2;
+        break :blk .{ .renew_lease = .{ .lease_id = rest[1], .epoch = ep } };
+    } else if (std.mem.eql(u8, op, "release") and rest.len >= 3) blk: {
+        const ep = std.fmt.parseInt(u64, rest[2], 10) catch return 2;
+        break :blk .{ .release_lease = .{ .lease_id = rest[1], .epoch = ep } };
+    } else if (std.mem.eql(u8, op, "verify") and rest.len >= 3) blk: {
+        const ep = std.fmt.parseInt(u64, rest[2], 10) catch return 2;
+        break :blk .{ .verify_epoch = .{ .boot_id = rest[1], .epoch = ep } };
+    } else {
+        try print_usage(init.io);
+        return 2;
+    };
+
+    const ua = try std.Io.net.UnixAddress.init(sock_path);
+    var stream = try ua.connect(init.io);
+    defer stream.close(init.io);
+
+    var wbuf: [4096]u8 = undefined;
+    var rbuf: [8192]u8 = undefined;
+    var w = stream.writer(init.io, &wbuf);
+    var r = stream.reader(init.io, &rbuf);
+
+    const payload = try msg.encode_alloc(arena, req);
+    try w.interface.writeAll(payload);
+    try w.interface.writeByte('\n');
+    try w.interface.flush();
+
+    var line_aw: std.Io.Writer.Allocating = .init(arena);
+    _ = r.interface.streamDelimiterLimit(&line_aw.writer, '\n', .limited(1 << 20)) catch {};
+    const rep = std.mem.trim(u8, line_aw.written(), " \t\r\n");
+
+    var obuf: [4096]u8 = undefined;
+    var out_w = std.Io.File.stdout().writer(init.io, &obuf);
+    try out_w.interface.print("{s}\n", .{rep});
+    try out_w.interface.flush();
+
+    if (std.mem.eql(u8, op, "verify")) {
+        if (msg.decode_arena(msg.VerifyEpochReply, arena, rep)) |vr| {
+            return if (vr.valid) 0 else 1;
+        } else |_| return 1;
+    }
+    if (msg.decode_arena(msg.LeaseReply, arena, rep)) |lr| {
+        if (std.mem.find(u8, rep, "\"lease_id\"") != null and !lr.ok) return 1;
+    } else |_| {}
+    return 0;
+}
+
 fn print_usage(io: std.Io) !void {
-    var buf: [512]u8 = undefined;
+    var buf: [1024]u8 = undefined;
     var w = std.Io.File.stdout().writer(io, &buf);
     try w.interface.writeAll(
         \\protectorate-node - remote fleet node daemon
@@ -95,6 +211,7 @@ fn print_usage(io: std.Io) !void {
         \\  protectorate-node serve [--stdio] [--home <dir>]
         \\  protectorate-node status [--home <dir>]
         \\  protectorate-node doctor
+        \\  protectorate-node lease (list | acquire [...] | renew <id> <epoch> | release <id> <epoch> | verify <boot_id> <epoch> | unquarantine) [--home <dir>] [--sock <path>]
         \\
     );
     try w.interface.flush();

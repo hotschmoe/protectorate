@@ -143,10 +143,39 @@ pub const JobArtifact = struct {
     sha256: ?[]const u8 = null,
 };
 
+pub const LeaseMode = enum {
+    shared,
+    exclusive,
+
+    pub fn to_wire(self: LeaseMode) []const u8 {
+        return @tagName(self);
+    }
+
+    pub fn from_wire(s: []const u8) ?LeaseMode {
+        return std.meta.stringToEnum(LeaseMode, s);
+    }
+};
+
+pub const LeaseState = enum {
+    active,
+    collecting,
+    fencing,
+
+    pub fn to_wire(self: LeaseState) []const u8 {
+        return @tagName(self);
+    }
+
+    pub fn from_wire(s: []const u8) ?LeaseState {
+        return std.meta.stringToEnum(LeaseState, s);
+    }
+};
+
 pub const Hello = struct {
     protocol: u32 = protocol_version,
     node_id: []const u8,
     node_version: []const u8,
+    boot_id: []const u8 = "",
+    quarantined: ?[]const u8 = null,
     addrs: []const []const u8 = &.{},
     inventory: ?Inventory = null,
     sample: ?Sample = null,
@@ -168,6 +197,13 @@ pub const SubmitJob = struct {
     even_if_present: bool = false,
     on_present: OnPresent = .idle,
     timeout_secs: ?u64 = null,
+    exclusive: bool = false,
+    slots: u32 = 1,
+    long_slots: u32 = 0,
+    mem_bytes: u64 = 0,
+    lease_ttl_ms: ?i64 = null,
+    wait_ms: ?i64 = null,
+    parent_epoch: ?u64 = null,
 };
 
 pub const JobStatus = struct {
@@ -233,6 +269,116 @@ pub const JobInfo = struct {
     log_bytes: u64 = 0,
     artifacts: []const JobArtifact = &.{},
     held_reason: ?[]const u8 = null,
+    boot_id: ?[]const u8 = null,
+    epoch: ?u64 = null,
+    lease_id: ?[]const u8 = null,
+    collecting: bool = false,
+};
+
+pub const AckJobReply = struct {
+    ok: bool,
+    fenced: bool = false,
+    quarantined: ?[]const u8 = null,
+};
+
+pub const AcquireLease = struct {
+    holder_id: []const u8,
+    job_id: ?[]const u8 = null,
+    exclusive: bool = false,
+    slots: u32 = 1,
+    long_slots: u32 = 0,
+    mem_bytes: u64 = 0,
+    ttl_ms: ?i64 = null,
+    wait_ms: ?i64 = null,
+    parent_epoch: ?u64 = null,
+};
+
+pub const RenewLease = struct {
+    lease_id: []const u8,
+    epoch: u64,
+};
+
+pub const ReleaseLease = struct {
+    lease_id: []const u8,
+    epoch: u64,
+};
+
+pub const VerifyEpoch = struct {
+    boot_id: []const u8,
+    epoch: u64,
+};
+
+pub const LeaseReply = struct {
+    ok: bool,
+    boot_id: []const u8 = "",
+    lease_id: []const u8 = "",
+    epoch: u64 = 0,
+    parent_epoch: ?u64 = null,
+    deadline_ms: i64 = 0,
+    reason: []const u8 = "",
+};
+
+pub const ReleaseLeaseReply = struct {
+    ok: bool,
+    fenced: bool = false,
+    quarantined: ?[]const u8 = null,
+};
+
+pub const VerifyEpochReply = struct {
+    valid: bool,
+    boot_id: []const u8 = "",
+    state: ?LeaseState = null,
+    expires_in_ms: ?i64 = null,
+    quarantined: ?[]const u8 = null,
+    reason: []const u8 = "",
+};
+
+pub const LeaseInfo = struct {
+    lease_id: []const u8,
+    epoch: u64,
+    parent_epoch: ?u64 = null,
+    holder_id: []const u8,
+    job_id: ?[]const u8 = null,
+    mode: LeaseMode,
+    state: LeaseState,
+    slots: u32,
+    long_slots: u32,
+    mem_bytes: u64,
+    deadline_ms: i64,
+};
+
+pub const TicketInfo = struct {
+    ticket_id: []const u8,
+    seq: u64,
+    holder_id: []const u8,
+    mode: LeaseMode,
+    slots: u32,
+    long_slots: u32,
+    mem_bytes: u64,
+    wait_deadline_ms: i64,
+    lease_deadline_ms: i64,
+};
+
+pub const AdmissionStatus = struct {
+    boot_id: []const u8,
+    next_epoch: u64,
+    slots_total: u32,
+    slots_used: u32,
+    long_slots_total: u32,
+    long_slots_used: u32,
+    mem_margin_bytes: u64,
+    mem_reserved_bytes: u64,
+    mem_avail_bytes: u64,
+    quarantined: ?[]const u8 = null,
+    grants: []const LeaseInfo = &.{},
+    queue: []const TicketInfo = &.{},
+};
+
+pub const ClearQuarantineReply = struct {
+    ok: bool,
+    cleared: bool,
+    quarantined: ?[]const u8 = null,
+    detail: []const u8 = "",
 };
 
 pub const JobReply = struct {
@@ -273,60 +419,25 @@ pub const Request = union(enum) {
     list_jobs: struct {},
     fetch_log: FetchLog,
     fetch_artifact: FetchArtifact,
+    ack_job: JobRef,
     update: Update,
     upload_update: UploadUpdate,
+    acquire_lease: AcquireLease,
+    renew_lease: RenewLease,
+    release_lease: ReleaseLease,
+    verify_epoch: VerifyEpoch,
+    list_leases: struct {},
+    clear_quarantine: struct {},
 
     pub fn jsonStringify(self: Request, jw: anytype) !void {
         try jw.beginObject();
         switch (self) {
-            .hello => |v| {
+            inline else => |v, tag| {
                 try jw.objectField("type");
-                try jw.write("hello");
-                try write_struct_fields(v, jw);
-            },
-            .ping => |v| {
-                try jw.objectField("type");
-                try jw.write("ping");
-                try write_struct_fields(v, jw);
-            },
-            .submit_job => |v| {
-                try jw.objectField("type");
-                try jw.write("submit_job");
-                try write_struct_fields(v, jw);
-            },
-            .job_status => |v| {
-                try jw.objectField("type");
-                try jw.write("job_status");
-                try write_struct_fields(v, jw);
-            },
-            .cancel_job => |v| {
-                try jw.objectField("type");
-                try jw.write("cancel_job");
-                try write_struct_fields(v, jw);
-            },
-            .list_jobs => {
-                try jw.objectField("type");
-                try jw.write("list_jobs");
-            },
-            .fetch_log => |v| {
-                try jw.objectField("type");
-                try jw.write("fetch_log");
-                try write_struct_fields(v, jw);
-            },
-            .fetch_artifact => |v| {
-                try jw.objectField("type");
-                try jw.write("fetch_artifact");
-                try write_struct_fields(v, jw);
-            },
-            .update => |v| {
-                try jw.objectField("type");
-                try jw.write("update");
-                try write_struct_fields(v, jw);
-            },
-            .upload_update => |v| {
-                try jw.objectField("type");
-                try jw.write("upload_update");
-                try write_struct_fields(v, jw);
+                try jw.write(@tagName(tag));
+                if (@TypeOf(v) != struct {}) {
+                    try write_struct_fields(v, jw);
+                }
             },
         }
         try jw.endObject();
@@ -343,29 +454,15 @@ pub const Request = union(enum) {
             .ignore_unknown_fields = true,
             .allocate = options.allocate,
         };
-        if (std.mem.eql(u8, tag_name, "hello")) {
-            return .{ .hello = try std.json.parseFromValueLeaky(Hello, allocator, source, opts) };
-        } else if (std.mem.eql(u8, tag_name, "ping")) {
-            return .{ .ping = try std.json.parseFromValueLeaky(Ping, allocator, source, opts) };
-        } else if (std.mem.eql(u8, tag_name, "submit_job")) {
-            return .{ .submit_job = try std.json.parseFromValueLeaky(SubmitJob, allocator, source, opts) };
-        } else if (std.mem.eql(u8, tag_name, "job_status")) {
-            return .{ .job_status = try std.json.parseFromValueLeaky(JobStatus, allocator, source, opts) };
-        } else if (std.mem.eql(u8, tag_name, "cancel_job")) {
-            return .{ .cancel_job = try std.json.parseFromValueLeaky(JobRef, allocator, source, opts) };
-        } else if (std.mem.eql(u8, tag_name, "list_jobs")) {
-            return .{ .list_jobs = .{} };
-        } else if (std.mem.eql(u8, tag_name, "fetch_log")) {
-            return .{ .fetch_log = try std.json.parseFromValueLeaky(FetchLog, allocator, source, opts) };
-        } else if (std.mem.eql(u8, tag_name, "fetch_artifact")) {
-            return .{ .fetch_artifact = try std.json.parseFromValueLeaky(FetchArtifact, allocator, source, opts) };
-        } else if (std.mem.eql(u8, tag_name, "update")) {
-            return .{ .update = try std.json.parseFromValueLeaky(Update, allocator, source, opts) };
-        } else if (std.mem.eql(u8, tag_name, "upload_update")) {
-            return .{ .upload_update = try std.json.parseFromValueLeaky(UploadUpdate, allocator, source, opts) };
-        } else {
-            return error.UnknownField;
+        inline for (@typeInfo(Request).@"union".field_names, @typeInfo(Request).@"union".field_types) |f_name, f_type| {
+            if (std.mem.eql(u8, f_name, tag_name)) {
+                if (f_type == struct {}) {
+                    return @unionInit(Request, f_name, .{});
+                }
+                return @unionInit(Request, f_name, try std.json.parseFromValueLeaky(f_type, allocator, source, opts));
+            }
         }
+        return error.UnknownField;
     }
 };
 

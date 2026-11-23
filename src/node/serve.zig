@@ -10,6 +10,7 @@ const transport = @import("../net/transport.zig");
 const u_ver = @import("../update/version.zig");
 const u_store = @import("../update/store.zig");
 const sys = @import("sys.zig");
+const admission = @import("admission.zig");
 const runner = @import("runner.zig");
 
 pub const NodeConfig = struct {
@@ -19,6 +20,9 @@ pub const NodeConfig = struct {
     hub_fingerprint: []const u8 = "",
     addrs: []const []const u8,
     authorized: bool = false,
+    slots: u32 = 8,
+    long_slots: u32 = 2,
+    mem_margin_bytes: u64 = 512 * 1024 * 1024,
 };
 
 pub fn resolve_node_home(
@@ -211,7 +215,7 @@ pub fn cmd_authorize(
             var conn = res_conn.conn;
             defer conn.deinit();
 
-            try send_hello_sync(gpa, arena, &conn, &cfg, inv, io, env);
+            try send_hello_sync(gpa, arena, &conn, &cfg, inv, io, env, null);
             cfg.authorized = true;
             try save_config(gpa, io, home_path, cfg);
             const chosen = eps.items[res_conn.addr_index];
@@ -274,7 +278,15 @@ pub fn cmd_serve(
     if (cfg.hub_public_key.len != 64) return error.InvalidHubKey;
     _ = try std.fmt.hexToBytes(&hub_pub, cfg.hub_public_key);
 
-    var run_mgr = try runner.Runner.init(gpa, io, home_path);
+    var adm_mgr = try admission.AdmissionManager.init(gpa, io, home_path, .{
+        .slots = cfg.slots,
+        .long_slots = cfg.long_slots,
+        .mem_margin_bytes = cfg.mem_margin_bytes,
+    });
+    defer adm_mgr.deinit();
+    try adm_mgr.start();
+
+    var run_mgr = try runner.Runner.init(gpa, io, home_path, env, adm_mgr);
     defer run_mgr.deinit();
 
     const inv = try sys.collect_inventory(arena, io, version.version);
@@ -289,7 +301,7 @@ pub fn cmd_serve(
             hub_pub,
         );
         defer conn.deinit();
-        try run_session(gpa, io, home_path, env, &conn, &cfg, inv, &run_mgr);
+        try run_session(gpa, io, home_path, env, &conn, &cfg, inv, run_mgr, adm_mgr);
         return 0;
     }
 
@@ -306,7 +318,7 @@ pub fn cmd_serve(
                 var conn = res_conn.conn;
                 backoff_ms = 500;
                 const chosen = eps.items[res_conn.addr_index];
-                run_session(gpa, io, home_path, env, &conn, &cfg, inv, &run_mgr) catch |err| {
+                run_session(gpa, io, home_path, env, &conn, &cfg, inv, run_mgr, adm_mgr) catch |err| {
                     print_err(io, "session {s}:{d} ended: {s}\n", .{ chosen.host, chosen.port, @errorName(err) }) catch {};
                 };
                 conn.deinit();
@@ -330,6 +342,31 @@ const SessionCtx = struct {
     closed: std.atomic.Value(bool) = .init(false),
     last_rx_ms: std.atomic.Value(i64),
     cfg: *const NodeConfig,
+    adm_mgr: *admission.AdmissionManager,
+    workers_mu: std.Io.Mutex = .init,
+    workers_cond: std.Io.Condition = .init,
+    active_workers: u32 = 0,
+
+    fn enter_worker(self: *SessionCtx) void {
+        self.workers_mu.lockUncancelable(self.io);
+        self.active_workers += 1;
+        self.workers_mu.unlock(self.io);
+    }
+
+    fn exit_worker(self: *SessionCtx) void {
+        self.workers_mu.lockUncancelable(self.io);
+        if (self.active_workers > 0) self.active_workers -= 1;
+        if (self.active_workers == 0) self.workers_cond.broadcast(self.io);
+        self.workers_mu.unlock(self.io);
+    }
+
+    fn wait_workers(self: *SessionCtx) void {
+        self.workers_mu.lockUncancelable(self.io);
+        while (self.active_workers > 0) {
+            self.workers_cond.waitUncancelable(self.io, &self.workers_mu);
+        }
+        self.workers_mu.unlock(self.io);
+    }
 };
 
 fn send_hello_sync(
@@ -340,10 +377,15 @@ fn send_hello_sync(
     inv: msg.Inventory,
     io: std.Io,
     env: ?*const std.process.Environ.Map,
+    adm_mgr: ?*admission.AdmissionManager,
 ) !void {
+    const bid = if (adm_mgr) |am| try am.boot_id(arena) else (sys.read_boot_id(arena, io) catch "boot-0");
+    const q = if (adm_mgr) |am| am.quarantined_copy(arena) else null;
     const req: msg.Request = .{ .hello = .{
         .node_id = cfg.node_id,
         .node_version = version.version,
+        .boot_id = bid,
+        .quarantined = q,
         .addrs = cfg.addrs,
         .inventory = inv,
         .sample = sys.collect_sample(io),
@@ -367,10 +409,11 @@ fn run_session(
     cfg: *const NodeConfig,
     inv: msg.Inventory,
     run_mgr: *runner.Runner,
+    adm_mgr: *admission.AdmissionManager,
 ) !void {
     var hello_arena_st = std.heap.ArenaAllocator.init(gpa);
     defer hello_arena_st.deinit();
-    try send_hello_sync(gpa, hello_arena_st.allocator(), conn, cfg, inv, io, env);
+    try send_hello_sync(gpa, hello_arena_st.allocator(), conn, cfg, inv, io, env, adm_mgr);
 
     var sctx = SessionCtx{
         .gpa = gpa,
@@ -380,10 +423,14 @@ fn run_session(
         .conn = conn,
         .last_rx_ms = .init(std.Io.Clock.awake.now(io).toMilliseconds()),
         .cfg = cfg,
+        .adm_mgr = adm_mgr,
     };
+    defer sctx.wait_workers();
 
     const hb_fn = struct {
         fn run(ctx: *SessionCtx) void {
+            var hb_arena = std.heap.ArenaAllocator.init(ctx.gpa);
+            defer hb_arena.deinit();
             var next_id: u64 = 4;
             while (!ctx.closed.load(.acquire)) {
                 var slept: u32 = 0;
@@ -397,9 +444,13 @@ fn run_session(
                     ctx.conn.shutdown();
                     break;
                 }
+                _ = hb_arena.reset(.retain_capacity);
+                const a = hb_arena.allocator();
                 const req: msg.Request = .{ .hello = .{
                     .node_id = ctx.cfg.node_id,
                     .node_version = version.version,
+                    .boot_id = ctx.adm_mgr.boot_id(a) catch "",
+                    .quarantined = ctx.adm_mgr.quarantined_copy(a),
                     .addrs = ctx.cfg.addrs,
                     .sample = sys.collect_sample(ctx.io),
                     .presence = sys.collect_presence(ctx.io, ctx.env),
@@ -659,6 +710,105 @@ fn handle_request(
                 .ready = ready,
                 .sha256 = if (ready) uu.sha256 else null,
             });
+        },
+        .ack_job => |jr| {
+            if (try run_mgr.ack_job(arena, jr.job_id)) |rep| {
+                sctx.tx_mu.lockUncancelable(sctx.io);
+                defer sctx.tx_mu.unlock(sctx.io);
+                try sctx.conn.send_json(.response, req_id, rep);
+            } else {
+                sctx.tx_mu.lockUncancelable(sctx.io);
+                defer sctx.tx_mu.unlock(sctx.io);
+                try sctx.conn.send_json(.err, req_id, msg.ErrorReply{ .code = .not_found, .message = "unknown job" });
+            }
+        },
+        .acquire_lease => |al| {
+            const Arg = struct {
+                sctx: *SessionCtx,
+                req_id: u64,
+                holder_id: []u8,
+                job_id: ?[]u8,
+                req: msg.AcquireLease,
+            };
+            const arg = try sctx.gpa.create(Arg);
+            errdefer sctx.gpa.destroy(arg);
+            const hd = try sctx.gpa.dupe(u8, al.holder_id);
+            errdefer sctx.gpa.free(hd);
+            const jd: ?[]u8 = if (al.job_id) |j| try sctx.gpa.dupe(u8, j) else null;
+            errdefer if (jd) |j| sctx.gpa.free(j);
+            var al_copy = al;
+            al_copy.holder_id = hd;
+            al_copy.job_id = jd;
+            arg.* = .{
+                .sctx = sctx,
+                .req_id = req_id,
+                .holder_id = hd,
+                .job_id = jd,
+                .req = al_copy,
+            };
+            sctx.enter_worker();
+            const t = std.Thread.spawn(.{}, struct {
+                fn run(a_ptr: *Arg) void {
+                    defer {
+                        a_ptr.sctx.exit_worker();
+                        a_ptr.sctx.gpa.free(a_ptr.holder_id);
+                        if (a_ptr.job_id) |j| a_ptr.sctx.gpa.free(j);
+                        a_ptr.sctx.gpa.destroy(a_ptr);
+                    }
+                    var wa = std.heap.ArenaAllocator.init(a_ptr.sctx.gpa);
+                    defer wa.deinit();
+                    const rep = a_ptr.sctx.adm_mgr.acquire_blocking(wa.allocator(), a_ptr.req, a_ptr.job_id) catch |err| {
+                        if (!a_ptr.sctx.closed.load(.acquire)) {
+                            a_ptr.sctx.tx_mu.lockUncancelable(a_ptr.sctx.io);
+                            defer a_ptr.sctx.tx_mu.unlock(a_ptr.sctx.io);
+                            a_ptr.sctx.conn.send_json(.err, a_ptr.req_id, msg.ErrorReply{
+                                .code = .internal,
+                                .message = @errorName(err),
+                            }) catch {};
+                        }
+                        return;
+                    };
+                    if (!a_ptr.sctx.closed.load(.acquire)) {
+                        a_ptr.sctx.tx_mu.lockUncancelable(a_ptr.sctx.io);
+                        defer a_ptr.sctx.tx_mu.unlock(a_ptr.sctx.io);
+                        a_ptr.sctx.conn.send_json(.response, a_ptr.req_id, rep) catch {};
+                    }
+                }
+            }.run, .{arg}) catch |err| {
+                sctx.exit_worker();
+                return err;
+            };
+            t.detach();
+        },
+        .renew_lease => |rl| {
+            const rep = try sctx.adm_mgr.renew(arena, rl);
+            sctx.tx_mu.lockUncancelable(sctx.io);
+            defer sctx.tx_mu.unlock(sctx.io);
+            try sctx.conn.send_json(.response, req_id, rep);
+        },
+        .release_lease => |rl| {
+            const rep = try sctx.adm_mgr.release(arena, rl.lease_id, rl.epoch);
+            sctx.tx_mu.lockUncancelable(sctx.io);
+            defer sctx.tx_mu.unlock(sctx.io);
+            try sctx.conn.send_json(.response, req_id, rep);
+        },
+        .verify_epoch => |ve| {
+            const rep = try sctx.adm_mgr.verify_epoch(arena, ve);
+            sctx.tx_mu.lockUncancelable(sctx.io);
+            defer sctx.tx_mu.unlock(sctx.io);
+            try sctx.conn.send_json(.response, req_id, rep);
+        },
+        .list_leases => {
+            const rep = try sctx.adm_mgr.status_snapshot(arena);
+            sctx.tx_mu.lockUncancelable(sctx.io);
+            defer sctx.tx_mu.unlock(sctx.io);
+            try sctx.conn.send_json(.response, req_id, rep);
+        },
+        .clear_quarantine => {
+            const rep = try sctx.adm_mgr.clear_quarantine(arena);
+            sctx.tx_mu.lockUncancelable(sctx.io);
+            defer sctx.tx_mu.unlock(sctx.io);
+            try sctx.conn.send_json(.response, req_id, rep);
         },
         .hello => {},
     }

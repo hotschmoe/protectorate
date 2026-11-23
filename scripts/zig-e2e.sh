@@ -164,6 +164,9 @@ wait "$PID1" >/dev/null 2>&1 || true
 echo "E2E 1 PASSED"
 
 echo "=== E2E 2 & 4: Real pi + hotschmoe-dd (bwrap), Crash/Replay & History BM25 ==="
+if [[ "${SKIP_PI_E2E:-0}" == "1" ]]; then
+  echo "=== E2E 2 & 4 SKIPPED (SKIP_PI_E2E=1) ==="
+else
 if ! command -v pi >/dev/null 2>&1; then
   echo "pi CLI not found in PATH" >&2
   exit 1
@@ -254,6 +257,7 @@ assert "E2E_PI_MARKER_7391" in h["hits"][0]["snippet"], h["hits"][0]
 kill "$PID2B" >/dev/null 2>&1 || true
 wait "$PID2B" >/dev/null 2>&1 || true
 echo "E2E 4 PASSED"
+fi
 
 echo "=== E2E 3: Noise_IK Node Enrollment, Jobs, SHA-256 Artifacts, Rejects, Cancel, Reconnect ==="
 HUB3="$TMP_ROOT/hub3"
@@ -639,4 +643,254 @@ fi
 kill "$NPID6" "$PID6" >/dev/null 2>&1 || true
 wait "$NPID6" "$PID6" >/dev/null 2>&1 || true
 echo "E2E 6 PASSED"
-echo "ALL 6 ZIG E2E SCENARIOS PASSED"
+
+echo "=== E2E 7: Node Admission Authority, Fencing, Child Borrows, Local Socket, & CLI ==="
+HUB7="$TMP_ROOT/hub7"
+NODE7="$TMP_ROOT/node7"
+LOG7="$TMP_ROOT/hub7.log"
+"$PT" serve --home "$HUB7" --listen 127.0.0.1:0 --fleet-listen 127.0.0.1:0 --no-sandbox >"$LOG7" 2>&1 &
+PID7=$!
+PIDS+=("$PID7")
+wait_for_listen "$LOG7"
+LINE7="$(grep 'protectorate listening ' "$LOG7" | head -n1)"
+HTTP7="$(extract_port "$LINE7" http)"
+FLEET7="$(extract_port "$LINE7" fleet)"
+TOK7="$("$PT" token --home "$HUB7" | sed -n 's/^owner=//p')"
+
+ENROLL7="$(rpc_post "$HTTP7" "$TOK7" GetEnrollment '{}')"
+JTOK7="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["control_key"])' <<<"$ENROLL7")"
+JOUT7="$("$PT_NODE" --home "$NODE7" join "$JTOK7" --name e2e-node-7)"
+NKEY7="$(sed -n 's/^  node_key: *//p' <<<"$JOUT7")"
+python3 - "$NODE7/config.json" "$FLEET7" <<'PY'
+import json, sys
+p, port = sys.argv[1], sys.argv[2]
+with open(p) as f:
+    cfg = json.load(f)
+cfg["addrs"] = [f"127.0.0.1:{port}"]
+cfg["slots"] = 4
+cfg["long_slots"] = 1
+with open(p, "w") as f:
+    json.dump(cfg, f, indent=2)
+PY
+
+ADD7="$(rpc_post "$HTTP7" "$TOK7" AddNode "{\"registration\":\"e2e-node-7:${NKEY7}\"}")"
+AID7="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["auth_id"])' <<<"$ADD7")"
+rpc_post "$HTTP7" "$TOK7" ApproveNode "{\"auth_id\":\"${AID7}\",\"name\":\"e2e-node-7\"}" >/dev/null
+"$PT_NODE" --home "$NODE7" authorize >/dev/null
+"$PT_NODE" --home "$NODE7" serve >"$TMP_ROOT/node7.log" 2>&1 &
+NPID7=$!
+PIDS+=("$NPID7")
+
+BOOT7=""
+for _ in $(seq 1 50); do
+  NJ7="$(rpc_post "$HTTP7" "$TOK7" ListNodes '{}')"
+  BOOT7="$(python3 -c '
+import json, sys
+nid = sys.argv[1]
+ns = [n for n in json.load(sys.stdin)["nodes"] if n["id"] == nid and n["online"] and n.get("boot_id")]
+print(ns[0]["boot_id"] if ns else "")
+' "$AID7" <<<"$NJ7")"
+  if [[ -n "$BOOT7" ]]; then
+    break
+  fi
+  sleep 0.2
+done
+if [[ -z "$BOOT7" ]]; then
+  echo "node 7 did not report online + boot_id" >&2
+  exit 1
+fi
+
+ADM7="$("$PT" --url "http://127.0.0.1:${HTTP7}" --token "$TOK7" --json lease list e2e-node-7)"
+python3 -c '
+import json, sys
+st = json.load(sys.stdin)
+assert st["boot_id"] == sys.argv[1], st
+assert st["slots_total"] == 4 and st["long_slots_total"] == 1, st
+assert st["next_epoch"] >= 1, st
+assert st.get("quarantined") is None, st
+' "$BOOT7" <<<"$ADM7"
+
+# Acquire parent shared lease, verify via both hub RPC and local admission.sock CLI.
+PARENT_LEASE="$(rpc_post "$HTTP7" "$TOK7" AcquireLease '{"node_id":"e2e-node-7","holder_id":"parent-1","slots":1,"ttl_ms":15000}')"
+read -r LID1 EP1 <<<"$(python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["ok"], d
+assert d["boot_id"], d
+assert d["epoch"] >= 1, d
+print(d["lease_id"], d["epoch"])
+' <<<"$PARENT_LEASE")"
+
+rpc_post "$HTTP7" "$TOK7" VerifyEpoch "{\"node_id\":\"e2e-node-7\",\"boot_id\":\"${BOOT7}\",\"epoch\":${EP1}}" | python3 -c '
+import json, sys
+v = json.load(sys.stdin)
+assert v["valid"] is True, v
+'
+"$PT_NODE" --sock "$NODE7/admission.sock" lease verify "$BOOT7" "$EP1" | python3 -c '
+import json, sys
+v = json.load(sys.stdin)
+assert v["valid"] is True, v
+'
+if "$PT_NODE" --sock "$NODE7/admission.sock" lease verify "wrong-boot" "$EP1" >/dev/null 2>&1; then
+  echo "expected wrong-boot verify to exit non-zero" >&2
+  exit 1
+fi
+BAD_EP=$((EP1 + 99))
+rpc_post "$HTTP7" "$TOK7" VerifyEpoch "{\"node_id\":\"e2e-node-7\",\"boot_id\":\"${BOOT7}\",\"epoch\":${BAD_EP}}" | python3 -c '
+import json, sys
+v = json.load(sys.stdin)
+assert v["valid"] is False, v
+'
+
+# Queue exclusive waiter in background while parent lease is held.
+EXCL_OUT="$TMP_ROOT/excl7.json"
+(
+  rpc_post "$HTTP7" "$TOK7" AcquireLease '{"node_id":"e2e-node-7","holder_id":"excl-waiter","exclusive":true,"slots":4,"ttl_ms":10000,"wait_ms":10000}' >"$EXCL_OUT"
+) &
+EXCL_BG=$!
+
+Q_VISIBLE=0
+for _ in $(seq 1 40); do
+  ST_Q="$(rpc_post "$HTTP7" "$TOK7" GetNodeAdmission '{"node_id":"e2e-node-7"}')"
+  if python3 -c 'import json,sys; st=json.load(sys.stdin); sys.exit(0 if len(st.get("queue",[])) >= 1 else 1)' <<<"$ST_Q"; then
+    Q_VISIBLE=1
+    break
+  fi
+  sleep 0.1
+done
+if [[ "$Q_VISIBLE" -ne 1 ]]; then
+  echo "exclusive waiter did not appear in admission queue" >&2
+  exit 1
+fi
+
+# Child borrow under parent_epoch MUST succeed without deadlocking behind queued exclusive waiter.
+CHILD_LEASE="$(rpc_post "$HTTP7" "$TOK7" AcquireLease "{\"node_id\":\"e2e-node-7\",\"holder_id\":\"child-1\",\"slots\":1,\"ttl_ms\":10000,\"parent_epoch\":${EP1}}")"
+read -r LID2 EP2 <<<"$(python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["ok"], d
+assert d["epoch"] > int(sys.argv[1]), d
+print(d["lease_id"], d["epoch"])
+' "$EP1" <<<"$CHILD_LEASE")"
+
+# Releasing parent revokes child immediately and unblocks queued exclusive waiter with strictly higher epoch.
+rpc_post "$HTTP7" "$TOK7" ReleaseLease "{\"node_id\":\"e2e-node-7\",\"lease_id\":\"${LID1}\",\"epoch\":${EP1}}" >/dev/null
+rpc_post "$HTTP7" "$TOK7" VerifyEpoch "{\"node_id\":\"e2e-node-7\",\"boot_id\":\"${BOOT7}\",\"epoch\":${EP1}}" | python3 -c 'import json,sys; assert json.load(sys.stdin)["valid"] is False'
+rpc_post "$HTTP7" "$TOK7" VerifyEpoch "{\"node_id\":\"e2e-node-7\",\"boot_id\":\"${BOOT7}\",\"epoch\":${EP2}}" | python3 -c 'import json,sys; assert json.load(sys.stdin)["valid"] is False'
+
+wait "$EXCL_BG"
+read -r LID3 EP3 <<<"$(python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+assert d["ok"], d
+assert d["epoch"] > int(sys.argv[1]), d
+print(d["lease_id"], d["epoch"])
+' "$EP2" <"$EXCL_OUT")"
+rpc_post "$HTTP7" "$TOK7" ReleaseLease "{\"node_id\":\"e2e-node-7\",\"lease_id\":\"${LID3}\",\"epoch\":${EP3}}" >/dev/null
+
+# Job with detached setsid child must be fenced completely on CancelJob.
+FENCE_JOB="$(rpc_post "$HTTP7" "$TOK7" RunJob '{"target":{"type":"node","node_id":"e2e-node-7"},"even_if_present":true,"argv":["python3","-c","import subprocess,sys; p=subprocess.Popen([\"sleep\",\"60\"],start_new_session=True,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); print(\"DETACHED_PID=\"+str(p.pid),flush=True); p.wait()"]}')"
+FJID="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"$FENCE_JOB")"
+
+DETACHED_PID=""
+for _ in $(seq 1 60); do
+  FLOG="$(rpc_post "$HTTP7" "$TOK7" GetJobLog "{\"job_id\":\"${FJID}\"}")"
+  DETACHED_PID="$(python3 -c '
+import json, re, sys
+txt = json.load(sys.stdin).get("text", "")
+m = re.search(r"DETACHED_PID=(\d+)", txt)
+print(m.group(1) if m else "")
+' <<<"$FLOG")"
+  if [[ -n "$DETACHED_PID" ]]; then
+    break
+  fi
+  sleep 0.2
+done
+if [[ -z "$DETACHED_PID" ]] || ! kill -0 "$DETACHED_PID" 2>/dev/null; then
+  echo "detached descendant process did not start: $DETACHED_PID" >&2
+  exit 1
+fi
+
+rpc_post "$HTTP7" "$TOK7" GetJob "{\"job_id\":\"${FJID}\"}" | python3 -c '
+import json, sys
+j = json.load(sys.stdin)
+assert j.get("boot_id") == sys.argv[1], j
+assert (j.get("epoch") or 0) > int(sys.argv[2]), j
+assert j.get("lease_id"), j
+' "$BOOT7" "$EP3"
+
+rpc_post "$HTTP7" "$TOK7" CancelJob "{\"job_id\":\"${FJID}\"}" >/dev/null
+FJ_DONE=0
+for _ in $(seq 1 60); do
+  FJST="$(rpc_post "$HTTP7" "$TOK7" GetJob "{\"job_id\":\"${FJID}\"}")"
+  if python3 -c 'import json,sys; j=json.load(sys.stdin); sys.exit(0 if j["state"]=="cancelled" else 1)' <<<"$FJST"; then
+    FJ_DONE=1
+    break
+  fi
+  sleep 0.2
+done
+if [[ "$FJ_DONE" -ne 1 ]]; then
+  echo "fencing test job did not transition to cancelled" >&2
+  exit 1
+fi
+for _ in $(seq 1 30); do
+  if ! kill -0 "$DETACHED_PID" 2>/dev/null; then break; fi
+  sleep 0.1
+done
+if kill -0 "$DETACHED_PID" 2>/dev/null; then
+  echo "detached setsid child $DETACHED_PID survived job cancel/fence!" >&2
+  kill -9 "$DETACHED_PID" 2>/dev/null || true
+  exit 1
+fi
+
+# Verify zero leaked leases and no quarantine after fence.
+rpc_post "$HTTP7" "$TOK7" GetNodeAdmission '{"node_id":"e2e-node-7"}' | python3 -c '
+import json, sys
+st = json.load(sys.stdin)
+assert st.get("quarantined") is None, st
+assert st["slots_used"] == 0 and len(st.get("grants", [])) == 0, st
+'
+
+# CLI job run --wait + artifact + AckJob lease release check.
+CLI_JOB="$("$PT" --url "http://127.0.0.1:${HTTP7}" --token "$TOK7" --json job run --wait --even-if-present --node e2e-node-7 --artifact report.txt -- sh -c 'printf "adm-ok-7" > report.txt')"
+JID_CLI="$(python3 -c '
+import json, sys
+j = json.load(sys.stdin)
+assert j["state"] == "succeeded", j
+assert (j.get("epoch") or 0) > 0 and j.get("boot_id"), j
+print(j["id"])
+' <<<"$CLI_JOB")"
+
+ART_OUT="$("$PT" --url "http://127.0.0.1:${HTTP7}" --token "$TOK7" job artifact "$JID_CLI" report.txt)"
+if [[ "$ART_OUT" != "adm-ok-7" ]]; then
+  echo "unexpected CLI artifact content: $ART_OUT" >&2
+  exit 1
+fi
+
+for _ in $(seq 1 30); do
+  ST_AFTER="$(rpc_post "$HTTP7" "$TOK7" GetNodeAdmission '{"node_id":"e2e-node-7"}')"
+  if python3 -c 'import json,sys; st=json.load(sys.stdin); sys.exit(0 if st["slots_used"]==0 and len(st.get("grants",[]))==0 else 1)' <<<"$ST_AFTER"; then
+    break
+  fi
+  sleep 0.1
+done
+rpc_post "$HTTP7" "$TOK7" GetNodeAdmission '{"node_id":"e2e-node-7"}' | python3 -c '
+import json, sys
+st = json.load(sys.stdin)
+assert st["slots_used"] == 0 and len(st.get("grants", [])) == 0, st
+'
+
+# CLI lease acquire / renew / release roundtrip.
+CLI_L="$("$PT" --url "http://127.0.0.1:${HTTP7}" --token "$TOK7" --json lease acquire e2e-node-7 --holder cli-test --slots 2 --ttl-ms 10000)"
+read -r CLID CEP <<<"$(python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["ok"], d; print(d["lease_id"], d["epoch"])' <<<"$CLI_L")"
+"$PT" --url "http://127.0.0.1:${HTTP7}" --token "$TOK7" --json lease renew e2e-node-7 "$CLID" "$CEP" | python3 -c 'import json,sys; assert json.load(sys.stdin)["ok"]'
+"$PT" --url "http://127.0.0.1:${HTTP7}" --token "$TOK7" --json lease release e2e-node-7 "$CLID" "$CEP" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["ok"] and d["fenced"]'
+
+kill "$NPID7" "$PID7" >/dev/null 2>&1 || true
+wait "$NPID7" "$PID7" >/dev/null 2>&1 || true
+echo "E2E 7 PASSED"
+if [[ "${SKIP_PI_E2E:-0}" == "1" ]]; then
+  echo "ZIG E2E SCENARIOS 1, 3, 5, 6, 7 PASSED (E2E 2 & 4 skipped via SKIP_PI_E2E=1)"
+else
+  echo "ALL 7 ZIG E2E SCENARIOS PASSED"
+fi

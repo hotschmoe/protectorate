@@ -43,7 +43,12 @@ pub fn dispatch_cli(init: std.process.Init, arena: std.mem.Allocator) !Action {
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
         const arg = args[i];
-        if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
+        if (std.mem.eql(u8, arg, "--")) {
+            while (i < args.len) : (i += 1) {
+                try pos.append(arena, args[i]);
+            }
+            break;
+        } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
             try print_out(init.io, "protectorate {s} ({s})\n", .{ version.version, version.git_commit });
             return .{ .exit = 0 };
         } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
@@ -228,7 +233,10 @@ pub fn dispatch_cli(init: std.process.Init, arena: std.mem.Allocator) !Action {
         }
         if (std.mem.eql(u8, act, "get") and pos.items.len >= 3) {
             const req = try schema.encode_alloc(arena, schema.JobRef{ .job_id = pos.items[2] });
-            return .{ .exit = try call_and_print(arena, init.io, &cl, "GetJob", req) };
+            return .{ .exit = try call_and_render(arena, init.io, &cl, "GetJob", req, json_out, print_job_single) };
+        }
+        if (std.mem.eql(u8, act, "run")) {
+            return .{ .exit = try cmd_job_run(arena, init.io, &cl, pos.items[2..], json_out) };
         }
         if (std.mem.eql(u8, act, "cancel") and pos.items.len >= 3) {
             const req = try schema.encode_alloc(arena, schema.JobRef{ .job_id = pos.items[2] });
@@ -238,6 +246,12 @@ pub fn dispatch_cli(init: std.process.Init, arena: std.mem.Allocator) !Action {
             const req = try schema.encode_alloc(arena, schema.GetJobLogRequest{ .job_id = pos.items[2] });
             return .{ .exit = try call_and_print(arena, init.io, &cl, "GetJobLog", req) };
         }
+        if (std.mem.eql(u8, act, "artifact") and pos.items.len >= 4) {
+            return .{ .exit = try cmd_job_artifact(arena, init.io, &cl, pos.items[2..], json_out) };
+        }
+    }
+    if (std.mem.eql(u8, sub, "lease") and pos.items.len >= 2) {
+        return .{ .exit = try cmd_lease(arena, init.io, &cl, pos.items[1..], json_out) };
     }
     if (std.mem.eql(u8, sub, "history") and pos.items.len >= 3 and std.mem.eql(u8, pos.items[1], "search")) {
         const req = try schema.encode_alloc(arena, schema.SearchHistoryRequest{ .query = pos.items[2] });
@@ -448,6 +462,329 @@ fn cmd_node_update(
     if (!req.all and req.cancel == null and req.nodes.len == 0) req.all = true;
     const body = try schema.encode_alloc(arena, req);
     return call_and_render(arena, io, cl, "UpdateNodes", body, json_out, print_node_updates);
+}
+
+fn cmd_job_run(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cl: *const client.Client,
+    rest: []const []const u8,
+    json_out: bool,
+) !u8 {
+    var node_opt: ?[]const u8 = null;
+    var arch_opt: ?[]const u8 = null;
+    var cwd_opt: ?[]const u8 = null;
+    var exclusive = false;
+    var slots: u32 = 1;
+    var long_slots: u32 = 0;
+    var mem_bytes: u64 = 0;
+    var parent_epoch: ?u64 = null;
+    var ttl_ms: ?u64 = null;
+    var wait_ms: ?u64 = null;
+    var timeout_secs: ?u64 = null;
+    var even_if_present = false;
+    var on_present: schema.OnPresent = .idle;
+    var maintenance = false;
+    var wait_done = false;
+    var arts: std.ArrayList([]const u8) = .empty;
+    var argv: std.ArrayList([]const u8) = .empty;
+
+    var idx: usize = 0;
+    var in_argv = false;
+    while (idx < rest.len) : (idx += 1) {
+        const a = rest[idx];
+        if (in_argv) {
+            try argv.append(arena, a);
+            continue;
+        }
+        if (std.mem.eql(u8, a, "--")) {
+            in_argv = true;
+        } else if (std.mem.eql(u8, a, "--node") and idx + 1 < rest.len) {
+            idx += 1;
+            node_opt = rest[idx];
+        } else if (std.mem.eql(u8, a, "--arch") and idx + 1 < rest.len) {
+            idx += 1;
+            arch_opt = rest[idx];
+        } else if (std.mem.eql(u8, a, "--cwd") and idx + 1 < rest.len) {
+            idx += 1;
+            cwd_opt = rest[idx];
+        } else if (std.mem.eql(u8, a, "--artifact") and idx + 1 < rest.len) {
+            idx += 1;
+            try arts.append(arena, rest[idx]);
+        } else if (std.mem.eql(u8, a, "--exclusive")) {
+            exclusive = true;
+        } else if (std.mem.eql(u8, a, "--slots") and idx + 1 < rest.len) {
+            idx += 1;
+            slots = std.fmt.parseInt(u32, rest[idx], 10) catch 1;
+        } else if (std.mem.eql(u8, a, "--long-slots") and idx + 1 < rest.len) {
+            idx += 1;
+            long_slots = std.fmt.parseInt(u32, rest[idx], 10) catch 0;
+        } else if (std.mem.eql(u8, a, "--mem-mib") and idx + 1 < rest.len) {
+            idx += 1;
+            const mib = std.fmt.parseInt(u64, rest[idx], 10) catch 0;
+            mem_bytes = mib *| (1024 * 1024);
+        } else if (std.mem.eql(u8, a, "--parent-epoch") and idx + 1 < rest.len) {
+            idx += 1;
+            parent_epoch = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+        } else if (std.mem.eql(u8, a, "--ttl-ms") and idx + 1 < rest.len) {
+            idx += 1;
+            ttl_ms = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+        } else if (std.mem.eql(u8, a, "--wait-ms") and idx + 1 < rest.len) {
+            idx += 1;
+            wait_ms = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+        } else if (std.mem.eql(u8, a, "--timeout") and idx + 1 < rest.len) {
+            idx += 1;
+            timeout_secs = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+        } else if (std.mem.eql(u8, a, "--even-if-present")) {
+            even_if_present = true;
+        } else if (std.mem.eql(u8, a, "--on-present") and idx + 1 < rest.len) {
+            idx += 1;
+            on_present = if (std.mem.eql(u8, rest[idx], "kill")) .kill else .idle;
+        } else if (std.mem.eql(u8, a, "--maintenance")) {
+            maintenance = true;
+        } else if (std.mem.eql(u8, a, "--wait")) {
+            wait_done = true;
+        } else {
+            in_argv = true;
+            try argv.append(arena, a);
+        }
+    }
+    if (argv.items.len == 0) {
+        try print_out(io, "usage: protectorate job run [--node <id> | --arch <arch>] [--exclusive] [--slots <n>] [--long-slots <n>] [--mem-mib <mib>] [--parent-epoch <ep>] [--wait] -- <argv...>\n", .{});
+        return 2;
+    }
+
+    const target: schema.JobTarget = if (node_opt) |n|
+        .{ .node = .{ .node_id = n } }
+    else
+        .{ .arch = .{ .arch = arch_opt orelse "x86_64" } };
+
+    const req = try schema.encode_alloc(arena, schema.RunJobRequest{
+        .target = target,
+        .argv = argv.items,
+        .cwd = cwd_opt,
+        .artifacts = arts.items,
+        .even_if_present = even_if_present,
+        .on_present = on_present,
+        .maintenance = maintenance,
+        .timeout_secs = timeout_secs,
+        .exclusive = exclusive,
+        .slots = slots,
+        .long_slots = long_slots,
+        .mem_bytes = mem_bytes,
+        .wait_ms = wait_ms,
+        .lease_ttl_ms = ttl_ms,
+        .parent_epoch = parent_epoch,
+    });
+
+    const res = cl.call_raw(arena, "RunJob", req) catch |err| {
+        try print_out(io, "error: {s}\n", .{@errorName(err)});
+        return 1;
+    };
+    if (res.status >= 300) {
+        if (json_out) {
+            try print_out(io, "{s}\n", .{res.body});
+        } else {
+            try print_error_or_raw(arena, io, res.status, res.body, false);
+        }
+        return 1;
+    }
+    if (!wait_done) {
+        if (json_out) {
+            try print_out(io, "{s}\n", .{res.body});
+        } else {
+            try print_job_single(arena, io, res.body);
+        }
+        return 0;
+    }
+
+    var job = try schema.decode_arena(schema.Job, arena, res.body);
+    var latest_body: []const u8 = res.body;
+    const poll_req = try schema.encode_alloc(arena, schema.JobRef{ .job_id = job.id });
+    while (true) {
+        const done = switch (job.state) {
+            .succeeded, .failed, .interrupted, .lost, .cancelled, .abandoned => true,
+            else => false,
+        };
+        if (done) break;
+        io.sleep(.fromMilliseconds(250), .awake) catch break;
+        const gres = cl.call_raw(arena, "GetJob", poll_req) catch continue;
+        if (gres.status >= 300) continue;
+        latest_body = gres.body;
+        job = schema.decode_arena(schema.Job, arena, gres.body) catch continue;
+    }
+
+    if (json_out) {
+        try print_out(io, "{s}\n", .{latest_body});
+    } else {
+        try print_job_single(arena, io, latest_body);
+    }
+    return if (job.state == .succeeded) 0 else 1;
+}
+
+fn cmd_job_artifact(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cl: *const client.Client,
+    rest: []const []const u8,
+    json_out: bool,
+) !u8 {
+    if (rest.len < 2) return 2;
+    const job_id = rest[0];
+    const rel_path = rest[1];
+    var out_file: ?[]const u8 = null;
+    var idx: usize = 2;
+    while (idx < rest.len) : (idx += 1) {
+        if (std.mem.eql(u8, rest[idx], "--out") and idx + 1 < rest.len) {
+            idx += 1;
+            out_file = rest[idx];
+        }
+    }
+
+    if (json_out and out_file == null) {
+        const req = try schema.encode_alloc(arena, schema.GetJobArtifactRequest{ .job_id = job_id, .path = rel_path });
+        return call_and_print(arena, io, cl, "GetJobArtifact", req);
+    }
+
+    var all: std.ArrayList(u8) = .empty;
+    var off: u64 = 0;
+    while (true) {
+        const req = try schema.encode_alloc(arena, schema.GetJobArtifactRequest{
+            .job_id = job_id,
+            .path = rel_path,
+            .offset = off,
+            .limit = 256 * 1024,
+        });
+        const res = cl.call_raw(arena, "GetJobArtifact", req) catch |err| {
+            try print_out(io, "error: {s}\n", .{@errorName(err)});
+            return 1;
+        };
+        if (res.status >= 300) {
+            try print_error_or_raw(arena, io, res.status, res.body, false);
+            return 1;
+        }
+        const chunk = try schema.decode_arena(schema.JobArtifactData, arena, res.body);
+        if (chunk.hex.len > 0) {
+            const raw = try arena.alloc(u8, chunk.hex.len / 2);
+            _ = try std.fmt.hexToBytes(raw, chunk.hex);
+            try all.appendSlice(arena, raw);
+        }
+        off = chunk.next_offset;
+        if (chunk.eof or chunk.next_offset >= chunk.size_bytes) break;
+    }
+
+    if (out_file) |fp| {
+        try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = fp, .data = all.items });
+        try print_out(io, "wrote {d} bytes to {s}\n", .{ all.items.len, fp });
+    } else {
+        var buf: [4096]u8 = undefined;
+        var w = std.Io.File.stdout().writer(io, &buf);
+        try w.interface.writeAll(all.items);
+        try w.interface.flush();
+    }
+    return 0;
+}
+
+fn cmd_lease(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cl: *const client.Client,
+    rest: []const []const u8,
+    json_out: bool,
+) !u8 {
+    if (rest.len < 2) {
+        try print_usage(io);
+        return 2;
+    }
+    const act = rest[0];
+    const node_id = rest[1];
+    if (std.mem.eql(u8, act, "list")) {
+        const req = try schema.encode_alloc(arena, schema.NodeRef{ .node_id = node_id });
+        return call_and_render(arena, io, cl, "GetNodeAdmission", req, json_out, print_node_admission);
+    }
+    if (std.mem.eql(u8, act, "unquarantine")) {
+        const req = try schema.encode_alloc(arena, schema.NodeRef{ .node_id = node_id });
+        return call_and_print(arena, io, cl, "ClearNodeQuarantine", req);
+    }
+    if (std.mem.eql(u8, act, "acquire")) {
+        var holder: []const u8 = "owner";
+        var exclusive = false;
+        var slots: u32 = 1;
+        var long_slots: u32 = 0;
+        var mem_bytes: u64 = 0;
+        var ttl_ms: ?u64 = null;
+        var wait_ms: ?u64 = null;
+        var parent_epoch: ?u64 = null;
+        var idx: usize = 2;
+        while (idx < rest.len) : (idx += 1) {
+            const a = rest[idx];
+            if (std.mem.eql(u8, a, "--holder") and idx + 1 < rest.len) {
+                idx += 1;
+                holder = rest[idx];
+            } else if (std.mem.eql(u8, a, "--exclusive")) {
+                exclusive = true;
+            } else if (std.mem.eql(u8, a, "--slots") and idx + 1 < rest.len) {
+                idx += 1;
+                slots = std.fmt.parseInt(u32, rest[idx], 10) catch 1;
+            } else if (std.mem.eql(u8, a, "--long-slots") and idx + 1 < rest.len) {
+                idx += 1;
+                long_slots = std.fmt.parseInt(u32, rest[idx], 10) catch 0;
+            } else if (std.mem.eql(u8, a, "--mem-mib") and idx + 1 < rest.len) {
+                idx += 1;
+                mem_bytes = (std.fmt.parseInt(u64, rest[idx], 10) catch 0) *| (1024 * 1024);
+            } else if (std.mem.eql(u8, a, "--ttl-ms") and idx + 1 < rest.len) {
+                idx += 1;
+                ttl_ms = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+            } else if (std.mem.eql(u8, a, "--wait-ms") and idx + 1 < rest.len) {
+                idx += 1;
+                wait_ms = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+            } else if (std.mem.eql(u8, a, "--parent-epoch") and idx + 1 < rest.len) {
+                idx += 1;
+                parent_epoch = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+            }
+        }
+        const req = try schema.encode_alloc(arena, schema.AcquireLeaseRequest{
+            .node_id = node_id,
+            .holder_id = holder,
+            .exclusive = exclusive,
+            .slots = slots,
+            .long_slots = long_slots,
+            .mem_bytes = mem_bytes,
+            .ttl_ms = ttl_ms,
+            .wait_ms = wait_ms,
+            .parent_epoch = parent_epoch,
+        });
+        return call_and_print(arena, io, cl, "AcquireLease", req);
+    }
+    if (std.mem.eql(u8, act, "renew") and rest.len >= 4) {
+        const ep = std.fmt.parseInt(u64, rest[3], 10) catch return 2;
+        const req = try schema.encode_alloc(arena, schema.RenewLeaseRequest{
+            .node_id = node_id,
+            .lease_id = rest[2],
+            .epoch = ep,
+        });
+        return call_and_print(arena, io, cl, "RenewLease", req);
+    }
+    if (std.mem.eql(u8, act, "release") and rest.len >= 4) {
+        const ep = std.fmt.parseInt(u64, rest[3], 10) catch return 2;
+        const req = try schema.encode_alloc(arena, schema.ReleaseLeaseRequest{
+            .node_id = node_id,
+            .lease_id = rest[2],
+            .epoch = ep,
+        });
+        return call_and_print(arena, io, cl, "ReleaseLease", req);
+    }
+    if (std.mem.eql(u8, act, "verify") and rest.len >= 4) {
+        const ep = std.fmt.parseInt(u64, rest[3], 10) catch return 2;
+        const req = try schema.encode_alloc(arena, schema.VerifyEpochRequest{
+            .node_id = node_id,
+            .boot_id = rest[2],
+            .epoch = ep,
+        });
+        return call_and_print(arena, io, cl, "VerifyEpoch", req);
+    }
+    try print_usage(io);
+    return 2;
 }
 
 fn call_and_print(
@@ -697,28 +1034,87 @@ fn print_job_list(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void 
     try render_jobs(io, jl.jobs);
 }
 
+fn print_job_single(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void {
+    const j = try schema.decode_arena(schema.Job, arena, body);
+    try render_jobs(io, &.{j});
+}
+
+fn print_node_admission(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void {
+    const na = try schema.decode_arena(schema.NodeAdmission, arena, body);
+    try print_out(
+        io,
+        "node={s} boot={s} next_epoch={d} slots={d}/{d} long={d}/{d} mem_reserved={d}MiB mem_avail={d}MiB",
+        .{
+            na.node_id,
+            na.boot_id,
+            na.next_epoch,
+            na.slots_used,
+            na.slots_total,
+            na.long_slots_used,
+            na.long_slots_total,
+            na.mem_reserved_bytes / (1024 * 1024),
+            na.mem_avail_bytes / (1024 * 1024),
+        },
+    );
+    if (na.quarantined) |q| try print_out(io, " QUARANTINED={s}", .{q});
+    try print_out(io, "\n", .{});
+    if (na.grants.len > 0) {
+        try print_out(io, "LEASES ({d}):\n", .{na.grants.len});
+        for (na.grants) |g| {
+            try print_out(io, "  {s} ep={d} parent={?d} holder={s} job={s} mode={s} state={s} slots={d} long={d}\n", .{
+                g.lease_id,
+                g.epoch,
+                g.parent_epoch,
+                g.holder_id,
+                g.job_id orelse "-",
+                @tagName(g.mode),
+                @tagName(g.state),
+                g.slots,
+                g.long_slots,
+            });
+        }
+    }
+    if (na.queue.len > 0) {
+        try print_out(io, "QUEUE ({d}):\n", .{na.queue.len});
+        for (na.queue) |t| {
+            try print_out(io, "  {s} seq={d} holder={s} mode={s} slots={d} long={d}\n", .{
+                t.ticket_id,
+                t.seq,
+                t.holder_id,
+                @tagName(t.mode),
+                t.slots,
+                t.long_slots,
+            });
+        }
+    }
+}
+
 fn render_jobs(io: std.Io, jobs: []const schema.Job) !void {
-    try print_out(io, "{s:<16} {s:<11} {s:<14} {s:<5} {s:<6} {s}\n", .{
-        "ID", "STATE", "NODE", "TRY", "EXIT", "COMMAND",
+    try print_out(io, "{s:<16} {s:<11} {s:<14} {s:<5} {s:<6} {s:<7} {s}\n", .{
+        "ID", "STATE", "NODE", "TRY", "EXIT", "EPOCH", "COMMAND",
     });
     for (jobs) |j| {
         var ec_buf: [16]u8 = undefined;
         const ec_s: []const u8 = if (j.exit_code) |ec| std.fmt.bufPrint(&ec_buf, "{d}", .{ec}) catch "-" else "-";
+        var ep_buf: [24]u8 = undefined;
+        const ep_s: []const u8 = if (j.epoch) |ep| std.fmt.bufPrint(&ep_buf, "{d}", .{ep}) catch "-" else "-";
         const node_s: []const u8 = j.node_id orelse switch (j.target) {
             .node => |n| n.node_id,
             .arch => |ar| ar.arch,
             .unknown => "-",
         };
-        try print_out(io, "{s:<16} {s:<11} {s:<14} {d:<5} {s:<6}", .{
+        try print_out(io, "{s:<16} {s:<11} {s:<14} {d:<5} {s:<6} {s:<7}", .{
             j.id,
             @tagName(j.state),
             node_s,
             j.attempt,
             ec_s,
+            ep_s,
         });
         for (j.argv, 0..) |arg, idx| {
             try print_out(io, "{s}{s}", .{ if (idx == 0) "" else " ", arg });
         }
+        if (j.held_reason) |hr| try print_out(io, " (held={s})", .{hr});
         if (j.@"error") |er| try print_out(io, " [{s}]", .{er});
         try print_out(io, "\n", .{});
     }
@@ -833,7 +1229,8 @@ fn print_usage(io: std.Io) !void {
         \\  protectorate [--json] node (list | join-token | add <reg> | approve <id> [<name>] | update [--all | <id>...] [--version <v>] [--channel stable|dev] [--no-wait] [--cancel <rid>])
         \\  protectorate [--json] hub update [--check] [--rollback] [--channel stable|dev] [--version <v>]
         \\  protectorate [--json] harness update [<program>...]
-        \\  protectorate [--json] job (list | get <id> | cancel <id> | logs <id>)
+        \\  protectorate [--json] job (list | get <id> | run [opts] -- <argv...> | cancel <id> | logs <id> | artifact <id> <path> [--out <file>])
+        \\  protectorate [--json] lease (list <node> | acquire <node> [opts] | renew <node> <lid> <ep> | release <node> <lid> <ep> | verify <node> <boot> <ep> | unquarantine <node>)
         \\  protectorate [--json] history search <query>
         \\  protectorate rpc <Method> [<json>]
         \\  protectorate --envoy | mcp

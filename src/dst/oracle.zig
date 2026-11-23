@@ -18,6 +18,7 @@ const sbox = @import("../sandbox/spec.zig");
 const upd_ver = @import("../update/version.zig");
 const qr = @import("../qr.zig");
 const schema = @import("../api/schema.zig");
+const admission = @import("../core/admission.zig");
 
 const CoreWorld = struct {
     gpa: std.mem.Allocator,
@@ -942,6 +943,347 @@ fn run_misc_oracle(gpa: std.mem.Allocator) !void {
     tiger.assert(items.items.len == 1 and items.items[0].doc.turn == 1);
 }
 
+fn check_admission_invariants(auth: *const admission.Authority, last_max_epoch: *u64) void {
+    tiger.assert(auth.next_epoch >= last_max_epoch.*);
+    last_max_epoch.* = auth.next_epoch;
+    tiger.assert(auth.grants.items.len <= admission.max_grants);
+    tiger.assert(auth.used_slots() <= auth.cfg.slots);
+    tiger.assert(auth.used_long_slots() <= auth.cfg.long_slots);
+
+    var excl_epoch: ?u64 = null;
+    for (auth.grants.items, 0..) |g, i| {
+        tiger.assert(g.epoch >= 1 and g.epoch < auth.next_epoch);
+        for (auth.grants.items[i + 1 ..]) |other| {
+            tiger.assert(g.epoch != other.epoch);
+            tiger.assert(!std.mem.eql(u8, g.lease_id, other.lease_id));
+        }
+        if (g.mode == .exclusive) {
+            tiger.assert(excl_epoch == null);
+            excl_epoch = g.epoch;
+        }
+        if (g.parent_epoch) |pe| {
+            if (g.state != .fencing) {
+                const p = auth.find_grant_by_epoch(pe) orelse unreachable;
+                tiger.assert(p.parent_epoch == null);
+                tiger.assert(p.state == .active);
+                tiger.assert(g.deadline_ms <= p.deadline_ms);
+            }
+        }
+    }
+    if (excl_epoch) |ee| {
+        for (auth.grants.items) |g| {
+            if (g.epoch != ee) {
+                tiger.assert(g.parent_epoch != null and g.parent_epoch.? == ee);
+            }
+        }
+    }
+    var idx: usize = 1;
+    while (idx < auth.queue.items.len) : (idx += 1) {
+        tiger.assert(auth.queue.items[idx - 1].seq < auth.queue.items[idx].seq);
+    }
+}
+
+fn run_admission_oracle(gpa: std.mem.Allocator, seed: u64) !void {
+    var prng = std.Random.DefaultPrng.init(seed ^ 0xA01D_7127);
+    const rng = prng.random();
+
+    const cfg: admission.CapacityConfig = .{
+        .slots = 2 + rng.uintLessThan(u32, 7),
+        .long_slots = 1 + rng.uintLessThan(u32, 3),
+        .mem_margin_bytes = 512 * 1024 * 1024,
+        .total_ram_bytes = 8 * 1024 * 1024 * 1024,
+        .max_queue = 64,
+        .default_ttl_ms = 5_000,
+    };
+    var auth = try admission.Authority.init(gpa, "boot-sim-1", cfg);
+    defer auth.deinit();
+
+    const LeaseRef = struct { lease_id: []u8, epoch: u64 };
+    var leases: std.ArrayList(LeaseRef) = .empty;
+    defer {
+        for (leases.items) |l| gpa.free(l.lease_id);
+        leases.deinit(gpa);
+    }
+    var tickets: std.ArrayList([]u8) = .empty;
+    defer {
+        for (tickets.items) |t| gpa.free(t);
+        tickets.deinit(gpa);
+    }
+
+    var now_ms: i64 = 1_000_000;
+    var last_max_epoch: u64 = 1;
+
+    for (0..120) |step_idx| {
+        const mem_avail: u64 = if (rng.uintLessThan(u8, 10) == 0)
+            512 * 1024 * 1024
+        else
+            6 * 1024 * 1024 * 1024;
+        var actions: std.ArrayList(admission.Action) = .empty;
+        defer admission.deinit_actions(gpa, &actions);
+
+        const op = rng.uintLessThan(u8, 12);
+        switch (op) {
+            0, 1, 2 => {
+                var hbuf: [32]u8 = undefined;
+                const holder = std.fmt.bufPrint(&hbuf, "h-{d}", .{step_idx}) catch "h";
+                const excl = rng.uintLessThan(u8, 5) == 0;
+                const req_slots: u32 = if (excl) cfg.slots else 1 + rng.uintLessThan(u32, 2);
+                const req_long: u32 = if (rng.uintLessThan(u8, 4) == 0) 1 else 0;
+                const req_mem: u64 = if (rng.boolean()) 512 * 1024 * 1024 else 0;
+                const wait_ms: i64 = if (rng.uintLessThan(u8, 3) == 0) 0 else 4_000 + @as(i64, rng.uintLessThan(u32, 12_000));
+                const res = try auth.enqueue_or_grant(
+                    holder,
+                    null,
+                    if (excl) .exclusive else .shared,
+                    .{ .slots = req_slots, .long_slots = req_long, .mem_bytes = req_mem },
+                    3_000 + @as(i64, rng.uintLessThan(u32, 6_000)),
+                    wait_ms,
+                    now_ms,
+                    mem_avail,
+                    &actions,
+                );
+                switch (res) {
+                    .granted => |g| try leases.append(gpa, .{
+                        .lease_id = try gpa.dupe(u8, g.lease_id),
+                        .epoch = g.epoch,
+                    }),
+                    .queued => |q| try tickets.append(gpa, try gpa.dupe(u8, q.ticket_id)),
+                    .refused => {},
+                }
+            },
+            3 => {
+                if (leases.items.len > 0) {
+                    const pick = leases.items[rng.uintLessThan(usize, leases.items.len)];
+                    const res = try auth.acquire_child(
+                        pick.epoch,
+                        "child",
+                        null,
+                        .{ .slots = 1 },
+                        4_000,
+                        now_ms,
+                        mem_avail,
+                    );
+                    switch (res) {
+                        .granted => |g| try leases.append(gpa, .{
+                            .lease_id = try gpa.dupe(u8, g.lease_id),
+                            .epoch = g.epoch,
+                        }),
+                        else => {},
+                    }
+                }
+            },
+            4 => {
+                if (leases.items.len > 0) {
+                    const pick = leases.items[rng.uintLessThan(usize, leases.items.len)];
+                    const ok_verify = auth.verify_epoch(auth.boot_id, pick.epoch, now_ms);
+                    if (ok_verify) {
+                        const g = auth.find_grant_by_epoch(pick.epoch).?;
+                        tiger.assert(g.state != .fencing and now_ms < g.deadline_ms and auth.quarantined() == null);
+                    }
+                    _ = auth.renew_lease(pick.lease_id, pick.epoch, now_ms);
+                }
+            },
+            5 => {
+                if (tickets.items.len > 0) {
+                    const idx = rng.uintLessThan(usize, tickets.items.len);
+                    if (rng.boolean()) {
+                        _ = auth.renew_ticket(tickets.items[idx], now_ms);
+                    } else {
+                        _ = auth.cancel_ticket(tickets.items[idx]);
+                        gpa.free(tickets.orderedRemove(idx));
+                    }
+                }
+            },
+            6 => {
+                if (auth.grants.items.len > 0) {
+                    const g = auth.grants.items[rng.uintLessThan(usize, auth.grants.items.len)];
+                    _ = try auth.begin_collecting(g.lease_id, g.epoch, now_ms, &actions);
+                }
+            },
+            7 => {
+                if (auth.grants.items.len > 0) {
+                    const g = auth.grants.items[rng.uintLessThan(usize, auth.grants.items.len)];
+                    const pe = g.epoch;
+                    _ = try auth.release_lease(g.lease_id, g.epoch, now_ms, &actions);
+                    for (auth.grants.items) |cg| {
+                        if (cg.parent_epoch != null and cg.parent_epoch.? == pe) {
+                            tiger.assert(cg.state == .fencing);
+                        }
+                    }
+                }
+            },
+            8 => {
+                for (auth.grants.items) |g| {
+                    if (g.state == .fencing) {
+                        const lid = try gpa.dupe(u8, g.lease_id);
+                        defer gpa.free(lid);
+                        _ = try auth.confirm_fence(lid, g.epoch, now_ms, mem_avail, &actions);
+                        break;
+                    }
+                }
+            },
+            9, 10 => {
+                now_ms += 400 + @as(i64, rng.uintLessThan(u32, 3_600));
+                try auth.tick(now_ms, mem_avail, &actions);
+            },
+            else => {
+                if (rng.uintLessThan(u8, 6) == 0 and auth.grants.items.len > 0) {
+                    const g = auth.grants.items[0];
+                    const lid = try gpa.dupe(u8, g.lease_id);
+                    defer gpa.free(lid);
+                    try auth.fail_fence(lid, g.epoch, "sim fence timeout");
+                    tiger.assert(auth.quarantined() != null);
+                    tiger.assert(!auth.verify_epoch(auth.boot_id, g.epoch, now_ms));
+                    var tmp_act: std.ArrayList(admission.Action) = .empty;
+                    defer admission.deinit_actions(gpa, &tmp_act);
+                    const qres = try auth.enqueue_or_grant("qchk", null, .shared, .{ .slots = 1 }, 5_000, 0, now_ms, mem_avail, &tmp_act);
+                    switch (qres) {
+                        .refused => |r| tiger.assert(std.mem.eql(u8, r, "quarantined")),
+                        else => tiger.assert(false),
+                    }
+                    // Confirm remaining fencing grants before clearing quarantine.
+                    while (true) {
+                        var fence_target: ?LeaseRef = null;
+                        for (auth.grants.items) |fg| {
+                            if (fg.state == .fencing) {
+                                fence_target = .{ .lease_id = try gpa.dupe(u8, fg.lease_id), .epoch = fg.epoch };
+                                break;
+                            }
+                        }
+                        if (fence_target) |ft| {
+                            defer gpa.free(ft.lease_id);
+                            _ = try auth.confirm_fence(ft.lease_id, ft.epoch, now_ms, mem_avail, &tmp_act);
+                        } else break;
+                    }
+                    tiger.assert(auth.clear_quarantine());
+                    tiger.assert(auth.quarantined() == null);
+                }
+            },
+        }
+        for (actions.items) |act| {
+            switch (act) {
+                .grant_admitted => |ga| try leases.append(gpa, .{
+                    .lease_id = try gpa.dupe(u8, ga.lease_id),
+                    .epoch = ga.epoch,
+                }),
+                else => {},
+            }
+        }
+        check_admission_invariants(&auth, &last_max_epoch);
+    }
+
+    // Drain all leases and tickets, confirming zero leaked slots/memory.
+    var drain_act: std.ArrayList(admission.Action) = .empty;
+    defer admission.deinit_actions(gpa, &drain_act);
+    now_ms += 100_000;
+    try auth.tick(now_ms, 6 * 1024 * 1024 * 1024, &drain_act);
+    while (auth.grants.items.len > 0) {
+        const g = auth.grants.items[0];
+        if (g.state != .fencing) {
+            const lid = try gpa.dupe(u8, g.lease_id);
+            defer gpa.free(lid);
+            _ = try auth.release_lease(lid, g.epoch, now_ms, &drain_act);
+        } else {
+            const lid = try gpa.dupe(u8, g.lease_id);
+            defer gpa.free(lid);
+            _ = try auth.confirm_fence(lid, g.epoch, now_ms, 6 * 1024 * 1024 * 1024, &drain_act);
+        }
+    }
+    try auth.tick(now_ms + 1, 6 * 1024 * 1024 * 1024, &drain_act);
+    tiger.assert(auth.grants.items.len == 0);
+    tiger.assert(auth.used_slots() == 0 and auth.used_long_slots() == 0 and auth.reserved_mem_bytes() == 0);
+
+    // Simulated node reboot: old boot_id/epoch is rejected on new Authority instance.
+    var post_boot = try admission.Authority.init(gpa, "boot-sim-2", cfg);
+    defer post_boot.deinit();
+    tiger.assert(!post_boot.verify_epoch("boot-sim-1", 1, now_ms));
+
+    if (seed == 0 or (seed % 7) == 0) {
+        try run_admission_t127_regression(gpa);
+    }
+}
+
+fn run_admission_t127_regression(gpa: std.mem.Allocator) !void {
+    const cfg: admission.CapacityConfig = .{
+        .slots = 4,
+        .long_slots = 1,
+        .mem_margin_bytes = 512 * 1024 * 1024,
+        .total_ram_bytes = 8 * 1024 * 1024 * 1024,
+        .max_queue = 32,
+        .default_ttl_ms = 5_000,
+    };
+    var auth = try admission.Authority.init(gpa, "boot-t127", cfg);
+    defer auth.deinit();
+
+    var actions: std.ArrayList(admission.Action) = .empty;
+    defer admission.deinit_actions(gpa, &actions);
+    const mem: u64 = 6 * 1024 * 1024 * 1024;
+
+    const rA = try auth.enqueue_or_grant("holder-A", "job-A", .shared, .{ .slots = 1 }, 5_000, 10_000, 1_000, mem, &actions);
+    const gA = rA.granted;
+    tiger.assert(gA.epoch == 1 and gA.deadline_ms == 6_000);
+
+    const rB = try auth.enqueue_or_grant("holder-B", "job-B", .exclusive, .{ .slots = 4 }, 5_000, 20_000, 1_000, mem, &actions);
+    const tB = rB.queued;
+    tiger.assert(tB.position == 0);
+
+    // Negative control: fifo_bypass — shared holder C MUST queue behind exclusive waiter B even though 1 slot is free.
+    const rC = try auth.enqueue_or_grant("holder-C", "job-C", .shared, .{ .slots = 1 }, 5_000, 20_000, 1_000, mem, &actions);
+    const tC = rC.queued;
+    tiger.assert(tC.position == 1);
+
+    // Child borrow under active parent A MUST succeed while B waits, capped to parent's deadline.
+    const rChild = try auth.acquire_child(gA.epoch, "child-of-A", null, .{ .slots = 1 }, 15_000, 2_000, mem);
+    const gChild = rChild.granted;
+    tiger.assert(gChild.epoch == 2 and gChild.deadline_ms == 6_000);
+    tiger.assert(auth.verify_epoch("boot-t127", gChild.epoch, 2_000));
+
+    // Save IDs before clock expiry / mutations.
+    const lidA = try gpa.dupe(u8, gA.lease_id);
+    defer gpa.free(lidA);
+    const lidChild = try gpa.dupe(u8, gChild.lease_id);
+    defer gpa.free(lidChild);
+    const tidB = try gpa.dupe(u8, tB.ticket_id);
+    defer gpa.free(tidB);
+    const tidC = try gpa.dupe(u8, tC.ticket_id);
+    defer gpa.free(tidC);
+
+    // Live waiters heartbeat their queued tickets before initial ticket TTL elapses.
+    tiger.assert(auth.renew_ticket(tidB, 3_500));
+    tiger.assert(auth.renew_ticket(tidC, 3_500));
+
+    // Negative control: immortal_lease — reaching deadline transitions both A and child to .fencing & rejects verify_epoch.
+    try auth.tick(6_000, mem, &actions);
+    tiger.assert(!auth.verify_epoch("boot-t127", 1, 6_000));
+    tiger.assert(!auth.verify_epoch("boot-t127", 2, 6_000));
+    tiger.assert(auth.find_grant_by_id(lidA).?.state == .fencing);
+    tiger.assert(auth.find_grant_by_id(lidChild).?.state == .fencing);
+
+    // Negative control: reuse_before_fence — B is NOT admitted until BOTH A and child finish confirm_fence.
+    tiger.assert(auth.find_grant_by_ticket(tidB) == null);
+    tiger.assert(try auth.confirm_fence(lidA, 1, 6_050, mem, &actions));
+    tiger.assert(auth.find_grant_by_ticket(tidB) == null);
+
+    tiger.assert(try auth.confirm_fence(lidChild, 2, 6_100, mem, &actions));
+    const gB = auth.find_grant_by_ticket(tidB).?;
+    tiger.assert(gB.epoch == 3 and gB.mode == .exclusive);
+    tiger.assert(auth.find_grant_by_ticket(tidC) == null);
+
+    const lidB = try gpa.dupe(u8, gB.lease_id);
+    defer gpa.free(lidB);
+    tiger.assert(try auth.release_lease(lidB, 3, 6_200, &actions));
+    tiger.assert(auth.find_grant_by_ticket(tidC) == null);
+    tiger.assert(try auth.confirm_fence(lidB, 3, 6_250, mem, &actions));
+    const gC = auth.find_grant_by_ticket(tidC).?;
+    tiger.assert(gC.epoch == 4 and gC.mode == .shared);
+
+    const lidC = try gpa.dupe(u8, gC.lease_id);
+    defer gpa.free(lidC);
+    tiger.assert(try auth.release_lease(lidC, 4, 6_300, &actions));
+    tiger.assert(try auth.confirm_fence(lidC, 4, 6_350, mem, &actions));
+    tiger.assert(auth.grants.items.len == 0 and auth.queue.items.len == 0);
+}
+
 pub fn run_seed(gpa: std.mem.Allocator, seed: u64, steps: usize) !void {
     var prng = std.Random.DefaultPrng.init(seed);
     var world = CoreWorld.init(gpa, prng.random());
@@ -954,6 +1296,7 @@ pub fn run_seed(gpa: std.mem.Allocator, seed: u64, steps: usize) !void {
 
     run_quota_oracle(seed);
     try run_drivers_oracle(gpa, seed);
+    try run_admission_oracle(gpa, seed);
     if (seed == 0 or (seed % 7) == 0) {
         try run_misc_oracle(gpa);
     }
