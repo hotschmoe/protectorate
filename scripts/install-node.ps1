@@ -1,27 +1,24 @@
-# Installs a Protectorate node on Windows from a GitHub release (SPEC 3.5, 6a). It downloads
-# protectorate-node.exe for this machine (one file: it embeds member), checks it against the
-# release's SHA256SUMS before using it and checks that it reports that release, stages it in
-# <state>\releases\<version>\ (the layout pt-update keeps), makes releases\current point at that version, then runs
-# `protectorate-node join SERVER_URL` (scan to join: it shows a QR code and waits for the owner to
-# approve on the hub) and `protectorate-node install-service`, which registers and starts the
-# Windows service protectorate-node. It prints the plan first; -DryRun checks the release and
-# stops there, writing nothing. The state dir defaults to the binary's own,
-# %ProgramData%\protectorate-node.
+# Installs a Protectorate node on Windows from a GitHub release. It downloads
+# protectorate-node.exe for this machine, checks it against SHA256SUMS, stages it in
+# <home>\releases\<version>\, writes current.txt (and updates releases\current if symlinks are
+# available), runs `protectorate-node join <ptjoin1:...> --home <home>`, waits for hub
+# approval via `protectorate-node authorize`, and installs the Windows service.
 #
-# Fetch this script at a commit, never a tag (SPEC 12a item 9), and compare its sha256 with the
-# one in the release notes before running it, from an elevated PowerShell:
+# Fetch this script at a commit and compare its sha256 before running from an elevated PowerShell:
 #   curl.exe -q -fsSLO https://raw.githubusercontent.com/hotschmoe/protectorate/<commit>/scripts/install-node.ps1
 #   Get-FileHash -Algorithm SHA256 .\install-node.ps1
-#   powershell -ExecutionPolicy Bypass -File .\install-node.ps1 -ServerUrl https://hub.example.lan -DryRun
+#   powershell -ExecutionPolicy Bypass -File .\install-node.ps1 -JoinToken ptjoin1:... -DryRun
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$ServerUrl,
+    [Parameter(Mandatory = $true)][string]$JoinToken,
     [string]$Name = '',
     [string]$Version = '',
     [ValidateSet('stable', 'dev')][string]$Channel = 'stable',
     [string]$From = '',
     [string]$Repo = 'hotschmoe/protectorate',
     [string]$StateDir = (Join-Path $env:ProgramData 'protectorate-node'),
+    [string]$ServiceName = 'ProtectorateNode',
+    [int]$WaitSecs = 60,
     [switch]$DryRun
 )
 
@@ -32,8 +29,6 @@ $ProgressPreference = 'SilentlyContinue'
 function Die([string]$msg) { [Console]::Error.WriteLine("install-node: $msg"); exit 1 }
 function Say([string]$msg) { Write-Output $msg }
 
-# A sort key for vX.Y.Z[-PRE] by semver precedence: numbers padded, a release after its
-# pre-releases, numeric identifiers before alphanumeric ones.
 function TagKey([string]$tag) {
     if ($tag -notmatch '^v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$') { return $null }
     $key = '{0:D10}.{1:D10}.{2:D10}' -f [long]$Matches[1], [long]$Matches[2], [long]$Matches[3]
@@ -57,8 +52,6 @@ function ResolveTag([string]$channel) {
     return $best
 }
 
-# An asset's bytes in memory, so a dry run stores nothing. The leading comma keeps PowerShell
-# from unrolling the array into the pipeline.
 function Bytes([string]$name) {
     if ($From) {
         $p = Join-Path $From $name
@@ -87,8 +80,9 @@ function CheckFile([string]$name, [string]$path) {
     if ($got -ne (Want $name)) { Die "$name does not match SHA256SUMS (got $got)" }
 }
 
-if ($ServerUrl -notmatch '^https?://[A-Za-z0-9.:\[\]-]+(/.*)?$') { Die 'ServerUrl must be http(s)://host[:port]' }
+if ($JoinToken -notmatch '^ptjoin1:[A-Za-z0-9_-]+$') { Die 'JoinToken must look like ptjoin1:...' }
 if ($Repo -notmatch '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$') { Die 'Repo must be OWNER/NAME' }
+if ($ServiceName -notmatch '^[A-Za-z0-9._-]+$') { Die 'ServiceName contains unsupported characters' }
 $cpu = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
 $arch = switch ($cpu) { 'AMD64' { 'amd64' } 'ARM64' { 'arm64' } default { Die "no node build for $cpu" } }
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
@@ -121,30 +115,32 @@ if ($DryRun) {
 }
 
 $rel = Join-Path $StateDir 'releases'
+$curMarker = Join-Path $rel 'current.txt'
 $cur = Join-Path $rel 'current'
-$joined = Test-Path -LiteralPath (Join-Path $StateDir 'node.json')
+$joined = Test-Path -LiteralPath (Join-Path $StateDir 'config.json')
 $service = Test-Path -LiteralPath (Join-Path $StateDir 'install-manifest.json')
-$haveCurrent = Test-Path -LiteralPath $cur
-$join = @('join', $ServerUrl, '--state-dir', $StateDir)
+$haveCurrent = (Test-Path -LiteralPath $curMarker) -or (Test-Path -LiteralPath $cur)
+$join = @('join', $JoinToken, '--home', $StateDir)
 if ($Name) { $join += @('--name', $Name) }
-$installService = @('install-service', '--state-dir', $StateDir)
-Say "Found: state $StateDir (joined: $joined, service installed: $service, releases\current: $haveCurrent)"
+$installService = @('install-service', '--home', $StateDir, '--service-name', $ServiceName)
+Say "Found: state $StateDir (joined: $joined, service installed: $service, current present: $haveCurrent)"
 Say 'Plan:'
 if (Test-Path -LiteralPath (Join-Path $rel $Tag)) { Say "  reuse    $rel\$Tag (checked against SHA256SUMS)" }
 else { Say "  stage    $rel\$Tag\protectorate-node.exe" }
-if ($haveCurrent) { Say "  stop     $cur exists: already installed; update from the hub" }
-else { Say "  link     $cur -> $Tag" }
-if ($joined) { Say "  skip     join: $StateDir\node.json exists" }
-else { Say "  run      $cur\protectorate-node.exe $($join -join ' ')" }
+if ($haveCurrent) { Say "  stop     $curMarker exists: already installed; update from the hub" }
+else { Say "  mark     $curMarker -> $Tag" }
+if ($joined) { Say "  skip     join: $StateDir\config.json exists" }
+else { Say "  run      $rel\$Tag\protectorate-node.exe $($join -join ' ')" }
 if ($service) { Say "  skip     install-service: $StateDir\install-manifest.json exists" }
-else { Say "  run      $cur\protectorate-node.exe $($installService -join ' ')" }
+else { Say "  run      $rel\$Tag\protectorate-node.exe $($installService -join ' ')" }
 if ($DryRun) { Say 'Dry run: nothing was written.'; exit 0 }
-if ($haveCurrent) { Die "$cur exists; this node is installed already" }
+if ($haveCurrent) { Die "$StateDir is installed already; update from the hub" }
 
 New-Item -ItemType Directory -Force -Path $rel | Out-Null
 $vdir = Join-Path $rel $Tag
+$exePath = Join-Path $vdir 'protectorate-node.exe'
 if (Test-Path -LiteralPath $vdir) {
-    CheckFile $asset (Join-Path $vdir 'protectorate-node.exe')
+    CheckFile $asset $exePath
 } else {
     $staging = Join-Path $rel ".staging-$Tag-$PID"
     New-Item -ItemType Directory -Path $staging | Out-Null
@@ -161,27 +157,45 @@ if (Test-Path -LiteralPath $vdir) {
         [IO.File]::WriteAllBytes((Join-Path $staging 'VERSION'), $versionBytes)
         $reports = @(& $dest --version)
         if ($LASTEXITCODE -ne 0) { Die 'the staged node binary does not run' }
-        if ($reports[0] -ne "protectorate-node $Tag") { Die "the staged node reports '$($reports[0])', not $Tag" }
-        if (-not ($reports -like 'member: embedded*')) { Die "the staged node does not embed member: $($reports -join ' ')" }
+        if ($reports[0] -ne "protectorate-node $Tag" -and -not $reports[0].StartsWith("protectorate-node $Tag ")) {
+            Die "the staged node reports '$($reports[0])', not $Tag"
+        }
         Rename-Item -LiteralPath $staging -NewName $Tag
     } catch {
-        # Only this run's own staging directory inside releases\.
         Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
         throw
     }
 }
-# A relative directory symlink, as pt-update reads it.
-& cmd.exe /c mklink /D "$cur" "$Tag" | Out-Null
-if ($LASTEXITCODE -ne 0) { Die "creating the $cur link failed" }
-Say "$cur -> $Tag"
+
+[IO.File]::WriteAllText($curMarker, "$Tag`n")
+if (Test-Path -LiteralPath $cur) { Remove-Item -LiteralPath $cur -Force -ErrorAction SilentlyContinue }
+& cmd.exe /c mklink /D "$cur" "$Tag" 2>$null | Out-Null
+Say "current -> $Tag"
 
 if (-not $joined) {
-    Say "Joining $ServerUrl`: approve this node on the hub when the QR code shows."
-    & (Join-Path $cur 'protectorate-node.exe') @join
+    $jout = & $exePath @join
     if ($LASTEXITCODE -ne 0) { Die 'join failed' }
+    $jout | ForEach-Object { Say $_ }
+    $nName = ($jout | Where-Object { $_ -match '^\s*name:\s*(.+)$' } | ForEach-Object { $Matches[1].Trim() } | Select-Object -First 1)
+    $nKey = ($jout | Where-Object { $_ -match '^\s*node_key:\s*(.+)$' } | ForEach-Object { $Matches[1].Trim() } | Select-Object -First 1)
+    if ($nName -and $nKey) {
+        Say "If not already pre-registered, run on the hub: protectorate node add $nName`:$nKey"
+    }
+    $elapsed = 0
+    $authed = $false
+    while ($elapsed -le $WaitSecs) {
+        & $exePath authorize --home $StateDir *> $null
+        if ($LASTEXITCODE -eq 0) { $authed = $true; break }
+        if ($elapsed -eq 0) { Say "Waiting for hub authorization (up to ${WaitSecs}s)..." }
+        if ($elapsed -ge $WaitSecs) { break }
+        Start-Sleep -Seconds 3
+        $elapsed += 3
+    }
+    if ($authed) { Say 'Authorized against hub.' }
+    else { Say 'warning: node not authorized yet; service will connect once approved on the hub.' }
 }
 if (-not $service) {
-    & (Join-Path $cur 'protectorate-node.exe') @installService
+    & $exePath @installService
     if ($LASTEXITCODE -ne 0) { Die 'install-service failed' }
 }
-Say "Installed Protectorate node $Tag as the Windows service protectorate-node."
+Say "Installed Protectorate node $Tag as the Windows service $ServiceName."

@@ -49,6 +49,8 @@ pub fn main(init: std.process.Init) !u8 {
             const rt = try hub_rt.Runtime.open(init.gpa, init.io, init.environ_map, .{
                 .home_override = s.home_opt,
                 .listen_override = s.listen_opt,
+                .proxy_listen_override = s.proxy_listen_opt,
+                .trusted_proxies_override = s.trusted_proxies,
                 .fleet_listen_override = s.fleet_opt,
                 .dev_token_override = s.dev_token_opt,
                 .no_sandbox = s.no_sandbox,
@@ -58,10 +60,22 @@ pub fn main(init: std.process.Init) !u8 {
             const hs = try hub_http.HttpServer.start(init.gpa, init.io, rt, rt.http_listen);
             defer hs.stop_and_destroy();
 
+            const proxy_hs = if (rt.proxy_listen) |pl|
+                try hub_http.HttpServer.start_with_options(init.gpa, init.io, rt, pl, rt.trusted_proxies)
+            else
+                null;
+            defer if (proxy_hs) |ph| ph.stop_and_destroy();
+
+            var proxy_buf: [192]u8 = undefined;
+            const proxy_str = if (proxy_hs) |ph|
+                std.fmt.bufPrint(&proxy_buf, " proxy={s}:{d}", .{ ph.host, ph.listen_port() }) catch ""
+            else
+                "";
+
             try commands.print_out(
                 init.io,
-                "protectorate listening http=127.0.0.1:{d} fleet=0.0.0.0:{d} home={s}\n",
-                .{ hs.listen_port(), rt.fleet_srv.listen_port(), rt.hub_home.root_path },
+                "protectorate listening http={s}:{d}{s} fleet=0.0.0.0:{d} home={s}\n",
+                .{ hs.host, hs.listen_port(), proxy_str, rt.fleet_srv.listen_port(), rt.hub_home.root_path },
             );
 
             while (!sig_stop.load(.acquire) and !rt.shutdown_requested.load(.acquire)) {

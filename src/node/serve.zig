@@ -605,7 +605,7 @@ fn handle_request(
                     });
                     return;
                 };
-                u_store.stage_from_url(sctx.gpa, sctx.io, rel_dir, target, u, sha) catch |err| {
+                u_store.stage_from_url(sctx.gpa, sctx.io, rel_dir, target, u, sha, .node) catch |err| {
                     ok = false;
                     detail = @errorName(err);
                 };
@@ -614,9 +614,9 @@ fn handle_request(
                 detail = "activated staged release";
             } else {
                 const ch: u_ver.Channel = if (upd.channel != null and std.mem.eql(u8, upd.channel.?, "dev")) .dev else .stable;
-                const latest = u_store.check_latest(arena, sctx.io, "hotschmoe/protectorate", ch, version.version) catch null;
+                const latest = u_store.check_latest(arena, sctx.io, "hotschmoe/protectorate", ch, version.version, .node, upd.version) catch null;
                 if (latest) |rel| {
-                    u_store.stage_and_apply(sctx.gpa, sctx.io, rel_dir, rel) catch |err| {
+                    u_store.stage_and_apply(sctx.gpa, sctx.io, rel_dir, rel, .node) catch |err| {
                         ok = false;
                         detail = @errorName(err);
                     };
@@ -697,8 +697,8 @@ fn handle_request(
                     });
                     return;
                 }
-                const asset_name = try std.fmt.allocPrint(arena, "protectorate-node-{s}", .{u_store.host_asset_suffix()});
-                try u_store.stage_archive_bytes(sctx.gpa, sctx.io, rel_dir_path, uu.version, asset_name, uu.sha256, full);
+                const asset_name = u_store.host_asset_name(.node);
+                try u_store.stage_archive_bytes(sctx.gpa, sctx.io, rel_dir_path, uu.version, asset_name, uu.sha256, full, .node);
                 rel_dir.deleteFile(sctx.io, part_name) catch {};
                 ready = true;
             }

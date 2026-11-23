@@ -14,6 +14,8 @@ pub const print_out = render.print_out;
 pub const ServeOpts = struct {
     home_opt: ?[]const u8 = null,
     listen_opt: ?[]const u8 = null,
+    proxy_listen_opt: ?[]const u8 = null,
+    trusted_proxies: []const []const u8 = &.{},
     fleet_opt: ?[]const u8 = null,
     dev_token_opt: ?[]const u8 = null,
     no_sandbox: bool = false,
@@ -35,6 +37,8 @@ pub fn dispatch_cli(init: std.process.Init, arena: std.mem.Allocator) !Action {
 
     var home_opt: ?[]const u8 = null;
     var listen_opt: ?[]const u8 = null;
+    var proxy_listen_opt: ?[]const u8 = null;
+    var trusted_proxies: std.ArrayList([]const u8) = .empty;
     var fleet_opt: ?[]const u8 = null;
     var url_opt: ?[]const u8 = null;
     var token_opt: ?[]const u8 = null;
@@ -72,6 +76,12 @@ pub fn dispatch_cli(init: std.process.Init, arena: std.mem.Allocator) !Action {
         } else if (std.mem.eql(u8, arg, "--listen") and i + 1 < args.len) {
             i += 1;
             listen_opt = args[i];
+        } else if (std.mem.eql(u8, arg, "--proxy-listen") and i + 1 < args.len) {
+            i += 1;
+            proxy_listen_opt = args[i];
+        } else if (std.mem.eql(u8, arg, "--trusted-proxy") and i + 1 < args.len) {
+            i += 1;
+            try trusted_proxies.append(arena, args[i]);
         } else if (std.mem.eql(u8, arg, "--fleet-listen") and i + 1 < args.len) {
             i += 1;
             fleet_opt = args[i];
@@ -129,6 +139,8 @@ pub fn dispatch_cli(init: std.process.Init, arena: std.mem.Allocator) !Action {
         return .{ .serve = .{
             .home_opt = home_opt,
             .listen_opt = listen_opt,
+            .proxy_listen_opt = proxy_listen_opt,
+            .trusted_proxies = trusted_proxies.items,
             .fleet_opt = fleet_opt,
             .dev_token_opt = dev_token_opt,
             .no_sandbox = no_sandbox,
@@ -972,7 +984,7 @@ fn cmd_job(
         const body = try schema.encode_alloc(arena, req);
         return call_and_render(arena, io, cl, "ListJobs", body, json_out, render.print_job_list);
     }
-    if (std.mem.eql(u8, act, "get") and rest.len >= 2) {
+    if ((std.mem.eql(u8, act, "get") or std.mem.eql(u8, act, "show")) and rest.len >= 2) {
         const req = try schema.encode_alloc(arena, schema.JobRef{ .job_id = rest[1] });
         return call_and_render(arena, io, cl, "GetJob", req, json_out, render.print_job_single);
     }
@@ -983,7 +995,7 @@ fn cmd_job(
         const req = try schema.encode_alloc(arena, schema.JobRef{ .job_id = rest[1] });
         return call_and_print(arena, io, cl, "CancelJob", req);
     }
-    if (std.mem.eql(u8, act, "logs") and rest.len >= 2) {
+    if ((std.mem.eql(u8, act, "logs") or std.mem.eql(u8, act, "log")) and rest.len >= 2) {
         var req = schema.GetJobLogRequest{ .job_id = rest[1] };
         var idx: usize = 2;
         while (idx < rest.len) : (idx += 1) {
@@ -1826,7 +1838,7 @@ fn print_usage(io: std.Io) !void {
         \\protectorate - AI coding agent orchestrator & Noise_IK fleet hub
         \\
         \\usage:
-        \\  protectorate serve [--home <dir>] [--listen <addr:port>] [--fleet-listen <addr:port>] [--no-sandbox] [--dev-token <tok>]
+        \\  protectorate serve [--home <dir>] [--listen <addr:port>] [--proxy-listen <addr:port>] [--trusted-proxy <ip>]... [--fleet-listen <addr:port>] [--no-sandbox] [--dev-token <tok>]
         \\  protectorate [--json] version | status | doctor [--refresh] | pair [<name>] | token | quota [list]
         \\  protectorate [--json] hub (info | state | update [--check|--rollback] [--channel stable|dev] [--version <v>] | probation [--retry-rollback])
         \\  protectorate [--json] harness (update [<program>...] | login <claude|codex|grok|pi|agy> [-- <args...>])

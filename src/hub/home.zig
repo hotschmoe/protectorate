@@ -22,11 +22,14 @@ pub const PairingRecord = struct {
 pub const ConfigFile = struct {
     hub_name: []const u8 = "protectorate",
     listen_addr: []const u8 = "127.0.0.1:7470",
+    proxy_listen: ?[]const u8 = null,
+    trusted_proxies: []const []const u8 = &.{},
     fleet_listen: []const u8 = "0.0.0.0:7475",
     advertise_addrs: []const []const u8 = &.{},
     no_sandbox: bool = false,
     update_repo: []const u8 = "hotschmoe/protectorate",
     update_channel: []const u8 = "stable",
+    release_channel: ?[]const u8 = null,
     d9_spawn_limit: u32 = 3,
     d9_approval_timeout_secs: u64 = 300,
     sleeve_devices: []const []const u8 = &.{},
@@ -57,6 +60,7 @@ pub const HubHome = struct {
     artifacts_path: []const u8,
     briefs_path: []const u8,
     releases_path: []const u8,
+    clients_path: []const u8,
 
     mu: std.Io.Mutex = .init,
     hub_keypair: noise.KeyPair,
@@ -101,8 +105,10 @@ pub const HubHome = struct {
         errdefer gpa.free(briefs_path);
         const releases_path = try std.fs.path.join(gpa, &.{ root_path, "releases" });
         errdefer gpa.free(releases_path);
+        const clients_path = try std.fs.path.join(gpa, &.{ root_path, "clients" });
+        errdefer gpa.free(clients_path);
 
-        for ([_][]const u8{ "journal", "transcripts", "history", "artifacts", "briefs", "releases" }) |sub| {
+        for ([_][]const u8{ "journal", "transcripts", "history", "artifacts", "briefs", "releases", "clients" }) |sub| {
             try root_dir.createDirPath(io, sub);
         }
 
@@ -118,6 +124,7 @@ pub const HubHome = struct {
             .artifacts_path = artifacts_path,
             .briefs_path = briefs_path,
             .releases_path = releases_path,
+            .clients_path = clients_path,
             .hub_keypair = undefined,
             .owner_token = "",
             .envoy_token = "",
@@ -137,6 +144,7 @@ pub const HubHome = struct {
         self.gpa.free(self.artifacts_path);
         self.gpa.free(self.briefs_path);
         self.gpa.free(self.releases_path);
+        self.gpa.free(self.clients_path);
         self.gpa.free(self.owner_token);
         self.gpa.free(self.envoy_token);
         self.gpa.free(self.hub_secret_hex);
@@ -159,11 +167,15 @@ pub const HubHome = struct {
         self.sleeve_tokens.deinit(self.gpa);
         self.gpa.free(self.config.hub_name);
         self.gpa.free(self.config.listen_addr);
+        if (self.config.proxy_listen) |pl| self.gpa.free(pl);
+        for (self.config.trusted_proxies) |tp| self.gpa.free(tp);
+        self.gpa.free(self.config.trusted_proxies);
         self.gpa.free(self.config.fleet_listen);
         for (self.config.advertise_addrs) |a| self.gpa.free(a);
         self.gpa.free(self.config.advertise_addrs);
         self.gpa.free(self.config.update_repo);
         self.gpa.free(self.config.update_channel);
+        if (self.config.release_channel) |rc| self.gpa.free(rc);
         for (self.config.sleeve_devices) |d| self.gpa.free(d);
         self.gpa.free(self.config.sleeve_devices);
     }
@@ -389,8 +401,14 @@ fn load_or_create_config(gpa: std.mem.Allocator, io: std.Io, root_dir: std.Io.Di
 
     const adv = gpa.alloc([]const u8, cf.advertise_addrs.len) catch return def;
     for (cf.advertise_addrs, 0..) |a, i| adv[i] = gpa.dupe(u8, a) catch "";
+    const proxies = gpa.alloc([]const u8, cf.trusted_proxies.len) catch return def;
+    for (cf.trusted_proxies, 0..) |tp, i| proxies[i] = gpa.dupe(u8, tp) catch "";
     const devs = gpa.alloc([]const u8, cf.sleeve_devices.len) catch return def;
     for (cf.sleeve_devices, 0..) |d, i| devs[i] = gpa.dupe(u8, d) catch "";
+    const eff_channel = if (cf.release_channel != null and std.mem.eql(u8, cf.update_channel, "stable"))
+        cf.release_channel.?
+    else
+        cf.update_channel;
 
     gpa.free(def.hub_name);
     gpa.free(def.listen_addr);
@@ -402,11 +420,14 @@ fn load_or_create_config(gpa: std.mem.Allocator, io: std.Io, root_dir: std.Io.Di
     return .{
         .hub_name = gpa.dupe(u8, cf.hub_name) catch "",
         .listen_addr = gpa.dupe(u8, cf.listen_addr) catch "",
+        .proxy_listen = if (cf.proxy_listen) |pl| (gpa.dupe(u8, pl) catch null) else null,
+        .trusted_proxies = proxies,
         .fleet_listen = gpa.dupe(u8, cf.fleet_listen) catch "",
         .advertise_addrs = adv,
         .no_sandbox = cf.no_sandbox,
         .update_repo = gpa.dupe(u8, cf.update_repo) catch "",
-        .update_channel = gpa.dupe(u8, cf.update_channel) catch "",
+        .update_channel = gpa.dupe(u8, eff_channel) catch "",
+        .release_channel = if (cf.release_channel) |rc| (gpa.dupe(u8, rc) catch null) else null,
         .d9_spawn_limit = cf.d9_spawn_limit,
         .d9_approval_timeout_secs = cf.d9_approval_timeout_secs,
         .sleeve_devices = devs,

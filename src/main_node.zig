@@ -19,6 +19,7 @@ pub fn main(init: std.process.Init) !u8 {
     }
     var home_override: ?[]const u8 = null;
     var sock_override: ?[]const u8 = null;
+    var service_name_opt: ?[]const u8 = null;
     var stdio_mode = false;
     var user_mode = false;
     var retry_rollback = false;
@@ -53,9 +54,12 @@ pub fn main(init: std.process.Init) !u8 {
         } else if (std.mem.eql(u8, arg, "--limit") and i + 1 < args.len) {
             i += 1;
             limit_opt = std.fmt.parseInt(u64, args[i], 10) catch null;
-        } else if (std.mem.eql(u8, arg, "--home") and i + 1 < args.len) {
+        } else if ((std.mem.eql(u8, arg, "--home") or std.mem.eql(u8, arg, "--state-dir")) and i + 1 < args.len) {
             i += 1;
             home_override = args[i];
+        } else if (std.mem.eql(u8, arg, "--service-name") and i + 1 < args.len) {
+            i += 1;
+            service_name_opt = args[i];
         } else if (std.mem.eql(u8, arg, "--sock") and i + 1 < args.len) {
             i += 1;
             sock_override = args[i];
@@ -92,9 +96,9 @@ pub fn main(init: std.process.Init) !u8 {
     } else if (std.mem.eql(u8, sub, "supervise")) {
         return service.cmd_supervise(init.gpa, init.io, init.environ_map, home_path);
     } else if (std.mem.eql(u8, sub, "install-service")) {
-        return service.cmd_install_service(init.gpa, init.io, init.environ_map, home_path, user_mode);
+        return service.cmd_install_service(init.gpa, init.io, init.environ_map, home_path, user_mode, service_name_opt);
     } else if (std.mem.eql(u8, sub, "uninstall")) {
-        return service.cmd_uninstall(init.gpa, init.io, init.environ_map, home_path, user_mode);
+        return service.cmd_uninstall(init.gpa, init.io, init.environ_map, home_path, user_mode, service_name_opt);
     } else if (std.mem.eql(u8, sub, "probation")) {
         return service.cmd_probation(init.gpa, init.io, home_path, retry_rollback);
     } else if (std.mem.eql(u8, sub, "status")) {
@@ -273,8 +277,8 @@ fn print_usage(io: std.Io) !void {
         \\  protectorate-node authorize [--home <dir>]
         \\  protectorate-node serve [--stdio] [--home <dir>]
         \\  protectorate-node supervise [--home <dir>]
-        \\  protectorate-node install-service [--user] [--home <dir>]
-        \\  protectorate-node uninstall [--user] [--home <dir>]
+        \\  protectorate-node install-service [--user] [--service-name <name>] [--home <dir>]
+        \\  protectorate-node uninstall [--user] [--service-name <name>] [--home <dir>]
         \\  protectorate-node probation [--retry-rollback] [--home <dir>]
         \\  protectorate-node status [--home <dir>]
         \\  protectorate-node doctor | inventory | sample | presence | watch-presence [--interval <s>] [--limit <n>]

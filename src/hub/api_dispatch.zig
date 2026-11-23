@@ -828,10 +828,11 @@ pub fn dispatch(
         }
         const cfg_ch: u_ver.Channel = if (std.mem.eql(u8, rt.hub_home.config.update_channel, "dev")) .dev else .stable;
         const ch: u_ver.Channel = if (req.channel) |rc| (if (rc == .dev) .dev else .stable) else cfg_ch;
-        const latest = try u_store.check_latest(a, rt.io, rt.hub_home.config.update_repo, ch, cur_ver);
+        const latest = try u_store.check_latest(a, rt.io, rt.hub_home.config.update_repo, ch, cur_ver, .hub, req.version);
         if (latest) |rel| {
             if (!req.check) {
-                try u_store.stage_and_apply(rt.gpa, rt.io, rt.hub_home.releases_path, rel);
+                try u_store.stage_and_apply(rt.gpa, rt.io, rt.hub_home.releases_path, rel, .hub);
+                u_store.cache_release_clients(rt.gpa, rt.io, rt.hub_home.clients_path, rel) catch {};
                 rt.record_hub_event(.hub, "hub_update", rel.tag, "staged hub update", .info);
             }
             return ok_json(rt.gpa, schema.HubUpdate{

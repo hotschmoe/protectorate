@@ -86,6 +86,8 @@ const DriverHandle = struct {
 pub const RuntimeOptions = struct {
     home_override: ?[]const u8 = null,
     listen_override: ?[]const u8 = null,
+    proxy_listen_override: ?[]const u8 = null,
+    trusted_proxies_override: []const []const u8 = &.{},
     fleet_listen_override: ?[]const u8 = null,
     dev_token_override: ?[]const u8 = null,
     no_sandbox: bool = false,
@@ -129,6 +131,8 @@ pub const Runtime = struct {
     fleet_srv: fleet.FleetServer,
 
     http_listen: []const u8,
+    proxy_listen: ?[]const u8 = null,
+    trusted_proxies: []const []const u8 = &.{},
     fleet_listen: []const u8,
     stopping: std.atomic.Value(bool) = .init(false),
     tick_thread: ?std.Thread = null,
@@ -149,6 +153,22 @@ pub const Runtime = struct {
 
         const http_listen = try gpa.dupe(u8, opts.listen_override orelse hh.config.listen_addr);
         errdefer gpa.free(http_listen);
+        const proxy_listen: ?[]const u8 = if (opts.proxy_listen_override orelse hh.config.proxy_listen) |pl|
+            try gpa.dupe(u8, pl)
+        else
+            null;
+        errdefer if (proxy_listen) |pl| gpa.free(pl);
+        const src_proxies = if (opts.trusted_proxies_override.len > 0) opts.trusted_proxies_override else hh.config.trusted_proxies;
+        const trusted_proxies = try gpa.alloc([]const u8, src_proxies.len);
+        var prox_init: usize = 0;
+        errdefer {
+            for (trusted_proxies[0..prox_init]) |tp| gpa.free(tp);
+            gpa.free(trusted_proxies);
+        }
+        for (src_proxies, 0..) |tp, idx| {
+            trusted_proxies[idx] = try gpa.dupe(u8, tp);
+            prox_init += 1;
+        }
         const fleet_listen = try gpa.dupe(u8, opts.fleet_listen_override orelse hh.config.fleet_listen);
         errdefer gpa.free(fleet_listen);
 
@@ -196,6 +216,8 @@ pub const Runtime = struct {
             .stream_hub = stream.StreamHub.init(gpa, io),
             .fleet_srv = undefined,
             .http_listen = http_listen,
+            .proxy_listen = proxy_listen,
+            .trusted_proxies = trusted_proxies,
             .fleet_listen = fleet_listen,
         };
 
@@ -310,6 +332,9 @@ pub const Runtime = struct {
 
         self.hub_home.deinit();
         self.gpa.free(self.http_listen);
+        if (self.proxy_listen) |pl| self.gpa.free(pl);
+        for (self.trusted_proxies) |tp| self.gpa.free(tp);
+        self.gpa.free(self.trusted_proxies);
         self.gpa.free(self.fleet_listen);
         self.gpa.destroy(self);
     }
@@ -1529,8 +1554,39 @@ pub const Runtime = struct {
             .version = version.version,
             .started_at_ms = .{ .ms = self.started_at_ms },
             .restore_error = self.restore_error,
+            .clients = try self.list_client_assets(arena),
             .job_artifact_max_bytes = 64 << 20,
         };
+    }
+
+    /// Return known client bundles staged under `<clients>/<version>/` or `<clients>/current/`.
+    pub fn list_client_assets(self: *Runtime, arena: std.mem.Allocator) ![]const []const u8 {
+        var found: std.ArrayList([]const u8) = .empty;
+        for (u_store.known_client_assets) |asset_name| {
+            if (try self.resolve_client_asset_path(arena, asset_name) != null) {
+                try found.append(arena, asset_name);
+            }
+        }
+        return found.items;
+    }
+
+    /// Resolve a client download filename safely under `<clients>/<version>/` or `<clients>/current/`.
+    pub fn resolve_client_asset_path(self: *Runtime, arena: std.mem.Allocator, name: []const u8) !?[]const u8 {
+        if (name.len == 0 or name[0] == '.') return null;
+        if (std.mem.findScalar(u8, name, '/') != null or std.mem.findScalar(u8, name, '\\') != null) return null;
+        if (std.mem.find(u8, name, "..") != null) return null;
+
+        const ver_p = try std.fs.path.join(arena, &.{ self.hub_home.clients_path, version.version, name });
+        if (std.Io.Dir.cwd().statFile(self.io, ver_p, .{})) |st| {
+            if (st.kind == .file) return ver_p;
+        } else |_| {}
+
+        const cur_p = try std.fs.path.join(arena, &.{ self.hub_home.clients_path, "current", name });
+        if (std.Io.Dir.cwd().statFile(self.io, cur_p, .{})) |st| {
+            if (st.kind == .file) return cur_p;
+        } else |_| {}
+
+        return null;
     }
 
     pub fn view_sleeve(self: *Runtime, arena: std.mem.Allocator, sleeve_id: []const u8) !?schema.Sleeve {

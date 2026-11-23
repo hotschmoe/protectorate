@@ -13,15 +13,32 @@ pub const HttpServer = struct {
     rt: *runtime.Runtime,
     host: []const u8,
     port: u16,
+    trusted_proxies: []std.Io.net.IpAddress = &.{},
     actual_port: std.atomic.Value(u16) = .init(0),
     stopping: std.atomic.Value(bool) = .init(false),
     srv: ?std.Io.net.Server = null,
     accept_thread: ?std.Thread = null,
 
     pub fn start(gpa: std.mem.Allocator, io: std.Io, rt: *runtime.Runtime, listen_addr: []const u8) !*HttpServer {
+        return start_with_options(gpa, io, rt, listen_addr, &.{});
+    }
+
+    pub fn start_with_options(
+        gpa: std.mem.Allocator,
+        io: std.Io,
+        rt: *runtime.Runtime,
+        listen_addr: []const u8,
+        trusted_proxy_strs: []const []const u8,
+    ) !*HttpServer {
         const hp = parse_host_port(listen_addr, 7470);
         const hs = try gpa.create(HttpServer);
         errdefer gpa.destroy(hs);
+
+        const proxies = try gpa.alloc(std.Io.net.IpAddress, trusted_proxy_strs.len);
+        errdefer gpa.free(proxies);
+        for (trusted_proxy_strs, 0..) |ip_str, idx| {
+            proxies[idx] = try std.Io.net.IpAddress.parse(ip_str, 0);
+        }
 
         hs.* = .{
             .gpa = gpa,
@@ -29,6 +46,7 @@ pub const HttpServer = struct {
             .rt = rt,
             .host = try gpa.dupe(u8, hp.host),
             .port = hp.port,
+            .trusted_proxies = proxies,
         };
         errdefer gpa.free(hs.host);
 
@@ -64,6 +82,7 @@ pub const HttpServer = struct {
             s.deinit(self.io);
             self.srv = null;
         }
+        self.gpa.free(self.trusted_proxies);
         self.gpa.free(self.host);
         self.gpa.destroy(self);
     }
@@ -78,6 +97,10 @@ pub const HttpServer = struct {
             if (self.stopping.load(.acquire)) {
                 stream.close(self.io);
                 break;
+            }
+            if (self.trusted_proxies.len > 0 and !ip_matches_any(stream.socket.address, self.trusted_proxies)) {
+                stream.close(self.io);
+                continue;
             }
             const arg = self.gpa.create(ConnArg) catch {
                 stream.close(self.io);
@@ -192,6 +215,74 @@ fn conn_thread(arg: *ConnArg) void {
             continue;
         }
 
+        if (method == .GET and std.mem.startsWith(u8, path, "/api/client/")) {
+            const principal = if (auth_token) |t| hs.rt.hub_home.authorize(t) else null;
+            if (principal == null) {
+                req.respond("{\"error\":{\"code\":\"unauthenticated\",\"message\":\"unauthorized\"}}", .{
+                    .status = .unauthorized,
+                    .extra_headers = &.{
+                        .{ .name = "content-type", .value = "application/json" },
+                        .{ .name = "access-control-allow-origin", .value = "*" },
+                    },
+                }) catch break;
+                continue;
+            }
+            const client_name = path["/api/client/".len..];
+            const asset_path = (hs.rt.resolve_client_asset_path(arena, client_name) catch null) orelse {
+                req.respond("{\"error\":{\"code\":\"not_found\",\"message\":\"client asset not found\"}}", .{
+                    .status = .not_found,
+                    .extra_headers = &.{
+                        .{ .name = "content-type", .value = "application/json" },
+                        .{ .name = "access-control-allow-origin", .value = "*" },
+                    },
+                }) catch break;
+                continue;
+            };
+            var cf = std.Io.Dir.cwd().openFile(hs.io, asset_path, .{}) catch {
+                req.respond("{\"error\":{\"code\":\"not_found\",\"message\":\"client asset not found\"}}", .{
+                    .status = .not_found,
+                    .extra_headers = &.{
+                        .{ .name = "content-type", .value = "application/json" },
+                        .{ .name = "access-control-allow-origin", .value = "*" },
+                    },
+                }) catch break;
+                continue;
+            };
+            defer cf.close(hs.io);
+            const st = cf.stat(hs.io) catch break;
+            const ct: []const u8 = if (std.mem.endsWith(u8, client_name, ".apk"))
+                "application/vnd.android.package-archive"
+            else if (std.mem.endsWith(u8, client_name, ".zip"))
+                "application/zip"
+            else
+                "application/octet-stream";
+
+            var sbuf: [32 * 1024]u8 = undefined;
+            var bw = req.respondStreaming(&sbuf, .{
+                .content_length = st.size,
+                .respond_options = .{
+                    .status = .ok,
+                    .extra_headers = &.{
+                        .{ .name = "content-type", .value = ct },
+                        .{ .name = "access-control-allow-origin", .value = "*" },
+                    },
+                },
+            }) catch break;
+
+            var fbuf: [32 * 1024]u8 = undefined;
+            var off: u64 = 0;
+            while (off < st.size) {
+                const want: usize = @intCast(@min(@as(u64, fbuf.len), st.size - off));
+                const got = cf.readPositionalAll(hs.io, fbuf[0..want], off) catch break;
+                if (got == 0) break;
+                bw.writer.writeAll(fbuf[0..got]) catch break;
+                off += got;
+            }
+            if (off != st.size) break;
+            bw.end() catch break;
+            continue;
+        }
+
         if (method == .POST and std.mem.startsWith(u8, path, "/api/")) {
             const rpc_name = path["/api/".len..];
             var body_buf: [16 * 1024]u8 = undefined;
@@ -213,6 +304,17 @@ fn conn_thread(arg: *ConnArg) void {
             const status_e: std.http.Status = @enumFromInt(res.status);
             req.respond(res.body_json, .{
                 .status = status_e,
+                .extra_headers = &.{
+                    .{ .name = "content-type", .value = "application/json" },
+                    .{ .name = "access-control-allow-origin", .value = "*" },
+                },
+            }) catch break;
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, path, "/api/")) {
+            req.respond("{\"error\":{\"code\":\"not_found\",\"message\":\"not found\"}}", .{
+                .status = .not_found,
                 .extra_headers = &.{
                     .{ .name = "content-type", .value = "application/json" },
                     .{ .name = "access-control-allow-origin", .value = "*" },
@@ -262,6 +364,35 @@ fn conn_thread(arg: *ConnArg) void {
 
         req.respond("not found", .{ .status = .not_found }) catch break;
     }
+}
+
+fn normalize_ip4(addr: std.Io.net.IpAddress) ?[4]u8 {
+    return switch (addr) {
+        .ip4 => |v4| v4.bytes,
+        .ip6 => |v6| blk: {
+            for (v6.bytes[0..10]) |b| {
+                if (b != 0) break :blk null;
+            }
+            if (v6.bytes[10] != 0xff or v6.bytes[11] != 0xff) break :blk null;
+            break :blk v6.bytes[12..16].*;
+        },
+    };
+}
+
+fn ip_matches_any(peer: std.Io.net.IpAddress, allowed: []const std.Io.net.IpAddress) bool {
+    const p4 = normalize_ip4(peer);
+    for (allowed) |cand| {
+        if (p4) |pv4| {
+            if (normalize_ip4(cand)) |cv4| {
+                if (std.mem.eql(u8, &pv4, &cv4)) return true;
+                continue;
+            }
+        }
+        if (peer == .ip6 and cand == .ip6) {
+            if (std.mem.eql(u8, &peer.ip6.bytes, &cand.ip6.bytes)) return true;
+        }
+    }
+    return false;
 }
 
 fn contains_ci(hay: []const u8, needle: []const u8) bool {

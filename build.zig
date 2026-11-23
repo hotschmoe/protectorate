@@ -128,6 +128,7 @@ pub fn build(b: *std.Build) void {
         .{ .label = "x86_64-linux-musl", .query = "x86_64-linux-musl" },
         .{ .label = "aarch64-linux-musl", .query = "aarch64-linux-musl" },
         .{ .label = "x86_64-windows-gnu", .query = "x86_64-windows-gnu" },
+        .{ .label = "aarch64-windows-gnu", .query = "aarch64-windows-gnu" },
         .{ .label = "aarch64-macos", .query = "aarch64-macos" },
     };
 

@@ -943,6 +943,44 @@ fi
 
 "$PT" version | grep -q 'protectorate '
 "$PT" $U8 hub info | grep -q 'hub='
+
+mkdir -p "$HUB8/clients/0.0.0-dev"
+printf 'APK_PAYLOAD_E2E8' > "$HUB8/clients/0.0.0-dev/protectorate-android.apk"
+"$PT" $U8 --json hub info | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "protectorate-android.apk" in d.get("clients", []), d'
+UNAUTH_CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${HTTP8}/api/client/protectorate-android.apk")"
+test "$UNAUTH_CODE" = "401"
+TRAV_CODE="$(curl --path-as-is -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${TOK8}" "http://127.0.0.1:${HTTP8}/api/client/../auth.json")"
+test "$TRAV_CODE" = "404"
+DL_CLIENT_HDR="$(curl -sSD "$TMP_ROOT/client8.hdr" -H "Authorization: Bearer ${TOK8}" -o "$TMP_ROOT/client8.apk" "http://127.0.0.1:${HTTP8}/api/client/protectorate-android.apk")"
+test "$(cat "$TMP_ROOT/client8.apk")" = "APK_PAYLOAD_E2E8"
+grep -qi '^content-length: *16' "$TMP_ROOT/client8.hdr"
+
+PROXY_DENY_LOG="$TMP_ROOT/hub_proxy_deny.log"
+"$PT" serve --home "$TMP_ROOT/hub_pdeny" --listen 127.0.0.1:0 --proxy-listen 127.0.0.1:0 --trusted-proxy 192.0.2.1 --fleet-listen 127.0.0.1:0 --no-sandbox >"$PROXY_DENY_LOG" 2>&1 &
+PID_PD=$!
+PIDS+=("$PID_PD")
+wait_for_listen "$PROXY_DENY_LOG"
+LINE_PD="$(grep 'protectorate listening ' "$PROXY_DENY_LOG" | head -n1)"
+HTTP_PD="$(extract_port "$LINE_PD" http)"
+PROXY_PD="$(extract_port "$LINE_PD" proxy)"
+curl -sf "http://127.0.0.1:${HTTP_PD}/health" | grep -q '"ok":true'
+if curl -s --max-time 2 "http://127.0.0.1:${PROXY_PD}/health" >/dev/null 2>&1; then
+  echo "expected untrusted direct connection to proxy port $PROXY_PD to be closed" >&2
+  exit 1
+fi
+kill "$PID_PD" >/dev/null 2>&1 || true
+wait "$PID_PD" >/dev/null 2>&1 || true
+
+PROXY_ALLOW_LOG="$TMP_ROOT/hub_proxy_allow.log"
+"$PT" serve --home "$TMP_ROOT/hub_pallow" --listen 127.0.0.1:0 --proxy-listen 127.0.0.1:0 --trusted-proxy 127.0.0.1 --fleet-listen 127.0.0.1:0 --no-sandbox >"$PROXY_ALLOW_LOG" 2>&1 &
+PID_PA=$!
+PIDS+=("$PID_PA")
+wait_for_listen "$PROXY_ALLOW_LOG"
+LINE_PA="$(grep 'protectorate listening ' "$PROXY_ALLOW_LOG" | head -n1)"
+PROXY_PA="$(extract_port "$LINE_PA" proxy)"
+curl -sf "http://127.0.0.1:${PROXY_PA}/health" | grep -q '"ok":true'
+kill "$PID_PA" >/dev/null 2>&1 || true
+wait "$PID_PA" >/dev/null 2>&1 || true
 "$PT" $U8 hub state | grep -q 'sleeves='
 "$PT" --home "$HUB8" hub probation | grep -q 'probation\|healthy'
 "$PT" $U8 doctor --refresh | grep -q 'HARNESS'

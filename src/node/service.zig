@@ -106,6 +106,7 @@ pub fn cmd_install_service(
     env: *const std.process.Environ.Map,
     home_path: []const u8,
     user_mode: bool,
+    service_name_opt: ?[]const u8,
 ) !u8 {
     var arena_st = std.heap.ArenaAllocator.init(gpa);
     defer arena_st.deinit();
@@ -125,7 +126,12 @@ pub fn cmd_install_service(
         var d = try std.Io.Dir.cwd().createDirPathOpen(io, unit_dir, .{});
         d.close(io);
 
-        const unit_path = try std.fs.path.join(a, &.{ unit_dir, "protectorate-node.service" });
+        const base = service_name_opt orelse "protectorate-node";
+        const unit_name = if (std.mem.endsWith(u8, base, ".service"))
+            base
+        else
+            try std.fmt.allocPrint(a, "{s}.service", .{base});
+        const unit_path = try std.fs.path.join(a, &.{ unit_dir, unit_name });
         const content = try std.fmt.allocPrint(
             a,
             \\[Unit]
@@ -147,10 +153,10 @@ pub fn cmd_install_service(
 
         if (is_user) {
             _ = run_quiet(a, io, &.{ "systemctl", "--user", "daemon-reload" });
-            _ = run_quiet(a, io, &.{ "systemctl", "--user", "enable", "--now", "protectorate-node.service" });
+            _ = run_quiet(a, io, &.{ "systemctl", "--user", "enable", "--now", unit_name });
         } else {
             _ = run_quiet(a, io, &.{ "systemctl", "daemon-reload" });
-            _ = run_quiet(a, io, &.{ "systemctl", "enable", "--now", "protectorate-node.service" });
+            _ = run_quiet(a, io, &.{ "systemctl", "enable", "--now", unit_name });
         }
 
         try write_manifest(a, io, home_path, unit_path, is_user);
@@ -162,13 +168,15 @@ pub fn cmd_install_service(
         const agents_dir = try std.fs.path.join(a, &.{ h, "Library/LaunchAgents" });
         var d = try std.Io.Dir.cwd().createDirPathOpen(io, agents_dir, .{});
         d.close(io);
-        const plist_path = try std.fs.path.join(a, &.{ agents_dir, "com.protectorate.node.plist" });
+        const label = service_name_opt orelse "com.protectorate.node";
+        const plist_file = try std.fmt.allocPrint(a, "{s}.plist", .{label});
+        const plist_path = try std.fs.path.join(a, &.{ agents_dir, plist_file });
         const plist = try std.fmt.allocPrint(
             a,
             \\<?xml version="1.0" encoding="UTF-8"?>
             \\<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
             \\<plist version="1.0"><dict>
-            \\  <key>Label</key><string>com.protectorate.node</string>
+            \\  <key>Label</key><string>{s}</string>
             \\  <key>ProgramArguments</key><array>
             \\    <string>{s}</string><string>supervise</string><string>--home</string><string>{s}</string>
             \\  </array>
@@ -177,7 +185,7 @@ pub fn cmd_install_service(
             \\</dict></plist>
             \\
         ,
-            .{ exe, home_path },
+            .{ label, exe, home_path },
         );
         try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = plist_path, .data = plist });
         _ = run_quiet(a, io, &.{ "launchctl", "load", "-w", plist_path });
@@ -186,11 +194,12 @@ pub fn cmd_install_service(
         try w.interface.flush();
         return 0;
     } else if (comptime builtin.os.tag == .windows) {
+        const svc_name = service_name_opt orelse "ProtectorateNode";
         const bin_arg = try std.fmt.allocPrint(a, "binPath= \"\\\"{s}\\\" supervise --home \\\"{s}\\\"\"", .{ exe, home_path });
-        _ = run_quiet(a, io, &.{ "sc.exe", "create", "ProtectorateNode", bin_arg, "start=", "auto" });
-        _ = run_quiet(a, io, &.{ "sc.exe", "start", "ProtectorateNode" });
-        try write_manifest(a, io, home_path, "ProtectorateNode", false);
-        try w.interface.writeAll("installed Windows service ProtectorateNode\n");
+        _ = run_quiet(a, io, &.{ "sc.exe", "create", svc_name, bin_arg, "start=", "auto" });
+        _ = run_quiet(a, io, &.{ "sc.exe", "start", svc_name });
+        try write_manifest(a, io, home_path, svc_name, false);
+        try w.interface.print("installed Windows service {s}\n", .{svc_name});
         try w.interface.flush();
         return 0;
     }
@@ -203,6 +212,7 @@ pub fn cmd_uninstall(
     env: *const std.process.Environ.Map,
     home_path: []const u8,
     user_mode: bool,
+    service_name_opt: ?[]const u8,
 ) !u8 {
     var arena_st = std.heap.ArenaAllocator.init(gpa);
     defer arena_st.deinit();
@@ -214,26 +224,34 @@ pub fn cmd_uninstall(
 
     if (comptime builtin.os.tag == .linux) {
         const is_user = user_mode or (std.os.linux.getuid() != 0);
+        const base = service_name_opt orelse "protectorate-node";
+        const unit_name = if (std.mem.endsWith(u8, base, ".service"))
+            base
+        else
+            try std.fmt.allocPrint(a, "{s}.service", .{base});
         if (is_user) {
-            _ = run_quiet(a, io, &.{ "systemctl", "--user", "disable", "--now", "protectorate-node.service" });
+            _ = run_quiet(a, io, &.{ "systemctl", "--user", "disable", "--now", unit_name });
         } else {
-            _ = run_quiet(a, io, &.{ "systemctl", "disable", "--now", "protectorate-node.service" });
+            _ = run_quiet(a, io, &.{ "systemctl", "disable", "--now", unit_name });
         }
         if (is_user) {
             if (env.get("HOME")) |h| {
-                const up = try std.fs.path.join(a, &.{ h, ".config/systemd/user/protectorate-node.service" });
+                const up = try std.fs.path.join(a, &.{ h, ".config/systemd/user", unit_name });
                 std.Io.Dir.cwd().deleteFile(io, up) catch {};
             }
         } else {
-            std.Io.Dir.cwd().deleteFile(io, "/etc/systemd/system/protectorate-node.service") catch {};
+            const sp = try std.fs.path.join(a, &.{ "/etc/systemd/system", unit_name });
+            std.Io.Dir.cwd().deleteFile(io, sp) catch {};
         }
         std.Io.Dir.cwd().deleteFile(io, man_path) catch {};
-        try w.interface.writeAll("uninstalled protectorate-node systemd service\n");
+        try w.interface.print("uninstalled {s} systemd service\n", .{unit_name});
         try w.interface.flush();
         return 0;
     } else if (comptime builtin.os.tag == .macos) {
         if (env.get("HOME")) |h| {
-            const plist_path = try std.fs.path.join(a, &.{ h, "Library/LaunchAgents/com.protectorate.node.plist" });
+            const label = service_name_opt orelse "com.protectorate.node";
+            const plist_file = try std.fmt.allocPrint(a, "{s}.plist", .{label});
+            const plist_path = try std.fs.path.join(a, &.{ h, "Library/LaunchAgents", plist_file });
             _ = run_quiet(a, io, &.{ "launchctl", "unload", "-w", plist_path });
             std.Io.Dir.cwd().deleteFile(io, plist_path) catch {};
         }
@@ -242,10 +260,11 @@ pub fn cmd_uninstall(
         try w.interface.flush();
         return 0;
     } else if (comptime builtin.os.tag == .windows) {
-        _ = run_quiet(a, io, &.{ "sc.exe", "stop", "ProtectorateNode" });
-        _ = run_quiet(a, io, &.{ "sc.exe", "delete", "ProtectorateNode" });
+        const svc_name = service_name_opt orelse "ProtectorateNode";
+        _ = run_quiet(a, io, &.{ "sc.exe", "stop", svc_name });
+        _ = run_quiet(a, io, &.{ "sc.exe", "delete", svc_name });
         std.Io.Dir.cwd().deleteFile(io, man_path) catch {};
-        try w.interface.writeAll("uninstalled Windows service ProtectorateNode\n");
+        try w.interface.print("uninstalled Windows service {s}\n", .{svc_name});
         try w.interface.flush();
         return 0;
     }
@@ -254,6 +273,21 @@ pub fn cmd_uninstall(
 
 fn resolve_node_bin(gpa: std.mem.Allocator, io: std.Io, home_path: []const u8) ![]u8 {
     const exe_name = if (comptime builtin.os.tag == .windows) "protectorate-node.exe" else "protectorate-node";
+    const marker_path = try std.fs.path.join(gpa, &.{ home_path, "releases", "current.txt" });
+    defer gpa.free(marker_path);
+    if (std.Io.Dir.cwd().readFileAlloc(io, marker_path, gpa, .limited(4096))) |raw| {
+        defer gpa.free(raw);
+        const tag = std.mem.trim(u8, raw, " \t\r\n");
+        if (tag.len > 0) {
+            const tagged = try std.fs.path.join(gpa, &.{ home_path, "releases", tag, exe_name });
+            if (std.Io.Dir.cwd().statFile(io, tagged, .{})) |_| {
+                return tagged;
+            } else |_| {
+                gpa.free(tagged);
+            }
+        }
+    } else |_| {}
+
     const cand = try std.fs.path.join(gpa, &.{ home_path, "releases", "current", exe_name });
     if (std.Io.Dir.cwd().statFile(io, cand, .{})) |_| {
         return cand;
