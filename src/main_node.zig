@@ -4,7 +4,9 @@ const s_exec = @import("sandbox/exec.zig");
 const version = @import("version.zig");
 const doctor = @import("doctor/doctor.zig");
 const msg = @import("net/msg.zig");
+const sys = @import("node/sys.zig");
 const serve = @import("node/serve.zig");
+const service = @import("node/service.zig");
 
 pub fn main(init: std.process.Init) !u8 {
     var arena_st = std.heap.ArenaAllocator.init(init.gpa);
@@ -18,6 +20,10 @@ pub fn main(init: std.process.Init) !u8 {
     var home_override: ?[]const u8 = null;
     var sock_override: ?[]const u8 = null;
     var stdio_mode = false;
+    var user_mode = false;
+    var retry_rollback = false;
+    var interval_secs: u64 = 2;
+    var limit_opt: ?u64 = null;
     var name_opt: ?[]const u8 = null;
     var hub_addr_opt: ?[]const u8 = null;
     var hub_key_opt: ?[]const u8 = null;
@@ -37,6 +43,16 @@ pub fn main(init: std.process.Init) !u8 {
             return 0;
         } else if (std.mem.eql(u8, arg, "--stdio")) {
             stdio_mode = true;
+        } else if (std.mem.eql(u8, arg, "--user")) {
+            user_mode = true;
+        } else if (std.mem.eql(u8, arg, "--retry-rollback")) {
+            retry_rollback = true;
+        } else if (std.mem.eql(u8, arg, "--interval") and i + 1 < args.len) {
+            i += 1;
+            interval_secs = @max(@as(u64, 1), std.fmt.parseInt(u64, args[i], 10) catch 2);
+        } else if (std.mem.eql(u8, arg, "--limit") and i + 1 < args.len) {
+            i += 1;
+            limit_opt = std.fmt.parseInt(u64, args[i], 10) catch null;
         } else if (std.mem.eql(u8, arg, "--home") and i + 1 < args.len) {
             i += 1;
             home_override = args[i];
@@ -73,15 +89,53 @@ pub fn main(init: std.process.Init) !u8 {
         return serve.cmd_authorize(init.gpa, init.io, init.environ_map, home_path);
     } else if (std.mem.eql(u8, sub, "serve")) {
         return serve.cmd_serve(init.gpa, init.io, init.environ_map, home_path, stdio_mode);
+    } else if (std.mem.eql(u8, sub, "supervise")) {
+        return service.cmd_supervise(init.gpa, init.io, init.environ_map, home_path);
+    } else if (std.mem.eql(u8, sub, "install-service")) {
+        return service.cmd_install_service(init.gpa, init.io, init.environ_map, home_path, user_mode);
+    } else if (std.mem.eql(u8, sub, "uninstall")) {
+        return service.cmd_uninstall(init.gpa, init.io, init.environ_map, home_path, user_mode);
+    } else if (std.mem.eql(u8, sub, "probation")) {
+        return service.cmd_probation(init.gpa, init.io, home_path, retry_rollback);
     } else if (std.mem.eql(u8, sub, "status")) {
         return serve.cmd_status(init.gpa, init.io, home_path);
     } else if (std.mem.eql(u8, sub, "doctor")) {
         const rep = try doctor.run_checks(arena, init.io, init.environ_map.get("HOME"));
         const json = try std.json.Stringify.valueAlloc(arena, rep, .{ .whitespace = .indent_2 });
-        var w = std.Io.File.stdout().writer(init.io, &.{});
-        try w.interface.writeAll(json);
-        try w.interface.writeByte('\n');
-        try w.interface.flush();
+        return write_stdout_line(init.io, json);
+    } else if (std.mem.eql(u8, sub, "inventory")) {
+        const inv = try sys.collect_inventory(arena, init.io, version.version);
+        const json = try std.json.Stringify.valueAlloc(arena, inv, .{});
+        return write_stdout_line(init.io, json);
+    } else if (std.mem.eql(u8, sub, "sample")) {
+        const smp = sys.collect_sample(init.io);
+        const json = try std.json.Stringify.valueAlloc(arena, smp, .{});
+        return write_stdout_line(init.io, json);
+    } else if (std.mem.eql(u8, sub, "presence")) {
+        const pr = sys.collect_presence(init.io, init.environ_map);
+        const json = try std.json.Stringify.valueAlloc(arena, pr, .{});
+        return write_stdout_line(init.io, json);
+    } else if (std.mem.eql(u8, sub, "watch-presence")) {
+        var count: u64 = 0;
+        var last_state: ?msg.PresenceState = null;
+        var last_locked: ?bool = null;
+        var line_arena = std.heap.ArenaAllocator.init(init.gpa);
+        defer line_arena.deinit();
+        while (true) {
+            const pr = sys.collect_presence(init.io, init.environ_map);
+            if (last_state == null or last_state.? != pr.state or last_locked != pr.locked) {
+                last_state = pr.state;
+                last_locked = pr.locked;
+                _ = line_arena.reset(.retain_capacity);
+                const json = try std.json.Stringify.valueAlloc(line_arena.allocator(), pr, .{});
+                _ = try write_stdout_line(init.io, json);
+                count += 1;
+                if (limit_opt) |lim| {
+                    if (count >= lim) break;
+                }
+            }
+            init.io.sleep(.fromMilliseconds(@intCast(interval_secs * 1000)), .awake) catch break;
+        }
         return 0;
     } else if (std.mem.eql(u8, sub, "lease")) {
         return cmd_local_lease(arena, init, home_path, sock_override, positionals.items[1..]);
@@ -89,6 +143,15 @@ pub fn main(init: std.process.Init) !u8 {
 
     try print_usage(init.io);
     return 2;
+}
+
+fn write_stdout_line(io: std.Io, line: []const u8) !u8 {
+    var buf: [4096]u8 = undefined;
+    var w = std.Io.File.stdout().writer(io, &buf);
+    try w.interface.writeAll(line);
+    try w.interface.writeByte('\n');
+    try w.interface.flush();
+    return 0;
 }
 
 fn cmd_local_lease(
@@ -200,7 +263,7 @@ fn cmd_local_lease(
 }
 
 fn print_usage(io: std.Io) !void {
-    var buf: [1024]u8 = undefined;
+    var buf: [2048]u8 = undefined;
     var w = std.Io.File.stdout().writer(io, &buf);
     try w.interface.writeAll(
         \\protectorate-node - remote fleet node daemon
@@ -209,8 +272,12 @@ fn print_usage(io: std.Io) !void {
         \\  protectorate-node join <ptjoin1:...> [--name <name>] [--home <dir>]
         \\  protectorate-node authorize [--home <dir>]
         \\  protectorate-node serve [--stdio] [--home <dir>]
+        \\  protectorate-node supervise [--home <dir>]
+        \\  protectorate-node install-service [--user] [--home <dir>]
+        \\  protectorate-node uninstall [--user] [--home <dir>]
+        \\  protectorate-node probation [--retry-rollback] [--home <dir>]
         \\  protectorate-node status [--home <dir>]
-        \\  protectorate-node doctor
+        \\  protectorate-node doctor | inventory | sample | presence | watch-presence [--interval <s>] [--limit <n>]
         \\  protectorate-node lease (list | acquire [...] | renew <id> <epoch> | release <id> <epoch> | verify <boot_id> <epoch> | unquarantine) [--home <dir>] [--sock <path>]
         \\
     );

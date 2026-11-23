@@ -16,6 +16,14 @@ pub const Client = struct {
     base_url: []const u8,
     token: ?[]const u8,
 
+    pub const ResolveOpts = struct {
+        url: ?[]const u8 = null,
+        token: ?[]const u8 = null,
+        token_file: ?[]const u8 = null,
+        home: ?[]const u8 = null,
+        prefer_envoy_token: bool = false,
+    };
+
     pub fn resolve(
         gpa: std.mem.Allocator,
         io: std.Io,
@@ -24,15 +32,36 @@ pub const Client = struct {
         token_override: ?[]const u8,
         home_override: ?[]const u8,
     ) !Client {
+        return resolve_opts(gpa, io, env, .{
+            .url = url_override,
+            .token = token_override,
+            .home = home_override,
+        });
+    }
+
+    pub fn resolve_opts(
+        gpa: std.mem.Allocator,
+        io: std.Io,
+        env: *const std.process.Environ.Map,
+        opts: ResolveOpts,
+    ) !Client {
         var arena_st = std.heap.ArenaAllocator.init(gpa);
         defer arena_st.deinit();
         const a = arena_st.allocator();
 
-        var resolved_url: ?[]const u8 = url_override orelse env.get("PROTECTORATE_URL");
-        var resolved_tok: ?[]const u8 = token_override orelse env.get("PROTECTORATE_TOKEN");
+        var resolved_url: ?[]const u8 = opts.url orelse env.get("PROTECTORATE_URL");
+        var resolved_tok: ?[]const u8 = opts.token orelse env.get("PROTECTORATE_TOKEN");
+        if (resolved_tok == null) {
+            if (opts.token_file) |tf| {
+                if (std.Io.Dir.cwd().readFileAlloc(io, tf, a, .limited(64 * 1024))) |raw| {
+                    const tr = std.mem.trim(u8, raw, " \t\r\n");
+                    if (tr.len > 0) resolved_tok = tr;
+                } else |_| {}
+            }
+        }
 
         if (resolved_url == null or resolved_tok == null) {
-            const hp = try resolve_home_path(gpa, env, home_override);
+            const hp = try resolve_home_path(gpa, env, opts.home);
             defer gpa.free(hp);
             if (resolved_url == null) {
                 const cfg_p = try std.fs.path.join(a, &.{ hp, "config.json" });
@@ -53,8 +82,15 @@ pub const Client = struct {
                 if (std.Io.Dir.cwd().readFileAlloc(io, auth_p, a, .limited(1 << 20))) |raw| {
                     if (std.json.parseFromSliceLeaky(std.json.Value, a, raw, .{})) |val| {
                         if (val == .object) {
-                            if (val.object.get("owner_token")) |ot| {
-                                if (ot == .string) resolved_tok = ot.string;
+                            if (opts.prefer_envoy_token) {
+                                if (val.object.get("envoy_token")) |et| {
+                                    if (et == .string) resolved_tok = et.string;
+                                }
+                            }
+                            if (resolved_tok == null) {
+                                if (val.object.get("owner_token")) |ot| {
+                                    if (ot == .string) resolved_tok = ot.string;
+                                }
                             }
                         }
                     } else |_| {}

@@ -4,8 +4,12 @@ const version = @import("../version.zig");
 const qr = @import("../qr.zig");
 const schema = @import("../api/schema.zig");
 const doctor = @import("../doctor/doctor.zig");
+const u_store = @import("../update/store.zig");
 const client = @import("client.zig");
 const mcp = @import("mcp.zig");
+const render = @import("render.zig");
+
+pub const print_out = render.print_out;
 
 pub const ServeOpts = struct {
     home_opt: ?[]const u8 = null,
@@ -34,6 +38,8 @@ pub fn dispatch_cli(init: std.process.Init, arena: std.mem.Allocator) !Action {
     var fleet_opt: ?[]const u8 = null;
     var url_opt: ?[]const u8 = null;
     var token_opt: ?[]const u8 = null;
+    var token_file_opt: ?[]const u8 = null;
+    var as_name_opt: ?[]const u8 = null;
     var dev_token_opt: ?[]const u8 = null;
     var no_sandbox = false;
     var envoy_mode = false;
@@ -49,7 +55,7 @@ pub fn dispatch_cli(init: std.process.Init, arena: std.mem.Allocator) !Action {
             }
             break;
         } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
-            try print_out(init.io, "protectorate {s} ({s})\n", .{ version.version, version.git_commit });
+            try render.print_out(init.io, "protectorate {s} ({s})\n", .{ version.version, version.git_commit });
             return .{ .exit = 0 };
         } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             try print_usage(init.io);
@@ -75,6 +81,12 @@ pub fn dispatch_cli(init: std.process.Init, arena: std.mem.Allocator) !Action {
         } else if (std.mem.eql(u8, arg, "--token") and i + 1 < args.len) {
             i += 1;
             token_opt = args[i];
+        } else if (std.mem.eql(u8, arg, "--token-file") and i + 1 < args.len) {
+            i += 1;
+            token_file_opt = args[i];
+        } else if (std.mem.eql(u8, arg, "--as") and i + 1 < args.len) {
+            i += 1;
+            as_name_opt = args[i];
         } else if (std.mem.eql(u8, arg, "--dev-token") and i + 1 < args.len) {
             i += 1;
             dev_token_opt = args[i];
@@ -83,8 +95,15 @@ pub fn dispatch_cli(init: std.process.Init, arena: std.mem.Allocator) !Action {
         }
     }
 
-    if (envoy_mode) {
-        return .{ .exit = try mcp.run(init.gpa, init.io, init.environ_map, url_opt, token_opt, home_opt) };
+    if (envoy_mode and pos.items.len == 0) {
+        return .{ .exit = try mcp.run(init.gpa, init.io, init.environ_map, .{
+            .url = url_opt,
+            .token = token_opt,
+            .token_file = token_file_opt,
+            .home = home_opt,
+            .as_name = as_name_opt,
+            .envoy_mode = true,
+        }) };
     }
     if (pos.items.len == 0) {
         try print_usage(init.io);
@@ -92,8 +111,19 @@ pub fn dispatch_cli(init: std.process.Init, arena: std.mem.Allocator) !Action {
     }
 
     const sub = pos.items[0];
+    if (std.mem.eql(u8, sub, "version")) {
+        try render.print_out(init.io, "protectorate {s} ({s})\n", .{ version.version, version.git_commit });
+        return .{ .exit = 0 };
+    }
     if (std.mem.eql(u8, sub, "mcp")) {
-        return .{ .exit = try mcp.run(init.gpa, init.io, init.environ_map, url_opt, token_opt, home_opt) };
+        return .{ .exit = try mcp.run(init.gpa, init.io, init.environ_map, .{
+            .url = url_opt,
+            .token = token_opt,
+            .token_file = token_file_opt,
+            .home = home_opt,
+            .as_name = as_name_opt,
+            .envoy_mode = envoy_mode,
+        }) };
     }
     if (std.mem.eql(u8, sub, "serve")) {
         return .{ .serve = .{
@@ -110,159 +140,582 @@ pub fn dispatch_cli(init: std.process.Init, arena: std.mem.Allocator) !Action {
             .dev_token_opt = dev_token_opt,
         } };
     }
-    if (std.mem.eql(u8, sub, "doctor")) {
-        const rep = try doctor.run_checks(arena, init.io, init.environ_map.get("HOME"));
-        if (json_out) {
-            const j = try std.json.Stringify.valueAlloc(arena, rep, .{ .whitespace = .indent_2 });
-            try print_out(init.io, "{s}\n", .{j});
-        } else {
-            try print_doctor(init.io, rep);
-        }
-        return .{ .exit = 0 };
-    }
 
-    var cl = try client.Client.resolve(init.gpa, init.io, init.environ_map, url_opt, token_opt, home_opt);
+    var cl = try client.Client.resolve_opts(init.gpa, init.io, init.environ_map, .{
+        .url = url_opt,
+        .token = token_opt,
+        .token_file = token_file_opt,
+        .home = home_opt,
+    });
     defer cl.deinit();
 
+    if (std.mem.eql(u8, sub, "doctor")) {
+        return .{ .exit = try cmd_doctor(arena, init, &cl, pos.items[1..], json_out) };
+    }
     if (std.mem.eql(u8, sub, "status")) {
-        return .{ .exit = try call_and_render(arena, init.io, &cl, "GetState", "{}", json_out, print_status) };
+        return .{ .exit = try call_and_render(arena, init.io, &cl, "GetState", "{}", json_out, render.print_status) };
     }
     if (std.mem.eql(u8, sub, "pair")) {
         const name = if (pos.items.len > 1) pos.items[1] else "device";
-        const req = try schema.encode_alloc(arena, schema.AddDeviceRequest{ .name = name });
-        const res = cl.call_raw(arena, "AddDevice", req) catch |err| {
-            try print_out(init.io, "error: {s}\n", .{@errorName(err)});
-            return .{ .exit = 1 };
-        };
-        if (json_out or res.status >= 300) {
-            try print_error_or_raw(arena, init.io, res.status, res.body, json_out);
-            return .{ .exit = if (res.status < 300) 0 else 1 };
-        }
-        if (schema.decode_arena(schema.PairingCode, arena, res.body)) |pc| {
-            try print_out(init.io, "device={s}  code={s}  expires_at_ms={d}\n", .{ pc.name, pc.code, pc.expires_at_ms.ms });
-            if (qr.encode(pc.code, .medium)) |qcode| {
-                const art = try qcode.to_terminal_alloc(arena, 2, false);
-                try print_out(init.io, "{s}\n", .{art});
-            } else |_| {}
-        } else |_| {
-            try print_out(init.io, "{s}\n", .{res.body});
-        }
-        return .{ .exit = 0 };
+        return .{ .exit = try cmd_device_add(arena, init.io, &cl, name, json_out) };
     }
     if (std.mem.eql(u8, sub, "rpc") and pos.items.len >= 2) {
         const method = pos.items[1];
         const body = if (pos.items.len >= 3) pos.items[2] else "{}";
         return .{ .exit = try call_and_print(arena, init.io, &cl, method, body) };
     }
-    if (std.mem.eql(u8, sub, "sleeve") and pos.items.len >= 2) {
-        const act = pos.items[1];
-        if (std.mem.eql(u8, act, "list")) {
-            return .{ .exit = try call_and_render(arena, init.io, &cl, "ListSleeves", "{}", json_out, print_sleeve_list) };
-        }
-        if (std.mem.eql(u8, act, "stop") and pos.items.len >= 3) {
-            const req = try schema.encode_alloc(arena, schema.SleeveRef{ .sleeve_id = pos.items[2] });
-            return .{ .exit = try call_and_print(arena, init.io, &cl, "StopSleeve", req) };
-        }
-        if (std.mem.eql(u8, act, "rm") and pos.items.len >= 3) {
-            const req = try schema.encode_alloc(arena, schema.SleeveRef{ .sleeve_id = pos.items[2] });
-            return .{ .exit = try call_and_print(arena, init.io, &cl, "RemoveSleeve", req) };
-        }
-        if (std.mem.eql(u8, act, "transcript") and pos.items.len >= 3) {
-            const req = try schema.encode_alloc(arena, schema.GetTranscriptRequest{ .sleeve_id = pos.items[2] });
-            return .{ .exit = try call_and_render(arena, init.io, &cl, "GetTranscript", req, json_out, print_transcript) };
-        }
-        if (std.mem.eql(u8, act, "prompt") and pos.items.len >= 4) {
-            const req = try schema.encode_alloc(arena, schema.SendMessageRequest{
-                .sleeve_id = pos.items[2],
-                .text = pos.items[3],
-            });
-            return .{ .exit = try call_and_print(arena, init.io, &cl, "SendMessage", req) };
-        }
-        if (std.mem.eql(u8, act, "attach") and pos.items.len >= 3) {
-            return .{ .exit = try cmd_sleeve_attach(arena, init, &cl, pos.items[2]) };
-        }
-    }
-    if (std.mem.eql(u8, sub, "node") and pos.items.len >= 2) {
-        const act = pos.items[1];
-        if (std.mem.eql(u8, act, "list")) {
-            return .{ .exit = try call_and_render(arena, init.io, &cl, "ListNodes", "{}", json_out, print_node_list) };
-        }
-        if (std.mem.eql(u8, act, "join-token")) {
-            const res = try cl.call_raw(arena, "GetEnrollment", "{}");
-            try print_out(init.io, "{s}\n", .{res.body});
-            if (!json_out and res.status == 200) {
-                if (schema.decode_arena(schema.Enrollment, arena, res.body)) |en| {
-                    if (qr.encode(en.control_key, .medium)) |qcode| {
-                        const art = try qcode.to_terminal_alloc(arena, 2, false);
-                        try print_out(init.io, "{s}\n", .{art});
-                    } else |_| {}
-                } else |_| {}
-            }
-            return .{ .exit = if (res.status < 300) 0 else 1 };
-        }
-        if (std.mem.eql(u8, act, "add") and pos.items.len >= 3) {
-            const req = try schema.encode_alloc(arena, schema.AddNodeRequest{ .registration = pos.items[2] });
-            return .{ .exit = try call_and_print(arena, init.io, &cl, "AddNode", req) };
-        }
-        if (std.mem.eql(u8, act, "approve") and pos.items.len >= 3) {
-            const req = try schema.encode_alloc(arena, schema.ApproveNodeRequest{
-                .auth_id = pos.items[2],
-                .name = if (pos.items.len >= 4) pos.items[3] else null,
-            });
-            return .{ .exit = try call_and_print(arena, init.io, &cl, "ApproveNode", req) };
-        }
-        if (std.mem.eql(u8, act, "update")) {
-            return .{ .exit = try cmd_node_update(arena, init.io, &cl, pos.items[2..], json_out) };
-        }
-    }
     if (std.mem.eql(u8, sub, "hub") and pos.items.len >= 2) {
-        if (std.mem.eql(u8, pos.items[1], "update")) {
-            return .{ .exit = try cmd_hub_update(arena, init.io, &cl, pos.items[2..], json_out) };
-        }
+        return .{ .exit = try cmd_hub(arena, init, &cl, home_opt, pos.items[1..], json_out) };
     }
     if (std.mem.eql(u8, sub, "harness") and pos.items.len >= 2) {
-        if (std.mem.eql(u8, pos.items[1], "update")) {
-            const req = try schema.encode_alloc(arena, schema.UpdateHarnessesRequest{ .programs = pos.items[2..] });
-            return .{ .exit = try call_and_render(arena, init.io, &cl, "UpdateHarnesses", req, json_out, print_harness_updates) };
-        }
+        return .{ .exit = try cmd_harness(arena, init, &cl, pos.items[1..], json_out) };
+    }
+    if (std.mem.eql(u8, sub, "sleeve") and pos.items.len >= 2) {
+        return .{ .exit = try cmd_sleeve(arena, init, &cl, pos.items[1..], json_out) };
+    }
+    if (std.mem.eql(u8, sub, "node") and pos.items.len >= 2) {
+        return .{ .exit = try cmd_node(arena, init.io, &cl, pos.items[1..], json_out) };
     }
     if (std.mem.eql(u8, sub, "job") and pos.items.len >= 2) {
-        const act = pos.items[1];
-        if (std.mem.eql(u8, act, "list")) {
-            return .{ .exit = try call_and_render(arena, init.io, &cl, "ListJobs", "{}", json_out, print_job_list) };
-        }
-        if (std.mem.eql(u8, act, "get") and pos.items.len >= 3) {
-            const req = try schema.encode_alloc(arena, schema.JobRef{ .job_id = pos.items[2] });
-            return .{ .exit = try call_and_render(arena, init.io, &cl, "GetJob", req, json_out, print_job_single) };
-        }
-        if (std.mem.eql(u8, act, "run")) {
-            return .{ .exit = try cmd_job_run(arena, init.io, &cl, pos.items[2..], json_out) };
-        }
-        if (std.mem.eql(u8, act, "cancel") and pos.items.len >= 3) {
-            const req = try schema.encode_alloc(arena, schema.JobRef{ .job_id = pos.items[2] });
-            return .{ .exit = try call_and_print(arena, init.io, &cl, "CancelJob", req) };
-        }
-        if (std.mem.eql(u8, act, "logs") and pos.items.len >= 3) {
-            const req = try schema.encode_alloc(arena, schema.GetJobLogRequest{ .job_id = pos.items[2] });
-            return .{ .exit = try call_and_print(arena, init.io, &cl, "GetJobLog", req) };
-        }
-        if (std.mem.eql(u8, act, "artifact") and pos.items.len >= 4) {
-            return .{ .exit = try cmd_job_artifact(arena, init.io, &cl, pos.items[2..], json_out) };
-        }
+        return .{ .exit = try cmd_job(arena, init.io, &cl, pos.items[1..], json_out) };
     }
     if (std.mem.eql(u8, sub, "lease") and pos.items.len >= 2) {
         return .{ .exit = try cmd_lease(arena, init.io, &cl, pos.items[1..], json_out) };
     }
-    if (std.mem.eql(u8, sub, "history") and pos.items.len >= 3 and std.mem.eql(u8, pos.items[1], "search")) {
-        const req = try schema.encode_alloc(arena, schema.SearchHistoryRequest{ .query = pos.items[2] });
-        return .{ .exit = try call_and_render(arena, init.io, &cl, "SearchHistory", req, json_out, print_history_hits) };
+    if (std.mem.eql(u8, sub, "approval") and pos.items.len >= 2) {
+        return .{ .exit = try cmd_approval(arena, init.io, &cl, pos.items[1..], json_out) };
+    }
+    if (std.mem.eql(u8, sub, "event") and pos.items.len >= 2) {
+        return .{ .exit = try cmd_event(arena, init.io, &cl, pos.items[1..], json_out) };
+    }
+    if (std.mem.eql(u8, sub, "envoy") and pos.items.len >= 2) {
+        return .{ .exit = try cmd_envoy(arena, init.io, &cl, as_name_opt, pos.items[1..], json_out) };
+    }
+    if (std.mem.eql(u8, sub, "history") and pos.items.len >= 2) {
+        return .{ .exit = try cmd_history(arena, init.io, &cl, pos.items[1..], json_out) };
+    }
+    if (std.mem.eql(u8, sub, "device") and pos.items.len >= 2) {
+        return .{ .exit = try cmd_device(arena, init.io, &cl, pos.items[1..], json_out) };
     }
     if (std.mem.eql(u8, sub, "quota")) {
-        return .{ .exit = try call_and_render(arena, init.io, &cl, "ListQuotas", "{}", json_out, print_quota_list) };
+        return .{ .exit = try call_and_render(arena, init.io, &cl, "ListQuotas", "{}", json_out, render.print_quota_list) };
     }
 
     try print_usage(init.io);
     return .{ .exit = 2 };
+}
+
+fn cmd_doctor(
+    arena: std.mem.Allocator,
+    init: std.process.Init,
+    cl: *const client.Client,
+    rest: []const []const u8,
+    json_out: bool,
+) !u8 {
+    var refresh = false;
+    for (rest) |a| {
+        if (std.mem.eql(u8, a, "--refresh")) refresh = true;
+    }
+    const req = try schema.encode_alloc(arena, schema.GetDoctorRequest{ .refresh = refresh });
+    if (cl.call_raw(arena, "GetDoctor", req)) |res| {
+        if (res.status < 300) {
+            if (json_out) {
+                try render.print_out(init.io, "{s}\n", .{res.body});
+            } else {
+                render.print_doctor_json(arena, init.io, res.body) catch {
+                    try render.print_out(init.io, "{s}\n", .{res.body});
+                };
+            }
+            return 0;
+        }
+    } else |_| {}
+
+    const rep = try doctor.run_checks(arena, init.io, init.environ_map.get("HOME"));
+    if (json_out) {
+        const j = try std.json.Stringify.valueAlloc(arena, rep, .{ .whitespace = .indent_2 });
+        try render.print_out(init.io, "{s}\n", .{j});
+    } else {
+        try render.print_doctor(init.io, rep);
+    }
+    return 0;
+}
+
+fn cmd_hub(
+    arena: std.mem.Allocator,
+    init: std.process.Init,
+    cl: *const client.Client,
+    home_opt: ?[]const u8,
+    rest: []const []const u8,
+    json_out: bool,
+) !u8 {
+    const act = rest[0];
+    if (std.mem.eql(u8, act, "info")) {
+        return call_and_render(arena, init.io, cl, "GetHubInfo", "{}", json_out, render.print_hub_info);
+    }
+    if (std.mem.eql(u8, act, "state")) {
+        return call_and_render(arena, init.io, cl, "GetState", "{}", json_out, render.print_status);
+    }
+    if (std.mem.eql(u8, act, "update")) {
+        return cmd_hub_update(arena, init.io, cl, rest[1..], json_out);
+    }
+    if (std.mem.eql(u8, act, "probation")) {
+        var retry_rollback = false;
+        for (rest[1..]) |a| {
+            if (std.mem.eql(u8, a, "--retry-rollback")) retry_rollback = true;
+        }
+        const hp = try resolve_hub_home(arena, init.environ_map, home_opt);
+        const rel_dir = try std.fs.path.join(arena, &.{ hp, "releases" });
+        const prob_path = try std.fs.path.join(arena, &.{ rel_dir, "probation.json" });
+        const raw = std.Io.Dir.cwd().readFileAlloc(init.io, prob_path, arena, .limited(64 * 1024)) catch {
+            try render.print_out(init.io, "{s}\n", .{if (json_out) "{\"status\":\"ok\",\"probation\":false}" else "no probation marker present (ok)"});
+            return 0;
+        };
+        const val = std.json.parseFromSliceLeaky(std.json.Value, arena, raw, .{}) catch {
+            try render.print_out(init.io, "unparseable probation marker\n", .{});
+            return 1;
+        };
+        const active = if (val == .object and val.object.get("active") != null and val.object.get("active").? == .string)
+            val.object.get("active").?.string
+        else
+            "-";
+        const healthy = if (val == .object and val.object.get("healthy") != null and val.object.get("healthy").? == .bool)
+            val.object.get("healthy").?.bool
+        else
+            true;
+        if (!healthy or retry_rollback) {
+            if (u_store.rollback(init.gpa, init.io, rel_dir)) |target| {
+                defer init.gpa.free(target);
+                if (json_out) {
+                    const msg = try std.json.Stringify.valueAlloc(arena, .{ .rolled_back = true, .from = active, .to = target }, .{});
+                    try render.print_out(init.io, "{s}\n", .{msg});
+                } else {
+                    try render.print_out(init.io, "rolled back from {s} to {s}\n", .{ active, target });
+                }
+                return 0;
+            } else |_| {}
+        }
+        try render.print_out(init.io, "{s}\n", .{if (json_out) raw else try std.fmt.allocPrint(arena, "active={s} healthy={}", .{ active, healthy })});
+        return 0;
+    }
+    try print_usage(init.io);
+    return 2;
+}
+
+fn cmd_harness(
+    arena: std.mem.Allocator,
+    init: std.process.Init,
+    cl: *const client.Client,
+    rest: []const []const u8,
+    json_out: bool,
+) !u8 {
+    const act = rest[0];
+    if (std.mem.eql(u8, act, "update")) {
+        const req = try schema.encode_alloc(arena, schema.UpdateHarnessesRequest{ .programs = rest[1..] });
+        return call_and_render(arena, init.io, cl, "UpdateHarnesses", req, json_out, render.print_harness_updates);
+    }
+    if (std.mem.eql(u8, act, "login") and rest.len >= 2) {
+        const prog = rest[1];
+        const h = parse_harness(prog) orelse {
+            try render.print_out(init.io, "unknown harness '{s}' (use claude|codex|grok|pi|agy)\n", .{prog});
+            return 2;
+        };
+        var argv: std.ArrayList([]const u8) = .empty;
+        switch (h) {
+            .claude => try argv.append(arena, "claude"),
+            .codex => try argv.appendSlice(arena, &.{ "codex", "login" }),
+            .grok => try argv.append(arena, "grok"),
+            .pi_vendor, .pi_local => try argv.append(arena, "pi"),
+            .antigravity => try argv.append(arena, "agy"),
+            .unknown => return 2,
+        }
+        var idx: usize = 2;
+        if (idx < rest.len and std.mem.eql(u8, rest[idx], "--")) idx += 1;
+        while (idx < rest.len) : (idx += 1) {
+            try argv.append(arena, rest[idx]);
+        }
+        var child = std.process.spawn(init.io, .{
+            .argv = argv.items,
+            .environ_map = init.environ_map,
+        }) catch |err| {
+            try render.print_out(init.io, "failed to launch {s}: {s}\n", .{ argv.items[0], @errorName(err) });
+            return 1;
+        };
+        const term = child.wait(init.io) catch return 1;
+        return switch (term) {
+            .exited => |c| @intCast(c),
+            else => 1,
+        };
+    }
+    try print_usage(init.io);
+    return 2;
+}
+
+fn cmd_sleeve(
+    arena: std.mem.Allocator,
+    init: std.process.Init,
+    cl: *const client.Client,
+    rest: []const []const u8,
+    json_out: bool,
+) !u8 {
+    const act = rest[0];
+    if (std.mem.eql(u8, act, "list")) {
+        return call_and_render(arena, init.io, cl, "ListSleeves", "{}", json_out, render.print_sleeve_list);
+    }
+    if (std.mem.eql(u8, act, "show") and rest.len >= 2) {
+        const res = cl.call_raw(arena, "ListSleeves", "{}") catch |err| {
+            try render.print_out(init.io, "error: {s}\n", .{@errorName(err)});
+            return 1;
+        };
+        if (res.status >= 300) {
+            try render.print_error_or_raw(arena, init.io, res.status, res.body, json_out);
+            return 1;
+        }
+        const ls = try schema.decode_arena(schema.SleeveList, arena, res.body);
+        for (ls.sleeves) |sv| {
+            if (std.mem.eql(u8, sv.id, rest[1]) or std.mem.eql(u8, sv.name, rest[1])) {
+                if (json_out) {
+                    const j = try schema.encode_alloc(arena, sv);
+                    try render.print_out(init.io, "{s}\n", .{j});
+                } else {
+                    try render.print_sleeve_detail(init.io, sv);
+                }
+                return 0;
+            }
+        }
+        try render.print_out(init.io, "sleeve not found: {s}\n", .{rest[1]});
+        return 1;
+    }
+    if (std.mem.eql(u8, act, "spawn") and rest.len >= 2) {
+        return cmd_sleeve_spawn(arena, init.io, cl, rest[1..], json_out);
+    }
+    if ((std.mem.eql(u8, act, "send") or std.mem.eql(u8, act, "prompt")) and rest.len >= 3) {
+        return cmd_sleeve_send(arena, init.io, cl, rest[1..]);
+    }
+    if (std.mem.eql(u8, act, "inbox")) {
+        var target: ?[]const u8 = null;
+        var drop = false;
+        for (rest[1..]) |a| {
+            if (std.mem.eql(u8, a, "--drop")) {
+                drop = true;
+            } else if (target == null) {
+                target = a;
+            }
+        }
+        const sid = target orelse "envoy";
+        if (drop) {
+            const req = try schema.encode_alloc(arena, schema.SleeveRef{ .sleeve_id = sid });
+            return call_and_print(arena, init.io, cl, "DropQueued", req);
+        }
+        const req = try schema.encode_alloc(arena, schema.InboxRequest{ .sleeve_id = sid });
+        return call_and_render(arena, init.io, cl, "GetInbox", req, json_out, render.print_inbox);
+    }
+    if (std.mem.eql(u8, act, "interrupt") and rest.len >= 2) {
+        const req = try schema.encode_alloc(arena, schema.SleeveRef{ .sleeve_id = rest[1] });
+        return call_and_print(arena, init.io, cl, "Interrupt", req);
+    }
+    if (std.mem.eql(u8, act, "stop") and rest.len >= 2) {
+        const req = try schema.encode_alloc(arena, schema.SleeveRef{ .sleeve_id = rest[1] });
+        return call_and_print(arena, init.io, cl, "StopSleeve", req);
+    }
+    if (std.mem.eql(u8, act, "rm") and rest.len >= 2) {
+        const req = try schema.encode_alloc(arena, schema.SleeveRef{ .sleeve_id = rest[1] });
+        return call_and_print(arena, init.io, cl, "RemoveSleeve", req);
+    }
+    if (std.mem.eql(u8, act, "start") and rest.len >= 2) {
+        return cmd_sleeve_start(arena, init.io, cl, rest[1..]);
+    }
+    if (std.mem.eql(u8, act, "resleeve") and rest.len >= 2) {
+        return cmd_sleeve_resleeve(arena, init.io, cl, rest[1..]);
+    }
+    if (std.mem.eql(u8, act, "takeover") and rest.len >= 2) {
+        const req = try schema.encode_alloc(arena, schema.SleeveRef{ .sleeve_id = rest[1] });
+        return call_and_print(arena, init.io, cl, "TakeoverTerminal", req);
+    }
+    if (std.mem.eql(u8, act, "attach") and rest.len >= 2) {
+        return cmd_sleeve_attach(arena, init, cl, rest[1]);
+    }
+    if (std.mem.eql(u8, act, "transcript") and rest.len >= 2) {
+        var from_seq: ?u64 = null;
+        var limit: ?u64 = null;
+        var idx: usize = 2;
+        while (idx < rest.len) : (idx += 1) {
+            if (std.mem.eql(u8, rest[idx], "--from") and idx + 1 < rest.len) {
+                idx += 1;
+                from_seq = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+            } else if (std.mem.eql(u8, rest[idx], "--limit") and idx + 1 < rest.len) {
+                idx += 1;
+                limit = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+            }
+        }
+        const req = try schema.encode_alloc(arena, schema.GetTranscriptRequest{
+            .sleeve_id = rest[1],
+            .from_seq = from_seq,
+            .limit = limit,
+        });
+        return call_and_render(arena, init.io, cl, "GetTranscript", req, json_out, render.print_transcript);
+    }
+    if (std.mem.eql(u8, act, "wait") and rest.len >= 2) {
+        return cmd_sleeve_wait(arena, init.io, cl, rest[1..], json_out);
+    }
+    if (std.mem.eql(u8, act, "push") and rest.len >= 2) {
+        var remote: ?[]const u8 = null;
+        var branch: ?[]const u8 = null;
+        var force = false;
+        var idx: usize = 2;
+        while (idx < rest.len) : (idx += 1) {
+            const a = rest[idx];
+            if (std.mem.eql(u8, a, "--remote") and idx + 1 < rest.len) {
+                idx += 1;
+                remote = rest[idx];
+            } else if (std.mem.eql(u8, a, "--branch") and idx + 1 < rest.len) {
+                idx += 1;
+                branch = rest[idx];
+            } else if (std.mem.eql(u8, a, "--force")) {
+                force = true;
+            }
+        }
+        const req = try schema.encode_alloc(arena, schema.GitPushRequest{
+            .sleeve_id = rest[1],
+            .remote = remote,
+            .branch = branch,
+            .force = force,
+        });
+        return call_and_render(arena, init.io, cl, "GitPush", req, json_out, render.print_git_push);
+    }
+    try print_usage(init.io);
+    return 2;
+}
+
+fn cmd_sleeve_spawn(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cl: *const client.Client,
+    rest: []const []const u8,
+    json_out: bool,
+) !u8 {
+    var req = schema.SpawnSleeveRequest{
+        .name = rest[0],
+        .harness = .claude,
+    };
+    var resleeve_list: std.ArrayList(schema.Harness) = .empty;
+    var idx: usize = 1;
+    while (idx < rest.len) : (idx += 1) {
+        const a = rest[idx];
+        if (std.mem.eql(u8, a, "--path") and idx + 1 < rest.len) {
+            idx += 1;
+            req.path = rest[idx];
+        } else if (std.mem.eql(u8, a, "--new-path") and idx + 1 < rest.len) {
+            idx += 1;
+            req.new_path = rest[idx];
+        } else if (std.mem.eql(u8, a, "--parent") and idx + 1 < rest.len) {
+            idx += 1;
+            req.parent_id = rest[idx];
+        } else if (std.mem.eql(u8, a, "--readonly")) {
+            req.view = .readonly;
+        } else if (std.mem.eql(u8, a, "--worktree")) {
+            req.view = .worktree;
+        } else if (std.mem.eql(u8, a, "--harness") and idx + 1 < rest.len) {
+            idx += 1;
+            req.harness = parse_harness(rest[idx]) orelse return 2;
+        } else if (std.mem.eql(u8, a, "--provider") and idx + 1 < rest.len) {
+            idx += 1;
+            req.provider = rest[idx];
+        } else if (std.mem.eql(u8, a, "--model") and idx + 1 < rest.len) {
+            idx += 1;
+            req.model = rest[idx];
+        } else if (std.mem.eql(u8, a, "--effort") and idx + 1 < rest.len) {
+            idx += 1;
+            req.effort = rest[idx];
+        } else if (std.mem.eql(u8, a, "--resleeve-to") and idx + 1 < rest.len) {
+            idx += 1;
+            var parts = std.mem.splitScalar(u8, rest[idx], ',');
+            while (parts.next()) |p| {
+                const tr = std.mem.trim(u8, p, " \t");
+                if (parse_harness(tr)) |rh| try resleeve_list.append(arena, rh);
+            }
+        } else if (std.mem.eql(u8, a, "--budget") and idx + 1 < rest.len) {
+            idx += 1;
+            req.budget = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+        } else if (std.mem.eql(u8, a, "--message") and idx + 1 < rest.len) {
+            idx += 1;
+            req.message = rest[idx];
+        } else if (std.mem.eql(u8, a, "--message-file") and idx + 1 < rest.len) {
+            idx += 1;
+            req.message = try read_message_file(arena, io, rest[idx]);
+        } else if (std.mem.eql(u8, a, "--until-done") and idx + 1 < rest.len) {
+            idx += 1;
+            req.until_done = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+        }
+    }
+    req.resleeve_to = resleeve_list.items;
+    const body = try schema.encode_alloc(arena, req);
+    if (json_out) return call_and_print(arena, io, cl, "SpawnSleeve", body);
+    const res = cl.call_raw(arena, "SpawnSleeve", body) catch |err| {
+        try render.print_out(io, "error: {s}\n", .{@errorName(err)});
+        return 1;
+    };
+    if (res.status >= 300) {
+        try render.print_error_or_raw(arena, io, res.status, res.body, false);
+        return 1;
+    }
+    const sv = try schema.decode_arena(schema.Sleeve, arena, res.body);
+    try render.print_sleeve_detail(io, sv);
+    return 0;
+}
+
+fn cmd_sleeve_send(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cl: *const client.Client,
+    rest: []const []const u8,
+) !u8 {
+    const sid = rest[0];
+    var delivery: schema.Delivery = .queue;
+    var supersede = false;
+    var until_done: ?u64 = null;
+    var msg_file: ?[]const u8 = null;
+    var words: std.ArrayList([]const u8) = .empty;
+    var idx: usize = 1;
+    while (idx < rest.len) : (idx += 1) {
+        const a = rest[idx];
+        if (std.mem.eql(u8, a, "--steer")) {
+            delivery = .steer;
+        } else if (std.mem.eql(u8, a, "--supersede")) {
+            supersede = true;
+        } else if (std.mem.eql(u8, a, "--until-done") and idx + 1 < rest.len) {
+            idx += 1;
+            until_done = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+        } else if (std.mem.eql(u8, a, "--message-file") and idx + 1 < rest.len) {
+            idx += 1;
+            msg_file = rest[idx];
+        } else {
+            try words.append(arena, a);
+        }
+    }
+    const text = if (msg_file) |mf|
+        try read_message_file(arena, io, mf)
+    else
+        try std.mem.join(arena, " ", words.items);
+    if (text.len == 0) return 2;
+    const req = try schema.encode_alloc(arena, schema.SendMessageRequest{
+        .sleeve_id = sid,
+        .text = text,
+        .delivery = delivery,
+        .supersede = supersede,
+        .until_done = until_done,
+    });
+    return call_and_print(arena, io, cl, "SendMessage", req);
+}
+
+fn cmd_sleeve_start(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cl: *const client.Client,
+    rest: []const []const u8,
+) !u8 {
+    var req = schema.StartSleeveRequest{ .sleeve_id = rest[0] };
+    var idx: usize = 1;
+    while (idx < rest.len) : (idx += 1) {
+        const a = rest[idx];
+        if (std.mem.eql(u8, a, "--harness") and idx + 1 < rest.len) {
+            idx += 1;
+            req.target = parse_harness(rest[idx]) orelse return 2;
+        } else if (std.mem.eql(u8, a, "--provider") and idx + 1 < rest.len) {
+            idx += 1;
+            req.provider = rest[idx];
+        } else if (std.mem.eql(u8, a, "--model") and idx + 1 < rest.len) {
+            idx += 1;
+            req.model = rest[idx];
+        } else if (std.mem.eql(u8, a, "--effort") and idx + 1 < rest.len) {
+            idx += 1;
+            req.effort = rest[idx];
+        } else if (std.mem.eql(u8, a, "--until-done") and idx + 1 < rest.len) {
+            idx += 1;
+            req.until_done = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+        }
+    }
+    const body = try schema.encode_alloc(arena, req);
+    return call_and_print(arena, io, cl, "StartSleeve", body);
+}
+
+fn cmd_sleeve_resleeve(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cl: *const client.Client,
+    rest: []const []const u8,
+) !u8 {
+    var target: ?schema.Harness = null;
+    var model: ?[]const u8 = null;
+    var provider: ?[]const u8 = null;
+    var effort: ?[]const u8 = null;
+    var idx: usize = 1;
+    while (idx < rest.len) : (idx += 1) {
+        const a = rest[idx];
+        if (std.mem.eql(u8, a, "--harness") and idx + 1 < rest.len) {
+            idx += 1;
+            target = parse_harness(rest[idx]) orelse return 2;
+        } else if (std.mem.eql(u8, a, "--provider") and idx + 1 < rest.len) {
+            idx += 1;
+            provider = rest[idx];
+        } else if (std.mem.eql(u8, a, "--model") and idx + 1 < rest.len) {
+            idx += 1;
+            model = rest[idx];
+        } else if (std.mem.eql(u8, a, "--effort") and idx + 1 < rest.len) {
+            idx += 1;
+            effort = rest[idx];
+        }
+    }
+    const req = try schema.encode_alloc(arena, schema.ResleeveRequest{
+        .sleeve_id = rest[0],
+        .target = target orelse return 2,
+        .model = model,
+        .provider = provider,
+        .effort = effort,
+    });
+    return call_and_print(arena, io, cl, "Resleeve", req);
+}
+
+fn cmd_sleeve_wait(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cl: *const client.Client,
+    rest: []const []const u8,
+    json_out: bool,
+) !u8 {
+    var sids: std.ArrayList([]const u8) = .empty;
+    var until: schema.WaitUntil = .done;
+    var any = false;
+    var after_seq: ?u64 = null;
+    var timeout_ms: u64 = 30_000;
+    var idx: usize = 0;
+    while (idx < rest.len) : (idx += 1) {
+        const a = rest[idx];
+        if (std.mem.eql(u8, a, "--all")) {
+            any = false;
+        } else if (std.mem.eql(u8, a, "--any")) {
+            any = true;
+        } else if (std.mem.eql(u8, a, "--until") and idx + 1 < rest.len) {
+            idx += 1;
+            until = std.meta.stringToEnum(schema.WaitUntil, rest[idx]) orelse return 2;
+        } else if (std.mem.eql(u8, a, "--after-seq") and idx + 1 < rest.len) {
+            idx += 1;
+            after_seq = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+        } else if (std.mem.eql(u8, a, "--timeout") and idx + 1 < rest.len) {
+            idx += 1;
+            const secs = std.fmt.parseInt(u64, rest[idx], 10) catch 30;
+            timeout_ms = secs *| 1000;
+        } else {
+            try sids.append(arena, a);
+        }
+    }
+    const req = try schema.encode_alloc(arena, schema.WaitRequest{
+        .sleeve_ids = sids.items,
+        .until = until,
+        .any = any,
+        .timeout_ms = timeout_ms,
+        .after_seq = after_seq,
+    });
+    return call_and_render(arena, io, cl, "Wait", req, json_out, render.print_wait_result);
 }
 
 fn cmd_sleeve_attach(
@@ -272,15 +725,15 @@ fn cmd_sleeve_attach(
     target_arg: []const u8,
 ) !u8 {
     const ls_res = cl.call_raw(arena, "ListSleeves", "{}") catch |err| {
-        try print_out(init.io, "error: {s}\n", .{@errorName(err)});
+        try render.print_out(init.io, "error: {s}\n", .{@errorName(err)});
         return 1;
     };
     if (ls_res.status >= 300) {
-        try print_error_or_raw(arena, init.io, ls_res.status, ls_res.body, false);
+        try render.print_error_or_raw(arena, init.io, ls_res.status, ls_res.body, false);
         return 1;
     }
     const ls = schema.decode_arena(schema.SleeveList, arena, ls_res.body) catch {
-        try print_out(init.io, "failed to parse sleeve list\n", .{});
+        try render.print_out(init.io, "failed to parse sleeve list\n", .{});
         return 1;
     };
 
@@ -292,7 +745,7 @@ fn cmd_sleeve_attach(
         }
     }
     const sv = chosen orelse {
-        try print_out(init.io, "sleeve not found: {s}\n", .{target_arg});
+        try render.print_out(init.io, "sleeve not found: {s}\n", .{target_arg});
         return 1;
     };
 
@@ -334,11 +787,11 @@ fn cmd_sleeve_attach(
 
     const to_req = try schema.encode_alloc(arena, schema.SleeveRef{ .sleeve_id = sv.id });
     const to_res = cl.call_raw(arena, "TakeoverTerminal", to_req) catch |err| {
-        try print_out(init.io, "takeover failed: {s}\n", .{@errorName(err)});
+        try render.print_out(init.io, "takeover failed: {s}\n", .{@errorName(err)});
         return 1;
     };
     if (to_res.status >= 300) {
-        try print_error_or_raw(arena, init.io, to_res.status, to_res.body, false);
+        try render.print_error_or_raw(arena, init.io, to_res.status, to_res.body, false);
         return 1;
     }
 
@@ -372,12 +825,10 @@ fn cmd_sleeve_attach(
             if (model) |m| try argv.appendSlice(arena, &.{ "--model", m });
             if (effort) |e| try argv.appendSlice(arena, &.{ "--effort", e });
         },
-        .unknown => {
-            try argv.append(arena, "claude");
-        },
+        .unknown => try argv.append(arena, "claude"),
     }
 
-    try print_out(init.io, "attaching to {s} ({s}) via {s} in {s}\n", .{
+    try render.print_out(init.io, "attaching to {s} ({s}) via {s} in {s}\n", .{
         sv.id,
         sv.name,
         @tagName(harness),
@@ -389,14 +840,483 @@ fn cmd_sleeve_attach(
         .cwd = .{ .path = sv.path },
         .environ_map = init.environ_map,
     }) catch |err| {
-        try print_out(init.io, "failed to launch {s}: {s}\n", .{ argv.items[0], @errorName(err) });
+        try render.print_out(init.io, "failed to launch {s}: {s}\n", .{ argv.items[0], @errorName(err) });
         return 1;
     };
     const term = child.wait(init.io) catch return 1;
     return switch (term) {
-        .exited => |c| c,
+        .exited => |code| @intCast(code),
         else => 1,
     };
+}
+
+fn cmd_node(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cl: *const client.Client,
+    rest: []const []const u8,
+    json_out: bool,
+) !u8 {
+    const act = rest[0];
+    if (std.mem.eql(u8, act, "list")) {
+        return call_and_render(arena, io, cl, "ListNodes", "{}", json_out, render.print_node_list);
+    }
+    if (std.mem.eql(u8, act, "show") and rest.len >= 2) {
+        const req = try schema.encode_alloc(arena, schema.NodeRef{ .node_id = rest[1] });
+        return call_and_render(arena, io, cl, "GetNode", req, json_out, render.print_node_single);
+    }
+    if (std.mem.eql(u8, act, "set") and rest.len >= 4) {
+        var jobs: ?schema.NodeJobs = null;
+        var note: ?[]const u8 = null;
+        var idx: usize = 2;
+        while (idx < rest.len) : (idx += 1) {
+            if (std.mem.eql(u8, rest[idx], "--jobs") and idx + 1 < rest.len) {
+                idx += 1;
+                jobs = std.meta.stringToEnum(schema.NodeJobs, rest[idx]) orelse return 2;
+            } else if (std.mem.eql(u8, rest[idx], "--note") and idx + 1 < rest.len) {
+                idx += 1;
+                note = rest[idx];
+            }
+        }
+        const req = try schema.encode_alloc(arena, schema.SetNodeJobsRequest{
+            .node_id = rest[1],
+            .jobs = jobs orelse return 2,
+            .note = note,
+        });
+        return call_and_render(arena, io, cl, "SetNodeJobs", req, json_out, render.print_node_single);
+    }
+    if (std.mem.eql(u8, act, "join-token")) {
+        const res = try cl.call_raw(arena, "GetEnrollment", "{}");
+        try render.print_out(io, "{s}\n", .{res.body});
+        if (!json_out and res.status == 200) {
+            if (schema.decode_arena(schema.Enrollment, arena, res.body)) |en| {
+                if (qr.encode(en.control_key, .medium)) |qcode| {
+                    const art = try qcode.to_terminal_alloc(arena, 2, false);
+                    try render.print_out(io, "{s}\n", .{art});
+                } else |_| {}
+            } else |_| {}
+        }
+        return if (res.status < 300) 0 else 1;
+    }
+    if (std.mem.eql(u8, act, "add") and rest.len >= 2) {
+        const req = try schema.encode_alloc(arena, schema.AddNodeRequest{ .registration = rest[1] });
+        return call_and_print(arena, io, cl, "AddNode", req);
+    }
+    if (std.mem.eql(u8, act, "approve") and rest.len >= 2) {
+        var name: ?[]const u8 = null;
+        var fp: ?[]const u8 = null;
+        var idx: usize = 2;
+        while (idx < rest.len) : (idx += 1) {
+            if (std.mem.eql(u8, rest[idx], "--name") and idx + 1 < rest.len) {
+                idx += 1;
+                name = rest[idx];
+            } else if (std.mem.eql(u8, rest[idx], "--fingerprint") and idx + 1 < rest.len) {
+                idx += 1;
+                fp = rest[idx];
+            } else if (name == null) {
+                name = rest[idx];
+            }
+        }
+        const req = try schema.encode_alloc(arena, schema.ApproveNodeRequest{
+            .auth_id = rest[1],
+            .name = name,
+            .fingerprint = fp,
+        });
+        return call_and_print(arena, io, cl, "ApproveNode", req);
+    }
+    if (std.mem.eql(u8, act, "rename") and rest.len >= 3) {
+        const req = try schema.encode_alloc(arena, schema.RenameNodeRequest{
+            .node_id = rest[1],
+            .name = rest[2],
+        });
+        return call_and_print(arena, io, cl, "RenameNode", req);
+    }
+    if (std.mem.eql(u8, act, "rm") and rest.len >= 2) {
+        var force = false;
+        for (rest[2..]) |a| {
+            if (std.mem.eql(u8, a, "--force")) force = true;
+        }
+        const req = try schema.encode_alloc(arena, schema.RemoveNodeRequest{
+            .node_id = rest[1],
+            .force = force,
+        });
+        return call_and_print(arena, io, cl, "RemoveNode", req);
+    }
+    if (std.mem.eql(u8, act, "update")) {
+        return cmd_node_update(arena, io, cl, rest[1..], json_out);
+    }
+    try print_usage(io);
+    return 2;
+}
+
+fn cmd_job(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cl: *const client.Client,
+    rest: []const []const u8,
+    json_out: bool,
+) !u8 {
+    const act = rest[0];
+    if (std.mem.eql(u8, act, "list")) {
+        var req = schema.ListJobsRequest{};
+        var idx: usize = 1;
+        while (idx < rest.len) : (idx += 1) {
+            if (std.mem.eql(u8, rest[idx], "--node") and idx + 1 < rest.len) {
+                idx += 1;
+                req.node_id = rest[idx];
+            } else if (std.mem.eql(u8, rest[idx], "--limit") and idx + 1 < rest.len) {
+                idx += 1;
+                req.limit = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+            }
+        }
+        const body = try schema.encode_alloc(arena, req);
+        return call_and_render(arena, io, cl, "ListJobs", body, json_out, render.print_job_list);
+    }
+    if (std.mem.eql(u8, act, "get") and rest.len >= 2) {
+        const req = try schema.encode_alloc(arena, schema.JobRef{ .job_id = rest[1] });
+        return call_and_render(arena, io, cl, "GetJob", req, json_out, render.print_job_single);
+    }
+    if (std.mem.eql(u8, act, "run")) {
+        return cmd_job_run(arena, io, cl, rest[1..], json_out);
+    }
+    if (std.mem.eql(u8, act, "cancel") and rest.len >= 2) {
+        const req = try schema.encode_alloc(arena, schema.JobRef{ .job_id = rest[1] });
+        return call_and_print(arena, io, cl, "CancelJob", req);
+    }
+    if (std.mem.eql(u8, act, "logs") and rest.len >= 2) {
+        var req = schema.GetJobLogRequest{ .job_id = rest[1] };
+        var idx: usize = 2;
+        while (idx < rest.len) : (idx += 1) {
+            if (std.mem.eql(u8, rest[idx], "--offset") and idx + 1 < rest.len) {
+                idx += 1;
+                req.offset = std.fmt.parseInt(u64, rest[idx], 10) catch 0;
+            } else if (std.mem.eql(u8, rest[idx], "--limit") and idx + 1 < rest.len) {
+                idx += 1;
+                req.limit = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+            }
+        }
+        const body = try schema.encode_alloc(arena, req);
+        return call_and_render(arena, io, cl, "GetJobLog", body, json_out, render.print_job_log);
+    }
+    if (std.mem.eql(u8, act, "artifact") and rest.len >= 3) {
+        return cmd_job_artifact(arena, io, cl, rest[1..], json_out);
+    }
+    try print_usage(io);
+    return 2;
+}
+
+fn cmd_approval(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cl: *const client.Client,
+    rest: []const []const u8,
+    json_out: bool,
+) !u8 {
+    const act = rest[0];
+    if (std.mem.eql(u8, act, "list")) {
+        var pending = false;
+        for (rest[1..]) |a| {
+            if (std.mem.eql(u8, a, "--pending")) pending = true;
+        }
+        const req = try schema.encode_alloc(arena, schema.ListApprovalsRequest{ .pending_only = pending });
+        return call_and_render(arena, io, cl, "ListApprovals", req, json_out, render.print_approval_list);
+    }
+    if (std.mem.eql(u8, act, "decide") and rest.len >= 3) {
+        const d_str = rest[2];
+        const dec: schema.Decision = if (std.mem.eql(u8, d_str, "allow") or std.mem.eql(u8, d_str, "allow-once") or std.mem.eql(u8, d_str, "allow_once"))
+            .allow_once
+        else if (std.mem.eql(u8, d_str, "allow-session") or std.mem.eql(u8, d_str, "allow_session"))
+            .allow_session
+        else if (std.mem.eql(u8, d_str, "deny"))
+            .deny
+        else
+            return 2;
+        const req = try schema.encode_alloc(arena, schema.DecideRequest{
+            .approval_id = rest[1],
+            .decision = dec,
+        });
+        return call_and_print(arena, io, cl, "Decide", req);
+    }
+    try print_usage(io);
+    return 2;
+}
+
+fn cmd_event(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cl: *const client.Client,
+    rest: []const []const u8,
+    json_out: bool,
+) !u8 {
+    const act = rest[0];
+    if (std.mem.eql(u8, act, "list")) {
+        var req = schema.ListEventsRequest{};
+        var idx: usize = 1;
+        while (idx < rest.len) : (idx += 1) {
+            if (std.mem.eql(u8, rest[idx], "--from") and idx + 1 < rest.len) {
+                idx += 1;
+                req.from_seq = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+            } else if (std.mem.eql(u8, rest[idx], "--limit") and idx + 1 < rest.len) {
+                idx += 1;
+                req.limit = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+            }
+        }
+        const body = try schema.encode_alloc(arena, req);
+        return call_and_render(arena, io, cl, "ListEvents", body, json_out, render.print_event_list);
+    }
+    if (std.mem.eql(u8, act, "read") and rest.len >= 2) {
+        const seq = std.fmt.parseInt(u64, rest[1], 10) catch return 2;
+        const req = try schema.encode_alloc(arena, schema.MarkEventsReadRequest{ .up_to_seq = seq });
+        return call_and_print(arena, io, cl, "MarkEventsRead", req);
+    }
+    try print_usage(io);
+    return 2;
+}
+
+fn cmd_envoy(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cl: *const client.Client,
+    default_as: ?[]const u8,
+    rest: []const []const u8,
+    json_out: bool,
+) !u8 {
+    const act = rest[0];
+    if (std.mem.eql(u8, act, "token")) {
+        const res = cl.call_raw(arena, "GetEnvoyToken", "{}") catch |err| {
+            try render.print_out(io, "error: {s}\n", .{@errorName(err)});
+            return 1;
+        };
+        if (json_out or res.status >= 300) {
+            try render.print_error_or_raw(arena, io, res.status, res.body, json_out);
+            return if (res.status < 300) 0 else 1;
+        }
+        const et = try schema.decode_arena(schema.EnvoyToken, arena, res.body);
+        try render.print_out(io, "{s}\n", .{et.token});
+        return 0;
+    }
+    if (std.mem.eql(u8, act, "send")) {
+        var agent: ?[]const u8 = default_as;
+        var msg_file: ?[]const u8 = null;
+        var words: std.ArrayList([]const u8) = .empty;
+        var idx: usize = 1;
+        while (idx < rest.len) : (idx += 1) {
+            const a = rest[idx];
+            if (std.mem.eql(u8, a, "--as") and idx + 1 < rest.len) {
+                idx += 1;
+                agent = rest[idx];
+            } else if (std.mem.eql(u8, a, "--message-file") and idx + 1 < rest.len) {
+                idx += 1;
+                msg_file = rest[idx];
+            } else {
+                try words.append(arena, a);
+            }
+        }
+        const text = if (msg_file) |mf|
+            try read_message_file(arena, io, mf)
+        else
+            try std.mem.join(arena, " ", words.items);
+        if (text.len == 0) return 2;
+        const req = try schema.encode_alloc(arena, schema.EnvoySendRequest{
+            .text = text,
+            .agent = agent,
+        });
+        return call_and_print(arena, io, cl, "EnvoySend", req);
+    }
+    if (std.mem.eql(u8, act, "wait")) {
+        var req = schema.EnvoyWaitRequest{};
+        var idx: usize = 1;
+        while (idx < rest.len) : (idx += 1) {
+            const a = rest[idx];
+            if (std.mem.eql(u8, a, "--timeout") and idx + 1 < rest.len) {
+                idx += 1;
+                const secs = std.fmt.parseInt(u64, rest[idx], 10) catch 30;
+                req.timeout_ms = secs *| 1000;
+            } else if (req.request_id == null) {
+                req.request_id = a;
+            }
+        }
+        const body = try schema.encode_alloc(arena, req);
+        return call_and_render(arena, io, cl, "EnvoyWait", body, json_out, render.print_envoy_reply);
+    }
+    if (std.mem.eql(u8, act, "read")) {
+        var req = schema.EnvoyReadRequest{};
+        var idx: usize = 1;
+        while (idx < rest.len) : (idx += 1) {
+            if (std.mem.eql(u8, rest[idx], "--from") and idx + 1 < rest.len) {
+                idx += 1;
+                req.from_seq = std.fmt.parseInt(u64, rest[idx], 10) catch 0;
+            } else if (std.mem.eql(u8, rest[idx], "--limit") and idx + 1 < rest.len) {
+                idx += 1;
+                req.limit = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+            }
+        }
+        const body = try schema.encode_alloc(arena, req);
+        return call_and_render(arena, io, cl, "EnvoyRead", body, json_out, render.print_transcript);
+    }
+    try print_usage(io);
+    return 2;
+}
+
+fn cmd_history(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cl: *const client.Client,
+    rest: []const []const u8,
+    json_out: bool,
+) !u8 {
+    const act = rest[0];
+    if (std.mem.eql(u8, act, "search") and rest.len >= 2) {
+        var words: std.ArrayList([]const u8) = .empty;
+        var sleeves: std.ArrayList([]const u8) = .empty;
+        var roles: std.ArrayList(schema.HistoryRole) = .empty;
+        var mode: schema.HistoryMode = .all;
+        var harness: ?schema.Harness = null;
+        var session: ?[]const u8 = null;
+        var since_ms: ?schema.TimeMs = null;
+        var until_ms: ?schema.TimeMs = null;
+        var limit: ?u64 = null;
+        const now_ms = std.Io.Clock.real.now(io).toMilliseconds();
+
+        var idx: usize = 1;
+        while (idx < rest.len) : (idx += 1) {
+            const a = rest[idx];
+            if (std.mem.eql(u8, a, "--mode") and idx + 1 < rest.len) {
+                idx += 1;
+                mode = std.meta.stringToEnum(schema.HistoryMode, rest[idx]) orelse return 2;
+            } else if (std.mem.eql(u8, a, "--sleeve") and idx + 1 < rest.len) {
+                idx += 1;
+                try sleeves.append(arena, rest[idx]);
+            } else if (std.mem.eql(u8, a, "--harness") and idx + 1 < rest.len) {
+                idx += 1;
+                harness = parse_harness(rest[idx]) orelse return 2;
+            } else if (std.mem.eql(u8, a, "--session") and idx + 1 < rest.len) {
+                idx += 1;
+                session = rest[idx];
+            } else if (std.mem.eql(u8, a, "--role") and idx + 1 < rest.len) {
+                idx += 1;
+                const r_s = rest[idx];
+                const role: schema.HistoryRole = if (std.mem.eql(u8, r_s, "user"))
+                    .user
+                else if (std.mem.eql(u8, r_s, "assistant"))
+                    .assistant
+                else if (std.mem.eql(u8, r_s, "tool-call") or std.mem.eql(u8, r_s, "tool_call"))
+                    .tool_call
+                else if (std.mem.eql(u8, r_s, "tool-error") or std.mem.eql(u8, r_s, "tool_error"))
+                    .tool_error
+                else if (std.mem.eql(u8, r_s, "compaction"))
+                    .compaction
+                else
+                    return 2;
+                try roles.append(arena, role);
+            } else if (std.mem.eql(u8, a, "--since") and idx + 1 < rest.len) {
+                idx += 1;
+                if (parse_time_arg(rest[idx], now_ms)) |ms| since_ms = .{ .ms = ms };
+            } else if (std.mem.eql(u8, a, "--until") and idx + 1 < rest.len) {
+                idx += 1;
+                if (parse_time_arg(rest[idx], now_ms)) |ms| until_ms = .{ .ms = ms };
+            } else if (std.mem.eql(u8, a, "--limit") and idx + 1 < rest.len) {
+                idx += 1;
+                limit = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+            } else {
+                try words.append(arena, a);
+            }
+        }
+        const query = try std.mem.join(arena, " ", words.items);
+        if (query.len == 0) return 2;
+        const req = try schema.encode_alloc(arena, schema.SearchHistoryRequest{
+            .query = query,
+            .mode = mode,
+            .sleeves = sleeves.items,
+            .harness = harness,
+            .session = session,
+            .since_ms = since_ms,
+            .until_ms = until_ms,
+            .roles = roles.items,
+            .limit = limit,
+        });
+        return call_and_render(arena, io, cl, "SearchHistory", req, json_out, render.print_history_hits);
+    }
+    if (std.mem.eql(u8, act, "read") and rest.len >= 2) {
+        var req = schema.ReadHistoryRequest{};
+        var idx: usize = 1;
+        while (idx < rest.len) : (idx += 1) {
+            const a = rest[idx];
+            if (std.mem.eql(u8, a, "--doc") and idx + 1 < rest.len) {
+                idx += 1;
+                req.doc_id = std.fmt.parseInt(u64, rest[idx], 10) catch return 2;
+            } else if (std.mem.eql(u8, a, "--from") and idx + 1 < rest.len) {
+                idx += 1;
+                req.from_turn = std.fmt.parseInt(u64, rest[idx], 10) catch 0;
+            } else if (std.mem.eql(u8, a, "--to") and idx + 1 < rest.len) {
+                idx += 1;
+                req.to_turn = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+            } else if (std.mem.eql(u8, a, "--after") and idx + 1 < rest.len) {
+                idx += 1;
+                req.after_doc = std.fmt.parseInt(u64, rest[idx], 10) catch null;
+            } else if (req.session == null) {
+                req.session = a;
+            }
+        }
+        const body = try schema.encode_alloc(arena, req);
+        return call_and_render(arena, io, cl, "ReadHistory", body, json_out, render.print_history_read);
+    }
+    try print_usage(io);
+    return 2;
+}
+
+fn cmd_device(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cl: *const client.Client,
+    rest: []const []const u8,
+    json_out: bool,
+) !u8 {
+    const act = rest[0];
+    if (std.mem.eql(u8, act, "list")) {
+        return call_and_render(arena, io, cl, "ListDevices", "{}", json_out, render.print_device_list);
+    }
+    if (std.mem.eql(u8, act, "add") and rest.len >= 2) {
+        return cmd_device_add(arena, io, cl, rest[1], json_out);
+    }
+    if (std.mem.eql(u8, act, "pair") and rest.len >= 2) {
+        const req = try schema.encode_alloc(arena, schema.PairDeviceRequest{ .code = rest[1] });
+        return call_and_print(arena, io, cl, "PairDevice", req);
+    }
+    if (std.mem.eql(u8, act, "revoke") and rest.len >= 2) {
+        const req = try schema.encode_alloc(arena, schema.DeviceRef{ .device_id = rest[1] });
+        return call_and_print(arena, io, cl, "RevokeDevice", req);
+    }
+    try print_usage(io);
+    return 2;
+}
+
+fn cmd_device_add(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    cl: *const client.Client,
+    name: []const u8,
+    json_out: bool,
+) !u8 {
+    const req = try schema.encode_alloc(arena, schema.AddDeviceRequest{ .name = name });
+    const res = cl.call_raw(arena, "AddDevice", req) catch |err| {
+        try render.print_out(io, "error: {s}\n", .{@errorName(err)});
+        return 1;
+    };
+    if (json_out or res.status >= 300) {
+        try render.print_error_or_raw(arena, io, res.status, res.body, json_out);
+        return if (res.status < 300) 0 else 1;
+    }
+    if (schema.decode_arena(schema.PairingCode, arena, res.body)) |pc| {
+        try render.print_out(io, "device={s}  code={s}  expires_at_ms={d}\n", .{ pc.name, pc.code, pc.expires_at_ms.ms });
+        if (qr.encode(pc.code, .medium)) |qcode| {
+            const art = try qcode.to_terminal_alloc(arena, 2, false);
+            try render.print_out(io, "{s}\n", .{art});
+        } else |_| {}
+    } else |_| {
+        try render.print_out(io, "{s}\n", .{res.body});
+    }
+    return 0;
 }
 
 fn cmd_hub_update(
@@ -423,7 +1343,7 @@ fn cmd_hub_update(
         }
     }
     const body = try schema.encode_alloc(arena, req);
-    return call_and_render(arena, io, cl, "UpdateHub", body, json_out, print_hub_update);
+    return call_and_render(arena, io, cl, "UpdateHub", body, json_out, render.print_hub_update);
 }
 
 fn cmd_node_update(
@@ -461,7 +1381,7 @@ fn cmd_node_update(
     req.nodes = node_list.items;
     if (!req.all and req.cancel == null and req.nodes.len == 0) req.all = true;
     const body = try schema.encode_alloc(arena, req);
-    return call_and_render(arena, io, cl, "UpdateNodes", body, json_out, print_node_updates);
+    return call_and_render(arena, io, cl, "UpdateNodes", body, json_out, render.print_node_updates);
 }
 
 fn cmd_job_run(
@@ -550,7 +1470,7 @@ fn cmd_job_run(
         }
     }
     if (argv.items.len == 0) {
-        try print_out(io, "usage: protectorate job run [--node <id> | --arch <arch>] [--exclusive] [--slots <n>] [--long-slots <n>] [--mem-mib <mib>] [--parent-epoch <ep>] [--wait] -- <argv...>\n", .{});
+        try render.print_out(io, "usage: protectorate job run [--node <id> | --arch <arch>] [--exclusive] [--slots <n>] [--long-slots <n>] [--mem-mib <mib>] [--parent-epoch <ep>] [--wait] -- <argv...>\n", .{});
         return 2;
     }
 
@@ -578,22 +1498,22 @@ fn cmd_job_run(
     });
 
     const res = cl.call_raw(arena, "RunJob", req) catch |err| {
-        try print_out(io, "error: {s}\n", .{@errorName(err)});
+        try render.print_out(io, "error: {s}\n", .{@errorName(err)});
         return 1;
     };
     if (res.status >= 300) {
         if (json_out) {
-            try print_out(io, "{s}\n", .{res.body});
+            try render.print_out(io, "{s}\n", .{res.body});
         } else {
-            try print_error_or_raw(arena, io, res.status, res.body, false);
+            try render.print_error_or_raw(arena, io, res.status, res.body, false);
         }
         return 1;
     }
     if (!wait_done) {
         if (json_out) {
-            try print_out(io, "{s}\n", .{res.body});
+            try render.print_out(io, "{s}\n", .{res.body});
         } else {
-            try print_job_single(arena, io, res.body);
+            try render.print_job_single(arena, io, res.body);
         }
         return 0;
     }
@@ -601,6 +1521,7 @@ fn cmd_job_run(
     var job = try schema.decode_arena(schema.Job, arena, res.body);
     var latest_body: []const u8 = res.body;
     const poll_req = try schema.encode_alloc(arena, schema.JobRef{ .job_id = job.id });
+    var unreach_start: ?i64 = null;
     while (true) {
         const done = switch (job.state) {
             .succeeded, .failed, .interrupted, .lost, .cancelled, .abandoned => true,
@@ -608,18 +1529,35 @@ fn cmd_job_run(
         };
         if (done) break;
         io.sleep(.fromMilliseconds(250), .awake) catch break;
-        const gres = cl.call_raw(arena, "GetJob", poll_req) catch continue;
-        if (gres.status >= 300) continue;
+        const gres = cl.call_raw(arena, "GetJob", poll_req) catch {
+            const now = std.Io.Clock.awake.now(io).toMilliseconds();
+            if (unreach_start == null) unreach_start = now;
+            if (now - unreach_start.? >= 60_000) return 6;
+            continue;
+        };
+        if (gres.status >= 300) {
+            const now = std.Io.Clock.awake.now(io).toMilliseconds();
+            if (unreach_start == null) unreach_start = now;
+            if (now - unreach_start.? >= 60_000) return 6;
+            continue;
+        }
+        unreach_start = null;
         latest_body = gres.body;
         job = schema.decode_arena(schema.Job, arena, gres.body) catch continue;
     }
 
     if (json_out) {
-        try print_out(io, "{s}\n", .{latest_body});
+        try render.print_out(io, "{s}\n", .{latest_body});
     } else {
-        try print_job_single(arena, io, latest_body);
+        try render.print_job_single(arena, io, latest_body);
     }
-    return if (job.state == .succeeded) 0 else 1;
+    return switch (job.state) {
+        .succeeded => 0,
+        .interrupted => 3,
+        .lost => 5,
+        .failed => if (job.exit_code) |ec| @intCast(@min(@as(i32, 255), @max(@as(i32, 1), ec))) else 1,
+        else => 1,
+    };
 }
 
 fn cmd_job_artifact(
@@ -656,11 +1594,11 @@ fn cmd_job_artifact(
             .limit = 256 * 1024,
         });
         const res = cl.call_raw(arena, "GetJobArtifact", req) catch |err| {
-            try print_out(io, "error: {s}\n", .{@errorName(err)});
+            try render.print_out(io, "error: {s}\n", .{@errorName(err)});
             return 1;
         };
         if (res.status >= 300) {
-            try print_error_or_raw(arena, io, res.status, res.body, false);
+            try render.print_error_or_raw(arena, io, res.status, res.body, false);
             return 1;
         }
         const chunk = try schema.decode_arena(schema.JobArtifactData, arena, res.body);
@@ -675,7 +1613,7 @@ fn cmd_job_artifact(
 
     if (out_file) |fp| {
         try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = fp, .data = all.items });
-        try print_out(io, "wrote {d} bytes to {s}\n", .{ all.items.len, fp });
+        try render.print_out(io, "wrote {d} bytes to {s}\n", .{ all.items.len, fp });
     } else {
         var buf: [4096]u8 = undefined;
         var w = std.Io.File.stdout().writer(io, &buf);
@@ -700,7 +1638,7 @@ fn cmd_lease(
     const node_id = rest[1];
     if (std.mem.eql(u8, act, "list")) {
         const req = try schema.encode_alloc(arena, schema.NodeRef{ .node_id = node_id });
-        return call_and_render(arena, io, cl, "GetNodeAdmission", req, json_out, print_node_admission);
+        return call_and_render(arena, io, cl, "GetNodeAdmission", req, json_out, render.print_node_admission);
     }
     if (std.mem.eql(u8, act, "unquarantine")) {
         const req = try schema.encode_alloc(arena, schema.NodeRef{ .node_id = node_id });
@@ -795,10 +1733,10 @@ fn call_and_print(
     req_json: []const u8,
 ) !u8 {
     const res = cl.call_raw(arena, method, req_json) catch |err| {
-        try print_out(io, "error: {s}\n", .{@errorName(err)});
+        try render.print_out(io, "error: {s}\n", .{@errorName(err)});
         return 1;
     };
-    try print_out(io, "{s}\n", .{res.body});
+    try render.print_out(io, "{s}\n", .{res.body});
     return if (res.status < 300) 0 else 1;
 }
 
@@ -812,428 +1750,100 @@ fn call_and_render(
     comptime formatter: anytype,
 ) !u8 {
     const res = cl.call_raw(arena, method, req_json) catch |err| {
-        try print_out(io, "error: {s}\n", .{@errorName(err)});
+        try render.print_out(io, "error: {s}\n", .{@errorName(err)});
         return 1;
     };
     if (json_out) {
-        try print_out(io, "{s}\n", .{res.body});
+        try render.print_out(io, "{s}\n", .{res.body});
         return if (res.status < 300) 0 else 1;
     }
     if (res.status >= 300) {
-        try print_error_or_raw(arena, io, res.status, res.body, false);
+        try render.print_error_or_raw(arena, io, res.status, res.body, false);
         return 1;
     }
     formatter(arena, io, res.body) catch {
-        try print_out(io, "{s}\n", .{res.body});
+        try render.print_out(io, "{s}\n", .{res.body});
     };
     return 0;
 }
 
-fn print_error_or_raw(
-    arena: std.mem.Allocator,
-    io: std.Io,
-    status: u16,
-    body: []const u8,
-    json_out: bool,
-) !void {
-    if (!json_out) {
-        if (schema.decode_arena(schema.ErrorBody, arena, body)) |eb| {
-            try print_out(io, "error ({d} {s}): {s}\n", .{ status, @tagName(eb.@"error".code), eb.@"error".message });
-            return;
-        } else |_| {}
-    }
-    try print_out(io, "{s}\n", .{body});
+fn parse_harness(raw: []const u8) ?schema.Harness {
+    if (std.mem.eql(u8, raw, "claude")) return .claude;
+    if (std.mem.eql(u8, raw, "codex")) return .codex;
+    if (std.mem.eql(u8, raw, "grok")) return .grok;
+    if (std.mem.eql(u8, raw, "pi_vendor")) return .pi_vendor;
+    if (std.mem.eql(u8, raw, "pi_local") or std.mem.eql(u8, raw, "pi")) return .pi_local;
+    if (std.mem.eql(u8, raw, "antigravity") or std.mem.eql(u8, raw, "agy")) return .antigravity;
+    return null;
 }
 
-fn print_doctor(io: std.Io, rep: schema.DoctorReport) !void {
-    try print_out(io, "protectorate doctor  os={s}  arch={s}  sandbox={s}  gh={s}\n", .{
-        rep.os,
-        rep.arch,
-        if (rep.sandbox_ok) "ok" else "UNAVAILABLE",
-        if (rep.gh_logged_in) "logged_in" else "no",
-    });
-    if (rep.sleeve_devices.len > 0) {
-        try print_out(io, "devices:", .{});
-        for (rep.sleeve_devices) |d| try print_out(io, " [{s}]", .{d});
-        try print_out(io, "\n", .{});
+fn parse_time_arg(raw: []const u8, now_ms: i64) ?i64 {
+    if (raw.len == 0) return null;
+    const last = raw[raw.len - 1];
+    const mult: i64 = switch (last) {
+        's' => 1_000,
+        'm' => 60_000,
+        'h' => 3_600_000,
+        'd' => 86_400_000,
+        else => 0,
+    };
+    if (mult > 0 and raw.len > 1) {
+        const v = std.fmt.parseInt(i64, raw[0 .. raw.len - 1], 10) catch return null;
+        return now_ms - (v *| mult);
     }
-    try print_out(io, "{s:<12} {s:<10} {s:<28} {s}\n", .{ "HARNESS", "STATUS", "VERSION", "NOTE" });
-    for (rep.harnesses) |h| {
-        const st: []const u8 = if (h.eligible) "ready" else if (h.present) "installed" else "missing";
-        const ver: []const u8 = if (h.version.len > 0) h.version else "-";
-        const note: []const u8 = if (!h.present)
-            h.install
-        else if (h.reasons.len > 0)
-            h.reasons[0]
-        else
-            "ok";
-        try print_out(io, "{s:<12} {s:<10} {s:<28} {s}\n", .{ h.name, st, ver, note });
-    }
-    if (rep.problems.len > 0) {
-        try print_out(io, "\nProblems:\n", .{});
-        for (rep.problems) |p| try print_out(io, "  - {s}\n", .{p});
-    }
+    return std.fmt.parseInt(i64, raw, 10) catch null;
 }
 
-fn print_status(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void {
-    const st = try schema.decode_arena(schema.HubState, arena, body);
-    try print_out(io, "hub={s}  version={s}  seq={d}  sleeves={d}  nodes={d}  jobs={d}  approvals={d}\n", .{
-        st.hub.name,
-        st.hub.version,
-        st.seq,
-        st.sleeves.len,
-        st.nodes.len,
-        st.jobs.len,
-        st.approvals.len,
-    });
-    if (st.hub.restore_error) |re| {
-        try print_out(io, "WARNING restore_error: {s}\n", .{re});
-    }
-    if (st.sleeves.len > 0) {
-        try print_out(io, "\n", .{});
-        render_sleeves(io, st.sleeves) catch {};
-    }
-    if (st.nodes.len > 0) {
-        try print_out(io, "\n", .{});
-        render_nodes(io, st.nodes) catch {};
-    }
-    if (st.approvals.len > 0) {
-        var pending_any = false;
-        for (st.approvals) |ap| {
-            if (ap.state == .pending) {
-                pending_any = true;
-                break;
-            }
+fn read_message_file(arena: std.mem.Allocator, io: std.Io, path: []const u8) ![]const u8 {
+    if (std.mem.eql(u8, path, "-")) {
+        var out: std.ArrayList(u8) = .empty;
+        var tmp: [4096]u8 = undefined;
+        const s: []u8 = &tmp;
+        const bufs = [_][]u8{s};
+        const st = std.Io.File.stdin();
+        while (true) {
+            const n = st.readStreaming(io, &bufs) catch break;
+            if (n == 0) break;
+            try out.appendSlice(arena, tmp[0..n]);
+            if (out.items.len >= 4 << 20) break;
         }
-        if (pending_any) {
-            try print_out(io, "\n{s:<18} {s:<8} {s:<14} {s}\n", .{ "APPROVAL", "KIND", "SLEEVE", "TITLE" });
-            for (st.approvals) |ap| {
-                if (ap.state != .pending) continue;
-                try print_out(io, "{s:<18} {s:<8} {s:<14} {s}\n", .{ ap.id, @tagName(ap.kind), ap.sleeve_id, ap.title });
-            }
-        }
+        return out.items;
     }
-    if (st.jobs.len > 0) {
-        try print_out(io, "\n", .{});
-        render_jobs(io, st.jobs) catch {};
-    }
+    return try std.Io.Dir.cwd().readFileAlloc(io, path, arena, .limited(4 << 20));
 }
 
-fn print_sleeve_list(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void {
-    const ls = try schema.decode_arena(schema.SleeveList, arena, body);
-    if (ls.sleeves.len == 0) {
-        try print_out(io, "no sleeves\n", .{});
-        return;
-    }
-    try render_sleeves(io, ls.sleeves);
-}
-
-fn render_sleeves(io: std.Io, sleeves: []const schema.Sleeve) !void {
-    try print_out(io, "{s:<16} {s:<14} {s:<7} {s:<10} {s:<12} {s:<10} {s:<5} {s}\n", .{
-        "ID", "NAME", "ROLE", "STATE", "HARNESS", "ACTIVITY", "Q", "PATH",
-    });
-    for (sleeves) |sv| {
-        const h_s: []const u8 = if (sv.incarnation) |inc| @tagName(inc.harness) else if (sv.resleeve_to.len > 0) @tagName(sv.resleeve_to[0]) else "-";
-        const act_s: []const u8 = if (sv.incarnation) |inc| @tagName(inc.activity.state) else "-";
-        try print_out(io, "{s:<16} {s:<14} {s:<7} {s:<10} {s:<12} {s:<10} {d:<5} {s}", .{
-            sv.id,
-            sv.name,
-            @tagName(sv.role),
-            @tagName(sv.lifecycle),
-            h_s,
-            act_s,
-            sv.queued,
-            sv.path,
-        });
-        if (sv.branch) |b| try print_out(io, " ({s})", .{b});
-        if (sv.d9) try print_out(io, " [d9]", .{});
-        try print_out(io, "\n", .{});
-    }
-}
-
-fn print_transcript(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void {
-    const tx = try schema.decode_arena(schema.Transcript, arena, body);
-    if (tx.entries.len == 0) {
-        try print_out(io, "no transcript entries for {s}\n", .{tx.sleeve_id});
-        return;
-    }
-    for (tx.entries) |ce| {
-        switch (ce.entry) {
-            .session_info => |s| try print_out(io, "[#{d} g{d}.t{d}] session harness={s} id={s}\n", .{ ce.seq, ce.g, ce.turn, @tagName(s.harness), s.native_id }),
-            .user_message => |u| try print_out(io, "[#{d} g{d}.t{d}] {s}: {s}\n", .{ ce.seq, ce.g, ce.turn, u.from, u.text }),
-            .prompt_ack => |p| try print_out(io, "[#{d} g{d}.t{d}] ack({s}) {s}\n", .{ ce.seq, ce.g, ce.turn, @tagName(p.ack), p.detail orelse "" }),
-            .assistant_text => |a| try print_out(io, "[#{d} g{d}.t{d}] assistant: {s}\n", .{ ce.seq, ce.g, ce.turn, a.text }),
-            .reasoning => |r| try print_out(io, "[#{d} g{d}.t{d}] thinking: {s}\n", .{ ce.seq, ce.g, ce.turn, r.text }),
-            .tool_call => |t| try print_out(io, "[#{d} g{d}.t{d}] tool {s}: {s}\n", .{ ce.seq, ce.g, ce.turn, t.name, t.summary }),
-            .tool_result => |t| try print_out(io, "[#{d} g{d}.t{d}] tool_result ({s}): {s}\n", .{ ce.seq, ce.g, ce.turn, @tagName(t.status), t.output }),
-            .file_change => |f| try print_out(io, "[#{d} g{d}.t{d}] files ({d})\n", .{ ce.seq, ce.g, ce.turn, f.files.len }),
-            .approval_request => |ap| try print_out(io, "[#{d} g{d}.t{d}] approval_req {s}: {s}\n", .{ ce.seq, ce.g, ce.turn, ap.title, ap.summary }),
-            .approval_decision => |ad| try print_out(io, "[#{d} g{d}.t{d}] approval_dec {s}: {s}\n", .{ ce.seq, ce.g, ce.turn, ad.approval_id, @tagName(ad.decision) }),
-            .turn_started => try print_out(io, "[#{d} g{d}.t{d}] turn_started\n", .{ ce.seq, ce.g, ce.turn }),
-            .turn_settled => |ts| try print_out(io, "[#{d} g{d}.t{d}] turn_settled stop={s}\n", .{ ce.seq, ce.g, ce.turn, @tagName(ts.stop) }),
-            .@"error" => |e| try print_out(io, "[#{d} g{d}.t{d}] error ({s}): {s}\n", .{ ce.seq, ce.g, ce.turn, @tagName(e.kind), e.text }),
-            .compaction => try print_out(io, "[#{d} g{d}.t{d}] compaction\n", .{ ce.seq, ce.g, ce.turn }),
-            .notice => |n| try print_out(io, "[#{d} g{d}.t{d}] notice ({s}): {s}\n", .{ ce.seq, ce.g, ce.turn, @tagName(n.level), n.text }),
-            .exited => |x| try print_out(io, "[#{d} g{d}.t{d}] exited code={?d}\n", .{ ce.seq, ce.g, ce.turn, x.code }),
-            .unknown => try print_out(io, "[#{d} g{d}.t{d}] <unknown>\n", .{ ce.seq, ce.g, ce.turn }),
-        }
-    }
-}
-
-fn print_node_list(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void {
-    const nl = try schema.decode_arena(schema.NodeList, arena, body);
-    if (nl.nodes.len == 0) {
-        try print_out(io, "no nodes\n", .{});
-        return;
-    }
-    try render_nodes(io, nl.nodes);
-}
-
-fn render_nodes(io: std.Io, nodes: []const schema.Node) !void {
-    try print_out(io, "{s:<16} {s:<14} {s:<7} {s:<10} {s:<8} {s:<9} {s:<6} {s:<7} {s}\n", .{
-        "ID", "NAME", "ONLINE", "VERSION", "ARCH", "PRESENCE", "JOBS", "CPU%", "HW",
-    });
-    for (nodes) |n| {
-        var cpu_buf: [16]u8 = undefined;
-        const cpu_s: []const u8 = if (n.sample) |smp|
-            (if (smp.cpu_pct) |c| std.fmt.bufPrint(&cpu_buf, "{d:.1}%", .{c}) catch "-" else "-")
-        else
-            "-";
-        const arch_s: []const u8 = if (n.inventory) |inv| inv.arch else "-";
-        try print_out(io, "{s:<16} {s:<14} {s:<7} {s:<10} {s:<8} {s:<9} {s:<6} {s:<7}", .{
-            n.id,
-            n.name,
-            if (n.online) "online" else "offline",
-            n.node_version,
-            arch_s,
-            @tagName(n.presence.state),
-            @tagName(n.jobs),
-            cpu_s,
-        });
-        if (n.inventory) |inv| {
-            try print_out(io, "{d}c/{d}GiB", .{ inv.cpu_count, inv.ram_bytes / (1024 * 1024 * 1024) });
-            if (inv.disks.len > 0) {
-                try print_out(io, " disk={s}:{d}GiBfree", .{ inv.disks[0].mount, inv.disks[0].free_bytes / (1024 * 1024 * 1024) });
-            }
-            if (inv.gpus.len > 0) {
-                try print_out(io, " gpu={s}", .{inv.gpus[0].name});
-            }
-        } else {
-            try print_out(io, "-", .{});
-        }
-        try print_out(io, "\n", .{});
-    }
-}
-
-fn print_job_list(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void {
-    const jl = try schema.decode_arena(schema.JobList, arena, body);
-    if (jl.jobs.len == 0) {
-        try print_out(io, "no jobs\n", .{});
-        return;
-    }
-    try render_jobs(io, jl.jobs);
-}
-
-fn print_job_single(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void {
-    const j = try schema.decode_arena(schema.Job, arena, body);
-    try render_jobs(io, &.{j});
-}
-
-fn print_node_admission(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void {
-    const na = try schema.decode_arena(schema.NodeAdmission, arena, body);
-    try print_out(
-        io,
-        "node={s} boot={s} next_epoch={d} slots={d}/{d} long={d}/{d} mem_reserved={d}MiB mem_avail={d}MiB",
-        .{
-            na.node_id,
-            na.boot_id,
-            na.next_epoch,
-            na.slots_used,
-            na.slots_total,
-            na.long_slots_used,
-            na.long_slots_total,
-            na.mem_reserved_bytes / (1024 * 1024),
-            na.mem_avail_bytes / (1024 * 1024),
-        },
-    );
-    if (na.quarantined) |q| try print_out(io, " QUARANTINED={s}", .{q});
-    try print_out(io, "\n", .{});
-    if (na.grants.len > 0) {
-        try print_out(io, "LEASES ({d}):\n", .{na.grants.len});
-        for (na.grants) |g| {
-            try print_out(io, "  {s} ep={d} parent={?d} holder={s} job={s} mode={s} state={s} slots={d} long={d}\n", .{
-                g.lease_id,
-                g.epoch,
-                g.parent_epoch,
-                g.holder_id,
-                g.job_id orelse "-",
-                @tagName(g.mode),
-                @tagName(g.state),
-                g.slots,
-                g.long_slots,
-            });
-        }
-    }
-    if (na.queue.len > 0) {
-        try print_out(io, "QUEUE ({d}):\n", .{na.queue.len});
-        for (na.queue) |t| {
-            try print_out(io, "  {s} seq={d} holder={s} mode={s} slots={d} long={d}\n", .{
-                t.ticket_id,
-                t.seq,
-                t.holder_id,
-                @tagName(t.mode),
-                t.slots,
-                t.long_slots,
-            });
-        }
-    }
-}
-
-fn render_jobs(io: std.Io, jobs: []const schema.Job) !void {
-    try print_out(io, "{s:<16} {s:<11} {s:<14} {s:<5} {s:<6} {s:<7} {s}\n", .{
-        "ID", "STATE", "NODE", "TRY", "EXIT", "EPOCH", "COMMAND",
-    });
-    for (jobs) |j| {
-        var ec_buf: [16]u8 = undefined;
-        const ec_s: []const u8 = if (j.exit_code) |ec| std.fmt.bufPrint(&ec_buf, "{d}", .{ec}) catch "-" else "-";
-        var ep_buf: [24]u8 = undefined;
-        const ep_s: []const u8 = if (j.epoch) |ep| std.fmt.bufPrint(&ep_buf, "{d}", .{ep}) catch "-" else "-";
-        const node_s: []const u8 = j.node_id orelse switch (j.target) {
-            .node => |n| n.node_id,
-            .arch => |ar| ar.arch,
-            .unknown => "-",
-        };
-        try print_out(io, "{s:<16} {s:<11} {s:<14} {d:<5} {s:<6} {s:<7}", .{
-            j.id,
-            @tagName(j.state),
-            node_s,
-            j.attempt,
-            ec_s,
-            ep_s,
-        });
-        for (j.argv, 0..) |arg, idx| {
-            try print_out(io, "{s}{s}", .{ if (idx == 0) "" else " ", arg });
-        }
-        if (j.held_reason) |hr| try print_out(io, " (held={s})", .{hr});
-        if (j.@"error") |er| try print_out(io, " [{s}]", .{er});
-        try print_out(io, "\n", .{});
-    }
-}
-
-fn print_quota_list(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void {
-    const ql = try schema.decode_arena(schema.QuotaList, arena, body);
-    if (ql.quotas.len == 0) {
-        try print_out(io, "no quotas\n", .{});
-        return;
-    }
-    try print_out(io, "{s:<12} {s:<10} {s:<14} {s}\n", .{ "SUB", "READING", "PLAN", "DETAIL" });
-    for (ql.quotas) |q| {
-        try print_out(io, "{s:<12} {s:<10} {s:<14}", .{
-            @tagName(q.subscription),
-            @tagName(q.reading),
-            if (q.plan.len > 0) q.plan else "-",
-        });
-        for (q.windows) |w| {
-            if (w.used_pct) |pct| {
-                try print_out(io, "{s}={d:.0}% ", .{ w.label, pct });
-            }
-        }
-        if (q.credits) |cr| {
-            if (cr.balance) |bal| try print_out(io, "balance={d:.2} ", .{bal});
-        }
-        if (q.note.len > 0) try print_out(io, "{s}", .{q.note});
-        try print_out(io, "\n", .{});
-    }
-}
-
-fn print_history_hits(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void {
-    const hh = try schema.decode_arena(schema.HistoryHits, arena, body);
-    try print_out(io, "hits={d}  indexed_docs={d}\n", .{ hh.hits.len, hh.indexed_docs });
-    for (hh.hits) |h| {
-        const har_s: []const u8 = if (h.doc.harness) |har| @tagName(har) else "-";
-        try print_out(io, "  [{d:.2}] #{d} {s} ({s}) {s}: {s}\n", .{
-            h.score,
-            h.doc.doc_id,
-            h.doc.sleeve,
-            har_s,
-            @tagName(h.doc.role),
-            h.snippet,
-        });
-    }
-}
-
-fn print_hub_update(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void {
-    const hu = try schema.decode_arena(schema.HubUpdate, arena, body);
-    try print_out(io, "current={s}  target={s}  available={}  restarting={}", .{
-        hu.current orelse "-",
-        hu.target,
-        hu.available,
-        hu.restarting,
-    });
-    if (hu.note.len > 0) try print_out(io, "  note={s}", .{hu.note});
-    try print_out(io, "\n", .{});
-}
-
-fn print_node_updates(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void {
-    const nu = try schema.decode_arena(schema.NodeUpdates, arena, body);
-    try print_out(io, "rollout={s}  target={s}  nodes={d}\n", .{
-        nu.rollout_id orelse "-",
-        nu.version,
-        nu.nodes.len,
-    });
-    if (nu.nodes.len > 0) {
-        try print_out(io, "{s:<16} {s:<14} {s:<10} {s:<10} {s:<5} {s}\n", .{
-            "ID", "NAME", "FROM", "TO", "OK", "DETAIL",
-        });
-        for (nu.nodes) |n| {
-            try print_out(io, "{s:<16} {s:<14} {s:<10} {s:<10} {s:<5} {s}\n", .{
-                n.node_id,
-                n.name,
-                n.from,
-                n.to,
-                if (n.ok) "yes" else "no",
-                n.detail,
-            });
-        }
-    }
-}
-
-fn print_harness_updates(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void {
-    const hu = try schema.decode_arena(schema.HarnessUpdates, arena, body);
-    if (hu.programs.len == 0) {
-        try print_out(io, "no harnesses matched\n", .{});
-        return;
-    }
-    try print_out(io, "{s:<14} {s:<12} {s}\n", .{ "PROGRAM", "STATE", "DETAIL" });
-    for (hu.programs) |p| {
-        try print_out(io, "{s:<14} {s:<12} {s}\n", .{ p.program, @tagName(p.state), p.detail });
-    }
-}
-
-pub fn print_out(io: std.Io, comptime fmt: []const u8, args: anytype) !void {
-    var buf: [4096]u8 = undefined;
-    var w = std.Io.File.stdout().writer(io, &buf);
-    try w.interface.print(fmt, args);
-    try w.interface.flush();
+fn resolve_hub_home(arena: std.mem.Allocator, env: *const std.process.Environ.Map, override: ?[]const u8) ![]u8 {
+    if (override) |o| return arena.dupe(u8, o);
+    if (env.get("PROTECTORATE_HOME")) |e| return arena.dupe(u8, e);
+    if (env.get("HOME")) |h| return std.fs.path.join(arena, &.{ h, ".local/share/protectorate" });
+    if (env.get("USERPROFILE")) |h| return std.fs.path.join(arena, &.{ h, ".protectorate" });
+    return arena.dupe(u8, ".protectorate");
 }
 
 fn print_usage(io: std.Io) !void {
-    try print_out(
+    try render.print_out(
         io,
         \\protectorate - AI coding agent orchestrator & Noise_IK fleet hub
         \\
         \\usage:
         \\  protectorate serve [--home <dir>] [--listen <addr:port>] [--fleet-listen <addr:port>] [--no-sandbox] [--dev-token <tok>]
-        \\  protectorate [--json] status | doctor | pair [<name>] | token | quota
-        \\  protectorate [--json] sleeve (list | attach <id> | stop <id> | rm <id> | prompt <id> <text> | transcript <id>)
-        \\  protectorate [--json] node (list | join-token | add <reg> | approve <id> [<name>] | update [--all | <id>...] [--version <v>] [--channel stable|dev] [--no-wait] [--cancel <rid>])
-        \\  protectorate [--json] hub update [--check] [--rollback] [--channel stable|dev] [--version <v>]
-        \\  protectorate [--json] harness update [<program>...]
-        \\  protectorate [--json] job (list | get <id> | run [opts] -- <argv...> | cancel <id> | logs <id> | artifact <id> <path> [--out <file>])
+        \\  protectorate [--json] version | status | doctor [--refresh] | pair [<name>] | token | quota [list]
+        \\  protectorate [--json] hub (info | state | update [--check|--rollback] [--channel stable|dev] [--version <v>] | probation [--retry-rollback])
+        \\  protectorate [--json] harness (update [<program>...] | login <claude|codex|grok|pi|agy> [-- <args...>])
+        \\  protectorate [--json] sleeve (list | show <id> | spawn <name> [opts] | send <id> <text> | inbox [<id>] [--drop] |
+        \\                                interrupt <id> | stop <id> | rm <id> | start <id> [opts] | resleeve <id> --harness <h> |
+        \\                                takeover <id> | attach <id> | transcript <id> [opts] | wait <id>... [opts] | push <id> [opts])
+        \\  protectorate [--json] node (list | show <n> | set <n> --jobs any|owner|none [--note <txt>] | join-token |
+        \\                              add <reg> | approve <id> [--name <n>] [--fingerprint <fp>] | rename <n> <new> | rm <n> | update [opts])
+        \\  protectorate [--json] job (list [--node <n>] [--limit <k>] | get <id> | run [opts] -- <argv...> | cancel <id> | logs <id> [opts] | artifact <id> <path> [--out <f>])
         \\  protectorate [--json] lease (list <node> | acquire <node> [opts] | renew <node> <lid> <ep> | release <node> <lid> <ep> | verify <node> <boot> <ep> | unquarantine <node>)
-        \\  protectorate [--json] history search <query>
+        \\  protectorate [--json] approval (list [--pending] | decide <id> allow|allow-once|allow-session|deny)
+        \\  protectorate [--json] event (list [--from <seq>] [--limit <n>] | read <seq>)
+        \\  protectorate [--json] envoy (send <text> [--as <name>] | wait [<rid>] [--timeout <s>] | read [opts] | token)
+        \\  protectorate [--json] history (search <query> [opts] | read (--doc <id> | <session>) [opts])
+        \\  protectorate [--json] device (list | add <name> | pair <code> | revoke <id>)
         \\  protectorate rpc <Method> [<json>]
-        \\  protectorate --envoy | mcp
+        \\  protectorate [--envoy] [--token-file <path>] [--as <name>] mcp
         \\
     ,
         .{},

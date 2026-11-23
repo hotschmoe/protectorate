@@ -74,7 +74,8 @@ pub fn dispatch(
         return ok_json(rt.gpa, schema.SleeveList{ .sleeves = st.sleeves });
     } else if (std.mem.eql(u8, method, "GetInbox")) {
         const req = schema.decode_arena(schema.InboxRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
-        const sid = req.sleeve_id orelse "envoy";
+        const raw_sid = req.sleeve_id orelse "envoy";
+        const sid = rt.resolve_sleeve_id(a, raw_sid) orelse raw_sid;
         rt.state_mu.lockUncancelable(rt.io);
         defer rt.state_mu.unlock(rt.io);
         const sl = rt.core_state.sleeves.get(sid) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
@@ -85,15 +86,23 @@ pub fn dispatch(
         return ok_json(rt.gpa, schema.Inbox{ .messages = msgs });
     } else if (std.mem.eql(u8, method, "DropQueued")) {
         const req = schema.decode_arena(schema.SleeveRef, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
-        rt.commit(.{ .drop_queued = .{ .sleeve_id = req.sleeve_id } }) catch return err_json(rt.gpa, .not_found, "sleeve not found");
+        const sid = rt.resolve_sleeve_id(a, req.sleeve_id) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
+        rt.commit(.{ .drop_queued = .{ .sleeve_id = sid } }) catch return err_json(rt.gpa, .not_found, "sleeve not found");
         return ok_json(rt.gpa, schema.Empty{});
     } else if (std.mem.eql(u8, method, "GetTranscript")) {
         const req = schema.decode_arena(schema.GetTranscriptRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
-        const tx = try rt.transcripts.read(a, req.sleeve_id, req.from_seq, req.limit);
+        const sid = rt.resolve_sleeve_id(a, req.sleeve_id) orelse req.sleeve_id;
+        const tx = try rt.transcripts.read(a, sid, req.from_seq, req.limit);
         return ok_json(rt.gpa, tx);
     } else if (std.mem.eql(u8, method, "SpawnSleeve")) {
         const req = schema.decode_arena(schema.SpawnSleeveRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
-        const base_path = req.path orelse req.new_path orelse return err_json(rt.gpa, .invalid, "path required");
+        var parent_sid: ?[]const u8 = null;
+        var parent_path: ?[]const u8 = null;
+        if (req.parent_id) |raw_pid| {
+            parent_sid = rt.resolve_sleeve_id(a, raw_pid) orelse return err_json(rt.gpa, .not_found, "parent sleeve not found");
+            if (try rt.view_sleeve(a, parent_sid.?)) |psv| parent_path = psv.path;
+        }
+        const base_path = req.path orelse req.new_path orelse parent_path orelse return err_json(rt.gpa, .invalid, "path or --parent required");
         if (rt.gate_d9(a, principal, .spawn_sleeve, req.name)) |_| {} else |err| {
             return map_d9_err(rt.gpa, err);
         }
@@ -103,7 +112,7 @@ pub fn dispatch(
             .readonly => .readonly,
             .worktree => .worktree,
             .unknown => .shared,
-        } else .shared;
+        } else if (parent_sid != null) .worktree else .shared;
         var sl_path: []const u8 = base_path;
         var sl_branch: ?[]const u8 = null;
         if (layout == .worktree) {
@@ -115,10 +124,10 @@ pub fn dispatch(
         rt.commit(.{ .sleeve_created = .{
             .sleeve_id = sid,
             .name = req.name,
-            .role = if (req.parent_id != null) .child else .root,
+            .role = if (parent_sid != null) .child else .root,
             .path = sl_path,
             .workspace_id = ws_id,
-            .parent_id = req.parent_id,
+            .parent_id = parent_sid,
             .layout = layout,
             .branch = sl_branch,
             .budget_limit = req.budget,
@@ -164,10 +173,11 @@ pub fn dispatch(
         return ok_json(rt.gpa, sv);
     } else if (std.mem.eql(u8, method, "StartSleeve")) {
         const req = schema.decode_arena(schema.StartSleeveRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        const sid = rt.resolve_sleeve_id(a, req.sleeve_id) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
         var targets: [model.max_targets]model.Harness = undefined;
         targets[0] = if (req.target) |h| runtime.schema_to_model_harness(h) else .pi_local;
         rt.commit(.{ .start_requested = .{
-            .sleeve_id = req.sleeve_id,
+            .sleeve_id = sid,
             .targets = targets,
             .target_len = 1,
             .mode = .headless,
@@ -179,10 +189,11 @@ pub fn dispatch(
         return ok_json(rt.gpa, schema.Accepted{});
     } else if (std.mem.eql(u8, method, "SendMessage")) {
         const req = schema.decode_arena(schema.SendMessageRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        const sid = rt.resolve_sleeve_id(a, req.sleeve_id) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
         const rid = try rt.gen_id(a, "req");
         const mode: model.SendMode = if (req.delivery == .steer) .steer else .queue;
         rt.commit(.{ .prompt_enqueued = .{
-            .sleeve_id = req.sleeve_id,
+            .sleeve_id = sid,
             .request_id = rid,
             .from = if (principal != null and principal.? == .envoy) "envoy" else "owner",
             .kind = if (principal != null and principal.? == .envoy) .mail else .prompt,
@@ -191,7 +202,7 @@ pub fn dispatch(
             .supersede = req.supersede,
             .until_done = req.until_done,
         } }) catch |err| return map_commit_err(rt.gpa, err);
-        const sv = try rt.view_sleeve(a, req.sleeve_id);
+        const sv = try rt.view_sleeve(a, sid);
         return ok_json(rt.gpa, schema.Sent{
             .request_id = rid,
             .queued = true,
@@ -199,26 +210,30 @@ pub fn dispatch(
         });
     } else if (std.mem.eql(u8, method, "Interrupt")) {
         const req = schema.decode_arena(schema.SleeveRef, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
-        const sv = (try rt.view_sleeve(a, req.sleeve_id)) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
+        const sid = rt.resolve_sleeve_id(a, req.sleeve_id) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
+        const sv = (try rt.view_sleeve(a, sid)) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
         if (sv.incarnation) |inc| {
-            rt.commit(.{ .interrupted = .{ .sleeve_id = req.sleeve_id, .g = inc.g, .by = .owner } }) catch {};
+            rt.commit(.{ .interrupted = .{ .sleeve_id = sid, .g = inc.g, .by = .owner } }) catch {};
         }
         return ok_json(rt.gpa, schema.Empty{});
     } else if (std.mem.eql(u8, method, "StopSleeve")) {
         const req = schema.decode_arena(schema.SleeveRef, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
-        rt.commit(.{ .stop_requested = .{ .sleeve_id = req.sleeve_id, .by = .owner } }) catch |err| return map_commit_err(rt.gpa, err);
+        const sid = rt.resolve_sleeve_id(a, req.sleeve_id) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
+        rt.commit(.{ .stop_requested = .{ .sleeve_id = sid, .by = .owner } }) catch |err| return map_commit_err(rt.gpa, err);
         return ok_json(rt.gpa, schema.Accepted{});
     } else if (std.mem.eql(u8, method, "RemoveSleeve")) {
         const req = schema.decode_arena(schema.SleeveRef, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
-        if (rt.gate_d9(a, principal, .remove_sleeve, req.sleeve_id)) |_| {} else |err| {
+        const sid = rt.resolve_sleeve_id(a, req.sleeve_id) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
+        if (rt.gate_d9(a, principal, .remove_sleeve, sid)) |_| {} else |err| {
             return map_d9_err(rt.gpa, err);
         }
-        rt.commit(.{ .removed = .{ .sleeve_id = req.sleeve_id } }) catch |err| return map_commit_err(rt.gpa, err);
+        rt.commit(.{ .removed = .{ .sleeve_id = sid } }) catch |err| return map_commit_err(rt.gpa, err);
         return ok_json(rt.gpa, schema.Accepted{});
     } else if (std.mem.eql(u8, method, "Resleeve")) {
         const req = schema.decode_arena(schema.ResleeveRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        const sid = rt.resolve_sleeve_id(a, req.sleeve_id) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
         rt.commit(.{ .resleeve_requested = .{
-            .sleeve_id = req.sleeve_id,
+            .sleeve_id = sid,
             .harness = runtime.schema_to_model_harness(req.target),
             .model_name = req.model,
             .provider = req.provider,
@@ -229,14 +244,16 @@ pub fn dispatch(
         return ok_json(rt.gpa, schema.Accepted{});
     } else if (std.mem.eql(u8, method, "TakeoverTerminal")) {
         const req = schema.decode_arena(schema.SleeveRef, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
-        rt.takeover_sleeve(a, req.sleeve_id) catch |err| return map_commit_err(rt.gpa, err);
+        const sid = rt.resolve_sleeve_id(a, req.sleeve_id) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
+        rt.takeover_sleeve(a, sid) catch |err| return map_commit_err(rt.gpa, err);
         return ok_json(rt.gpa, schema.Empty{});
     } else if (std.mem.eql(u8, method, "GitPush")) {
         const req = schema.decode_arena(schema.GitPushRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
-        const sv = (try rt.view_sleeve(a, req.sleeve_id)) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
+        const sid = rt.resolve_sleeve_id(a, req.sleeve_id) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
+        const sv = (try rt.view_sleeve(a, sid)) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
         const summary = try std.fmt.allocPrint(a, "{s} {s}", .{ req.remote orelse "origin", req.branch orelse (sv.branch orelse "HEAD") });
         const d9_app = rt.gate_d9(a, principal, .git_push, summary) catch |err| return map_d9_err(rt.gpa, err);
-        var res = git.push(a, rt.io, req.sleeve_id, sv.path, req.remote, req.branch, req.force) catch |err| {
+        var res = git.push(a, rt.io, sid, sv.path, req.remote, req.branch, req.force) catch |err| {
             return err_json(rt.gpa, .invalid, @errorName(err));
         };
         if (d9_app) |aid| res.approval_id = aid;
@@ -265,17 +282,19 @@ pub fn dispatch(
         return ok_json(rt.gpa, schema.NodeList{ .nodes = st.nodes });
     } else if (std.mem.eql(u8, method, "GetNode")) {
         const req = schema.decode_arena(schema.NodeRef, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
-        const nd = (try rt.view_node(a, req.node_id)) orelse return err_json(rt.gpa, .not_found, "node not found");
+        const nid = rt.resolve_node_id(a, req.node_id) orelse return err_json(rt.gpa, .not_found, "node not found");
+        const nd = (try rt.view_node(a, nid)) orelse return err_json(rt.gpa, .not_found, "node not found");
         return ok_json(rt.gpa, nd);
     } else if (std.mem.eql(u8, method, "SetNodeJobs")) {
         const req = schema.decode_arena(schema.SetNodeJobsRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        const nid = rt.resolve_node_id(a, req.node_id) orelse return err_json(rt.gpa, .not_found, "node not found");
         const jp: model.NodeJobs = switch (req.jobs) {
             .any => .any,
             .owner => .owner,
             .none, .unknown => .none,
         };
-        rt.commit(.{ .node_jobs_updated = .{ .node_id = req.node_id, .jobs = jp, .note = req.note } }) catch |err| return map_commit_err(rt.gpa, err);
-        const nd = (try rt.view_node(a, req.node_id)) orelse return err_json(rt.gpa, .not_found, "node not found");
+        rt.commit(.{ .node_jobs_updated = .{ .node_id = nid, .jobs = jp, .note = req.note } }) catch |err| return map_commit_err(rt.gpa, err);
+        const nd = (try rt.view_node(a, nid)) orelse return err_json(rt.gpa, .not_found, "node not found");
         return ok_json(rt.gpa, nd);
     } else if (std.mem.eql(u8, method, "GetEnrollment")) {
         const addrs = try rt.advertise_addrs(a);
@@ -360,6 +379,17 @@ pub fn dispatch(
         var chosen_name = req.name orelse "";
         {
             rt.meta_mu.lockUncancelable(rt.io);
+            if (rt.pending_nodes.get(req.auth_id)) |kv| {
+                if (req.fingerprint) |want_fp| {
+                    if (want_fp.len > 0) {
+                        const actual_fp = noise.fingerprint_prefixed(kv.pub_key);
+                        if (!std.mem.eql(u8, want_fp, &actual_fp)) {
+                            rt.meta_mu.unlock(rt.io);
+                            return err_json(rt.gpa, .invalid, "fingerprint mismatch");
+                        }
+                    }
+                }
+            }
             if (rt.pending_nodes.fetchRemove(req.auth_id)) |kv| {
                 if (chosen_name.len == 0) chosen_name = try a.dupe(u8, kv.value.name);
                 rt.gpa.free(kv.key);
@@ -387,13 +417,17 @@ pub fn dispatch(
         });
     } else if (std.mem.eql(u8, method, "RemoveNode")) {
         const req = schema.decode_arena(schema.RemoveNodeRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
-        rt.fleet_srv.disconnect_node(req.node_id);
-        rt.commit(.{ .node_removed = .{ .node_id = req.node_id } }) catch |err| return map_commit_err(rt.gpa, err);
-        return ok_json(rt.gpa, schema.RemovedNode{ .node_id = req.node_id, .name = req.node_id });
+        const nid = rt.resolve_node_id(a, req.node_id) orelse return err_json(rt.gpa, .not_found, "node not found");
+        const old_name = if (try rt.view_node(a, nid)) |nd| nd.name else nid;
+        rt.fleet_srv.disconnect_node(nid);
+        rt.commit(.{ .node_removed = .{ .node_id = nid } }) catch |err| return map_commit_err(rt.gpa, err);
+        return ok_json(rt.gpa, schema.RemovedNode{ .node_id = nid, .name = old_name });
     } else if (std.mem.eql(u8, method, "RenameNode")) {
         const req = schema.decode_arena(schema.RenameNodeRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
-        rt.commit(.{ .node_renamed = .{ .node_id = req.node_id, .name = req.name } }) catch |err| return map_commit_err(rt.gpa, err);
-        return ok_json(rt.gpa, schema.RenamedNode{ .node_id = req.node_id, .from = req.node_id, .to = req.name });
+        const nid = rt.resolve_node_id(a, req.node_id) orelse return err_json(rt.gpa, .not_found, "node not found");
+        const old_name = if (try rt.view_node(a, nid)) |nd| nd.name else nid;
+        rt.commit(.{ .node_renamed = .{ .node_id = nid, .name = req.name } }) catch |err| return map_commit_err(rt.gpa, err);
+        return ok_json(rt.gpa, schema.RenamedNode{ .node_id = nid, .from = old_name, .to = req.name });
     } else if (std.mem.eql(u8, method, "RunJob")) {
         const req = schema.decode_arena(schema.RunJobRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
         if (req.argv.len == 0) return err_json(rt.gpa, .invalid, "argv must not be empty");
@@ -464,9 +498,10 @@ pub fn dispatch(
     } else if (std.mem.eql(u8, method, "ListJobs")) {
         const req = schema.decode_arena(schema.ListJobsRequest, a, body) catch schema.ListJobsRequest{};
         const st = try rt.view_state(a);
+        const want_id = if (req.node_id) |w| (rt.resolve_node_id(a, w) orelse w) else null;
         var list: std.ArrayList(schema.Job) = .empty;
         for (st.jobs) |j| {
-            if (req.node_id) |want| {
+            if (want_id) |want| {
                 if (j.node_id == null or !std.mem.eql(u8, j.node_id.?, want)) continue;
             }
             try list.append(a, j);
@@ -570,9 +605,9 @@ pub fn dispatch(
         const req = schema.decode_arena(schema.EnvoySendRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
         const rid = try rt.gen_id(a, "envoy");
         rt.commit(.{ .prompt_enqueued = .{
-            .sleeve_id = req.agent orelse "envoy",
+            .sleeve_id = "envoy",
             .request_id = rid,
-            .from = "owner",
+            .from = req.agent orelse "owner",
             .kind = .prompt,
             .mode = .queue,
             .text = req.text,
@@ -642,7 +677,8 @@ pub fn dispatch(
         while (true) {
             res_sleeves.clearRetainingCapacity();
             var match_count: usize = 0;
-            for (req.sleeve_ids) |sid| {
+            for (req.sleeve_ids) |raw_sid| {
+                const sid = rt.resolve_sleeve_id(a, raw_sid) orelse raw_sid;
                 const sv = (try rt.view_sleeve(a, sid)) orelse continue;
                 const ok = switch (req.until) {
                     .idle => sv.lifecycle == .stopped or (sv.incarnation != null and sv.incarnation.?.activity.state == .idle and sv.queued == 0),

@@ -889,8 +889,129 @@ read -r CLID CEP <<<"$(python3 -c 'import json,sys; d=json.load(sys.stdin); asse
 kill "$NPID7" "$PID7" >/dev/null 2>&1 || true
 wait "$NPID7" "$PID7" >/dev/null 2>&1 || true
 echo "E2E 7 PASSED"
+
+echo "=== E2E 8: Full Hub & Node CLI Parity ==="
+HUB8="$TMP_ROOT/hub8"
+NODE8="$TMP_ROOT/node8"
+REPO8="$TMP_ROOT/repo8"
+LOG8="$TMP_ROOT/hub8.log"
+mkdir -p "$REPO8"
+
+"$PT" serve --home "$HUB8" --listen 127.0.0.1:0 --fleet-listen 127.0.0.1:0 --no-sandbox >"$LOG8" 2>&1 &
+PID8=$!
+PIDS+=("$PID8")
+wait_for_listen "$LOG8"
+LINE8="$(grep 'protectorate listening ' "$LOG8" | head -n1)"
+HTTP8="$(extract_port "$LINE8" http)"
+FLEET8="$(extract_port "$LINE8" fleet)"
+TOK8="$("$PT" token --home "$HUB8" | sed -n 's/^owner=//p')"
+U8="--url http://127.0.0.1:${HTTP8} --token ${TOK8}"
+
+ENROLL8="$(rpc_post "$HTTP8" "$TOK8" GetEnrollment '{}')"
+JTOK8="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["control_key"])' <<<"$ENROLL8")"
+JOUT8="$("$PT_NODE" --home "$NODE8" join "$JTOK8" --name e2e-node-8)"
+NKEY8="$(sed -n 's/^  node_key: *//p' <<<"$JOUT8")"
+python3 - "$NODE8/config.json" "$FLEET8" <<'PY'
+import json, sys
+p, port = sys.argv[1], sys.argv[2]
+with open(p) as f:
+    cfg = json.load(f)
+cfg["addrs"] = [f"127.0.0.1:{port}"]
+with open(p, "w") as f:
+    json.dump(cfg, f, indent=2)
+PY
+ADD8="$(rpc_post "$HTTP8" "$TOK8" AddNode "{\"registration\":\"e2e-node-8:${NKEY8}\"}")"
+AID8="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["auth_id"])' <<<"$ADD8")"
+rpc_post "$HTTP8" "$TOK8" ApproveNode "{\"auth_id\":\"${AID8}\",\"name\":\"e2e-node-8\"}" >/dev/null
+"$PT_NODE" --home "$NODE8" authorize >/dev/null
+"$PT_NODE" --home "$NODE8" serve >"$TMP_ROOT/node8.log" 2>&1 &
+NPID8=$!
+PIDS+=("$NPID8")
+
+ONLINE8=0
+for _ in $(seq 1 50); do
+  if "$PT" $U8 --json node show e2e-node-8 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("online") else 1)'; then
+    ONLINE8=1
+    break
+  fi
+  sleep 0.2
+done
+if [[ "$ONLINE8" -ne 1 ]]; then
+  echo "node 8 did not come online" >&2
+  exit 1
+fi
+
+"$PT" version | grep -q 'protectorate '
+"$PT" $U8 hub info | grep -q 'hub='
+"$PT" $U8 hub state | grep -q 'sleeves='
+"$PT" --home "$HUB8" hub probation | grep -q 'probation\|healthy'
+"$PT" $U8 doctor --refresh | grep -q 'HARNESS'
+"$PT" $U8 quota list >/dev/null
+
+"$PT" $U8 node set e2e-node-8 --jobs owner --note maint | grep -q 'owner'
+"$PT" $U8 node rename e2e-node-8 e2e-node-8b | grep -q 'e2e-node-8b'
+"$PT" $U8 node show e2e-node-8b | grep -q 'e2e-node-8b'
+
+set +e
+JOB8_JSON="$("$PT" $U8 --json job run --wait --even-if-present --node e2e-node-8b -- sh -c 'echo CLI_LOG_8; exit 7')"
+JOB8_RC=$?
+set -e
+if [[ "$JOB8_RC" -ne 7 ]]; then
+  echo "expected job run --wait exit code 7, got $JOB8_RC ($JOB8_JSON)" >&2
+  exit 1
+fi
+JID8="$(python3 -c 'import json,sys; j=json.load(sys.stdin); assert j["state"]=="failed"; print(j["id"])' <<<"$JOB8_JSON")"
+"$PT" $U8 job list --node e2e-node-8b --limit 5 | grep -q "$JID8"
+"$PT" $U8 job logs "$JID8" --offset 0 --limit 9 | grep -q 'CLI_LOG_8'
+
+"$PT" $U8 --json sleeve spawn s8 --path "$REPO8" --harness pi_local --message "hi" | python3 -c 'import json,sys; s=json.load(sys.stdin); assert s["name"]=="s8"'
+"$PT" $U8 sleeve show s8 | grep -q 's8'
+"$PT" $U8 --json sleeve inbox s8 | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "messages" in d'
+"$PT" $U8 sleeve send s8 "follow up" --steer | python3 -c 'import json,sys; assert json.load(sys.stdin)["queued"]'
+"$PT" $U8 sleeve inbox s8 --drop >/dev/null
+"$PT" $U8 sleeve takeover s8 >/dev/null
+"$PT" $U8 sleeve stop s8 >/dev/null
+"$PT" $U8 sleeve rm s8 >/dev/null
+
+"$PT" $U8 --json approval list --pending | python3 -c 'import json,sys; assert "approvals" in json.load(sys.stdin)'
+"$PT" $U8 --json event list --limit 5 | python3 -c 'import json,sys; assert len(json.load(sys.stdin)["events"]) >= 1'
+"$PT" $U8 event read 1 >/dev/null
+
+DADD8="$("$PT" $U8 --json device add cli-dev)"
+DCODE8="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["code"])' <<<"$DADD8")"
+DPAIR8="$("$PT" $U8 --json device pair "$DCODE8")"
+DID8="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["device"]["id"])' <<<"$DPAIR8")"
+"$PT" $U8 --json device list | grep -q "$DID8"
+"$PT" $U8 device revoke "$DID8" >/dev/null
+
+ETOK8="$("$PT" $U8 envoy token)"
+test -n "$ETOK8"
+"$PT" $U8 --json envoy read --from 0 --limit 5 | python3 -c 'import json,sys; assert "entries" in json.load(sys.stdin)'
+
+MCP8_OUT="$("$PT" $U8 --as test-agent mcp <<JSON
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"e2e-cli"}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"node_admission","arguments":{"node_id":"e2e-node-8b"}}}
+JSON
+)"
+grep -q 'envoy_send' <<<"$MCP8_OUT"
+grep -q 'envoy_wait' <<<"$MCP8_OUT"
+grep -q 'envoy_read' <<<"$MCP8_OUT"
+grep -q 'acquire_lease' <<<"$MCP8_OUT"
+grep -q '"isError":false' <<<"$MCP8_OUT"
+
+"$PT_NODE" inventory | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["cpu_count"] >= 1'
+"$PT_NODE" sample | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "sampled_at_ms" in d'
+"$PT_NODE" presence | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "state" in d'
+"$PT_NODE" watch-presence --interval 1 --limit 1 | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "state" in d'
+"$PT_NODE" --home "$NODE8" probation | grep -q 'probation\|healthy'
+
+kill "$NPID8" "$PID8" >/dev/null 2>&1 || true
+wait "$NPID8" "$PID8" >/dev/null 2>&1 || true
+echo "E2E 8 PASSED"
+
 if [[ "${SKIP_PI_E2E:-0}" == "1" ]]; then
-  echo "ZIG E2E SCENARIOS 1, 3, 5, 6, 7 PASSED (E2E 2 & 4 skipped via SKIP_PI_E2E=1)"
+  echo "ZIG E2E SCENARIOS 1, 3, 5, 6, 7, 8 PASSED (E2E 2 & 4 skipped via SKIP_PI_E2E=1)"
 else
-  echo "ALL 7 ZIG E2E SCENARIOS PASSED"
+  echo "ALL 8 ZIG E2E SCENARIOS PASSED"
 fi

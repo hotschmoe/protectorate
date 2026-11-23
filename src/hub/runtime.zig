@@ -1416,6 +1416,27 @@ pub const Runtime = struct {
         return null;
     }
 
+    pub fn resolve_sleeve_id(self: *Runtime, arena: std.mem.Allocator, id_or_name: []const u8) ?[]const u8 {
+        self.state_mu.lockUncancelable(self.io);
+        defer self.state_mu.unlock(self.io);
+        if (self.core_state.sleeves.contains(id_or_name)) {
+            return arena.dupe(u8, id_or_name) catch null;
+        }
+        var fallback: ?[]const u8 = null;
+        var it = self.core_state.sleeves.iterator();
+        while (it.next()) |e| {
+            const sl = e.value_ptr.*;
+            if (std.mem.eql(u8, sl.name, id_or_name)) {
+                if (sl.lifecycle != .removed) {
+                    return arena.dupe(u8, sl.id) catch null;
+                }
+                if (fallback == null) fallback = sl.id;
+            }
+        }
+        if (fallback) |fb| return arena.dupe(u8, fb) catch null;
+        return null;
+    }
+
     pub fn record_hub_event(
         self: *Runtime,
         kind: schema.EventKind,

@@ -7,6 +7,8 @@
 - `join <ptjoin1:...>`: Decodes the base64url enrollment token, pins the hub X25519 public key + fingerprint, creates a `0o600` private key (`node_key.hex`) if absent, and outputs the node's static public key for owner approval.
 - `authorize`: Tests the `Noise_IK` handshake + `Hello` RPC against the hub and marks `authorized = true` once approved.
 - `serve [--stdio]`: Connects to the hub over TCP (with Happy-Eyeballs roaming dialing across `addrs` and exponential backoff reconnect) or raw stdin/stdout (`--stdio`).
+- `supervise`, `install-service [--user]`, `uninstall [--user]`, `probation [--retry-rollback]`: Cross-platform service installation (systemd user/system units, macOS launchd agents, Windows `sc.exe`), restart supervision, and release probation rollback checks.
+- `inventory`, `sample`, `presence`, `watch-presence`: Standalone JSON diagnostics matching node heartbeat telemetry.
 
 ## Telemetry & Self-Updates (`src/node/sys.zig`, `src/update/store.zig`)
 
