@@ -1,0 +1,250 @@
+const std = @import("std");
+const json_util = @import("../json_util.zig");
+const proto = @import("protocol.zig");
+
+const RpcKind = union(enum) {
+    initialize,
+    session_open,
+    prompt: []const u8,
+};
+
+pub const Grok = struct {
+    cwd: []const u8,
+    model: ?[]const u8 = null,
+    resume_id: ?[]const u8 = null,
+    supervised: bool = false,
+    session_id: ?[]const u8 = null,
+    turn_request_id: ?[]const u8 = null,
+    turn_active: bool = false,
+    acked: bool = false,
+    next_id: u64 = 1,
+    segment: u64 = 0,
+    turns: u64 = 0,
+    pending_rpc: std.AutoHashMapUnmanaged(u64, RpcKind) = .empty,
+    approvals: std.StringHashMapUnmanaged(struct { rpc_id: []const u8, allow_opt: ?[]const u8 }) = .empty,
+
+    pub fn build_argv(arena: std.mem.Allocator, spec: proto.SpawnSpec) ![]const []const u8 {
+        var argv: std.ArrayList([]const u8) = .empty;
+        try argv.appendSlice(arena, &.{ spec.program, "--acp" });
+        if (spec.model) |m| try argv.appendSlice(arena, &.{ "--model", m });
+        try argv.appendSlice(arena, spec.extra_args);
+        return argv.items;
+    }
+
+    pub fn start(self: *Grok, out: *proto.Out) !void {
+        try self.call("initialize", .{
+            .protocolVersion = @as(u32, 1),
+            .clientCapabilities = .{},
+            .clientInfo = .{ .name = "protectorate", .version = "0.7.0" },
+        }, .initialize, out);
+    }
+
+    fn call(self: *Grok, method: []const u8, params: anytype, kind: RpcKind, out: *proto.Out) !void {
+        const id = self.next_id;
+        self.next_id += 1;
+        try self.pending_rpc.put(out.alloc, id, kind);
+        try out.write_value(.{ .jsonrpc = "2.0", .id = id, .method = method, .params = params }, null);
+    }
+
+    pub fn on_line(self: *Grok, arena: std.mem.Allocator, line: []const u8, out: *proto.Out) !void {
+        const trimmed = std.mem.trim(u8, line, " \t\r\n");
+        if (trimmed.len == 0) return;
+        const msg = std.json.parseFromSliceLeaky(std.json.Value, arena, trimmed, .{}) catch {
+            out.stray += 1;
+            return;
+        };
+        if (msg != .object) {
+            out.stray += 1;
+            return;
+        }
+        const method_opt = json_util.value_str(msg, "method");
+        const id_val = json_util.value_get(msg, "id");
+        const has_id = id_val != null and id_val.? != .null;
+
+        if (method_opt != null and has_id) {
+            try self.on_request(msg, method_opt.?, out);
+        } else if (method_opt != null) {
+            try self.on_note(method_opt.?, json_util.value_get(msg, "params") orelse .null, out);
+        } else if (has_id) {
+            try self.on_reply(msg, out);
+        } else {
+            try out.emit_error(.protocol, "grok message missing method and id");
+        }
+    }
+
+    fn on_reply(self: *Grok, msg: std.json.Value, out: *proto.Out) !void {
+        const id = json_util.as_u64(json_util.value_get(msg, "id") orelse return) orelse return;
+        const kind = self.pending_rpc.get(id) orelse return;
+        _ = self.pending_rpc.remove(id);
+
+        const err_obj = json_util.value_get(msg, "error");
+        const failed = err_obj != null and err_obj.? != .null;
+        const err_msg = if (failed) (json_util.value_str(err_obj.?, "message") orelse "rpc error") else "";
+        const result = json_util.value_get(msg, "result") orelse .null;
+
+        switch (kind) {
+            .initialize => {
+                if (failed) {
+                    out.refused = true;
+                    try out.emit_error(.protocol, err_msg);
+                    return;
+                }
+                if (self.resume_id) |rid| {
+                    try self.call("session/load", .{ .sessionId = rid, .cwd = self.cwd }, .session_open, out);
+                } else {
+                    try self.call("session/new", .{ .cwd = self.cwd, .model = self.model }, .session_open, out);
+                }
+            },
+            .session_open => {
+                if (failed) {
+                    out.refused = true;
+                    try out.emit_error(.protocol, err_msg);
+                    return;
+                }
+                const sid = json_util.value_str(result, "sessionId") orelse self.resume_id orelse {
+                    out.refused = true;
+                    try out.emit_error(.protocol, "grok session missing sessionId");
+                    return;
+                };
+                self.session_id = try out.alloc.dupe(u8, sid);
+                try out.emit(.{ .session_info = .{
+                    .harness = .grok,
+                    .native_id = self.session_id.?,
+                    .model = self.model,
+                    .cwd = self.cwd,
+                } });
+            },
+            .prompt => |req_id| {
+                self.ack(out);
+                if (failed) {
+                    try out.emit_error(proto.classify_error(err_msg), err_msg);
+                    try out.emit(.{ .turn_settled = .{ .stop = .@"error", .native_stop = "error" } });
+                } else {
+                    const reason = json_util.value_str(result, "stopReason") orelse "end_turn";
+                    const stop: proto.Stop = if (std.mem.eql(u8, reason, "cancelled")) .cancelled else .end_turn;
+                    try out.emit(.{ .turn_settled = .{ .stop = stop, .native_stop = try out.alloc.dupe(u8, reason) } });
+                }
+                self.turn_active = false;
+                self.turn_request_id = null;
+                self.acked = false;
+                _ = req_id;
+            },
+        }
+    }
+
+    fn ack(self: *Grok, out: *proto.Out) void {
+        if (self.acked) return;
+        self.acked = true;
+        if (self.turn_request_id) |req_id| {
+            out.emit(.{ .prompt_ack = .{ .request_id = req_id, .ack = .confirmed } }) catch {};
+            out.emit(.{ .turn_started = .{ .request_id = req_id } }) catch {};
+        }
+    }
+
+    fn on_request(self: *Grok, msg: std.json.Value, method: []const u8, out: *proto.Out) !void {
+        const id_val = json_util.value_get(msg, "id") orelse return;
+        const raw_id = try json_util.stringify_alloc(out.alloc, id_val);
+        if (!std.mem.eql(u8, method, "session/request_permission")) {
+            const line = try std.fmt.allocPrint(out.alloc, "{{\"jsonrpc\":\"2.0\",\"id\":{s},\"error\":{{\"code\":-32601,\"message\":\"unsupported\"}}}}", .{raw_id});
+            try out.write_raw_line(line, null);
+            return;
+        }
+        const p = json_util.value_get(msg, "params") orelse .null;
+        const app_id = try std.fmt.allocPrint(out.alloc, "grok-{s}", .{raw_id});
+        var allow_opt: ?[]const u8 = null;
+        if (json_util.value_array(p, "options")) |opts| {
+            for (opts) |o| {
+                if (std.mem.eql(u8, json_util.value_str(o, "kind") orelse "", "allow_once")) {
+                    allow_opt = json_util.value_str(o, "optionId");
+                }
+            }
+        }
+        const tc = json_util.value_get(p, "toolCall") orelse .null;
+        const name = json_util.value_str(tc, "title") orelse "tool";
+        const decisions = try out.alloc.dupe(proto.Decision, &.{ .allow_once, .deny, .cancel });
+        try out.emit(.{ .approval_request = .{
+            .id = app_id,
+            .tool = .other,
+            .name = try out.alloc.dupe(u8, name),
+            .summary = try out.alloc.dupe(u8, name),
+            .options = decisions,
+        } });
+        try self.approvals.put(out.alloc, app_id, .{
+            .rpc_id = raw_id,
+            .allow_opt = if (allow_opt) |ao| try out.alloc.dupe(u8, ao) else null,
+        });
+        if (!self.supervised) {
+            try self.respond_approval(app_id, .allow_once, out);
+        }
+    }
+
+    fn on_note(self: *Grok, method: []const u8, p: std.json.Value, out: *proto.Out) !void {
+        if (!std.mem.eql(u8, method, "session/update")) return;
+        const u = json_util.value_get(p, "update") orelse return;
+        const kind = json_util.value_str(u, "sessionUpdate") orelse return;
+        if (std.mem.eql(u8, kind, "agent_message_chunk") or std.mem.eql(u8, kind, "agent_thought_chunk")) {
+            self.ack(out);
+            const content = json_util.value_get(u, "content") orelse .null;
+            const txt = json_util.value_str(content, "text") orelse "";
+            const key = try std.fmt.allocPrint(out.alloc, "grok-{d}-{d}", .{ self.turns, self.segment });
+            try out.delta(std.mem.eql(u8, kind, "agent_thought_chunk"), key, txt);
+        } else if (std.mem.eql(u8, kind, "tool_call")) {
+            self.ack(out);
+            self.segment += 1;
+            const id = json_util.value_str(u, "toolCallId") orelse "";
+            const title = json_util.value_str(u, "title") orelse "tool";
+            try out.tool_call(id, .other, title, json_util.value_get(u, "rawInput") orelse .null);
+        } else if (std.mem.eql(u8, kind, "tool_call_update")) {
+            const st = json_util.value_str(u, "status") orelse "";
+            if (std.mem.eql(u8, st, "completed") or std.mem.eql(u8, st, "failed")) {
+                const id = json_util.value_str(u, "toolCallId") orelse "";
+                const res = json_util.value_str(u, "title") orelse st;
+                try out.emit(.{ .tool_result = .{
+                    .id = try out.alloc.dupe(u8, id),
+                    .status = if (std.mem.eql(u8, st, "failed")) .failed else .completed,
+                    .output = try out.alloc.dupe(u8, res),
+                    .truncated = false,
+                } });
+            }
+        }
+    }
+
+    pub fn send_user(self: *Grok, request_id: []const u8, text: []const u8, steer: ?[]const u8, out: *proto.Out) !void {
+        const sid = self.session_id orelse return error.NotReady;
+        if (steer != null) return error.Unsupported;
+        if (self.turn_active) return error.Busy;
+        const req_dup = try out.alloc.dupe(u8, request_id);
+        const prompt = [_]struct { type: []const u8, text: []const u8 }{.{ .type = "text", .text = text }};
+        try self.call("session/prompt", .{ .sessionId = sid, .prompt = &prompt }, .{ .prompt = req_dup }, out);
+        self.turns += 1;
+        self.turn_active = true;
+        self.acked = false;
+        self.turn_request_id = req_dup;
+    }
+
+    pub fn respond_approval(self: *Grok, id: []const u8, decision: proto.Decision, out: *proto.Out) !void {
+        const app = self.approvals.get(id) orelse return error.UnknownApproval;
+        _ = self.approvals.remove(id);
+        const line = if ((decision == .allow_once or decision == .allow_session) and app.allow_opt != null)
+            try std.fmt.allocPrint(out.alloc, "{{\"jsonrpc\":\"2.0\",\"id\":{s},\"result\":{{\"outcome\":{{\"outcome\":\"selected\",\"optionId\":\"{s}\"}}}}}}", .{ app.rpc_id, app.allow_opt.? })
+        else
+            try std.fmt.allocPrint(out.alloc, "{{\"jsonrpc\":\"2.0\",\"id\":{s},\"result\":{{\"outcome\":{{\"outcome\":\"cancelled\"}}}}}}", .{app.rpc_id});
+        try out.write_raw_line(line, null);
+        try out.emit(.{ .approval_decision = .{
+            .id = try out.alloc.dupe(u8, id),
+            .decision = decision,
+            .by = if (self.supervised) "owner" else "autonomous",
+            .confirmed = true,
+        } });
+    }
+
+    pub fn interrupt(self: *Grok, out: *proto.Out) !void {
+        const sid = self.session_id orelse return;
+        if (!self.turn_active) return;
+        try out.write_value(.{
+            .jsonrpc = "2.0",
+            .method = "session/cancel",
+            .params = .{ .sessionId = sid },
+        }, null);
+    }
+};

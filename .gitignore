@@ -13,3 +13,5 @@
 /.env.e2e
 /references/
 /.archive/
+/.zig-cache/
+/zig-out/

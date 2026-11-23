@@ -38,7 +38,7 @@ Future<Directory?> _settingsDir() async {
   final dir = Directory('$base${Platform.pathSeparator}protectorate');
   await dir.create(recursive: true);
   // The file holds a bearer token. Android's filesDir is already private to the app.
-  if (!Platform.isWindows && (await Process.run('chmod', ['700', dir.path])).exitCode != 0) {
+  if (!Platform.isWindows && !Platform.isAndroid && (await Process.run('chmod', ['700', dir.path])).exitCode != 0) {
     return null;
   }
   return dir;

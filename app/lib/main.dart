@@ -67,6 +67,10 @@ class _AppState extends State<App> {
     if (u.isNotEmpty) {
       saveSetting('hub_url', u == pageOrigin() ? null : u);
       saveSetting('device_token', t);
+    } else {
+      saveSetting('hub_url', null);
+      saveSetting('device_token', null);
+      saveSetting('device_id', null);
     }
     if (u == _url && t == _token) return;
     _hub.close();

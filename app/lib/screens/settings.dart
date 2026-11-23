@@ -115,7 +115,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final app = AppScope.of(context);
     final p = pal(context);
     _loadDevices(app);
-    final kept = pageOrigin() != null ? 'kept in this browser' : 'kept for this session only';
+    final kept = pageOrigin() != null ? 'kept in this browser' : 'kept on this device';
     void save() {
       app.connect(_url.text, _token.text);
       app.say(_url.text.trim().isEmpty
