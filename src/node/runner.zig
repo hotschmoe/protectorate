@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const tiger = @import("../tiger.zig");
 const msg = @import("../net/msg.zig");
+const s_exec = @import("../sandbox/exec.zig");
 
 const Sha256 = std.crypto.hash.sha2.Sha256;
 
@@ -30,6 +31,7 @@ const JobEntry = struct {
     log_bytes: u64 = 0,
     artifacts: std.ArrayList(ArtifactRec) = .empty,
     child_id: ?std.process.Child.Id = null,
+    guard: s_exec.ProcessGuard = .{},
     cancel_requested: std.atomic.Value(bool) = .init(false),
     thread: ?std.Thread = null,
     started_ms: i64,
@@ -305,14 +307,8 @@ fn is_terminal(st: msg.JobState) bool {
 
 fn kill_job_proc(job: *JobEntry) void {
     job.mu.lockUncancelable(job.io);
-    const cid = job.child_id;
+    job.guard.terminate();
     job.mu.unlock(job.io);
-    if (cid) |id| {
-        if (comptime builtin.os.tag != .windows) {
-            std.posix.kill(-id, .KILL) catch {};
-            std.posix.kill(id, .KILL) catch {};
-        }
-    }
 }
 
 fn run_job_thread(job: *JobEntry) void {
@@ -331,9 +327,17 @@ fn run_job_thread(job: *JobEntry) void {
         return;
     };
 
-    job.mu.lockUncancelable(job.io);
-    job.child_id = child.id;
-    job.mu.unlock(job.io);
+    {
+        var guard = s_exec.ProcessGuard.init(null);
+        guard.attach(child.id);
+        job.mu.lockUncancelable(job.io);
+        job.child_id = child.id;
+        job.guard = guard;
+        if (job.cancel_requested.load(.acquire)) {
+            job.guard.terminate();
+        }
+        job.mu.unlock(job.io);
+    }
 
     const log_file = std.Io.Dir.cwd().openFile(job.io, job.log_path, .{ .mode = .read_write }) catch null;
     defer if (log_file) |lf| lf.close(job.io);
@@ -377,8 +381,11 @@ fn run_job_thread(job: *JobEntry) void {
     const term = child.wait(job.io) catch null;
     collect_artifacts(job);
 
+    var old_guard: s_exec.ProcessGuard = .{};
     job.mu.lockUncancelable(job.io);
     job.child_id = null;
+    old_guard = job.guard;
+    job.guard = .{};
     if (job.cancel_requested.load(.acquire)) {
         job.state = .cancelled;
     } else if (term) |t| {
@@ -397,6 +404,7 @@ fn run_job_thread(job: *JobEntry) void {
         job.state = .failed;
     }
     job.mu.unlock(job.io);
+    old_guard.deinit();
 }
 
 fn collect_artifacts(job: *JobEntry) void {

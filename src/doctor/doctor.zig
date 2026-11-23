@@ -13,15 +13,16 @@ pub fn run_checks(
     var harnesses: std.ArrayList(schema.DoctorHarness) = .empty;
     var problems: std.ArrayList([]const u8) = .empty;
 
-    const specs = [_]struct { name: []const u8, cred_rel: []const u8, install: []const u8 }{
-        .{ .name = "claude", .cred_rel = ".claude/.credentials.json", .install = "npm i -g @anthropic-ai/claude-code" },
-        .{ .name = "codex", .cred_rel = ".codex/auth.json", .install = "npm i -g @openai/codex" },
-        .{ .name = "grok", .cred_rel = ".grok/auth.json", .install = "npm i -g @vibe-kit/grok-cli" },
-        .{ .name = "pi", .cred_rel = ".pi/agent/models.json", .install = "npm i -g @mariozechner/pi-coding-agent" },
+    const specs = [_]struct { name: []const u8, bin: []const u8, cred_rel: []const u8, install: []const u8 }{
+        .{ .name = "claude", .bin = "claude", .cred_rel = ".claude/.credentials.json", .install = "npm i -g @anthropic-ai/claude-code" },
+        .{ .name = "codex", .bin = "codex", .cred_rel = ".codex/auth.json", .install = "npm i -g @openai/codex" },
+        .{ .name = "grok", .bin = "grok", .cred_rel = ".grok/auth.json", .install = "npm i -g @vibe-kit/grok-cli" },
+        .{ .name = "antigravity", .bin = "agy", .cred_rel = ".gemini", .install = "https://antigravity.google/docs/getting-started" },
+        .{ .name = "pi", .bin = "pi", .cred_rel = ".pi/agent/models.json", .install = "npm i -g @mariozechner/pi-coding-agent" },
     };
 
     for (specs) |sp| {
-        const ver = probe_version(arena, io, &.{ sp.name, "--version" });
+        const ver = probe_version(arena, io, &.{ sp.bin, "--version" });
         const present = ver != null;
         var login = false;
         if (user_home) |h| {
@@ -29,7 +30,13 @@ pub fn run_checks(
             if (p.len > 0) {
                 if (std.Io.Dir.cwd().statFile(io, p, .{})) |_| {
                     login = true;
-                } else |_| {}
+                } else |_| {
+                    if (std.Io.Dir.cwd().openDir(io, p, .{})) |dval| {
+                        var d = dval;
+                        d.close(io);
+                        login = true;
+                    } else |_| {}
+                }
             }
         }
         var reasons: std.ArrayList([]const u8) = .empty;
@@ -39,7 +46,7 @@ pub fn run_checks(
         try harnesses.append(arena, .{
             .name = sp.name,
             .present = present,
-            .path = if (present) sp.name else "",
+            .path = if (present) sp.bin else "",
             .version = ver orelse "",
             .install = sp.install,
             .login = login,
@@ -49,9 +56,14 @@ pub fn run_checks(
     }
 
     const gh_ok = probe_ok(arena, io, &.{ "gh", "auth", "status" });
-    const sandbox_ok = if (builtin.os.tag == .linux) probe_ok(arena, io, &.{ "bwrap", "--version" }) else false;
+    const sandbox_ok = if (builtin.os.tag == .linux)
+        (probe_ok(arena, io, &.{ "bwrap", "--version" }) or probe_landlock())
+    else if (builtin.os.tag == .windows)
+        true
+    else
+        false;
     if (builtin.os.tag == .linux and !sandbox_ok) {
-        try problems.append(arena, "bubblewrap (bwrap) not found");
+        try problems.append(arena, "neither bubblewrap (bwrap) nor Landlock LSM available");
     }
     const git_ok = probe_ok(arena, io, &.{ "git", "--version" });
     if (!git_ok) {
@@ -88,4 +100,10 @@ fn probe_ok(arena: std.mem.Allocator, io: std.Io, argv: []const []const u8) bool
         .stderr_limit = .limited(8192),
     }) catch return false;
     return res.term.success();
+}
+
+fn probe_landlock() bool {
+    if (comptime builtin.os.tag != .linux) return false;
+    const rc = std.os.linux.syscall3(.landlock_create_ruleset, 0, 0, 1);
+    return std.os.linux.errno(rc) == .SUCCESS and rc >= 1;
 }

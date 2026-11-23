@@ -48,7 +48,15 @@ pub fn main(init: std.process.Init) !u8 {
     var out_root = try std.Io.Dir.cwd().createDirPathOpen(init.io, od_path, .{});
     defer out_root.close(init.io);
 
-    var entries: std.ArrayList([]const u8) = .empty;
+    const comp_ptr = try arena.create(std.compress.flate.Compress);
+    const comp_buf = try arena.alloc(u8, std.compress.flate.max_window_len);
+
+    const AssetRec = struct {
+        rel: []const u8,
+        embed_rel: []const u8,
+        gzipped: bool,
+    };
+    var entries: std.ArrayList(AssetRec) = .empty;
 
     if (in_dir) |id_path| {
         var in_root_opt: ?std.Io.Dir = std.Io.Dir.cwd().openDir(init.io, id_path, .{ .iterate = true }) catch null;
@@ -62,19 +70,36 @@ pub fn main(init: std.process.Init) !u8 {
                 const rel = try normalize_slashes(arena, entry.path);
                 if (std.mem.eql(u8, rel, ".last_build_id")) continue;
                 const data = try in_root.readFileAlloc(init.io, rel, arena, .limited(64 * 1024 * 1024));
-                const dest_rel = try std.fmt.allocPrint(arena, "files/{s}", .{rel});
+
+                var gz_aw = try std.Io.Writer.Allocating.initCapacity(arena, @max(@as(usize, 4096), data.len / 2));
+                comp_ptr.* = try std.compress.flate.Compress.init(&gz_aw.writer, comp_buf, .gzip, .level_6);
+                try comp_ptr.writer.writeAll(data);
+                try comp_ptr.finish();
+
+                const gz_bytes = gz_aw.written();
+                const use_gz = gz_bytes.len + 64 < data.len;
+                const payload = if (use_gz) gz_bytes else data;
+                const dest_rel = if (use_gz)
+                    try std.fmt.allocPrint(arena, "files/{s}.gz", .{rel})
+                else
+                    try std.fmt.allocPrint(arena, "files/{s}", .{rel});
+
                 if (std.mem.findScalarLast(u8, dest_rel, '/')) |slash| {
                     try out_root.createDirPath(init.io, dest_rel[0..slash]);
                 }
-                try out_root.writeFile(init.io, .{ .sub_path = dest_rel, .data = data });
-                try entries.append(arena, rel);
+                try out_root.writeFile(init.io, .{ .sub_path = dest_rel, .data = payload });
+                try entries.append(arena, .{
+                    .rel = rel,
+                    .embed_rel = dest_rel,
+                    .gzipped = use_gz,
+                });
             }
         }
     }
 
-    std.mem.sort([]const u8, entries.items, {}, struct {
-        fn less(_: void, a: []const u8, b: []const u8) bool {
-            return std.mem.lessThan(u8, a, b);
+    std.mem.sort(AssetRec, entries.items, {}, struct {
+        fn less(_: void, a: AssetRec, b: AssetRec) bool {
+            return std.mem.lessThan(u8, a.rel, b.rel);
         }
     }.less);
 
@@ -87,21 +112,21 @@ pub fn main(init: std.process.Init) !u8 {
         \\    path: []const u8,
         \\    content_type: []const u8,
         \\    bytes: []const u8,
+        \\    gzipped: bool,
         \\};
         \\
         \\pub const assets = [_]Asset{
         \\
     );
-    for (entries.items) |rel| {
-        const ct = content_type_for(rel);
+    for (entries.items) |rec| {
+        const ct = content_type_for(rec.rel);
         try w.writeAll("    .{ .path = ");
-        try std.json.Stringify.encodeJsonString(rel, .{}, w);
+        try std.json.Stringify.encodeJsonString(rec.rel, .{}, w);
         try w.writeAll(", .content_type = ");
         try std.json.Stringify.encodeJsonString(ct, .{}, w);
         try w.writeAll(", .bytes = @embedFile(");
-        const embed_rel = try std.fmt.allocPrint(arena, "files/{s}", .{rel});
-        try std.json.Stringify.encodeJsonString(embed_rel, .{}, w);
-        try w.writeAll(") },\n");
+        try std.json.Stringify.encodeJsonString(rec.embed_rel, .{}, w);
+        try w.print("), .gzipped = {} }},\n", .{rec.gzipped});
     }
     try w.writeAll(
         \\};

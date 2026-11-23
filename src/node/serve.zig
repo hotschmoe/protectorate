@@ -194,22 +194,28 @@ pub fn cmd_authorize(gpa: std.mem.Allocator, io: std.Io, home_path: []const u8) 
     _ = try std.fmt.hexToBytes(&hub_pub, cfg.hub_public_key);
 
     const inv = try sys.collect_inventory(arena, io, version.version);
+    var eps: std.ArrayList(transport.Endpoint) = .empty;
     for (cfg.addrs) |addr_str| {
         const hp = split_host_port(addr_str, 7475) orelse continue;
-        var conn = transport.NoiseConn.dial_tcp(gpa, io, hp.host, hp.port, kp, hub_pub) catch |err| {
-            try print_err(io, "authorize dial {s} failed: {s}\n", .{ addr_str, @errorName(err) });
-            continue;
-        };
-        defer conn.deinit();
+        try eps.append(arena, .{ .host = hp.host, .port = hp.port });
+    }
+    if (eps.items.len > 0) {
+        if (transport.NoiseConn.dial_any_tcp(gpa, io, eps.items, 3_000, kp, hub_pub)) |res_conn| {
+            var conn = res_conn.conn;
+            defer conn.deinit();
 
-        try send_hello_sync(gpa, arena, &conn, &cfg, inv, io);
-        cfg.authorized = true;
-        try save_config(gpa, io, home_path, cfg);
-        var obuf: [512]u8 = undefined;
-        var w = std.Io.File.stdout().writer(io, &obuf);
-        try w.interface.print("authorized against {s} (hub {s})\n", .{ addr_str, cfg.hub_fingerprint });
-        try w.interface.flush();
-        return 0;
+            try send_hello_sync(gpa, arena, &conn, &cfg, inv, io);
+            cfg.authorized = true;
+            try save_config(gpa, io, home_path, cfg);
+            const chosen = eps.items[res_conn.addr_index];
+            var obuf: [512]u8 = undefined;
+            var w = std.Io.File.stdout().writer(io, &obuf);
+            try w.interface.print("authorized against {s}:{d} (hub {s})\n", .{ chosen.host, chosen.port, cfg.hub_fingerprint });
+            try w.interface.flush();
+            return 0;
+        } else |err| {
+            try print_err(io, "authorize dial failed: {s}\n", .{@errorName(err)});
+        }
     }
     try print_err(io, "authorization failed across configured hub addresses\n", .{});
     return 1;
@@ -274,24 +280,27 @@ pub fn cmd_serve(gpa: std.mem.Allocator, io: std.Io, home_path: []const u8, stdi
         return 0;
     }
 
+    var eps: std.ArrayList(transport.Endpoint) = .empty;
+    for (cfg.addrs) |addr_str| {
+        const hp = split_host_port(addr_str, 7475) orelse continue;
+        try eps.append(arena, .{ .host = hp.host, .port = hp.port });
+    }
+
     var backoff_ms: i64 = 500;
     while (true) {
-        var connected_any = false;
-        for (cfg.addrs) |addr_str| {
-            const hp = split_host_port(addr_str, 7475) orelse continue;
-            var conn = transport.NoiseConn.dial_tcp(gpa, io, hp.host, hp.port, kp, hub_pub) catch |err| {
-                print_err(io, "connect {s} failed: {s}\n", .{ addr_str, @errorName(err) }) catch {};
-                continue;
-            };
-            connected_any = true;
-            backoff_ms = 500;
-            run_session(gpa, io, &conn, &cfg, inv, &run_mgr) catch |err| {
-                print_err(io, "session {s} ended: {s}\n", .{ addr_str, @errorName(err) }) catch {};
-            };
-            conn.deinit();
-        }
-        if (!connected_any) {
-            backoff_ms = @min(backoff_ms * 2, 15_000);
+        if (eps.items.len > 0) {
+            if (transport.NoiseConn.dial_any_tcp(gpa, io, eps.items, 3_000, kp, hub_pub)) |res_conn| {
+                var conn = res_conn.conn;
+                backoff_ms = 500;
+                const chosen = eps.items[res_conn.addr_index];
+                run_session(gpa, io, &conn, &cfg, inv, &run_mgr) catch |err| {
+                    print_err(io, "session {s}:{d} ended: {s}\n", .{ chosen.host, chosen.port, @errorName(err) }) catch {};
+                };
+                conn.deinit();
+            } else |err| {
+                print_err(io, "connect across {d} addr(s) failed: {s}\n", .{ eps.items.len, @errorName(err) }) catch {};
+                backoff_ms = @min(backoff_ms * 2, 5_000);
+            }
         }
         io.sleep(.fromMilliseconds(backoff_ms), .awake) catch break;
     }
@@ -304,6 +313,7 @@ const SessionCtx = struct {
     conn: *transport.NoiseConn,
     tx_mu: std.Io.Mutex = .init,
     closed: std.atomic.Value(bool) = .init(false),
+    last_rx_ms: std.atomic.Value(i64),
     cfg: *const NodeConfig,
 };
 
@@ -348,6 +358,7 @@ fn run_session(
         .gpa = gpa,
         .io = io,
         .conn = conn,
+        .last_rx_ms = .init(std.Io.Clock.awake.now(io).toMilliseconds()),
         .cfg = cfg,
     };
 
@@ -355,8 +366,17 @@ fn run_session(
         fn run(ctx: *SessionCtx) void {
             var next_id: u64 = 4;
             while (!ctx.closed.load(.acquire)) {
-                ctx.io.sleep(.fromMilliseconds(5_000), .awake) catch break;
+                var slept: u32 = 0;
+                while (slept < 5_000 and !ctx.closed.load(.acquire)) : (slept += 250) {
+                    ctx.io.sleep(.fromMilliseconds(250), .awake) catch break;
+                }
                 if (ctx.closed.load(.acquire)) break;
+                const now_ms = std.Io.Clock.awake.now(ctx.io).toMilliseconds();
+                if (now_ms - ctx.last_rx_ms.load(.acquire) > 15_000) {
+                    ctx.closed.store(true, .release);
+                    ctx.conn.shutdown();
+                    break;
+                }
                 const req: msg.Request = .{ .hello = .{
                     .node_id = ctx.cfg.node_id,
                     .node_version = version.version,
@@ -367,6 +387,8 @@ fn run_session(
                 ctx.tx_mu.lockUncancelable(ctx.io);
                 ctx.conn.send_json(.request, next_id, req) catch {
                     ctx.tx_mu.unlock(ctx.io);
+                    ctx.closed.store(true, .release);
+                    ctx.conn.shutdown();
                     break;
                 };
                 ctx.tx_mu.unlock(ctx.io);
@@ -387,6 +409,7 @@ fn run_session(
     while (true) {
         var f = try conn.recv_frame();
         defer f.deinit(gpa);
+        sctx.last_rx_ms.store(std.Io.Clock.awake.now(io).toMilliseconds(), .release);
 
         if (f.kind != .request) continue;
         _ = req_arena_st.reset(.retain_capacity);

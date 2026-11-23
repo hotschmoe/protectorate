@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const s_exec = @import("sandbox/exec.zig");
 const commands = @import("cli/commands.zig");
 const hub_home = @import("hub/home.zig");
 const hub_rt = @import("hub/runtime.zig");
@@ -26,8 +27,14 @@ fn install_signal_handlers() void {
 pub fn main(init: std.process.Init) !u8 {
     var arena_st = std.heap.ArenaAllocator.init(init.gpa);
     defer arena_st.deinit();
+    const arena = arena_st.allocator();
 
-    switch (try commands.dispatch_cli(init, arena_st.allocator())) {
+    const raw_args = try init.minimal.args.toSlice(arena);
+    if (raw_args.len >= 2 and std.mem.eql(u8, raw_args[1], "__guard")) {
+        return try s_exec.run_guard_trampoline(init, raw_args[2..]);
+    }
+
+    switch (try commands.dispatch_cli(init, arena)) {
         .exit => |code| return code,
         .token => |t| {
             const hp = try hub_home.HubHome.resolve_path(init.gpa, init.environ_map, t.home_opt);

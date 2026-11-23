@@ -1,4 +1,5 @@
 const std = @import("std");
+const s_exec = @import("sandbox/exec.zig");
 const version = @import("version.zig");
 const doctor = @import("doctor/doctor.zig");
 const serve = @import("node/serve.zig");
@@ -9,6 +10,9 @@ pub fn main(init: std.process.Init) !u8 {
     const arena = arena_st.allocator();
 
     const args = try init.minimal.args.toSlice(arena);
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "__guard")) {
+        return try s_exec.run_guard_trampoline(init, args[2..]);
+    }
     var home_override: ?[]const u8 = null;
     var stdio_mode = false;
     var name_opt: ?[]const u8 = null;

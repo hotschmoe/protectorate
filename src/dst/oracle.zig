@@ -13,6 +13,7 @@ const drv_claude = @import("../drivers/claude.zig");
 const drv_codex = @import("../drivers/codex.zig");
 const drv_grok = @import("../drivers/grok.zig");
 const drv_pi = @import("../drivers/pi.zig");
+const drv_agy = @import("../drivers/antigravity.zig");
 const sbox = @import("../sandbox/spec.zig");
 const upd_ver = @import("../update/version.zig");
 const qr = @import("../qr.zig");
@@ -630,12 +631,86 @@ fn run_drivers_oracle(gpa: std.mem.Allocator, seed: u64) !void {
         };
         var cl2 = drv_claude.Claude{ .session_id = "s", .uuid_base = "b" };
         var pi2 = drv_pi.Pi{ .session_id = "p" };
+        var ag2 = drv_agy.Antigravity{ .session_id = "a" };
         for (0..12) |_| {
             const line = garbage[rng.uintLessThan(usize, garbage.len)];
             try cl2.on_line(a, line, &out);
             try gr.on_line(a, line, &out);
             try pi2.on_line(a, line, &out);
+            try ag2.on_line(a, line, &out);
         }
+    }
+
+    // 5. Antigravity stream-json argv, multi-turn cumulative usage deltas, tools, and errors.
+    {
+        const ag_argv = try drv_agy.Antigravity.build_argv(a, .{
+            .harness = .antigravity,
+            .program = "agy",
+            .cwd = "/tmp/ws",
+            .model = "gemini-3.8-flash-medium",
+            .effort = "medium",
+            .resume_id = "conv-prev",
+            .permission = .unsupervised,
+        });
+        var saw_in_fmt = false;
+        var saw_out_fmt = false;
+        for (ag_argv, 0..) |arg, idx| {
+            tiger.assert(!std.mem.eql(u8, arg, "-p") and !std.mem.eql(u8, arg, "--print"));
+            if (std.mem.eql(u8, arg, "--input-format") and idx + 1 < ag_argv.len) {
+                saw_in_fmt = std.mem.eql(u8, ag_argv[idx + 1], "stream-json");
+            }
+            if (std.mem.eql(u8, arg, "--output-format") and idx + 1 < ag_argv.len) {
+                saw_out_fmt = std.mem.eql(u8, ag_argv[idx + 1], "stream-json");
+            }
+        }
+        tiger.assert(saw_in_fmt and saw_out_fmt);
+
+        var ag = drv_agy.Antigravity{ .session_id = "ag-s1", .model = "gemini-3.8-flash-medium" };
+        var out = drv_proto.Out.init(a, 5);
+        try ag.start(&out);
+        try ag.on_line(a, "{\"event\":\"init\",\"conversation_id\":\"conv-live\",\"init\":{\"cwd\":\"/tmp/ws\",\"model\":\"gemini-3.8-flash-medium\",\"permission_mode\":\"always-proceed\"}}", &out);
+        tiger.assert(std.mem.eql(u8, ag.session_id, "conv-live"));
+
+        try ag.send_user("ag-req-1", "edit a file", null, &out);
+        tiger.assert(out.writes.items.len > 0);
+        const w0 = out.writes.items[out.writes.items.len - 1].json_line;
+        tiger.assert(std.mem.findPos(u8, w0, 0, "\"event\":\"user\"") != null);
+
+        try ag.on_line(a, "{\"event\":\"step_update\",\"step_update\":{\"conversation_id\":\"conv-live\",\"step_index\":0,\"state\":\"DONE\",\"step_type\":\"user_input\"}}", &out);
+        try ag.on_line(a, "{\"event\":\"step_update\",\"step_update\":{\"conversation_id\":\"conv-live\",\"step_index\":1,\"state\":\"DONE\",\"step_type\":\"tool\",\"tool_name\":\"write_to_file\",\"duration_seconds\":0.12,\"tool_info\":{\"name\":\"write_to_file\",\"parameters\":{\"TargetFile\":\"/tmp/ws/a.txt\"},\"output\":\"ok\"}}}", &out);
+        try ag.on_line(a, "{\"event\":\"step_update\",\"step_update\":{\"conversation_id\":\"conv-live\",\"step_index\":2,\"state\":\"ACTIVE\",\"step_type\":\"agent_response\",\"text_delta\":\"Do\"}}", &out);
+        try ag.on_line(a, "{\"event\":\"step_update\",\"step_update\":{\"conversation_id\":\"conv-live\",\"step_index\":2,\"state\":\"DONE\",\"step_type\":\"agent_response\",\"text_delta\":\"ne\"}}", &out);
+        try ag.on_line(a, "{\"event\":\"step_update\",\"step_update\":{\"conversation_id\":\"conv-live\",\"step_index\":3,\"state\":\"DONE\",\"step_type\":\"checkpoint\"}}", &out);
+        try ag.on_line(a, "{\"event\":\"result\",\"result\":{\"conversation_id\":\"conv-live\",\"status\":\"SUCCESS\",\"response\":\"Done\",\"duration_seconds\":1.5,\"num_turns\":1,\"usage\":{\"input_tokens\":100,\"output_tokens\":20,\"cache_read_tokens\":10,\"total_tokens\":120}}}", &out);
+        tiger.assert(!ag.turn_active);
+
+        // Turn 2 cumulative usage must emit delta (30 input, 10 output) not raw 130/30.
+        try ag.send_user("ag-req-2", "fail check", null, &out);
+        try ag.on_line(a, "{\"event\":\"result\",\"result\":{\"conversation_id\":\"conv-live\",\"status\":\"ERROR\",\"response\":\"\",\"error\":\"rate limit exceeded\",\"duration_seconds\":2.5,\"num_turns\":2,\"usage\":{\"input_tokens\":130,\"output_tokens\":30,\"cache_read_tokens\":25,\"total_tokens\":160}}}", &out);
+        tiger.assert(!ag.turn_active);
+
+        var settles: usize = 0;
+        var saw_file_delta = false;
+        for (out.events.items) |ev| {
+            switch (ev.entry) {
+                .file_change => |fc| {
+                    if (fc.files.len > 0 and std.mem.eql(u8, fc.files[0].path, "/tmp/ws/a.txt")) {
+                        saw_file_delta = true;
+                    }
+                },
+                .turn_settled => |ts| {
+                    settles += 1;
+                    if (settles == 1) {
+                        tiger.assert(ts.stop == .end_turn and ts.usage.input == 100 and ts.usage.output == 20 and ts.usage.cache_read == 10);
+                    } else if (settles == 2) {
+                        tiger.assert(ts.stop == .@"error" and ts.usage.input == 30 and ts.usage.output == 10 and ts.usage.cache_read == 15);
+                        tiger.assert(ts.duration_ms.? == 1000);
+                    }
+                },
+                else => {},
+            }
+        }
+        tiger.assert(saw_file_delta and settles == 2);
     }
 }
 
@@ -665,6 +740,48 @@ fn run_misc_oracle(gpa: std.mem.Allocator) !void {
         }
     }
     tiger.assert(saw_ro_ws);
+
+    var saw_gemini_mask = false;
+    for (masks) |m| {
+        if (std.mem.endsWith(u8, m.path, "/.gemini")) saw_gemini_mask = true;
+    }
+    tiger.assert(saw_gemini_mask);
+
+    const guard_ro = try sbox.build_guard_argv(gpa, "/usr/bin/protectorate", .{
+        .workspace = "/home/alice/repo",
+        .readonly = true,
+        .runtime_dir = "/tmp/run-ro",
+        .git_dirs = &.{"/home/alice/repo/.git"},
+        .memory_max_bytes = 512 * 1024 * 1024,
+    }, &.{ "agy", "--input-format", "stream-json" });
+    defer sbox.free_guard_argv(gpa, guard_ro);
+    var ro_has_flag = false;
+    var ro_has_ws_rw = false;
+    var ro_has_tmp = false;
+    for (guard_ro, 0..) |arg, idx| {
+        if (std.mem.eql(u8, arg, "--readonly")) ro_has_flag = true;
+        if (std.mem.eql(u8, arg, "--rw") and idx + 1 < guard_ro.len and std.mem.eql(u8, guard_ro[idx + 1], "/home/alice/repo")) {
+            ro_has_ws_rw = true;
+        }
+        if (std.mem.eql(u8, arg, "--tmp") and idx + 1 < guard_ro.len and std.mem.eql(u8, guard_ro[idx + 1], "/tmp/run-ro")) {
+            ro_has_tmp = true;
+        }
+    }
+    tiger.assert(ro_has_flag and !ro_has_ws_rw and ro_has_tmp);
+
+    const guard_rw = try sbox.build_guard_argv(gpa, "/usr/bin/protectorate", .{
+        .workspace = "/home/alice/repo",
+        .readonly = false,
+        .git_dirs = &.{"/home/alice/repo/.git"},
+    }, &.{ "agy", "--input-format", "stream-json" });
+    defer sbox.free_guard_argv(gpa, guard_rw);
+    var rw_has_ws = false;
+    for (guard_rw, 0..) |arg, idx| {
+        if (std.mem.eql(u8, arg, "--rw") and idx + 1 < guard_rw.len and std.mem.eql(u8, guard_rw[idx + 1], "/home/alice/repo")) {
+            rw_has_ws = true;
+        }
+    }
+    tiger.assert(rw_has_ws);
 
     // Git dir overlapping credential mask must fail closed.
     const spec_bad = sbox.SandboxSpec{

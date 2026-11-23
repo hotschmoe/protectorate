@@ -6,6 +6,7 @@ const claude = @import("claude.zig");
 const codex = @import("codex.zig");
 const grok = @import("grok.zig");
 const pi = @import("pi.zig");
+const antigravity = @import("antigravity.zig");
 const spec = @import("../sandbox/spec.zig");
 
 pub const OnEventFn = *const fn (ctx: ?*anyopaque, ev: proto.DriverEvent) void;
@@ -23,6 +24,8 @@ pub const Config = struct {
     session_id: ?[]const u8 = null,
     permission: proto.Permission = .unsupervised,
     extra_args: []const []const u8 = &.{},
+    sandbox_mode: spec.GuardMode = .none,
+    guard_exe: ?[]const u8 = null,
     sandbox: ?spec.SandboxSpec = null,
     environ_map: ?*const std.process.Environ.Map = null,
     on_event: OnEventFn,
@@ -35,6 +38,7 @@ const DriverImpl = union(enum) {
     codex: codex.Codex,
     grok: grok.Grok,
     pi: pi.Pi,
+    antigravity: antigravity.Antigravity,
 };
 
 pub const Session = struct {
@@ -98,13 +102,21 @@ pub const Session = struct {
             .claude => try claude.Claude.build_argv(a, s_spec),
             .codex => try codex.Codex.build_argv(a, s_spec),
             .grok => try grok.Grok.build_argv(a, s_spec),
-            .pi_vendor, .pi_local, .antigravity => try pi.Pi.build_argv(a, s_spec),
+            .pi_vendor, .pi_local => try pi.Pi.build_argv(a, s_spec),
+            .antigravity => try antigravity.Antigravity.build_argv(a, s_spec),
         };
 
-        const final_argv = if (builtin.os.tag == .linux and cfg.sandbox != null)
-            try spec.build_bwrap_argv(a, cfg.sandbox.?, raw_argv)
-        else
-            raw_argv;
+        const final_argv = switch (cfg.sandbox_mode) {
+            .bwrap => if (builtin.os.tag == .linux and cfg.sandbox != null)
+                try spec.build_bwrap_argv(a, cfg.sandbox.?, raw_argv)
+            else
+                raw_argv,
+            .landlock => if (builtin.os.tag == .linux and cfg.sandbox != null and cfg.guard_exe != null)
+                try spec.build_guard_argv(a, cfg.guard_exe.?, cfg.sandbox.?, raw_argv)
+            else
+                raw_argv,
+            .none => raw_argv,
+        };
 
         self.child = try std.process.spawn(io, .{
             .argv = final_argv,
@@ -144,14 +156,26 @@ pub const Session = struct {
                 .resume_id = res_d,
                 .supervised = cfg.permission == .supervised,
             } },
-            .pi_vendor, .pi_local, .antigravity => .{ .pi = .{
+            .pi_vendor, .pi_local => .{ .pi = .{
                 .session_id = sess_id,
                 .model = mod_d,
                 .provider = prov_d,
                 .effort = eff_d,
             } },
+            .antigravity => .{ .antigravity = .{
+                .session_id = sess_id,
+                .model = mod_d,
+                .effort = eff_d,
+                .supervised = cfg.permission == .supervised,
+            } },
         };
         return self;
+    }
+
+    pub fn child_id(self: *Session) ?std.process.Child.Id {
+        self.mu.lockUncancelable(self.io);
+        defer self.mu.unlock(self.io);
+        return self.child.id;
     }
 
     pub fn begin(self: *Session) !void {
@@ -167,6 +191,7 @@ pub const Session = struct {
             .codex => |*c| try c.start(&self.out),
             .grok => |*c| try c.start(&self.out),
             .pi => |*p| try p.start(&self.out),
+            .antigravity => |*ag| try ag.start(&self.out),
         }
         const evs = try self.take_pending_locked();
         self.mu.unlock(self.io);
@@ -203,6 +228,7 @@ pub const Session = struct {
                 .codex => |*c| try c.send_user(request_id, text, steer, &self.out),
                 .grok => |*g| try g.send_user(request_id, text, steer, &self.out),
                 .pi => |*p| try p.send_user(request_id, text, steer, &self.out),
+                .antigravity => |*ag| try ag.send_user(request_id, text, steer, &self.out),
             }
             break :blk try self.take_pending_locked();
         };
@@ -220,6 +246,15 @@ pub const Session = struct {
                 .codex => |*c| try c.interrupt(&self.out),
                 .grok => |*g| try g.interrupt(&self.out),
                 .pi => |*p| try p.interrupt(&self.out),
+                .antigravity => |*ag| {
+                    try ag.interrupt(&self.out);
+                    if (comptime builtin.os.tag != .windows) {
+                        if (self.child.id) |pid| {
+                            std.posix.kill(-pid, .INT) catch {};
+                            std.posix.kill(pid, .INT) catch {};
+                        }
+                    }
+                },
             }
             break :blk try self.take_pending_locked();
         };
@@ -237,6 +272,7 @@ pub const Session = struct {
                 .codex => |*c| try c.respond_approval(id, decision, &self.out),
                 .grok => |*g| try g.respond_approval(id, decision, &self.out),
                 .pi => |*p| try p.respond_approval(id, decision, &self.out),
+                .antigravity => |*ag| try ag.respond_approval(id, decision, &self.out),
             }
             break :blk try self.take_pending_locked();
         };
@@ -324,6 +360,7 @@ pub const Session = struct {
             .codex => |*c| try c.on_line(a, line, &self.out),
             .grok => |*g| try g.on_line(a, line, &self.out),
             .pi => |*p| try p.on_line(a, line, &self.out),
+            .antigravity => |*ag| try ag.on_line(a, line, &self.out),
         }
         return self.take_pending_locked();
     }

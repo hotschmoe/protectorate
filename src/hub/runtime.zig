@@ -66,6 +66,7 @@ const DriverHandle = struct {
     sleeve_id: []const u8,
     rt: *Runtime,
     sess: *d_session.Session,
+    guard: s_exec.ProcessGuard = .{},
     turn_id: u64 = 0,
 };
 
@@ -85,6 +86,7 @@ pub const Runtime = struct {
     started_at_ms: i64,
     no_sandbox: bool,
     bwrap_ok: bool,
+    landlock_ok: bool,
 
     state_mu: std.Io.Mutex = .init,
     journal: store.JournalStore,
@@ -157,6 +159,7 @@ pub const Runtime = struct {
         errdefer gpa.destroy(rt);
 
         const bwrap_ok = if (opts.no_sandbox or hh.config.no_sandbox) false else s_exec.probe_bwrap(gpa, io);
+        const landlock_ok = if (opts.no_sandbox or hh.config.no_sandbox) false else s_exec.probe_landlock();
 
         rt.* = .{
             .gpa = gpa,
@@ -166,6 +169,7 @@ pub const Runtime = struct {
             .started_at_ms = std.Io.Clock.real.now(io).toMilliseconds(),
             .no_sandbox = opts.no_sandbox or hh.config.no_sandbox,
             .bwrap_ok = bwrap_ok,
+            .landlock_ok = landlock_ok,
             .journal = jstore,
             .core_state = st,
             .cached_quotas_arena = std.heap.ArenaAllocator.init(gpa),
@@ -226,7 +230,9 @@ pub const Runtime = struct {
             self.meta_mu.unlock(self.io);
         }
         for (handles.items) |dh| {
+            dh.guard.terminate();
             dh.sess.kill_and_destroy();
+            dh.guard.deinit();
             self.gpa.free(dh.sleeve_id);
             self.gpa.destroy(dh);
         }
@@ -537,7 +543,8 @@ pub const Runtime = struct {
             .claude => "claude",
             .codex => "codex",
             .grok => "grok",
-            .pi_vendor, .pi_local, .antigravity => "pi",
+            .pi_vendor, .pi_local => "pi",
+            .antigravity => "agy",
         };
         const p_harness: d_proto.Harness = switch (li.harness) {
             .claude => .claude,
@@ -548,63 +555,94 @@ pub const Runtime = struct {
             .antigravity => .antigravity,
         };
 
+        var guard_mode: s_spec.GuardMode = .none;
+        var guard_exe: ?[]const u8 = null;
         var sb_spec: ?s_spec.SandboxSpec = null;
-        if (!self.no_sandbox and self.bwrap_ok and builtin.os.tag == .linux) {
-            const host_home = self.env.get("HOME");
-            const git_dirs = try s_exec.resolve_git_dirs(a, self.io, sl_path);
+        var child_env = try self.env.clone(a);
+        if (!self.no_sandbox) {
+            const sleeve_tmp = try std.fs.path.join(a, &.{ self.hub_home.root_path, "run", li.sleeve_id, "tmp" });
+            try std.Io.Dir.cwd().createDirPath(self.io, sleeve_tmp);
+            for (s_spec.stripped_nested_env_keys) |k| {
+                _ = child_env.swapRemove(k);
+            }
+            try child_env.put("TMPDIR", sleeve_tmp);
+            try child_env.put("TEMP", sleeve_tmp);
+            try child_env.put("TMP", sleeve_tmp);
+            try child_env.put("PROTECTORATE_SLEEVE", li.sleeve_id);
+            try child_env.put("PROTECTORATE_WORKSPACE", sl_path);
 
-            var masks: std.ArrayList(s_spec.Mount) = .empty;
-            var extra_rw: std.ArrayList([]const u8) = .empty;
-            if (host_home) |hh| {
-                const def_masks = try s_spec.default_masks(a, hh);
-                const keep_rel: []const u8 = switch (li.harness) {
-                    .claude => ".claude",
-                    .codex => ".codex",
-                    .grok => ".grok",
-                    .pi_vendor, .pi_local, .antigravity => ".pi",
-                };
-                for (def_masks) |m| {
-                    const tail = std.fs.path.basename(m.path);
-                    if (std.mem.eql(u8, tail, keep_rel)) {
-                        try extra_rw.append(a, m.path);
-                        continue;
+            if (builtin.os.tag == .linux) {
+                guard_mode = if (self.bwrap_ok) .bwrap else if (self.landlock_ok) .landlock else .none;
+                if (guard_mode != .none) {
+                    if (guard_mode == .landlock) {
+                        guard_exe = try std.process.executablePathAlloc(self.io, a);
                     }
-                    if (std.Io.Dir.cwd().statFile(self.io, m.path, .{})) |_| {
-                        try masks.append(a, m);
-                    } else |_| {
-                        if (std.Io.Dir.cwd().openDir(self.io, m.path, .{})) |dval| {
-                            var d = dval;
-                            d.close(self.io);
-                            try masks.append(a, m);
-                        } else |_| {}
+                    const host_home = self.env.get("HOME");
+                    const git_dirs = try s_exec.resolve_git_dirs(a, self.io, sl_path);
+
+                    var masks: std.ArrayList(s_spec.Mount) = .empty;
+                    var extra_rw: std.ArrayList([]const u8) = .empty;
+                    if (host_home) |hh| {
+                        const def_masks = try s_spec.default_masks(a, hh);
+                        const keep_rel: []const u8 = switch (li.harness) {
+                            .claude => ".claude",
+                            .codex => ".codex",
+                            .grok => ".grok",
+                            .pi_vendor, .pi_local => ".pi",
+                            .antigravity => ".gemini",
+                        };
+                        for (def_masks) |m| {
+                            const tail = std.fs.path.basename(m.path);
+                            if (std.mem.eql(u8, tail, keep_rel)) {
+                                try extra_rw.append(a, m.path);
+                                continue;
+                            }
+                            if (std.Io.Dir.cwd().statFile(self.io, m.path, .{})) |_| {
+                                try masks.append(a, m);
+                            } else |_| {
+                                if (std.Io.Dir.cwd().openDir(self.io, m.path, .{})) |dval| {
+                                    var d = dval;
+                                    d.close(self.io);
+                                    try masks.append(a, m);
+                                } else |_| {}
+                            }
+                        }
                     }
-                }
-            }
 
-            var env_set: std.ArrayList(s_spec.EnvVar) = .empty;
-            for (s_spec.default_env_allow_keys) |ek| {
-                if (self.env.get(ek)) |ev| {
-                    try env_set.append(a, .{ .key = ek, .value = ev });
-                }
-            }
-            if (host_home) |hh| {
-                try env_set.append(a, .{ .key = "HOME", .value = hh });
-            }
-            for ([_][]const u8{ "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "XDG_CONFIG_HOME", "XDG_DATA_HOME" }) |ek| {
-                if (self.env.get(ek)) |ev| {
-                    try env_set.append(a, .{ .key = ek, .value = ev });
-                }
-            }
+                    var env_set: std.ArrayList(s_spec.EnvVar) = .empty;
+                    for (s_spec.default_env_allow_keys) |ek| {
+                        if (self.env.get(ek)) |ev| {
+                            try env_set.append(a, .{ .key = ek, .value = ev });
+                        }
+                    }
+                    if (host_home) |hh| {
+                        try env_set.append(a, .{ .key = "HOME", .value = hh });
+                    }
+                    for ([_][]const u8{ "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "XDG_CONFIG_HOME", "XDG_DATA_HOME" }) |ek| {
+                        if (self.env.get(ek)) |ev| {
+                            try env_set.append(a, .{ .key = ek, .value = ev });
+                        }
+                    }
+                    try env_set.appendSlice(a, &.{
+                        .{ .key = "TMPDIR", .value = sleeve_tmp },
+                        .{ .key = "TEMP", .value = sleeve_tmp },
+                        .{ .key = "TMP", .value = sleeve_tmp },
+                        .{ .key = "PROTECTORATE_SLEEVE", .value = li.sleeve_id },
+                        .{ .key = "PROTECTORATE_WORKSPACE", .value = sl_path },
+                    });
 
-            sb_spec = .{
-                .workspace = sl_path,
-                .readonly = (sl_layout == .readonly),
-                .host_home = null,
-                .git_dirs = git_dirs,
-                .extra_rw = extra_rw.items,
-                .masks = masks.items,
-                .env_set = env_set.items,
-            };
+                    sb_spec = .{
+                        .workspace = sl_path,
+                        .readonly = (sl_layout == .readonly),
+                        .host_home = null,
+                        .runtime_dir = sleeve_tmp,
+                        .git_dirs = git_dirs,
+                        .extra_rw = extra_rw.items,
+                        .masks = masks.items,
+                        .env_set = env_set.items,
+                    };
+                }
+            }
         }
 
         const dh = try self.gpa.create(DriverHandle);
@@ -617,7 +655,9 @@ pub const Runtime = struct {
             .sleeve_id = sid_dup,
             .rt = self,
             .sess = undefined,
+            .guard = s_exec.ProcessGuard.init(null),
         };
+        errdefer dh.guard.deinit();
 
         const sess_id = try std.fmt.allocPrint(a, "{s}-{d}", .{ li.sleeve_id, li.g });
         const mod_opt: ?[]const u8 = if (li.model_name.len > 0) li.model_name else null;
@@ -632,12 +672,15 @@ pub const Runtime = struct {
             .provider = prov_opt,
             .effort = li.effort,
             .session_id = sess_id,
+            .sandbox_mode = guard_mode,
+            .guard_exe = guard_exe,
             .sandbox = sb_spec,
-            .environ_map = self.env,
+            .environ_map = &child_env,
             .on_event = on_driver_event,
             .on_exit = on_driver_exit,
             .ctx = dh,
         });
+        dh.guard.attach(dh.sess.child_id());
 
         self.stop_driver_for(li.sleeve_id);
         {
@@ -676,7 +719,9 @@ pub const Runtime = struct {
             self.meta_mu.unlock(self.io);
         }
         if (removed) |dh| {
+            dh.guard.terminate();
             dh.sess.kill_and_destroy();
+            dh.guard.deinit();
             self.gpa.free(dh.sleeve_id);
             self.gpa.destroy(dh);
         }
@@ -1056,6 +1101,9 @@ pub const Runtime = struct {
             if (self.stopping.load(.acquire)) break;
             ticks += 1;
             self.poll_inflight_jobs();
+            if (ticks % 5 == 0) {
+                self.fleet_srv.sweep_stale(20_000);
+            }
             if (ticks % 10 == 0) {
                 self.commit(.{ .tick = .{} }) catch {};
             }

@@ -7,6 +7,7 @@ pub fn build(b: *std.Build) void {
     const ver = b.option([]const u8, "version", "Release version string") orelse "0.0.0-dev";
     const git_commit = b.option([]const u8, "git-commit", "Git commit hash") orelse "unknown";
     const web_dir = b.option([]const u8, "web-dir", "Flutter web assets directory") orelse "app/build/web";
+    const strip_opt = b.option(bool, "strip", "Strip debug symbols from installed binaries");
 
     const build_options = b.addOptions();
     build_options.addOption([]const u8, "version", ver);
@@ -54,6 +55,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main_hub.zig"),
         .target = target,
         .optimize = optimize,
+        .strip = strip_opt,
     });
     hub_mod.addOptions("build_options", build_options);
     hub_mod.addImport("web_assets", web_assets_mod);
@@ -68,6 +70,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main_node.zig"),
         .target = target,
         .optimize = optimize,
+        .strip = strip_opt,
     });
     node_mod.addOptions("build_options", build_options);
 
@@ -140,6 +143,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main_hub.zig"),
             .target = r_target,
             .optimize = .safe,
+            .strip = true,
         });
         r_hub_mod.addOptions("build_options", build_options);
         r_hub_mod.addImport("web_assets", r_web);
@@ -156,6 +160,7 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("src/main_node.zig"),
             .target = r_target,
             .optimize = .safe,
+            .strip = true,
         });
         r_node_mod.addOptions("build_options", build_options);
         const r_node = b.addExecutable(.{

@@ -63,6 +63,7 @@ const PeerSession = struct {
     pending_mu: std.Io.Mutex = .init,
     pending: std.AutoHashMapUnmanaged(u64, *PendingCall) = .empty,
     next_id: std.atomic.Value(u64) = .init(1),
+    last_rx_ms: std.atomic.Value(i64),
     closed: std.atomic.Value(bool) = .init(false),
     refs: std.atomic.Value(usize) = .init(1),
 
@@ -199,14 +200,36 @@ pub const FleetServer = struct {
 
         for (vals.items) |ps| {
             ps.closed.store(true, .release);
-            switch (ps.conn.chan) {
-                .tcp => |s| s.shutdown(self.io, .both) catch {},
-                .stdio => {},
-            }
+            ps.conn.shutdown();
             ps.release();
         }
         vals.deinit(self.gpa);
         self.gpa.free(self.host);
+    }
+
+    pub fn sweep_stale(self: *FleetServer, max_idle_ms: i64) void {
+        const now_ms = std.Io.Clock.awake.now(self.io).toMilliseconds();
+        var stale: std.ArrayList(*PeerSession) = .empty;
+        defer stale.deinit(self.gpa);
+
+        {
+            self.peers_mu.lockUncancelable(self.io);
+            defer self.peers_mu.unlock(self.io);
+            var it = self.peers.iterator();
+            while (it.next()) |e| {
+                const ps = e.value_ptr.*;
+                if (now_ms - ps.last_rx_ms.load(.acquire) > max_idle_ms) {
+                    ps.acquire();
+                    stale.append(self.gpa, ps) catch ps.release();
+                }
+            }
+        }
+
+        for (stale.items) |ps| {
+            ps.closed.store(true, .release);
+            ps.conn.shutdown();
+            ps.release();
+        }
     }
 
     pub fn disconnect_node(self: *FleetServer, node_id: []const u8) void {
@@ -216,10 +239,7 @@ pub const FleetServer = struct {
         if (removed) |kv| {
             self.gpa.free(kv.key);
             kv.value.closed.store(true, .release);
-            switch (kv.value.conn.chan) {
-                .tcp => |s| s.shutdown(self.io, .both) catch {},
-                .stdio => {},
-            }
+            kv.value.conn.shutdown();
             kv.value.release();
         }
     }
@@ -502,6 +522,7 @@ fn peer_conn_thread(arg: *ConnArg) void {
             return;
         },
         .conn = conn,
+        .last_rx_ms = .init(std.Io.Clock.awake.now(self.io).toMilliseconds()),
     };
 
     {
@@ -522,6 +543,7 @@ fn peer_conn_thread(arg: *ConnArg) void {
         if (old) |okv| {
             self.gpa.free(okv.key);
             okv.value.closed.store(true, .release);
+            okv.value.conn.shutdown();
             okv.value.release();
         }
     }
@@ -538,6 +560,7 @@ fn peer_conn_thread(arg: *ConnArg) void {
             break;
         };
         defer f.deinit(self.gpa);
+        ps.last_rx_ms.store(std.Io.Clock.awake.now(self.io).toMilliseconds(), .release);
 
         switch (f.kind) {
             .request => {
@@ -597,18 +620,22 @@ fn peer_conn_thread(arg: *ConnArg) void {
     }
     ps.pending_mu.unlock(self.io);
 
+    var was_current = false;
     {
         self.peers_mu.lockUncancelable(self.io);
         if (self.peers.get(ps.node_id)) |cur| {
             if (cur == ps) {
                 if (self.peers.fetchRemove(ps.node_id)) |kv| {
                     self.gpa.free(kv.key);
+                    was_current = true;
                 }
             }
         }
         self.peers_mu.unlock(self.io);
     }
-    self.hooks.on_disconnected(self.hooks.ctx, ps.node_id, disconnect_reason);
+    if (was_current) {
+        self.hooks.on_disconnected(self.hooks.ctx, ps.node_id, disconnect_reason);
+    }
     ps.closed.store(true, .release);
     ps.release();
 }

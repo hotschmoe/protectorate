@@ -9,6 +9,19 @@ pub const MountKind = enum {
     runtime,
 };
 
+pub const GuardMode = enum {
+    none,
+    bwrap,
+    landlock,
+};
+
+pub const stripped_nested_env_keys = [_][]const u8{
+    "CLAUDECODE",
+    "CLAUDE_CODE_SSE_PORT",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CODEX_THREAD_ID",
+};
+
 pub const Mount = struct {
     path: []const u8,
     kind: MountKind,
@@ -54,6 +67,7 @@ const default_mask_rels = [_]struct { rel: []const u8, is_dir: bool }{
     .{ .rel = ".claude.json", .is_dir = false },
     .{ .rel = ".codex", .is_dir = true },
     .{ .rel = ".grok", .is_dir = true },
+    .{ .rel = ".gemini", .is_dir = true },
     .{ .rel = ".pi", .is_dir = true },
     .{ .rel = ".config/gh", .is_dir = true },
     .{ .rel = ".git-credentials", .is_dir = false },
@@ -218,6 +232,56 @@ pub fn build_bwrap_argv(
     try args.appendSlice(gpa, &.{ "--chdir", spec.workspace, "--" });
     try args.appendSlice(gpa, inner_argv);
     return args.toOwnedSlice(gpa);
+}
+
+pub fn build_guard_argv(
+    gpa: std.mem.Allocator,
+    self_exe: []const u8,
+    spec: SandboxSpec,
+    inner_argv: []const []const u8,
+) BuildError![][]const u8 {
+    tiger.assert(inner_argv.len > 0);
+    tiger.assert(self_exe.len > 0);
+    const mounts = try build_mounts(gpa, spec);
+    defer gpa.free(mounts);
+
+    var args: std.ArrayList([]const u8) = .empty;
+    errdefer free_guard_argv(gpa, args.items);
+
+    try args.appendSlice(gpa, &.{
+        self_exe,
+        "__guard",
+        "--cwd",
+        spec.workspace,
+    });
+    if (spec.readonly) {
+        try args.append(gpa, "--readonly");
+    }
+    if (spec.memory_max_bytes) |lim| {
+        const mem_flag = try std.fmt.allocPrint(gpa, "--mem={d}", .{lim});
+        try args.append(gpa, mem_flag);
+    }
+
+    for (mounts) |m| {
+        switch (m.kind) {
+            .rw => try args.appendSlice(gpa, &.{ "--rw", m.path }),
+            .runtime => try args.appendSlice(gpa, &.{ "--tmp", m.path }),
+            .ro, .mask_dir, .mask_file => {},
+        }
+    }
+
+    try args.append(gpa, "--");
+    try args.appendSlice(gpa, inner_argv);
+    return args.toOwnedSlice(gpa);
+}
+
+pub fn free_guard_argv(gpa: std.mem.Allocator, argv: []const []const u8) void {
+    for (argv) |s| {
+        if (std.mem.startsWith(u8, s, "--mem=")) {
+            gpa.free(s);
+        }
+    }
+    gpa.free(argv);
 }
 
 pub fn build_systemd_scope_argv(

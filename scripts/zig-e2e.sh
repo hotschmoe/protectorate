@@ -77,6 +77,9 @@ TOK1="$("$PT" token --home "$HUB1" | sed -n 's/^owner=//p')"
 
 curl -sf "http://127.0.0.1:${HTTP1}/health" | grep -q '"ok":true'
 curl -sf "http://127.0.0.1:${HTTP1}/" | grep -qiE '<!doctype html>|<html'
+HDR1="$TMP_ROOT/web_hdr.txt"
+curl -sf -D "$HDR1" -H "Accept-Encoding: gzip" "http://127.0.0.1:${HTTP1}/" | gzip -dc | grep -qiE '<!doctype html>|<html'
+grep -qi '^content-encoding: *gzip' "$HDR1"
 
 UNAUTH_CODE="$(curl -s -o /dev/null -w '%{http_code}' -X POST -d '{}' "http://127.0.0.1:${HTTP1}/api/GetState")"
 if [[ "$UNAUTH_CODE" != "401" ]]; then
@@ -270,6 +273,16 @@ ENROLL="$(rpc_post "$HTTP3" "$TOK3" GetEnrollment '{}')"
 JOIN_TOK="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["control_key"])' <<<"$ENROLL")"
 
 JOIN_OUT="$("$PT_NODE" --home "$NODE3" join "$JOIN_TOK" --name e2e-node-1)"
+python3 - "$NODE3/config.json" "$FLEET3" <<'PY'
+import json, sys
+p = sys.argv[1]
+port = sys.argv[2]
+with open(p) as f:
+    cfg = json.load(f)
+cfg["addrs"] = ["127.0.0.1:1", f"127.0.0.1:{port}"]
+with open(p, "w") as f:
+    json.dump(cfg, f, indent=2)
+PY
 NODE_KEY="$(sed -n 's/^  node_key: *//p' <<<"$JOIN_OUT")"
 if [[ -z "$NODE_KEY" ]]; then
   echo "failed to parse node_key" >&2
@@ -427,6 +440,21 @@ rpc_post "$HTTP3B" "$TOK3" GetJobLog "{\"job_id\":\"${JID3}\"}" | grep -q 'E2E_R
 kill "$NPID3" "$PID3B" >/dev/null 2>&1 || true
 wait "$NPID3" "$PID3B" >/dev/null 2>&1 || true
 echo "E2E 3 PASSED"
+
+echo "=== E2E 4b: __guard Landlock Write Containment ==="
+GUARD_ALLOW="$TMP_ROOT/guard_allow"
+GUARD_DENY="$TMP_ROOT/guard_deny"
+mkdir -p "$GUARD_ALLOW" "$GUARD_DENY"
+"$PT" __guard --cwd "$GUARD_ALLOW" --rw "$GUARD_ALLOW" -- /bin/sh -c 'touch ok.txt'
+if [[ ! -f "$GUARD_ALLOW/ok.txt" ]]; then
+  echo "__guard failed to allow write inside workspace" >&2
+  exit 1
+fi
+if "$PT" __guard --cwd "$GUARD_ALLOW" --rw "$GUARD_ALLOW" -- /bin/sh -c "touch '$GUARD_DENY/nope.txt'" 2>/dev/null; then
+  echo "__guard failed to block write outside --rw" >&2
+  exit 1
+fi
+echo "E2E 4b PASSED"
 
 echo "=== E2E 5: Cross-Compiled release-all Smoke Checks ==="
 REL="$ROOT_DIR/zig-out/release"

@@ -130,12 +130,15 @@ fn conn_thread(arg: *ConnArg) void {
         const target = arena.dupe(u8, req.head.target) catch break;
 
         var auth_token: ?[]const u8 = null;
+        var accept_gzip = false;
         var hit = req.iterateHeaders();
         while (hit.next()) |h| {
             if (std.ascii.eqlIgnoreCase(h.name, "authorization")) {
                 if (std.mem.startsWith(u8, h.value, "Bearer ") or std.mem.startsWith(u8, h.value, "bearer ")) {
                     auth_token = arena.dupe(u8, std.mem.trim(u8, h.value[7..], " \t")) catch null;
                 }
+            } else if (std.ascii.eqlIgnoreCase(h.name, "accept-encoding")) {
+                if (contains_ci(h.value, "gzip")) accept_gzip = true;
             }
         }
         const qmark = std.mem.findScalar(u8, target, '?');
@@ -221,19 +224,54 @@ fn conn_thread(arg: *ConnArg) void {
         if (method == .GET) {
             const asset = web_assets.find(path) orelse web_assets.find("index.html");
             if (asset) |a| {
-                req.respond(a.bytes, .{
-                    .status = .ok,
-                    .extra_headers = &.{
-                        .{ .name = "content-type", .value = a.content_type },
-                        .{ .name = "access-control-allow-origin", .value = "*" },
-                    },
-                }) catch break;
+                if (!a.gzipped) {
+                    req.respond(a.bytes, .{
+                        .status = .ok,
+                        .extra_headers = &.{
+                            .{ .name = "content-type", .value = a.content_type },
+                            .{ .name = "access-control-allow-origin", .value = "*" },
+                        },
+                    }) catch break;
+                } else if (accept_gzip) {
+                    req.respond(a.bytes, .{
+                        .status = .ok,
+                        .extra_headers = &.{
+                            .{ .name = "content-type", .value = a.content_type },
+                            .{ .name = "content-encoding", .value = "gzip" },
+                            .{ .name = "vary", .value = "Accept-Encoding" },
+                            .{ .name = "access-control-allow-origin", .value = "*" },
+                        },
+                    }) catch break;
+                } else {
+                    var in_r: std.Io.Reader = .fixed(a.bytes);
+                    var win_buf: [std.compress.flate.max_window_len]u8 = undefined;
+                    var dec: std.compress.flate.Decompress = .init(&in_r, .gzip, &win_buf);
+                    const plain = dec.reader.allocRemaining(arena, .limited(64 << 20)) catch break;
+                    req.respond(plain, .{
+                        .status = .ok,
+                        .extra_headers = &.{
+                            .{ .name = "content-type", .value = a.content_type },
+                            .{ .name = "vary", .value = "Accept-Encoding" },
+                            .{ .name = "access-control-allow-origin", .value = "*" },
+                        },
+                    }) catch break;
+                }
                 continue;
             }
         }
 
         req.respond("not found", .{ .status = .not_found }) catch break;
     }
+}
+
+fn contains_ci(hay: []const u8, needle: []const u8) bool {
+    if (needle.len == 0) return true;
+    if (needle.len > hay.len) return false;
+    var i: usize = 0;
+    while (i + needle.len <= hay.len) : (i += 1) {
+        if (std.ascii.eqlIgnoreCase(hay[i .. i + needle.len], needle)) return true;
+    }
+    return false;
 }
 
 fn handle_websocket(

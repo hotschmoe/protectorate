@@ -6,11 +6,11 @@
 
 ## Embedded Web UI & HTTP/WS Server (`src/hub/http_server.zig`, `src/tools/embed_web.zig`)
 
-At build time `pt-embed-web` bundles `app/build/web` into a pure-Zig module (`web_assets`) embedded directly inside the `protectorate` binary. At runtime `std.http.Server` serves:
+At build time `pt-embed-web` pre-compresses `app/build/web` files with gzip (`std.compress.flate.Compress`, keeping raw bytes only when compression does not shrink the asset) into the pure-Zig module `web_assets` embedded directly inside `protectorate`. Release builds (`zig build release-all` or `-Dstrip=true`) strip debug symbols while preserving `ReleaseSafe` checks. At runtime `std.http.Server` serves:
 - `GET /health`: unauthenticated liveness check.
 - `POST /api/<Method>`: bearer-authenticated RPC dispatch (`PairDevice` is public one-time claim; `.owner` and `.envoy_only` scopes checked per `schema.methods`).
 - `GET /api/events`: RFC 6455 WebSocket stream (accepting `Authorization: Bearer` header or `?access_token=` query param for browsers), emitting `snapshot` + `live` + incremental `HubStreamMessage` updates from `StreamHub`.
-- `GET /*`: embedded Flutter SPA assets.
+- `GET /*`: embedded Flutter SPA assets (serving pre-gzipped assets directly with `Content-Encoding: gzip` when accepted, or transparently inflating via `std.compress.flate.Decompress` for uncompressed clients).
 
 ## CLI & Envoy MCP (`src/cli/`)
 
