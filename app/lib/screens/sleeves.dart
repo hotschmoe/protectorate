@@ -90,10 +90,13 @@ class _StartEnvoyCardState extends State<StartEnvoyCard> {
 }
 
 /// Modal dialog to spawn a new root, child, or envoy sleeve from the UI.
-Future<void> showSpawnSleeveDialog(BuildContext context, AppScope app) => showDialog<void>(
-  context: context,
-  builder: (ctx) => _SpawnSleeveDialog(app: app),
-);
+Future<void> showSpawnSleeveDialog(BuildContext context, AppScope app) {
+  final look = Look.of(context);
+  return showDialog<void>(
+    context: context,
+    builder: (ctx) => Look(p: look.p, phone: look.phone, child: _SpawnSleeveDialog(app: app)),
+  );
+}
 
 class _SpawnSleeveDialog extends StatefulWidget {
   const _SpawnSleeveDialog({required this.app});
