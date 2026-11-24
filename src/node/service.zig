@@ -152,42 +152,42 @@ pub fn cmd_probation(
     const a = arena_st.allocator();
 
     const rel_dir_path = try std.fs.path.join(a, &.{ home_path, "releases" });
-    const prob_path = try std.fs.path.join(a, &.{ rel_dir_path, "probation.json" });
-
     var obuf: [1024]u8 = undefined;
     var w = std.Io.File.stdout().writer(io, &obuf);
 
-    const raw = std.Io.Dir.cwd().readFileAlloc(io, prob_path, a, .limited(64 * 1024)) catch {
-        try w.interface.writeAll("no probation marker present (ok)\n");
-        try w.interface.flush();
-        return 0;
-    };
-
-    const val = std.json.parseFromSliceLeaky(std.json.Value, a, raw, .{}) catch {
-        try w.interface.writeAll("unparseable probation marker\n");
-        try w.interface.flush();
-        return 1;
-    };
-    const active = if (val == .object and val.object.get("active") != null and val.object.get("active").? == .string)
-        val.object.get("active").?.string
-    else
-        "-";
-    const healthy = if (val == .object and val.object.get("healthy") != null and val.object.get("healthy").? == .bool)
-        val.object.get("healthy").?.bool
-    else
-        true;
-
-    if (!healthy or retry_rollback) {
-        if (u_store.rollback(gpa, io, rel_dir_path)) |target| {
-            defer gpa.free(target);
-            try w.interface.print("rolled back from {s} to {s}\n", .{ active, target });
+    const out = try u_store.check_probation(gpa, a, io, rel_dir_path, retry_rollback);
+    switch (out) {
+        .none => {
+            try w.interface.writeAll("no probation marker present (ok)\n");
             try w.interface.flush();
             return 0;
-        } else |_| {}
+        },
+        .invalid => {
+            try w.interface.writeAll("unparseable probation marker\n");
+            try w.interface.flush();
+            return 1;
+        },
+        .healthy => |h| {
+            try w.interface.print("active={s} healthy=true\n", .{h.active});
+            try w.interface.flush();
+            return 0;
+        },
+        .launch_pending => |lp| {
+            try w.interface.print("active={s} healthy=false probation=pending (attempt {d})\n", .{ lp.active, lp.attempts });
+            try w.interface.flush();
+            return 0;
+        },
+        .rolled_back => |rb| {
+            try w.interface.print("rolled back from {s} to {s} (probation failed)\n", .{ rb.from, rb.to });
+            try w.interface.flush();
+            return 0;
+        },
+        .unhealthy_no_previous => |np| {
+            try w.interface.print("active={s} healthy=false (no previous release for rollback)\n", .{np.active});
+            try w.interface.flush();
+            return 0;
+        },
     }
-    try w.interface.print("active={s} healthy={}\n", .{ active, healthy });
-    try w.interface.flush();
-    return 0;
 }
 
 fn supervise_loop(

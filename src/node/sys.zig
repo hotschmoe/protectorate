@@ -497,6 +497,14 @@ pub const PresenceDetector = struct {
                     .sampled_at_ms = now_ms,
                 };
             }
+            if (linux_lid_closed(io)) {
+                return .{
+                    .state = .away,
+                    .locked = lg.locked,
+                    .source = "lid-closed",
+                    .sampled_at_ms = now_ms,
+                };
+            }
             const quiet: u64 = @intCast(@divTrunc(@max(@as(i64, 0), awake_ms - self.linux_started_ms), 1000));
             if (quiet >= 300) {
                 return .{
@@ -748,6 +756,21 @@ fn query_logind(io: std.Io, now_ms: i64) LogindResult {
         .locked = all_locked,
         .source = "logind",
     };
+}
+
+fn linux_lid_closed(io: std.Io) bool {
+    var dir = std.Io.Dir.openDirAbsolute(io, "/proc/acpi/button/lid", .{ .iterate = true }) catch return false;
+    defer dir.close(io);
+    var it = dir.iterate();
+    var buf: [128]u8 = undefined;
+    var pbuf: [256]u8 = undefined;
+    while (it.next(io) catch null) |entry| {
+        const sp = std.fmt.bufPrint(&pbuf, "/proc/acpi/button/lid/{s}/state", .{entry.name}) catch continue;
+        if (read_small_file(io, sp, &buf)) |txt| {
+            if (std.mem.find(u8, txt, "closed") != null) return true;
+        }
+    }
+    return false;
 }
 
 fn is_human_evdev_device(io: std.Io, event_name: []const u8) bool {

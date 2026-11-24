@@ -990,6 +990,8 @@ wait "$PID_PA" >/dev/null 2>&1 || true
 "$PT" $U8 node set e2e-node-8 --jobs owner --note maint | grep -q 'owner'
 "$PT" $U8 node rename e2e-node-8 e2e-node-8b | grep -q 'e2e-node-8b'
 "$PT" $U8 node show e2e-node-8b | grep -q 'e2e-node-8b'
+NUPD8="$("$PT" $U8 --json node update e2e-node-8b --version "$VER8")"
+python3 -c 'import json,sys; d=json.load(sys.stdin); assert d.get("rollout_id") and len(d.get("nodes", [])) == 1 and d["nodes"][0]["ok"], d' <<<"$NUPD8"
 
 set +e
 JOB8_JSON="$("$PT" $U8 --json job run --wait --even-if-present --node e2e-node-8b -- sh -c 'echo CLI_LOG_8; exit 7')"
@@ -1044,6 +1046,17 @@ grep -q '"isError":false' <<<"$MCP8_OUT"
 "$PT_NODE" presence | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "state" in d'
 "$PT_NODE" watch-presence --interval 1 --limit 1 | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "state" in d'
 "$PT_NODE" --home "$NODE8" probation | grep -q 'probation\|healthy'
+
+PROB_HOME="$TMP_ROOT/prob-test"
+mkdir -p "$PROB_HOME/releases/v1" "$PROB_HOME/releases/v2"
+printf 'v1' > "$PROB_HOME/releases/previous.txt"
+printf 'v2' > "$PROB_HOME/releases/current.txt"
+printf '{"active":"v2","previous":"v1","healthy":false,"attempts":0}\n' > "$PROB_HOME/releases/probation.json"
+"$PT_NODE" --home "$PROB_HOME" probation | grep -q 'probation=pending'
+test "$(cat "$PROB_HOME/releases/current.txt")" = "v2"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["attempts"] == 1 and not d["healthy"], d' "$PROB_HOME/releases/probation.json"
+"$PT_NODE" --home "$PROB_HOME" probation | grep -q 'rolled back from v2 to v1'
+test "$(cat "$PROB_HOME/releases/current.txt")" = "v1"
 
 kill "$NPID8" "$PID8" >/dev/null 2>&1 || true
 wait "$NPID8" "$PID8" >/dev/null 2>&1 || true

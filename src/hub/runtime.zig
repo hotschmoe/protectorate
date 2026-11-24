@@ -2180,7 +2180,7 @@ pub const Runtime = struct {
         } });
 
         if (!req.no_wait) {
-            const deadline = std.Io.Clock.real.now(self.io).toMilliseconds() + 30_000;
+            const deadline = std.Io.Clock.real.now(self.io).toMilliseconds() + 90_000;
             var cursor = cursor_start;
             while (true) {
                 var all_done = true;
@@ -2276,10 +2276,13 @@ pub const Runtime = struct {
                 defer arena_st.deinit();
                 const arena = arena_st.allocator();
 
-                const ch = a_ptr.rt.hub_home.config.update_channel;
+                const ch_str: []const u8 = if (std.mem.findScalar(u8, a_ptr.target_ver, '-') != null)
+                    "dev"
+                else
+                    a_ptr.rt.hub_home.config.update_channel;
                 const rep = a_ptr.rt.fleet_srv.send_update(arena, a_ptr.node_id, .{
                     .version = a_ptr.target_ver,
-                    .channel = ch,
+                    .channel = ch_str,
                     .rollout_id = a_ptr.rollout_id,
                 }) catch |err| {
                     a_ptr.rt.commit(.{ .rollout_node_result = .{
@@ -2290,6 +2293,17 @@ pub const Runtime = struct {
                     } }) catch {};
                     return;
                 };
+                if (!rep.ok) {
+                    if (a_ptr.rt.push_node_update_from_hub(arena, a_ptr.rollout_id, a_ptr.node_id, a_ptr.target_ver, ch_str)) |_| {
+                        a_ptr.rt.commit(.{ .rollout_node_result = .{
+                            .rollout_id = a_ptr.rollout_id,
+                            .node_id = a_ptr.node_id,
+                            .ok = true,
+                            .detail = "uploaded from hub",
+                        } }) catch {};
+                        return;
+                    } else |_| {}
+                }
                 a_ptr.rt.commit(.{ .rollout_node_result = .{
                     .rollout_id = a_ptr.rollout_id,
                     .node_id = a_ptr.node_id,
@@ -2305,6 +2319,85 @@ pub const Runtime = struct {
             return;
         };
         t.detach();
+    }
+
+    fn push_node_update_from_hub(
+        self: *Runtime,
+        arena: std.mem.Allocator,
+        rollout_id: []const u8,
+        node_id: []const u8,
+        target_ver: []const u8,
+        ch_str: []const u8,
+    ) !void {
+        var node_os: []const u8 = "linux";
+        var node_arch: []const u8 = "";
+        {
+            self.meta_mu.lockUncancelable(self.io);
+            defer self.meta_mu.unlock(self.io);
+            if (self.node_tele.get(node_id)) |nt| {
+                if (nt.inventory) |inv| {
+                    if (inv.os.len > 0) node_os = try arena.dupe(u8, inv.os);
+                    if (inv.arch.len > 0) node_arch = try arena.dupe(u8, inv.arch);
+                }
+            }
+        }
+        var node_ver: []const u8 = "0.0.0";
+        {
+            self.state_mu.lockUncancelable(self.io);
+            defer self.state_mu.unlock(self.io);
+            if (self.core_state.nodes.get(node_id)) |nr| {
+                if (node_arch.len == 0 and nr.arch.len > 0) node_arch = try arena.dupe(u8, nr.arch);
+                if (nr.version.len > 0) node_ver = try arena.dupe(u8, nr.version);
+            }
+        }
+        const want_asset = u_store.asset_name_for(.node, node_os, node_arch) orelse return error.UnsupportedTarget;
+        const ch_enum: u_ver.Channel = if (std.mem.eql(u8, ch_str, "dev")) .dev else .stable;
+        const rel = (try u_store.check_latest_for_asset(
+            arena,
+            self.io,
+            self.hub_home.config.update_repo,
+            ch_enum,
+            node_ver,
+            want_asset,
+            target_ver,
+        )) orelse return error.ReleaseNotFound;
+
+        const dl = try u_store.download_release_asset(self.gpa, self.io, rel);
+        defer self.gpa.free(dl.bytes);
+
+        const hex_chars = "0123456789abcdef";
+        const chunk_max: usize = 128 * 1024;
+        const hex_buf = try arena.alloc(u8, chunk_max * 2);
+        var off: usize = 0;
+        var ready = false;
+        while (off < dl.bytes.len or dl.bytes.len == 0) {
+            const end = @min(off + chunk_max, dl.bytes.len);
+            const slice = dl.bytes[off..end];
+            for (slice, 0..) |b, i| {
+                hex_buf[i * 2] = hex_chars[b >> 4];
+                hex_buf[i * 2 + 1] = hex_chars[b & 0x0f];
+            }
+            const up_rep = try self.fleet_srv.upload_update(arena, node_id, .{
+                .rollout_id = rollout_id,
+                .version = rel.tag,
+                .sha256 = &dl.sha256_hex,
+                .offset = off,
+                .total_bytes = dl.bytes.len,
+                .hex = hex_buf[0 .. slice.len * 2],
+                .eof = (end == dl.bytes.len),
+            });
+            off = end;
+            ready = up_rep.ready;
+            if (dl.bytes.len == 0) break;
+        }
+        if (!ready) return error.UploadIncomplete;
+
+        const act = try self.fleet_srv.send_update(arena, node_id, .{
+            .version = rel.tag,
+            .channel = ch_str,
+            .rollout_id = rollout_id,
+        });
+        if (!act.ok) return error.ActivateFailed;
     }
 
     fn init_sleeve_devices(self: *Runtime) void {

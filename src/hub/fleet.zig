@@ -392,7 +392,7 @@ pub const FleetServer = struct {
     ) !msg.UpdateReply {
         const ps = self.get_peer(node_id) orelse return error.NodeOffline;
         defer ps.release();
-        const res = try ps.call_rpc(.{ .update = upd }, 30_000);
+        const res = try ps.call_rpc(.{ .update = upd }, 60_000);
         defer {
             self.gpa.free(res.payload);
             self.gpa.free(res.chunks);

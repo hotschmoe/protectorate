@@ -58,7 +58,7 @@ pub fn dispatch_cli(init: std.process.Init, arena: std.mem.Allocator) !Action {
                 try pos.append(arena, args[i]);
             }
             break;
-        } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V")) {
+        } else if (pos.items.len == 0 and (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-V"))) {
             try render.print_out(init.io, "protectorate {s} ({s})\n", .{ version.version, version.git_commit });
             return .{ .exit = 0 };
         } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
@@ -277,37 +277,54 @@ fn cmd_hub(
         }
         const hp = try resolve_hub_home(arena, init.environ_map, home_opt);
         const rel_dir = try std.fs.path.join(arena, &.{ hp, "releases" });
-        const prob_path = try std.fs.path.join(arena, &.{ rel_dir, "probation.json" });
-        const raw = std.Io.Dir.cwd().readFileAlloc(init.io, prob_path, arena, .limited(64 * 1024)) catch {
-            try render.print_out(init.io, "{s}\n", .{if (json_out) "{\"status\":\"ok\",\"probation\":false}" else "no probation marker present (ok)"});
-            return 0;
-        };
-        const val = std.json.parseFromSliceLeaky(std.json.Value, arena, raw, .{}) catch {
-            try render.print_out(init.io, "unparseable probation marker\n", .{});
-            return 1;
-        };
-        const active = if (val == .object and val.object.get("active") != null and val.object.get("active").? == .string)
-            val.object.get("active").?.string
-        else
-            "-";
-        const healthy = if (val == .object and val.object.get("healthy") != null and val.object.get("healthy").? == .bool)
-            val.object.get("healthy").?.bool
-        else
-            true;
-        if (!healthy or retry_rollback) {
-            if (u_store.rollback(init.gpa, init.io, rel_dir)) |target| {
-                defer init.gpa.free(target);
-                if (json_out) {
-                    const msg = try std.json.Stringify.valueAlloc(arena, .{ .rolled_back = true, .from = active, .to = target }, .{});
-                    try render.print_out(init.io, "{s}\n", .{msg});
-                } else {
-                    try render.print_out(init.io, "rolled back from {s} to {s}\n", .{ active, target });
-                }
+        const out = try u_store.check_probation(init.gpa, arena, init.io, rel_dir, retry_rollback);
+        switch (out) {
+            .none => {
+                try render.print_out(init.io, "{s}\n", .{if (json_out) "{\"status\":\"ok\",\"probation\":false}" else "no probation marker present (ok)"});
                 return 0;
-            } else |_| {}
+            },
+            .invalid => {
+                try render.print_out(init.io, "{s}\n", .{if (json_out) "{\"status\":\"error\",\"reason\":\"unparseable probation marker\"}" else "unparseable probation marker"});
+                return 1;
+            },
+            .healthy => |h| {
+                const text = if (json_out)
+                    try std.json.Stringify.valueAlloc(arena, .{ .active = h.active, .healthy = true }, .{})
+                else
+                    try std.fmt.allocPrint(arena, "active={s} healthy=true", .{h.active});
+                try render.print_out(init.io, "{s}\n", .{text});
+                return 0;
+            },
+            .launch_pending => |lp| {
+                const text = if (json_out)
+                    try std.json.Stringify.valueAlloc(arena, .{
+                        .active = lp.active,
+                        .healthy = false,
+                        .probation = "pending",
+                        .attempts = lp.attempts,
+                    }, .{})
+                else
+                    try std.fmt.allocPrint(arena, "active={s} healthy=false probation=pending (attempt {d})", .{ lp.active, lp.attempts });
+                try render.print_out(init.io, "{s}\n", .{text});
+                return 0;
+            },
+            .rolled_back => |rb| {
+                const text = if (json_out)
+                    try std.json.Stringify.valueAlloc(arena, .{ .rolled_back = true, .from = rb.from, .to = rb.to }, .{})
+                else
+                    try std.fmt.allocPrint(arena, "rolled back from {s} to {s} (probation failed)", .{ rb.from, rb.to });
+                try render.print_out(init.io, "{s}\n", .{text});
+                return 0;
+            },
+            .unhealthy_no_previous => |np| {
+                const text = if (json_out)
+                    try std.json.Stringify.valueAlloc(arena, .{ .active = np.active, .healthy = false, .rolled_back = false }, .{})
+                else
+                    try std.fmt.allocPrint(arena, "active={s} healthy=false (no previous release for rollback)", .{np.active});
+                try render.print_out(init.io, "{s}\n", .{text});
+                return 0;
+            },
         }
-        try render.print_out(init.io, "{s}\n", .{if (json_out) raw else try std.fmt.allocPrint(arena, "active={s} healthy={}", .{ active, healthy })});
-        return 0;
     }
     try print_usage(init.io);
     return 2;

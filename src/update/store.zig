@@ -27,6 +27,21 @@ pub const Probation = struct {
     active: []const u8,
     previous: ?[]const u8 = null,
     healthy: bool = false,
+    attempts: u32 = 0,
+};
+
+pub const ProbationOutcome = union(enum) {
+    none,
+    invalid,
+    healthy: struct { active: []const u8 },
+    launch_pending: struct { active: []const u8, attempts: u32 },
+    rolled_back: struct { from: []const u8, to: []const u8 },
+    unhealthy_no_previous: struct { active: []const u8 },
+};
+
+pub const DownloadedAsset = struct {
+    bytes: []u8,
+    sha256_hex: [64]u8,
 };
 
 pub const known_client_assets = [_][]const u8{
@@ -34,6 +49,64 @@ pub const known_client_assets = [_][]const u8{
     "protectorate-desktop-windows-amd64.zip",
     "protectorate-desktop-windows-arm64.zip",
 };
+
+/// Initialize an HTTP client with CA roots populated on Android/Termux as well.
+pub fn init_http_client(gpa: std.mem.Allocator, io: std.Io) std.http.Client {
+    var client: std.http.Client = .{ .allocator = gpa, .io = io };
+    if (comptime builtin.os.tag == .linux and !std.http.Client.disable_tls) {
+        const now = std.Io.Clock.real.now(io);
+        client.ca_bundle.rescan(gpa, io, now) catch {
+            client.ca_bundle.bytes.clearRetainingCapacity();
+            client.ca_bundle.map.clearRetainingCapacity();
+        };
+        if (client.ca_bundle.map.size == 0) {
+            client.ca_bundle.addCertsFromFilePathAbsolute(
+                gpa,
+                io,
+                now,
+                "/data/data/com.termux/files/usr/etc/tls/cert.pem",
+            ) catch {};
+        }
+        if (client.ca_bundle.map.size == 0) {
+            client.ca_bundle.addCertsFromDirPathAbsolute(
+                gpa,
+                io,
+                now,
+                "/apex/com.android.conscrypt/cacerts",
+            ) catch {};
+        }
+        if (client.ca_bundle.map.size > 0) {
+            client.now = now;
+        }
+    }
+    return client;
+}
+
+/// Canonical GitHub release asset filename for an arbitrary target OS/arch pair.
+pub fn asset_name_for(component: Component, os: []const u8, arch: []const u8) ?[]const u8 {
+    const is_arm64 = std.mem.eql(u8, arch, "aarch64") or std.mem.eql(u8, arch, "arm64");
+    const is_amd64 = std.mem.eql(u8, arch, "x86_64") or std.mem.eql(u8, arch, "amd64");
+    if (!is_arm64 and !is_amd64) return null;
+
+    if (std.mem.eql(u8, os, "linux")) {
+        return switch (component) {
+            .hub => if (is_arm64) "protectorate-linux-arm64" else "protectorate-linux-amd64",
+            .node => if (is_arm64) "protectorate-node-linux-arm64" else "protectorate-node-linux-amd64",
+        };
+    } else if (std.mem.eql(u8, os, "macos") or std.mem.eql(u8, os, "darwin")) {
+        if (!is_arm64) return null;
+        return switch (component) {
+            .hub => "protectorate-macos-arm64",
+            .node => "protectorate-node-macos-arm64",
+        };
+    } else if (std.mem.eql(u8, os, "windows")) {
+        return switch (component) {
+            .hub => if (is_arm64) "protectorate-windows-arm64.exe" else "protectorate-windows-amd64.exe",
+            .node => if (is_arm64) "protectorate-node-windows-arm64.exe" else "protectorate-node-windows-amd64.exe",
+        };
+    }
+    return null;
+}
 
 /// Canonical GitHub release asset filename for the running target and component.
 pub fn host_asset_name(component: Component) []const u8 {
@@ -89,27 +162,46 @@ pub fn check_latest(
     component: Component,
     want_tag_opt: ?[]const u8,
 ) !?ReleaseInfo {
+    return check_latest_for_asset(
+        arena,
+        io,
+        repo,
+        channel,
+        current_str,
+        host_asset_name(component),
+        want_tag_opt,
+    );
+}
+
+pub fn check_latest_for_asset(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    repo: []const u8,
+    channel: version.Channel,
+    current_str: []const u8,
+    want_asset: []const u8,
+    want_tag_opt: ?[]const u8,
+) !?ReleaseInfo {
     const cur = version.Version.parse_tag(current_str) orelse version.Version{ .major = 0, .minor = 0, .patch = 0 };
     const url = try std.fmt.allocPrint(arena, "https://api.github.com/repos/{s}/releases?per_page=25", .{repo});
 
-    var client: std.http.Client = .{ .allocator = arena, .io = io };
+    var client = init_http_client(arena, io);
     defer client.deinit();
     var out: std.Io.Writer.Allocating = .init(arena);
-    const res = client.fetch(.{
+    const res = try client.fetch(.{
         .location = .{ .url = url },
         .method = .GET,
+        .headers = .{ .user_agent = .{ .override = "protectorate" } },
         .extra_headers = &.{
-            .{ .name = "user-agent", .value = "protectorate" },
             .{ .name = "accept", .value = "application/vnd.github+json" },
         },
         .response_writer = &out.writer,
-    }) catch return null;
-    if (res.status != .ok) return null;
+    });
+    if (res.status != .ok) return error.HttpFailed;
 
     const root = std.json.parseFromSliceLeaky(std.json.Value, arena, out.written(), .{}) catch return null;
     if (root != .array) return null;
 
-    const want_asset = host_asset_name(component);
     var best: ?ReleaseInfo = null;
 
     for (root.array.items) |rel| {
@@ -164,7 +256,7 @@ fn fetch_sums(
     io: std.Io,
     sums_url: []const u8,
 ) ![]version.SumEntry {
-    var client: std.http.Client = .{ .allocator = gpa, .io = io };
+    var client = init_http_client(gpa, io);
     defer client.deinit();
 
     var sums_aw: std.Io.Writer.Allocating = .init(gpa);
@@ -172,7 +264,7 @@ fn fetch_sums(
     const sums_res = try client.fetch(.{
         .location = .{ .url = sums_url },
         .method = .GET,
-        .extra_headers = &.{.{ .name = "user-agent", .value = "protectorate" }},
+        .headers = .{ .user_agent = .{ .override = "protectorate" } },
         .response_writer = &sums_aw.writer,
     });
     if (sums_res.status != .ok) return error.HttpFailed;
@@ -186,13 +278,11 @@ fn find_sum_hex(entries: []const version.SumEntry, filename: []const u8) ?[64]u8
     return null;
 }
 
-pub fn stage_and_apply(
+pub fn download_release_asset(
     gpa: std.mem.Allocator,
     io: std.Io,
-    releases_dir_path: []const u8,
     info: ReleaseInfo,
-    component: Component,
-) !void {
+) !DownloadedAsset {
     const entries = try fetch_sums(gpa, io, info.sums_url);
     defer {
         for (entries) |e| gpa.free(e.filename);
@@ -201,7 +291,7 @@ pub fn stage_and_apply(
 
     const want_hex = find_sum_hex(entries, info.asset_name) orelse return error.MissingChecksum;
 
-    var client: std.http.Client = .{ .allocator = gpa, .io = io };
+    var client = init_http_client(gpa, io);
     defer client.deinit();
 
     var pkg_aw: std.Io.Writer.Allocating = .init(gpa);
@@ -209,12 +299,31 @@ pub fn stage_and_apply(
     const pkg_res = try client.fetch(.{
         .location = .{ .url = info.asset_url },
         .method = .GET,
-        .extra_headers = &.{.{ .name = "user-agent", .value = "protectorate" }},
+        .headers = .{ .user_agent = .{ .override = "protectorate" } },
         .response_writer = &pkg_aw.writer,
     });
     if (pkg_res.status != .ok) return error.HttpFailed;
+    if (!version.verify_sha256(pkg_aw.written(), &want_hex)) {
+        return error.ChecksumMismatch;
+    }
 
-    try stage_archive_bytes(gpa, io, releases_dir_path, info.tag, info.asset_name, &want_hex, pkg_aw.written(), component);
+    return .{
+        .bytes = try gpa.dupe(u8, pkg_aw.written()),
+        .sha256_hex = want_hex,
+    };
+}
+
+pub fn stage_and_apply(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    releases_dir_path: []const u8,
+    info: ReleaseInfo,
+    component: Component,
+) !void {
+    const dl = try download_release_asset(gpa, io, info);
+    defer gpa.free(dl.bytes);
+
+    try stage_archive_bytes(gpa, io, releases_dir_path, info.tag, info.asset_name, &dl.sha256_hex, dl.bytes, component);
 }
 
 /// Download and verify release client bundles (APK / Windows desktop zips) into `<clients_dir>/<tag>/`.
@@ -237,7 +346,7 @@ pub fn cache_release_clients(
     var tag_dir = try std.Io.Dir.cwd().createDirPathOpen(io, tag_dir_path, .{});
     defer tag_dir.close(io);
 
-    var client: std.http.Client = .{ .allocator = gpa, .io = io };
+    var client = init_http_client(gpa, io);
     defer client.deinit();
 
     for (info.clients) |ca| {
@@ -248,7 +357,7 @@ pub fn cache_release_clients(
         const dl_res = client.fetch(.{
             .location = .{ .url = ca.url },
             .method = .GET,
-            .extra_headers = &.{.{ .name = "user-agent", .value = "protectorate" }},
+            .headers = .{ .user_agent = .{ .override = "protectorate" } },
             .response_writer = &dl_aw.writer,
         }) catch continue;
         if (dl_res.status != .ok) continue;
@@ -270,7 +379,7 @@ pub fn stage_from_url(
     expected_hex: []const u8,
     component: Component,
 ) !void {
-    var client: std.http.Client = .{ .allocator = gpa, .io = io };
+    var client = init_http_client(gpa, io);
     defer client.deinit();
 
     var pkg_aw: std.Io.Writer.Allocating = .init(gpa);
@@ -278,7 +387,7 @@ pub fn stage_from_url(
     const pkg_res = try client.fetch(.{
         .location = .{ .url = url },
         .method = .GET,
-        .extra_headers = &.{.{ .name = "user-agent", .value = "protectorate" }},
+        .headers = .{ .user_agent = .{ .override = "protectorate" } },
         .response_writer = &pkg_aw.writer,
     });
     if (pkg_res.status != .ok) return error.HttpFailed;
@@ -384,6 +493,7 @@ pub fn activate_staged(
         .active = tag,
         .previous = prev_active,
         .healthy = false,
+        .attempts = 0,
     });
     return true;
 }
@@ -399,6 +509,7 @@ pub fn mark_healthy(gpa: std.mem.Allocator, io: std.Io, releases_dir_path: []con
         .active = active,
         .previous = prev,
         .healthy = true,
+        .attempts = 0,
     });
 }
 
@@ -412,8 +523,77 @@ pub fn rollback(gpa: std.mem.Allocator, io: std.Io, releases_dir_path: []const u
         rel_dir.deleteFile(io, "current") catch {};
         std.Io.Dir.symLink(rel_dir, io, prev, "current", .{ .is_directory = true }) catch {};
     }
-    try write_probation(gpa, io, rel_dir, .{ .active = prev, .previous = null, .healthy = true });
+    try write_probation(gpa, io, rel_dir, .{ .active = prev, .previous = null, .healthy = true, .attempts = 0 });
     return prev;
+}
+
+/// Evaluate probation.json before launching a release, allowing 1 startup attempt when attempts == 0.
+pub fn check_probation(
+    gpa: std.mem.Allocator,
+    arena: std.mem.Allocator,
+    io: std.Io,
+    releases_dir_path: []const u8,
+    force_rollback: bool,
+) !ProbationOutcome {
+    const prob_path = try std.fs.path.join(arena, &.{ releases_dir_path, "probation.json" });
+    const raw = std.Io.Dir.cwd().readFileAlloc(io, prob_path, arena, .limited(64 * 1024)) catch {
+        return .none;
+    };
+    const val = std.json.parseFromSliceLeaky(std.json.Value, arena, raw, .{}) catch {
+        return .invalid;
+    };
+    if (val != .object) return .invalid;
+
+    const active_raw = if (val.object.get("active")) |av| (if (av == .string) av.string else "-") else "-";
+    const active = try arena.dupe(u8, active_raw);
+    const prev_json = if (val.object.get("previous")) |pv| (if (pv == .string) pv.string else null) else null;
+    const healthy = if (val.object.get("healthy")) |hv| (if (hv == .bool) hv.bool else true) else true;
+    const attempts: u32 = if (val.object.get("attempts")) |atv|
+        (if (atv == .integer) @intCast(@max(@as(i64, 0), atv.integer)) else 1)
+    else
+        1;
+
+    if (force_rollback) {
+        if (rollback(gpa, io, releases_dir_path)) |target| {
+            defer gpa.free(target);
+            return .{ .rolled_back = .{
+                .from = active,
+                .to = try arena.dupe(u8, target),
+            } };
+        } else |_| {
+            return .{ .unhealthy_no_previous = .{ .active = active } };
+        }
+    }
+
+    if (healthy) {
+        return .{ .healthy = .{ .active = active } };
+    }
+
+    if (attempts == 0) {
+        var rel_dir = std.Io.Dir.cwd().openDir(io, releases_dir_path, .{}) catch {
+            return .{ .unhealthy_no_previous = .{ .active = active } };
+        };
+        defer rel_dir.close(io);
+        const prev_disk = if (prev_json == null) read_marker(gpa, io, rel_dir, "previous.txt") else null;
+        defer if (prev_disk) |p| gpa.free(p);
+        try write_probation(gpa, io, rel_dir, .{
+            .active = active,
+            .previous = prev_json orelse prev_disk,
+            .healthy = false,
+            .attempts = 1,
+        });
+        return .{ .launch_pending = .{ .active = active, .attempts = 1 } };
+    }
+
+    if (rollback(gpa, io, releases_dir_path)) |target| {
+        defer gpa.free(target);
+        return .{ .rolled_back = .{
+            .from = active,
+            .to = try arena.dupe(u8, target),
+        } };
+    } else |_| {
+        return .{ .unhealthy_no_previous = .{ .active = active } };
+    }
 }
 
 fn read_marker(gpa: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, name: []const u8) ?[]const u8 {
@@ -437,6 +617,8 @@ fn write_probation(gpa: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, p: Proba
     }
     try jw.objectField("healthy");
     try jw.write(p.healthy);
+    try jw.objectField("attempts");
+    try jw.write(p.attempts);
     try jw.endObject();
     try dir.writeFile(io, .{ .sub_path = "probation.json.tmp", .data = aw.written() });
     try std.Io.Dir.rename(dir, "probation.json.tmp", dir, "probation.json", io);

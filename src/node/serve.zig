@@ -628,23 +628,29 @@ fn handle_request(
                     detail = "staged from url";
                     staged_new = true;
                 }
+            } else if (upd.version != null and std.mem.eql(u8, target, version.version)) {
+                detail = "already on requested release";
             } else if (upd.version != null and (u_store.activate_staged(sctx.gpa, sctx.io, rel_dir, target) catch false)) {
                 detail = "activated staged release";
                 staged_new = true;
             } else {
                 const ch: u_ver.Channel = if (upd.channel != null and std.mem.eql(u8, upd.channel.?, "dev")) .dev else .stable;
-                const latest = u_store.check_latest(arena, sctx.io, "hotschmoe/protectorate", ch, version.version, .node, upd.version) catch null;
-                if (latest) |rel| {
-                    u_store.stage_and_apply(sctx.gpa, sctx.io, rel_dir, rel, .node) catch |err| {
-                        ok = false;
-                        detail = @errorName(err);
-                    };
-                    if (ok) {
-                        detail = "staged from github";
-                        staged_new = true;
+                if (u_store.check_latest(arena, sctx.io, "hotschmoe/protectorate", ch, version.version, .node, upd.version)) |latest| {
+                    if (latest) |rel| {
+                        u_store.stage_and_apply(sctx.gpa, sctx.io, rel_dir, rel, .node) catch |err| {
+                            ok = false;
+                            detail = @errorName(err);
+                        };
+                        if (ok) {
+                            detail = "staged from github";
+                            staged_new = true;
+                        }
+                    } else {
+                        detail = "already on latest release";
                     }
-                } else {
-                    detail = "already on latest release";
+                } else |err| {
+                    ok = false;
+                    detail = @errorName(err);
                 }
             }
 

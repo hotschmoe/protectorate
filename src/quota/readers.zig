@@ -222,11 +222,11 @@ fn poll_claude(
     const res = client.fetch(.{
         .location = .{ .url = "https://api.anthropic.com/api/oauth/usage" },
         .method = .GET,
+        .headers = .{ .user_agent = .{ .override = "protectorate" } },
         .extra_headers = &.{
             .{ .name = "authorization", .value = auth },
             .{ .name = "anthropic-beta", .value = "oauth-2025-04-20" },
             .{ .name = "accept", .value = "application/json" },
-            .{ .name = "user-agent", .value = "protectorate" },
         },
         .response_writer = &out.writer,
     }) catch |err| {
@@ -319,13 +319,11 @@ fn poll_codex(
     now_ms: i64,
 ) void {
     const auth = std.fmt.allocPrint(arena, "Bearer {s}", .{token}) catch return;
-    var hdrs_buf: [4]std.http.Header = undefined;
+    var hdrs_buf: [3]std.http.Header = undefined;
     var hdr_len: usize = 0;
     hdrs_buf[hdr_len] = .{ .name = "authorization", .value = auth };
     hdr_len += 1;
     hdrs_buf[hdr_len] = .{ .name = "accept", .value = "application/json" };
-    hdr_len += 1;
-    hdrs_buf[hdr_len] = .{ .name = "user-agent", .value = "protectorate" };
     hdr_len += 1;
     if (account_id.len > 0) {
         hdrs_buf[hdr_len] = .{ .name = "chatgpt-account-id", .value = account_id };
@@ -338,6 +336,7 @@ fn poll_codex(
     const res = client.fetch(.{
         .location = .{ .url = "https://chatgpt.com/backend-api/wham/usage" },
         .method = .GET,
+        .headers = .{ .user_agent = .{ .override = "protectorate" } },
         .extra_headers = hdrs_buf[0..hdr_len],
         .response_writer = &out.writer,
     }) catch |err| {
@@ -432,11 +431,11 @@ fn poll_grok(
     const res = client.fetch(.{
         .location = .{ .url = "https://cli-chat-proxy.grok.com/v1/billing?format=credits" },
         .method = .GET,
+        .headers = .{ .user_agent = .{ .override = "protectorate" } },
         .extra_headers = &.{
             .{ .name = "authorization", .value = auth },
             .{ .name = "x-xai-token-auth", .value = "xai-grok-cli" },
             .{ .name = "accept", .value = "application/json" },
-            .{ .name = "user-agent", .value = "protectorate" },
         },
         .response_writer = &out.writer,
     }) catch |err| {
