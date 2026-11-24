@@ -146,17 +146,28 @@ app_src() {
 
 apk_ssh() { ssh -o BatchMode=yes ${APK_KEY:+-i "$APK_KEY" -o IdentitiesOnly=yes} "$APK_HOST" "$@"; }
 
+# On the APK host (or locally when PT_RELEASE_APK_HOST=local), then signed here: the key never leaves this machine.
 build_apk() {
-	local out=$APP_OUT/protectorate-android.apk ks alias
+	local out=$APP_OUT/protectorate-android.apk ks alias apk_src
 	[ -f "$APK_SIGNING" ] || die "no signing properties at $APK_SIGNING (PT_RELEASE_APK_SIGNING)"
 	[ -x "$APKSIGNER" ] || die "no apksigner at $APKSIGNER (PT_RELEASE_APKSIGNER)"
-	apk_ssh "mkdir -p pt-release"
-	scp -q -o BatchMode=yes ${APK_KEY:+-i "$APK_KEY" -o IdentitiesOnly=yes} "$APP_TAR" "$APK_HOST:pt-release/app.tar"
-	apk_ssh "cd pt-release && tar -xf app.tar && cd app" \
-		"&& export ANDROID_HOME=\"\$HOME/$APK_ANDROID_HOME\" PATH=\"\$HOME/$APK_PATH:\$PATH\"" \
-		"&& flutter build apk --release $APP_FLAGS"
-	scp -q -o BatchMode=yes ${APK_KEY:+-i "$APK_KEY" -o IdentitiesOnly=yes} \
-		"$APK_HOST:pt-release/app/build/app/outputs/flutter-apk/app-release.apk" "$out.unsigned"
+	if [ "$APK_HOST" = local ]; then
+		apk_src=$APP_OUT/apk-build
+		rm -rf "$apk_src"
+		mkdir -p "$apk_src"
+		tar -xf "$APP_TAR" -C "$apk_src"
+		ANDROID_HOME="${PT_RELEASE_ANDROID_HOME:-$HOME/Android/Sdk}" \
+			sh -c "cd '$apk_src/app' && flutter build apk --release $APP_FLAGS"
+		cp -f "$apk_src/app/build/app/outputs/flutter-apk/app-release.apk" "$out.unsigned"
+	else
+		apk_ssh "mkdir -p pt-release"
+		scp -q -o BatchMode=yes ${APK_KEY:+-i "$APK_KEY" -o IdentitiesOnly=yes} "$APP_TAR" "$APK_HOST:pt-release/app.tar"
+		apk_ssh "cd pt-release && tar -xf app.tar && cd app" \
+			"&& export ANDROID_HOME=\"\$HOME/$APK_ANDROID_HOME\" PATH=\"\$HOME/$APK_PATH:\$PATH\"" \
+			"&& flutter build apk --release $APP_FLAGS"
+		scp -q -o BatchMode=yes ${APK_KEY:+-i "$APK_KEY" -o IdentitiesOnly=yes} \
+			"$APK_HOST:pt-release/app/build/app/outputs/flutter-apk/app-release.apk" "$out.unsigned"
+	fi
 	ks=$(sed -n 's/^storeFile=//p' "$APK_SIGNING")
 	alias=$(sed -n 's/^keyAlias=//p' "$APK_SIGNING")
 	KS_PASS=$(sed -n 's/^storePassword=//p' "$APK_SIGNING") KEY_PASS=$(sed -n 's/^keyPassword=//p' "$APK_SIGNING") \
@@ -298,7 +309,7 @@ write_notes() {
 		echo "Protectorate $VERSION"
 		echo
 		echo "Built locally from commit $commit and checked by SHA256SUMS."
-		if [ -n "$(git status --porcelain)" ]; then
+		if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
 			echo
 			echo "WARNING: built from a dirty tree; the scripts below may differ at that commit."
 		fi
@@ -324,7 +335,7 @@ release_version() {
 	if [[ "$VERSION" =~ -[0-9]+-g[0-9a-f]+$ ]]; then die "VERSION $VERSION is commits past a tag; tag HEAD"; fi
 	[[ "$VERSION" =~ $SEMVER ]] || die "VERSION $VERSION is not a semver tag (vX.Y.Z or vX.Y.Z-PRE)"
 	git tag --points-at HEAD | grep -qxF "$VERSION" || die "HEAD is not tagged $VERSION"
-	[ -z "$(git status --porcelain)" ] || die "the tree is dirty; commit first (a release is built from a commit)"
+	[ -z "$(git status --porcelain --untracked-files=no)" ] || die "the tree is dirty; commit first (a release is built from a commit)"
 }
 
 assets() {
@@ -342,10 +353,13 @@ assets() {
 	if [ -n "$WIN_HOST" ]; then
 		win "ver" >/dev/null || die "cannot reach $WIN_HOST over ssh (unset PT_RELEASE_WIN_HOST to skip desktop-amd64)"
 	fi
+	if [ -z "$APK_HOST" ] && [ -f "$APK_SIGNING" ] && [ -x "$APKSIGNER" ] && [ -d "${PT_RELEASE_ANDROID_HOME:-$HOME/Android/Sdk}" ]; then
+		APK_HOST=local
+	fi
 	if [ -n "$APK_HOST$WIN_HOST$ARM64_NODE" ]; then
 		[ -n "$APP_FLAGS" ] || die "APP_VERSION_FLAGS is not set; run this through make"
 	fi
-	if [ -n "$APK_HOST" ]; then
+	if [ -n "$APK_HOST" ] && [ "$APK_HOST" != local ]; then
 		apk_ssh true || die "cannot reach $APK_HOST over ssh (unset PT_RELEASE_APK_HOST to skip the APK)"
 	fi
 	if [ -n "$ARM64_NODE" ]; then

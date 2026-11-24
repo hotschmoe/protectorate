@@ -13,6 +13,8 @@ const sys = @import("sys.zig");
 const admission = @import("admission.zig");
 const runner = @import("runner.zig");
 
+var node_restart_requested: std.atomic.Value(bool) = .init(false);
+
 pub const NodeConfig = struct {
     node_id: []const u8,
     name: []const u8,
@@ -312,7 +314,7 @@ pub fn cmd_serve(
     }
 
     var backoff_ms: i64 = 500;
-    while (true) {
+    while (!node_restart_requested.load(.acquire)) {
         if (eps.items.len > 0) {
             if (transport.NoiseConn.dial_any_tcp(gpa, io, eps.items, 3_000, kp, hub_pub)) |res_conn| {
                 var conn = res_conn.conn;
@@ -327,6 +329,7 @@ pub fn cmd_serve(
                 backoff_ms = @min(backoff_ms * 2, 5_000);
             }
         }
+        if (node_restart_requested.load(.acquire)) break;
         io.sleep(.fromMilliseconds(backoff_ms), .awake) catch break;
     }
     return 0;
@@ -414,6 +417,9 @@ fn run_session(
     var hello_arena_st = std.heap.ArenaAllocator.init(gpa);
     defer hello_arena_st.deinit();
     try send_hello_sync(gpa, hello_arena_st.allocator(), conn, cfg, inv, io, env, adm_mgr);
+    if (std.fs.path.join(hello_arena_st.allocator(), &.{ home_path, "releases" })) |rel_dir| {
+        u_store.mark_healthy(gpa, io, rel_dir) catch {};
+    } else |_| {}
 
     var sctx = SessionCtx{
         .gpa = gpa,
@@ -477,7 +483,7 @@ fn run_session(
     var req_arena_st = std.heap.ArenaAllocator.init(gpa);
     defer req_arena_st.deinit();
 
-    while (true) {
+    while (!node_restart_requested.load(.acquire)) {
         var f = try conn.recv_frame();
         defer f.deinit(gpa);
         sctx.last_rx_ms.store(std.Io.Clock.awake.now(io).toMilliseconds(), .release);
@@ -593,6 +599,7 @@ fn handle_request(
             const rel_dir = try std.fs.path.join(arena, &.{ sctx.home_path, "releases" });
             const target = upd.version orelse version.version;
             var ok = true;
+            var staged_new = false;
             var detail: []const u8 = "up to date";
 
             if (upd.url) |u| {
@@ -609,9 +616,13 @@ fn handle_request(
                     ok = false;
                     detail = @errorName(err);
                 };
-                if (ok) detail = "staged from url";
+                if (ok) {
+                    detail = "staged from url";
+                    staged_new = true;
+                }
             } else if (upd.version != null and (u_store.activate_staged(sctx.gpa, sctx.io, rel_dir, target) catch false)) {
                 detail = "activated staged release";
+                staged_new = true;
             } else {
                 const ch: u_ver.Channel = if (upd.channel != null and std.mem.eql(u8, upd.channel.?, "dev")) .dev else .stable;
                 const latest = u_store.check_latest(arena, sctx.io, "hotschmoe/protectorate", ch, version.version, .node, upd.version) catch null;
@@ -620,21 +631,32 @@ fn handle_request(
                         ok = false;
                         detail = @errorName(err);
                     };
-                    if (ok) detail = "staged from github";
+                    if (ok) {
+                        detail = "staged from github";
+                        staged_new = true;
+                    }
                 } else {
                     detail = "already on latest release";
                 }
             }
 
-            sctx.tx_mu.lockUncancelable(sctx.io);
-            defer sctx.tx_mu.unlock(sctx.io);
-            try sctx.conn.send_json(.response, req_id, msg.UpdateReply{
-                .ok = ok,
-                .from = version.version,
-                .to = target,
-                .detail = detail,
-                .restarting = false,
-            });
+            {
+                sctx.tx_mu.lockUncancelable(sctx.io);
+                defer sctx.tx_mu.unlock(sctx.io);
+                try sctx.conn.send_json(.response, req_id, msg.UpdateReply{
+                    .ok = ok,
+                    .from = version.version,
+                    .to = target,
+                    .detail = detail,
+                    .restarting = ok and staged_new,
+                });
+            }
+            if (ok and staged_new) {
+                node_restart_requested.store(true, .release);
+                sctx.closed.store(true, .release);
+                sctx.io.sleep(.fromMilliseconds(100), .awake) catch {};
+                sctx.conn.shutdown();
+            }
         },
         .upload_update => |uu| {
             if (!is_safe_name(uu.rollout_id) or !is_safe_name(uu.version)) {

@@ -2,10 +2,83 @@ const std = @import("std");
 const builtin = @import("builtin");
 const u_store = @import("../update/store.zig");
 
+const WinSvc = if (builtin.os.tag == .windows) struct {
+    const w = std.os.windows;
+
+    const SERVICE_STATUS = extern struct {
+        dwServiceType: w.DWORD = 0,
+        dwCurrentState: w.DWORD = 0,
+        dwControlsAccepted: w.DWORD = 0,
+        dwWin32ExitCode: w.DWORD = 0,
+        dwServiceSpecificExitCode: w.DWORD = 0,
+        dwCheckPoint: w.DWORD = 0,
+        dwWaitHint: w.DWORD = 0,
+    };
+
+    const SERVICE_STATUS_HANDLE = ?*anyopaque;
+    const LPSERVICE_MAIN_FUNCTIONW = *const fn (dwArgc: w.DWORD, lpszArgv: [*]const [*:0]const u16) callconv(.winapi) void;
+    const LPHANDLER_FUNCTION_EX = *const fn (
+        dwControl: w.DWORD,
+        dwEventType: w.DWORD,
+        lpEventData: ?*anyopaque,
+        lpContext: ?*anyopaque,
+    ) callconv(.winapi) w.DWORD;
+
+    const SERVICE_TABLE_ENTRYW = extern struct {
+        lpServiceName: ?[*:0]const u16,
+        lpServiceProc: ?LPSERVICE_MAIN_FUNCTIONW,
+    };
+
+    const SERVICE_WIN32_OWN_PROCESS: w.DWORD = 0x00000010;
+    const SERVICE_STOPPED: w.DWORD = 0x00000001;
+    const SERVICE_START_PENDING: w.DWORD = 0x00000002;
+    const SERVICE_STOP_PENDING: w.DWORD = 0x00000003;
+    const SERVICE_RUNNING: w.DWORD = 0x00000004;
+    const SERVICE_ACCEPT_STOP: w.DWORD = 0x00000001;
+    const SERVICE_ACCEPT_SHUTDOWN: w.DWORD = 0x00000004;
+    const SERVICE_CONTROL_STOP: w.DWORD = 0x00000001;
+    const SERVICE_CONTROL_INTERROGATE: w.DWORD = 0x00000004;
+    const SERVICE_CONTROL_SHUTDOWN: w.DWORD = 0x00000005;
+    const ERROR_FAILED_SERVICE_CONTROLLER_CONNECT: w.DWORD = 1063;
+    const ERROR_CALL_NOT_IMPLEMENTED: w.DWORD = 120;
+
+    extern "advapi32" fn StartServiceCtrlDispatcherW(lpServiceStartTable: [*]const SERVICE_TABLE_ENTRYW) callconv(.winapi) c_int;
+    extern "advapi32" fn RegisterServiceCtrlHandlerExW(
+        lpServiceName: [*:0]const u16,
+        lpHandlerProc: LPHANDLER_FUNCTION_EX,
+        lpContext: ?*anyopaque,
+    ) callconv(.winapi) SERVICE_STATUS_HANDLE;
+    extern "advapi32" fn SetServiceStatus(hServiceStatus: SERVICE_STATUS_HANDLE, lpServiceStatus: *SERVICE_STATUS) callconv(.winapi) c_int;
+    extern "kernel32" fn GetLastError() callconv(.winapi) w.DWORD;
+    extern "kernel32" fn TerminateProcess(hProcess: w.HANDLE, uExitCode: c_uint) callconv(.winapi) c_int;
+} else struct {};
+
+const WinSupCtx = struct {
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+    home_path: []const u8,
+};
+
 var sup_stop: std.atomic.Value(bool) = .init(false);
+var active_child_id: std.atomic.Value(usize) = .init(0);
+var win_ctx: ?WinSupCtx = null;
+var win_status_handle: if (builtin.os.tag == .windows) WinSvc.SERVICE_STATUS_HANDLE else void =
+    if (builtin.os.tag == .windows) null else {};
+
+fn stop_active_child() void {
+    const raw = active_child_id.load(.acquire);
+    if (raw == 0) return;
+    if (comptime builtin.os.tag == .windows) {
+        _ = WinSvc.TerminateProcess(@ptrFromInt(raw), 0);
+    } else if (comptime builtin.os.tag == .linux or builtin.os.tag == .macos) {
+        std.posix.kill(@intCast(raw), .TERM) catch {};
+    }
+}
 
 fn handle_sup_sig(_: std.posix.SIG) callconv(.c) void {
     sup_stop.store(true, .release);
+    stop_active_child();
 }
 
 fn install_sup_signals() void {
@@ -18,6 +91,54 @@ fn install_sup_signals() void {
         std.posix.sigaction(.INT, &act, null);
         std.posix.sigaction(.TERM, &act, null);
     }
+}
+
+fn win_report_status(state: u32, controls: u32, exit_code: u32, wait_hint_ms: u32) void {
+    if (comptime builtin.os.tag != .windows) return;
+    if (win_status_handle) |h| {
+        var st: WinSvc.SERVICE_STATUS = .{
+            .dwServiceType = WinSvc.SERVICE_WIN32_OWN_PROCESS,
+            .dwCurrentState = state,
+            .dwControlsAccepted = controls,
+            .dwWin32ExitCode = exit_code,
+            .dwServiceSpecificExitCode = 0,
+            .dwCheckPoint = 0,
+            .dwWaitHint = wait_hint_ms,
+        };
+        _ = WinSvc.SetServiceStatus(h, &st);
+    }
+}
+
+fn win_ctrl_handler(
+    control: std.os.windows.DWORD,
+    _: std.os.windows.DWORD,
+    _: ?*anyopaque,
+    _: ?*anyopaque,
+) callconv(.winapi) std.os.windows.DWORD {
+    switch (control) {
+        WinSvc.SERVICE_CONTROL_STOP, WinSvc.SERVICE_CONTROL_SHUTDOWN => {
+            sup_stop.store(true, .release);
+            win_report_status(WinSvc.SERVICE_STOP_PENDING, 0, 0, 5000);
+            stop_active_child();
+            return 0;
+        },
+        WinSvc.SERVICE_CONTROL_INTERROGATE => return 0,
+        else => return WinSvc.ERROR_CALL_NOT_IMPLEMENTED,
+    }
+}
+
+fn win_service_main(
+    _: std.os.windows.DWORD,
+    _: [*]const [*:0]const u16,
+) callconv(.winapi) void {
+    const svc_name_w = std.unicode.utf8ToUtf16LeStringLiteral("ProtectorateNode");
+    win_status_handle = WinSvc.RegisterServiceCtrlHandlerExW(svc_name_w, win_ctrl_handler, null);
+    if (win_status_handle == null) return;
+    win_report_status(WinSvc.SERVICE_RUNNING, WinSvc.SERVICE_ACCEPT_STOP | WinSvc.SERVICE_ACCEPT_SHUTDOWN, 0, 0);
+    if (win_ctx) |ctx| {
+        supervise_loop(ctx.gpa, ctx.io, ctx.env, ctx.home_path);
+    }
+    win_report_status(WinSvc.SERVICE_STOPPED, 0, 0, 0);
 }
 
 pub fn cmd_probation(
@@ -69,13 +190,12 @@ pub fn cmd_probation(
     return 0;
 }
 
-pub fn cmd_supervise(
+fn supervise_loop(
     gpa: std.mem.Allocator,
     io: std.Io,
     env: *const std.process.Environ.Map,
     home_path: []const u8,
-) !u8 {
-    install_sup_signals();
+) void {
     var backoff_ms: i64 = 500;
     while (!sup_stop.load(.acquire)) {
         _ = cmd_probation(gpa, io, home_path, false) catch 1;
@@ -90,13 +210,47 @@ pub fn cmd_supervise(
             backoff_ms = @min(backoff_ms * 2, 10_000);
             continue;
         };
+        if (child.id) |cid| {
+            const id_val: usize = if (comptime builtin.os.tag == .windows)
+                @intFromPtr(cid)
+            else
+                @intCast(cid);
+            active_child_id.store(id_val, .release);
+        }
         const start_ms = std.Io.Clock.awake.now(io).toMilliseconds();
         _ = child.wait(io) catch {};
+        active_child_id.store(0, .release);
         if (sup_stop.load(.acquire)) break;
         const ran_ms = std.Io.Clock.awake.now(io).toMilliseconds() - start_ms;
         backoff_ms = if (ran_ms > 30_000) 500 else @min(backoff_ms * 2, 10_000);
         io.sleep(.fromMilliseconds(backoff_ms), .awake) catch break;
     }
+}
+
+pub fn cmd_supervise(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+    home_path: []const u8,
+) !u8 {
+    install_sup_signals();
+    if (comptime builtin.os.tag == .windows) {
+        win_ctx = .{ .gpa = gpa, .io = io, .env = env, .home_path = home_path };
+        defer win_ctx = null;
+        const svc_name_w = std.unicode.utf8ToUtf16LeStringLiteral("ProtectorateNode");
+        const table = [_]WinSvc.SERVICE_TABLE_ENTRYW{
+            .{ .lpServiceName = svc_name_w, .lpServiceProc = win_service_main },
+            .{ .lpServiceName = null, .lpServiceProc = null },
+        };
+        if (WinSvc.StartServiceCtrlDispatcherW(&table) != 0) {
+            return 0;
+        }
+        const err_code = WinSvc.GetLastError();
+        if (err_code != WinSvc.ERROR_FAILED_SERVICE_CONTROLLER_CONNECT) {
+            return 1;
+        }
+    }
+    supervise_loop(gpa, io, env, home_path);
     return 0;
 }
 
@@ -152,11 +306,11 @@ pub fn cmd_install_service(
         try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = unit_path, .data = content });
 
         if (is_user) {
-            _ = run_quiet(a, io, &.{ "systemctl", "--user", "daemon-reload" });
-            _ = run_quiet(a, io, &.{ "systemctl", "--user", "enable", "--now", unit_name });
+            if (!run_checked(a, io, &.{ "systemctl", "--user", "daemon-reload" })) return 1;
+            if (!run_checked(a, io, &.{ "systemctl", "--user", "enable", "--now", unit_name })) return 1;
         } else {
-            _ = run_quiet(a, io, &.{ "systemctl", "daemon-reload" });
-            _ = run_quiet(a, io, &.{ "systemctl", "enable", "--now", unit_name });
+            if (!run_checked(a, io, &.{ "systemctl", "daemon-reload" })) return 1;
+            if (!run_checked(a, io, &.{ "systemctl", "enable", "--now", unit_name })) return 1;
         }
 
         try write_manifest(a, io, home_path, unit_path, is_user);
@@ -195,9 +349,14 @@ pub fn cmd_install_service(
         return 0;
     } else if (comptime builtin.os.tag == .windows) {
         const svc_name = service_name_opt orelse "ProtectorateNode";
-        const bin_arg = try std.fmt.allocPrint(a, "binPath= \"\\\"{s}\\\" supervise --home \\\"{s}\\\"\"", .{ exe, home_path });
-        _ = run_quiet(a, io, &.{ "sc.exe", "create", svc_name, bin_arg, "start=", "auto" });
-        _ = run_quiet(a, io, &.{ "sc.exe", "start", svc_name });
+        const bin_val = try std.fmt.allocPrint(a, "\"{s}\" supervise --home \"{s}\"", .{ exe, home_path });
+        if (!run_checked(a, io, &.{ "sc.exe", "create", svc_name, "binPath=", bin_val, "start=", "auto" })) {
+            return 1;
+        }
+        _ = run_quiet(a, io, &.{ "sc.exe", "failure", svc_name, "reset=", "86400", "actions=", "restart/5000/restart/5000/restart/5000" });
+        if (!run_checked(a, io, &.{ "sc.exe", "start", svc_name })) {
+            return 1;
+        }
         try write_manifest(a, io, home_path, svc_name, false);
         try w.interface.print("installed Windows service {s}\n", .{svc_name});
         try w.interface.flush();
@@ -323,4 +482,24 @@ fn run_quiet(arena: std.mem.Allocator, io: std.Io, argv: []const []const u8) boo
         .stderr_limit = .limited(8192),
     }) catch return false;
     return res.term.success();
+}
+
+fn run_checked(arena: std.mem.Allocator, io: std.Io, argv: []const []const u8) bool {
+    const res = std.process.run(arena, io, .{
+        .argv = argv,
+        .stdout_limit = .limited(16384),
+        .stderr_limit = .limited(16384),
+    }) catch |err| {
+        var eb: [256]u8 = undefined;
+        var ew = std.Io.File.stderr().writer(io, &eb);
+        ew.interface.print("command {s} failed: {s}\n", .{ argv[0], @errorName(err) }) catch {};
+        ew.interface.flush() catch {};
+        return false;
+    };
+    if (res.term.success()) return true;
+    var eb: [512]u8 = undefined;
+    var ew = std.Io.File.stderr().writer(io, &eb);
+    ew.interface.print("command {s} failed:\n{s}\n{s}\n", .{ argv[0], res.stdout, res.stderr }) catch {};
+    ew.interface.flush() catch {};
+    return false;
 }
