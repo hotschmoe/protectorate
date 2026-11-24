@@ -123,10 +123,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           : 'Connecting to ${_url.text.trim()} ($kept)');
     }
     Future<void> pair() async {
-      if (_url.text.trim() != app.hubUrl) app.connect(_url.text, '');
+      final url = _url.text.trim();
+      final code = _code.text;
       await app.act(() async {
-        final name = await app.pair(_code.text);
-        _code.clear();
+        final name = await app.pair(code, url: url.isEmpty ? null : url);
+        if (mounted) _code.clear();
         app.say('Paired as $name ($kept)');
       });
     }

@@ -61,7 +61,7 @@ class Shell extends StatefulWidget {
   final String hubUrl;
   final String hubToken;
   final void Function(String url, String token) connect;
-  final Future<String> Function(String code) pair;
+  final Future<String> Function(String code, {String? url}) pair;
   final Screen initial;
   final String? initialSleeve;
   final String? initialNode;
@@ -155,6 +155,7 @@ class _ShellState extends State<Shell> {
   });
 
   void _say(String text, {Level level = Level.info}) {
+    if (!mounted) return;
     _msgTimer?.cancel();
     setState(() {
       _msg = text;

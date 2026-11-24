@@ -39,7 +39,7 @@ class AppScope extends InheritedWidget {
   final void Function(String url, String token) connect;
 
   /// Trades a code from `protectorate device add` for this device's token; the device's name.
-  final Future<String> Function(String code) pair;
+  final Future<String> Function(String code, {String? url}) pair;
 
   static AppScope of(BuildContext context) {
     final s = context.dependOnInheritedWidgetOfExactType<AppScope>();

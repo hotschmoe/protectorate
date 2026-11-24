@@ -294,6 +294,7 @@ class FakeHub implements HubClient {
       'parent_id': 's-proto',
       'role': 'child',
       'lifecycle': 'provisioning',
+      'path': '~/github/protectorate/.worktrees/$name',
       'resleeve_to': ['pi_local'],
       'branch': 'protectorate/$name',
       'incarnation': null,
@@ -765,31 +766,35 @@ class FakeHub implements HubClient {
     _sleeves.addAll([
       {
         'id': 's-envoy', 'name': 'envoy', 'workspace_id': 'w-envoy', 'role': 'envoy',
-        'lifecycle': 'running', 'resleeve_to': ['codex', 'pi_local'],
+        'lifecycle': 'running', 'path': '~/.local/share/protectorate/envoy',
+        'resleeve_to': ['codex', 'pi_local'],
         'incarnation': _incarnation('claude', g: 4, activity: 'idle', turn: 31, ctx: 61200,
             ageMin: 300),
       },
       {
         'id': 's-proto', 'name': 'protectorate', 'workspace_id': 'w-proto', 'role': 'root',
-        'lifecycle': 'running', 'resleeve_to': ['pi_local'], 'branch': 'next-core',
+        'lifecycle': 'running', 'path': '~/github/protectorate',
+        'resleeve_to': ['pi_local'], 'branch': 'next-core',
         'incarnation': _incarnation('claude', g: 2, activity: 'working', turn: 9, ctx: 41200),
         'budget_used': 1240000, 'budget_limit': 3000000,
       },
       {
         'id': 's-laapp', 'name': 'la/app', 'workspace_id': 'w-proto', 'parent_id': 's-proto',
-        'role': 'child', 'lifecycle': 'running', 'resleeve_to': ['pi_local'],
-        'branch': 'la/app',
+        'role': 'child', 'lifecycle': 'running', 'path': '~/github/protectorate/.worktrees/la-app',
+        'resleeve_to': ['pi_local'], 'branch': 'la/app',
         'incarnation': _incarnation('codex', g: 3, activity: 'blocked', turn: 14, ctx: 118000),
       },
       {
         'id': 's-fuzz', 'name': 'fuzz-wire', 'workspace_id': 'w-proto', 'parent_id': 's-proto',
-        'role': 'child', 'lifecycle': 'running', 'resleeve_to': ['pi_local'],
+        'role': 'child', 'lifecycle': 'running',
+        'path': '~/github/protectorate/.worktrees/fuzz-wire', 'resleeve_to': ['pi_local'],
         'branch': 'fuzz-wire',
         'incarnation': _incarnation('pi_local', g: 2, activity: 'idle', turn: 22, ctx: 30500),
       },
       {
         'id': 's-herdr', 'name': 'herdr-port', 'workspace_id': 'w-herdr', 'role': 'root',
-        'lifecycle': 'running', 'resleeve_to': ['pi_local'], 'branch': 'main',
+        'lifecycle': 'running', 'path': '~/github/herdr-port',
+        'resleeve_to': ['pi_local'], 'branch': 'main',
         'incarnation': {
           ..._incarnation('claude', g: 1, activity: 'idle', turn: 40, ctx: 152000, ageMin: 600),
           'activity': {'state': 'idle', 'since_ms': _ago(const Duration(hours: 5)), 'seen': false},
@@ -797,7 +802,8 @@ class FakeHub implements HubClient {
       },
       {
         'id': 's-notes', 'name': 'notes-site', 'workspace_id': 'w-notes', 'role': 'root',
-        'lifecycle': 'parked', 'resleeve_to': ['pi_local'], 'branch': 'main',
+        'lifecycle': 'parked', 'path': '~/github/notes-site',
+        'resleeve_to': ['pi_local'], 'branch': 'main',
         'incarnation': {
           ..._incarnation('pi_local', g: 4, activity: 'ended', turn: 2, ctx: 9000),
         },

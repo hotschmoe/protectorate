@@ -82,11 +82,12 @@ class _AppState extends State<App> {
   }
 
   /// Trades a pairing code for this device's token and connects with it.
-  Future<String> _pair(String code) async {
-    if (_url.isEmpty) throw StateError('set the hub URL first');
-    final r = await HubApi(Uri.parse(_url)).pairDevice(PairDeviceRequest(code: code.trim()));
+  Future<String> _pair(String code, {String? url}) async {
+    final target = (url ?? _url).trim();
+    if (target.isEmpty) throw StateError('set the hub URL first');
+    final r = await HubApi(Uri.parse(target)).pairDevice(PairDeviceRequest(code: code.trim()));
     saveSetting('device_id', r.device.id);
-    _connect(_url, r.token);
+    _connect(target, r.token);
     return r.device.name;
   }
 
