@@ -40,4 +40,4 @@ Bundled fonts under `app/assets/fonts/` (SIL OFL 1.1):
 ## Removed vs. Legacy Architecture
 
 - **Removed**: Go, `headscale`, `tailscale.com/tsnet`, `curl`, `gzip`, Cargo/Rust workspace crates (replaced by pure-Zig `Noise_IK_25519_ChaChaPoly_BLAKE2s`, `std.http.Client`, `std.compress.flate`, `std.tar.extract`, `vopr` DST).
-- **Preserved**: Legacy `crates/` and `go/` directories remain intact in the repository for reference and post-mortem comparison; neither is required to build or run the Zig binaries.
+- **Preserved**: the legacy `go/` directory remains for reference; it is not required to build or run the Zig binaries. The Rust `crates/` workspace was removed on 2026-11-24 (see git history).
