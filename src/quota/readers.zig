@@ -48,6 +48,12 @@ pub fn read_all(
         .fetched_at_ms = now_ms,
         .note = "not configured",
     };
+    var agy_q: select.Quota = .{
+        .subscription = .antigravity,
+        .reading = .unknown,
+        .fetched_at_ms = now_ms,
+        .note = "not configured",
+    };
     var local_q: select.Quota = .{
         .subscription = .local,
         .reading = .unknown,
@@ -62,6 +68,30 @@ pub fn read_all(
     var first_local_key: []const u8 = "";
 
     if (user_home) |home| {
+        if (try read_json_rel(arena, io, home, ".gemini/antigravity-cli/antigravity-oauth-token")) |v| {
+            if (json_util.value_object(v, "token")) |oauth| {
+                if (json_util.value_nonempty_str(oauth, "access_token")) |tok| {
+                    agy_q.reading = .@"error";
+                    const expiry = if (json_util.value_str(oauth, "expiry")) |s| parse_rfc3339_ms(s) else null;
+                    if (expiry) |exp| {
+                        if (now_ms >= exp) {
+                            if (json_util.value_nonempty_str(oauth, "refresh_token") != null) {
+                                agy_q.reading = .stale;
+                                agy_q.note = "agy token expired; refreshes when agy next runs";
+                            } else {
+                                agy_q.note = "agy login expired";
+                            }
+                        } else {
+                            agy_q.reading = .ok;
+                            agy_q.note = "credentials present";
+                            if (poll_remote) poll_agy(arena, io, tok, &agy_q, now_ms);
+                        }
+                    } else {
+                        agy_q.note = "agy token expiry missing or invalid";
+                    }
+                }
+            }
+        }
         if (try read_json_rel(arena, io, home, ".claude/.credentials.json")) |v| {
             if (json_util.value_get(v, "claudeAiOauth")) |oauth| {
                 if (json_util.value_nonempty_str(oauth, "accessToken")) |tok| {
@@ -170,6 +200,7 @@ pub fn read_all(
     try quotas.append(arena, claude_q);
     try quotas.append(arena, codex_q);
     try quotas.append(arena, grok_q);
+    try quotas.append(arena, agy_q);
     try quotas.append(arena, local_q);
 
     return .{
@@ -179,6 +210,138 @@ pub fn read_all(
         .codex_present = codex_ok,
         .grok_present = grok_ok,
     };
+}
+
+fn agy_timeout(io: std.Io, milliseconds: i64) void {
+    io.sleep(.fromMilliseconds(milliseconds), .awake) catch {};
+}
+
+fn agy_open(client: *std.http.Client, uri: std.Uri, auth: []const u8) std.http.Client.RequestError!std.http.Client.Request {
+    return client.request(.POST, uri, .{
+        .redirect_behavior = .unhandled,
+        .headers = .{
+            .user_agent = .{ .override = "antigravity" },
+            .authorization = .{ .override = auth },
+            .content_type = .{ .override = "application/json" },
+            .accept_encoding = .{ .override = "identity" },
+        },
+    });
+}
+
+fn agy_exchange(req: *std.http.Client.Request, body: []u8, status: *std.http.Status) !usize {
+    req.transfer_encoding = .{ .content_length = 2 };
+    var request_body = try req.sendBodyUnflushed(&.{});
+    try request_body.writer.writeAll("{}");
+    try request_body.end();
+    try req.connection.?.flush();
+    var response = try req.receiveHead(&.{});
+    status.* = response.head.status;
+    if (status.* != .ok) return 0;
+    var transfer_buffer: [4096]u8 = undefined;
+    const reader = response.reader(&transfer_buffer);
+    var writer: std.Io.Writer = .fixed(body);
+    _ = try reader.streamRemaining(&writer);
+    return writer.end;
+}
+
+fn agy_request(arena: std.mem.Allocator, io: std.Io, token: []const u8, operation: []const u8) !std.json.Value {
+    for (token) |c| {
+        if (c < 0x21 or c > 0x7e or c == '"' or c == '\\') return error.InvalidToken;
+    }
+    const url = try std.fmt.allocPrint(arena, "https://daily-cloudcode-pa.googleapis.com/v1internal:{s}", .{operation});
+    const auth = try std.fmt.allocPrint(arena, "Bearer {s}", .{token});
+    const uri = try std.Uri.parse(url);
+    var client: std.http.Client = .{ .allocator = arena, .io = io };
+    defer client.deinit();
+    const start = std.Io.Clock.awake.now(io).toMilliseconds();
+    const OpenResult = union(enum) { request: std.http.Client.RequestError!std.http.Client.Request, timeout: void };
+    const cancel_open = struct {
+        fn run(s: *std.Io.Select(OpenResult)) void {
+            while (s.cancel()) |pending| switch (pending) {
+                .request => |result| {
+                    if (result) |value| {
+                        var orphan = value;
+                        orphan.deinit();
+                    } else |_| {}
+                },
+                .timeout => {},
+            };
+        }
+    }.run;
+    var open_buffer: [2]OpenResult = undefined;
+    var open_select: std.Io.Select(OpenResult) = .init(io, &open_buffer);
+    try open_select.concurrent(.request, agy_open, .{ &client, uri, auth });
+    defer cancel_open(&open_select);
+    open_select.async(.timeout, agy_timeout, .{ io, 5_000 });
+    const opened = try open_select.await();
+    cancel_open(&open_select);
+    var req = switch (opened) {
+        .request => |result| try result,
+        .timeout => return error.ConnectTimeout,
+    };
+    req.connection.?.closing = true;
+    defer req.deinit();
+    const remaining = 10_000 - (std.Io.Clock.awake.now(io).toMilliseconds() - start);
+    if (remaining <= 0) return error.RequestTimeout;
+    const body = try arena.alloc(u8, 2 << 20);
+    var status: std.http.Status = undefined;
+    const ExchangeResult = union(enum) { response: anyerror!usize, timeout: void };
+    var exchange_buffer: [2]ExchangeResult = undefined;
+    var exchange_select: std.Io.Select(ExchangeResult) = .init(io, &exchange_buffer);
+    try exchange_select.concurrent(.response, agy_exchange, .{ &req, body, &status });
+    defer exchange_select.cancelDiscard();
+    exchange_select.async(.timeout, agy_timeout, .{ io, remaining });
+    const exchanged = try exchange_select.await();
+    exchange_select.cancelDiscard();
+    const len = switch (exchanged) {
+        .response => |result| try result,
+        .timeout => return error.RequestTimeout,
+    };
+    if (status == .unauthorized) return error.Unauthorized;
+    if (status != .ok) return error.HttpFailure;
+    return try std.json.parseFromSliceLeaky(std.json.Value, arena, body[0..len], .{});
+}
+
+fn poll_agy(arena: std.mem.Allocator, io: std.Io, token: []const u8, out_q: *select.Quota, now_ms: i64) void {
+    out_q.reading = .@"error";
+    out_q.note = "agy model quota request failed";
+    const models_response = agy_request(arena, io, token, "fetchAvailableModels") catch |err| {
+        out_q.note = if (err == error.Unauthorized) "agy login expired" else std.fmt.allocPrint(arena, "agy model quota: {s}", .{@errorName(err)}) catch "agy model quota request failed";
+        return;
+    };
+    const models = json_util.value_object(models_response, "models") orelse {
+        out_q.note = "agy response missing models";
+        return;
+    };
+    var wins: std.ArrayList(select.Window) = .empty;
+    var it = models.object.iterator();
+    while (it.next()) |entry| {
+        const model = entry.value_ptr.*;
+        const quota = json_util.value_object(model, "quotaInfo") orelse continue;
+        const remaining = json_util.value_f64(quota, "remainingFraction") orelse continue;
+        if (!std.math.isFinite(remaining) or remaining < 0 or remaining > 1) continue;
+        const reset = if (json_util.value_str(quota, "resetTime")) |s| parse_rfc3339_ms(s) else null;
+        const label = std.fmt.allocPrint(arena, "model {s}", .{entry.key_ptr.*}) catch return;
+        wins.append(arena, .{ .label = label, .used_pct = (1.0 - remaining) * 100.0, .resets_at_ms = reset }) catch return;
+    }
+    if (wins.items.len == 0) {
+        out_q.note = "agy response has no model quotas";
+        return;
+    }
+    std.mem.sort(select.Window, wins.items, {}, struct {
+        fn less(_: void, a: select.Window, b: select.Window) bool {
+            if (a.used_pct.? != b.used_pct.?) return a.used_pct.? > b.used_pct.?;
+            return std.mem.lessThan(u8, a.label, b.label);
+        }
+    }.less);
+    out_q.windows = wins.items;
+    out_q.fetched_at_ms = now_ms;
+    out_q.reading = .ok;
+    out_q.note = "agy tier request failed";
+    const account = agy_request(arena, io, token, "loadCodeAssist") catch return;
+    const tier = json_util.value_object(account, "paidTier") orelse json_util.value_object(account, "currentTier") orelse return;
+    out_q.plan = json_util.value_nonempty_str(tier, "name") orelse json_util.value_nonempty_str(tier, "id") orelse return;
+    out_q.note = "";
 }
 
 fn read_json_rel(arena: std.mem.Allocator, io: std.Io, home: []const u8, rel: []const u8) !?std.json.Value {

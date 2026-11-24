@@ -616,6 +616,7 @@ enum Subscription {
   claude('claude'),
   codex('codex'),
   grok('grok'),
+  antigravity('antigravity'),
   local('local'),
   api('api'),
   unknown('unknown');

@@ -1,4 +1,0 @@
-POST /echo HTTP/1.1
-Host: x
-Transfer-Encoding: gzip, chunked
-

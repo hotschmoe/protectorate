@@ -81,6 +81,11 @@ const DriverHandle = struct {
     sess: *d_session.Session,
     guard: s_exec.ProcessGuard = .{},
     turn_id: u64 = 0,
+    unknown_tool_calls: u64 = 0,
+    harness: model.Harness,
+    interrupt_exit: std.atomic.Value(bool) = .init(false),
+    exit_pending: std.atomic.Value(bool) = .init(false),
+    exit_code: ?u8 = null,
 };
 
 pub const RuntimeOptions = struct {
@@ -140,6 +145,25 @@ pub const Runtime = struct {
     quota_thread: ?std.Thread = null,
     history_thread: ?std.Thread = null,
     shutdown_requested: std.atomic.Value(bool) = .init(false),
+    workers_mu: std.Io.Mutex = .init,
+    workers_cond: std.Io.Condition = .init,
+    active_workers: usize = 0,
+
+    fn enter_worker(self: *Runtime) bool {
+        self.workers_mu.lockUncancelable(self.io);
+        defer self.workers_mu.unlock(self.io);
+        if (self.stopping.load(.acquire)) return false;
+        self.active_workers += 1;
+        return true;
+    }
+
+    fn exit_worker(self: *Runtime) void {
+        self.workers_mu.lockUncancelable(self.io);
+        tiger.assert(self.active_workers > 0);
+        self.active_workers -= 1;
+        if (self.active_workers == 0) self.workers_cond.broadcast(self.io);
+        self.workers_mu.unlock(self.io);
+    }
 
     pub fn open(
         gpa: std.mem.Allocator,
@@ -278,6 +302,11 @@ pub const Runtime = struct {
         if (self.tick_thread) |t| t.join();
         if (self.quota_thread) |t| t.join();
         if (self.history_thread) |t| t.join();
+        self.fleet_srv.shutdown();
+        self.workers_mu.lockUncancelable(self.io);
+        while (self.active_workers > 0) self.workers_cond.waitUncancelable(self.io, &self.workers_mu);
+        self.workers_mu.unlock(self.io);
+        self.fleet_srv.stop_and_deinit();
 
         var handles: std.ArrayList(*DriverHandle) = .empty;
         {
@@ -291,7 +320,7 @@ pub const Runtime = struct {
             self.meta_mu.unlock(self.io);
         }
         for (handles.items) |dh| {
-            dh.guard.terminate();
+            _ = dh.guard.fence_and_confirm(self.io, 500);
             dh.sess.kill_and_destroy();
             dh.guard.deinit();
             self.gpa.free(dh.sleeve_id);
@@ -299,7 +328,6 @@ pub const Runtime = struct {
         }
         handles.deinit(self.gpa);
 
-        self.fleet_srv.stop_and_deinit();
         self.stream_hub.deinit();
         self.history.deinit();
         self.transcripts.deinit();
@@ -466,9 +494,8 @@ pub const Runtime = struct {
         var pub_qs: []schema.Quota = &.{};
 
         self.meta_mu.lockUncancelable(self.io);
-        self.cached_quotas_arena.deinit();
-        self.cached_quotas_arena = arena_st;
-        const a = self.cached_quotas_arena.allocator();
+        const merge_now = std.Io.Clock.real.now(self.io).toMilliseconds();
+        const a = arena_st.allocator();
         const out: []schema.Quota = a.alloc(schema.Quota, rep.quotas.len) catch &.{};
         for (rep.quotas, 0..) |q, i| {
             const wins: []schema.QuotaWindow = a.alloc(schema.QuotaWindow, q.windows.len) catch &.{};
@@ -494,6 +521,7 @@ pub const Runtime = struct {
                     .claude => .claude,
                     .codex => .codex,
                     .grok => .grok,
+                    .antigravity => .antigravity,
                     .local => .local,
                     .api => .api,
                     .unknown => .unknown,
@@ -510,7 +538,31 @@ pub const Runtime = struct {
                 .credits = cr_opt,
                 .note = q.note,
             };
+            if (out[i].reading == .stale and out[i].windows.len == 0) {
+                for (self.cached_quotas) |old| {
+                    if (old.subscription != out[i].subscription or old.windows.len == 0) continue;
+                    if (old.fetched_at_ms.ms <= 0 or (merge_now -| old.fetched_at_ms.ms) >= 24 * 60 * 60 * 1000) break;
+                    const copy = clone_quotas_slice(a, &.{old}) catch break;
+                    const retained = a.alloc(schema.QuotaWindow, copy[0].windows.len) catch break;
+                    var count: usize = 0;
+                    for (copy[0].windows) |w| {
+                        if (w.resets_at_ms) |reset| {
+                            if (reset.ms <= merge_now) continue;
+                        }
+                        retained[count] = w;
+                        count += 1;
+                    }
+                    if (count == 0) break;
+                    out[i].windows = retained[0..count];
+                    out[i].plan = copy[0].plan;
+                    out[i].credits = copy[0].credits;
+                    out[i].fetched_at_ms = copy[0].fetched_at_ms;
+                    break;
+                }
+            }
         }
+        self.cached_quotas_arena.deinit();
+        self.cached_quotas_arena = arena_st;
         self.cached_quotas = out;
         if (poll_remote) {
             self.quotas_remote_polled.store(true, .release);
@@ -630,12 +682,20 @@ pub const Runtime = struct {
             },
             .interrupt_incarnation => |ii| {
                 if (self.get_driver(ii.sleeve_id)) |dh| {
-                    if (dh.g == ii.g) dh.sess.interrupt() catch {};
+                    if (dh.g == ii.g) {
+                        if (dh.harness == .antigravity) dh.interrupt_exit.store(true, .release);
+                        dh.sess.interrupt() catch {};
+                        if (dh.harness == .antigravity) _ = dh.guard.fence_and_confirm(self.io, 500);
+                    }
                 }
             },
             .kill_incarnation => |ki| {
-                self.stop_driver_for(ki.sleeve_id);
-                self.commit(.{ .stopped = .{ .sleeve_id = ki.sleeve_id } }) catch {};
+                self.stop_driver_generation(ki.sleeve_id, ki.g);
+                if (ki.recover) {
+                    self.commit(.{ .exited = .{ .sleeve_id = ki.sleeve_id, .g = ki.g, .cause = .killed, .requested = false } }) catch {};
+                } else {
+                    self.commit(.{ .stopped = .{ .sleeve_id = ki.sleeve_id } }) catch {};
+                }
             },
             .respond_approval => |ra| {
                 if (self.get_driver(ra.sleeve_id)) |dh| {
@@ -663,6 +723,14 @@ pub const Runtime = struct {
             },
             .emit_notice => |en| {
                 self.record_hub_event(.guardrail, en.code, en.sleeve_id, en.text, .warn);
+                if (en.sleeve_id) |sid| {
+                    if (self.get_driver(sid)) |dh| {
+                        const ce = self.transcripts.append(sid, dh.g, dh.turn_id, std.Io.Clock.real.now(self.io).toMilliseconds(), .{
+                            .notice = .{ .level = .warn, .code = en.code, .text = en.text },
+                        }) catch null;
+                        if (ce) |c| self.stream_hub.publish_raw(.{ .entry = .{ .seq = 0, .sleeve_id = sid, .entry = c } });
+                    }
+                }
             },
             .notify_parent => |np| {
                 var deliver = false;
@@ -742,6 +810,8 @@ pub const Runtime = struct {
         var arena_st = std.heap.ArenaAllocator.init(self.gpa);
         defer arena_st.deinit();
         const a = arena_st.allocator();
+        const process_tag = try std.fmt.allocPrint(a, "sleeve-{d}-{s}-{d}", .{ self.started_at_ms, li.sleeve_id, li.g });
+        self.stop_driver_for(li.sleeve_id);
 
         var sl_path: []const u8 = "";
         var sl_layout: model.Layout = .shared;
@@ -779,6 +849,7 @@ pub const Runtime = struct {
         try child_env.put("PROTECTORATE_SLEEVE", li.sleeve_id);
         try child_env.put("PROTECTORATE_WORKSPACE", sl_path);
         try child_env.put("PROTECTORATE_ENVOY", "envoy");
+        try child_env.put("PROTECTORATE_JOB_ID", process_tag);
         try child_env.put("PROTECTORATE_URL", hub_url);
         if (is_envoy) {
             try child_env.put("PROTECTORATE_TOKEN", self.hub_home.envoy_token);
@@ -853,6 +924,7 @@ pub const Runtime = struct {
                         .{ .key = "PROTECTORATE_WORKSPACE", .value = sl_path },
                         .{ .key = "PROTECTORATE_ENVOY", .value = "envoy" },
                         .{ .key = "PROTECTORATE_URL", .value = hub_url },
+                        .{ .key = "PROTECTORATE_JOB_ID", .value = process_tag },
                     });
                     if (is_envoy) {
                         try env_set.append(a, .{ .key = "PROTECTORATE_TOKEN", .value = self.hub_home.envoy_token });
@@ -881,8 +953,9 @@ pub const Runtime = struct {
             .g = li.g,
             .sleeve_id = sid_dup,
             .rt = self,
+            .harness = li.harness,
             .sess = undefined,
-            .guard = s_exec.ProcessGuard.init(null),
+            .guard = s_exec.ProcessGuard.init_fenced(self.gpa, self.io, process_tag, null),
         };
         errdefer dh.guard.deinit();
 
@@ -898,6 +971,7 @@ pub const Runtime = struct {
             .model = mod_opt,
             .provider = prov_opt,
             .effort = li.effort,
+            .resume_id = li.resume_id,
             .session_id = sess_id,
             .sandbox_mode = guard_mode,
             .guard_exe = guard_exe,
@@ -907,14 +981,22 @@ pub const Runtime = struct {
             .on_exit = on_driver_exit,
             .ctx = dh,
         });
-        dh.guard.attach(dh.sess.child_id());
+        errdefer {
+            _ = dh.guard.fence_and_confirm(self.io, 500);
+            dh.sess.kill_and_destroy();
+        }
+        dh.guard.attach_with_io(self.io, dh.sess.child_id());
 
-        self.stop_driver_for(li.sleeve_id);
         {
             self.meta_mu.lockUncancelable(self.io);
             defer self.meta_mu.unlock(self.io);
             const kdup = try self.gpa.dupe(u8, li.sleeve_id);
             try self.sessions.put(self.gpa, kdup, dh);
+        }
+        errdefer {
+            self.meta_mu.lockUncancelable(self.io);
+            if (self.sessions.fetchRemove(li.sleeve_id)) |kv| self.gpa.free(kv.key);
+            self.meta_mu.unlock(self.io);
         }
 
         try self.commit(.{ .launched = .{
@@ -936,17 +1018,24 @@ pub const Runtime = struct {
     }
 
     fn stop_driver_for(self: *Runtime, sleeve_id: []const u8) void {
+        self.stop_driver_generation(sleeve_id, null);
+    }
+
+    fn stop_driver_generation(self: *Runtime, sleeve_id: []const u8, expected_g: ?u64) void {
         var removed: ?*DriverHandle = null;
         {
             self.meta_mu.lockUncancelable(self.io);
-            if (self.sessions.fetchRemove(sleeve_id)) |kv| {
-                self.gpa.free(kv.key);
-                removed = kv.value;
+            const matches = if (self.sessions.get(sleeve_id)) |dh| expected_g == null or dh.g == expected_g.? else false;
+            if (matches) {
+                if (self.sessions.fetchRemove(sleeve_id)) |kv| {
+                    self.gpa.free(kv.key);
+                    removed = kv.value;
+                }
             }
             self.meta_mu.unlock(self.io);
         }
         if (removed) |dh| {
-            dh.guard.terminate();
+            _ = dh.guard.fence_and_confirm(self.io, 500);
             dh.sess.kill_and_destroy();
             dh.guard.deinit();
             self.gpa.free(dh.sleeve_id);
@@ -1016,10 +1105,14 @@ pub const Runtime = struct {
                 if (ce) |c| self.stream_hub.publish_raw(.{ .entry = .{ .seq = 0, .sleeve_id = dh.sleeve_id, .entry = c } });
             },
             .tool_call => |tc| {
+                var input_arena = std.heap.ArenaAllocator.init(self.gpa);
+                defer input_arena.deinit();
+                dh.unknown_tool_calls += 1;
+                const unknown_sig = std.fmt.allocPrint(input_arena.allocator(), "unknown:{d}", .{dh.unknown_tool_calls}) catch return;
                 self.commit(.{ .tool_activity = .{
                     .sleeve_id = dh.sleeve_id,
                     .g = dh.g,
-                    .tool_sig = tc.name,
+                    .tool_sig = tc.signature orelse unknown_sig,
                 } }) catch {};
                 const ce = self.transcripts.append(dh.sleeve_id, dh.g, dh.turn_id, ev.time_ms, .{
                     .tool_call = .{
@@ -1027,6 +1120,8 @@ pub const Runtime = struct {
                         .tool = map_tool_kind(tc.tool),
                         .name = tc.name,
                         .summary = tc.summary,
+                        .input = .{ .val = if (tc.input_json) |raw| (std.json.parseFromSliceLeaky(std.json.Value, input_arena.allocator(), raw, .{}) catch .null) else .null },
+                        .truncated = tc.truncated,
                     },
                 }) catch null;
                 if (ce) |c| self.stream_hub.publish_raw(.{ .entry = .{ .seq = 0, .sleeve_id = dh.sleeve_id, .entry = c } });
@@ -1049,6 +1144,7 @@ pub const Runtime = struct {
                 if (ce) |c| self.stream_hub.publish_raw(.{ .entry = .{ .seq = 0, .sleeve_id = dh.sleeve_id, .entry = c } });
             },
             .turn_settled => |ts| {
+                if (dh.interrupt_exit.load(.acquire)) return;
                 const end_m: model.TurnEnd = switch (ts.stop) {
                     .end_turn => .end_turn,
                     .cancelled => .cancelled,
@@ -1136,24 +1232,67 @@ pub const Runtime = struct {
         const dh: *DriverHandle = @ptrCast(@alignCast(ctx orelse return));
         const self = dh.rt;
         const at_ms = std.Io.Clock.real.now(self.io).toMilliseconds();
+        const requested = dh.interrupt_exit.load(.acquire);
+        if (requested) {
+            self.commit(.{ .turn_settled = .{
+                .sleeve_id = dh.sleeve_id,
+                .g = dh.g,
+                .turn_end = .cancelled,
+                .context_tokens = 0,
+                .context_window = 0,
+            } }) catch {};
+            const settled = self.transcripts.append(dh.sleeve_id, dh.g, dh.turn_id, at_ms, .{
+                .turn_settled = .{ .stop = .cancelled, .native_stop = "interrupted" },
+            }) catch null;
+            if (settled) |c| self.stream_hub.publish_raw(.{ .entry = .{ .seq = 0, .sleeve_id = dh.sleeve_id, .entry = c } });
+        }
         const ce = self.transcripts.append(dh.sleeve_id, dh.g, dh.turn_id, at_ms, .{
             .exited = .{
                 .code = if (exit_code) |c| @intCast(c) else null,
+                .requested = requested,
                 .stderr_tail = stderr_tail,
             },
         }) catch null;
         if (ce) |c| self.stream_hub.publish_raw(.{ .entry = .{ .seq = 0, .sleeve_id = dh.sleeve_id, .entry = c } });
 
-        const cause: model.ExitCause = if (exit_code == 0) .clean else .crash;
-        self.commit(.{ .exited = .{
-            .sleeve_id = dh.sleeve_id,
-            .g = g,
-            .cause = cause,
-            .requested = self.stopping.load(.acquire),
-        } }) catch {};
+        _ = g;
+        dh.exit_code = exit_code;
+        dh.exit_pending.store(true, .release);
+    }
+
+    fn reap_driver_exits(self: *Runtime) void {
+        while (true) {
+            self.meta_mu.lockUncancelable(self.io);
+            var it = self.sessions.iterator();
+            var found: ?*DriverHandle = null;
+            while (it.next()) |entry| {
+                if (entry.value_ptr.*.exit_pending.load(.acquire)) {
+                    found = entry.value_ptr.*;
+                    break;
+                }
+            }
+            const dh = found orelse {
+                self.meta_mu.unlock(self.io);
+                return;
+            };
+            const sid = self.gpa.dupe(u8, dh.sleeve_id) catch {
+                self.meta_mu.unlock(self.io);
+                return;
+            };
+            const g = dh.g;
+            const requested = dh.interrupt_exit.load(.acquire);
+            const cause: model.ExitCause = if (dh.exit_code == 0) .clean else .crash;
+            self.meta_mu.unlock(self.io);
+            self.stop_driver_generation(sid, g);
+            self.commit(.{ .exited = .{ .sleeve_id = sid, .g = g, .cause = cause, .requested = requested } }) catch {};
+            self.gpa.free(sid);
+        }
     }
 
     fn dispatch_job_async(self: *Runtime, job_id: []const u8, node_id: []const u8) void {
+        if (!self.enter_worker()) return;
+        var spawned = false;
+        defer if (!spawned) self.exit_worker();
         const Arg = struct { rt: *Runtime, job_id: []const u8, node_id: []const u8 };
         const arg = self.gpa.create(Arg) catch return;
         arg.* = .{
@@ -1171,9 +1310,11 @@ pub const Runtime = struct {
         const t = std.Thread.spawn(.{}, struct {
             fn run(a_ptr: *Arg) void {
                 defer {
-                    a_ptr.rt.gpa.free(a_ptr.job_id);
-                    a_ptr.rt.gpa.free(a_ptr.node_id);
-                    a_ptr.rt.gpa.destroy(a_ptr);
+                    const rt = a_ptr.rt;
+                    rt.gpa.free(a_ptr.job_id);
+                    rt.gpa.free(a_ptr.node_id);
+                    rt.gpa.destroy(a_ptr);
+                    rt.exit_worker();
                 }
                 var arena_st = std.heap.ArenaAllocator.init(a_ptr.rt.gpa);
                 defer arena_st.deinit();
@@ -1235,6 +1376,7 @@ pub const Runtime = struct {
             self.gpa.destroy(arg);
             return;
         };
+        spawned = true;
         t.detach();
     }
 
@@ -1245,6 +1387,9 @@ pub const Runtime = struct {
     }
 
     fn cancel_job_async(self: *Runtime, job_id: []const u8, node_id: []const u8) void {
+        if (!self.enter_worker()) return;
+        var spawned = false;
+        defer if (!spawned) self.exit_worker();
         const Arg = struct { rt: *Runtime, job_id: []const u8, node_id: []const u8 };
         const arg = self.gpa.create(Arg) catch return;
         arg.* = .{
@@ -1262,9 +1407,11 @@ pub const Runtime = struct {
         const t = std.Thread.spawn(.{}, struct {
             fn run(a_ptr: *Arg) void {
                 defer {
-                    a_ptr.rt.gpa.free(a_ptr.job_id);
-                    a_ptr.rt.gpa.free(a_ptr.node_id);
-                    a_ptr.rt.gpa.destroy(a_ptr);
+                    const rt = a_ptr.rt;
+                    rt.gpa.free(a_ptr.job_id);
+                    rt.gpa.free(a_ptr.node_id);
+                    rt.gpa.destroy(a_ptr);
+                    rt.exit_worker();
                 }
                 var arena_st = std.heap.ArenaAllocator.init(a_ptr.rt.gpa);
                 defer arena_st.deinit();
@@ -1279,6 +1426,7 @@ pub const Runtime = struct {
             self.gpa.destroy(arg);
             return;
         };
+        spawned = true;
         t.detach();
     }
 
@@ -1382,6 +1530,7 @@ pub const Runtime = struct {
             self.io.sleep(.fromMilliseconds(1_000), .awake) catch break;
             if (self.stopping.load(.acquire)) break;
             ticks += 1;
+            self.reap_driver_exits();
             self.poll_inflight_jobs();
             if (ticks % 5 == 0) {
                 self.fleet_srv.sweep_stale(20_000);
@@ -2244,6 +2393,9 @@ pub const Runtime = struct {
     }
 
     fn send_node_update_async(self: *Runtime, rollout_id: []const u8, node_id: []const u8, target_ver: []const u8) void {
+        if (!self.enter_worker()) return;
+        var spawned = false;
+        defer if (!spawned) self.exit_worker();
         const Arg = struct { rt: *Runtime, rollout_id: []const u8, node_id: []const u8, target_ver: []const u8 };
         const arg = self.gpa.create(Arg) catch return;
         arg.* = .{
@@ -2267,10 +2419,12 @@ pub const Runtime = struct {
         const t = std.Thread.spawn(.{}, struct {
             fn run(a_ptr: *Arg) void {
                 defer {
-                    a_ptr.rt.gpa.free(a_ptr.rollout_id);
-                    a_ptr.rt.gpa.free(a_ptr.node_id);
-                    a_ptr.rt.gpa.free(a_ptr.target_ver);
-                    a_ptr.rt.gpa.destroy(a_ptr);
+                    const rt = a_ptr.rt;
+                    rt.gpa.free(a_ptr.rollout_id);
+                    rt.gpa.free(a_ptr.node_id);
+                    rt.gpa.free(a_ptr.target_ver);
+                    rt.gpa.destroy(a_ptr);
+                    rt.exit_worker();
                 }
                 var arena_st = std.heap.ArenaAllocator.init(a_ptr.rt.gpa);
                 defer arena_st.deinit();
@@ -2318,6 +2472,7 @@ pub const Runtime = struct {
             self.gpa.destroy(arg);
             return;
         };
+        spawned = true;
         t.detach();
     }
 
@@ -2540,7 +2695,8 @@ fn sleeve_to_schema(arena: std.mem.Allocator, sl: state.SleeveState) !schema.Sle
             .codex => .codex,
             .grok => .grok,
             .pi_local => .local,
-            .pi_vendor, .antigravity => .api,
+            .pi_vendor => .api,
+            .antigravity => .antigravity,
         },
         .provider = try arena.dupe(u8, inc.provider),
         .model = try arena.dupe(u8, inc.model_name),

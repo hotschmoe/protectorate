@@ -647,6 +647,7 @@ String subscriptionLetter(Subscription s) => switch (s) {
   Subscription.claude => 'C',
   Subscription.codex => 'X',
   Subscription.grok => 'G',
+  Subscription.antigravity => 'V',
   Subscription.local => 'L',
   Subscription.api => 'A',
   Subscription.unknown => '?',

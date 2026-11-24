@@ -458,23 +458,33 @@ pub fn print_quota_list(arena: std.mem.Allocator, io: std.Io, body: []const u8) 
         try print_out(io, "no quotas\n", .{});
         return;
     }
-    try print_out(io, "{s:<12} {s:<10} {s:<14} {s}\n", .{ "SUB", "READING", "PLAN", "DETAIL" });
+    try print_out(io, "{s:<13} {s}\n", .{ "SUB", "READING" });
     for (ql.quotas) |q| {
-        try print_out(io, "{s:<12} {s:<10} {s:<14}", .{
+        try print_out(io, "{s:<13} {s}\n  {s}\n", .{
             @tagName(q.subscription),
             @tagName(q.reading),
             if (q.plan.len > 0) q.plan else "-",
         });
-        for (q.windows) |w| {
+        const visible = if (q.subscription == .antigravity) @min(q.windows.len, 6) else q.windows.len;
+        for (q.windows[0..visible]) |w| {
             if (w.used_pct) |pct| {
-                try print_out(io, "{s}={d:.0}% ", .{ w.label, pct });
+                const label = if (std.mem.startsWith(u8, w.label, "model ")) w.label[6..] else w.label;
+                try print_out(io, "  {s}\n    {d:.0}% used\n", .{ label, pct });
+                if (w.resets_at_ms) |reset| {
+                    const now = std.Io.Clock.real.now(io).toMilliseconds();
+                    const minutes = @divFloor(@max(@as(i64, 0), reset.ms -| now), 60_000);
+                    try print_out(io, "    reset in {d}h {d}m\n", .{ @divFloor(minutes, 60), @mod(minutes, 60) });
+                }
             }
         }
-        if (q.credits) |cr| {
-            if (cr.balance) |bal| try print_out(io, "balance={d:.2} ", .{bal});
+        if (q.windows.len > visible) {
+            const hidden = q.windows.len - visible;
+            try print_out(io, "  +{d} more model{s}\n", .{ hidden, if (hidden == 1) "" else "s" });
         }
-        if (q.note.len > 0) try print_out(io, "{s}", .{q.note});
-        try print_out(io, "\n", .{});
+        if (q.credits) |cr| {
+            if (cr.balance) |bal| try print_out(io, "  balance={d:.2}\n", .{bal});
+        }
+        if (q.note.len > 0) try print_out(io, "  {s}\n", .{q.note});
     }
 }
 

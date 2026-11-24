@@ -15,6 +15,8 @@ Every source file under `src/` belongs to one of six monotonic dependency layers
 
 No `test "..."` unit test blocks exist anywhere under `src/` (`pt-levels` rejects them). Reliability is verified through `vopr` multi-hundred-seed DST simulation (`zig build dst`) and real-binary E2E suites (`scripts/zig-e2e.sh`).
 
+[Quota readers and selection](quota.md) describes the Antigravity quota source and its assumptions.
+
 ## Key Build & Run Commands
 
 ```sh

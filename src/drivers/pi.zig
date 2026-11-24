@@ -272,10 +272,7 @@ pub const Pi = struct {
                 return;
             }
         }
-        const turn = self.turn orelse {
-            try out.emit(.{ .turn_settled = .{ .stop = .other, .native_stop = "settled" } });
-            return;
-        };
+        const turn = self.turn orelse return;
         self.turn = null;
         if (!turn.started) {
             try out.emit(.{ .turn_started = .{ .request_id = turn.request_id, .native_turn_id = turn.native_id } });

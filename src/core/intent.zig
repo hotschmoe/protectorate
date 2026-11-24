@@ -24,6 +24,7 @@ pub const Intent = union(enum) {
         model_name: []const u8,
         provider: []const u8,
         effort: ?[]const u8,
+        resume_id: ?[]const u8 = null,
     },
     deliver_prompt: struct {
         sleeve_id: []const u8,
@@ -39,6 +40,7 @@ pub const Intent = union(enum) {
     kill_incarnation: struct {
         sleeve_id: []const u8,
         g: model.Gen,
+        recover: bool = false,
     },
     compact_incarnation: struct {
         sleeve_id: []const u8,

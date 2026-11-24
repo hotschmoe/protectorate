@@ -159,6 +159,7 @@ pub fn apply(
                 if (sl.inc) |*inc| {
                     if (inc.activity == .working or inc.activity == .delivering) {
                         inc.activity = .interrupting;
+                        inc.stop_requested_ms = now;
                         try intents.append(gpa, .{ .interrupt_incarnation = .{ .sleeve_id = sl.id, .g = inc.g } });
                     }
                 }
@@ -200,7 +201,7 @@ pub fn apply(
             const sl = st.sleeves.getPtr(e.sleeve_id) orelse return error.NotFound;
             const inc = &(sl.inc orelse return);
             if (inc.g != e.g) return;
-            inc.activity = .working;
+            if (inc.activity != .interrupting) inc.activity = .working;
             inc.turn += 1;
             inc.turn_started_ms = now;
             inc.last_event_ms = now;
@@ -227,8 +228,9 @@ pub fn apply(
                 inc.last_tool_sig = try st.dupe_str(e.tool_sig);
                 inc.tool_repeat_count = 1;
             }
-            if (inc.tool_repeat_count >= model.loop_repeats) {
+            if (inc.tool_repeat_count >= model.loop_repeats and inc.activity != .interrupting) {
                 inc.activity = .interrupting;
+                inc.stop_requested_ms = now;
                 try intents.append(gpa, .{ .emit_notice = .{
                     .sleeve_id = sl.id,
                     .code = "g6_loop_detection",
@@ -245,13 +247,20 @@ pub fn apply(
             inc.last_event_ms = now;
         },
         .interrupted => |e| {
-            _ = e;
+            const sl = st.sleeves.getPtr(e.sleeve_id) orelse return error.NotFound;
+            const inc = &(sl.inc orelse return);
+            if (inc.g != e.g or (inc.activity != .working and inc.activity != .delivering)) return;
+            inc.activity = .interrupting;
+            inc.stop_requested_ms = now;
+            try intents.append(gpa, .{ .interrupt_incarnation = .{ .sleeve_id = sl.id, .g = inc.g } });
         },
         .turn_settled => |e| {
             const sl = st.sleeves.getPtr(e.sleeve_id) orelse return error.NotFound;
             const inc = &(sl.inc orelse return);
             if (inc.g != e.g) return;
-            inc.activity = .idle;
+            const exiting_after_interrupt = inc.activity == .interrupting and inc.harness == .antigravity;
+            inc.activity = if (exiting_after_interrupt) .interrupting else .idle;
+            if (sl.lifecycle == .running) inc.stop_requested_ms = null;
             inc.turn_started_ms = null;
             inc.last_event_ms = now;
             inc.context_tokens = e.context_tokens;
@@ -292,6 +301,7 @@ pub fn apply(
                     } });
                 }
             }
+            if (exiting_after_interrupt) return;
             if (sl.queued.items.len > 0) {
                 try maybe_deliver_next(gpa, st, sl, now, intents);
             } else if (sl.until_done_left > 0 and e.turn_end == .end_turn) {
@@ -398,18 +408,21 @@ pub fn apply(
                 } });
                 return;
             }
-            if (e.requested or e.cause == .clean) {
+            const interrupt_exit = e.requested and inc.harness == .antigravity;
+            if (!interrupt_exit and (e.requested or e.cause == .clean)) {
                 sl.lifecycle = .stopped;
                 return;
             }
 
-            sl.strike_win.push(now);
-            if (sl.strike_win.count_in_window(now, model.strike_window_ms) >= model.strike_limit) {
-                sl.lifecycle = .parked;
-                sl.park_reason = .strike_rate_exceeded;
-                return;
+            if (!interrupt_exit) {
+                sl.strike_win.push(now);
+                if (sl.strike_win.count_in_window(now, model.strike_window_ms) >= model.strike_limit) {
+                    sl.lifecycle = .parked;
+                    sl.park_reason = .strike_rate_exceeded;
+                    return;
+                }
             }
-            if (e.cause == .crash or e.cause == .oom or e.cause == .killed) {
+            if (interrupt_exit or e.cause == .crash or e.cause == .oom or e.cause == .killed) {
                 if (sl.resume_win.count_in_window(now, model.resume_window_ms) < model.resume_limit) {
                     sl.resume_win.push(now);
                     sl.lifecycle = .recovering;
@@ -422,6 +435,7 @@ pub fn apply(
                         .model_name = inc.model_name,
                         .provider = inc.provider,
                         .effort = inc.effort,
+                        .resume_id = inc.native_id,
                     } });
                     return;
                 }
@@ -775,8 +789,12 @@ fn handle_tick(
         if (inc.stop_requested_ms) |srm| {
             if (now - srm >= model.stop_grace_ms) {
                 inc.stop_requested_ms = null;
-                try intents.append(gpa, .{ .kill_incarnation = .{ .sleeve_id = sl.id, .g = inc.g } });
+                try intents.append(gpa, .{ .kill_incarnation = .{ .sleeve_id = sl.id, .g = inc.g, .recover = sl.lifecycle == .running and inc.activity == .interrupting } });
             }
+        }
+        if (sl.lifecycle == .running and inc.activity == .booting and now - inc.started_at_ms >= model.silent_ms) {
+            try intents.append(gpa, .{ .kill_incarnation = .{ .sleeve_id = sl.id, .g = inc.g, .recover = true } });
+            continue;
         }
         if (inc.activity == .working) {
             if (now - inc.last_event_ms >= model.silent_ms) {

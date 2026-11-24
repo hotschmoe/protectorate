@@ -786,10 +786,11 @@ fn handle_request(
             const t = std.Thread.spawn(.{}, struct {
                 fn run(a_ptr: *Arg) void {
                     defer {
-                        a_ptr.sctx.exit_worker();
-                        a_ptr.sctx.gpa.free(a_ptr.holder_id);
-                        if (a_ptr.job_id) |j| a_ptr.sctx.gpa.free(j);
-                        a_ptr.sctx.gpa.destroy(a_ptr);
+                        const ctx = a_ptr.sctx;
+                        ctx.gpa.free(a_ptr.holder_id);
+                        if (a_ptr.job_id) |j| ctx.gpa.free(j);
+                        ctx.gpa.destroy(a_ptr);
+                        ctx.exit_worker();
                     }
                     var wa = std.heap.ArenaAllocator.init(a_ptr.sctx.gpa);
                     defer wa.deinit();

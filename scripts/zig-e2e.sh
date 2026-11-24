@@ -26,10 +26,20 @@ cleanup() {
     kill -9 "$pid" >/dev/null 2>&1 || true
     wait "$pid" >/dev/null 2>&1 || true
   done
+  if [[ $rc -eq 0 ]] && ! check_crashes "$TMP_ROOT"/*.log; then
+    rc=1
+  fi
   rm -rf "$TMP_ROOT"
   exit $rc
 }
 trap cleanup EXIT
+
+check_crashes() {
+  if grep -iH -E 'Segmentation fault|panic' "$@"; then
+    echo "hub or node crash detected" >&2
+    return 1
+  fi
+}
 
 wait_for_listen() {
   local log_file="$1"
@@ -161,6 +171,7 @@ grep -q 'spawn_sleeve' <<<"$MCP_OUT"
 grep -q '"isError":false' <<<"$MCP_OUT"
 kill "$PID1" >/dev/null 2>&1 || true
 wait "$PID1" >/dev/null 2>&1 || true
+check_crashes "$LOG1"
 echo "E2E 1 PASSED"
 
 echo "=== E2E 2 & 4: Real pi + hotschmoe-dd (bwrap), Crash/Replay & History BM25 ==="
@@ -223,6 +234,7 @@ fi
 # Test SIGKILL + Journal Crash Replay
 kill -9 "$PID2" >/dev/null 2>&1 || true
 wait "$PID2" >/dev/null 2>&1 || true
+check_crashes "$LOG2"
 
 LOG2B="$TMP_ROOT/hub2b.log"
 "$PT" serve --home "$HUB2" --listen 127.0.0.1:0 --fleet-listen 127.0.0.1:0 >"$LOG2B" 2>&1 &
@@ -256,6 +268,7 @@ assert "E2E_PI_MARKER_7391" in h["hits"][0]["snippet"], h["hits"][0]
 ' <<<"$HIST_RESP"
 kill "$PID2B" >/dev/null 2>&1 || true
 wait "$PID2B" >/dev/null 2>&1 || true
+check_crashes "$LOG2B"
 echo "E2E 4 PASSED"
 fi
 
@@ -336,6 +349,29 @@ if [[ "$ONLINE" -ne 1 ]]; then
   exit 1
 fi
 
+# A second connection with the same key replaces the still-live session.
+"$PT_NODE" --home "$NODE3" authorize >/dev/null
+REPLACED=0
+for _ in $(seq 1 100); do
+  NODES_JSON="$(rpc_post "$HTTP3" "$TOK3" ListNodes '{}')"
+  if python3 -c '
+import json, sys
+nid = sys.argv[1]
+ns = json.load(sys.stdin)["nodes"]
+m = [n for n in ns if n["id"] == nid and n["online"] and n.get("inventory")]
+sys.exit(0 if m else 1)
+' "$AUTH_ID" <<<"$NODES_JSON"
+  then
+    REPLACED=1
+    break
+  fi
+  sleep 0.2
+done
+if [[ "$REPLACED" -ne 1 ]]; then
+  echo "node did not reconnect after session replacement" >&2
+  exit 1
+fi
+
 # RunJob with artifact
 JOB1_REQ="{\"target\":{\"type\":\"node\",\"node_id\":\"${AUTH_ID}\"},\"argv\":[\"sh\",\"-c\",\"echo E2E_JOB_STDOUT; printf 'artifact-payload-99' > out.bin\"],\"artifacts\":[\"out.bin\"]}"
 JOB1_RESP="$(rpc_post "$HTTP3" "$TOK3" RunJob "$JOB1_REQ")"
@@ -395,6 +431,7 @@ fi
 # Reconnect after hub restart on same fleet port
 kill "$PID3" >/dev/null 2>&1 || true
 wait "$PID3" >/dev/null 2>&1 || true
+check_crashes "$LOG3"
 
 LOG3B="$TMP_ROOT/hub3b.log"
 "$PT" serve --home "$HUB3" --listen 127.0.0.1:0 --fleet-listen "127.0.0.1:${FLEET3}" --no-sandbox >"$LOG3B" 2>&1 &
@@ -443,6 +480,7 @@ fi
 rpc_post "$HTTP3B" "$TOK3" GetJobLog "{\"job_id\":\"${JID3}\"}" | grep -q 'E2E_RECONNECTED'
 kill "$NPID3" "$PID3B" >/dev/null 2>&1 || true
 wait "$NPID3" "$PID3B" >/dev/null 2>&1 || true
+check_crashes "$LOG3B" "$TMP_ROOT/node3.log"
 echo "E2E 3 PASSED"
 
 echo "=== E2E 4b: __guard Landlock Write Containment ==="
@@ -642,6 +680,7 @@ fi
 
 kill "$NPID6" "$PID6" >/dev/null 2>&1 || true
 wait "$NPID6" "$PID6" >/dev/null 2>&1 || true
+check_crashes "$LOG6" "$TMP_ROOT/node6.log"
 echo "E2E 6 PASSED"
 
 echo "=== E2E 7: Node Admission Authority, Fencing, Child Borrows, Local Socket, & CLI ==="
@@ -888,6 +927,7 @@ read -r CLID CEP <<<"$(python3 -c 'import json,sys; d=json.load(sys.stdin); asse
 
 kill "$NPID7" "$PID7" >/dev/null 2>&1 || true
 wait "$NPID7" "$PID7" >/dev/null 2>&1 || true
+check_crashes "$LOG7" "$TMP_ROOT/node7.log"
 echo "E2E 7 PASSED"
 
 echo "=== E2E 8: Full Hub & Node CLI Parity ==="
@@ -971,6 +1011,7 @@ if curl -s --max-time 2 "http://127.0.0.1:${PROXY_PD}/health" >/dev/null 2>&1; t
 fi
 kill "$PID_PD" >/dev/null 2>&1 || true
 wait "$PID_PD" >/dev/null 2>&1 || true
+check_crashes "$PROXY_DENY_LOG"
 
 PROXY_ALLOW_LOG="$TMP_ROOT/hub_proxy_allow.log"
 "$PT" serve --home "$TMP_ROOT/hub_pallow" --listen 127.0.0.1:0 --proxy-listen 127.0.0.1:0 --trusted-proxy 127.0.0.1 --fleet-listen 127.0.0.1:0 --no-sandbox >"$PROXY_ALLOW_LOG" 2>&1 &
@@ -982,6 +1023,7 @@ PROXY_PA="$(extract_port "$LINE_PA" proxy)"
 curl -sf "http://127.0.0.1:${PROXY_PA}/health" | grep -q '"ok":true'
 kill "$PID_PA" >/dev/null 2>&1 || true
 wait "$PID_PA" >/dev/null 2>&1 || true
+check_crashes "$PROXY_ALLOW_LOG"
 "$PT" $U8 hub state | grep -q 'sleeves='
 "$PT" --home "$HUB8" hub probation | grep -q 'probation\|healthy'
 "$PT" $U8 doctor --refresh | grep -q 'HARNESS'
@@ -1060,6 +1102,7 @@ test "$(cat "$PROB_HOME/releases/current.txt")" = "v1"
 
 kill "$NPID8" "$PID8" >/dev/null 2>&1 || true
 wait "$NPID8" "$PID8" >/dev/null 2>&1 || true
+check_crashes "$LOG8" "$TMP_ROOT/node8.log"
 echo "E2E 8 PASSED"
 
 if [[ "${SKIP_PI_E2E:-0}" == "1" ]]; then

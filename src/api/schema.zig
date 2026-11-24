@@ -427,6 +427,7 @@ pub const Subscription = enum {
     claude,
     codex,
     grok,
+    antigravity,
     local,
     api,
     unknown,

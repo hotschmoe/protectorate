@@ -49,19 +49,19 @@ class QuotaScreen extends StatelessWidget {
                       const SizedBox(height: 14),
                       if (q.windows.isEmpty && q.note.isEmpty)
                         const EmptyState('No windows reported', compact: true),
-                      for (final w in q.windows)
+                      for (final w in q.subscription == Subscription.antigravity ? q.windows.take(6) : q.windows)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 10),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Row(children: [
-                                SizedBox(width: 44, child: T(w.label, color: p.dim, weight: FontWeight.w500)),
-                                Expanded(child: Meter(w.usedPct == null ? null : w.usedPct! / 100, width: null)),
-                              ]),
+                              T(w.label.startsWith('model ') ? w.label.substring(6) : w.label,
+                                  color: p.dim, weight: FontWeight.w500, maxLines: null),
+                              const SizedBox(height: 3),
+                              Meter(w.usedPct == null ? null : w.usedPct! / 100, width: null),
                               if (w.resetsAt != null)
                                 Padding(
-                                  padding: const EdgeInsets.only(left: 44, top: 3),
+                                  padding: const EdgeInsets.only(top: 3),
                                   child: T(
                                     'Resets in ${span(w.resetsAt!.difference(now))}  (${_day(w.resetsAt!, now)} ${hhmm(w.resetsAt!)})',
                                     color: p.faint,
@@ -71,6 +71,9 @@ class QuotaScreen extends StatelessWidget {
                             ],
                           ),
                         ),
+                      if (q.subscription == Subscription.antigravity && q.windows.length > 6)
+                        T('+${q.windows.length - 6} more model${q.windows.length == 7 ? '' : 's'}',
+                            color: p.faint, size: kSmall),
                       if (q.note.isNotEmpty)
                         T(q.note, color: q.reading == QuotaReading.ok ? p.dim : p.warn, maxLines: null,
                             size: kSmall),
@@ -81,8 +84,8 @@ class QuotaScreen extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 20),
-        T('Readers are read-only. Dispatch weighs projected unused quota at reset and falls back to '
-            'the local model (SPEC 8).', color: p.faint, maxLines: null, size: kSmall),
+        T('Readers are read-only. Antigravity usage is shown per model.',
+            color: p.faint, maxLines: null, size: kSmall),
       ],
     ));
   }
@@ -110,11 +113,12 @@ class QuotaMini extends StatelessWidget {
           SizedBox(
             height: 26,
             child: Row(children: [
-              SizedBox(width: 62, child: T(cap(q.subscription.wire), color: p.dim)),
-              SizedBox(width: 28, child: T(q.tightest?.label ?? '-', color: p.faint, size: kSmall)),
-              Expanded(child: Meter(q.tightest?.usedPct == null ? null : q.tightest!.usedPct! / 100,
-                  width: null)),
-              SizedBox(
+              Flexible(flex: 90, child: SizedBox(width: 90, child: T(cap(q.subscription.wire), color: p.dim))),
+              Flexible(flex: 80, child: SizedBox(width: 80, child: T(q.tightest?.label.replaceFirst('model ', '') ?? '-', color: p.faint, size: kSmall))),
+              Expanded(flex: 90, child: LayoutBuilder(builder: (context, constraints) =>
+                  Meter(q.tightest?.usedPct == null ? null : q.tightest!.usedPct! / 100,
+                      width: null, pct: constraints.maxWidth >= 40))),
+              Flexible(flex: 64, child: SizedBox(
                 width: 64,
                 child: T(
                   q.tightest?.resetsAt == null ? '' : span(q.tightest!.resetsAt!.difference(now)),
@@ -122,7 +126,7 @@ class QuotaMini extends StatelessWidget {
                   size: kSmall,
                   align: TextAlign.right,
                 ),
-              ),
+              )),
             ]),
           ),
       ],

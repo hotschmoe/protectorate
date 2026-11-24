@@ -127,6 +127,7 @@ pub const Session = struct {
             .stderr = .pipe,
             .pgid = if (builtin.os.tag != .windows) 0 else null,
         });
+        errdefer self.child.kill(io);
 
         const sess_id = try a.dupe(u8, cfg.session_id orelse "pt-sess");
         const cwd_d = try a.dupe(u8, cfg.cwd);
@@ -163,7 +164,7 @@ pub const Session = struct {
                 .effort = eff_d,
             } },
             .antigravity => .{ .antigravity = .{
-                .session_id = sess_id,
+                .session_id = res_d orelse sess_id,
                 .model = mod_d,
                 .effort = eff_d,
                 .supervised = cfg.permission == .supervised,
@@ -325,6 +326,7 @@ pub const Session = struct {
         var line_aw: std.Io.Writer.Allocating = .init(self.gpa);
         defer line_aw.deinit();
 
+        var refused = false;
         while (!self.stopping.load(.acquire)) {
             line_aw.clearRetainingCapacity();
             _ = r.interface.streamDelimiterLimit(&line_aw.writer, '\n', .limited(16 << 20)) catch break;
@@ -343,12 +345,17 @@ pub const Session = struct {
                     defer self.gpa.free(evs);
                     for (evs) |ev| self.on_event(self.ctx, ev);
                 }
+                self.mu.lockUncancelable(self.io);
+                refused = self.out.refused;
+                if (refused) self.child.kill(self.io);
+                self.mu.unlock(self.io);
+                if (refused) break;
             }
             if (at_eof) break;
         }
 
         if (!self.stopping.load(.acquire)) {
-            const term = self.child.wait(self.io) catch null;
+            const term = if (refused) null else self.child.wait(self.io) catch null;
             const code: ?u8 = if (term) |t| switch (t) {
                 .exited => |c| c,
                 else => 1,

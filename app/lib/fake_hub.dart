@@ -1177,6 +1177,19 @@ class FakeHub implements HubClient {
         ],
       },
       {
+        'subscription': 'antigravity', 'plan': 'Google AI Ultra', 'reading': 'ok',
+        'fetched_at_ms': _now,
+        'windows': [
+          {'label': 'model gemini-2.5-flash', 'used_pct': 28.0, 'resets_at_ms': _now + const Duration(hours: 3).inMilliseconds},
+          {'label': 'model gemini-2.5-flash-lite', 'used_pct': 28.0, 'resets_at_ms': _now + const Duration(hours: 3).inMilliseconds},
+          {'label': 'model gemini-2.5-flash-thinking', 'used_pct': 28.0, 'resets_at_ms': _now + const Duration(hours: 3).inMilliseconds},
+          {'label': 'model gemini-3-flash', 'used_pct': 28.0, 'resets_at_ms': _now + const Duration(hours: 3).inMilliseconds},
+          {'label': 'model gemini-3.1-flash-image', 'used_pct': 28.0, 'resets_at_ms': _now + const Duration(hours: 3).inMilliseconds},
+          {'label': 'model gemini-3.1-flash-lite', 'used_pct': 28.0, 'resets_at_ms': _now + const Duration(hours: 3).inMilliseconds},
+          {'label': 'model claude-sonnet-5-5-high', 'used_pct': 10.0, 'resets_at_ms': _now + const Duration(hours: 5).inMilliseconds},
+        ],
+      },
+      {
         'subscription': 'local', 'plan': 'llama.cpp (local)', 'reading': 'ok',
         'fetched_at_ms': _now, 'note': 'unmetered; 1 slot of 2 busy',
         'windows': [{'label': 'slots'}],

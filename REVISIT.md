@@ -730,9 +730,16 @@ Each entry: where, what was done, what right looks like.
   rate-limit-reset-credits, Grok GetRemainingResets and its protobuf walker), because
   `pt_api::Quota` has no field for them; no Claude `extra` overage window; no Codex `app-server`
   path (it would launch the CLI, which may refresh a token; the wham endpoint is the only source);
-  no Antigravity reader (no `Subscription` for it, the `agy` CLI is not installed here, and
-  Antigravity is pane-only, D13). Right: add a resets field to `Quota` when dispatch uses
-  credits; revisit Codex `app-server` if wham breaks; Antigravity when it has a subscription.
+  Right: add a resets field to `Quota` when dispatch uses credits; revisit Codex `app-server` if wham breaks.
+- **Antigravity quota uses an internal API** (`quota/readers.zig`): the model and tier endpoints
+  are observed CLI interfaces, with no stable public quota contract. The reader treats each named
+  model as a separate scope and uses the best available model when none is specified; it cannot infer
+  shared pools or the duration of a reset window. Right: use a documented quota interface if agy
+  exposes one, including explicit shared buckets and window durations.
+- **Zig hub does not yet invoke quota ranking** (`hub/runtime.zig`, `quota/select.zig`): the
+  selector accepts Antigravity readings, but the hub's resleeve path still follows the configured
+  target order. Right: connect selection to the journaled dispatch decision without changing the
+  pane-only restriction on Antigravity resleeves.
 - **Local endpoint address can still be configuration** (`pt-quota`): `local_url` (or the probe's
   `--local` and `PT_LOCAL_URL`) overrides the `baseUrl` of Pi's `pi_local_provider`, which is used
   when it is empty, so the two can still disagree when both are set. Right: drop `local_url` once
@@ -1054,3 +1061,11 @@ Each entry: where, what was done, what right looks like.
   auto-compaction runs first. Right: fine while the harness auto-compacts below its window.
 - **Background node rollouts:** `node update --all --no-wait` stops at a hub restart. Right:
   persist rollout progress and recover in-flight nodes after restart.
+- **Sleeve process fencing without a delegated cgroup** (`src/sandbox/exec.zig`): the fallback
+  finds the process group and processes carrying the sleeve tag. A descendant that starts a new
+  group and removes its tag can escape that fallback; inherited stdout or stderr can also delay
+  observing an unexpected parent exit. Right: use an isolated, delegated cgroup or equivalent
+  process container for every incarnation and monitor the parent independently of its pipes.
+- **Losing fleet dials can remain blocked** (`src/net/transport.zig`): a timed-out or losing dial
+  retains its worker and process-lifetime I/O until the connection attempt or handshake returns.
+  Right: cancel DNS, connect, and handshake operations and wait for each losing worker to exit.
