@@ -81,11 +81,16 @@ class _SleeveViewState extends State<SleeveView> {
       return _TakeoverPlaceholder(sleeve: s, onBack: () => setState(() => _takeover = false));
     }
     final running = s.lifecycle == Lifecycle.running;
+    final canStart = s.lifecycle == Lifecycle.stopped || s.lifecycle == Lifecycle.parked;
     final actions = <_Action>[
       _Action('Interrupt', Glyph.interrupt, 'Stop the current turn',
           running ? () => unawaited(app.act(() => app.hub.interrupt(s.id))) : null),
-      _Action('Stop', Glyph.power, 'Stop this sleeve and its children',
-          s.lifecycle == Lifecycle.stopped ? null : () => setState(() => _pending = _Pending.stop)),
+      if (canStart)
+        _Action('Start', Glyph.power, 'Start this sleeve',
+            () => unawaited(app.act(() => app.hub.start(s.id), done: 'Starting ${s.name}')))
+      else
+        _Action('Stop', Glyph.power, 'Stop this sleeve and its children',
+            () => setState(() => _pending = _Pending.stop)),
       _Action('Resleeve', Glyph.resleeve, 'Move this sleeve to another harness',
           () => setState(() => _pending = _Pending.resleeve)),
       _Action('Terminal', Glyph.terminal, 'Take over the harness terminal (advanced)',
@@ -187,7 +192,7 @@ class _SleeveViewState extends State<SleeveView> {
       case _Pending.resleeve:
         final order = [
           ...s.resleeveTo,
-          for (final h in const [Harness.claude, Harness.codex, Harness.grok, Harness.piLocal])
+          for (final h in const [Harness.claude, Harness.codex, Harness.grok, Harness.piLocal, Harness.antigravity])
             if (!s.resleeveTo.contains(h)) h,
         ];
         final current = s.incarnation?.harness;

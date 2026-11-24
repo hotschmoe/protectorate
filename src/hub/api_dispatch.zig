@@ -14,6 +14,21 @@ const git = @import("git.zig");
 const fleet = @import("fleet.zig");
 const runtime = @import("runtime.zig");
 
+const envoy_md = @embedFile("envoy.md");
+
+fn expand_tilde_alloc(a: std.mem.Allocator, home_opt: ?[]const u8, p: []const u8) ![]const u8 {
+    var trimmed = std.mem.trim(u8, p, " \t\r\n");
+    while (trimmed.len > 1 and trimmed[trimmed.len - 1] == '/') {
+        trimmed = trimmed[0 .. trimmed.len - 1];
+    }
+    if (std.mem.eql(u8, trimmed, "~")) {
+        if (home_opt) |h| return a.dupe(u8, std.mem.trimEnd(u8, h, "/"));
+    } else if (std.mem.startsWith(u8, trimmed, "~/")) {
+        if (home_opt) |h| return std.fs.path.join(a, &.{ h, trimmed[2..] });
+    }
+    return a.dupe(u8, trimmed);
+}
+
 pub const DispatchResult = struct {
     status: u16,
     body_json: []u8,
@@ -102,29 +117,71 @@ pub fn dispatch(
             parent_sid = rt.resolve_sleeve_id(a, raw_pid) orelse return err_json(rt.gpa, .not_found, "parent sleeve not found");
             if (try rt.view_sleeve(a, parent_sid.?)) |psv| parent_path = psv.path;
         }
-        const base_path = req.path orelse req.new_path orelse parent_path orelse return err_json(rt.gpa, .invalid, "path or --parent required");
+        const is_envoy = parent_sid == null and std.mem.eql(u8, req.name, "envoy");
+        if (is_envoy) {
+            rt.state_mu.lockUncancelable(rt.io);
+            var dup_envoy = false;
+            var sit = rt.core_state.sleeves.iterator();
+            while (sit.next()) |e| {
+                const sl = e.value_ptr.*;
+                if (sl.lifecycle != .removed and (std.mem.eql(u8, sl.id, "envoy") or sl.role == .envoy)) {
+                    dup_envoy = true;
+                    break;
+                }
+            }
+            rt.state_mu.unlock(rt.io);
+            if (dup_envoy) return err_json(rt.gpa, .conflict, "envoy sleeve already exists");
+        }
+        const raw_base_path: []const u8 = if (req.path) |p|
+            try expand_tilde_alloc(a, rt.env.get("HOME"), p)
+        else if (req.new_path) |p|
+            try expand_tilde_alloc(a, rt.env.get("HOME"), p)
+        else if (parent_path) |p|
+            p
+        else if (is_envoy)
+            try std.fs.path.join(a, &.{ rt.hub_home.root_path, "envoy" })
+        else
+            return err_json(rt.gpa, .invalid, "path or --parent required");
+
+        if (is_envoy) {
+            try std.Io.Dir.cwd().createDirPath(rt.io, raw_base_path);
+            for ([_][]const u8{ "CLAUDE.md", "AGENTS.md" }) |fname| {
+                const instr_p = try std.fs.path.join(a, &.{ raw_base_path, fname });
+                if (std.Io.Dir.cwd().statFile(rt.io, instr_p, .{})) |_| {} else |_| {
+                    std.Io.Dir.cwd().writeFile(rt.io, .{ .sub_path = instr_p, .data = envoy_md }) catch {};
+                }
+            }
+        } else if (req.new_path != null) {
+            try std.Io.Dir.cwd().createDirPath(rt.io, raw_base_path);
+        } else if (req.path != null and parent_sid == null) {
+            var d = std.Io.Dir.cwd().openDir(rt.io, raw_base_path, .{}) catch {
+                return err_json(rt.gpa, .invalid, "path does not exist");
+            };
+            d.close(rt.io);
+        }
+
         if (rt.gate_d9(a, principal, .spawn_sleeve, req.name)) |_| {} else |err| {
             return map_d9_err(rt.gpa, err);
         }
-        const sid = try rt.gen_id(a, "slv");
-        const ws_id = try rt.gen_id(a, "ws");
+        const sid = if (is_envoy) "envoy" else try rt.gen_id(a, "slv");
+        const ws_id = if (is_envoy) "ws-envoy" else try rt.gen_id(a, "ws");
         const layout: model.Layout = if (req.view) |v| switch (v) {
             .readonly => .readonly,
             .worktree => .worktree,
             .unknown => .shared,
         } else if (parent_sid != null) .worktree else .shared;
-        var sl_path: []const u8 = base_path;
+        var sl_path: []const u8 = raw_base_path;
         var sl_branch: ?[]const u8 = null;
         if (layout == .worktree) {
-            sl_path = if (req.new_path) |np| np else try std.fs.path.join(a, &.{ rt.hub_home.root_path, "worktrees", sid });
+            sl_path = if (req.new_path != null) raw_base_path else try std.fs.path.join(a, &.{ rt.hub_home.root_path, "worktrees", sid });
             sl_branch = try std.fmt.allocPrint(a, "pt/{s}", .{sid});
-            try rt.register_worktree_base(sid, base_path);
+            try rt.register_worktree_base(sid, raw_base_path);
         }
-        try rt.register_workspace(ws_id, req.name, base_path);
+        try rt.register_workspace(ws_id, req.name, raw_base_path);
         rt.commit(.{ .sleeve_created = .{
             .sleeve_id = sid,
             .name = req.name,
-            .role = if (parent_sid != null) .child else .root,
+            .role = if (is_envoy) .envoy else if (parent_sid != null) .child else .root,
             .path = sl_path,
             .workspace_id = ws_id,
             .parent_id = parent_sid,
@@ -174,8 +231,20 @@ pub fn dispatch(
     } else if (std.mem.eql(u8, method, "StartSleeve")) {
         const req = schema.decode_arena(schema.StartSleeveRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
         const sid = rt.resolve_sleeve_id(a, req.sleeve_id) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
+        var default_h: model.Harness = .claude;
+        {
+            rt.state_mu.lockUncancelable(rt.io);
+            defer rt.state_mu.unlock(rt.io);
+            if (rt.core_state.sleeves.get(sid)) |sl| {
+                if (sl.inc) |inc| {
+                    default_h = inc.harness;
+                } else if (sl.target_len > 0) {
+                    default_h = sl.targets[0];
+                }
+            }
+        }
         var targets: [model.max_targets]model.Harness = undefined;
-        targets[0] = if (req.target) |h| runtime.schema_to_model_harness(h) else .pi_local;
+        targets[0] = if (req.target) |h| runtime.schema_to_model_harness(h) else default_h;
         rt.commit(.{ .start_requested = .{
             .sleeve_id = sid,
             .targets = targets,
@@ -573,10 +642,13 @@ pub fn dispatch(
         const jv = (try rt.view_job(a, req.job_id)) orelse return err_json(rt.gpa, .not_found, "job not found");
         return ok_json(rt.gpa, jv);
     } else if (std.mem.eql(u8, method, "ListQuotas")) {
-        rt.refresh_quotas_sync();
-        rt.meta_mu.lockUncancelable(rt.io);
-        const qs = rt.cached_quotas;
-        rt.meta_mu.unlock(rt.io);
+        const disable_remote = rt.env.get("PROTECTORATE_NO_REMOTE_QUOTA") != null or rt.env.get("PROTECTORATE_NO_HOST_HISTORY") != null;
+        if (!disable_remote and !rt.quotas_remote_polled.load(.acquire)) {
+            rt.refresh_quotas_sync(true);
+        } else if (rt.cached_quotas.len == 0) {
+            rt.refresh_quotas_sync(false);
+        }
+        const qs = try rt.copy_cached_quotas(a);
         return ok_json(rt.gpa, schema.QuotaList{ .quotas = qs });
     } else if (std.mem.eql(u8, method, "ListEvents")) {
         const req = schema.decode_arena(schema.ListEventsRequest, a, body) catch schema.ListEventsRequest{};

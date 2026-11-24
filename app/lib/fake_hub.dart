@@ -104,6 +104,59 @@ class FakeHub implements HubClient {
   }
 
   @override
+  Future<Sleeve> spawnSleeve(SpawnSleeveRequest req) async {
+    final isEnvoy = req.parentId == null && req.name == 'envoy';
+    if (isEnvoy && _sleeves.any((s) => s['role'] == 'envoy')) {
+      throw StateError('envoy sleeve already exists');
+    }
+    final id = isEnvoy ? 's-envoy' : 's-${++_hubSeq}';
+    final wsId = req.parentId != null
+        ? (_sleeve(req.parentId!)['workspace_id'] as String)
+        : (isEnvoy ? 'w-envoy' : 'w-$id');
+    final path = req.path ?? req.newPath ?? (isEnvoy ? '~/.local/share/protectorate/envoy' : '~/github/${req.name}');
+    if (!_workspaces.any((w) => w['id'] == wsId)) {
+      _workspaces.add({'id': wsId, 'name': req.name, 'path': path});
+    }
+    final h = req.harness == Harness.unknown ? 'claude' : req.harness.wire;
+    final raw = <String, Object?>{
+      'id': id,
+      'name': req.name,
+      'workspace_id': wsId,
+      'parent_id': ?req.parentId,
+      'role': isEnvoy ? 'envoy' : (req.parentId != null ? 'child' : 'root'),
+      'lifecycle': 'running',
+      'path': path,
+      'resleeve_to': ['pi_local'],
+      if (req.parentId != null) 'branch': 'pt/${req.name}',
+      'incarnation': _incarnation(h, g: 1, activity: 'idle', turn: 0),
+    };
+    _sleeves.add(raw);
+    _tx[id] = [];
+    _sessionInfo(id, raw['incarnation']! as Json);
+    _dirty = true;
+    _state = HubState.fromJson(_snapshot());
+    _states.add(_state);
+    if (req.message case final m? when m.trim().isNotEmpty) {
+      unawaited(send(id, m));
+    }
+    return Sleeve.fromJson(raw);
+  }
+
+  @override
+  Future<void> start(String sleeveId, {Harness? target}) async {
+    final s = _sleeve(sleeveId);
+    final oldInc = s['incarnation'] as Json?;
+    final h = (target != null && target != Harness.unknown)
+        ? target.wire
+        : (oldInc?['harness'] as String? ?? 'claude');
+    final g = (oldInc?['g'] as int? ?? 0) + 1;
+    s['lifecycle'] = 'running';
+    final next = s['incarnation'] = _incarnation(h, g: g, activity: 'idle', turn: 0);
+    _sessionInfo(sleeveId, next);
+    _dirty = true;
+  }
+
+  @override
   Future<void> interrupt(String sleeveId) async {
     final s = _sleeve(sleeveId);
     final act = _activity(sleeveId);

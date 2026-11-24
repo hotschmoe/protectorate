@@ -123,6 +123,7 @@ pub const Runtime = struct {
     host_inventory: ?msg.Inventory = null,
     cached_quotas: []schema.Quota = &.{},
     cached_quotas_arena: std.heap.ArenaAllocator,
+    quotas_remote_polled: std.atomic.Value(bool) = .init(false),
     restore_error: ?[]const u8 = null,
 
     transcripts: transcript.TranscriptStore,
@@ -136,6 +137,7 @@ pub const Runtime = struct {
     fleet_listen: []const u8,
     stopping: std.atomic.Value(bool) = .init(false),
     tick_thread: ?std.Thread = null,
+    quota_thread: ?std.Thread = null,
     history_thread: ?std.Thread = null,
     shutdown_requested: std.atomic.Value(bool) = .init(false),
 
@@ -237,14 +239,29 @@ pub const Runtime = struct {
         }
         rt.init_sleeve_devices();
         rt.load_host_info();
-        rt.refresh_quotas_sync();
+        rt.refresh_quotas_sync(false);
         _ = rt.history.ingest_roots(null, hh.transcripts_path);
 
         rt.tick_thread = try std.Thread.spawn(.{}, tick_loop, .{rt});
+        if (env.get("PROTECTORATE_NO_REMOTE_QUOTA") == null and env.get("PROTECTORATE_NO_HOST_HISTORY") == null) {
+            rt.quota_thread = std.Thread.spawn(.{}, quota_bg_loop, .{rt}) catch null;
+        }
         if (env.get("PROTECTORATE_NO_HOST_HISTORY") == null) {
             rt.history_thread = std.Thread.spawn(.{}, history_bg_loop, .{rt}) catch null;
         }
         return rt;
+    }
+
+    fn quota_bg_loop(self: *Runtime) void {
+        self.refresh_quotas_sync(true);
+        while (!self.stopping.load(.acquire)) {
+            var i: usize = 0;
+            while (i < 120 and !self.stopping.load(.acquire)) : (i += 1) {
+                self.io.sleep(.fromMilliseconds(1_000), .awake) catch break;
+            }
+            if (self.stopping.load(.acquire)) break;
+            self.refresh_quotas_sync(true);
+        }
     }
 
     fn history_bg_loop(self: *Runtime) void {
@@ -259,6 +276,7 @@ pub const Runtime = struct {
         self.stopping.store(true, .release);
         self.stream_hub.wake_all();
         if (self.tick_thread) |t| t.join();
+        if (self.quota_thread) |t| t.join();
         if (self.history_thread) |t| t.join();
 
         var handles: std.ArrayList(*DriverHandle) = .empty;
@@ -404,13 +422,48 @@ pub const Runtime = struct {
         _ = self;
     }
 
-    pub fn refresh_quotas_sync(self: *Runtime) void {
+    pub fn copy_cached_quotas(self: *Runtime, arena: std.mem.Allocator) ![]schema.Quota {
+        self.meta_mu.lockUncancelable(self.io);
+        defer self.meta_mu.unlock(self.io);
+        return clone_quotas_slice(arena, self.cached_quotas);
+    }
+
+    fn clone_quotas_slice(arena: std.mem.Allocator, src: []const schema.Quota) ![]schema.Quota {
+        const out = try arena.alloc(schema.Quota, src.len);
+        for (src, 0..) |q, i| {
+            const wins = try arena.alloc(schema.QuotaWindow, q.windows.len);
+            for (q.windows, 0..) |w, wi| {
+                wins[wi] = .{
+                    .label = try arena.dupe(u8, w.label),
+                    .used_pct = w.used_pct,
+                    .resets_at_ms = w.resets_at_ms,
+                    .length_ms = w.length_ms,
+                };
+            }
+            out[i] = .{
+                .subscription = q.subscription,
+                .plan = try arena.dupe(u8, q.plan),
+                .reading = q.reading,
+                .fetched_at_ms = q.fetched_at_ms,
+                .windows = wins,
+                .credits = q.credits,
+                .note = try arena.dupe(u8, q.note),
+            };
+        }
+        return out;
+    }
+
+    pub fn refresh_quotas_sync(self: *Runtime, poll_remote: bool) void {
         var arena_st = std.heap.ArenaAllocator.init(self.gpa);
         const now = std.Io.Clock.real.now(self.io).toMilliseconds();
-        const rep = q_readers.read_all(arena_st.allocator(), self.io, self.env.get("HOME"), now, false) catch {
+        const rep = q_readers.read_all(arena_st.allocator(), self.io, self.env, self.env.get("HOME"), now, poll_remote) catch {
             arena_st.deinit();
             return;
         };
+
+        var pub_arena_st = std.heap.ArenaAllocator.init(self.gpa);
+        defer pub_arena_st.deinit();
+        var pub_qs: []schema.Quota = &.{};
 
         self.meta_mu.lockUncancelable(self.io);
         self.cached_quotas_arena.deinit();
@@ -427,6 +480,15 @@ pub const Runtime = struct {
                     .length_ms = if (w.length_ms) |l| @intCast(l) else null,
                 };
             }
+            const cr_opt: ?schema.QuotaCredits = if (q.credits) |cr| .{
+                .allowed = cr.allowed,
+                .limit_reached = cr.limit_reached,
+                .has_credits = cr.has_credits,
+                .balance = cr.balance,
+                .overage_limit_reached = cr.overage_limit_reached,
+                .reset_available_count = if (cr.reset_available_count) |c| @as(u64, c) else null,
+                .per_hour = cr.per_hour,
+            } else null;
             out[i] = .{
                 .subscription = switch (q.subscription) {
                     .claude => .claude,
@@ -445,11 +507,20 @@ pub const Runtime = struct {
                 },
                 .fetched_at_ms = .{ .ms = q.fetched_at_ms },
                 .windows = wins,
+                .credits = cr_opt,
                 .note = q.note,
             };
         }
         self.cached_quotas = out;
+        if (poll_remote) {
+            self.quotas_remote_polled.store(true, .release);
+        }
+        pub_qs = clone_quotas_slice(pub_arena_st.allocator(), out) catch &.{};
         self.meta_mu.unlock(self.io);
+
+        for (pub_qs) |pq| {
+            self.stream_hub.publish_raw(.{ .quota = .{ .seq = 0, .quota = pq } });
+        }
     }
 
     pub fn commit(self: *Runtime, ev: event.Event) !void {
@@ -674,12 +745,14 @@ pub const Runtime = struct {
 
         var sl_path: []const u8 = "";
         var sl_layout: model.Layout = .shared;
+        var is_envoy = false;
         {
             self.state_mu.lockUncancelable(self.io);
             defer self.state_mu.unlock(self.io);
             const sl = self.core_state.sleeves.get(li.sleeve_id) orelse return error.NotFound;
             sl_path = try a.dupe(u8, sl.path);
             sl_layout = sl.layout;
+            is_envoy = (sl.role == .envoy);
         }
 
         const prog: []const u8 = switch (li.harness) {
@@ -698,10 +771,18 @@ pub const Runtime = struct {
             .antigravity => .antigravity,
         };
 
+        const hub_url = try std.fmt.allocPrint(a, "http://{s}", .{self.http_listen});
         var guard_mode: s_spec.GuardMode = .none;
         var guard_exe: ?[]const u8 = null;
         var sb_spec: ?s_spec.SandboxSpec = null;
         var child_env = try self.env.clone(a);
+        try child_env.put("PROTECTORATE_SLEEVE", li.sleeve_id);
+        try child_env.put("PROTECTORATE_WORKSPACE", sl_path);
+        try child_env.put("PROTECTORATE_ENVOY", "envoy");
+        try child_env.put("PROTECTORATE_URL", hub_url);
+        if (is_envoy) {
+            try child_env.put("PROTECTORATE_TOKEN", self.hub_home.envoy_token);
+        }
         if (!self.no_sandbox) {
             const sleeve_tmp = try std.fs.path.join(a, &.{ self.hub_home.root_path, "run", li.sleeve_id, "tmp" });
             try std.Io.Dir.cwd().createDirPath(self.io, sleeve_tmp);
@@ -711,8 +792,6 @@ pub const Runtime = struct {
             try child_env.put("TMPDIR", sleeve_tmp);
             try child_env.put("TEMP", sleeve_tmp);
             try child_env.put("TMP", sleeve_tmp);
-            try child_env.put("PROTECTORATE_SLEEVE", li.sleeve_id);
-            try child_env.put("PROTECTORATE_WORKSPACE", sl_path);
 
             if (builtin.os.tag == .linux) {
                 guard_mode = if (self.bwrap_ok) .bwrap else if (self.landlock_ok) .landlock else .none;
@@ -772,7 +851,12 @@ pub const Runtime = struct {
                         .{ .key = "TMP", .value = sleeve_tmp },
                         .{ .key = "PROTECTORATE_SLEEVE", .value = li.sleeve_id },
                         .{ .key = "PROTECTORATE_WORKSPACE", .value = sl_path },
+                        .{ .key = "PROTECTORATE_ENVOY", .value = "envoy" },
+                        .{ .key = "PROTECTORATE_URL", .value = hub_url },
                     });
+                    if (is_envoy) {
+                        try env_set.append(a, .{ .key = "PROTECTORATE_TOKEN", .value = self.hub_home.envoy_token });
+                    }
 
                     sb_spec = .{
                         .workspace = sl_path,
@@ -1641,7 +1725,7 @@ pub const Runtime = struct {
                 });
             }
             try ev_list.appendSlice(arena, self.hub_events.items);
-            q_list = self.cached_quotas;
+            q_list = try clone_quotas_slice(arena, self.cached_quotas);
         }
 
         return .{

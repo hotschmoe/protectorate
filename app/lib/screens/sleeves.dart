@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../api/api.g.dart';
@@ -6,6 +8,251 @@ import '../icons.dart';
 import '../scope.dart';
 import '../theme.dart';
 import '../widgets.dart';
+
+const List<Harness> _harnessChoices = [
+  Harness.claude,
+  Harness.codex,
+  Harness.piLocal,
+  Harness.antigravity,
+  Harness.grok,
+];
+
+/// Card shown on Envoy screen when no Envoy sleeve exists yet on the hub.
+class StartEnvoyCard extends StatefulWidget {
+  const StartEnvoyCard({super.key});
+
+  @override
+  State<StartEnvoyCard> createState() => _StartEnvoyCardState();
+}
+
+class _StartEnvoyCardState extends State<StartEnvoyCard> {
+  Harness _harness = Harness.claude;
+  bool _busy = false;
+
+  Future<void> _start(AppScope app) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await app.act(() async {
+        await app.hub.spawnSleeve(SpawnSleeveRequest(name: 'envoy', harness: _harness));
+        app.go(Screen.envoy);
+      }, done: 'Started Envoy (${harnessName(_harness)})');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final app = AppScope.of(context);
+    final p = pal(context);
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
+        child: Panel(
+          title: 'No Envoy sleeve on this hub',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              T(
+                'Envoy coordinates workspaces, spawns child sleeves, and runs jobs across your nodes.',
+                color: p.dim,
+                maxLines: 3,
+              ),
+              const SizedBox(height: 14),
+              const Label('Harness'),
+              const SizedBox(height: 6),
+              Buttons([
+                for (final h in _harnessChoices)
+                  Btn(
+                    harnessName(h),
+                    dense: true,
+                    active: _harness == h,
+                    onTap: _busy ? null : () => setState(() => _harness = h),
+                  ),
+              ]),
+              const SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Btn(
+                  _busy ? 'Starting...' : 'Start Envoy',
+                  kind: BtnKind.primary,
+                  glyph: Glyph.envoy,
+                  onTap: _busy ? null : () => unawaited(_start(app)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Modal dialog to spawn a new root, child, or envoy sleeve from the UI.
+Future<void> showSpawnSleeveDialog(BuildContext context, AppScope app) => showDialog<void>(
+  context: context,
+  builder: (ctx) => _SpawnSleeveDialog(app: app),
+);
+
+class _SpawnSleeveDialog extends StatefulWidget {
+  const _SpawnSleeveDialog({required this.app});
+
+  final AppScope app;
+
+  @override
+  State<_SpawnSleeveDialog> createState() => _SpawnSleeveDialogState();
+}
+
+class _SpawnSleeveDialogState extends State<_SpawnSleeveDialog> {
+  final _name = TextEditingController();
+  final _path = TextEditingController();
+  final _message = TextEditingController();
+  Harness _harness = Harness.claude;
+  String? _parentId;
+  bool _newDir = false;
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _path.dispose();
+    _message.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final name = _name.text.trim();
+    final path = _path.text.trim();
+    final msg = _message.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = 'Name is required');
+      return;
+    }
+    final isEnvoy = _parentId == null && name == 'envoy';
+    if (_parentId == null && !isEnvoy && path.isEmpty) {
+      setState(() => _error = 'Directory path is required for a root sleeve');
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final req = SpawnSleeveRequest(
+        name: name,
+        harness: _harness,
+        path: _parentId == null && !_newDir && path.isNotEmpty ? path : null,
+        newPath: _parentId == null && _newDir && path.isNotEmpty ? path : null,
+        parentId: _parentId,
+        message: msg.isEmpty ? null : msg,
+      );
+      final s = await widget.app.hub.spawnSleeve(req);
+      if (mounted) Navigator.of(context).pop();
+      if (s.role == SleeveRole.envoy) {
+        widget.app.go(Screen.envoy);
+      } else {
+        widget.app.openSleeve(s.id);
+      }
+      widget.app.say('Started sleeve ${s.name}');
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = e is StateError ? e.message : '$e';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context);
+    final roots = widget.app.state.sleeves
+        .where((s) => s.parentId == null && s.role != SleeveRole.envoy)
+        .toList();
+    return Center(
+      child: Material(
+        color: Colors.transparent,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Panel(
+              title: 'New sleeve',
+              trailing: IconBtn(Glyph.close, tooltip: 'Close',
+                  onTap: _busy ? null : () => Navigator.of(context).pop()),
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Label('Name'),
+                    const SizedBox(height: 4),
+                    Field(controller: _name, hint: 'my-project (or envoy)', autofocus: true,
+                        onSubmit: (_) => unawaited(_submit())),
+                    if (roots.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      const Label('Parent (optional, spawns a worktree child)'),
+                      const SizedBox(height: 6),
+                      Buttons([
+                        Btn('None (root)', dense: true, active: _parentId == null,
+                            onTap: _busy ? null : () => setState(() => _parentId = null)),
+                        for (final r in roots)
+                          Btn(r.name, dense: true, active: _parentId == r.id,
+                              onTap: _busy ? null : () => setState(() => _parentId = r.id)),
+                      ]),
+                    ],
+                    if (_parentId == null) ...[
+                      const SizedBox(height: 12),
+                      const Label('Directory path on hub'),
+                      const SizedBox(height: 4),
+                      Field(controller: _path, mono: true,
+                          hint: '~/github/my-project (blank for envoy default)',
+                          onSubmit: (_) => unawaited(_submit())),
+                      const SizedBox(height: 6),
+                      Buttons([
+                        Btn('Existing path', dense: true, active: !_newDir,
+                            onTap: _busy ? null : () => setState(() => _newDir = false)),
+                        Btn('Create directory', dense: true, active: _newDir,
+                            onTap: _busy ? null : () => setState(() => _newDir = true)),
+                      ]),
+                    ],
+                    const SizedBox(height: 12),
+                    const Label('Harness'),
+                    const SizedBox(height: 6),
+                    Buttons([
+                      for (final h in _harnessChoices)
+                        Btn(harnessName(h), dense: true, active: _harness == h,
+                            onTap: _busy ? null : () => setState(() => _harness = h)),
+                    ]),
+                    const SizedBox(height: 12),
+                    const Label('Initial prompt (optional)'),
+                    const SizedBox(height: 4),
+                    Field(controller: _message, hint: 'What should it start working on?',
+                        onSubmit: (_) => unawaited(_submit())),
+                    if (_error != null) ...[
+                      const SizedBox(height: 10),
+                      T(_error!, color: p.alarm, maxLines: 3),
+                    ],
+                    const SizedBox(height: 16),
+                    Buttons([
+                      Btn(_busy ? 'Starting...' : 'Spawn sleeve', kind: BtnKind.primary,
+                          onTap: _busy ? null : () => unawaited(_submit())),
+                      Btn('Cancel', kind: BtnKind.ghost,
+                          onTap: _busy ? null : () => Navigator.of(context).pop()),
+                    ]),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 /// Rows of the workspaces > sleeves > children tree, in display order.
 List<(Workspace, Sleeve?, bool last)> treeRows(HubState s) {
@@ -53,7 +300,17 @@ class SleeveTree extends StatelessWidget {
     final app = AppScope.of(context);
     final p = pal(context);
     final rows = treeRows(app.state);
-    if (rows.isEmpty) return const EmptyState('No workspaces yet', compact: true);
+    if (rows.isEmpty) {
+      if (compact) return const EmptyState('No workspaces yet', compact: true);
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const EmptyState('No sleeves yet', glyph: Glyph.sleeves),
+          Btn('New sleeve', kind: BtnKind.primary,
+              onTap: () => unawaited(showSpawnSleeveDialog(context, app))),
+        ],
+      );
+    }
     return ListView.builder(
       padding: EdgeInsets.fromLTRB(8, 0, 8, compact ? 8 : 16),
       itemCount: rows.length,
@@ -150,7 +407,16 @@ class SleevesTable extends StatelessWidget {
     final app = AppScope.of(context);
     final p = pal(context);
     final rows = treeRows(app.state).where((r) => r.$2 != null).toList();
-    if (rows.isEmpty) return const EmptyState('No sleeves yet', glyph: Glyph.sleeves);
+    if (rows.isEmpty) {
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const EmptyState('No sleeves yet', glyph: Glyph.sleeves),
+          Btn('New sleeve', kind: BtnKind.primary,
+              onTap: () => unawaited(showSpawnSleeveDialog(context, app))),
+        ],
+      );
+    }
     return Wide(
       min: 1000,
       child: Padding(

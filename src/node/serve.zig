@@ -217,7 +217,7 @@ pub fn cmd_authorize(
             var conn = res_conn.conn;
             defer conn.deinit();
 
-            try send_hello_sync(gpa, arena, &conn, &cfg, inv, io, env, null);
+            try send_hello_sync(gpa, arena, &conn, &cfg, inv, io, env, null, null);
             cfg.authorized = true;
             try save_config(gpa, io, home_path, cfg);
             const chosen = eps.items[res_conn.addr_index];
@@ -293,6 +293,9 @@ pub fn cmd_serve(
 
     const inv = try sys.collect_inventory(arena, io, version.version);
 
+    var pres_det = sys.PresenceDetector.init(io);
+    defer pres_det.deinit(io);
+
     if (stdio_mode) {
         var conn = try transport.NoiseConn.dial_stdio(
             gpa,
@@ -303,7 +306,7 @@ pub fn cmd_serve(
             hub_pub,
         );
         defer conn.deinit();
-        try run_session(gpa, io, home_path, env, &conn, &cfg, inv, run_mgr, adm_mgr);
+        try run_session(gpa, io, home_path, env, &conn, &cfg, inv, run_mgr, adm_mgr, &pres_det);
         return 0;
     }
 
@@ -320,7 +323,7 @@ pub fn cmd_serve(
                 var conn = res_conn.conn;
                 backoff_ms = 500;
                 const chosen = eps.items[res_conn.addr_index];
-                run_session(gpa, io, home_path, env, &conn, &cfg, inv, run_mgr, adm_mgr) catch |err| {
+                run_session(gpa, io, home_path, env, &conn, &cfg, inv, run_mgr, adm_mgr, &pres_det) catch |err| {
                     print_err(io, "session {s}:{d} ended: {s}\n", .{ chosen.host, chosen.port, @errorName(err) }) catch {};
                 };
                 conn.deinit();
@@ -346,6 +349,7 @@ const SessionCtx = struct {
     last_rx_ms: std.atomic.Value(i64),
     cfg: *const NodeConfig,
     adm_mgr: *admission.AdmissionManager,
+    pres_det: ?*sys.PresenceDetector = null,
     workers_mu: std.Io.Mutex = .init,
     workers_cond: std.Io.Condition = .init,
     active_workers: u32 = 0,
@@ -381,9 +385,11 @@ fn send_hello_sync(
     io: std.Io,
     env: ?*const std.process.Environ.Map,
     adm_mgr: ?*admission.AdmissionManager,
+    pres_det: ?*sys.PresenceDetector,
 ) !void {
     const bid = if (adm_mgr) |am| try am.boot_id(arena) else (sys.read_boot_id(arena, io) catch "boot-0");
     const q = if (adm_mgr) |am| am.quarantined_copy(arena) else null;
+    const pres = if (pres_det) |pd| pd.collect(io, env) else sys.collect_presence(io, env);
     const req: msg.Request = .{ .hello = .{
         .node_id = cfg.node_id,
         .node_version = version.version,
@@ -392,7 +398,7 @@ fn send_hello_sync(
         .addrs = cfg.addrs,
         .inventory = inv,
         .sample = sys.collect_sample(io),
-        .presence = sys.collect_presence(io, env),
+        .presence = pres,
     } };
     try conn.send_json(.request, 2, req);
     var rep = try conn.recv_frame();
@@ -413,10 +419,11 @@ fn run_session(
     inv: msg.Inventory,
     run_mgr: *runner.Runner,
     adm_mgr: *admission.AdmissionManager,
+    pres_det: *sys.PresenceDetector,
 ) !void {
     var hello_arena_st = std.heap.ArenaAllocator.init(gpa);
     defer hello_arena_st.deinit();
-    try send_hello_sync(gpa, hello_arena_st.allocator(), conn, cfg, inv, io, env, adm_mgr);
+    try send_hello_sync(gpa, hello_arena_st.allocator(), conn, cfg, inv, io, env, adm_mgr, pres_det);
     if (std.fs.path.join(hello_arena_st.allocator(), &.{ home_path, "releases" })) |rel_dir| {
         u_store.mark_healthy(gpa, io, rel_dir) catch {};
     } else |_| {}
@@ -430,6 +437,7 @@ fn run_session(
         .last_rx_ms = .init(std.Io.Clock.awake.now(io).toMilliseconds()),
         .cfg = cfg,
         .adm_mgr = adm_mgr,
+        .pres_det = pres_det,
     };
     defer sctx.wait_workers();
 
@@ -459,7 +467,7 @@ fn run_session(
                     .quarantined = ctx.adm_mgr.quarantined_copy(a),
                     .addrs = ctx.cfg.addrs,
                     .sample = sys.collect_sample(ctx.io),
-                    .presence = sys.collect_presence(ctx.io, ctx.env),
+                    .presence = if (ctx.pres_det) |pd| pd.collect(ctx.io, ctx.env) else sys.collect_presence(ctx.io, ctx.env),
                 } };
                 ctx.tx_mu.lockUncancelable(ctx.io);
                 ctx.conn.send_json(.request, next_id, req) catch {

@@ -20,6 +20,8 @@ abstract class HubClient {
   Stream<Transcript> transcripts(String sleeveId);
 
   Future<void> send(String sleeveId, String text);
+  Future<Sleeve> spawnSleeve(SpawnSleeveRequest req);
+  Future<void> start(String sleeveId, {Harness? target});
   Future<void> interrupt(String sleeveId);
   Future<void> stop(String sleeveId);
   Future<void> resleeve(String sleeveId, Harness target);

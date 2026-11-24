@@ -379,6 +379,19 @@ class RealHub implements HubClient {
       _api.sendMessage(SendMessageRequest(sleeveId: sleeveId, text: text));
 
   @override
+  Future<Sleeve> spawnSleeve(SpawnSleeveRequest req) async {
+    final s = await _api.spawnSleeve(req);
+    final cur = _pendingState ?? _state;
+    _setState(_copy(cur, sleeves: _upsert(cur.sleeves, s, (x) => x.id == s.id)));
+    _changed();
+    return s;
+  }
+
+  @override
+  Future<void> start(String sleeveId, {Harness? target}) =>
+      _api.startSleeve(StartSleeveRequest(sleeveId: sleeveId, target: target));
+
+  @override
   Future<void> interrupt(String sleeveId) =>
       _api.interrupt(SleeveRef(sleeveId: sleeveId));
 

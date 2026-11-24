@@ -86,7 +86,16 @@ pub fn main(init: std.process.Init) !u8 {
     defer init.gpa.free(home_path);
 
     const sub = positionals.items[0];
-    if (std.mem.eql(u8, sub, "join")) {
+    if (std.mem.eql(u8, sub, "idle-probe")) {
+        if (comptime builtin.os.tag == .windows) {
+            var ibuf: [256]u8 = undefined;
+            if (sys.windows_idle_probe_json(&ibuf)) |line| {
+                return write_stdout_line(init.io, line);
+            }
+            return 1;
+        }
+        return 2;
+    } else if (std.mem.eql(u8, sub, "join")) {
         const tok = if (positionals.items.len > 1) positionals.items[1] else null;
         return serve.cmd_join(init.gpa, init.io, home_path, tok, hub_addr_opt, hub_key_opt, name_opt);
     } else if (std.mem.eql(u8, sub, "authorize")) {
@@ -120,13 +129,15 @@ pub fn main(init: std.process.Init) !u8 {
         const json = try std.json.Stringify.valueAlloc(arena, pr, .{});
         return write_stdout_line(init.io, json);
     } else if (std.mem.eql(u8, sub, "watch-presence")) {
+        var det = sys.PresenceDetector.init(init.io);
+        defer det.deinit(init.io);
         var count: u64 = 0;
         var last_state: ?msg.PresenceState = null;
         var last_locked: ?bool = null;
         var line_arena = std.heap.ArenaAllocator.init(init.gpa);
         defer line_arena.deinit();
         while (true) {
-            const pr = sys.collect_presence(init.io, init.environ_map);
+            const pr = det.collect(init.io, init.environ_map);
             if (last_state == null or last_state.? != pr.state or last_locked != pr.locked) {
                 last_state = pr.state;
                 last_locked = pr.locked;

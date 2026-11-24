@@ -944,8 +944,9 @@ fi
 "$PT" version | grep -q 'protectorate '
 "$PT" $U8 hub info | grep -q 'hub='
 
-mkdir -p "$HUB8/clients/0.0.0-dev"
-printf 'APK_PAYLOAD_E2E8' > "$HUB8/clients/0.0.0-dev/protectorate-android.apk"
+VER8="$("$PT" $U8 --json hub info | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
+mkdir -p "$HUB8/clients/${VER8}"
+printf 'APK_PAYLOAD_E2E8' > "$HUB8/clients/${VER8}/protectorate-android.apk"
 "$PT" $U8 --json hub info | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "protectorate-android.apk" in d.get("clients", []), d'
 UNAUTH_CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${HTTP8}/api/client/protectorate-android.apk")"
 test "$UNAUTH_CODE" = "401"

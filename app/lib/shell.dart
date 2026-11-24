@@ -436,12 +436,12 @@ class _ShellState extends State<Shell> {
 
   Widget _main(BuildContext context, bool phone, double width) {
     final p = pal(context);
+    final app = AppScope.of(context);
     switch (_screen) {
       case Screen.envoy:
         final env = _state.envoy;
         if (env == null) {
-          return const Pane(title: 'Envoy',
-              child: EmptyState('No Envoy sleeve on this hub', glyph: Glyph.envoy));
+          return const Pane(title: 'Envoy', child: StartEnvoyCard());
         }
         final chat = SleeveView(key: const ValueKey('envoy'), sleeveId: env.id, envoy: true);
         if (phone || width < _sidePanelFrom) return chat;
@@ -461,6 +461,10 @@ class _ShellState extends State<Shell> {
         return Pane(
           title: 'Sleeves',
           status: T(treeStatusWord(_state), color: p.dim),
+          actions: [
+            Btn('New sleeve', kind: BtnKind.primary, dense: phone,
+                onTap: () => unawaited(showSpawnSleeveDialog(context, app))),
+          ],
           padded: phone,
           child: phone ? SleeveTree(selected: _sleeveId) : const SleevesTable(),
         );

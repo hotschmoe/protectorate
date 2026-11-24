@@ -47,7 +47,8 @@ class QuotaScreen extends StatelessWidget {
                       const SizedBox(height: 2),
                       T('Fetched ${span(now.difference(q.fetchedAt))} ago', color: p.faint, size: kSmall),
                       const SizedBox(height: 14),
-                      if (q.windows.isEmpty) const EmptyState('No windows reported', compact: true),
+                      if (q.windows.isEmpty && q.note.isEmpty)
+                        const EmptyState('No windows reported', compact: true),
                       for (final w in q.windows)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 10),
