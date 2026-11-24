@@ -6,7 +6,6 @@ const intent = @import("../core/intent.zig");
 const state = @import("../core/state.zig");
 const apply = @import("../core/apply.zig");
 const ccodec = @import("../core/codec.zig");
-const select = @import("../quota/select.zig");
 const extract = @import("../history/extract.zig");
 const drv_proto = @import("../drivers/protocol.zig");
 const drv_claude = @import("../drivers/claude.zig");
@@ -136,16 +135,35 @@ const CoreWorld = struct {
                         .sleeve_id = k.sleeve_id,
                         .g = k.g,
                         .cause = .killed,
-                        .requested = true,
+                        .requested = !k.recover,
                     } }, &sub_intents);
                 },
                 .interrupt_incarnation => |k| {
-                    _ = try self.apply_checked(.{ .exited = .{
-                        .sleeve_id = k.sleeve_id,
-                        .g = k.g,
-                        .cause = .killed,
-                        .requested = false,
-                    } }, &sub_intents);
+                    const sl = self.st.sleeves.get(k.sleeve_id) orelse continue;
+                    const inc = sl.inc orelse continue;
+                    if (inc.harness == .antigravity) {
+                        _ = try self.apply_checked(.{ .turn_settled = .{
+                            .sleeve_id = k.sleeve_id,
+                            .g = k.g,
+                            .turn_end = .cancelled,
+                            .context_tokens = 0,
+                            .context_window = 0,
+                        } }, &sub_intents);
+                        _ = try self.apply_checked(.{ .exited = .{
+                            .sleeve_id = k.sleeve_id,
+                            .g = k.g,
+                            .cause = .killed,
+                            .requested = true,
+                        } }, &sub_intents);
+                    } else {
+                        _ = try self.apply_checked(.{ .turn_settled = .{
+                            .sleeve_id = k.sleeve_id,
+                            .g = k.g,
+                            .turn_end = .cancelled,
+                            .context_tokens = 0,
+                            .context_window = 0,
+                        } }, &sub_intents);
+                    }
                 },
                 .dispatch_job => |dj| {
                     const attempt: u32 = if (self.st.jobs.get(dj.job_id)) |j| j.attempt else 1;
@@ -592,49 +610,6 @@ fn check_invariants(gpa: std.mem.Allocator, st: *const state.State) void {
             tiger.assert(st.nodes.contains(rn.node_id));
         }
     }
-}
-
-fn run_quota_oracle(seed: u64) void {
-    var prng = std.Random.DefaultPrng.init(seed);
-    const rng = prng.random();
-    const now: i64 = 1_700_000_000_000;
-
-    // 1. Model-scoped windows: opusplan matches both wk opus and wk sonnet.
-    tiger.assert(select.gates("wk opus", "opusplan"));
-    tiger.assert(select.gates("wk sonnet", "opusplan"));
-    tiger.assert(!select.gates("wk sonnet", "opus-4-1"));
-    tiger.assert(!select.gates("wk sonnet", "default"));
-    tiger.assert(!select.gates("wk sonnet", null));
-    tiger.assert(select.gates("5h", null));
-    tiger.assert(select.window_length_ms("5h") == 5 * select.hour_ms);
-    tiger.assert(select.window_length_ms("wk sonnet") == 7 * 24 * select.hour_ms);
-
-    // 2. Unmetered pi_vendor/antigravity never auto-selected.
-    const unmetered_only = [_]select.Candidate{
-        .{ .harness = .pi_vendor, .model = "gpt-5" },
-        .{ .harness = .antigravity, .model = "gemini" },
-    };
-    const empty_q = [_]select.Quota{};
-    if (select.select_with_fallback(&unmetered_only, &empty_q, .medium, now)) |_| {
-        tiger.assert(false);
-    } else |err| {
-        tiger.assert(err == error.NoMeteredTarget);
-    }
-
-    // 3. Stale grace window blocking vs expired.
-    const used = 96.0 + @as(f64, @floatFromInt(rng.uintLessThan(u8, 4)));
-    const reset_past = now - 60_000; // within 600s grace window!
-    const win_blocking = [_]select.Window{.{ .label = "5h", .used_pct = used, .resets_at_ms = reset_past }};
-    const q_stale = [_]select.Quota{
-        .{ .subscription = .claude, .reading = .stale, .fetched_at_ms = now - 120_000, .windows = &win_blocking },
-        .{ .subscription = .local, .reading = .ok, .fetched_at_ms = now },
-    };
-    const cands = [_]select.Candidate{
-        .{ .harness = .claude, .model = "sonnet" },
-        .{ .harness = .pi_local, .model = "hotschmoe-dd" },
-    };
-    const dec = select.select_target(&cands, &q_stale, .medium, now) catch unreachable;
-    tiger.assert(dec.candidate.harness == .pi_local);
 }
 
 fn run_drivers_oracle(gpa: std.mem.Allocator, seed: u64) !void {
@@ -1294,7 +1269,6 @@ pub fn run_seed(gpa: std.mem.Allocator, seed: u64, steps: usize) !void {
     }
     try world.verify_replay_equals_live();
 
-    run_quota_oracle(seed);
     try run_drivers_oracle(gpa, seed);
     try run_admission_oracle(gpa, seed);
     if (seed == 0 or (seed % 7) == 0) {

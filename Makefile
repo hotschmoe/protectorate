@@ -42,7 +42,7 @@ check-gen:
 	$(ZIG) build check-gen
 
 dst:
-	$(ZIG) build -Doptimize=safe dst -- --seeds 300 --steps 1500
+	$(ZIG) build -j4 -Doptimize=safe dst -- --seeds 300 --steps 1500
 
 web:
 	cd app && $(FLUTTER) build web --release --no-web-resources-cdn $(APP_VERSION_FLAGS)

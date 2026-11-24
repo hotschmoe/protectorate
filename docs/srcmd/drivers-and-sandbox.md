@@ -6,15 +6,21 @@ Protectorate drives upstream CLIs exclusively via their official machine-readabl
 - **`claude`** (`claude.zig`): `-p --verbose --output-format stream-json --input-format stream-json --include-partial-messages`
 - **`codex`** (`codex.zig`): `app-server` JSON-RPC 2.0
 - **`grok`** (`grok.zig`): `--acp` JSON-RPC 2.0
-- **`antigravity`** (`antigravity.zig`): `agy --input-format stream-json --output-format stream-json` (`event: init / step_update / result`, subtracting cumulative session usage counters per turn and signalling interrupts with `SIGINT`)
+- **`antigravity`** (`antigravity.zig`): `agy --input-format stream-json --output-format stream-json` (`event: init / step_update / result`, subtracting cumulative session usage counters per turn). The CLI rejects `control_request`; an interrupt terminates its process tree and resumes the native conversation in a new incarnation.
 - **`pi`** (`pi.zig`): `--mode rpc` JSONL (`get_state`, `prompt`, `steer`, `abort`, `compact`)
 
 Each adapter translates raw protocol lines into normalized `DriverEntry` events (`session_info`, `assistant_text`, `reasoning`, `tool_call`, `tool_result`, `approval_request`, `compaction`, `turn_started`, `turn_settled`) through `protocol.Out`, coalescing streaming deltas and capping block/output sizes (`max_block = 1 MiB`).
 
 `drivers/session.zig` wraps a spawned child process with dedicated stdout NDJSON and bounded 16 KiB stderr ring threads, exposes `compact()` for native in-session compaction (`claude`, `pi`, with automatic handoff resleeve fallback for other harnesses), and releases `Session.mu` prior to delivering callbacks to eliminate lock-order inversions with `hub/runtime.zig`. Worktree sleeves provision isolated checkouts (`<hub_home>/worktrees/<id>` on `pt/<id>`) separate from the base repo path, and `hub/runtime.zig` monitors configured `sleeve_devices` paths for attach/detach transitions.
 
+The G6 signature combines the tool name with a SHA-256 digest of the serialized input before transcript clipping. Calls with unavailable input receive distinct signatures. Exit callbacks hand cleanup to the runtime tick thread so recovery never joins the reader from itself. A guardrail notice is recorded in the sleeve transcript as well as the hub event log.
+
+Interrupts have a 30-second grace period; an unresponsive incarnation is fenced and recovered. Antigravity stays interrupting until its exit is reaped, so queued prompts wait for the new incarnation. Interrupt-driven Antigravity relaunches and crash recoveries share a limit of two resumes in ten minutes; exceeding it parks the sleeve with `resume_rate_exceeded`.
+
+Crash recovery passes the bound native session ID back to each adapter: Claude uses `--resume`, Codex `thread/resume`, Grok `session/load`, Pi `--session`, and Antigravity `--conversation`. An exit before binding starts a fresh session. Repeated crashes and refused handshakes are bounded by the resume window and the crash strike limit; the strike window also bounds boot timeouts, whose 15-minute interval exceeds the resume window. The adapters implement these resume paths; their success depends on the installed harness and its stored session.
+
 ## Cross-Platform Guardrails & Sandboxing (`src/sandbox/`)
 
 - **Per-sleeve hygiene (all OSes):** When sandboxing is enabled, `hub/runtime.zig` provisions an isolated per-sleeve temp directory (`<hub_home>/run/<sleeve_id>/tmp` exposed via `TMPDIR`/`TEMP`/`TMP`), exports `PROTECTORATE_SLEEVE`/`PROTECTORATE_WORKSPACE`, and strips nested session markers (`CLAUDECODE`, `CODEX_THREAD_ID`, etc.).
-- **Process trees (`ProcessGuard` in `sandbox/exec.zig`):** Tracks POSIX process groups (`pgid = 0` + `-pid` kill) on Linux/macOS and Win32 Job Objects (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` + `TerminateJobObject` + optional `JOB_OBJECT_LIMIT_JOB_MEMORY`) on Windows for both local sleeves and remote `node/runner.zig` jobs.
+- **Process trees (`ProcessGuard` in `sandbox/exec.zig`):** Tracks POSIX process groups, Linux cgroups where available and tagged processes, and Win32 Job Objects for both local sleeves and remote `node/runner.zig` jobs. The runtime fences a sleeve tree before discarding its handle.
 - **Linux `bwrap` + Landlock `__guard` fallback:** On Linux, `sandbox/spec.zig` prefers `bwrap` (`ro-bind / /`, explicit workspace/git mounts, `--clearenv`, credential masks leaving only the active harness state dir accessible). When `bwrap` is unavailable, `hub/runtime.zig` falls back to self-re-exec via `<exe> __guard` (`sandbox/exec.zig`), applying `PR_SET_PDEATHSIG`, optional `RLIMIT_AS`, and Landlock LSM write restrictions (`handled_access_fs`) allowing writes only inside the workspace, git admin dirs, active harness state dir, sleeve temp dir, `/dev/null`, and `/dev/shm`.

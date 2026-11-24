@@ -72,7 +72,9 @@ const PeerSession = struct {
     }
 
     fn release(self: *PeerSession) void {
-        if (self.refs.fetchSub(1, .acq_rel) == 1) {
+        const previous = self.refs.fetchSub(1, .acq_rel);
+        tiger.assert(previous > 0);
+        if (previous == 1) {
             self.conn.deinit();
             self.pending.deinit(self.gpa);
             self.gpa.free(self.node_id);
@@ -99,6 +101,7 @@ const PeerSession = struct {
         {
             self.pending_mu.lockUncancelable(self.io);
             defer self.pending_mu.unlock(self.io);
+            if (self.closed.load(.acquire)) return error.Disconnected;
             try self.pending.put(self.gpa, id, &pc);
         }
         defer {
@@ -136,6 +139,9 @@ pub const FleetServer = struct {
     accept_thread: ?std.Thread = null,
     peers_mu: std.Io.Mutex = .init,
     peers: std.StringHashMapUnmanaged(*PeerSession) = .empty,
+    conns_mu: std.Io.Mutex = .init,
+    conns_cond: std.Io.Condition = .init,
+    conns: ?*ConnArg = null,
 
     pub fn init(
         gpa: std.mem.Allocator,
@@ -168,8 +174,8 @@ pub const FleetServer = struct {
         return self.actual_port.load(.acquire);
     }
 
-    pub fn stop_and_deinit(self: *FleetServer) void {
-        self.stopping.store(true, .release);
+    pub fn shutdown(self: *FleetServer) void {
+        if (self.stopping.swap(true, .acq_rel)) return;
         const port = self.actual_port.load(.acquire);
         if (port != 0) {
             const wake_host = if (std.mem.eql(u8, self.host, "0.0.0.0"))
@@ -187,23 +193,23 @@ pub const FleetServer = struct {
             s.deinit(self.io);
             self.srv = null;
         }
-
-        self.peers_mu.lockUncancelable(self.io);
-        var vals: std.ArrayList(*PeerSession) = .empty;
-        var it = self.peers.iterator();
-        while (it.next()) |e| {
-            self.gpa.free(e.key_ptr.*);
-            vals.append(self.gpa, e.value_ptr.*) catch {};
+        self.conns_mu.lockUncancelable(self.io);
+        var current = self.conns;
+        while (current) |conn| : (current = conn.next) {
+            if (conn.active) conn.stream.shutdown(self.io, .both) catch {};
         }
+        self.conns_mu.unlock(self.io);
+    }
+
+    pub fn stop_and_deinit(self: *FleetServer) void {
+        self.shutdown();
+        self.conns_mu.lockUncancelable(self.io);
+        while (self.conns != null) {
+            self.conns_cond.waitUncancelable(self.io, &self.conns_mu);
+        }
+        self.conns_mu.unlock(self.io);
+        tiger.assert(self.peers.count() == 0);
         self.peers.deinit(self.gpa);
-        self.peers_mu.unlock(self.io);
-
-        for (vals.items) |ps| {
-            ps.closed.store(true, .release);
-            ps.conn.shutdown();
-            ps.release();
-        }
-        vals.deinit(self.gpa);
         self.gpa.free(self.host);
     }
 
@@ -247,6 +253,7 @@ pub const FleetServer = struct {
     fn get_peer(self: *FleetServer, node_id: []const u8) ?*PeerSession {
         self.peers_mu.lockUncancelable(self.io);
         defer self.peers_mu.unlock(self.io);
+        if (self.stopping.load(.acquire)) return null;
         if (self.peers.get(node_id)) |ps| {
             ps.acquire();
             return ps;
@@ -544,8 +551,12 @@ pub const FleetServer = struct {
                 continue;
             };
             ctx.* = .{ .fleet = self, .stream = stream };
+            self.conns_mu.lockUncancelable(self.io);
+            ctx.next = self.conns;
+            self.conns = ctx;
+            self.conns_mu.unlock(self.io);
             const t = std.Thread.spawn(.{}, peer_conn_thread, .{ctx}) catch {
-                self.gpa.destroy(ctx);
+                ctx.finish();
                 stream.close(self.io);
                 continue;
             };
@@ -557,12 +568,31 @@ pub const FleetServer = struct {
 const ConnArg = struct {
     fleet: *FleetServer,
     stream: std.Io.net.Stream,
+    next: ?*ConnArg = null,
+    active: bool = true,
+
+    fn deactivate(self: *ConnArg) void {
+        self.fleet.conns_mu.lockUncancelable(self.fleet.io);
+        self.active = false;
+        self.fleet.conns_mu.unlock(self.fleet.io);
+    }
+
+    fn finish(self: *ConnArg) void {
+        const fleet = self.fleet;
+        fleet.conns_mu.lockUncancelable(fleet.io);
+        var link = &fleet.conns;
+        while (link.* != self) link = &link.*.?.next;
+        link.* = self.next;
+        fleet.gpa.destroy(self);
+        fleet.conns_cond.broadcast(fleet.io);
+        fleet.conns_mu.unlock(fleet.io);
+    }
 };
 
 fn peer_conn_thread(arg: *ConnArg) void {
     const self = arg.fleet;
     const stream = arg.stream;
-    self.gpa.destroy(arg);
+    defer arg.finish();
 
     var arena_st = std.heap.ArenaAllocator.init(self.gpa);
     defer arena_st.deinit();
@@ -570,16 +600,19 @@ fn peer_conn_thread(arg: *ConnArg) void {
 
     const peers_allowed = self.hooks.get_allowed_peers(self.hooks.ctx, arena);
     if (peers_allowed.len == 0) {
+        arg.deactivate();
         stream.close(self.io);
         return;
     }
     const keys = arena.alloc([32]u8, peers_allowed.len) catch {
+        arg.deactivate();
         stream.close(self.io);
         return;
     };
     for (peers_allowed, 0..) |ap, i| keys[i] = ap.pub_key;
 
     var conn = transport.NoiseConn.accept_on_chan(self.gpa, self.io, .{ .tcp = stream }, self.hub_kp, keys) catch {
+        arg.deactivate();
         stream.close(self.io);
         return;
     };
@@ -592,27 +625,32 @@ fn peer_conn_thread(arg: *ConnArg) void {
         }
     }
     const peer = matched orelse {
+        arg.deactivate();
         conn.deinit();
         return;
     };
 
     var hello_frame = conn.recv_frame() catch {
+        arg.deactivate();
         conn.deinit();
         return;
     };
     defer hello_frame.deinit(self.gpa);
 
     if (hello_frame.kind != .request) {
+        arg.deactivate();
         conn.deinit();
         return;
     }
     const h_req = msg.decode_arena(msg.Request, arena, hello_frame.payload) catch {
+        arg.deactivate();
         conn.deinit();
         return;
     };
     const hello = switch (h_req) {
         .hello => |h| h,
         else => {
+            arg.deactivate();
             conn.deinit();
             return;
         },
@@ -623,11 +661,13 @@ fn peer_conn_thread(arg: *ConnArg) void {
         .hub_version = version.version,
         .node_name = peer.name,
     }) catch {
+        arg.deactivate();
         conn.deinit();
         return;
     };
 
     const ps = self.gpa.create(PeerSession) catch {
+        arg.deactivate();
         conn.deinit();
         return;
     };
@@ -635,11 +675,13 @@ fn peer_conn_thread(arg: *ConnArg) void {
         .gpa = self.gpa,
         .io = self.io,
         .node_id = self.gpa.dupe(u8, peer.node_id) catch {
+            arg.deactivate();
             self.gpa.destroy(ps);
             conn.deinit();
             return;
         },
         .name = self.gpa.dupe(u8, peer.name) catch {
+            arg.deactivate();
             self.gpa.free(ps.node_id);
             self.gpa.destroy(ps);
             conn.deinit();
@@ -651,18 +693,28 @@ fn peer_conn_thread(arg: *ConnArg) void {
 
     {
         self.peers_mu.lockUncancelable(self.io);
-        const old = self.peers.fetchRemove(ps.node_id);
+        if (self.stopping.load(.acquire)) {
+            self.peers_mu.unlock(self.io);
+            arg.deactivate();
+            ps.release();
+            return;
+        }
         const kdup = self.gpa.dupe(u8, ps.node_id) catch {
             self.peers_mu.unlock(self.io);
+            arg.deactivate();
             ps.release();
             return;
         };
-        self.peers.put(self.gpa, kdup, ps) catch {
+        self.peers.ensureUnusedCapacity(self.gpa, 1) catch {
             self.gpa.free(kdup);
             self.peers_mu.unlock(self.io);
+            arg.deactivate();
             ps.release();
             return;
         };
+        const old = self.peers.fetchRemove(ps.node_id);
+        ps.acquire();
+        self.peers.putAssumeCapacity(kdup, ps);
         self.peers_mu.unlock(self.io);
         if (old) |okv| {
             self.gpa.free(okv.key);
@@ -732,6 +784,7 @@ fn peer_conn_thread(arg: *ConnArg) void {
         }
     }
 
+    ps.closed.store(true, .release);
     ps.pending_mu.lockUncancelable(self.io);
     var pit = ps.pending.iterator();
     while (pit.next()) |pe| {
@@ -759,8 +812,9 @@ fn peer_conn_thread(arg: *ConnArg) void {
     }
     if (was_current) {
         self.hooks.on_disconnected(self.hooks.ctx, ps.node_id, disconnect_reason);
+        ps.release();
     }
-    ps.closed.store(true, .release);
+    arg.deactivate();
     ps.release();
 }
 

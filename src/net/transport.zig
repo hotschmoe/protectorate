@@ -4,6 +4,16 @@ const frame = @import("frame.zig");
 const noise = @import("noise.zig");
 const msg = @import("msg.zig");
 
+var dial_io_mu: std.Io.Mutex = .init;
+var dial_threaded: ?std.Io.Threaded = null;
+
+fn dial_worker_io(io: std.Io) std.Io {
+    dial_io_mu.lockUncancelable(io);
+    defer dial_io_mu.unlock(io);
+    if (dial_threaded == null) dial_threaded = .init(std.heap.page_allocator, .{});
+    return dial_threaded.?.io();
+}
+
 pub const Chan = union(enum) {
     tcp: std.Io.net.Stream,
     stdio: struct {
@@ -112,12 +122,12 @@ pub const NoiseConn = struct {
             refs: std.atomic.Value(usize),
 
             fn create(
-                r_gpa: std.mem.Allocator,
-                r_io: std.Io,
                 r_endpoints: []const Endpoint,
+                r_io: std.Io,
                 r_my_static: noise.KeyPair,
                 r_peer_static: [32]u8,
             ) !*@This() {
+                const r_gpa = std.heap.page_allocator;
                 const n = @min(r_endpoints.len, 16);
                 const s = try r_gpa.create(@This());
                 errdefer r_gpa.destroy(s);
@@ -148,7 +158,9 @@ pub const NoiseConn = struct {
             }
 
             fn release(self: *@This()) void {
-                if (self.refs.fetchSub(1, .acq_rel) == 1) {
+                const previous = self.refs.fetchSub(1, .acq_rel);
+                tiger.assert(previous > 0);
+                if (previous == 1) {
                     if (self.winner) |*w| {
                         w.conn.deinit();
                     }
@@ -160,7 +172,7 @@ pub const NoiseConn = struct {
             }
         };
 
-        const st = try RaceState.create(gpa, io, endpoints, my_static, peer_static);
+        const st = try RaceState.create(endpoints, dial_worker_io(io), my_static, peer_static);
         defer st.release();
 
         const WorkerArg = struct {
@@ -209,7 +221,7 @@ pub const NoiseConn = struct {
         for (0..count) |i| {
             _ = st.refs.fetchAdd(1, .acq_rel);
             const t = std.Thread.spawn(.{}, worker_fn, .{WorkerArg{ .state = st, .idx = i }}) catch {
-                _ = st.refs.fetchSub(1, .acq_rel);
+                st.release();
                 continue;
             };
             t.detach();
@@ -218,24 +230,29 @@ pub const NoiseConn = struct {
         if (spawned == 0) return error.ConnectFailed;
 
         const deadline_ms = if (timeout_ms > 0)
-            std.Io.Clock.awake.now(io).toMilliseconds() + timeout_ms
+            std.Io.Clock.awake.now(st.io).toMilliseconds() + timeout_ms
         else
             std.math.maxInt(i64);
 
-        st.mu.lockUncancelable(io);
+        st.mu.lockUncancelable(st.io);
         while (st.winner == null and st.finished < spawned) {
-            const now_ms = std.Io.Clock.awake.now(io).toMilliseconds();
+            const now_ms = std.Io.Clock.awake.now(st.io).toMilliseconds();
             const rem_ms = deadline_ms - now_ms;
             if (rem_ms <= 0) break;
-            st.cond.waitTimeout(io, &st.mu, .{
+            st.cond.waitTimeout(st.io, &st.mu, .{
                 .duration = .{ .raw = .fromMilliseconds(rem_ms), .clock = .awake },
             }) catch {};
         }
-        const won = st.winner;
+        var won = st.winner;
         st.winner = null;
         st.winner_taken = true;
         st.aborted.store(true, .release);
-        st.mu.unlock(io);
+        st.mu.unlock(st.io);
+
+        if (won) |*winner| {
+            winner.conn.gpa = gpa;
+            winner.conn.io = io;
+        }
 
         return won orelse error.ConnectFailed;
     }

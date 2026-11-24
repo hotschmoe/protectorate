@@ -3,6 +3,20 @@ const tiger = @import("../tiger.zig");
 const json_util = @import("../json_util.zig");
 const proto = @import("protocol.zig");
 
+fn tool_input(arena: std.mem.Allocator, item: std.json.Value) !std.json.Value {
+    if (item != .object) return .null;
+    var input: std.json.ObjectMap = .empty;
+    var it = item.object.iterator();
+    while (it.next()) |field| {
+        const key = field.key_ptr.*;
+        if (std.mem.eql(u8, key, "id") or std.mem.eql(u8, key, "status") or
+            std.mem.eql(u8, key, "processId") or std.mem.eql(u8, key, "aggregatedOutput") or
+            std.mem.eql(u8, key, "exitCode") or std.mem.eql(u8, key, "durationMs")) continue;
+        try input.put(arena, key, field.value_ptr.*);
+    }
+    return .{ .object = input };
+}
+
 const RpcKind = union(enum) {
     initialize,
     thread_open,
@@ -248,14 +262,15 @@ pub const Codex = struct {
             const item = json_util.value_get(p, "item") orelse return;
             const id = json_util.value_str(item, "id") orelse "";
             const itype = json_util.value_str(item, "type") orelse "";
+            const input = try tool_input(arena, item);
             if (std.mem.eql(u8, itype, "commandExecution")) {
-                try out.tool_call(id, .command, "shell", item);
+                try out.tool_call(id, .command, "shell", input);
             } else if (std.mem.eql(u8, itype, "fileChange")) {
-                try out.tool_call(id, .edit, "apply_patch", item);
+                try out.tool_call(id, .edit, "apply_patch", input);
             } else if (std.mem.eql(u8, itype, "mcpToolCall")) {
-                try out.tool_call(id, .mcp, json_util.value_str(item, "tool") orelse "mcp", item);
+                try out.tool_call(id, .mcp, json_util.value_str(item, "tool") orelse "mcp", input);
             } else if (std.mem.eql(u8, itype, "webSearch")) {
-                try out.tool_call(id, .web, "web_search", item);
+                try out.tool_call(id, .web, "web_search", input);
             }
         } else if (std.mem.eql(u8, method, "item/completed")) {
             const item = json_util.value_get(p, "item") orelse return;

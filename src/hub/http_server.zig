@@ -18,6 +18,9 @@ pub const HttpServer = struct {
     stopping: std.atomic.Value(bool) = .init(false),
     srv: ?std.Io.net.Server = null,
     accept_thread: ?std.Thread = null,
+    conns_mu: std.Io.Mutex = .init,
+    conns_cond: std.Io.Condition = .init,
+    conns: ?*ConnArg = null,
 
     pub fn start(gpa: std.mem.Allocator, io: std.Io, rt: *runtime.Runtime, listen_addr: []const u8) !*HttpServer {
         return start_with_options(gpa, io, rt, listen_addr, &.{});
@@ -65,6 +68,7 @@ pub const HttpServer = struct {
 
     pub fn stop_and_destroy(self: *HttpServer) void {
         self.stopping.store(true, .release);
+        self.rt.stream_hub.wake_all();
         const port = self.actual_port.load(.acquire);
         if (port != 0) {
             const wake_host = if (std.mem.eql(u8, self.host, "0.0.0.0"))
@@ -82,6 +86,13 @@ pub const HttpServer = struct {
             s.deinit(self.io);
             self.srv = null;
         }
+        self.conns_mu.lockUncancelable(self.io);
+        var current = self.conns;
+        while (current) |conn| : (current = conn.next) {
+            conn.stream.shutdown(self.io, .both) catch {};
+        }
+        while (self.conns != null) self.conns_cond.waitUncancelable(self.io, &self.conns_mu);
+        self.conns_mu.unlock(self.io);
         self.gpa.free(self.trusted_proxies);
         self.gpa.free(self.host);
         self.gpa.destroy(self);
@@ -107,9 +118,12 @@ pub const HttpServer = struct {
                 continue;
             };
             arg.* = .{ .hs = self, .stream = stream };
+            self.conns_mu.lockUncancelable(self.io);
+            arg.next = self.conns;
+            self.conns = arg;
+            self.conns_mu.unlock(self.io);
             const t = std.Thread.spawn(.{}, conn_thread, .{arg}) catch {
-                self.gpa.destroy(arg);
-                stream.close(self.io);
+                arg.finish();
                 continue;
             };
             t.detach();
@@ -120,6 +134,19 @@ pub const HttpServer = struct {
 const ConnArg = struct {
     hs: *HttpServer,
     stream: std.Io.net.Stream,
+    next: ?*ConnArg = null,
+
+    fn finish(self: *ConnArg) void {
+        const hs = self.hs;
+        hs.conns_mu.lockUncancelable(hs.io);
+        var link = &hs.conns;
+        while (link.* != self) link = &link.*.?.next;
+        link.* = self.next;
+        self.stream.close(hs.io);
+        hs.gpa.destroy(self);
+        hs.conns_cond.broadcast(hs.io);
+        hs.conns_mu.unlock(hs.io);
+    }
 };
 
 const cors_headers = [_]std.http.Header{
@@ -131,8 +158,7 @@ const cors_headers = [_]std.http.Header{
 fn conn_thread(arg: *ConnArg) void {
     const hs = arg.hs;
     const stream = arg.stream;
-    hs.gpa.destroy(arg);
-    defer stream.close(hs.io);
+    defer arg.finish();
 
     var rbuf: [32 * 1024]u8 = undefined;
     var wbuf: [32 * 1024]u8 = undefined;

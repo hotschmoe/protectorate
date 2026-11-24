@@ -132,6 +132,7 @@ pub const DriverEntry = union(enum) {
         name: []const u8,
         summary: []const u8,
         input_json: ?[]const u8 = null,
+        signature: ?[]const u8 = null,
         truncated: bool,
     },
     tool_result: struct {
@@ -366,6 +367,11 @@ pub const Out = struct {
         const truncated = if (raw_json) |rj| rj.len > max_tool_input else false;
         const clipped_json: ?[]const u8 = if (raw_json) |rj| clip_utf8(rj, max_tool_input) else null;
         const summary = try summarize_alloc(self.alloc, name, input_val);
+        const signature = if (raw_json) |raw| blk: {
+            var digest: [32]u8 = undefined;
+            std.crypto.hash.sha2.Sha256.hash(raw, &digest, .{});
+            break :blk try std.fmt.allocPrint(self.alloc, "{s}:{x}", .{ name, std.fmt.bytesToHex(digest, .lower) });
+        } else null;
         try self.emit(.{
             .tool_call = .{
                 .id = try self.alloc.dupe(u8, id),
@@ -373,6 +379,7 @@ pub const Out = struct {
                 .name = try self.alloc.dupe(u8, name),
                 .summary = summary,
                 .input_json = clipped_json,
+                .signature = signature,
                 .truncated = truncated,
             },
         });
@@ -406,7 +413,8 @@ pub fn bounded_output(alloc: std.mem.Allocator, raw: []const u8) !struct { text:
 }
 
 pub fn summarize_alloc(alloc: std.mem.Allocator, name: []const u8, input_val: std.json.Value) ![]const u8 {
-    if (json_util.value_str(input_val, "command") orelse
+    if (json_util.value_str(input_val, "CommandLine") orelse
+        json_util.value_str(input_val, "command") orelse
         json_util.value_str(input_val, "cmd") orelse
         json_util.value_str(input_val, "file_path") orelse
         json_util.value_str(input_val, "path") orelse

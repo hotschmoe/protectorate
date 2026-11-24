@@ -12,6 +12,7 @@ pub const Subscription = enum {
     claude,
     codex,
     grok,
+    antigravity,
     local,
     api,
     unknown,
@@ -66,13 +67,13 @@ pub const Harness = enum {
             .grok => .grok,
             .pi_vendor => .api,
             .pi_local => .local,
-            .antigravity => .api,
+            .antigravity => .antigravity,
         };
     }
 
     pub fn is_subscribed(self: Harness) bool {
         return switch (self) {
-            .claude, .codex, .grok => true,
+            .claude, .codex, .grok, .antigravity => true,
             else => false,
         };
     }
@@ -166,6 +167,14 @@ fn any_family(folded: []const u8) bool {
 }
 
 pub fn gates(label: []const u8, model: ?[]const u8) bool {
+    if (std.mem.startsWith(u8, label, "model ")) {
+        if (unspecified(model)) return true;
+        var scope_buf: [128]u8 = undefined;
+        var model_buf: [128]u8 = undefined;
+        const scope = fold_alnum(label[6..], &scope_buf);
+        const name = fold_alnum(model.?, &model_buf);
+        return name.len > 0 and std.mem.startsWith(u8, scope, name);
+    }
     if (!std.mem.startsWith(u8, label, "wk ")) return true;
     const scope = std.mem.trim(u8, label[3..], " \t");
     if (scope.len == 0) return true;
@@ -247,6 +256,7 @@ fn past_blocks(q: *const Quota, now_ms: i64, min_pct: f64, model: ?[]const u8) b
         const used = w.used_pct orelse continue;
         if (!std.math.isFinite(used)) continue;
         if (!gates(w.label, model)) continue;
+        if (unspecified(model) and std.mem.startsWith(u8, w.label, "model ")) continue;
         const reset = reset_at(w) orelse continue;
         const remaining = std.math.clamp(100.0 - used, 0.0, 100.0);
         if (reset > now_ms or remaining >= min_pct) continue;
@@ -255,6 +265,17 @@ fn past_blocks(q: *const Quota, now_ms: i64, min_pct: f64, model: ?[]const u8) b
         } else {
             if (fetched < reset +| stale_grace_ms and now_ms < fetched +| stale_grace_ms) return true;
         }
+    }
+    if (unspecified(model)) {
+        var has_model = false;
+        for (q.windows) |w| {
+            if (!std.mem.startsWith(u8, w.label, "model ")) continue;
+            const used = w.used_pct orelse continue;
+            if (!std.math.isFinite(used) or unspecified(w.label[6..])) continue;
+            has_model = true;
+            if (!past_blocks(q, now_ms, min_pct, w.label[6..])) return false;
+        }
+        return has_model;
     }
     return false;
 }
@@ -265,6 +286,23 @@ const Scored = struct {
 };
 
 fn score_quota(q: *const Quota, now_ms: i64, model: ?[]const u8, min_pct: ?f64) ?Scored {
+    if (unspecified(model)) {
+        var has_model = false;
+        var best: ?Scored = null;
+        for (q.windows) |w| {
+            if (!std.mem.startsWith(u8, w.label, "model ")) continue;
+            const used = w.used_pct orelse continue;
+            if (!std.math.isFinite(used) or unspecified(w.label[6..])) continue;
+            has_model = true;
+            if (stale_limit_passed(q, w, now_ms, min_pct, used)) continue;
+            if (reset_at(w)) |r| if (r <= now_ms) continue;
+            if (min_pct) |min| if (past_blocks(q, now_ms, min, w.label[6..])) continue;
+            const scored = score_quota(q, now_ms, w.label[6..], min_pct) orelse continue;
+            if (best == null or scored.usable > best.?.usable or
+                (scored.usable == best.?.usable and scored.score > best.?.score)) best = scored;
+        }
+        if (has_model) return best;
+    }
     var min_usable: f64 = std.math.inf(f64);
     var count: usize = 0;
 
