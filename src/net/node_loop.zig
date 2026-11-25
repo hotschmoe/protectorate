@@ -60,7 +60,8 @@ pub const Buffers = struct {
 };
 
 const Slot = struct {
-    state: enum { free, working, sending } = .free,
+    state: enum { free, working, sending, awaiting } = .free,
+    mark: u64 = 0,
     task: Task = .request,
     generation: u64 = 0,
     id: u64 = 0,
@@ -99,6 +100,7 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
         work: bounded.Ring(u8, work_slots) = .{},
         finished: bounded.Ring(u8, work_slots) = .{},
         outbox: bounded.Ring(u8, work_slots) = .{},
+        awaiting: bounded.Ring(u8, work_slots) = .{},
         control: bounded.Ring(Control, control_slots) = .{},
         resolve_wanted: ?u64 = null,
         stop_flush: bool = false,
@@ -165,14 +167,14 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
         /// True when no slot is held and nothing is queued: every worker has handed its slot back.
         pub fn quiescent(self: *const Self) bool {
             for (&self.slots) |*slot| if (slot.state != .free) return false;
-            return self.work.len == 0 and self.finished.len == 0 and self.outbox.len == 0;
+            return self.work.len == 0 and self.finished.len == 0 and self.outbox.len == 0 and self.awaiting.len == 0;
         }
 
         /// Request slots still with a worker or waiting to send.
         pub fn count_requests(self: *const Self) usize {
             var count: usize = 0;
             for (&self.slots) |*slot| {
-                if (slot.state != .free and slot.task == .request) count += 1;
+                if ((slot.state == .working or slot.state == .sending) and slot.task == .request) count += 1;
             }
             return count;
         }
@@ -188,12 +190,14 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
         pub fn assert_invariants(self: *const Self) void {
             var working: usize = 0;
             var sending: usize = 0;
+            var awaiting: usize = 0;
             for (&self.slots) |*slot| switch (slot.state) {
                 .free => {},
                 .working => working += 1,
                 .sending => sending += 1,
+                .awaiting => awaiting += 1,
             };
-            tiger.assert(sending == self.outbox.len);
+            tiger.assert(sending == self.outbox.len and awaiting == self.awaiting.len);
             tiger.assert(self.work.len + self.finished.len <= working);
         }
 
@@ -205,6 +209,7 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
                 var progress = self.take_finished();
                 if (self.service_events()) progress = true;
                 if (self.flush()) progress = true;
+                if (self.settle()) progress = true;
                 if (self.submit_resolve()) progress = true;
                 if (!progress) break;
             }
@@ -326,6 +331,28 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
             return progress;
         }
 
+        /// Whether every byte of an awaiting slot's reply has been written to the socket on the link it was sent on.
+        fn fully_sent(self: *const Self, index: u8) bool {
+            const slot = &self.slots[index];
+            return slot.generation == self.link.generation and self.link.conn.tx_done >= slot.mark;
+        }
+
+        /// A reply with a side effect keeps its slot until its last byte is written, so a disconnect before that
+        /// still releases the effect; once written, only lease expiry covers a reply lost in flight.
+        fn settle(self: *Self) bool {
+            var progress = false;
+            while (self.awaiting.len > 0) {
+                const index = self.awaiting.items[self.awaiting.head];
+                if (self.fully_sent(index)) {
+                    self.release(self.awaiting.pop().?);
+                } else if (self.slots[index].generation == self.link.generation and self.link.phase == .established) {
+                    break;
+                } else self.drop(self.awaiting.pop().?);
+                progress = true;
+            }
+            return progress;
+        }
+
         fn release(self: *Self, index: u8) void {
             self.slots[index] = .{};
         }
@@ -350,6 +377,9 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
                 if (slot.state == .working) slot.abandoned.store(true, .release);
             }
             while (self.outbox.pop()) |index| self.drop(index);
+            while (self.awaiting.pop()) |index| {
+                if (self.fully_sent(index)) self.release(index) else self.drop(index);
+            }
             self.control = .{};
         }
 
@@ -439,8 +469,12 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
                     self.stop_deadline = self.backend.now() +| flush_wait_ms;
                 }
                 _ = self.outbox.pop();
-                self.release(index);
                 progress = true;
+                if (slot.cleanup) {
+                    slot.state = .awaiting;
+                    slot.mark = self.link.conn.tx_queued;
+                    self.awaiting.push(index) catch unreachable;
+                } else self.release(index);
             }
             return progress;
         }

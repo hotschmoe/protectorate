@@ -564,9 +564,11 @@ pub const Server = struct {
             self.resolver_busy.store(false, .release);
         }
         self.sync.lock();
-        @memcpy(self.resolved[0..count], found[0..count]);
-        self.resolved_count = count;
-        self.resolved_id = id;
+        if (id > self.resolved_id) {
+            @memcpy(self.resolved[0..count], found[0..count]);
+            self.resolved_count = count;
+            self.resolved_id = id;
+        }
         self.sync.unlock();
     }
 

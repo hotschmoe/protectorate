@@ -472,7 +472,7 @@ fn step_workers(core: *Core, workers: *[fake_workers]Worker, sim: *Sim, stop_fin
             work.payload_len = body.len;
             work.kind = if (len > 0) .end else .response;
             work.then_stop = kind_of(worker.x) == .stop;
-            work.cleanup = kind_of(worker.x) == .abandon;
+            work.cleanup = kind_of(worker.x) == .abandon or kind_of(worker.x) == .quick;
             if (work.then_stop) stop_finished.* = true;
         }
         core.finish_work(work);

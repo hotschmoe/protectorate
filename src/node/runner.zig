@@ -55,6 +55,10 @@ const JobEntry = struct {
     thread: ?std.Thread = null,
     started_ms: i64,
     proc_exited: std.atomic.Value(bool) = .init(false),
+    kill_issued: bool = false,
+    starting: bool = true,
+    log_ready: bool = false,
+    start_cond: std.Io.Condition = .init,
     run_started_ms: i64 = 0,
     last_renew_ms: i64 = 0,
 
@@ -142,6 +146,18 @@ pub const Runner = struct {
         return self;
     }
 
+    /// Kills every running job's process tree without freeing anything: the normal teardown's effect on jobs, for a
+    /// process that must exit while a worker may still reach the runner.
+    pub fn fence_all(self: *Runner) void {
+        self.mu.lockUncancelable(self.io);
+        var list: std.ArrayList(*JobEntry) = .empty;
+        defer list.deinit(self.gpa);
+        var it = self.jobs.iterator();
+        while (it.next()) |e| list.append(self.gpa, e.value_ptr.*) catch break;
+        self.mu.unlock(self.io);
+        for (list.items) |job| cancel_live(job);
+    }
+
     pub fn deinit(self: *Runner) void {
         self.supervisor_stop.store(true, .release);
         if (self.supervisor) |t| t.join();
@@ -155,8 +171,7 @@ pub const Runner = struct {
         self.mu.unlock(self.io);
 
         for (list.items) |job| {
-            job.cancel_requested.store(true, .release);
-            kill_job_proc(job);
+            cancel_live(job);
             job.deinit();
         }
         list.deinit(self.gpa);
@@ -167,19 +182,14 @@ pub const Runner = struct {
     pub fn submit(self: *Runner, arena: std.mem.Allocator, req: msg.SubmitJob) !msg.JobInfo {
         if (req.argv.len == 0) return error.EmptyArgv;
 
-        self.mu.lockUncancelable(self.io);
-        if (self.jobs.get(req.job_id)) |existing| {
-            self.mu.unlock(self.io);
-            return existing.info_snapshot(arena);
-        }
-        self.mu.unlock(self.io);
+        if (try self.known(arena, req.job_id)) |info| return info;
 
         const je = try self.make_entry(req);
         self.mu.lockUncancelable(self.io);
-        if (self.jobs.get(req.job_id)) |existing| {
+        if (self.jobs.get(req.job_id) != null) {
             self.mu.unlock(self.io);
             je.deinit();
-            return existing.info_snapshot(arena);
+            return (try self.known(arena, req.job_id)).?;
         }
         self.jobs.put(self.gpa, je.id, je) catch |err| {
             self.mu.unlock(self.io);
@@ -188,21 +198,59 @@ pub const Runner = struct {
         };
         self.mu.unlock(self.io);
 
-        self.start_entry(je) catch |err| {
-            self.mu.lockUncancelable(self.io);
-            _ = self.jobs.remove(je.id);
-            self.mu.unlock(self.io);
-            je.deinit();
-            return err;
-        };
+        // From here the entry is published and is never freed before deinit: a failure turns it into a failed job.
+        self.start_entry(je) catch |err| self.fail_start(je, err);
         self.ensure_supervisor();
         return je.info_snapshot(arena);
+    }
+
+    /// A job already in the table, once it has left its starting state (waiting a bounded time for that).
+    fn known(self: *Runner, arena: std.mem.Allocator, job_id: []const u8) !?msg.JobInfo {
+        self.mu.lockUncancelable(self.io);
+        const existing = self.jobs.get(job_id);
+        self.mu.unlock(self.io);
+        const job = existing orelse return null;
+        var waited: i64 = 0;
+        job.mu.lockUncancelable(self.io);
+        while (job.starting and waited < start_wait_ms) : (waited += 100) {
+            job.start_cond.waitTimeout(self.io, &job.mu, .{
+                .duration = .{ .raw = .fromMilliseconds(100), .clock = .awake },
+            }) catch {};
+        }
+        job.mu.unlock(self.io);
+        return try job.info_snapshot(arena);
     }
 
     fn start_entry(self: *Runner, je: *JobEntry) !void {
         try std.Io.Dir.cwd().createDirPath(self.io, je.job_dir_path);
         try std.Io.Dir.cwd().writeFile(self.io, .{ .sub_path = je.log_path, .data = "" });
+        je.mu.lockUncancelable(self.io);
+        je.log_ready = true;
+        je.state = if (self.admission_mgr != null) .queued else .running;
+        je.held_reason = if (self.admission_mgr != null) "admission_queue" else null;
+        je.mu.unlock(self.io);
         je.thread = try std.Thread.spawn(.{}, run_job_thread, .{je});
+        je.mu.lockUncancelable(self.io);
+        je.starting = false;
+        je.start_cond.broadcast(self.io);
+        je.mu.unlock(self.io);
+    }
+
+    fn fail_start(self: *Runner, je: *JobEntry, err: anyerror) void {
+        var note_buf: [128]u8 = undefined;
+        const note = std.fmt.bufPrint(&note_buf, "node: job did not start: {s}\n", .{@errorName(err)}) catch "node: job did not start\n";
+        je.mu.lockUncancelable(self.io);
+        defer je.mu.unlock(self.io);
+        if (je.log_ready) {
+            std.Io.Dir.cwd().writeFile(self.io, .{ .sub_path = je.log_path, .data = note }) catch {};
+            je.log_bytes = note.len;
+        }
+        je.state = .failed;
+        je.held_reason = null;
+        je.err_msg = je.gpa.dupe(u8, @errorName(err)) catch null;
+        je.starting = false;
+        je.start_cond.broadcast(self.io);
+        je.done_cond.broadcast(self.io);
     }
 
     fn make_entry(self: *Runner, req: msg.SubmitJob) !*JobEntry {
@@ -260,8 +308,8 @@ pub const Runner = struct {
             .lease_ttl_ms = req.lease_ttl_ms,
             .wait_ms = req.wait_ms,
             .parent_epoch = req.parent_epoch,
-            .state = if (self.admission_mgr != null) .queued else .running,
-            .held_reason = if (self.admission_mgr != null) "admission_queue" else null,
+            .state = .queued,
+            .held_reason = "starting",
             .started_ms = std.Io.Clock.real.now(self.io).toMilliseconds(),
         };
 
@@ -299,8 +347,7 @@ pub const Runner = struct {
         const je = self.jobs.get(job_id);
         self.mu.unlock(self.io);
         const job = je orelse return null;
-        job.cancel_requested.store(true, .release);
-        kill_job_proc(job);
+        cancel_live(job);
         return try job.info_snapshot(arena);
     }
 
@@ -352,7 +399,13 @@ pub const Runner = struct {
         const job = je orelse return null;
         self.renew_if_collecting(arena, job);
 
-        var f = std.Io.Dir.cwd().openFile(self.io, job.log_path, .{}) catch return null;
+        var f = std.Io.Dir.cwd().openFile(self.io, job.log_path, .{}) catch {
+            job.mu.lockUncancelable(self.io);
+            const starting = job.starting;
+            job.mu.unlock(self.io);
+            if (starting) return .{ .data = "", .eof = false, .next_offset = offset };
+            return null;
+        };
         defer f.close(self.io);
         const st = try f.stat(self.io);
         if (offset >= st.size) {
@@ -464,6 +517,7 @@ pub const Runner = struct {
         defer job.mu.unlock(io);
         if (job.guard_active) {
             job.guard.terminate();
+            job.kill_issued = true;
             const deadline = std.Io.Clock.awake.now(io).toMilliseconds() + 3_500;
             while (job.guard_active) {
                 const now = std.Io.Clock.awake.now(io).toMilliseconds();
@@ -651,7 +705,9 @@ fn run_job_thread(job: *JobEntry) void {
     if (job.runner.admission_mgr != null and fenced_ok and granted_lid != null) {
         job.collecting = true;
     }
-    if (job.cancel_requested.load(.acquire)) {
+    // The wait status decides: a process that ended on its own keeps its own result, and only one our kill ended is cancelled.
+    const killed = if (term) |t| (if (comptime builtin.os.tag == .windows) job.kill_issued else t == .signal) else true;
+    if (job.cancel_requested.load(.acquire) and killed) {
         job.state = .cancelled;
     } else if (term) |t| {
         switch (t) {
@@ -674,6 +730,7 @@ fn run_job_thread(job: *JobEntry) void {
 }
 
 const pipe_chunk = 4096;
+const start_wait_ms = 5_000;
 
 /// Copies a job's stdout and stderr into its log from this one thread until both pipes close.
 fn pump_output(job: *JobEntry, child: *std.process.Child, log_file: ?std.Io.File) void {
@@ -734,7 +791,10 @@ fn supervise_jobs(self: *Runner) void {
 fn cancel_live(job: *JobEntry) void {
     job.mu.lockUncancelable(job.io);
     const live = !job.proc_exited.load(.acquire);
-    if (live) job.cancel_requested.store(true, .release);
+    if (live) {
+        job.cancel_requested.store(true, .release);
+        job.kill_issued = true;
+    }
     job.mu.unlock(job.io);
     if (live) kill_job_proc(job);
 }

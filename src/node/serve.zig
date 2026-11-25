@@ -303,6 +303,12 @@ pub fn cmd_serve(
     });
     defer server.destroy();
     server.run();
+    if (server.workers_abandoned) {
+        // A detached worker may still reach the runner, admission, presence and config: do what teardown does to
+        // running jobs, then end the process without destroying any of them.
+        run_mgr.fence_all();
+        std.process.exit(0);
+    }
     return 0;
 }
 

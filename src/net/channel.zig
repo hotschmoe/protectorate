@@ -34,6 +34,8 @@ pub fn Channel(comptime IO: type) type {
         tx_wire_len: usize = 0,
         tx_frame: bounded.FrameBuffer = .{},
         tx_frame_pos: usize = 0,
+        tx_queued: u64 = 0,
+        tx_done: u64 = 0,
         stopping: bool = false,
 
         pub fn init(self: *Self, socket: io.Socket, session: noise.Session) void {
@@ -68,6 +70,7 @@ pub fn Channel(comptime IO: type) type {
             std.mem.writeInt(u64, prefix[5..13], id, .little);
             try self.tx_frame.append(pool, &prefix, control);
             try self.tx_frame.append(pool, payload, control);
+            self.tx_queued += 1;
         }
 
         /// True while the peer is held back by this side: an unconsumed frame, or no slab free for the next one.
@@ -199,6 +202,7 @@ pub fn Channel(comptime IO: type) type {
             }
             if (self.tx_wire_pos == self.tx_wire_len and self.tx_frame.len != 0) {
                 if (self.tx_frame_pos == self.tx_frame.len) {
+                    self.tx_done += 1;
                     self.tx_frame.clear(pool);
                     self.tx_frame_pos = 0;
                     self.tx_wire_pos = 0;
