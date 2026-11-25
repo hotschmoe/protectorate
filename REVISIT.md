@@ -634,19 +634,3 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   overrides and a scope OOM guardrail. Right: a configured limit applied to the cgroup (or a
   scope), a watcher on `memory.events`, and an `oom` exit cause that names the limit and the
   override key.
-- **Event stream sequence restarts at 1 after a hub restart** (`src/hub/stream.zig`,
-  `StreamHub.next_seq`; `src/hub/http_server.zig`, `handle_websocket`; `app/lib/real_hub.dart`,
-  `_run`, `_onMessage`): the sequence is in memory, so it starts again at 1 with each hub process.
-  The app keeps its last seq across a dropped connection and reconnects with `from_seq = _seq + 1`.
-  The hub always sends a fresh snapshot and a `live` marker first, and the app then sets `_seq` to
-  the snapshot's (new, small) seq, so the state shown is right. But the hub uses the requested
-  `from_seq`, not the snapshot's seq, as the cursor for the rest of that connection, so after a
-  restart it sends no stream message (state deltas, `entry` chat lines, events) until its counter
-  passes the old value, and the app notices nothing because the pings continue. A new connection
-  with the corrected seq (an app restart or any later drop) repairs it. The app code has no check
-  for a snapshot whose seq is below its own. Read from the code, not reproduced. Right: seed the
-  counter from something that grows across restarts, or have the hub treat a `from_seq` above its
-  current seq as absent; and have the app reconnect when a snapshot's seq is lower than the last one
-  it held. The same code also reads `from_seq` as "after" while the app sends "last seq plus one",
-  which skips one message per reconnect; harmless today because every reconnect starts with a
-  snapshot and reloads open transcripts.

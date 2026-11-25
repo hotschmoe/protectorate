@@ -269,8 +269,7 @@ fn conn_thread(arg: *ConnArg) void {
                 else => null,
             };
             if (ws_key) |k| {
-                const from_seq = if (query_param(arena, query, "from_seq")) |fs| std.fmt.parseInt(u64, fs, 10) catch null else null;
-                handle_websocket(hs, &req, k, from_seq) catch {};
+                handle_websocket(hs, &req, k) catch {};
                 return;
             }
             req.respond("upgrade required", .{ .status = .bad_request }) catch break;
@@ -471,7 +470,6 @@ fn handle_websocket(
     hs: *HttpServer,
     req: *std.http.Server.Request,
     key: []const u8,
-    from_seq_opt: ?u64,
 ) !void {
     var ws = try req.respondWebSocket(.{ .key = key });
     try ws.flush();
@@ -494,7 +492,7 @@ fn handle_websocket(
     defer hs.gpa.free(live_json);
     try ws.writeMessage(live_json, .text);
 
-    var cursor: u64 = from_seq_opt orelse state_snap.seq;
+    var cursor: u64 = state_snap.seq;
     while (!hs.stopping.load(.acquire) and !hs.rt.stopping.load(.acquire)) {
         _ = ws_arena_st.reset(.retain_capacity);
         const batch = try hs.rt.stream_hub.wait_since(ws_arena_st.allocator(), cursor, 15_000);

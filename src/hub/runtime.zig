@@ -1863,6 +1863,7 @@ pub const Runtime = struct {
     }
 
     pub fn view_state(self: *Runtime, arena: std.mem.Allocator) !schema.HubState {
+        const seq = self.stream_hub.current_seq();
         var sleeves_list: std.ArrayList(schema.Sleeve) = .empty;
         var approvals_list: std.ArrayList(schema.Approval) = .empty;
         var nodes_list: std.ArrayList(schema.Node) = .empty;
@@ -1911,7 +1912,7 @@ pub const Runtime = struct {
         }
 
         return .{
-            .seq = self.stream_hub.current_seq(),
+            .seq = seq,
             .hub = try self.view_hub_info(arena),
             .workspaces = ws_list.items,
             .sleeves = sleeves_list.items,

@@ -6099,11 +6099,9 @@ final class HubApi {
   }
 
   Stream<HubStreamMessage> events({
-    int? fromSeq,
     Iterable<String> transcripts = const [],
   }) => openSocket(
     _url('/api/events', {
-      if (fromSeq != null) 'from_seq': '$fromSeq',
       if (transcripts.isNotEmpty) 'transcripts': transcripts.join(','),
     }),
     token,
