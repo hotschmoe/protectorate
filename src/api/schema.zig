@@ -217,6 +217,30 @@ pub const Harness = enum {
     }
 };
 
+pub const ModelChoice = struct {
+    id: []const u8,
+    label: []const u8,
+    provider: ?[]const u8 = null,
+    is_default: bool = false,
+    efforts: ?[]const []const u8 = null,
+    default_effort: ?[]const u8 = null,
+};
+
+pub const HarnessModels = struct {
+    harness: Harness,
+    models: []const ModelChoice = &.{},
+    efforts: []const []const u8 = &.{},
+    default_effort: ?[]const u8 = null,
+};
+
+pub const ModelCatalogRequest = struct {
+    harness: ?Harness = null,
+};
+
+pub const ModelCatalog = struct {
+    harnesses: []const HarnessModels,
+};
+
 pub const HarnessUpdateState = enum {
     started,
     deferred,
@@ -1735,6 +1759,7 @@ pub const MethodSpec = struct {
 pub const methods = [_]MethodSpec{
     .{ .name = "GetState", .dart_name = "getState", .scope = .owner, .Req = Empty, .Resp = HubState, .default_empty = true, .doc = "The full snapshot." },
     .{ .name = "ListSleeves", .dart_name = "listSleeves", .scope = .sleeve, .Req = Empty, .Resp = SleeveList, .default_empty = true },
+    .{ .name = "ListModels", .dart_name = "listModels", .scope = .sleeve, .Req = ModelCatalogRequest, .Resp = ModelCatalog, .default_empty = true },
     .{ .name = "GetInbox", .dart_name = "getInbox", .scope = .sleeve, .Req = InboxRequest, .Resp = Inbox },
     .{ .name = "DropQueued", .dart_name = "dropQueued", .scope = .sleeve, .Req = SleeveRef, .Resp = Empty },
     .{ .name = "GetTranscript", .dart_name = "getTranscript", .scope = .sleeve, .Req = GetTranscriptRequest, .Resp = Transcript },
@@ -1886,6 +1911,7 @@ pub const wire_records = .{
     GitPushRequest,
     GitPushResult,
     Gpu,
+    HarnessModels,
     HarnessUpdate,
     HarnessUpdates,
     HistoryDoc,
@@ -1929,6 +1955,9 @@ pub const wire_records = .{
     ListEventsRequest,
     ListJobsRequest,
     MarkEventsReadRequest,
+    ModelCatalog,
+    ModelCatalogRequest,
+    ModelChoice,
     Node,
     NodeAdmission,
     NodeList,

@@ -399,8 +399,11 @@ class RealHub implements HubClient {
       _api.stopSleeve(SleeveRef(sleeveId: sleeveId));
 
   @override
-  Future<void> resleeve(String sleeveId, Harness target) =>
-      _api.resleeve(ResleeveRequest(sleeveId: sleeveId, target: target));
+  Future<ModelCatalog> listModels(Harness harness) =>
+      _api.listModels(ModelCatalogRequest(harness: harness));
+
+  @override
+  Future<void> resleeve(ResleeveRequest req) => _api.resleeve(req);
 
   @override
   Future<void> decide(String approvalId, Decision decision) =>

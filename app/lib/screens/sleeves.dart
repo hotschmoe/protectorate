@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../api/api.g.dart';
 import '../derived.dart';
 import '../icons.dart';
+import '../model_selection.dart';
 import '../scope.dart';
 import '../theme.dart';
 import '../widgets.dart';
@@ -12,6 +13,7 @@ import '../widgets.dart';
 const List<Harness> _harnessChoices = [
   Harness.claude,
   Harness.codex,
+  Harness.piVendor,
   Harness.piLocal,
   Harness.antigravity,
   Harness.grok,
@@ -27,6 +29,7 @@ class StartEnvoyCard extends StatefulWidget {
 
 class _StartEnvoyCardState extends State<StartEnvoyCard> {
   Harness _harness = Harness.claude;
+  ModelSelection _selection = defaultModelSelection;
   bool _busy = false;
 
   Future<void> _start(AppScope app) async {
@@ -34,7 +37,10 @@ class _StartEnvoyCardState extends State<StartEnvoyCard> {
     setState(() => _busy = true);
     try {
       await app.act(() async {
-        await app.hub.spawnSleeve(SpawnSleeveRequest(name: 'envoy', harness: _harness));
+        await app.hub.spawnSleeve(SpawnSleeveRequest(
+          name: 'envoy', harness: _harness,
+          model: _selection.model, provider: _selection.provider, effort: _selection.effort,
+        ));
         app.go(Screen.envoy);
       }, done: 'Started Envoy (${harnessName(_harness)})');
     } finally {
@@ -68,9 +74,15 @@ class _StartEnvoyCardState extends State<StartEnvoyCard> {
                     harnessName(h),
                     dense: true,
                     active: _harness == h,
-                    onTap: _busy ? null : () => setState(() => _harness = h),
+                    onTap: _busy ? null : () => setState(() {
+                      if (_harness != h) _selection = defaultModelSelection;
+                      _harness = h;
+                    }),
                   ),
               ]),
+              const SizedBox(height: 12),
+              ModelSelectionFields(key: ValueKey(_harness), hub: app.hub, harness: _harness,
+                  enabled: !_busy, onChanged: (value) => _selection = value),
               const SizedBox(height: 16),
               Align(
                 alignment: Alignment.centerLeft,
@@ -112,10 +124,18 @@ class _SpawnSleeveDialogState extends State<_SpawnSleeveDialog> {
   final _path = TextEditingController();
   final _message = TextEditingController();
   Harness? _harness = Harness.claude;
+  ModelSelection _selection = defaultModelSelection;
   String? _parentId;
   bool _newDir = false;
   bool _busy = false;
   String? _error;
+
+  void _chooseHarness(Harness? harness) {
+    setState(() {
+      if (_harness != harness) _selection = defaultModelSelection;
+      _harness = harness;
+    });
+  }
 
   @override
   void dispose() {
@@ -126,6 +146,7 @@ class _SpawnSleeveDialogState extends State<_SpawnSleeveDialog> {
   }
 
   Future<void> _submit() async {
+    if (_busy) return;
     final name = _name.text.trim();
     final path = _path.text.trim();
     final msg = _message.text.trim();
@@ -147,6 +168,9 @@ class _SpawnSleeveDialogState extends State<_SpawnSleeveDialog> {
         name: name,
         harness: _harness ?? Harness.claude,
         autoSelect: !isEnvoy && _harness == null,
+        model: _selection.model,
+        provider: _selection.provider,
+        effort: _selection.effort,
         path: _parentId == null && !_newDir && path.isNotEmpty ? path : null,
         newPath: _parentId == null && _newDir && path.isNotEmpty ? path : null,
         parentId: _parentId,
@@ -231,14 +255,27 @@ class _SpawnSleeveDialogState extends State<_SpawnSleeveDialog> {
                       builder: (context, name, _) {
                         final isEnvoy = _parentId == null && name.text.trim() == 'envoy';
                         final activeHarness = isEnvoy ? _harness ?? Harness.claude : _harness;
-                        return Buttons([
-                          if (!isEnvoy)
-                            Btn('Auto', dense: true, active: _harness == null,
-                                onTap: _busy ? null : () => setState(() => _harness = null)),
-                          for (final h in _harnessChoices)
-                            Btn(harnessName(h), dense: true, active: activeHarness == h,
-                                onTap: _busy ? null : () => setState(() => _harness = h)),
-                        ]);
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Buttons([
+                              if (!isEnvoy)
+                                Btn('Auto', dense: true, active: _harness == null,
+                                    onTap: _busy ? null : () => _chooseHarness(null)),
+                              for (final h in _harnessChoices)
+                                Btn(harnessName(h), dense: true, active: activeHarness == h,
+                                    onTap: _busy ? null : () => _chooseHarness(h)),
+                            ]),
+                            if (activeHarness != null) ...[
+                              const SizedBox(height: 12),
+                              ModelSelectionFields(key: ValueKey(activeHarness), hub: widget.app.hub,
+                                  harness: activeHarness, enabled: !_busy, onChanged: (value) {
+                                _selection = value;
+                                if (_harness == null) setState(() => _harness = activeHarness);
+                              }),
+                            ],
+                          ],
+                        );
                       },
                     ),
                     const SizedBox(height: 12),

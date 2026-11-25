@@ -10,6 +10,7 @@ const h_ext = @import("../history/extract.zig");
 const u_ver = @import("../update/version.zig");
 const u_store = @import("../update/store.zig");
 const doctor = @import("../doctor/doctor.zig");
+const claude = @import("../drivers/claude.zig");
 const home = @import("home.zig");
 const git = @import("git.zig");
 const fleet = @import("fleet.zig");
@@ -47,6 +48,20 @@ fn err_json(gpa: std.mem.Allocator, code: schema.ErrorCode, message: []const u8)
     return .{
         .status = code.http_status(),
         .body_json = try schema.encode_alloc(gpa, body),
+    };
+}
+
+fn provider_error(harness: schema.Harness, provider: ?[]const u8) ?[]const u8 {
+    const id = provider orelse return null;
+    if (id.len == 0) return null;
+    return switch (harness) {
+        .claude, .unknown => if (std.meta.stringToEnum(claude.Provider, id) == null)
+            "Claude provider must be anthropic, bedrock, vertex, or foundry"
+        else
+            null,
+        .antigravity => if (std.mem.eql(u8, id, "gemini")) null else "Antigravity provider must be gemini",
+        .grok => "Select a configured Grok provider by its custom --model ID",
+        else => null,
     };
 }
 
@@ -88,6 +103,10 @@ pub fn dispatch(
     } else if (std.mem.eql(u8, method, "ListSleeves")) {
         const st = try rt.view_state(a);
         return ok_json(rt.gpa, schema.SleeveList{ .sleeves = st.sleeves });
+    } else if (std.mem.eql(u8, method, "ListModels")) {
+        const req = schema.decode_arena(schema.ModelCatalogRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        if (req.harness == .unknown) return err_json(rt.gpa, .invalid, "unknown harness");
+        return .{ .status = 200, .body_json = try rt.model_catalog.encode(rt.gpa, rt.io, rt.env, req.harness) };
     } else if (std.mem.eql(u8, method, "GetInbox")) {
         const req = schema.decode_arena(schema.InboxRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
         const raw_sid = req.sleeve_id orelse "envoy";
@@ -115,6 +134,7 @@ pub fn dispatch(
         if (req.harness == .unknown or req.task_size == .unknown) return err_json(rt.gpa, .invalid, "unknown harness or task size");
         const caller = principal.?;
         if (req.task_size != null and caller == .sleeve) return err_json(rt.gpa, .forbidden, "task size requires owner or Envoy scope");
+        if (provider_error(req.harness, req.provider)) |message| return err_json(rt.gpa, .invalid, message);
         var parent_sid: ?[]const u8 = null;
         var parent_path: ?[]const u8 = null;
         if (req.parent_id) |raw_pid| {
@@ -260,6 +280,7 @@ pub fn dispatch(
                 target_len += 1;
             }
         }
+        if (provider_error(runtime.model_to_schema_harness(targets[0]), req.provider)) |message| return err_json(rt.gpa, .invalid, message);
         rt.commit(.{ .start_requested = .{
             .sleeve_id = sid,
             .targets = targets,
@@ -316,6 +337,7 @@ pub fn dispatch(
     } else if (std.mem.eql(u8, method, "Resleeve")) {
         const req = schema.decode_arena(schema.ResleeveRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
         if (req.target == .unknown) return err_json(rt.gpa, .invalid, "unknown harness");
+        if (provider_error(req.target, req.provider)) |message| return err_json(rt.gpa, .invalid, message);
         const sid = rt.resolve_sleeve_id(a, req.sleeve_id) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
         rt.commit(.{ .resleeve_requested = .{
             .sleeve_id = sid,

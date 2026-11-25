@@ -132,6 +132,27 @@ pub fn print_sleeve_list(arena: std.mem.Allocator, io: std.Io, body: []const u8)
     try render_sleeves(io, ls.sleeves);
 }
 
+pub fn print_model_catalog(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void {
+    const catalog = try schema.decode_arena(schema.ModelCatalog, arena, body);
+    for (catalog.harnesses) |h| {
+        try print_out(io, "{s} (efforts: {s}; default effort: {s})\n", .{
+            @tagName(h.harness),
+            if (h.efforts.len == 0) "-" else try std.mem.join(arena, ", ", h.efforts),
+            h.default_effort orelse "native",
+        });
+        if (h.models.len == 0) try print_out(io, "  No catalog entries. Use --model to enter an ID.\n", .{});
+        for (h.models) |m| {
+            try print_out(io, "  {s}{s}{s}  {s}{s}\n", .{
+                m.provider orelse "",
+                if (m.provider != null) "/" else "",
+                m.id,
+                m.label,
+                if (m.is_default) " (default)" else "",
+            });
+        }
+    }
+}
+
 pub fn render_sleeves(io: std.Io, sleeves: []const schema.Sleeve) !void {
     try print_out(io, "{s:<16} {s:<14} {s:<7} {s:<10} {s:<12} {s:<10} {s:<5} {s}\n", .{
         "ID", "NAME", "ROLE", "STATE", "HARNESS", "ACTIVITY", "Q", "PATH",

@@ -392,14 +392,14 @@ pub fn apply(
             else
                 null;
             const preferred = e.inherit_preferences and sl.target_len > 0 and sl.targets[0] == e.harness;
+            const effort = e.effort orelse (if (current) |inc| inc.effort else if (preferred) sl.preferred_effort else null);
             const launch = state.PendingLaunch{
                 .harness = e.harness,
                 .model_name = (try st.dupe_opt(e.model_name) orelse
                     (if (current) |inc| inc.model_name else if (preferred) sl.preferred_model else null)) orelse "",
                 .provider = (try st.dupe_opt(e.provider) orelse
                     (if (current) |inc| inc.provider else if (preferred) sl.preferred_provider else null)) orelse "",
-                .effort = try st.dupe_opt(e.effort) orelse
-                    (if (current) |inc| inc.effort else if (preferred) sl.preferred_effort else null),
+                .effort = if (effort) |value| if (value.len == 0) null else try st.dupe_str(value) else null,
                 .cause = e.cause,
             };
             if (sl.inc) |*inc| {

@@ -216,6 +216,7 @@ print(json.dumps({
     "harness": "pi_local",
     "provider": "hotschmoe-local",
     "model": "hotschmoe-dd",
+    "effort": "low",
     "path": sys.argv[1],
     "message": "Reply with exactly the token E2E_PI_MARKER_7391 and nothing else."
 }))
@@ -243,6 +244,18 @@ if grep -q '"type":"exited"' "$HUB2"/transcripts/*.jsonl || grep -qv '"g":1,' "$
   cat "$HUB2"/transcripts/*.jsonl >&2
   exit 1
 fi
+
+"$PT" --home "$HUB2" --url "http://127.0.0.1:$HTTP2" sleeve resleeve "$SLV2" \
+  --harness pi_local --provider hotschmoe-local --model hotschmoe-dd --effort high >/dev/null
+"$PT" --home "$HUB2" --url "http://127.0.0.1:$HTTP2" sleeve wait "$SLV2" --until idle --timeout 30 >/dev/null
+rpc_post "$HTTP2" "$TOK2" GetTranscript "{\"sleeve_id\":\"$SLV2\"}" | python3 -c '
+import json, sys
+sessions = [row for row in json.load(sys.stdin)["entries"] if row["entry"]["type"] == "session_info"]
+for generation, effort in [(1, "low"), (2, "high")]:
+    assert any(row["g"] == generation and row["entry"]["effort"] == effort
+               and row["entry"]["model"] == "hotschmoe-dd"
+               and row["entry"]["provider"] == "hotschmoe-local" for row in sessions), sessions
+'
 
 # Test SIGKILL + Journal Crash Replay
 kill -9 "$PID2" >/dev/null 2>&1 || true

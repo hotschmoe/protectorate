@@ -136,12 +136,14 @@ pub const Session = struct {
                 .session_id = sess_id,
                 .uuid_base = "00000000-0000-4000-8000-",
                 .model = mod_d,
+                .provider = prov_d,
                 .effort = eff_d,
                 .supervised = cfg.permission == .supervised,
             } },
             .codex => .{ .codex = .{
                 .cwd = cwd_d,
                 .model = mod_d,
+                .provider = prov_d,
                 .effort = eff_d,
                 .resume_id = res_d,
                 .supervised = cfg.permission == .supervised,
@@ -149,6 +151,7 @@ pub const Session = struct {
             .grok => .{ .grok = .{
                 .cwd = cwd_d,
                 .model = mod_d,
+                .effort = eff_d,
                 .resume_id = res_d,
                 .supervised = cfg.permission == .supervised,
             } },
@@ -161,6 +164,7 @@ pub const Session = struct {
             .antigravity => .{ .antigravity = .{
                 .session_id = res_d orelse sess_id,
                 .model = mod_d,
+                .provider = prov_d,
                 .effort = eff_d,
                 .supervised = cfg.permission == .supervised,
             } },

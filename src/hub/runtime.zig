@@ -29,6 +29,7 @@ const stream = @import("stream.zig");
 const brief = @import("brief.zig");
 const git = @import("git.zig");
 const fleet = @import("fleet.zig");
+const model_catalog = @import("model_catalog.zig");
 
 const log_mirror_max: u64 = 1024 * 1024;
 const status_failures_max: u8 = 5;
@@ -177,6 +178,7 @@ pub const Runtime = struct {
     cached_quotas: []const q_select.Quota = &.{},
     cached_local_model: ?q_readers.LocalModel = null,
     cached_quotas_arena: std.heap.ArenaAllocator,
+    model_catalog: model_catalog.Cache = .{},
     quotas_remote_polled: std.atomic.Value(bool) = .init(false),
     restore_error: ?[]const u8 = null,
     /// The release this process started as (current.txt at open) and the lock that keeps an update from
@@ -425,6 +427,7 @@ pub const Runtime = struct {
     }
 
     pub fn close_and_destroy(self: *Runtime) void {
+        self.model_catalog.deinit();
         self.stopping.store(true, .release);
         self.stream_hub.wake_all();
         self.fleet_srv.shutdown();
@@ -1136,6 +1139,7 @@ pub const Runtime = struct {
     }
 
     fn launch_driver(self: *Runtime, li: anytype) !void {
+        const effort = if (li.effort) |e| if (e.len == 0) null else e else null;
         const dh = blk: {
             self.driver_launch_mu.lockUncancelable(self.io);
             defer self.driver_launch_mu.unlock(self.io);
@@ -1148,14 +1152,15 @@ pub const Runtime = struct {
             const Spawn = struct {
                 rt: *Runtime,
                 li: @TypeOf(li),
+                effort: ?[]const u8,
                 result: anyerror!*DriverHandle = error.HubStopping,
 
                 fn run(ctx: *anyopaque) void {
                     const s: *@This() = @ptrCast(@alignCast(ctx));
-                    s.result = s.rt.spawn_driver(s.li);
+                    s.result = s.rt.spawn_driver(s.li, s.effort);
                 }
             };
-            var spawn: Spawn = .{ .rt = self, .li = li };
+            var spawn: Spawn = .{ .rt = self, .li = li, .effort = effort };
             var job: LauncherJob = .{ .run = Spawn.run, .ctx = &spawn };
             try self.run_on_launcher(&job);
             const dh = try spawn.result;
@@ -1172,7 +1177,7 @@ pub const Runtime = struct {
             .mode = li.mode,
             .model_name = li.model_name,
             .provider = li.provider,
-            .effort = li.effort,
+            .effort = effort,
         } });
         const started = if (launched) |_| dh.sess.begin() else |err| err;
         self.release_driver(dh);
@@ -1182,7 +1187,7 @@ pub const Runtime = struct {
         };
     }
 
-    fn spawn_driver(self: *Runtime, li: anytype) !*DriverHandle {
+    fn spawn_driver(self: *Runtime, li: anytype, effort: ?[]const u8) !*DriverHandle {
         var arena_st = std.heap.ArenaAllocator.init(self.gpa);
         defer arena_st.deinit();
         const a = arena_st.allocator();
@@ -1239,6 +1244,8 @@ pub const Runtime = struct {
         var guard_exe: ?[]const u8 = if (cgroup_path != null) try std.process.executablePathAlloc(self.io, a) else null;
         var sb_spec: ?s_spec.SandboxSpec = null;
         var child_env = try self.env.clone(a);
+        const claude_effort = if (li.harness == .claude) effort else null;
+        if (claude_effort) |level| try child_env.put("CLAUDE_CODE_EFFORT_LEVEL", level);
         _ = child_env.swapRemove("PROTECTORATE_MEMORY_MAX");
         const memory_env = if (configured_limit) |limit| try std.fmt.allocPrint(a, "{d}", .{limit}) else null;
         if (memory_env) |value| try child_env.put("PROTECTORATE_MEMORY_MAX", value);
@@ -1335,6 +1342,7 @@ pub const Runtime = struct {
                     if (is_envoy) {
                         try env_set.append(a, .{ .key = "PROTECTORATE_TOKEN", .value = self.hub_home.envoy_token });
                     }
+                    if (claude_effort) |level| try env_set.append(a, .{ .key = "CLAUDE_CODE_EFFORT_LEVEL", .value = level });
                     if (memory_env) |value| try env_set.append(a, .{ .key = "PROTECTORATE_MEMORY_MAX", .value = value });
 
                     sb_spec = .{
@@ -1381,7 +1389,7 @@ pub const Runtime = struct {
             .cwd = sl_path,
             .model = mod_opt,
             .provider = prov_opt,
-            .effort = li.effort,
+            .effort = effort,
             .resume_id = li.resume_id,
             .session_id = sess_id,
             .sandbox_mode = guard_mode,
@@ -3246,7 +3254,7 @@ pub fn schema_to_model_harness(h: schema.Harness) model.Harness {
     };
 }
 
-fn model_to_schema_harness(h: model.Harness) schema.Harness {
+pub fn model_to_schema_harness(h: model.Harness) schema.Harness {
     return switch (h) {
         .claude => .claude,
         .codex => .codex,

@@ -2928,6 +2928,40 @@ final class Gpu {
   };
 }
 
+final class HarnessModels {
+  const HarnessModels({
+    required this.harness,
+    this.models = const <ModelChoice>[],
+    this.efforts = const <String>[],
+    this.defaultEffort,
+  });
+
+  factory HarnessModels.fromJson(Object? json) {
+    final j = _object(json, 'HarnessModels');
+    return HarnessModels(
+      harness: Harness.fromJson(j['harness']),
+      models: _or(j['models'], const <ModelChoice>[], (e0) => _list(e0, 'HarnessModels.models', ModelChoice.fromJson)),
+      efforts: _or(j['efforts'], const <String>[], (e0) => _list(e0, 'HarnessModels.efforts', (e0) => _string(e0, 'HarnessModels.efforts'))),
+      defaultEffort: _opt(j['default_effort'], (e0) => _string(e0, 'HarnessModels.default_effort')),
+    );
+  }
+
+  final Harness harness;
+
+  final List<ModelChoice> models;
+
+  final List<String> efforts;
+
+  final String? defaultEffort;
+
+  Map<String, Object?> toJson() => {
+    'harness': harness.toJson(),
+    'models': [for (final e in models) e.toJson()],
+    'efforts': efforts,
+    if (defaultEffort case final v?) 'default_effort': v,
+  };
+}
+
 final class HarnessUpdate {
   const HarnessUpdate({
     required this.program,
@@ -4092,6 +4126,88 @@ final class MarkEventsReadRequest {
 
   Map<String, Object?> toJson() => {
     'up_to_seq': upToSeq,
+  };
+}
+
+final class ModelCatalog {
+  const ModelCatalog({
+    required this.harnesses,
+  });
+
+  factory ModelCatalog.fromJson(Object? json) {
+    final j = _object(json, 'ModelCatalog');
+    return ModelCatalog(
+      harnesses: _list(j['harnesses'], 'ModelCatalog.harnesses', HarnessModels.fromJson),
+    );
+  }
+
+  final List<HarnessModels> harnesses;
+
+  Map<String, Object?> toJson() => {
+    'harnesses': [for (final e in harnesses) e.toJson()],
+  };
+}
+
+final class ModelCatalogRequest {
+  const ModelCatalogRequest({
+    this.harness,
+  });
+
+  factory ModelCatalogRequest.fromJson(Object? json) {
+    final j = _object(json, 'ModelCatalogRequest');
+    return ModelCatalogRequest(
+      harness: _opt(j['harness'], Harness.fromJson),
+    );
+  }
+
+  final Harness? harness;
+
+  Map<String, Object?> toJson() => {
+    if (harness case final v?) 'harness': v.toJson(),
+  };
+}
+
+final class ModelChoice {
+  const ModelChoice({
+    required this.id,
+    required this.label,
+    this.provider,
+    this.isDefault = false,
+    this.efforts,
+    this.defaultEffort,
+  });
+
+  factory ModelChoice.fromJson(Object? json) {
+    final j = _object(json, 'ModelChoice');
+    return ModelChoice(
+      id: _string(j['id'], 'ModelChoice.id'),
+      label: _string(j['label'], 'ModelChoice.label'),
+      provider: _opt(j['provider'], (e0) => _string(e0, 'ModelChoice.provider')),
+      isDefault: _or(j['is_default'], false, (e0) => _bool(e0, 'ModelChoice.is_default')),
+      efforts: _opt(j['efforts'], (e0) => _list(e0, 'ModelChoice.efforts', (e0) => _string(e0, 'ModelChoice.efforts'))),
+      defaultEffort: _opt(j['default_effort'], (e0) => _string(e0, 'ModelChoice.default_effort')),
+    );
+  }
+
+  final String id;
+
+  final String label;
+
+  final String? provider;
+
+  final bool isDefault;
+
+  final List<String>? efforts;
+
+  final String? defaultEffort;
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'label': label,
+    if (provider case final v?) 'provider': v,
+    'is_default': isDefault,
+    if (efforts case final v?) 'efforts': v,
+    if (defaultEffort case final v?) 'default_effort': v,
   };
 }
 
@@ -6156,6 +6272,10 @@ final class HubApi {
   /// `POST /api/ListSleeves`, scope `sleeve`.
   Future<SleeveList> listSleeves([Empty request = const Empty()]) =>
       _call('ListSleeves', request.toJson(), SleeveList.fromJson);
+
+  /// `POST /api/ListModels`, scope `sleeve`.
+  Future<ModelCatalog> listModels(ModelCatalogRequest request) =>
+      _call('ListModels', request.toJson(), ModelCatalog.fromJson);
 
   /// `POST /api/GetInbox`, scope `sleeve`.
   Future<Inbox> getInbox(InboxRequest request) =>

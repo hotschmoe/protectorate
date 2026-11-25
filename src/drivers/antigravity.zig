@@ -5,6 +5,7 @@ const proto = @import("protocol.zig");
 pub const Antigravity = struct {
     session_id: []const u8,
     model: ?[]const u8 = null,
+    provider: ?[]const u8 = null,
     effort: ?[]const u8 = null,
     supervised: bool = false,
     turn_active: bool = false,
@@ -34,6 +35,10 @@ pub const Antigravity = struct {
         if (spec.model) |m| {
             try argv.appendSlice(arena, &.{ "--model", m });
         }
+        if (spec.provider) |provider| {
+            const settings = try std.json.Stringify.valueAlloc(arena, .{ .modelProvider = provider }, .{});
+            try argv.appendSlice(arena, &.{ "--settings", settings });
+        }
         if (spec.effort) |e| {
             try argv.appendSlice(arena, &.{ "--effort", e });
         }
@@ -50,6 +55,7 @@ pub const Antigravity = struct {
             .harness = .antigravity,
             .native_id = self.session_id,
             .model = self.model,
+            .provider = self.provider,
             .effort = self.effort,
         } });
     }

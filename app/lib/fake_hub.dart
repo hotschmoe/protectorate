@@ -8,6 +8,30 @@ typedef Json = Map<String, Object?>;
 
 const _gib = 1024 * 1024 * 1024;
 
+const _efforts = ['low', 'medium', 'high', 'xhigh'];
+const _modelCatalog = {
+  Harness.claude: HarnessModels(harness: Harness.claude, efforts: _efforts, defaultEffort: 'high', models: [
+    ModelChoice(id: 'opus', label: 'Opus', isDefault: true),
+    ModelChoice(id: 'sonnet', label: 'Sonnet'),
+    ModelChoice(id: 'haiku', label: 'Haiku', efforts: []),
+  ]),
+  Harness.codex: HarnessModels(harness: Harness.codex, efforts: _efforts, defaultEffort: 'medium', models: [
+    ModelChoice(id: 'gpt-5.1-codex', label: 'GPT-5.1 Codex', isDefault: true, defaultEffort: 'medium'),
+    ModelChoice(id: 'gpt-5.1-codex-mini', label: 'GPT-5.1 Codex Mini', efforts: ['medium', 'high'], defaultEffort: 'medium'),
+  ]),
+  Harness.grok: HarnessModels(harness: Harness.grok, efforts: _efforts, defaultEffort: 'high', models: [
+    ModelChoice(id: 'grok-4.6', label: 'Grok 4.6', isDefault: true),
+  ]),
+  Harness.piVendor: HarnessModels(harness: Harness.piVendor, efforts: _efforts, defaultEffort: 'high', models: [
+    ModelChoice(id: 'grok-4.6', label: 'xai/grok-4.6', provider: 'xai', isDefault: true),
+  ]),
+  Harness.piLocal: HarnessModels(harness: Harness.piLocal, efforts: ['off', 'low', 'medium', 'high'], defaultEffort: 'low', models: [
+    ModelChoice(id: 'qwen3-coder-30b-a3b', label: 'llama.cpp/qwen3-coder-30b-a3b', provider: 'llama.cpp', isDefault: true),
+    ModelChoice(id: 'qwen3-coder-30b-a3b', label: 'ollama/qwen3-coder-30b-a3b', provider: 'ollama'),
+  ]),
+  Harness.antigravity: HarnessModels(harness: Harness.antigravity, efforts: _efforts),
+};
+
 /// A scripted hub for judging the UI without a real one. It holds its state as the JSON the hub
 /// would send and hands it out through the generated `fromJson`, so the JSON shapes are
 /// exercised too. Transcripts are append-only like the hub's: a tool result is a new entry, and
@@ -117,7 +141,9 @@ class FakeHub implements HubClient {
     if (!_workspaces.any((w) => w['id'] == wsId)) {
       _workspaces.add({'id': wsId, 'name': req.name, 'path': path});
     }
-    final h = req.harness == Harness.unknown ? 'claude' : req.harness.wire;
+    final h = req.harness == Harness.unknown ? Harness.claude : req.harness;
+    final inc = _incarnation(h.wire, g: 1, activity: 'idle', turn: 0);
+    _selectModel(inc, h, model: req.model, provider: req.provider, effort: req.effort);
     final raw = <String, Object?>{
       'id': id,
       'name': req.name,
@@ -128,7 +154,7 @@ class FakeHub implements HubClient {
       'path': path,
       'resleeve_to': ['pi_local'],
       if (req.parentId != null) 'branch': 'pt/${req.name}',
-      'incarnation': _incarnation(h, g: 1, activity: 'idle', turn: 0),
+      'incarnation': inc,
     };
     _sleeves.add(raw);
     _tx[id] = [];
@@ -140,6 +166,24 @@ class FakeHub implements HubClient {
       unawaited(send(id, m));
     }
     return Sleeve.fromJson(raw);
+  }
+
+  @override
+  Future<ModelCatalog> listModels(Harness harness) async =>
+      ModelCatalog(harnesses: [_modelCatalog[harness] ?? HarnessModels(harness: harness)]);
+
+  void _selectModel(Json inc, Harness harness, {String? model, String? provider, String? effort}) {
+    final catalog = _modelCatalog[harness]!;
+    final option = model == null || model.isEmpty
+        ? catalog.models.where((m) => m.isDefault).firstOrNull
+        : catalog.models.where((m) =>
+            (m.id == model && (provider == null || provider.isEmpty || provider == m.provider)) ||
+            (m.provider != null && '${m.provider}/${m.id}' == model)).firstOrNull;
+    inc['model'] = option?.id ?? (model == null || model.isEmpty ? inc['model'] : model);
+    inc['provider'] = provider == null || provider.isEmpty ? option?.provider ?? inc['provider'] : provider;
+    inc['effort'] = effort == null || effort.isEmpty
+        ? option?.defaultEffort ?? catalog.defaultEffort
+        : effort;
   }
 
   @override
@@ -205,7 +249,9 @@ class FakeHub implements HubClient {
   }
 
   @override
-  Future<void> resleeve(String sleeveId, Harness target) async {
+  Future<void> resleeve(ResleeveRequest req) async {
+    final sleeveId = req.sleeveId;
+    final target = req.target;
     final s = _sleeve(sleeveId);
     final inc = s['incarnation'] as Json?;
     if (inc == null) throw StateError('${s['name']} has no incarnation');
@@ -219,6 +265,11 @@ class FakeHub implements HubClient {
     _after(2200, () {
       s['lifecycle'] = 'running';
       final next = s['incarnation'] = _incarnation(target.wire, g: g + 1, activity: 'booting', turn: 0);
+      final same = from == target.wire;
+      _selectModel(next, target,
+          model: req.model ?? (same ? inc['model'] as String? : null),
+          provider: req.provider ?? (same ? inc['provider'] as String? : null),
+          effort: req.effort ?? (same ? inc['effort'] as String? : null));
       _notice(sleeveId, 'resleeved g$g -> g${g + 1}: $from -> ${target.wire} (owner); '
           'brief written to .protectorate/BRIEF.md');
       _sessionInfo(sleeveId, next);
@@ -599,6 +650,7 @@ class FakeHub implements HubClient {
     'native_id': 'sess-${_rand.nextInt(1 << 30).toRadixString(16)}',
     'model': inc['model'],
     'provider': inc['provider'],
+    'effort': inc['effort'],
   });
 
   void _settle(String id, {String stop = 'end_turn'}) {

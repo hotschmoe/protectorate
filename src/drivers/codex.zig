@@ -28,6 +28,7 @@ const RpcKind = union(enum) {
 pub const Codex = struct {
     cwd: []const u8,
     model: ?[]const u8 = null,
+    provider: ?[]const u8 = null,
     effort: ?[]const u8 = null,
     resume_id: ?[]const u8 = null,
     supervised: bool = false,
@@ -44,11 +45,14 @@ pub const Codex = struct {
     pub fn build_argv(arena: std.mem.Allocator, spec: proto.SpawnSpec) ![]const []const u8 {
         var argv: std.ArrayList([]const u8) = .empty;
         try argv.appendSlice(arena, &.{ spec.program, "app-server" });
-        if (spec.model) |m| {
-            try argv.appendSlice(arena, &.{ "-c", try std.fmt.allocPrint(arena, "model=\"{s}\"", .{m}) });
-        }
-        if (spec.effort) |e| {
-            try argv.appendSlice(arena, &.{ "-c", try std.fmt.allocPrint(arena, "model_reasoning_effort=\"{s}\"", .{e}) });
+        for ([_]struct { key: []const u8, value: ?[]const u8 }{
+            .{ .key = "model", .value = spec.model },
+            .{ .key = "model_provider", .value = spec.provider },
+            .{ .key = "model_reasoning_effort", .value = spec.effort },
+        }) |setting| {
+            const value = setting.value orelse continue;
+            const quoted = try std.json.Stringify.valueAlloc(arena, value, .{});
+            try argv.appendSlice(arena, &.{ "-c", try std.fmt.allocPrint(arena, "{s}={s}", .{ setting.key, quoted }) });
         }
         try argv.appendSlice(arena, spec.extra_args);
         return argv.items;
@@ -124,12 +128,15 @@ pub const Codex = struct {
                     try self.call("thread/resume", .{
                         .threadId = rid,
                         .cwd = self.cwd,
+                        .model = self.model,
+                        .modelProvider = self.provider,
                         .approvalPolicy = approval_pol,
                     }, .thread_open, out);
                 } else {
                     try self.call("thread/start", .{
                         .cwd = self.cwd,
                         .model = self.model,
+                        .modelProvider = self.provider,
                         .approvalPolicy = approval_pol,
                     }, .thread_open, out);
                 }
@@ -151,7 +158,7 @@ pub const Codex = struct {
                     .harness = .codex,
                     .native_id = self.thread_id.?,
                     .model = json_util.value_str(result, "model") orelse self.model,
-                    .provider = json_util.value_str(result, "modelProvider"),
+                    .provider = json_util.value_str(result, "modelProvider") orelse self.provider,
                     .effort = self.effort orelse json_util.value_str(result, "reasoningEffort"),
                     .cwd = json_util.value_str(result, "cwd") orelse self.cwd,
                 } });
@@ -348,6 +355,7 @@ pub const Codex = struct {
             .threadId = tid,
             .input = &input,
             .clientUserMessageId = req_dup,
+            .effort = self.effort,
         }, .{ .turn_start = req_dup }, out);
         self.turn_active = true;
         self.turn_started = false;

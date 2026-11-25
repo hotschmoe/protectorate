@@ -15,6 +15,7 @@ capability). `--json` prints the API's answer; `protectorate --help` lists every
 | Command | What it does |
 |---|---|
 | `sleeve list` / `sleeve show <s>` | sleeves: id, name, lifecycle, activity, harness, directory |
+| `sleeve models [harness]` | the hub's model and effort catalog |
 | `sleeve spawn <name> --path <dir> --harness H [--model M] [--effort E] [--message TEXT]` | a root sleeve on a directory (one root per directory) |
 | `sleeve spawn <name> --new-path <dir> --harness H [--model M] [--effort E] [--message TEXT]` | a new project: the hub creates `<dir>` under `projects_dir` and an empty git repo (branch `main`), then a root sleeve on it |
 | `sleeve spawn <name> --parent <root> --harness H [--readonly]` | a child on its own worktree and branch `pt/<name>` (or a read-only view) |
@@ -31,15 +32,16 @@ capability). `--json` prints the API's answer; `protectorate --help` lists every
 | `history search <words> [--sleeve S] [--mode any\|phrase]` | keyword search over every sleeve's past sessions; each hit names its doc |
 | `history read --doc N` / `history read <session> --from T --to T` | a hit's whole text, or a session's turns |
 
-Harnesses: `claude`, `codex`, `grok`, `pi_vendor`, `pi_local` (the configured free local model).
-Use `--harness auto` on a spawn to let the hub choose by quota. With Auto, `--task-size
+Harnesses are `claude`, `codex`, `grok`, `pi_vendor`, `pi_local`, and `antigravity`.
+Use `--harness auto` on a sleeve spawn to let the hub choose by quota. With Auto, `--task-size
 small|medium|large` requests a class within one of the hub's workspace estimate. See the target
-and reason in `event list`.
-`--effort` sets the harness's reasoning effort (for example `low`, `medium`, or `high`);
-available levels depend on the harness and model. On spawn, omitting it uses the harness default.
-On start or resleeve, omitting it keeps the earlier effort for the same harness; changing harness
-uses the new harness's default. An explicitly set effort cannot currently be cleared for the same
-harness; it can be replaced with another level.
+and reason in `event list`. Envoy itself defaults to Claude and accepts a fixed harness chosen by
+the owner. Auto is refused for Envoy itself.
+
+Spawn and resleeve accept `--model`, `--provider`, and `--effort`. Available levels depend on the
+harness and model. On a manual resleeve, an explicit setting takes precedence. An omitted field
+inherits from the target harness's own preferences when available and uses its native default
+otherwise. An empty argument such as `--effort ''` clears that selection and uses the harness default.
 
 ## How to work
 

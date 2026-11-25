@@ -732,7 +732,9 @@ class Field extends StatefulWidget {
   const Field({
     super.key,
     required this.controller,
-    required this.onSubmit,
+    this.onSubmit,
+    this.onChanged,
+    this.enabled = true,
     this.focusNode,
     this.hint,
     this.multiline = false,
@@ -756,7 +758,9 @@ class Field extends StatefulWidget {
   /// No border or fill, for fields inside a composed box.
   final bool bare;
   final bool autofocus;
-  final void Function(String) onSubmit;
+  final ValueChanged<String>? onSubmit;
+  final ValueChanged<String>? onChanged;
+  final bool enabled;
 
   @override
   State<Field> createState() => _FieldState();
@@ -797,6 +801,8 @@ class _FieldState extends State<Field> {
     final style = ts(context, mono: widget.mono, size: widget.mono ? 12.5 : size);
     final field = TextField(
       controller: widget.controller,
+      enabled: widget.enabled,
+      onChanged: widget.onChanged,
       focusNode: _node,
       autofocus: widget.autofocus,
       style: style,
@@ -817,9 +823,9 @@ class _FieldState extends State<Field> {
         ? CallbackShortcuts(
             bindings: {
               const SingleActivator(LogicalKeyboardKey.enter): () =>
-                  widget.onSubmit(widget.controller.text),
+                  widget.onSubmit?.call(widget.controller.text),
               const SingleActivator(LogicalKeyboardKey.numpadEnter): () =>
-                  widget.onSubmit(widget.controller.text),
+                  widget.onSubmit?.call(widget.controller.text),
             },
             child: field,
           )

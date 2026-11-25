@@ -278,11 +278,17 @@ class _ShellState extends State<Shell> {
         } else if (head == '/stop') {
           unawaited(app.act(() => widget.hub.stop(id)));
         } else {
-          final h = Harness.fromJson(arg);
-          if (h == Harness.unknown) {
-            return _say('Resleeve to what? claude codex grok pi_local pi_vendor', level: Level.warn);
+          final h = parts.length > 1 ? Harness.fromJson(parts[1]) : Harness.unknown;
+          if (h == Harness.unknown || parts.length > 4) {
+            return _say('Usage: /resleeve <harness> [model] [effort]', level: Level.warn);
           }
-          unawaited(app.act(() => widget.hub.resleeve(id, h), done: 'Resleeving to ${h.wire}'));
+          final req = ResleeveRequest(
+            sleeveId: id, target: h,
+            model: parts.length > 2 ? parts[2] : null,
+            provider: parts.length > 2 && (h == Harness.piLocal || h == Harness.piVendor) ? '' : null,
+            effort: parts.length > 3 ? parts[3] : null,
+          );
+          unawaited(app.act(() => widget.hub.resleeve(req), done: 'Resleeving to ${h.wire}'));
         }
       default:
         _say('Unknown command: $head  (? for help)', level: Level.alarm);

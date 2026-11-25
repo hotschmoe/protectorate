@@ -5,11 +5,29 @@
 Protectorate drives upstream CLIs exclusively via their official machine-readable stdio modes without injecting synthetic hooks or patching external binaries:
 - **`claude`** (`claude.zig`): `-p --verbose --output-format stream-json --input-format stream-json --include-partial-messages`
 - **`codex`** (`codex.zig`): `app-server` JSON-RPC 2.0
-- **`grok`** (`grok.zig`): `--acp` JSON-RPC 2.0
+- **`grok`** (`grok.zig`): `grok agent stdio` over ACP
 - **`antigravity`** (`antigravity.zig`): `agy --input-format stream-json --output-format stream-json` (`event: init / step_update / result`, subtracting cumulative session usage counters per turn). The CLI rejects `control_request`; an interrupt terminates its process tree and resumes the native conversation in a new incarnation.
 - **`pi`** (`pi.zig`): `--mode rpc` JSONL (`get_state`, `prompt`, `steer`, `abort`, `compact`)
 
 Each adapter translates raw protocol lines into normalized `DriverEntry` events (`session_info`, `assistant_text`, `reasoning`, `tool_call`, `tool_result`, `approval_request`, `compaction`, `turn_started`, `turn_settled`) through `protocol.Out`, coalescing streaming deltas and capping block/output sizes (`max_block = 1 MiB`).
+
+## Model, provider and effort
+
+Spawn and resleeve pass incarnation settings to the same driver entry point. An unset selection
+lets the harness resolve its native defaults. The catalog is scoped to the hub account. A
+workspace's native configuration can supply more specific defaults at launch.
+
+| Harness | Catalog source | Launch and resleeve |
+|---|---|---|
+| Claude Code | Native model aliases and effort flags, plus user settings and environment defaults | `--model`, `--effort`, `CLAUDE_CODE_EFFORT_LEVEL` for an explicit effort, and inline `--settings` for the native provider switches. The provider IDs are `anthropic`, `bedrock`, `vertex`, and `foundry`. |
+| Codex | App-server `model/list` and `config/read` | App-server `-c model=...`, `-c model_provider=...`, and `-c model_reasoning_effort=...`. Thread start/resume carries model and provider, and turn start carries effort. |
+| Grok | ACP `initialize` model metadata | ACP `session/set_config_option` sets `model` then `reasoning_effort` before the hub marks the session ready. A custom model ID selects its configured provider. |
+| Pi | `pi --list-models` and Pi's user settings, shared by both Pi sleeve kinds | `--provider`, `--model`, and `--thinking`. Pi requires a model when passing a provider. |
+| Antigravity | `agy models`, user settings, and CLI effort names | `--model`, `--effort`, and inline `--settings '{"modelProvider":"gemini"}'` when choosing the Gemini API provider. |
+
+Catalog discovery runs native listing or initialization only. It sends no prompts and opens
+no sleeve sessions. Each native probe has a 2.5-second deadline and bounded output. Unreadable
+sources yield an empty model list for the corresponding harness.
 
 `drivers/session.zig` wraps a spawned child process with dedicated stdout NDJSON and bounded 16 KiB stderr ring threads, exposes `compact()` for native in-session compaction (`claude`, `pi`, with automatic handoff resleeve fallback for other harnesses), and releases `Session.mu` prior to delivering callbacks to eliminate lock-order inversions with `hub/runtime.zig`. Worktree sleeves provision isolated checkouts (`<hub_home>/worktrees/<id>` on `pt/<id>`) separate from the base repo path, and `hub/runtime.zig` monitors configured `sleeve_devices` paths for attach/detach transitions.
 
@@ -20,6 +38,10 @@ The session mutex serializes reaping with teardown. Each reader owns its pipe on
 Interrupts have a 30-second grace period; an unresponsive incarnation is fenced and recovered. Antigravity stays interrupting until its exit is reaped, so queued prompts wait for the new incarnation. Interrupt-driven Antigravity relaunches and crash recoveries share a limit of two resumes in ten minutes; exceeding it parks the sleeve with `resume_rate_exceeded`.
 
 Crash recovery passes the bound native session ID back to each adapter: Claude uses `--resume`, Codex `thread/resume`, Grok `session/load`, Pi `--session`, and Antigravity `--conversation`. An exit before binding starts a fresh session. Repeated crashes and refused handshakes are bounded by the resume window and the crash strike limit; the strike window also bounds boot timeouts, whose 15-minute interval exceeds the resume window. The adapters implement these resume paths; their success depends on the installed harness and its stored session.
+
+The thread that removes and fences a driver generation commits that generation's exit. A pending
+resleeve consumes the exit to start the replacement. The exit's generation protects the
+replacement from stale completions.
 
 ## Cross-Platform Guardrails & Sandboxing (`src/sandbox/`)
 
