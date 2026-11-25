@@ -160,9 +160,8 @@ pub const Iocp = struct {
     }
 
     /// Opens a listening socket and reports the port it bound; it joins the completion port at its first accept.
+    /// Winsock is started by init, so call this after init and before deinit.
     pub fn listen(endpoint: io.Endpoint, backlog: u32) !struct { socket: io.Socket, port: u16 } {
-        var data: [512]u8 align(8) = undefined;
-        if (WSAStartup(0x0202, &data) != 0) return error.ListenFailed;
         const family: c_int = if (endpoint.family == .ipv4) AF_INET else AF_INET6;
         const created = WSASocketW(family, SOCK_STREAM, IPPROTO_TCP, null, 0, socket_flags);
         if (created == invalid_socket) return error.ListenFailed;

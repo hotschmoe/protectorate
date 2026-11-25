@@ -57,6 +57,7 @@ pub fn NodeLink(comptime IO: type) type {
         backoff: u64 = 500,
         last_rx: u64 = 0,
         rx_serial: u64 = 0,
+        rx_bytes: u64 = 0,
         heartbeat_at: u64 = 0,
         next_id: u64 = 4,
         generation: u64 = 0,
@@ -259,6 +260,7 @@ pub fn NodeLink(comptime IO: type) type {
                                 self.phase = .hello;
                                 self.last_rx = now;
                                 self.rx_serial = 0;
+                                self.rx_bytes = 0;
                                 self.generation +%= 1;
                                 if (self.generation == 0) self.generation = 1;
                                 self.conn.queue(self.pool, .request, 2, self.hello, true) catch {
@@ -302,6 +304,10 @@ pub fn NodeLink(comptime IO: type) type {
                     self.close_link();
                     return;
                 };
+                if (self.rx_bytes != self.conn.rx_progress or self.conn.rx_blocked()) {
+                    self.rx_bytes = self.conn.rx_progress;
+                    self.last_rx = now;
+                }
                 if (self.conn.frame_ready) {
                     if (self.rx_serial != self.conn.rx_serial) {
                         self.rx_serial = self.conn.rx_serial;

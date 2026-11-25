@@ -22,6 +22,7 @@ pub const workers_max = 14;
 pub const waiting_leases_max = 10;
 const worker_stack_bytes = 4 * 1024 * 1024;
 const worker_idle_ms = 10_000;
+const worker_exit_ms = 3_000;
 const telemetry_connected_ms = 2_500;
 const telemetry_idle_ms = 10_000;
 const probe_wait_ms = 8_000;
@@ -231,6 +232,9 @@ pub const Server = struct {
     staged_ok: bool = false,
     resolved: [node_link.candidate_limit]io_net.Endpoint = undefined,
     resolved_count: usize = 0,
+    resolved_id: u64 = 0,
+    resolver_busy: std.atomic.Value(bool) = .init(false),
+    workers_abandoned: bool = false,
     telemetry_inflight: bool = false,
     telemetry_next: u64 = 0,
     healthy_wanted: bool = false,
@@ -320,6 +324,7 @@ pub const Server = struct {
     }
 
     pub fn destroy(self: *Server) void {
+        if (self.workers_abandoned) return;
         const static = self.static;
         static.begin_deinit();
         const a = static.allocator();
@@ -362,7 +367,7 @@ pub const Server = struct {
         }
         self.stop_workers();
         self.core.drain();
-        tiger.assert(self.core.quiescent());
+        tiger.assert(self.workers_abandoned or self.core.quiescent());
     }
 
     fn adm_interrupt(self: *Server) void {
@@ -405,7 +410,14 @@ pub const Server = struct {
     fn task_done(context: *anyopaque, task: Task, id: u64) void {
         const self: *Server = @ptrCast(@alignCast(context));
         switch (task) {
-            .resolve => self.core.link.set_endpoints(id, self.resolved[0..self.resolved_count]),
+            .resolve => {
+                var answer: [node_link.candidate_limit]io_net.Endpoint = undefined;
+                self.sync.lock();
+                const count = if (self.resolved_id == id) self.resolved_count else 0;
+                @memcpy(answer[0..count], self.resolved[0..count]);
+                self.sync.unlock();
+                self.core.link.set_endpoints(id, answer[0..count]);
+            },
             .telemetry => {
                 self.telemetry_inflight = false;
                 const established = self.core.link.phase == .established;
@@ -417,7 +429,7 @@ pub const Server = struct {
                     self.beat_len = self.staged_beat_len;
                 }
             },
-            .healthy, .request => {},
+            .healthy, .request, .cleanup => {},
         }
     }
 
@@ -456,15 +468,33 @@ pub const Server = struct {
         };
     }
 
+    /// Joins the workers, but never waits more than worker_exit_ms on one stuck in a lookup or download it cannot
+    /// cancel: it is detached, the server's memory is kept for it, and the process exits without freeing it.
     fn stop_workers(self: *Server) void {
         self.sync.lock();
         self.quitting = true;
         self.sync.unlock();
         self.sync.cond.broadcast(self.cfg.io);
-        for (&self.threads) |*thread| {
-            if (thread.*) |t| t.join();
-            thread.* = null;
+        var waited: u64 = 0;
+        while (waited < worker_exit_ms) : (waited += 10) {
+            self.sync.lock();
+            const live = self.live;
+            self.sync.unlock();
+            if (live == 0) break;
+            self.cfg.io.sleep(.fromMilliseconds(10), .awake) catch break;
         }
+        for (&self.threads, 0..) |*thread, i| {
+            const t = thread.* orelse continue;
+            thread.* = null;
+            self.sync.lock();
+            const running = self.alive[i];
+            self.sync.unlock();
+            if (running) {
+                self.workers_abandoned = true;
+                t.detach();
+            } else t.join();
+        }
+        if (self.workers_abandoned) std.debug.print("node: a worker is stuck in a blocking call; exiting without waiting for it\n", .{});
     }
 
     fn worker_main(self: *Server, index: usize) void {
@@ -513,14 +543,38 @@ pub const Server = struct {
 
     fn handle(self: *Server, arena: std.mem.Allocator, work: *node_loop.Work) void {
         switch (work.task) {
-            .resolve => self.resolved_count = resolve(self.cfg.io, self.cfg.addrs, &self.resolved),
+            .resolve => self.run_resolve(work.id),
             .telemetry => self.refresh_hello(arena),
             .healthy => {
                 const dir = std.fs.path.join(arena, &.{ self.cfg.home_path, "releases" }) catch return;
                 u_store.mark_healthy(self.cfg.gpa, self.cfg.io, dir) catch {};
             },
             .request => self.serve(arena, work),
+            .cleanup => self.release_orphan(arena, work),
         }
+    }
+
+    /// One lookup at a time: a lookup that outlives the link's 15 s patience is not joined by a second one,
+    /// which answers empty so the link keeps its previous endpoints.
+    fn run_resolve(self: *Server, id: u64) void {
+        var found: [node_link.candidate_limit]io_net.Endpoint = undefined;
+        var count: usize = 0;
+        if (!self.resolver_busy.swap(true, .acq_rel)) {
+            count = resolve(self.cfg.io, self.cfg.addrs, &found);
+            self.resolver_busy.store(false, .release);
+        }
+        self.sync.lock();
+        @memcpy(self.resolved[0..count], found[0..count]);
+        self.resolved_count = count;
+        self.resolved_id = id;
+        self.sync.unlock();
+    }
+
+    /// A lease was granted to a request whose reply could not be sent, so no one can release it: release it here.
+    fn release_orphan(self: *Server, arena: std.mem.Allocator, work: *node_loop.Work) void {
+        const granted = msg.decode_arena(msg.LeaseReply, arena, work.request) catch return;
+        if (!granted.ok or granted.lease_id.len == 0) return;
+        _ = self.cfg.adm.release(arena, granted.lease_id, granted.epoch) catch {};
     }
 
     fn refresh_hello(self: *Server, arena: std.mem.Allocator) void {
@@ -586,7 +640,9 @@ pub const Server = struct {
                     return fail(w, .busy, "too many lease acquisitions waiting");
                 }
                 defer _ = self.waiting_leases.fetchSub(1, .acq_rel);
-                reply(w, .response, try adm.acquire_blocking(arena, al, al.job_id, w.abandoned));
+                const granted = try adm.acquire_blocking(arena, al, al.job_id, w.abandoned);
+                w.cleanup = granted.ok;
+                reply(w, .response, granted);
             },
             .renew_lease => |rl| reply(w, .response, try adm.renew(arena, rl)),
             .release_lease => |rl| reply(w, .response, try adm.release(arena, rl.lease_id, rl.epoch)),

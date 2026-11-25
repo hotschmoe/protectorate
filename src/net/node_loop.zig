@@ -22,11 +22,12 @@ comptime {
     tiger.comptime_assert(limits.piece_max <= frame.max_payload, "a piece fits one frame");
 }
 
-pub const Task = enum(u8) { request, resolve, telemetry, healthy };
+pub const Task = enum(u8) { request, resolve, telemetry, healthy, cleanup };
 
 /// One request or task as a worker sees it. The worker fills the reply fields and hands it back with finish_work.
 pub const Work = struct {
     index: u8,
+    id: u64,
     task: Task,
     request: []const u8,
     chunk: []u8,
@@ -37,6 +38,9 @@ pub const Work = struct {
     payload_len: usize = 0,
     then_stop: bool = false,
     no_reply: bool = false,
+    /// The reply carries a side effect, such as a granted lease, that must be undone if the reply is never sent:
+    /// the dropped reply's payload comes back to a worker as a cleanup task.
+    cleanup: bool = false,
 };
 
 pub const Embed = struct {
@@ -67,6 +71,7 @@ const Slot = struct {
     payload_len: usize = 0,
     then_stop: bool = false,
     no_reply: bool = false,
+    cleanup: bool = false,
     chunk_sent: bool = false,
 };
 
@@ -99,6 +104,7 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
         stop_flush: bool = false,
         stop_deadline: u64 = 0,
         stalled: bool = false,
+        stopping: bool = false,
         stop_reply_sent: bool = false,
         busy_replies: u64 = 0,
         dropped_replies: u64 = 0,
@@ -147,6 +153,7 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
         }
 
         pub fn shutdown(self: *Self) void {
+            self.stopping = true;
             self.link.shutdown();
             self.abandon_all();
         }
@@ -159,6 +166,15 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
         pub fn quiescent(self: *const Self) bool {
             for (&self.slots) |*slot| if (slot.state != .free) return false;
             return self.work.len == 0 and self.finished.len == 0 and self.outbox.len == 0;
+        }
+
+        /// Request slots still with a worker or waiting to send.
+        pub fn count_requests(self: *const Self) usize {
+            var count: usize = 0;
+            for (&self.slots) |*slot| {
+                if (slot.state != .free and slot.task == .request) count += 1;
+            }
+            return count;
         }
 
         pub fn free_slots(self: *const Self) usize {
@@ -249,6 +265,7 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
             const buffer = self.buffers[i];
             return .{
                 .index = i,
+                .id = slot.id,
                 .task = slot.task,
                 .request = buffer.request[0..slot.request_len],
                 .chunk = &buffer.chunk,
@@ -266,6 +283,7 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
             slot.payload_len = work.payload_len;
             slot.then_stop = work.then_stop;
             slot.no_reply = work.no_reply;
+            slot.cleanup = work.cleanup;
             self.sync.lock();
             self.finished.push(work.index) catch unreachable;
             self.sync.unlock();
@@ -298,9 +316,8 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
                 }
                 const live = self.link.phase == .established and slot.generation == self.link.generation;
                 if (!live or slot.abandoned.load(.acquire) or slot.no_reply) {
-                    if (!slot.no_reply) self.dropped_replies += 1;
                     if (slot.then_stop) self.stop_reply_sent = true;
-                    self.release(i);
+                    self.drop(i);
                     continue;
                 }
                 slot.state = .sending;
@@ -313,11 +330,26 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
             self.slots[index] = .{};
         }
 
+        /// A reply that will not be sent. One that carries a side effect goes back to a worker to be undone.
+        fn drop(self: *Self, index: u8) void {
+            const slot = &self.slots[index];
+            if (!slot.no_reply) self.dropped_replies += 1;
+            if (!slot.cleanup or self.stopping or slot.no_reply) return self.release(index);
+            const buffer = self.buffers[index];
+            const len = slot.payload_len;
+            @memcpy(buffer.request[0..len], buffer.payload[0..len]);
+            slot.* = .{ .state = .working, .task = .cleanup, .generation = self.link.generation, .request_len = len };
+            self.sync.lock();
+            self.work.push(index) catch unreachable;
+            self.sync.unlock();
+            self.embed.notify(self.embed.context);
+        }
+
         fn abandon_all(self: *Self) void {
             for (&self.slots) |*slot| {
                 if (slot.state == .working) slot.abandoned.store(true, .release);
             }
-            while (self.outbox.pop()) |index| self.release(index);
+            while (self.outbox.pop()) |index| self.drop(index);
             self.control = .{};
         }
 
@@ -395,7 +427,13 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
                         slot.chunk_sent = true;
                         continue;
                     }
-                } else |_| self.dropped_replies += 1;
+                } else |_| {
+                    if (slot.then_stop) self.stop_reply_sent = true;
+                    _ = self.outbox.pop();
+                    self.drop(index);
+                    progress = true;
+                    continue;
+                }
                 if (slot.then_stop) {
                     self.stop_flush = true;
                     self.stop_deadline = self.backend.now() +| flush_wait_ms;

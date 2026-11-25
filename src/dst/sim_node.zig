@@ -64,6 +64,7 @@ const Ctx = struct {
     connects: usize = 0,
     disconnects: usize = 0,
     healthy: usize = 0,
+    cleanups: usize = 0,
     hello_ok: bool = true,
     hello_key: [32]u8 = undefined,
     allowed: [32]u8,
@@ -84,6 +85,7 @@ const Ctx = struct {
                 self.core.link.set_endpoints(id, self.endpoints[0..2]);
             },
             .healthy => self.healthy += 1,
+            .cleanup => self.cleanups += 1,
             .telemetry, .request => {},
         }
     }
@@ -175,6 +177,9 @@ pub fn run(gpa: std.mem.Allocator, seed: u64) !void {
     var phase_step: usize = 0;
     var stop_reply = false;
     var stop_sent = false;
+    var stop_finished = false;
+    var stale_requests: usize = 0;
+    var dropped_before: u64 = 0;
     var step: usize = 0;
     errdefer std.debug.print("node sim: seed={d} step={d} phase={s} connects={d} disconnects={d} busy={d} gone={d} delivered={d} free={d}\n", .{ seed, step, @tagName(phase), ctx.connects, ctx.disconnects, busy_seen, gone_seen, delivered, core.free_slots() });
     while (step < 60_000) : (step += 1) {
@@ -182,7 +187,7 @@ pub fn run(gpa: std.mem.Allocator, seed: u64) !void {
         if (sim.now() >= 500) sim.transfer_max = 4096;
         try bus.drive();
         core.turn();
-        try step_workers(core, &workers, sim);
+        try step_workers(core, &workers, sim, &stop_finished);
         if (bus.event()) |event| switch (event) {
             .connected => |connected| {
                 peer = connected;
@@ -277,6 +282,8 @@ pub fn run(gpa: std.mem.Allocator, seed: u64) !void {
             .crash => if (plan_pos < plan_len) {
                 phase_step = 0;
             } else if (phase_step > 30 + seed % 40) {
+                stale_requests = core.count_requests();
+                dropped_before = core.dropped_replies;
                 sim.crash(endpoint);
                 phase = .outage;
                 phase_step = 0;
@@ -288,9 +295,11 @@ pub fn run(gpa: std.mem.Allocator, seed: u64) !void {
                     phase_step = 0;
                 }
             },
-            .reconnect => if (peer != null and ctx.connects >= 2 and settled) {
+            .reconnect => if (peer != null and ctx.connects >= 2 and settled and core.free_slots() == node_loop.work_slots) {
                 if (ctx.disconnects == 0) return error.NoDisconnect;
-                if (core.dropped_replies == 0 and gone_seen == 0) return error.NothingAbandoned;
+                if (stale_requests == 0 or gone_seen == 0) return error.NothingInFlight;
+                if (core.dropped_replies < dropped_before + stale_requests) return error.StaleReplyNotDropped;
+                if (ctx.cleanups == 0) return error.OrphanNotCleaned;
                 for (&plan, 0..) |*x, i| {
                     next_x = if (i % 3 == 0) quick_x(next_x) else if (i % 3 == 1) chunked_x(next_x) else large_x(next_x);
                     x.* = next_x;
@@ -309,6 +318,7 @@ pub fn run(gpa: std.mem.Allocator, seed: u64) !void {
                 phase_step = 0;
             },
             .stop => {
+                if (core.stop_reply_sent and (!stop_finished or core.outbox.len != 0 or !core.link.flushed())) return error.StopBeforeFlush;
                 if (stop_reply) stop_sent = true;
                 if (core.stop_reply_sent and stop_sent) {
                     core.shutdown();
@@ -428,7 +438,7 @@ fn flush_replies(bus: *Bus, replies: *Replies) !void {
     }
 }
 
-fn step_workers(core: *Core, workers: *[fake_workers]Worker, sim: *Sim) !void {
+fn step_workers(core: *Core, workers: *[fake_workers]Worker, sim: *Sim, stop_finished: *bool) !void {
     for (workers) |*worker| {
         if (worker.work == null) {
             const work = core.next_work() orelse continue;
@@ -462,6 +472,8 @@ fn step_workers(core: *Core, workers: *[fake_workers]Worker, sim: *Sim) !void {
             work.payload_len = body.len;
             work.kind = if (len > 0) .end else .response;
             work.then_stop = kind_of(worker.x) == .stop;
+            work.cleanup = kind_of(worker.x) == .abandon;
+            if (work.then_stop) stop_finished.* = true;
         }
         core.finish_work(work);
         worker.work = null;
