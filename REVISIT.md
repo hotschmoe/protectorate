@@ -259,12 +259,10 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
 - **Transcripts never rotate** (`src/hub/transcript.zig`): one JSONL per sleeve, and every read
   loads and parses the whole file to find its range. A file over 64 MiB reads as an empty
   transcript. Fast: an offset index.
-- **Wait and EnvoyWait hold a connection thread** (`src/hub/api_dispatch.zig`,
-  `src/hub/http_server.zig`): each call polls the stream hub for up to 60 s on its own request
-  thread. The HTTP server starts one detached thread per connection (`accept_loop`, `conn_thread`)
-  with no connection cap and no idle timeout, so idle or slow clients can pile up threads. Fine for
-  a few clients. Right: a connection limit that closes the oldest idle connection, a shorter idle
-  limit for unauthenticated connections, and an event-driven wait if Envoy fans out.
+- **Long calls past eight get 503** (`src/hub/http_server.zig`, the long worker pool): `Wait`,
+  `EnvoyWait`, `AcquireLease`, `SpawnSleeve`, `RemoveSleeve`, `GitPush`, `RunJob` and the update
+  calls run on 8 long workers with no queue, so a ninth concurrent one is refused at once rather than
+  queued. Right: continuations (a waiting call holds a slot, not a thread) if Envoy fans out.
 - **A revoked caller's event stream stays open** (`src/hub/http_server.zig`, `handle_websocket`):
   the token is checked once when `/api/events` is opened. `revoke_device` (`src/hub/home.zig`) stops
   the token working for new requests but does not end streams already open, which keep receiving
@@ -608,12 +606,11 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
 - **Losing fleet dials can remain blocked** (`src/net/transport.zig`): a timed-out or losing dial
   retains its worker and process-lifetime I/O until the connection attempt or handshake returns.
   Right: cancel DNS, connect, and handshake operations and wait for each losing worker to exit.
-- **The events WebSocket and CORS accept any Origin** (`src/hub/http_server.zig`, `conn_thread`
-  for `/api/events`, `cors_headers`): the upgrade checks only the token (`Authorization` or
-  `?access_token=`), and every response, errors included, carries `access-control-allow-origin: *`.
-  With bearer tokens and no cookies a foreign page cannot ride a session, so this is low risk
-  today. Right: an allow-list of the hub's own origin and the proxy's host, checked on the upgrade
-  and in the CORS headers, before any cookie or ambient credential is added.
+- **CORS accepts any Origin** (`src/hub/http_server.zig`, `cors_headers`): the WebSocket upgrade now
+  checks Origin against Host, but every response still carries `access-control-allow-origin: *`.
+  With bearer tokens and no cookies a foreign page cannot ride a session, so this stays by decision.
+  Right: an allow-list of the hub's own origin and the proxy's host before any cookie or ambient
+  credential is added.
 - **History and transcripts ignore the caller's reach** (`src/hub/api_dispatch.zig`,
   `GetTranscript`, `SearchHistory`, `ReadHistory`; `src/api/schema.zig`, scope `.sleeve`): these
   methods are open to every authenticated caller, the envoy-only token included, and none checks
@@ -629,10 +626,10 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
 - **The job log mirror re-reads from offset 0** (`src/hub/runtime.zig`, `fetch_log_mirror`):
   every poll pulls the first 1 MiB of a running job's log again in 256 KiB pieces. Right: append
   from the last offset.
-- **HTTP connection refusals are counted but not shown** (`src/net/limits.zig`, `ConnGate`): the
-  HTTP gates log one `std.debug.print` line per burst; their `refused_total` and high-water marks
-  are not in `hub info` (the fleet's `fleet_refused` is). Right: expose them with the network
-  budget (Phase 5 of docs/design/tigerstyle-network.md).
+- **HTTP refusals are counted but not shown** (`src/hub/http_server.zig`): the HTTP loop counts
+  connections refused past its 32 slots per listener, but the counter is not in `hub info` (the
+  fleet's `fleet_refused` is). Right: expose it with the network budget (Phase 5 of
+  docs/design/tigerstyle-network.md).
 - **Git sleeve mounts require bubblewrap** (`src/sandbox/`): Landlock grants write access to
   whole trees and cannot exclude protected Git paths from the workspace grant. A Git checkout
   is refused when Landlock is the only Linux sandbox available.
@@ -640,14 +637,10 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   serve --stdio` speaks the fleet protocol over a pipe for an ssh bridge, but nothing on the hub
   calls `accept_stdio`. Right: a hub command that runs the node over ssh and attaches the pipe,
   or drop the node mode.
-- **The hub fleet starts only on Linux** (`src/hub/fleet.zig` `start`, `src/hub/fleet_loop.zig`): the
+- **The hub fleet and HTTP start only on Linux** (`src/hub/fleet.zig` `start`, `src/hub/fleet_loop.zig`): the
   loop runs on `src/net/io_epoll.zig`; Windows and macOS hub builds compile but `start` returns
-  `error.FleetUnsupportedPlatform`, so `serve` cannot run there. Right: the kqueue and IOCP backends
+  `error.FleetUnsupportedPlatform` (HTTP: `error.HttpUnsupportedPlatform`), so `serve` cannot run there. Right: the kqueue and IOCP backends
   of Phase 3 behind one comptime selector.
-- **Lease waits can hold every HTTP handler** (`src/hub/fleet_loop.zig` `long_calls_per_peer`,
-  `src/hub/http_server.zig`): waiting lease acquisitions are capped at 8 per node and 64 call slots
-  in all, but nothing relates that to the HTTP server's 32 connections, so a few nodes' waiters can
-  fill them. Right: HTTP on the loop with continuations (Phase 4), so a waiting call holds no thread.
 - **Fleet telemetry is dropped when the event ring is full** (`src/hub/fleet_loop.zig`, 32 events):
   counted in `hub info` as `fleet_telemetry_dropped`; connected and disconnected events wait in the
   bus instead. Right: coalesce telemetry per node (keep only the newest) so nothing is lost.
@@ -670,3 +663,11 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   forked PID, so every failed launch (doctor probing a harness that is not on PATH, a missing pi)
   left a zombie; the live dev.4 hub had 92 after five hours. The hub's own spawn wrapper now reaps
   the failed child before returning. Right: report it upstream and drop the wrapper once std reaps it.
+- **HTTP responses and snapshots are built whole in heap memory** (`src/hub/api_dispatch.zig`,
+  `src/hub/http_server.zig`): `dispatch` returns a whole JSON body and each WebSocket connect builds
+  its snapshot on a worker; only assets and downloads stream. Right: bounded per-request arenas from
+  a fixed pool (design doc section 6, item 1).
+- **HTTP loop gaps** (`src/hub/http_server.zig`): no Range requests; bytes pipelined after a chunked
+  body are dropped and the connection closes after the reply; a client that disconnects while its
+  call runs is noticed only when the call ends; single-stream downloads run at about half the old
+  server's speed (1.2 vs 2.6 GB/s in curl, far above any real link). Right: each as it matters.

@@ -1,8 +1,12 @@
 # TigerStyle networking: investigation and rewrite proposal
 
-Status: accepted 2026-11-24 with every recommendation in section 6; in progress. Phases 0, 1 and 2
+Status: accepted 2026-11-24 with every recommendation in section 6; in progress. Phases 0, 1, 2 and 4
 are done: the hub's fleet runs on one epoll loop (src/hub/fleet_loop.zig, docs/srcmd/network.md) and
-its accept and per-peer threads are gone. Phases 3 to 5 are outstanding.
+its accept and per-peer threads are gone; its HTTP and WebSocket server runs on a second epoll loop
+(src/hub/http_server.zig, docs/srcmd/network.md "HTTP and WebSocket loop"): fixed connection slots,
+a bounded parser, worker pools for the runtime calls, streamed assets and downloads, and a lock-free
+stream ring read by the loop, so the accept thread, the per-connection threads and the StreamHub
+mutex and condition are gone. Phases 3 and 5 are outstanding.
 SPEC.md wins where they differ.
 
 Inputs: a read-only source inventory of src/net, src/hub/{fleet,http_server,stream,runtime}.zig,

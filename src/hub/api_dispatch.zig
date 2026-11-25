@@ -745,8 +745,7 @@ pub fn dispatch(
             if (settled) break;
             const now = std.Io.Clock.real.now(rt.io).toMilliseconds();
             if (now >= deadline) break;
-            const ws = try rt.stream_hub.wait_since(a, cursor, @min(500, deadline - now));
-            cursor = ws.last_seq;
+            cursor = try rt.stream_hub.wait_change(cursor, @min(500, deadline - now));
         }
         const reply_text = extract_envoy_reply(a, rt, req.request_id);
         return ok_json(rt.gpa, schema.EnvoyReply{
@@ -790,8 +789,7 @@ pub fn dispatch(
             }
             const now = std.Io.Clock.real.now(rt.io).toMilliseconds();
             if (now >= deadline) break;
-            const ws = try rt.stream_hub.wait_since(a, cursor, @min(500, deadline - now));
-            cursor = ws.last_seq;
+            cursor = try rt.stream_hub.wait_change(cursor, @min(500, deadline - now));
         }
         return ok_json(rt.gpa, schema.WaitResult{ .reached = reached, .sleeves = res_sleeves.items });
     } else if (std.mem.eql(u8, method, "SearchHistory")) {

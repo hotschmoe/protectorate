@@ -243,6 +243,9 @@ pub const Runtime = struct {
         var h_idx = try h_index.HistoryIndex.open(gpa, io, hh.history_path);
         errdefer h_idx.deinit();
 
+        var hub_stream = try stream.StreamHub.init(gpa, io);
+        errdefer hub_stream.deinit();
+
         const rt = try gpa.create(Runtime);
         errdefer gpa.destroy(rt);
 
@@ -264,7 +267,7 @@ pub const Runtime = struct {
             .cached_quotas_arena = std.heap.ArenaAllocator.init(gpa),
             .transcripts = tx_store,
             .history = h_idx,
-            .stream_hub = stream.StreamHub.init(gpa, io),
+            .stream_hub = hub_stream,
             .fleet_srv = undefined,
             .http_listen = http_listen,
             .proxy_listen = proxy_listen,
@@ -2636,8 +2639,7 @@ pub const Runtime = struct {
                 self.commit(.{ .approval_expired = .{ .approval_id = app_id } }) catch {};
                 return error.ApprovalTimeout;
             }
-            const ws = try self.stream_hub.wait_since(arena, cursor, @min(500, deadline - now));
-            cursor = ws.last_seq;
+            cursor = try self.stream_hub.wait_change(cursor, @min(500, deadline - now));
         }
     }
 
@@ -2794,8 +2796,7 @@ pub const Runtime = struct {
                 if (all_done) break;
                 const now = std.Io.Clock.real.now(self.io).toMilliseconds();
                 if (now >= deadline) break;
-                const ws = try self.stream_hub.wait_since(arena, cursor, @min(500, deadline - now));
-                cursor = ws.last_seq;
+                cursor = try self.stream_hub.wait_change(cursor, @min(500, deadline - now));
             }
         }
 
