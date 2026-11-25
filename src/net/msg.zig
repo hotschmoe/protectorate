@@ -480,6 +480,12 @@ pub fn encode_alloc(gpa: std.mem.Allocator, value: anytype) error{OutOfMemory}![
     return std.json.Stringify.valueAlloc(gpa, value, .{});
 }
 
+pub fn encode_fixed(buffer: []u8, value: anytype) error{NoSpaceLeft}![]u8 {
+    var writer: std.Io.Writer = .fixed(buffer);
+    std.json.Stringify.value(value, .{}, &writer) catch return error.NoSpaceLeft;
+    return writer.buffered();
+}
+
 pub fn decode_arena(comptime T: type, arena: std.mem.Allocator, bytes: []const u8) !T {
     const val = try std.json.parseFromSliceLeaky(std.json.Value, arena, bytes, .{});
     return std.json.parseFromValueLeaky(T, arena, val, .{

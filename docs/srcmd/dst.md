@@ -4,8 +4,8 @@ Robustness rests on `vopr` (`src/dst/vopr.zig`), a Viewstamped-Replication-style
 
 ## Simulated Components
 
-- **`src/dst/sim_storage.zig`**: Modelssector-level disk writes, fsync durability barriers, bitflips, incomplete torn-tail writes on un-fsynced crashes, and mid-log corruption detection (`journal/codec.zig`).
-- **`src/dst/sim_net.zig`**: Fault-injecting network model over real `Noise_IK` (`net/noise.zig`) handshakes, `pt-frame` (`net/frame.zig`) splitting, message reordering, packet drops, duplicate delivery, and tamper verification.
+- **`src/dst/sim_storage.zig`**: Models sector-level disk writes, fsync durability barriers, bitflips, incomplete torn-tail writes on un-fsynced crashes, and mid-log corruption detection (`journal/codec.zig`).
+- **`src/dst/io_sim.zig` and `src/dst/sim_fleet.zig`**: Seeded completion IO drives one real fleet bus and two to six node links with a frozen network allocator. Simulated streams preserve byte order; transfers can be short, completions delayed, connects refused or timed out, and consumers slowed. Partitions stall and then reset streams; endpoints can crash and restart. Explicit corruption faults alter a Noise handshake and a record to exercise authentication failure; an authenticated malformed frame exercises framing rejection. The workload races viable endpoints, exchanges fragmented encrypted requests and chunked replies, samples maximum-sized frames spanning five slabs, fills the RPC table, times out a call, replaces a duplicate identity, and shuts down with a handshake in flight. It checks slot and slab conservation, request parity, terminal results, generation fencing, replacement disconnect suppression, cancellation, and reconnect followed by a successful RPC. After a fault stops, each initial node must reconnect and finish its RPC within the 30,000 ms bound for that phase; the tamper/reconnect phase has a separate 20,000 ms bound. Failures print a recent event trace and VOPR's reproduction command.
 - **`src/dst/oracle.zig`**: `CoreWorld` + invariant checker asserting on every single step:
   - No overlapping active workspace claims.
   - Approval generation fencing consistency.
@@ -19,4 +19,5 @@ Robustness rests on `vopr` (`src/dst/vopr.zig`), a Viewstamped-Replication-style
 ```sh
 zig build -Doptimize=safe dst -- --seeds 300 --steps 1500
 zig build dst -- --seed 41 --steps 1500 --verbose
+zig build -Doptimize=safe dst -- --seeds 300 --steps 1500 --fleet-long
 ```

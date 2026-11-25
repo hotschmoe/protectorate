@@ -63,7 +63,9 @@ fn classify(rel_path: []const u8) ?Classification {
     }
     if (std.mem.eql(u8, rel_path, "net/frame.zig") or
         std.mem.eql(u8, rel_path, "net/noise.zig") or
-        std.mem.eql(u8, rel_path, "net/limits.zig"))
+        std.mem.eql(u8, rel_path, "net/limits.zig") or
+        std.mem.eql(u8, rel_path, "net/io.zig") or
+        std.mem.eql(u8, rel_path, "net/bounded.zig"))
     {
         return .{ .tier = .l1, .group = .net };
     }
@@ -85,7 +87,10 @@ fn classify(rel_path: []const u8) ?Classification {
     if (std.mem.eql(u8, rel_path, "api/schema.zig")) {
         return .{ .tier = .l2, .group = .api };
     }
-    if (std.mem.eql(u8, rel_path, "net/msg.zig")) {
+    if (std.mem.eql(u8, rel_path, "net/msg.zig") or std.mem.eql(u8, rel_path, "net/channel.zig") or
+        std.mem.eql(u8, rel_path, "net/handshake.zig") or std.mem.eql(u8, rel_path, "net/fleet_bus.zig") or
+        std.mem.eql(u8, rel_path, "net/node_link.zig"))
+    {
         return .{ .tier = .l2, .group = .net };
     }
     if (std.mem.startsWith(u8, rel_path, "core/")) {
