@@ -137,6 +137,12 @@ pub const RuntimeOptions = struct {
     no_sandbox: bool = false,
 };
 
+const LauncherJob = struct {
+    run: *const fn (*anyopaque) void,
+    ctx: *anyopaque,
+    done: bool = false,
+};
+
 pub const Runtime = struct {
     gpa: std.mem.Allocator,
     io: std.Io,
@@ -191,6 +197,11 @@ pub const Runtime = struct {
     tick_thread: ?std.Thread = null,
     quota_thread: ?std.Thread = null,
     history_thread: ?std.Thread = null,
+    launcher_thread: ?std.Thread = null,
+    launcher_mu: std.Io.Mutex = .init,
+    launcher_cond: std.Io.Condition = .init,
+    launcher_job: ?*LauncherJob = null,
+    launcher_closed: bool = false,
     shutdown_requested: std.atomic.Value(bool) = .init(false),
     workers_mu: std.Io.Mutex = .init,
     workers_cond: std.Io.Condition = .init,
@@ -310,6 +321,14 @@ pub const Runtime = struct {
         rt.init_sleeve_devices();
         rt.load_host_info();
         rt.refresh_quotas_sync(false);
+        rt.launcher_thread = try std.Thread.spawn(.{}, launcher_loop, .{rt});
+        errdefer {
+            rt.stopping.store(true, .release);
+            rt.launcher_mu.lockUncancelable(rt.io);
+            rt.launcher_cond.broadcast(rt.io);
+            rt.launcher_mu.unlock(rt.io);
+            rt.launcher_thread.?.join();
+        }
         try rt.recover_after_replay();
         _ = rt.history.ingest_roots(null, hh.transcripts_path);
 
@@ -321,6 +340,38 @@ pub const Runtime = struct {
             rt.history_thread = std.Thread.spawn(.{}, history_bg_loop, .{rt}) catch null;
         }
         return rt;
+    }
+
+    /// A child dies with the thread that forked it (PDEATHSIG), so sleeves are forked from this thread, which lives as long as the hub.
+    fn launcher_loop(self: *Runtime) void {
+        self.launcher_mu.lockUncancelable(self.io);
+        while (true) {
+            if (self.launcher_job) |job| {
+                self.launcher_mu.unlock(self.io);
+                job.run(job.ctx);
+                self.launcher_mu.lockUncancelable(self.io);
+                job.done = true;
+                self.launcher_job = null;
+                self.launcher_cond.broadcast(self.io);
+            } else if (self.stopping.load(.acquire)) {
+                break;
+            } else {
+                self.launcher_cond.waitUncancelable(self.io, &self.launcher_mu);
+            }
+        }
+        self.launcher_closed = true;
+        self.launcher_cond.broadcast(self.io);
+        self.launcher_mu.unlock(self.io);
+    }
+
+    fn run_on_launcher(self: *Runtime, job: *LauncherJob) !void {
+        self.launcher_mu.lockUncancelable(self.io);
+        defer self.launcher_mu.unlock(self.io);
+        while (self.launcher_job != null and !self.launcher_closed) self.launcher_cond.waitUncancelable(self.io, &self.launcher_mu);
+        if (self.launcher_closed) return error.HubStopping;
+        self.launcher_job = job;
+        self.launcher_cond.broadcast(self.io);
+        while (!job.done) self.launcher_cond.waitUncancelable(self.io, &self.launcher_mu);
     }
 
     fn quota_bg_loop(self: *Runtime) void {
@@ -377,7 +428,11 @@ pub const Runtime = struct {
         self.stopping.store(true, .release);
         self.stream_hub.wake_all();
         self.fleet_srv.shutdown();
+        self.launcher_mu.lockUncancelable(self.io);
+        self.launcher_cond.broadcast(self.io);
+        self.launcher_mu.unlock(self.io);
         if (self.tick_thread) |t| t.join();
+        if (self.launcher_thread) |t| t.join();
         if (self.quota_thread) |t| t.join();
         if (self.history_thread) |t| t.join();
         self.workers_mu.lockUncancelable(self.io);
@@ -1090,7 +1145,20 @@ pub const Runtime = struct {
                 if (self.stopping.load(.acquire) or self.sessions.contains(li.sleeve_id)) return;
                 try self.sessions.ensureUnusedCapacity(self.gpa, 1);
             }
-            const dh = try self.spawn_driver(li);
+            const Spawn = struct {
+                rt: *Runtime,
+                li: @TypeOf(li),
+                result: anyerror!*DriverHandle = error.HubStopping,
+
+                fn run(ctx: *anyopaque) void {
+                    const s: *@This() = @ptrCast(@alignCast(ctx));
+                    s.result = s.rt.spawn_driver(s.li);
+                }
+            };
+            var spawn: Spawn = .{ .rt = self, .li = li };
+            var job: LauncherJob = .{ .run = Spawn.run, .ctx = &spawn };
+            try self.run_on_launcher(&job);
+            const dh = try spawn.result;
             self.meta_mu.lockUncancelable(self.io);
             defer self.meta_mu.unlock(self.io);
             dh.users = 1;

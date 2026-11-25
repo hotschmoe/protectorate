@@ -238,6 +238,11 @@ if [[ "$MARKER_FOUND" -ne 1 ]]; then
   rpc_post "$HTTP2" "$TOK2" GetTranscript "{\"sleeve_id\":\"${SLV2}\"}" >&2 || true
   exit 1
 fi
+if grep -q '"type":"exited"' "$HUB2"/transcripts/*.jsonl || grep -qv '"g":1,' "$HUB2"/transcripts/*.jsonl; then
+  echo "pi + hotschmoe-dd was killed or relaunched before its first turn settled; transcript:" >&2
+  cat "$HUB2"/transcripts/*.jsonl >&2
+  exit 1
+fi
 
 # Test SIGKILL + Journal Crash Replay
 kill -9 "$PID2" >/dev/null 2>&1 || true
