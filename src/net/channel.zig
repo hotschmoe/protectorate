@@ -122,7 +122,28 @@ pub fn Channel(comptime IO: type) type {
             self.session.deinit();
         }
 
+        fn settle_tx(self: *Self, pool: *bounded.SlabPool) void {
+            if (self.tx_frame.len == 0 or self.tx_wire_pos != self.tx_wire_len or self.tx_frame_pos != self.tx_frame.len) return;
+            self.tx_done += 1;
+            self.tx_frame.clear(pool);
+            self.tx_frame_pos = 0;
+            self.tx_wire_pos = 0;
+            self.tx_wire_len = 0;
+        }
+
         pub fn drive(self: *Self, backend: *IO, pool: *bounded.SlabPool) !void {
+            // Sends first: a receive failure must not hide a frame whose last byte was written.
+            if (self.tx_result) |result| {
+                self.tx_result = null;
+                if (!self.stopping) switch (result) {
+                    .sent => |n| {
+                        if (n == 0) return error.Closed;
+                        self.tx_wire_pos += n;
+                        self.settle_tx(pool);
+                    },
+                    else => return error.SendFailed,
+                };
+            }
             if (self.rx_result) |result| {
                 self.rx_result = null;
                 if (!self.stopping) switch (result) {
@@ -132,16 +153,6 @@ pub fn Channel(comptime IO: type) type {
                         self.rx_progress +%= n;
                     },
                     else => return error.ReceiveFailed,
-                };
-            }
-            if (self.tx_result) |result| {
-                self.tx_result = null;
-                if (!self.stopping) switch (result) {
-                    .sent => |n| {
-                        if (n == 0) return error.Closed;
-                        self.tx_wire_pos += n;
-                    },
-                    else => return error.SendFailed,
                 };
             }
             if (self.stopping) return;
@@ -202,11 +213,7 @@ pub fn Channel(comptime IO: type) type {
             }
             if (self.tx_wire_pos == self.tx_wire_len and self.tx_frame.len != 0) {
                 if (self.tx_frame_pos == self.tx_frame.len) {
-                    self.tx_done += 1;
-                    self.tx_frame.clear(pool);
-                    self.tx_frame_pos = 0;
-                    self.tx_wire_pos = 0;
-                    self.tx_wire_len = 0;
+                    self.settle_tx(pool);
                 } else {
                     const n = @min(self.tx_plain.len, self.tx_frame.len - self.tx_frame_pos);
                     self.tx_frame.read(pool, self.tx_frame_pos, self.tx_plain[0..n]);

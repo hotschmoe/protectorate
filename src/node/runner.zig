@@ -121,6 +121,7 @@ pub const Runner = struct {
     jobs: std.StringHashMapUnmanaged(*JobEntry) = .empty,
     supervisor: ?std.Thread = null,
     supervisor_stop: std.atomic.Value(bool) = .init(false),
+    closed: std.atomic.Value(bool) = .init(false),
 
     pub fn init(
         gpa: std.mem.Allocator,
@@ -146,10 +147,12 @@ pub const Runner = struct {
         return self;
     }
 
-    /// Kills every running job's process tree without freeing anything: the normal teardown's effect on jobs, for a
-    /// process that must exit while a worker may still reach the runner.
+    /// Closes the runner (no job is published or started afterwards) and kills every running job's process tree
+    /// without freeing anything: the normal teardown's effect on jobs, for a process that must exit while a worker
+    /// may still reach the runner.
     pub fn fence_all(self: *Runner) void {
         self.mu.lockUncancelable(self.io);
+        self.closed.store(true, .release);
         var list: std.ArrayList(*JobEntry) = .empty;
         defer list.deinit(self.gpa);
         var it = self.jobs.iterator();
@@ -186,6 +189,11 @@ pub const Runner = struct {
 
         const je = try self.make_entry(req);
         self.mu.lockUncancelable(self.io);
+        if (self.closed.load(.acquire)) {
+            self.mu.unlock(self.io);
+            je.deinit();
+            return error.RunnerClosed;
+        }
         if (self.jobs.get(req.job_id) != null) {
             self.mu.unlock(self.io);
             je.deinit();
@@ -222,6 +230,7 @@ pub const Runner = struct {
     }
 
     fn start_entry(self: *Runner, je: *JobEntry) !void {
+        if (self.closed.load(.acquire)) return error.RunnerClosed;
         try std.Io.Dir.cwd().createDirPath(self.io, je.job_dir_path);
         try std.Io.Dir.cwd().writeFile(self.io, .{ .sub_path = je.log_path, .data = "" });
         je.mu.lockUncancelable(self.io);
@@ -659,8 +668,9 @@ fn run_job_thread(job: *JobEntry) void {
         job.guard_active = true;
         job.run_started_ms = std.Io.Clock.awake.now(job.io).toMilliseconds();
         job.last_renew_ms = job.run_started_ms;
-        if (job.cancel_requested.load(.acquire)) {
+        if (job.cancel_requested.load(.acquire) or job.runner.closed.load(.acquire)) {
             job.guard.terminate();
+            job.kill_issued = true;
         }
         job.mu.unlock(job.io);
     }
