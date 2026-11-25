@@ -5,6 +5,7 @@ const commands = @import("cli/commands.zig");
 const hub_home = @import("hub/home.zig");
 const hub_rt = @import("hub/runtime.zig");
 const hub_http = @import("hub/http_server.zig");
+const child_process = @import("child_process.zig");
 
 var sig_stop: std.atomic.Value(bool) = .init(false);
 
@@ -49,7 +50,9 @@ pub fn main(init: std.process.Init) !u8 {
         },
         .serve => |s| {
             install_signal_handlers();
-            const rt = try hub_rt.Runtime.open(init.gpa, init.io, init.environ_map, .{
+            var process_vtable: std.Io.VTable = undefined;
+            const io = child_process.io_for_serve(init, &process_vtable);
+            const rt = try hub_rt.Runtime.open(init.gpa, io, init.environ_map, .{
                 .home_override = s.home_opt,
                 .listen_override = s.listen_opt,
                 .proxy_listen_override = s.proxy_listen_opt,
@@ -60,12 +63,12 @@ pub fn main(init: std.process.Init) !u8 {
             });
             defer rt.close_and_destroy();
 
-            const hs = try hub_http.HttpServer.start(init.gpa, init.io, rt, rt.http_listen);
+            const hs = try hub_http.HttpServer.start(init.gpa, io, rt, rt.http_listen);
             defer hs.stop_and_destroy();
             defer rt.fleet_srv.shutdown();
 
             const proxy_hs = if (rt.proxy_listen) |pl|
-                try hub_http.HttpServer.start_with_options(init.gpa, init.io, rt, pl, rt.trusted_proxies)
+                try hub_http.HttpServer.start_with_options(init.gpa, io, rt, pl, rt.trusted_proxies)
             else
                 null;
             defer if (proxy_hs) |ph| ph.stop_and_destroy();

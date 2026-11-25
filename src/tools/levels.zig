@@ -56,7 +56,8 @@ fn classify(rel_path: []const u8) ?Classification {
     {
         return .{ .tier = .l0, .group = .root };
     }
-    if (std.mem.eql(u8, rel_path, "qr.zig") or
+    if (std.mem.eql(u8, rel_path, "child_process.zig") or
+        std.mem.eql(u8, rel_path, "qr.zig") or
         std.mem.eql(u8, rel_path, "json_util.zig"))
     {
         return .{ .tier = .l1, .group = .root };

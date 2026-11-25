@@ -93,7 +93,9 @@ const DriverHandle = struct {
     memory_prompt_pending: std.atomic.Value(bool) = .init(false),
     interrupt_exit: std.atomic.Value(bool) = .init(false),
     exit_pending: std.atomic.Value(bool) = .init(false),
+    handoff_pending: std.atomic.Value(bool) = .init(false),
     exit_cause: model.ExitCause = .crash,
+    users: usize = 0,
 };
 
 pub const RuntimeOptions = struct {
@@ -122,6 +124,8 @@ pub const Runtime = struct {
     core_state: state.State,
 
     meta_mu: std.Io.Mutex = .init,
+    driver_launch_mu: std.Io.Mutex = .init,
+    driver_users_cond: std.Io.Condition = .init,
     workspaces: std.StringHashMapUnmanaged(schema.Workspace) = .empty,
     sessions: std.StringHashMapUnmanaged(*DriverHandle) = .empty,
     worktree_bases: std.StringHashMapUnmanaged([]const u8) = .empty,
@@ -317,19 +321,13 @@ pub const Runtime = struct {
         self.workers_mu.unlock(self.io);
         self.fleet_srv.stop_and_deinit();
 
-        var handles: std.ArrayList(*DriverHandle) = .empty;
-        {
-            self.meta_mu.lockUncancelable(self.io);
-            var sit = self.sessions.iterator();
-            while (sit.next()) |e| {
-                handles.append(self.gpa, e.value_ptr.*) catch {};
-                self.gpa.free(e.key_ptr.*);
-            }
-            self.sessions.deinit(self.gpa);
-            self.meta_mu.unlock(self.io);
-        }
-        for (handles.items) |dh| self.destroy_driver(dh);
-        handles.deinit(self.gpa);
+        self.meta_mu.lockUncancelable(self.io);
+        var sessions = self.sessions;
+        self.sessions = .empty;
+        self.meta_mu.unlock(self.io);
+        var drivers = sessions.valueIterator();
+        while (drivers.next()) |dh| self.destroy_driver(dh.*);
+        sessions.deinit(self.gpa);
 
         self.stream_hub.deinit();
         self.history.deinit();
@@ -592,6 +590,13 @@ pub const Runtime = struct {
             self.state_mu.lockUncancelable(self.io);
             defer self.state_mu.unlock(self.io);
 
+            if (ev == .launched) {
+                const sl = self.core_state.sleeves.get(ev.launched.sleeve_id) orelse return error.NotFound;
+                switch (sl.lifecycle) {
+                    .launching, .recovering, .resleeving => {},
+                    else => return error.InvalidState,
+                }
+            }
             const seq = self.core_state.event_seq + 1;
             const se: event.StampedEvent = .{
                 .seq = seq,
@@ -665,6 +670,7 @@ pub const Runtime = struct {
             .deliver_prompt => |dp| {
                 const dh = self.get_driver(dp.sleeve_id);
                 if (dh) |h| {
+                    defer self.release_driver(h);
                     if (h.g == dp.g) {
                         const with_memory_note = h.memory_prompt_pending.swap(false, .acq_rel);
                         const text = if (with_memory_note) memory_prompt(ia, h, dp.text) catch dp.text else dp.text;
@@ -699,6 +705,7 @@ pub const Runtime = struct {
             },
             .interrupt_incarnation => |ii| {
                 if (self.get_driver(ii.sleeve_id)) |dh| {
+                    defer self.release_driver(dh);
                     if (dh.g == ii.g) {
                         if (dh.harness == .antigravity) dh.interrupt_exit.store(true, .release);
                         dh.sess.interrupt() catch {};
@@ -707,15 +714,13 @@ pub const Runtime = struct {
                 }
             },
             .kill_incarnation => |ki| {
-                self.stop_driver_generation(ki.sleeve_id, ki.g);
-                if (ki.recover) {
-                    self.commit(.{ .exited = .{ .sleeve_id = ki.sleeve_id, .g = ki.g, .cause = .killed, .requested = false } }) catch {};
-                } else {
-                    self.commit(.{ .stopped = .{ .sleeve_id = ki.sleeve_id } }) catch {};
+                if (self.stop_driver_generation(ki.sleeve_id, ki.g)) {
+                    self.commit(.{ .exited = .{ .sleeve_id = ki.sleeve_id, .g = ki.g, .cause = .killed, .requested = !ki.recover } }) catch {};
                 }
             },
             .respond_approval => |ra| {
                 if (self.get_driver(ra.sleeve_id)) |dh| {
+                    defer self.release_driver(dh);
                     if (dh.g == ra.g) {
                         const dec: d_proto.Decision = switch (ra.verdict) {
                             .allow_once => .allow_once,
@@ -743,6 +748,7 @@ pub const Runtime = struct {
                 self.record_hub_event(.guardrail, en.code, en.sleeve_id, en.text, .warn);
                 if (en.sleeve_id) |sid| {
                     if (self.get_driver(sid)) |dh| {
+                        defer self.release_driver(dh);
                         const ce = self.transcripts.append(sid, dh.g, dh.turn_id, std.Io.Clock.real.now(self.io).toMilliseconds(), .{
                             .notice = .{ .level = .warn, .code = en.code, .text = en.text },
                         }) catch null;
@@ -783,34 +789,11 @@ pub const Runtime = struct {
             },
             .compact_incarnation => |ci| {
                 if (self.get_driver(ci.sleeve_id)) |dh| {
+                    defer self.release_driver(dh);
                     if (dh.g == ci.g) {
                         if (dh.sess.compact()) |_| {} else |err| {
                             if (err == error.Unsupported) {
-                                var cur_h: ?model.Harness = null;
-                                {
-                                    self.state_mu.lockUncancelable(self.io);
-                                    if (self.core_state.sleeves.get(ci.sleeve_id)) |sl| {
-                                        if (sl.inc) |inc| cur_h = inc.harness;
-                                    }
-                                    self.state_mu.unlock(self.io);
-                                }
-                                if (cur_h) |h| {
-                                    brief.write_handoff(
-                                        self.gpa,
-                                        self.io,
-                                        self.hub_home.briefs_path,
-                                        ci.sleeve_id,
-                                        ci.g,
-                                        .handoff,
-                                        "Context ceiling reached; auto-handoff",
-                                    ) catch {};
-                                    self.commit(.{ .resleeve_requested = .{
-                                        .sleeve_id = ci.sleeve_id,
-                                        .harness = h,
-                                        .by = .system,
-                                        .cause = .handoff,
-                                    } }) catch {};
-                                }
+                                dh.handoff_pending.store(true, .release);
                             } else {
                                 self.record_hub_event(.sleeve, "compact", ci.sleeve_id, @errorName(err), .warn);
                             }
@@ -836,11 +819,42 @@ pub const Runtime = struct {
     }
 
     fn launch_driver(self: *Runtime, li: anytype) !void {
+        const dh = blk: {
+            self.driver_launch_mu.lockUncancelable(self.io);
+            defer self.driver_launch_mu.unlock(self.io);
+            {
+                self.meta_mu.lockUncancelable(self.io);
+                defer self.meta_mu.unlock(self.io);
+                if (self.stopping.load(.acquire) or self.sessions.contains(li.sleeve_id)) return;
+                try self.sessions.ensureUnusedCapacity(self.gpa, 1);
+            }
+            const dh = try self.spawn_driver(li);
+            self.meta_mu.lockUncancelable(self.io);
+            defer self.meta_mu.unlock(self.io);
+            dh.users = 1;
+            self.sessions.putAssumeCapacityNoClobber(dh.sleeve_id, dh);
+            break :blk dh;
+        };
+        errdefer _ = self.stop_driver_generation(li.sleeve_id, li.g);
+        defer self.release_driver(dh);
+
+        try self.commit(.{ .launched = .{
+            .sleeve_id = li.sleeve_id,
+            .g = li.g,
+            .harness = li.harness,
+            .mode = li.mode,
+            .model_name = li.model_name,
+            .provider = li.provider,
+            .effort = li.effort,
+        } });
+        try dh.sess.begin();
+    }
+
+    fn spawn_driver(self: *Runtime, li: anytype) !*DriverHandle {
         var arena_st = std.heap.ArenaAllocator.init(self.gpa);
         defer arena_st.deinit();
         const a = arena_st.allocator();
         const process_tag = try std.fmt.allocPrint(a, "sleeve-{d}-{s}-{d}", .{ self.started_at_ms, li.sleeve_id, li.g });
-        self.stop_driver_for(li.sleeve_id);
 
         var sl_path: []const u8 = "";
         var sl_layout: model.Layout = .shared;
@@ -851,6 +865,7 @@ pub const Runtime = struct {
             self.state_mu.lockUncancelable(self.io);
             defer self.state_mu.unlock(self.io);
             const sl = self.core_state.sleeves.get(li.sleeve_id) orelse return error.NotFound;
+            if (li.g <= sl.next_g) return error.InvalidState;
             sl_path = try a.dupe(u8, sl.path);
             sl_layout = sl.layout;
             is_envoy = (sl.role == .envoy);
@@ -1052,68 +1067,55 @@ pub const Runtime = struct {
             .on_exit = on_driver_exit,
             .ctx = dh,
         });
-        errdefer {
-            _ = dh.guard.fence_and_confirm(self.io, 500);
-            dh.sess.kill_and_destroy();
-        }
         if (cgroup_path != null) {
             dh.guard.attach_sleeve(dh.sess.child_id());
         } else {
             dh.guard.attach_with_io(self.io, dh.sess.child_id());
         }
 
-        {
-            self.meta_mu.lockUncancelable(self.io);
-            defer self.meta_mu.unlock(self.io);
-            const kdup = try self.gpa.dupe(u8, li.sleeve_id);
-            try self.sessions.put(self.gpa, kdup, dh);
-        }
-        errdefer {
-            self.meta_mu.lockUncancelable(self.io);
-            if (self.sessions.fetchRemove(li.sleeve_id)) |kv| self.gpa.free(kv.key);
-            self.meta_mu.unlock(self.io);
-        }
-
-        try self.commit(.{ .launched = .{
-            .sleeve_id = li.sleeve_id,
-            .g = li.g,
-            .harness = li.harness,
-            .mode = li.mode,
-            .model_name = li.model_name,
-            .provider = li.provider,
-            .effort = li.effort,
-        } });
-        try dh.sess.begin();
+        return dh;
     }
 
     fn get_driver(self: *Runtime, sleeve_id: []const u8) ?*DriverHandle {
         self.meta_mu.lockUncancelable(self.io);
         defer self.meta_mu.unlock(self.io);
-        return self.sessions.get(sleeve_id);
+        const dh = self.sessions.get(sleeve_id) orelse return null;
+        dh.users += 1;
+        return dh;
+    }
+
+    fn release_driver(self: *Runtime, dh: *DriverHandle) void {
+        self.meta_mu.lockUncancelable(self.io);
+        defer self.meta_mu.unlock(self.io);
+        tiger.assert(dh.users > 0);
+        dh.users -= 1;
+        if (dh.users == 0) self.driver_users_cond.broadcast(self.io);
     }
 
     fn stop_driver_for(self: *Runtime, sleeve_id: []const u8) void {
-        self.stop_driver_generation(sleeve_id, null);
+        _ = self.stop_driver_generation(sleeve_id, null);
     }
 
-    fn stop_driver_generation(self: *Runtime, sleeve_id: []const u8, expected_g: ?u64) void {
-        var removed: ?*DriverHandle = null;
-        {
+    fn stop_driver_generation(self: *Runtime, sleeve_id: []const u8, expected_g: ?u64) bool {
+        const dh = blk: {
             self.meta_mu.lockUncancelable(self.io);
-            const matches = if (self.sessions.get(sleeve_id)) |dh| expected_g == null or dh.g == expected_g.? else false;
-            if (matches) {
-                if (self.sessions.fetchRemove(sleeve_id)) |kv| {
-                    self.gpa.free(kv.key);
-                    removed = kv.value;
-                }
-            }
-            self.meta_mu.unlock(self.io);
-        }
-        if (removed) |dh| self.destroy_driver(dh);
+            defer self.meta_mu.unlock(self.io);
+            const dh = self.sessions.get(sleeve_id) orelse return false;
+            if (expected_g) |g| if (dh.g != g) return false;
+            const removed = self.sessions.remove(sleeve_id);
+            tiger.assert(removed);
+            break :blk dh;
+        };
+        self.destroy_driver(dh);
+        return true;
     }
 
     fn destroy_driver(self: *Runtime, dh: *DriverHandle) void {
+        dh.sess.request_stop();
         _ = dh.guard.fence_and_confirm(self.io, 500);
+        self.meta_mu.lockUncancelable(self.io);
+        while (dh.users > 0) self.driver_users_cond.waitUncancelable(self.io, &self.meta_mu);
+        self.meta_mu.unlock(self.io);
         dh.sess.kill_and_destroy();
         dh.guard.deinit();
         self.gpa.free(dh.sleeve_id);
@@ -1380,12 +1382,52 @@ pub const Runtime = struct {
             const cause = dh.exit_cause;
             const removed = self.sessions.fetchRemove(sid).?;
             tiger.assert(removed.value == dh);
-            self.gpa.free(removed.key);
             self.meta_mu.unlock(self.io);
             if (cause == .oom and !requested) self.record_sleeve_oom(dh);
             self.destroy_driver(dh);
             self.commit(.{ .exited = .{ .sleeve_id = sid, .g = g, .cause = cause, .requested = requested } }) catch {};
             self.gpa.free(sid);
+        }
+    }
+
+    fn process_driver_handoffs(self: *Runtime) void {
+        while (true) {
+            const handoff = blk: {
+                self.meta_mu.lockUncancelable(self.io);
+                defer self.meta_mu.unlock(self.io);
+                var it = self.sessions.valueIterator();
+                while (it.next()) |entry| {
+                    const dh = entry.*;
+                    if (!dh.handoff_pending.load(.acquire)) continue;
+                    const sid = self.gpa.dupe(u8, dh.sleeve_id) catch return;
+                    dh.handoff_pending.store(false, .release);
+                    break :blk .{ .sid = sid, .g = dh.g, .harness = dh.harness };
+                }
+                return;
+            };
+            defer self.gpa.free(handoff.sid);
+            {
+                self.state_mu.lockUncancelable(self.io);
+                defer self.state_mu.unlock(self.io);
+                const sl = self.core_state.sleeves.get(handoff.sid) orelse continue;
+                const inc = sl.inc orelse continue;
+                if (sl.lifecycle != .running or inc.g != handoff.g) continue;
+            }
+            brief.write_handoff(
+                self.gpa,
+                self.io,
+                self.hub_home.briefs_path,
+                handoff.sid,
+                handoff.g,
+                .handoff,
+                "Context ceiling reached; auto-handoff",
+            ) catch {};
+            self.commit(.{ .resleeve_requested = .{
+                .sleeve_id = handoff.sid,
+                .harness = handoff.harness,
+                .by = .system,
+                .cause = .handoff,
+            } }) catch {};
         }
     }
 
@@ -1662,6 +1704,7 @@ pub const Runtime = struct {
             if (self.stopping.load(.acquire)) break;
             ticks += 1;
             self.reap_driver_exits();
+            self.process_driver_handoffs();
             self.poll_inflight_jobs();
             if (ticks % 5 == 0) {
                 self.poll_sleeve_devices();

@@ -661,3 +661,8 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   Phase 5, with the network `StaticAllocator` flipped to static.
 - **`fetch_artifact` creates its temporary before checking the node** (`src/hub/fleet.zig`): an
   offline node costs a create-then-abort of `<dest>.ptpart`. Right: check presence first.
+- **Zig 0.17.1 leaks a child when exec fails** (`src/child_process.zig`): `std.process.spawn` on POSIX
+  forks, learns of a setup or exec error over its pipe and returns the error without waiting for the
+  forked PID, so every failed launch (doctor probing a harness that is not on PATH, a missing pi)
+  left a zombie; the live dev.4 hub had 92 after five hours. The hub's own spawn wrapper now reaps
+  the failed child before returning. Right: report it upstream and drop the wrapper once std reaps it.

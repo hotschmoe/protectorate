@@ -77,7 +77,8 @@ rpc_post() {
 echo "=== E2E 1: Hub Web / REST / WS / Pairing / Envoy MCP ==="
 HUB1="$TMP_ROOT/hub1"
 LOG1="$TMP_ROOT/hub1.log"
-"$PT" serve --home "$HUB1" --listen 127.0.0.1:0 --fleet-listen 127.0.0.1:0 --no-sandbox >"$LOG1" 2>&1 &
+mkdir "$TMP_ROOT/empty-path"
+PATH="$TMP_ROOT/empty-path" "$PT" serve --home "$HUB1" --listen 127.0.0.1:0 --fleet-listen 127.0.0.1:0 --no-sandbox >"$LOG1" 2>&1 &
 PID1=$!
 PIDS+=("$PID1")
 wait_for_listen "$LOG1"
@@ -169,6 +170,13 @@ JSON
 grep -q 'protectorate-envoy' <<<"$MCP_OUT"
 grep -q 'spawn_sleeve' <<<"$MCP_OUT"
 grep -q '"isError":false' <<<"$MCP_OUT"
+rpc_post "$HTTP1" "$TOK1" GetDoctor '{}' | python3 -c 'import json,sys; d=json.load(sys.stdin); assert all(not h["present"] for h in d["harnesses"]) and "git binary not found" in d["problems"], d'
+ZOMBIES1="$(ps -eo pid,stat,ppid,comm | awk -v hub="$PID1" '$3 == hub && $2 ~ /^Z/')"
+if [[ -n "$ZOMBIES1" ]]; then
+  echo "hub retained children after failed process launches:" >&2
+  echo "$ZOMBIES1" >&2
+  exit 1
+fi
 kill "$PID1" >/dev/null 2>&1 || true
 wait "$PID1" >/dev/null 2>&1 || true
 check_crashes "$LOG1"

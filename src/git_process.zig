@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const child_process = @import("child_process.zig");
 const tiger = @import("tiger.zig");
 
 const metadata_timeout: std.Io.Duration = .fromSeconds(5);
@@ -114,47 +115,9 @@ fn run_until(
 
 fn wait_for_exit(io: std.Io, id: std.process.Child.Id, deadline: std.Io.Clock.Timestamp) !void {
     while (true) {
-        if (try exited_without_reaping(id)) return;
+        if (try child_process.has_exited(id)) return;
         const remaining = deadline.durationFromNow(io).raw;
         if (remaining.nanoseconds <= 0) return error.Timeout;
         try io.sleep(.{ .nanoseconds = @min(remaining.nanoseconds, exit_poll_interval.nanoseconds) }, .awake);
-    }
-}
-
-extern "c" fn waitid(id_type: c_int, id: std.posix.pid_t, info: *std.c.siginfo_t, options: c_int) c_int;
-
-fn exited_without_reaping(id: std.process.Child.Id) !bool {
-    switch (builtin.os.tag) {
-        .linux => {
-            const linux = std.os.linux;
-            var info: linux.siginfo_t = std.mem.zeroes(linux.siginfo_t);
-            const flags = linux.W.EXITED | linux.W.NOHANG | linux.W.NOWAIT;
-            return switch (linux.errno(linux.waitid(.PID, id, &info, flags, null))) {
-                .SUCCESS => info.fields.common.first.piduid.pid != 0,
-                .INTR => false,
-                else => |err| std.posix.unexpectedErrno(err),
-            };
-        },
-        .macos => {
-            const p_pid = 1;
-            const w_exited = 0x04;
-            const w_nowait = 0x20;
-            var info: std.c.siginfo_t = std.mem.zeroes(std.c.siginfo_t);
-            return switch (std.posix.errno(waitid(p_pid, @intCast(id), &info, std.c.W.NOHANG | w_exited | w_nowait))) {
-                .SUCCESS => info.pid != 0,
-                .INTR => false,
-                else => |err| std.posix.unexpectedErrno(err),
-            };
-        },
-        .windows => {
-            const windows = std.os.windows;
-            const poll: windows.LARGE_INTEGER = 0;
-            return switch (windows.ntdll.NtWaitForSingleObject(id, .FALSE, &poll)) {
-                .WAIT_0 => true,
-                .TIMEOUT => false,
-                else => |status| windows.unexpectedStatus(status),
-            };
-        },
-        else => @compileError("git process deadlines require a supported platform"),
     }
 }
