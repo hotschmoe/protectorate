@@ -395,15 +395,33 @@ const CoreWorld = struct {
                         .harness = .claude,
                         .by = if (self.rng.boolean()) .rule else .owner,
                         .cause = .quota,
+                        .inherit_preferences = self.rng.boolean(),
                     } }, &intents);
                 } else if (self.st.sleeves.get(sid)) |sl| {
                     if (sl.inc) |inc| {
                         const causes = [_]model.ExitCause{ .crash, .oom, .quota_exhausted, .auth_error };
+                        const cause = causes[self.rng.uintLessThan(usize, causes.len)];
+                        const quota_reviewed = (cause == .quota_exhausted or cause == .auth_error) and self.rng.boolean();
+                        const target = if (inc.harness == .pi_local) model.Harness.codex else .pi_local;
+                        const selection: ?event.QuotaSelection = if (quota_reviewed) .{
+                            .harness = if (self.rng.boolean()) target else null,
+                            .reason = "quota reviewed",
+                        } else null;
+                        const settled = quota_reviewed and inc.activity == .working;
+                        if (settled) {
+                            _ = try self.apply_checked(.{ .turn_settled = .{
+                                .sleeve_id = sid,
+                                .g = inc.g,
+                                .turn_end = .@"error",
+                                .quota_handoff = .{ .cause = cause, .selection = selection },
+                            } }, &intents);
+                        }
                         _ = try self.apply_checked(.{ .exited = .{
                             .sleeve_id = sid,
                             .g = inc.g,
-                            .cause = causes[self.rng.uintLessThan(usize, causes.len)],
+                            .cause = cause,
                             .requested = false,
+                            .quota_selection = if (settled) null else selection,
                         } }, &intents);
                     }
                 }

@@ -522,10 +522,7 @@ fn cmd_sleeve_spawn(
     rest: []const []const u8,
     json_out: bool,
 ) !u8 {
-    var req = schema.SpawnSleeveRequest{
-        .name = rest[0],
-        .harness = .claude,
-    };
+    var req = schema.SpawnSleeveRequest{ .name = rest[0], .harness = .claude };
     var resleeve_list: std.ArrayList(schema.Harness) = .empty;
     var idx: usize = 1;
     while (idx < rest.len) : (idx += 1) {
@@ -543,9 +540,11 @@ fn cmd_sleeve_spawn(
             req.view = .readonly;
         } else if (std.mem.eql(u8, a, "--worktree")) {
             req.view = .worktree;
-        } else if (std.mem.eql(u8, a, "--harness") and idx + 1 < rest.len) {
+        } else if (std.mem.eql(u8, a, "--harness")) {
             idx += 1;
-            req.harness = parse_harness(rest[idx]) orelse return 2;
+            if (idx == rest.len) return 2;
+            req.auto_select = std.mem.eql(u8, rest[idx], "auto");
+            req.harness = if (req.auto_select) .claude else parse_harness(rest[idx]) orelse return 2;
         } else if (std.mem.eql(u8, a, "--provider") and idx + 1 < rest.len) {
             idx += 1;
             req.provider = rest[idx];
@@ -562,6 +561,10 @@ fn cmd_sleeve_spawn(
                 const tr = std.mem.trim(u8, p, " \t");
                 if (parse_harness(tr)) |rh| try resleeve_list.append(arena, rh);
             }
+        } else if (std.mem.eql(u8, a, "--task-size")) {
+            idx += 1;
+            if (idx == rest.len) return 2;
+            req.task_size = parse_task_size(rest[idx]) orelse return 2;
         } else if (std.mem.eql(u8, a, "--budget") and idx + 1 < rest.len) {
             idx += 1;
             req.budget = std.fmt.parseInt(u64, rest[idx], 10) catch null;
@@ -1806,6 +1809,11 @@ fn parse_harness(raw: []const u8) ?schema.Harness {
     return null;
 }
 
+fn parse_task_size(raw: []const u8) ?schema.TaskSize {
+    const size = std.meta.stringToEnum(schema.TaskSize, raw) orelse return null;
+    return if (size == .unknown) null else size;
+}
+
 fn parse_time_arg(raw: []const u8, now_ms: i64) ?i64 {
     if (raw.len == 0) return null;
     const last = raw[raw.len - 1];
@@ -1859,7 +1867,7 @@ fn print_usage(io: std.Io) !void {
         \\  protectorate [--json] version | status | doctor [--refresh] | pair [<name>] | token | quota [list]
         \\  protectorate [--json] hub (info | state | update [--check|--rollback] [--channel stable|dev] [--version <v>] | probation [--retry-rollback])
         \\  protectorate [--json] harness (update [<program>...] | login <claude|codex|grok|pi|agy> [-- <args...>])
-        \\  protectorate [--json] sleeve (list | show <id> | spawn <name> [opts] | send <id> <text> | inbox [<id>] [--drop] |
+        \\  protectorate [--json] sleeve (list | show <id> | spawn <name> [--harness <h|auto>] [opts] | send <id> <text> | inbox [<id>] [--drop] |
         \\                                interrupt <id> | stop <id> | rm <id> | start <id> [opts] | resleeve <id> --harness <h> |
         \\                                takeover <id> | attach <id> | transcript <id> [opts] | wait <id>... [opts] | push <id> [opts])
         \\  protectorate [--json] node (list | show <n> | set <n> --jobs any|owner|none [--note <txt>] | join-token |

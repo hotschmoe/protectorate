@@ -69,6 +69,7 @@ pub fn apply(
         },
         .provision_failed => |e| {
             const sl = st.sleeves.getPtr(e.sleeve_id) orelse return error.NotFound;
+            sl.quota_launch = null;
             sl.lifecycle = .parked;
             sl.park_reason = .provision_failed;
             try intents.append(gpa, .{ .emit_notice = .{
@@ -90,7 +91,20 @@ pub fn apply(
             sl.preferred_provider = try st.dupe_opt(e.provider);
             sl.preferred_effort = try st.dupe_opt(e.effort);
             if (e.until_done) |ud| sl.until_done_left = ud;
+            sl.quota_launch = null;
             sl.lifecycle = .launching;
+            if (e.selection_reason) |reason| {
+                try intents.append(gpa, .{ .record_quota_selection = .{
+                    .sleeve_id = sl.id,
+                    .source = .spawn,
+                    .choice = .{
+                        .harness = e.targets[0],
+                        .model_name = sl.preferred_model,
+                        .provider = sl.preferred_provider,
+                        .reason = reason,
+                    },
+                } });
+            }
             const next_g = sl.next_g + 1;
             try intents.append(gpa, .{ .write_brief = .{
                 .sleeve_id = sl.id,
@@ -114,6 +128,7 @@ pub fn apply(
             if (st.active_claim_conflict(sl.id, sl.path, sl.layout) != null) return error.WorkspaceConflict;
             if (e.g <= sl.next_g) return error.InvalidState;
             fence_sleeve_approvals(st, sl.id, e.g);
+            sl.quota_launch = null;
             sl.next_g = e.g;
             sl.lifecycle = .running;
             sl.park_reason = null;
@@ -261,9 +276,18 @@ pub fn apply(
         .turn_settled => |e| {
             const sl = st.sleeves.getPtr(e.sleeve_id) orelse return error.NotFound;
             const inc = &(sl.inc orelse return);
-            if (inc.g != e.g) return;
+            if (inc.g != e.g or inc.classified_exit != null) return;
+            inc.classified_exit = if (e.quota_handoff) |handoff| .{
+                .cause = handoff.cause,
+                .selection = if (handoff.selection) |selection| .{
+                    .harness = selection.harness,
+                    .model_name = try st.dupe_opt(selection.model_name),
+                    .provider = try st.dupe_opt(selection.provider),
+                    .reason = try st.dupe_str(selection.reason),
+                } else null,
+            } else null;
             const exiting_after_interrupt = inc.activity == .interrupting and inc.harness == .antigravity;
-            inc.activity = if (exiting_after_interrupt) .interrupting else .idle;
+            inc.activity = if (exiting_after_interrupt) .interrupting else if (e.quota_handoff != null) .ended else .idle;
             if (sl.lifecycle == .running) inc.stop_requested_ms = null;
             inc.turn_started_ms = null;
             inc.last_event_ms = now;
@@ -292,7 +316,7 @@ pub fn apply(
                     } });
                 }
             }
-            if (sl.role == .envoy and e.context_tokens >= model.envoy_context_ceiling) {
+            if (e.quota_handoff == null and sl.role == .envoy and e.context_tokens >= model.envoy_context_ceiling) {
                 try intents.append(gpa, .{ .compact_incarnation = .{ .sleeve_id = sl.id, .g = inc.g } });
             }
             if (sl.budget_limit) |lim| {
@@ -305,7 +329,7 @@ pub fn apply(
                     } });
                 }
             }
-            if (exiting_after_interrupt) return;
+            if (exiting_after_interrupt or e.quota_handoff != null) return;
             if (sl.queued.items.len > 0) {
                 try maybe_deliver_next(gpa, st, sl, now, intents);
             } else if (sl.until_done_left > 0 and e.turn_end == .end_turn) {
@@ -327,6 +351,7 @@ pub fn apply(
             _ = e.by;
             const sl = st.sleeves.getPtr(e.sleeve_id) orelse return error.NotFound;
             if (sl.lifecycle == .stopped or sl.lifecycle == .removed) return;
+            sl.quota_launch = null;
             sl.lifecycle = .stopping;
             sl.queued.clearRetainingCapacity();
             sl.until_done_left = 0;
@@ -340,6 +365,7 @@ pub fn apply(
         },
         .stopped => |e| {
             const sl = st.sleeves.getPtr(e.sleeve_id) orelse return error.NotFound;
+            sl.quota_launch = null;
             sl.lifecycle = .stopped;
             sl.inc = null;
             sl.d9 = false;
@@ -348,6 +374,7 @@ pub fn apply(
             const sl = st.sleeves.getPtr(e.sleeve_id) orelse return error.NotFound;
             if (sl.lifecycle == .removed) return error.InvalidState;
             if (st.active_claim_conflict(sl.id, sl.path, sl.layout) != null) return error.WorkspaceConflict;
+            sl.quota_launch = null;
             if (sl.resleeve_win.count_in_window(now, model.resleeve_window_ms) >= model.resleeve_limit and e.by != .owner) {
                 if (sl.inc) |inc| {
                     try intents.append(gpa, .{ .kill_incarnation = .{ .sleeve_id = sl.id, .g = inc.g } });
@@ -360,11 +387,19 @@ pub fn apply(
             }
             sl.resleeve_win.push(now);
             sl.lifecycle = .resleeving;
+            const current = if (e.inherit_preferences and sl.inc != null and sl.inc.?.harness == e.harness)
+                sl.inc
+            else
+                null;
+            const preferred = e.inherit_preferences and sl.target_len > 0 and sl.targets[0] == e.harness;
             const launch = state.PendingLaunch{
                 .harness = e.harness,
-                .model_name = try st.dupe_opt(e.model_name) orelse (sl.preferred_model orelse ""),
-                .provider = try st.dupe_opt(e.provider) orelse (sl.preferred_provider orelse ""),
-                .effort = try st.dupe_opt(e.effort) orelse sl.preferred_effort,
+                .model_name = (try st.dupe_opt(e.model_name) orelse
+                    (if (current) |inc| inc.model_name else if (preferred) sl.preferred_model else null)) orelse "",
+                .provider = (try st.dupe_opt(e.provider) orelse
+                    (if (current) |inc| inc.provider else if (preferred) sl.preferred_provider else null)) orelse "",
+                .effort = try st.dupe_opt(e.effort) orelse
+                    (if (current) |inc| inc.effort else if (preferred) sl.preferred_effort else null),
                 .cause = e.cause,
             };
             if (sl.inc) |*inc| {
@@ -385,9 +420,25 @@ pub fn apply(
                 } });
             }
         },
+        .exit_classified => |e| {
+            const sl = st.sleeves.getPtr(e.sleeve_id) orelse return error.NotFound;
+            const inc = &(sl.inc orelse return);
+            if (inc.g != e.g or sl.lifecycle != .running or inc.classified_exit != null) return;
+            inc.classified_exit = .{ .cause = e.cause };
+            inc.activity = .ended;
+        },
         .exited => |e| {
             const sl = st.sleeves.getPtr(e.sleeve_id) orelse return error.NotFound;
-            const inc = sl.inc orelse return;
+            const inc = sl.inc orelse {
+                if (sl.quota_launch) |launch| {
+                    if (launch.g == e.g) {
+                        sl.quota_launch = null;
+                        sl.lifecycle = .parked;
+                        sl.park_reason = .provision_failed;
+                    }
+                }
+                return;
+            };
             if (inc.g != e.g) return;
             const pending_launch = inc.next_launch;
             sl.inc = null;
@@ -417,6 +468,17 @@ pub fn apply(
                 sl.lifecycle = .stopped;
                 return;
             }
+
+            const quota_exit = !interrupt_exit and (e.cause == .quota_exhausted or e.cause == .auth_error);
+            const selection = if (quota_exit)
+                e.quota_selection orelse if (inc.classified_exit) |handoff| handoff.selection else null
+            else
+                null;
+            if (selection) |picked| try intents.append(gpa, .{ .record_quota_selection = .{
+                .sleeve_id = sl.id,
+                .source = .guardrail,
+                .choice = picked,
+            } });
 
             if (e.cause == .oom) {
                 const previous = sl.last_oom_ms;
@@ -458,31 +520,37 @@ pub fn apply(
                 sl.park_reason = .resume_rate_exceeded;
                 return;
             }
-            if (e.cause == .quota_exhausted or e.cause == .auth_error) {
-                if (sl.target_len > 1) {
-                    for (0..sl.target_len) |ti| {
-                        if (sl.targets[ti] != inc.harness) {
-                            sl.resleeve_win.push(now);
-                            if (sl.resleeve_win.count_in_window(now, model.resleeve_window_ms) > model.resleeve_limit) {
-                                sl.lifecycle = .parked;
-                                sl.park_reason = .resleeve_rate_exceeded;
-                                return;
-                            }
-                            sl.lifecycle = .resleeving;
-                            const ng = sl.next_g + 1;
-                            try intents.append(gpa, .{ .write_brief = .{ .sleeve_id = sl.id, .path = sl.path, .g = ng, .cause = .quota } });
-                            try intents.append(gpa, .{ .launch_incarnation = .{
-                                .sleeve_id = sl.id,
-                                .g = ng,
-                                .harness = sl.targets[ti],
-                                .mode = sl.preferred_mode,
-                                .model_name = sl.preferred_model orelse "",
-                                .provider = sl.preferred_provider orelse "",
-                                .effort = sl.preferred_effort,
-                            } });
-                            return;
+            if (quota_exit) {
+                const target: ?model.Harness = if (selection) |s| s.harness else blk: {
+                    if (sl.target_len > 1) {
+                        for (sl.targets[0..sl.target_len]) |h| {
+                            if (h != inc.harness) break :blk h;
                         }
                     }
+                    break :blk null;
+                };
+                if (target) |harness| {
+                    sl.resleeve_win.push(now);
+                    if (sl.resleeve_win.count_in_window(now, model.resleeve_window_ms) > model.resleeve_limit) {
+                        sl.lifecycle = .parked;
+                        sl.park_reason = .resleeve_rate_exceeded;
+                        return;
+                    }
+                    sl.lifecycle = .resleeving;
+                    const ng = sl.next_g + 1;
+                    const launch: intent.LaunchIncarnation = .{
+                        .sleeve_id = sl.id,
+                        .g = ng,
+                        .harness = harness,
+                        .mode = if (selection == null) sl.preferred_mode else .headless,
+                        .model_name = (if (selection) |picked| try st.dupe_opt(picked.model_name) else sl.preferred_model) orelse "",
+                        .provider = (if (selection) |picked| try st.dupe_opt(picked.provider) else sl.preferred_provider) orelse "",
+                        .effort = if (selection == null) sl.preferred_effort else null,
+                    };
+                    if (selection != null) sl.quota_launch = launch;
+                    try intents.append(gpa, .{ .write_brief = .{ .sleeve_id = sl.id, .path = sl.path, .g = ng, .cause = .quota } });
+                    try intents.append(gpa, .{ .launch_incarnation = launch });
+                    return;
                 }
                 sl.lifecycle = .parked;
                 sl.park_reason = .no_fallback_target;
@@ -490,6 +558,7 @@ pub fn apply(
         },
         .parked => |e| {
             const sl = st.sleeves.getPtr(e.sleeve_id) orelse return error.NotFound;
+            sl.quota_launch = null;
             sl.lifecycle = .parked;
             sl.park_reason = e.reason;
             sl.inc = null;
@@ -505,6 +574,7 @@ pub fn apply(
             }
             const layout = sl.layout;
             const path = sl.path;
+            sl.quota_launch = null;
             sl.lifecycle = .removed;
             sl.park_reason = .removed;
             sl.inc = null;

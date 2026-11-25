@@ -1,6 +1,7 @@
 const std = @import("std");
 const tiger = @import("../tiger.zig");
 const schema = @import("../api/schema.zig");
+const event = @import("../core/event.zig");
 const model = @import("../core/model.zig");
 const msg = @import("../net/msg.zig");
 const noise = @import("../net/noise.zig");
@@ -111,6 +112,9 @@ pub fn dispatch(
         return ok_json(rt.gpa, tx);
     } else if (std.mem.eql(u8, method, "SpawnSleeve")) {
         const req = schema.decode_arena(schema.SpawnSleeveRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        if (req.harness == .unknown or req.task_size == .unknown) return err_json(rt.gpa, .invalid, "unknown harness or task size");
+        const caller = principal.?;
+        if (req.task_size != null and caller == .sleeve) return err_json(rt.gpa, .forbidden, "task size requires owner or Envoy scope");
         var parent_sid: ?[]const u8 = null;
         var parent_path: ?[]const u8 = null;
         if (req.parent_id) |raw_pid| {
@@ -119,6 +123,7 @@ pub fn dispatch(
         }
         const is_envoy = parent_sid == null and std.mem.eql(u8, req.name, "envoy");
         if (is_envoy) {
+            if (req.auto_select) return err_json(rt.gpa, .invalid, "Envoy requires a fixed harness");
             rt.state_mu.lockUncancelable(rt.io);
             var dup_envoy = false;
             var sit = rt.core_state.sleeves.iterator();
@@ -160,6 +165,15 @@ pub fn dispatch(
             d.close(rt.io);
         }
 
+        const choice: ?event.QuotaSelection = if (req.auto_select and req.harness == .claude and req.model == null and req.provider == null)
+            try rt.choose_target(a, &runtime.spawn_harnesses, null, parent_sid, raw_base_path, req.task_size, caller == .envoy)
+        else
+            null;
+        const harness = if (choice) |picked|
+            picked.harness orelse return err_json(rt.gpa, .unavailable, picked.reason)
+        else
+            runtime.schema_to_model_harness(req.harness);
+
         if (rt.gate_d9(a, principal, .spawn_sleeve, req.name)) |_| {} else |err| {
             return map_d9_err(rt.gpa, err);
         }
@@ -192,10 +206,11 @@ pub fn dispatch(
         } }) catch |err| return map_commit_err(rt.gpa, err);
 
         var targets: [model.max_targets]model.Harness = undefined;
-        targets[0] = runtime.schema_to_model_harness(req.harness);
+        targets[0] = harness;
         var tlen: u8 = 1;
         for (req.resleeve_to) |rh| {
             if (tlen >= model.max_targets) break;
+            if (rh == .unknown) continue;
             targets[tlen] = runtime.schema_to_model_harness(rh);
             tlen += 1;
         }
@@ -207,10 +222,11 @@ pub fn dispatch(
                 .pane => .pane,
                 else => .headless,
             },
-            .model_name = req.model,
-            .provider = req.provider,
+            .model_name = if (choice) |picked| picked.model_name else req.model,
+            .provider = if (choice) |picked| picked.provider else req.provider,
             .effort = req.effort,
             .until_done = req.until_done,
+            .selection_reason = if (choice) |picked| picked.reason else null,
         } }) catch |err| return map_commit_err(rt.gpa, err);
 
         if (req.message) |msg_txt| {
@@ -231,24 +247,23 @@ pub fn dispatch(
     } else if (std.mem.eql(u8, method, "StartSleeve")) {
         const req = schema.decode_arena(schema.StartSleeveRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
         const sid = rt.resolve_sleeve_id(a, req.sleeve_id) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
-        var default_h: model.Harness = .claude;
+        var targets: [model.max_targets]model.Harness = undefined;
+        var target_len: u8 = 1;
         {
             rt.state_mu.lockUncancelable(rt.io);
             defer rt.state_mu.unlock(rt.io);
-            if (rt.core_state.sleeves.get(sid)) |sl| {
-                if (sl.inc) |inc| {
-                    default_h = inc.harness;
-                } else if (sl.target_len > 0) {
-                    default_h = sl.targets[0];
-                }
+            const sl = rt.core_state.sleeves.get(sid) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
+            const primary = if (sl.target_len > 0) sl.targets[0] else .claude;
+            targets[0] = if (req.target) |h| runtime.schema_to_model_harness(h) else if (sl.inc) |inc| inc.harness else primary;
+            for (sl.targets[1..@max(sl.target_len, 1)]) |h| {
+                targets[target_len] = h;
+                target_len += 1;
             }
         }
-        var targets: [model.max_targets]model.Harness = undefined;
-        targets[0] = if (req.target) |h| runtime.schema_to_model_harness(h) else default_h;
         rt.commit(.{ .start_requested = .{
             .sleeve_id = sid,
             .targets = targets,
-            .target_len = 1,
+            .target_len = target_len,
             .mode = .headless,
             .model_name = req.model,
             .provider = req.provider,
@@ -300,6 +315,7 @@ pub fn dispatch(
         return ok_json(rt.gpa, schema.Accepted{});
     } else if (std.mem.eql(u8, method, "Resleeve")) {
         const req = schema.decode_arena(schema.ResleeveRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        if (req.target == .unknown) return err_json(rt.gpa, .invalid, "unknown harness");
         const sid = rt.resolve_sleeve_id(a, req.sleeve_id) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
         rt.commit(.{ .resleeve_requested = .{
             .sleeve_id = sid,

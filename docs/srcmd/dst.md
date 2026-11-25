@@ -13,6 +13,7 @@ Robustness rests on `vopr` (`src/dst/vopr.zig`), a Viewstamped-Replication-style
   - Parent/child hierarchy bounds (`max_children`) and continuation accounting.
   - Job state machine conservation (no ghost running jobs on offline/removed nodes past lease abandonment, no illegal terminal transitions).
   - Full crash-replay equivalence: resetting `State` to empty and replaying the exact committed journal bytes must reproduce an identical canonical `State.state_hash(gpa)`.
+  - Resleeve replay with recorded quota picks, recorded parks, and exits that predate quota selection.
 
 ## Reproducing Failures
 

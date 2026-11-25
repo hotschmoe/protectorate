@@ -2,6 +2,41 @@ const std = @import("std");
 const tiger = @import("../tiger.zig");
 const schema = @import("../api/schema.zig");
 
+pub const RecentCosts = struct {
+    const sample_count_max = 9;
+
+    samples: tiger.BoundedArray(Sample, sample_count_max) = .{},
+
+    const Sample = struct {
+        at_ms: i64,
+        cost: f64,
+    };
+
+    fn add(self: *RecentCosts, sample: Sample) void {
+        const samples = self.samples.slice();
+        var index: usize = 0;
+        while (index < samples.len and
+            (samples[index].at_ms > sample.at_ms or
+                (samples[index].at_ms == sample.at_ms and samples[index].cost >= sample.cost))) : (index += 1)
+        {}
+        if (index == self.samples.buffer.len) return;
+        if (self.samples.len < self.samples.buffer.len) self.samples.len += 1;
+        @memmove(self.samples.buffer[index + 1 .. self.samples.len], self.samples.buffer[index .. self.samples.len - 1]);
+        self.samples.buffer[index] = sample;
+    }
+
+    pub fn median(self: *RecentCosts) ?f64 {
+        const samples = self.samples.slice_mut();
+        if (samples.len == 0) return null;
+        std.mem.sort(Sample, samples, {}, struct {
+            fn less_than(_: void, lhs: Sample, rhs: Sample) bool {
+                return lhs.cost < rhs.cost;
+            }
+        }.less_than);
+        return samples[(samples.len - 1) / 2].cost / 2 + samples[samples.len / 2].cost / 2;
+    }
+};
+
 const FileEntry = struct {
     mu: std.Io.Mutex = .init,
     next_seq: u64 = 1,
@@ -154,5 +189,33 @@ pub const TranscriptStore = struct {
 
     pub fn path_for(self: *TranscriptStore, arena: std.mem.Allocator, sleeve_id: []const u8) ![]u8 {
         return std.fmt.allocPrint(arena, "{s}/{s}.jsonl", .{ self.dir_path, sleeve_id });
+    }
+
+    pub fn collect_costs(self: *TranscriptStore, arena: std.mem.Allocator, sleeve_id: []const u8, costs: *RecentCosts) !void {
+        const path = try self.path_for(arena, sleeve_id);
+        var file = std.Io.Dir.cwd().openFile(self.io, path, .{}) catch |err| switch (err) {
+            error.FileNotFound => return,
+            else => return err,
+        };
+        defer file.close(self.io);
+        var line_arena = std.heap.ArenaAllocator.init(self.gpa);
+        defer line_arena.deinit();
+        var buffer: [16 * 1024]u8 = undefined;
+        var reader = file.reader(self.io, &buffer);
+        while (true) {
+            const line = reader.interface.takeDelimiter('\n') catch |err| switch (err) {
+                error.StreamTooLong => {
+                    _ = reader.interface.discardDelimiterInclusive('\n') catch break;
+                    continue;
+                },
+                else => return err,
+            } orelse break;
+            if (std.mem.find(u8, line, "\"turn_settled\"") == null) continue;
+            defer _ = line_arena.reset(.retain_capacity);
+            const chat = schema.decode_arena(schema.ChatEntry, line_arena.allocator(), line) catch continue;
+            if (chat.entry != .turn_settled or chat.entry.turn_settled.stop != .end_turn) continue;
+            const cost = chat.entry.turn_settled.usage.cost_usd orelse continue;
+            if (std.math.isFinite(cost) and cost >= 0) costs.add(.{ .at_ms = chat.at_ms.ms, .cost = cost });
+        }
     }
 };

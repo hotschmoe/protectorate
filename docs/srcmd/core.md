@@ -2,6 +2,17 @@
 
 All persistent orchestration state lives in `core/state.zig` (`State`) and advances strictly through stamped events (`event.StampedEvent`) applied by a single deterministic pure transition function `core/apply.apply(gpa, state, se, &intents)`.
 
+An Auto spawn journals its selection reason in `start_requested`. For quota or auth handoffs,
+`turn_settled` stores the exit cause and decision before the driver is retired. The exit callback
+journals `exit_classified` for quota, auth and scope OOM before writing the transcript and
+notifying the reaper. When the cause is the last durable record, recovery completes the exit.
+It ranks alternatives for quota and auth and commits the decision in `exited` before writing
+the brief or launching a replacement. When `exited` already holds a quota launch decision,
+recovery can launch the replacement. The settled turn holds queued prompts for the replacement
+generation. Historical exits without a selection keep their recorded-era ordered fallback.
+Replay restores recent selection notices to the hub event list with their journal timestamps,
+including when a rate limit prevents launch.
+
 ## TigerStyle Design Rules
 
 1. **Sequence Monotonicity**: Every accepted event must advance `state.event_seq + 1` in order. Any validation or state error restores `event_seq` via `errdefer` so failed applies leave zero partial mutation.

@@ -1333,6 +1333,19 @@ pub const RenamedNode = struct {
     to: []const u8,
 };
 
+pub const TaskSize = enum {
+    small,
+    medium,
+    large,
+    unknown,
+
+    pub fn jsonParseFromValue(a: std.mem.Allocator, s: std.json.Value, o: std.json.ParseOptions) !TaskSize {
+        _ = a;
+        _ = o;
+        return wire_enum_parse(TaskSize, s);
+    }
+};
+
 pub const ResleeveRequest = struct {
     sleeve_id: []const u8,
     target: Harness,
@@ -1401,7 +1414,8 @@ pub const SleeveRef = struct {
 
 pub const SpawnSleeveRequest = struct {
     name: []const u8,
-    harness: Harness,
+    harness: Harness = .claude,
+    auto_select: bool = false,
     path: ?[]const u8 = null,
     new_path: ?[]const u8 = null,
     parent_id: ?[]const u8 = null,
@@ -1414,6 +1428,7 @@ pub const SpawnSleeveRequest = struct {
     message: ?[]const u8 = null,
     budget: ?u64 = null,
     until_done: ?u64 = null,
+    task_size: ?TaskSize = null,
 };
 
 pub const StartSleeveRequest = struct {
@@ -1804,6 +1819,7 @@ pub const wire_enums = .{
     SleeveRole,
     Stop,
     Subscription,
+    TaskSize,
     ToolKind,
     ToolStatus,
     TurnStatusState,

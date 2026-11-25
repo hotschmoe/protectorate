@@ -36,6 +36,7 @@ pub const ConfigFile = struct {
     sleeve_memory_max: u64 = 4 << 30,
     sleeve_memory_max_overrides: std.json.ArrayHashMap(u64) = .{},
     scopes: bool = true,
+    quota_local_provider: ?[]const u8 = null,
 
     pub fn sleeve_memory_limit(self: *const ConfigFile, sleeve_name: []const u8) ?u64 {
         const limit = self.sleeve_memory_max_overrides.map.get(sleeve_name) orelse self.sleeve_memory_max;
@@ -188,6 +189,7 @@ pub const HubHome = struct {
         self.gpa.free(self.config.sleeve_devices);
         for (self.config.sleeve_memory_max_overrides.map.keys()) |name| self.gpa.free(name);
         self.config.sleeve_memory_max_overrides.deinit(self.gpa);
+        if (self.config.quota_local_provider) |provider| self.gpa.free(provider);
     }
 
     fn load_or_create_auth(self: *HubHome, root_dir: std.Io.Dir, dev_token: ?[]const u8) !void {
@@ -445,6 +447,7 @@ fn load_or_create_config(gpa: std.mem.Allocator, io: std.Io, root_dir: std.Io.Di
         .sleeve_memory_max = cf.sleeve_memory_max,
         .sleeve_memory_max_overrides = memory_overrides,
         .scopes = cf.scopes,
+        .quota_local_provider = if (cf.quota_local_provider) |provider| (gpa.dupe(u8, provider) catch null) else null,
     };
 }
 

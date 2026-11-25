@@ -32,6 +32,13 @@ const fleet = @import("fleet.zig");
 
 const log_mirror_max: u64 = 1024 * 1024;
 const status_failures_max: u8 = 5;
+const no_driver_exit = std.math.maxInt(u8);
+
+pub const spawn_harnesses = [_]model.Harness{ .claude, .codex, .grok, .pi_local };
+
+const small_task_cost_usd = 0.05;
+const medium_task_cost_usd = 0.50;
+const default_task_size: q_select.TaskSize = .medium;
 
 pub const NodeTelemetry = struct {
     inventory: ?msg.Inventory = null,
@@ -79,6 +86,12 @@ pub const JobMeta = struct {
     status_failures: u8 = 0,
 };
 
+const DriverExit = packed struct(u8) {
+    cause: model.ExitCause,
+    requested: bool = false,
+    reserved: u4 = 0,
+};
+
 const DriverHandle = struct {
     g: u64,
     sleeve_id: []const u8,
@@ -92,10 +105,19 @@ const DriverHandle = struct {
     oom_notice_pending: bool = false,
     memory_prompt_pending: std.atomic.Value(bool) = .init(false),
     interrupt_exit: std.atomic.Value(bool) = .init(false),
-    exit_pending: std.atomic.Value(bool) = .init(false),
+    pending_exit: std.atomic.Value(u8) = .init(no_driver_exit),
+    quota_exit_cause: std.atomic.Value(u8) = .init(no_driver_exit),
     handoff_pending: std.atomic.Value(bool) = .init(false),
-    exit_cause: model.ExitCause = .crash,
     users: usize = 0,
+
+    fn driver_exit(self: *const DriverHandle) ?DriverExit {
+        const pending = self.pending_exit.load(.acquire);
+        return if (pending == no_driver_exit) null else @bitCast(pending);
+    }
+
+    fn publish_exit(self: *DriverHandle, exit: DriverExit) void {
+        _ = self.pending_exit.cmpxchgStrong(no_driver_exit, @bitCast(exit), .release, .monotonic);
+    }
 };
 
 pub const RuntimeOptions = struct {
@@ -139,7 +161,8 @@ pub const Runtime = struct {
     d9_turn_spawns: u32 = 0,
     next_id_seq: std.atomic.Value(u64) = .init(1),
     host_inventory: ?msg.Inventory = null,
-    cached_quotas: []schema.Quota = &.{},
+    cached_quotas: []const q_select.Quota = &.{},
+    cached_local_model: ?q_readers.LocalModel = null,
     cached_quotas_arena: std.heap.ArenaAllocator,
     quotas_remote_polled: std.atomic.Value(bool) = .init(false),
     restore_error: ?[]const u8 = null,
@@ -214,17 +237,6 @@ pub const Runtime = struct {
         var root_dir = try std.Io.Dir.cwd().openDir(io, hh.root_path, .{});
         defer root_dir.close(io);
 
-        var jstore = try store.JournalStore.open(gpa, io, root_dir);
-        errdefer jstore.close();
-
-        var st = state.State.init(gpa);
-        errdefer st.deinit();
-
-        var rest_err: ?[]const u8 = null;
-        jstore.replay_into(&st) catch |err| {
-            rest_err = @errorName(err);
-        };
-
         var tx_store = try transcript.TranscriptStore.init(gpa, io, hh.transcripts_path);
         errdefer tx_store.deinit();
 
@@ -237,6 +249,7 @@ pub const Runtime = struct {
         const bwrap_ok = if (opts.no_sandbox or hh.config.no_sandbox) false else s_exec.probe_bwrap(gpa, io);
         const landlock_ok = if (opts.no_sandbox or hh.config.no_sandbox) false else s_exec.probe_landlock();
 
+        const journal = try store.JournalStore.open(gpa, io, root_dir);
         rt.* = .{
             .gpa = gpa,
             .io = io,
@@ -246,10 +259,9 @@ pub const Runtime = struct {
             .no_sandbox = opts.no_sandbox or hh.config.no_sandbox,
             .bwrap_ok = bwrap_ok,
             .landlock_ok = landlock_ok,
-            .journal = jstore,
-            .core_state = st,
+            .journal = journal,
+            .core_state = state.State.init(gpa),
             .cached_quotas_arena = std.heap.ArenaAllocator.init(gpa),
-            .restore_error = rest_err,
             .transcripts = tx_store,
             .history = h_idx,
             .stream_hub = stream.StreamHub.init(gpa, io),
@@ -258,6 +270,13 @@ pub const Runtime = struct {
             .proxy_listen = proxy_listen,
             .trusted_proxies = trusted_proxies,
             .fleet_listen = fleet_listen,
+        };
+
+        errdefer rt.journal.close();
+        errdefer rt.core_state.deinit();
+
+        rt.journal.replay_into(&rt.core_state, rt, replay_quota_events) catch |err| {
+            rt.restore_error = @errorName(err);
         };
 
         rt.fleet_srv = try fleet.FleetServer.init(gpa, io, hh.hub_keypair, fleet_listen, .{
@@ -270,13 +289,13 @@ pub const Runtime = struct {
         try rt.fleet_srv.start();
         errdefer rt.fleet_srv.stop_and_deinit();
 
-        try rt.recover_after_replay();
-        if (rest_err == null) {
-            u_store.mark_healthy(gpa, io, hh.releases_path) catch {};
-        }
         rt.init_sleeve_devices();
         rt.load_host_info();
         rt.refresh_quotas_sync(false);
+        try rt.recover_after_replay();
+        if (rt.restore_error == null) {
+            u_store.mark_healthy(gpa, io, hh.releases_path) catch {};
+        }
         _ = rt.history.ingest_roots(null, hh.transcripts_path);
 
         rt.tick_thread = try std.Thread.spawn(.{}, tick_loop, .{rt});
@@ -326,7 +345,7 @@ pub const Runtime = struct {
         self.sessions = .empty;
         self.meta_mu.unlock(self.io);
         var drivers = sessions.valueIterator();
-        while (drivers.next()) |dh| self.destroy_driver(dh.*);
+        while (drivers.next()) |dh| self.destroy_driver(dh.*, null);
         sessions.deinit(self.gpa);
 
         self.stream_hub.deinit();
@@ -397,6 +416,10 @@ pub const Runtime = struct {
         defer arena_st.deinit();
         const a = arena_st.allocator();
 
+        const PendingExit = struct { sleeve_id: []const u8, g: model.Gen, cause: model.ExitCause };
+        var pending_exits: std.ArrayList(PendingExit) = .empty;
+        const PendingLaunch = struct { path: []const u8, launch: intent.LaunchIncarnation };
+        var pending_launches: std.ArrayList(PendingLaunch) = .empty;
         var stop_ids: std.ArrayList([]const u8) = .empty;
         var ws_entries: std.ArrayList(schema.Workspace) = .empty;
         var offline_nodes: std.ArrayList([]const u8) = .empty;
@@ -407,8 +430,13 @@ pub const Runtime = struct {
             var sit = self.core_state.sleeves.iterator();
             while (sit.next()) |e| {
                 const sl = e.value_ptr.*;
-                if (sl.lifecycle != .stopped and sl.lifecycle != .parked and sl.lifecycle != .removed) {
-                    try stop_ids.append(a, try a.dupe(u8, sl.id));
+                if (sl.lifecycle == .running and sl.inc != null and sl.inc.?.classified_exit != null) {
+                    const inc = sl.inc.?;
+                    try pending_exits.append(a, .{ .sleeve_id = sl.id, .g = inc.g, .cause = inc.classified_exit.?.cause });
+                } else if (sl.quota_launch) |launch| {
+                    try pending_launches.append(a, .{ .path = sl.path, .launch = launch });
+                } else if (sl.lifecycle != .stopped and sl.lifecycle != .parked and sl.lifecycle != .removed) {
+                    try stop_ids.append(a, sl.id);
                 }
                 if (sl.lifecycle != .removed) {
                     try ws_entries.append(a, .{
@@ -435,6 +463,18 @@ pub const Runtime = struct {
         for (offline_nodes.items) |nid| {
             self.commit(.{ .node_disconnected = .{ .node_id = nid, .reason = "hub restarted" } }) catch {};
         }
+        for (pending_exits.items) |pending| {
+            try self.complete_driver_exit(a, pending.sleeve_id, pending.g, pending.cause, false);
+        }
+        for (pending_launches.items) |pending| {
+            self.execute_intent(a, .{ .write_brief = .{
+                .sleeve_id = pending.launch.sleeve_id,
+                .path = pending.path,
+                .g = pending.launch.g,
+                .cause = .quota,
+            } });
+            self.execute_intent(a, .{ .launch_incarnation = pending.launch });
+        }
     }
 
     pub fn register_workspace(self: *Runtime, ws_id: []const u8, name: []const u8, path: []const u8) !void {
@@ -454,70 +494,189 @@ pub const Runtime = struct {
     pub fn copy_cached_quotas(self: *Runtime, arena: std.mem.Allocator) ![]schema.Quota {
         self.meta_mu.lockUncancelable(self.io);
         defer self.meta_mu.unlock(self.io);
-        return clone_quotas_slice(arena, self.cached_quotas);
+        return quotas_to_schema(arena, self.cached_quotas);
     }
 
-    fn clone_quotas_slice(arena: std.mem.Allocator, src: []const schema.Quota) ![]schema.Quota {
-        const out = try arena.alloc(schema.Quota, src.len);
-        for (src, 0..) |q, i| {
-            const wins = try arena.alloc(schema.QuotaWindow, q.windows.len);
-            for (q.windows, 0..) |w, wi| {
-                wins[wi] = .{
-                    .label = try arena.dupe(u8, w.label),
-                    .used_pct = w.used_pct,
-                    .resets_at_ms = w.resets_at_ms,
-                    .length_ms = w.length_ms,
-                };
+    fn workspace_root(self: *Runtime, sleeve: state.SleeveState) state.SleeveState {
+        var root = sleeve;
+        while (root.parent_id) |parent| {
+            root = self.core_state.sleeves.get(parent) orelse break;
+        }
+        return root;
+    }
+
+    fn workspace_task_size(
+        self: *Runtime,
+        arena: std.mem.Allocator,
+        sleeve_id: ?[]const u8,
+        path: []const u8,
+    ) !q_select.TaskSize {
+        var sleeve_ids: std.ArrayList([]const u8) = .empty;
+        {
+            self.state_mu.lockUncancelable(self.io);
+            defer self.state_mu.unlock(self.io);
+            const root = if (sleeve_id) |id| self.core_state.sleeves.get(id) else null;
+            const workspace_path = if (root) |sl| self.workspace_root(sl).path else path;
+            var sleeves = self.core_state.sleeves.valueIterator();
+            while (sleeves.next()) |sl| {
+                const other_root = self.workspace_root(sl.*);
+                if (std.mem.eql(u8, workspace_path, other_root.path)) try sleeve_ids.append(arena, sl.id);
             }
-            out[i] = .{
-                .subscription = q.subscription,
-                .plan = try arena.dupe(u8, q.plan),
-                .reading = q.reading,
-                .fetched_at_ms = q.fetched_at_ms,
-                .windows = wins,
-                .credits = q.credits,
-                .note = try arena.dupe(u8, q.note),
+        }
+        var costs: transcript.RecentCosts = .{};
+        for (sleeve_ids.items) |id| {
+            self.transcripts.collect_costs(arena, id, &costs) catch |err| {
+                if (err == error.OutOfMemory) return err;
+                std.log.warn("task size: transcript {s}: {s}", .{ id, @errorName(err) });
             };
         }
-        return out;
+        const cost = costs.median() orelse return default_task_size;
+        if (cost < small_task_cost_usd) return .small;
+        if (cost < medium_task_cost_usd) return .medium;
+        return .large;
     }
 
-    pub fn refresh_quotas_sync(self: *Runtime, poll_remote: bool) void {
-        var arena_st = std.heap.ArenaAllocator.init(self.gpa);
-        const now = std.Io.Clock.real.now(self.io).toMilliseconds();
-        const rep = q_readers.read_all(arena_st.allocator(), self.io, self.env, self.env.get("HOME"), now, poll_remote) catch {
-            arena_st.deinit();
-            return;
+    fn rank_guardrail_targets(self: *Runtime, arena: std.mem.Allocator, sleeve_id: []const u8, g: model.Gen) !?event.QuotaSelection {
+        var targets: [model.max_targets]model.Harness = undefined;
+        var target_len: usize = 0;
+        var current: model.Harness = undefined;
+        {
+            self.state_mu.lockUncancelable(self.io);
+            defer self.state_mu.unlock(self.io);
+            const sl = self.core_state.sleeves.get(sleeve_id) orelse return null;
+            const inc = sl.inc orelse return null;
+            if (inc.g != g or sl.lifecycle != .running) return null;
+            if (inc.classified_exit) |handoff| {
+                if (handoff.selection != null) return null;
+            }
+            current = inc.harness;
+            if (sl.target_len > 1) {
+                target_len = sl.target_len - 1;
+                @memcpy(targets[0..target_len], sl.targets[1..sl.target_len]);
+            }
+        }
+        if (target_len == 0) return .{ .reason = "no configured alternatives" };
+        return try self.choose_target(arena, targets[0..target_len], current, sleeve_id, "", null, false);
+    }
+
+    fn complete_driver_exit(self: *Runtime, arena: std.mem.Allocator, sleeve_id: []const u8, g: model.Gen, cause: model.ExitCause, requested: bool) !void {
+        const selection: ?event.QuotaSelection = if (!requested and (cause == .quota_exhausted or cause == .auth_error))
+            self.rank_guardrail_targets(arena, sleeve_id, g) catch event.QuotaSelection{ .reason = "quota selection unavailable" }
+        else
+            null;
+        try self.commit(.{ .exited = .{
+            .sleeve_id = sleeve_id,
+            .g = g,
+            .cause = cause,
+            .requested = requested,
+            .quota_selection = selection,
+        } });
+    }
+
+    pub fn choose_target(
+        self: *Runtime,
+        arena: std.mem.Allocator,
+        allowed: []const model.Harness,
+        exclude: ?model.Harness,
+        sleeve_id: ?[]const u8,
+        path: []const u8,
+        requested_size: ?schema.TaskSize,
+        envoy: bool,
+    ) !event.QuotaSelection {
+        const requested: ?q_select.TaskSize = if (requested_size) |s|
+            std.meta.stringToEnum(q_select.TaskSize, @tagName(s))
+        else
+            null;
+        const size: q_select.TaskSize = blk: {
+            if (!envoy and requested != null) break :blk requested.?;
+            const measured = try self.workspace_task_size(arena, sleeve_id, path);
+            const nudge = requested orelse break :blk measured;
+            const baseline: i8 = @backingInt(measured);
+            const clamped = std.math.clamp(@as(i8, @backingInt(nudge)), baseline - 1, baseline + 1);
+            break :blk @fromBackingInt(@intCast(clamped));
         };
 
-        var pub_arena_st = std.heap.ArenaAllocator.init(self.gpa);
-        defer pub_arena_st.deinit();
-        var pub_qs: []schema.Quota = &.{};
+        const health = try doctor.check_harnesses(arena, self.io, self.env.get("HOME"));
+        var candidates: [spawn_harnesses.len]q_select.Candidate = undefined;
+        tiger.assert(allowed.len <= candidates.len);
+        for (allowed, candidates[0..allowed.len]) |h, *candidate| {
+            candidate.* = .{
+                .harness = std.meta.stringToEnum(q_select.Harness, @tagName(h)).?,
+                .eligible = h != exclude and h != .antigravity and doctor_eligible(health, h),
+            };
+        }
 
         self.meta_mu.lockUncancelable(self.io);
-        const merge_now = std.Io.Clock.real.now(self.io).toMilliseconds();
-        const a = arena_st.allocator();
-        const out: []schema.Quota = a.alloc(schema.Quota, rep.quotas.len) catch &.{};
-        for (rep.quotas, 0..) |q, i| {
-            const wins: []schema.QuotaWindow = a.alloc(schema.QuotaWindow, q.windows.len) catch &.{};
-            for (q.windows, 0..) |w, wi| {
-                wins[wi] = .{
-                    .label = w.label,
+        defer self.meta_mu.unlock(self.io);
+        if (self.cached_local_model == null) {
+            for (candidates[0..allowed.len]) |*candidate| {
+                if (candidate.harness == .pi_local) candidate.eligible = false;
+            }
+        }
+        const now = std.Io.Clock.real.now(self.io).toMilliseconds();
+        var snapshot: [std.enums.values(q_select.Subscription).len]q_select.Quota = undefined;
+        const quotas = snapshot[0..self.cached_quotas.len];
+        for (self.cached_quotas, quotas) |q, *row| {
+            row.* = q;
+            if (q.reading == .ok and now -| q.fetched_at_ms >= q_select.stale_grace_ms) row.reading = .stale;
+        }
+        const decision = q_select.select_with_fallback(candidates[0..allowed.len], quotas, size, now) catch |err| {
+            return .{ .reason = switch (err) {
+                error.NoCandidates, error.AllIneligible => "no eligible harness with a runnable configuration",
+                error.NoMeteredTarget => "no metered harness available",
+                error.AllExhausted => "eligible harnesses are short of usable quota or have failed readings",
+            } };
+        };
+        const harness = allowed[decision.index];
+        const local = if (harness == .pi_local) self.cached_local_model else null;
+        return .{
+            .harness = harness,
+            .model_name = if (local) |m| try arena.dupe(u8, m.id) else null,
+            .provider = if (local) |m| try arena.dupe(u8, m.provider) else null,
+            .reason = try std.fmt.allocPrint(arena, "{s} for a {s} task", .{ decision.reason, @tagName(size) }),
+        };
+    }
+
+    fn replay_quota_events(self: *Runtime, at_ms: i64, intents: []const intent.Intent) void {
+        for (intents) |it| {
+            if (it == .record_quota_selection) self.record_target_selection(it.record_quota_selection, at_ms, false);
+        }
+    }
+
+    fn record_target_selection(self: *Runtime, record: @FieldType(intent.Intent, "record_quota_selection"), at_ms: i64, publish: bool) void {
+        const source = switch (record.source) {
+            .spawn => "spawn",
+            .guardrail => "guardrail resleeve",
+        };
+        const choice = record.choice;
+        const harness = choice.harness orelse {
+            self.record_hub_event_at(.sleeve, source, record.sleeve_id, choice.reason, .warn, at_ms, publish);
+            return;
+        };
+        const model_name = choice.model_name orelse "";
+        const text = std.fmt.allocPrint(self.gpa, "{s}{s}{s} ({s})", .{
+            @tagName(harness),
+            if (model_name.len > 0) "/" else "",
+            model_name,
+            choice.reason,
+        }) catch return;
+        defer self.gpa.free(text);
+        self.record_hub_event_at(.sleeve, source, record.sleeve_id, text, .info, at_ms, publish);
+    }
+
+    fn quotas_to_schema(arena: std.mem.Allocator, src: []const q_select.Quota) ![]schema.Quota {
+        const out = try arena.alloc(schema.Quota, src.len);
+        for (src, out) |q, *dest| {
+            const windows = try arena.alloc(schema.QuotaWindow, q.windows.len);
+            for (q.windows, windows) |w, *window| {
+                window.* = .{
+                    .label = try arena.dupe(u8, w.label),
                     .used_pct = w.used_pct,
                     .resets_at_ms = if (w.resets_at_ms) |r| .{ .ms = r } else null,
                     .length_ms = if (w.length_ms) |l| @intCast(l) else null,
                 };
             }
-            const cr_opt: ?schema.QuotaCredits = if (q.credits) |cr| .{
-                .allowed = cr.allowed,
-                .limit_reached = cr.limit_reached,
-                .has_credits = cr.has_credits,
-                .balance = cr.balance,
-                .overage_limit_reached = cr.overage_limit_reached,
-                .reset_available_count = if (cr.reset_available_count) |c| @as(u64, c) else null,
-                .per_hour = cr.per_hour,
-            } else null;
-            out[i] = .{
+            dest.* = .{
                 .subscription = switch (q.subscription) {
                     .claude => .claude,
                     .codex => .codex,
@@ -527,7 +686,7 @@ pub const Runtime = struct {
                     .api => .api,
                     .unknown => .unknown,
                 },
-                .plan = q.plan,
+                .plan = try arena.dupe(u8, q.plan),
                 .reading = switch (q.reading) {
                     .unknown => .unknown,
                     .ok => .ok,
@@ -535,40 +694,71 @@ pub const Runtime = struct {
                     .@"error" => .@"error",
                 },
                 .fetched_at_ms = .{ .ms = q.fetched_at_ms },
-                .windows = wins,
-                .credits = cr_opt,
-                .note = q.note,
+                .windows = windows,
+                .credits = if (q.credits) |cr| .{
+                    .allowed = cr.allowed,
+                    .limit_reached = cr.limit_reached,
+                    .has_credits = cr.has_credits,
+                    .balance = cr.balance,
+                    .overage_limit_reached = cr.overage_limit_reached,
+                    .reset_available_count = if (cr.reset_available_count) |count| @as(u64, count) else null,
+                    .per_hour = cr.per_hour,
+                } else null,
+                .note = try arena.dupe(u8, q.note),
             };
-            if (out[i].reading == .stale and out[i].windows.len == 0) {
-                for (self.cached_quotas) |old| {
-                    if (old.subscription != out[i].subscription or old.windows.len == 0) continue;
-                    if (old.fetched_at_ms.ms <= 0 or (merge_now -| old.fetched_at_ms.ms) >= 24 * 60 * 60 * 1000) break;
-                    const copy = clone_quotas_slice(a, &.{old}) catch break;
-                    const retained = a.alloc(schema.QuotaWindow, copy[0].windows.len) catch break;
-                    var count: usize = 0;
-                    for (copy[0].windows) |w| {
-                        if (w.resets_at_ms) |reset| {
-                            if (reset.ms <= merge_now) continue;
-                        }
-                        retained[count] = w;
-                        count += 1;
+        }
+        return out;
+    }
+
+    pub fn refresh_quotas_sync(self: *Runtime, poll_remote: bool) void {
+        var arena_st = std.heap.ArenaAllocator.init(self.gpa);
+        const a = arena_st.allocator();
+        const now = std.Io.Clock.real.now(self.io).toMilliseconds();
+        const rep = q_readers.read_all(a, self.io, self.env, self.env.get("HOME"), now, poll_remote, self.hub_home.config.quota_local_provider) catch {
+            arena_st.deinit();
+            return;
+        };
+        const out = a.dupe(q_select.Quota, rep.quotas) catch {
+            arena_st.deinit();
+            return;
+        };
+
+        var pub_arena_st = std.heap.ArenaAllocator.init(self.gpa);
+        defer pub_arena_st.deinit();
+
+        self.meta_mu.lockUncancelable(self.io);
+        const merge_now = std.Io.Clock.real.now(self.io).toMilliseconds();
+        for (out) |*q| {
+            if (q.reading != .stale or q.windows.len != 0) continue;
+            for (self.cached_quotas) |old| {
+                if (old.subscription != q.subscription or old.windows.len == 0) continue;
+                if (old.fetched_at_ms <= 0 or (merge_now -| old.fetched_at_ms) >= 24 * 60 * 60 * 1000) break;
+                const retained = a.alloc(q_select.Window, old.windows.len) catch break;
+                var count: usize = 0;
+                for (old.windows) |w| {
+                    if (w.resets_at_ms) |reset| {
+                        if (reset <= merge_now) continue;
                     }
-                    if (count == 0) break;
-                    out[i].windows = retained[0..count];
-                    out[i].plan = copy[0].plan;
-                    out[i].credits = copy[0].credits;
-                    out[i].fetched_at_ms = copy[0].fetched_at_ms;
-                    break;
+                    retained[count] = w;
+                    retained[count].label = a.dupe(u8, w.label) catch break;
+                    count += 1;
                 }
+                if (count == 0) break;
+                q.plan = a.dupe(u8, old.plan) catch break;
+                q.windows = retained[0..count];
+                q.credits = old.credits;
+                q.fetched_at_ms = old.fetched_at_ms;
+                break;
             }
         }
         self.cached_quotas_arena.deinit();
         self.cached_quotas_arena = arena_st;
         self.cached_quotas = out;
+        self.cached_local_model = rep.local_model;
         if (poll_remote) {
             self.quotas_remote_polled.store(true, .release);
         }
-        pub_qs = clone_quotas_slice(pub_arena_st.allocator(), out) catch &.{};
+        const pub_qs = quotas_to_schema(pub_arena_st.allocator(), out) catch &.{};
         self.meta_mu.unlock(self.io);
 
         for (pub_qs) |pq| {
@@ -577,6 +767,10 @@ pub const Runtime = struct {
     }
 
     pub fn commit(self: *Runtime, ev: event.Event) !void {
+        try self.commit_with_handoff_generation(ev, null);
+    }
+
+    fn commit_with_handoff_generation(self: *Runtime, ev: event.Event, handoff_g: ?model.Gen) !void {
         var intent_arena_st = std.heap.ArenaAllocator.init(self.gpa);
         defer intent_arena_st.deinit();
         const ia = intent_arena_st.allocator();
@@ -590,6 +784,11 @@ pub const Runtime = struct {
             self.state_mu.lockUncancelable(self.io);
             defer self.state_mu.unlock(self.io);
 
+            if (handoff_g) |g| {
+                const sl = self.core_state.sleeves.get(ev.resleeve_requested.sleeve_id) orelse return;
+                const inc = sl.inc orelse return;
+                if (sl.lifecycle != .running or inc.g != g or inc.classified_exit != null) return;
+            }
             if (ev == .launched) {
                 const sl = self.core_state.sleeves.get(ev.launched.sleeve_id) orelse return error.NotFound;
                 switch (sl.lifecycle) {
@@ -611,7 +810,11 @@ pub const Runtime = struct {
         }
 
         for (intents.items) |it| {
-            self.execute_intent(ia, it);
+            if (it == .record_quota_selection) {
+                self.record_target_selection(it.record_quota_selection, now_ms, true);
+            } else {
+                self.execute_intent(ia, it);
+            }
         }
 
         switch (ev) {
@@ -623,6 +826,7 @@ pub const Runtime = struct {
 
     fn execute_intent(self: *Runtime, ia: std.mem.Allocator, it: intent.Intent) void {
         switch (it) {
+            .record_quota_selection => unreachable,
             .provision_worktree => |p| {
                 var base_repo: []const u8 = p.path;
                 {
@@ -714,9 +918,10 @@ pub const Runtime = struct {
                 }
             },
             .kill_incarnation => |ki| {
-                if (self.stop_driver_generation(ki.sleeve_id, ki.g)) {
-                    self.commit(.{ .exited = .{ .sleeve_id = ki.sleeve_id, .g = ki.g, .cause = .killed, .requested = !ki.recover } }) catch {};
-                }
+                _ = self.stop_driver_generation(ki.sleeve_id, ki.g, .{
+                    .cause = .killed,
+                    .requested = !ki.recover,
+                });
             },
             .respond_approval => |ra| {
                 if (self.get_driver(ra.sleeve_id)) |dh| {
@@ -732,7 +937,8 @@ pub const Runtime = struct {
                 }
             },
             .write_brief => |wb| {
-                brief.write_handoff(self.gpa, self.io, self.hub_home.briefs_path, wb.sleeve_id, wb.g, wb.cause, "Auto handoff") catch {};
+                const summary = if (wb.cause == .handoff) "Context ceiling reached; auto-handoff" else "Auto handoff";
+                brief.write_handoff(self.gpa, self.io, self.hub_home.briefs_path, wb.sleeve_id, wb.g, wb.cause, summary) catch {};
             },
             .dispatch_job => |dj| {
                 self.dispatch_job_async(dj.job_id, dj.node_id);
@@ -835,10 +1041,7 @@ pub const Runtime = struct {
             self.sessions.putAssumeCapacityNoClobber(dh.sleeve_id, dh);
             break :blk dh;
         };
-        errdefer _ = self.stop_driver_generation(li.sleeve_id, li.g);
-        defer self.release_driver(dh);
-
-        try self.commit(.{ .launched = .{
+        const launched = self.commit(.{ .launched = .{
             .sleeve_id = li.sleeve_id,
             .g = li.g,
             .harness = li.harness,
@@ -847,7 +1050,12 @@ pub const Runtime = struct {
             .provider = li.provider,
             .effort = li.effort,
         } });
-        try dh.sess.begin();
+        const started = if (launched) |_| dh.sess.begin() else |err| err;
+        self.release_driver(dh);
+        started catch |err| {
+            self.record_hub_event(.sleeve, "hub", li.sleeve_id, @errorName(err), .alarm);
+            _ = self.stop_driver_generation(li.sleeve_id, li.g, .{ .cause = .crash });
+        };
     }
 
     fn spawn_driver(self: *Runtime, li: anytype) !*DriverHandle {
@@ -892,13 +1100,7 @@ pub const Runtime = struct {
         errdefer guard.deinit();
         const cgroup_path = if (applied_limit != null) guard.sleeve_cgroup() else null;
 
-        const prog: []const u8 = switch (li.harness) {
-            .claude => "claude",
-            .codex => "codex",
-            .grok => "grok",
-            .pi_vendor, .pi_local => "pi",
-            .antigravity => "agy",
-        };
+        const prog = harness_program(li.harness);
         const p_harness: d_proto.Harness = switch (li.harness) {
             .claude => .claude,
             .codex => .codex,
@@ -1093,10 +1295,10 @@ pub const Runtime = struct {
     }
 
     fn stop_driver_for(self: *Runtime, sleeve_id: []const u8) void {
-        _ = self.stop_driver_generation(sleeve_id, null);
+        _ = self.stop_driver_generation(sleeve_id, null, null);
     }
 
-    fn stop_driver_generation(self: *Runtime, sleeve_id: []const u8, expected_g: ?u64) bool {
+    fn stop_driver_generation(self: *Runtime, sleeve_id: []const u8, expected_g: ?u64, report: ?DriverExit) bool {
         const dh = blk: {
             self.meta_mu.lockUncancelable(self.io);
             defer self.meta_mu.unlock(self.io);
@@ -1106,17 +1308,27 @@ pub const Runtime = struct {
             tiger.assert(removed);
             break :blk dh;
         };
-        self.destroy_driver(dh);
+        self.destroy_driver(dh, report);
         return true;
     }
 
-    fn destroy_driver(self: *Runtime, dh: *DriverHandle) void {
+    fn destroy_driver(self: *Runtime, dh: *DriverHandle, report: ?DriverExit) void {
         dh.sess.request_stop();
         _ = dh.guard.fence_and_confirm(self.io, 500);
         self.meta_mu.lockUncancelable(self.io);
         while (dh.users > 0) self.driver_users_cond.waitUncancelable(self.io, &self.meta_mu);
         self.meta_mu.unlock(self.io);
         dh.sess.kill_and_destroy();
+        if (report) |fallback| {
+            const observed = dh.driver_exit() orelse fallback;
+            const requested = fallback.requested or observed.requested;
+            var arena = std.heap.ArenaAllocator.init(self.gpa);
+            defer arena.deinit();
+            self.complete_driver_exit(arena.allocator(), dh.sleeve_id, dh.g, observed.cause, requested) catch |err| {
+                std.log.warn("reporting exit for {s} generation {d}: {s}", .{ dh.sleeve_id, dh.g, @errorName(err) });
+            };
+            if (observed.cause == .oom and !requested) self.record_sleeve_oom(dh);
+        }
         dh.guard.deinit();
         self.gpa.free(dh.sleeve_id);
         self.gpa.destroy(dh);
@@ -1223,7 +1435,15 @@ pub const Runtime = struct {
                 if (ce) |c| self.stream_hub.publish_raw(.{ .entry = .{ .seq = 0, .sleeve_id = dh.sleeve_id, .entry = c } });
             },
             .turn_settled => |ts| {
-                if (dh.interrupt_exit.load(.acquire)) return;
+                if (dh.interrupt_exit.load(.acquire) or dh.driver_exit() != null) return;
+                const handoff: ?model.ExitCause = blk: {
+                    if (ts.stop == .@"error") {
+                        const cause = dh.quota_exit_cause.load(.acquire);
+                        if (cause != no_driver_exit) break :blk @fromBackingInt(@intCast(cause));
+                    }
+                    dh.quota_exit_cause.store(no_driver_exit, .release);
+                    break :blk null;
+                };
                 const end_m: model.TurnEnd = switch (ts.stop) {
                     .end_turn => .end_turn,
                     .cancelled => .cancelled,
@@ -1231,13 +1451,25 @@ pub const Runtime = struct {
                     .max_turns => .max_turns,
                     .other => .other,
                 };
+                var arena = std.heap.ArenaAllocator.init(self.gpa);
+                defer arena.deinit();
+                const pending: ?event.ClassifiedExit = if (handoff) |cause| .{
+                    .cause = cause,
+                    .selection = self.rank_guardrail_targets(arena.allocator(), dh.sleeve_id, dh.g) catch
+                        event.QuotaSelection{ .reason = "quota selection unavailable" },
+                } else null;
                 self.commit(.{ .turn_settled = .{
                     .sleeve_id = dh.sleeve_id,
                     .g = dh.g,
                     .turn_end = end_m,
                     .context_tokens = ts.usage.context_tokens orelse 0,
                     .context_window = ts.usage.context_window orelse 0,
-                } }) catch {};
+                    .quota_handoff = pending,
+                } }) catch |err| {
+                    std.log.warn("settling turn for {s}: {s}", .{ dh.sleeve_id, @errorName(err) });
+                    return;
+                };
+                if (handoff) |cause| dh.publish_exit(.{ .cause = cause });
                 const ce = self.transcripts.append(dh.sleeve_id, dh.g, dh.turn_id, ev.time_ms, .{
                     .turn_settled = .{
                         .stop = switch (ts.stop) {
@@ -1273,6 +1505,7 @@ pub const Runtime = struct {
                 } }) catch {};
             },
             .@"error" => |er| {
+                if (quota_exit_cause(er.kind)) |cause| dh.quota_exit_cause.store(@backingInt(cause), .release);
                 const ce = self.transcripts.append(dh.sleeve_id, dh.g, dh.turn_id, ev.time_ms, .{
                     .@"error" = .{
                         .kind = switch (er.kind) {
@@ -1309,10 +1542,22 @@ pub const Runtime = struct {
 
     fn on_driver_exit(ctx: ?*anyopaque, g: u64, exit_code: ?u8, stderr_tail: []const u8) void {
         const dh: *DriverHandle = @ptrCast(@alignCast(ctx orelse return));
+        tiger.assert(g == dh.g);
         const self = dh.rt;
         const at_ms = std.Io.Clock.real.now(self.io).toMilliseconds();
-        const requested = dh.interrupt_exit.load(.acquire);
-        if (requested) {
+        const pending = dh.driver_exit();
+        const exit = pending orelse self.classify_driver_exit(dh, exit_code, stderr_tail);
+        if (pending == null and !exit.requested) {
+            switch (exit.cause) {
+                .quota_exhausted, .auth_error, .oom => self.commit(.{ .exit_classified = .{
+                    .sleeve_id = dh.sleeve_id,
+                    .g = dh.g,
+                    .cause = exit.cause,
+                } }) catch |err| std.log.warn("classifying exit for {s}: {s}", .{ dh.sleeve_id, @errorName(err) }),
+                else => {},
+            }
+        }
+        if (exit.requested) {
             self.commit(.{ .turn_settled = .{
                 .sleeve_id = dh.sleeve_id,
                 .g = dh.g,
@@ -1328,22 +1573,32 @@ pub const Runtime = struct {
         const ce = self.transcripts.append(dh.sleeve_id, dh.g, dh.turn_id, at_ms, .{
             .exited = .{
                 .code = if (exit_code) |c| @intCast(c) else null,
-                .requested = requested,
+                .requested = exit.requested,
                 .stderr_tail = stderr_tail,
             },
         }) catch null;
         if (ce) |c| self.stream_hub.publish_raw(.{ .entry = .{ .seq = 0, .sleeve_id = dh.sleeve_id, .entry = c } });
 
-        tiger.assert(g == dh.g);
-        dh.exit_cause = if (exit_code == 0) .clean else .crash;
+        dh.publish_exit(exit);
+    }
+
+    fn classify_driver_exit(self: *Runtime, dh: *const DriverHandle, exit_code: ?u8, stderr_tail: []const u8) DriverExit {
+        const requested = dh.interrupt_exit.load(.acquire);
+        const quota_cause = dh.quota_exit_cause.load(.acquire);
+        var cause: model.ExitCause = if (quota_cause != no_driver_exit)
+            @fromBackingInt(@intCast(quota_cause))
+        else if (exit_code == 0)
+            .clean
+        else
+            quota_exit_cause(d_proto.classify_error(stderr_tail)) orelse .crash;
         if (!requested and exit_code == 137 and dh.memory_max_bytes != null) {
             const killed = dh.guard.sleeve_oom_killed(self.io) catch |err| blk: {
                 std.log.warn("read sleeve {s} memory.events after exit: {s}", .{ dh.sleeve_id, @errorName(err) });
                 break :blk false;
             };
-            if (killed) dh.exit_cause = .oom;
+            if (killed) cause = .oom;
         }
-        dh.exit_pending.store(true, .release);
+        return .{ .cause = cause, .requested = requested };
     }
 
     fn record_sleeve_oom(self: *Runtime, dh: *const DriverHandle) void {
@@ -1359,34 +1614,22 @@ pub const Runtime = struct {
 
     fn reap_driver_exits(self: *Runtime) void {
         while (true) {
-            self.meta_mu.lockUncancelable(self.io);
-            var it = self.sessions.iterator();
-            var found: ?*DriverHandle = null;
-            while (it.next()) |entry| {
-                if (entry.value_ptr.*.exit_pending.load(.acquire)) {
-                    found = entry.value_ptr.*;
-                    break;
+            const pending = blk: {
+                self.meta_mu.lockUncancelable(self.io);
+                defer self.meta_mu.unlock(self.io);
+                var it = self.sessions.valueIterator();
+                while (it.next()) |entry| {
+                    const dh = entry.*;
+                    if (dh.driver_exit()) |exit| {
+                        const removed = self.sessions.remove(dh.sleeve_id);
+                        tiger.assert(removed);
+                        break :blk .{ .dh = dh, .exit = exit };
+                    }
+                    dh.guard.drain_sleeve_after_exit(self.io);
                 }
-                entry.value_ptr.*.guard.drain_sleeve_after_exit(self.io);
-            }
-            const dh = found orelse {
-                self.meta_mu.unlock(self.io);
                 return;
             };
-            const sid = self.gpa.dupe(u8, dh.sleeve_id) catch {
-                self.meta_mu.unlock(self.io);
-                return;
-            };
-            const g = dh.g;
-            const requested = dh.interrupt_exit.load(.acquire);
-            const cause = dh.exit_cause;
-            const removed = self.sessions.fetchRemove(sid).?;
-            tiger.assert(removed.value == dh);
-            self.meta_mu.unlock(self.io);
-            if (cause == .oom and !requested) self.record_sleeve_oom(dh);
-            self.destroy_driver(dh);
-            self.commit(.{ .exited = .{ .sleeve_id = sid, .g = g, .cause = cause, .requested = requested } }) catch {};
-            self.gpa.free(sid);
+            self.destroy_driver(pending.dh, pending.exit);
         }
     }
 
@@ -1406,28 +1649,12 @@ pub const Runtime = struct {
                 return;
             };
             defer self.gpa.free(handoff.sid);
-            {
-                self.state_mu.lockUncancelable(self.io);
-                defer self.state_mu.unlock(self.io);
-                const sl = self.core_state.sleeves.get(handoff.sid) orelse continue;
-                const inc = sl.inc orelse continue;
-                if (sl.lifecycle != .running or inc.g != handoff.g) continue;
-            }
-            brief.write_handoff(
-                self.gpa,
-                self.io,
-                self.hub_home.briefs_path,
-                handoff.sid,
-                handoff.g,
-                .handoff,
-                "Context ceiling reached; auto-handoff",
-            ) catch {};
-            self.commit(.{ .resleeve_requested = .{
+            self.commit_with_handoff_generation(.{ .resleeve_requested = .{
                 .sleeve_id = handoff.sid,
                 .harness = handoff.harness,
                 .by = .system,
                 .cause = .handoff,
-            } }) catch {};
+            } }, handoff.g) catch {};
         }
     }
 
@@ -1897,12 +2124,26 @@ pub const Runtime = struct {
         level: schema.Level,
     ) void {
         const now = std.Io.Clock.real.now(self.io).toMilliseconds();
+        self.record_hub_event_at(kind, source, target, text, level, now, true);
+    }
+
+    fn record_hub_event_at(
+        self: *Runtime,
+        kind: schema.EventKind,
+        source: []const u8,
+        target: ?[]const u8,
+        text: []const u8,
+        level: schema.Level,
+        at_ms: i64,
+        publish: bool,
+    ) void {
         self.meta_mu.lockUncancelable(self.io);
+        defer self.meta_mu.unlock(self.io);
         const seq = self.next_hub_event_seq;
         self.next_hub_event_seq += 1;
         const ev: schema.HubEvent = .{
             .seq = seq,
-            .at_ms = .{ .ms = now },
+            .at_ms = .{ .ms = at_ms },
             .kind = kind,
             .source = self.gpa.dupe(u8, source) catch "",
             .target = if (target) |t| (self.gpa.dupe(u8, t) catch null) else null,
@@ -1916,13 +2157,12 @@ pub const Runtime = struct {
             self.gpa.free(old.text);
         }
         self.hub_events.append(self.gpa, ev) catch {};
-        self.meta_mu.unlock(self.io);
-        self.stream_hub.publish_raw(.{ .event = .{ .seq = 0, .event = ev } });
+        if (publish) self.stream_hub.publish_raw(.{ .event = .{ .seq = 0, .event = ev } });
     }
 
     fn publish_event_updates(self: *Runtime, arena: std.mem.Allocator, ev: event.Event) void {
         switch (ev) {
-            inline .sleeve_created, .provisioned, .provision_failed, .start_requested, .launched, .session_bound, .prompt_enqueued, .prompt_delivered, .turn_started, .turn_settled, .stop_requested, .stopped, .resleeve_requested, .parked, .exited => |s| {
+            inline .sleeve_created, .provisioned, .provision_failed, .start_requested, .launched, .session_bound, .prompt_enqueued, .prompt_delivered, .turn_started, .turn_settled, .exit_classified, .stop_requested, .stopped, .resleeve_requested, .parked, .exited => |s| {
                 if (self.view_sleeve(arena, s.sleeve_id) catch null) |sv| {
                     self.stream_hub.publish_raw(.{ .sleeve = .{ .seq = 0, .sleeve = sv } });
                 }
@@ -2079,7 +2319,7 @@ pub const Runtime = struct {
                 });
             }
             try ev_list.appendSlice(arena, self.hub_events.items);
-            q_list = try clone_quotas_slice(arena, self.cached_quotas);
+            q_list = try quotas_to_schema(arena, self.cached_quotas);
         }
 
         return .{
@@ -2844,6 +3084,31 @@ fn map_proto_harness(h: d_proto.Harness) schema.Harness {
         .pi_vendor => .pi_vendor,
         .pi_local => .pi_local,
         .antigravity => .antigravity,
+    };
+}
+
+fn harness_program(harness: model.Harness) []const u8 {
+    return switch (harness) {
+        .claude => "claude",
+        .codex => "codex",
+        .grok => "grok",
+        .pi_vendor, .pi_local => "pi",
+        .antigravity => "agy",
+    };
+}
+
+fn doctor_eligible(health: []const schema.DoctorHarness, harness: model.Harness) bool {
+    for (health) |check| {
+        if (std.mem.eql(u8, check.name, harness_program(harness))) return check.eligible;
+    }
+    return false;
+}
+
+fn quota_exit_cause(kind: d_proto.ErrorClass) ?model.ExitCause {
+    return switch (kind) {
+        .quota => .quota_exhausted,
+        .auth => .auth_error,
+        else => null,
     };
 }
 

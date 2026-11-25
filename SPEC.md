@@ -587,9 +587,11 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   - budget, forbidden path, disk limit;
   - interrupt unresponsive, protocol desync.
 - **Guardrail actions:** interrupt, resume (at most twice in 10 min), resleeve, or park. Automatic
-  resleeves go to headless mode, walking the sleeve's ordered `resleeve_to` list (default
-  `[pi_local]`). A third resleeve within an hour parks the sleeve. When that trip is an auth
-  failure, the park reason names the login that was rejected (`flapping (<harness> login rejected)`).
+  quota and auth resleeves go to headless mode. Section 8 ranks allowed targets and uses the
+  sleeve's configured `resleeve_to` alternatives in order for degraded readings. A sleeve
+  with no configured alternative parks. A third resleeve within an hour parks the sleeve. When
+  that trip is an auth failure, the park reason names the login that was rejected
+  (`flapping (<harness> login rejected)`).
   Any other flap stays `flapping`. The hourly limit itself is unchanged.
 - **Auto-continue:** after a native resume of a headless turn that a crash ended, the core sends
   one short continuation prompt, keyed to that owner turn. A relaunch that is a fresh session,
@@ -837,14 +839,11 @@ backup that recovers a dead hub moves a live one.
 
 ## 8. Quota and dispatch
 
-Superseded (2026-11, Zig rewrite): `select_target` and its helpers are in `src/quota/select.zig`, but
-the hub does not call them yet; a quota or auth exit resleeves to the next harness in the sleeve's
-`resleeve_to` list (`src/core/apply.zig`), and nothing computes the task-size class (D27).
-
 Quota readers stay read-only per subscription. `select_target(task_size, allow, mode, exclude,
 quota, health)` is pure code, using fresh data only. It weighs projected unused quota at reset with a
 48 h urgency half-life and falls back to the local model. "Dispatch by quota" is this function,
-called at spawn and at guardrail time. Code derives the task-size class, Envoy may nudge it one
+called at spawn when the request opts into Auto and at guardrail time for quota and auth trips.
+Spawns default to Claude. Code derives the task-size class, Envoy may nudge it one
 class, and code clamps it (D27).
 
 A stale reading keeps the windows of its last good fetch. The resleeve fallback treats those
@@ -1134,7 +1133,7 @@ All decided. The owner's answers are recorded in `docs/sessions/2026-11-01-decis
 | D11 | Windows node as LocalSystem plus runner account | yes |
 | D12 | Cut the sandbox network namespace and egress proxy | yes |
 | D13 | Antigravity pane-only until headless approvals work | yes. Superseded (2026-11, Zig rewrite): `src/drivers/antigravity.zig` runs `agy` headless (stream-json) |
-| D15 | Resleeve target: ordered list per sleeve, default `[pi_local]` | yes |
+| D15 | Resleeve targets: ordered alternatives per sleeve | Superseded: no implicit alternative. Section 8 ranks by quota first and uses the list order for fallback |
 | D16 | Guardrail thresholds as listed; no auto-revert on forbidden-path edits | yes |
 | D17 | Hub updates by re-exec in place, keeping sleeves alive | yes. Superseded (2026-11, Zig rewrite): `hub update` stages the release and moves the `current` link; the service restarts the hub and sleeves resume as after a crash (6a) |
 | D18 | The hub never types into a pane after launch | yes |
@@ -1146,7 +1145,7 @@ All decided. The owner's answers are recorded in `docs/sessions/2026-11-01-decis
 | D24 | `===>` command line and F-key legend in the app | yes; since 2026-11-02 a command palette (Esc, Ctrl+K) and F-keys shown in the sidebar (SPEC 9) |
 | D25 | macOS node and desktop only once a Mac exists | yes |
 | D26 | `history.read` scope | Envoy, plus a continued sleeve for its own run; wider is owner-only |
-| D27 | Source of the task-size class for dispatch | code (median of the last N), Envoy may nudge one class, code clamps. Superseded (2026-11, Zig rewrite): `src/quota/select.zig` takes a `TaskSize`, but nothing computes it and the hub does not call the selector yet; resleeve walks `resleeve_to` in order (section 8) |
+| D27 | Source of the task-size class for dispatch | code (median cost of recent tasks in the workspace), or an owner-set class. Envoy may nudge one class, code clamps |
 | D28 | Verus phasing: phase 1 is journal and frame codec; presence, audit and brief math dropped | yes. Superseded (2026-11, Zig rewrite): no Verus; the journal and frame codecs are covered by VOPR (`src/dst/`) and the e2e script |
 | D29 | Backlog with a spare-quota trigger in code and a review inbox for public repos (PROBLEMS P6) | yes, after resleeve works |
 | D30 | GPU/resource leases with a TTL (PROBLEMS P9) | later |
@@ -1272,7 +1271,8 @@ shortcut is also in `REVISIT.md`.
   dial `node:7475` (hub), or where accepted tailnet connections are handed over (node).
   Superseded (2026-11, Zig rewrite): there is no Go in the build or at run time; `go/` stays only as
   reference. The node dials the hub through `src/net/transport.zig`.
-- **Envoy** is a root sleeve running Claude Code headless in `$PROTECTORATE_HOME/envoy/`. That
+- **Envoy** is a root sleeve in `$PROTECTORATE_HOME/envoy/`. It defaults to Claude Code headless.
+  The owner may choose another harness explicitly. Auto selection is refused for Envoy. That
   directory's own `CLAUDE.md` describes the `protectorate` CLI, so no worked-on repo is touched.
 
 The blocking gate is `make check`; `make e2e` runs its real-binary scenarios and `make dst` the VOPR run. Superseded (2026-11, Zig rewrite): `make test`, `make test-heavy`, fuzz seed replay and the

@@ -351,6 +351,7 @@ pub const Session = struct {
                     self.kill_child_locked();
                     return null;
                 }) {
+                    if (self.stopping.load(.acquire)) return null;
                     const previous = self.io.swapCancelProtection(.blocked);
                     defer _ = self.io.swapCancelProtection(previous);
                     return self.child.wait(self.io) catch null;
@@ -401,7 +402,7 @@ pub const Session = struct {
         }
 
         const term = self.finish_child(failed);
-        if (!self.stopping.load(.acquire)) {
+        if (term != null or !self.stopping.load(.acquire)) {
             const code: ?u8 = if (term) |t| switch (t) {
                 .exited => |c| c,
                 .signal => |sig| if (builtin.os.tag != .windows and sig == .KILL) 137 else 1,

@@ -1,6 +1,18 @@
 const std = @import("std");
 const model = @import("model.zig");
 
+pub const QuotaSelection = struct {
+    harness: ?model.Harness = null,
+    model_name: ?[]const u8 = null,
+    provider: ?[]const u8 = null,
+    reason: []const u8,
+};
+
+pub const ClassifiedExit = struct {
+    cause: model.ExitCause,
+    selection: ?QuotaSelection = null,
+};
+
 pub const Event = union(enum) {
     sleeve_created: struct {
         sleeve_id: []const u8,
@@ -31,6 +43,7 @@ pub const Event = union(enum) {
         provider: ?[]const u8 = null,
         effort: ?[]const u8 = null,
         until_done: ?u64 = null,
+        selection_reason: ?[]const u8 = null,
     },
     launched: struct {
         sleeve_id: []const u8,
@@ -81,6 +94,7 @@ pub const Event = union(enum) {
         declared_status: ?model.DeclaredStatus = null,
         context_tokens: u64 = 0,
         context_window: u64 = 0,
+        quota_handoff: ?ClassifiedExit = null,
     },
     tool_activity: struct {
         sleeve_id: []const u8,
@@ -102,6 +116,7 @@ pub const Event = union(enum) {
         g: model.Gen,
         cause: model.ExitCause,
         requested: bool,
+        quota_selection: ?QuotaSelection = null,
     },
     stop_requested: struct {
         sleeve_id: []const u8,
@@ -118,6 +133,7 @@ pub const Event = union(enum) {
         effort: ?[]const u8 = null,
         by: model.Party,
         cause: model.Cause,
+        inherit_preferences: bool = true,
     },
     parked: struct {
         sleeve_id: []const u8,
@@ -254,6 +270,11 @@ pub const Event = union(enum) {
         rollout_id: []const u8,
     },
     tick: struct {},
+    exit_classified: struct {
+        sleeve_id: []const u8,
+        g: model.Gen,
+        cause: model.ExitCause,
+    },
 };
 
 pub const StampedEvent = struct {

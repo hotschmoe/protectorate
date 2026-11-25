@@ -111,7 +111,7 @@ class _SpawnSleeveDialogState extends State<_SpawnSleeveDialog> {
   final _name = TextEditingController();
   final _path = TextEditingController();
   final _message = TextEditingController();
-  Harness _harness = Harness.claude;
+  Harness? _harness = Harness.claude;
   String? _parentId;
   bool _newDir = false;
   bool _busy = false;
@@ -145,7 +145,8 @@ class _SpawnSleeveDialogState extends State<_SpawnSleeveDialog> {
     try {
       final req = SpawnSleeveRequest(
         name: name,
-        harness: _harness,
+        harness: _harness ?? Harness.claude,
+        autoSelect: !isEnvoy && _harness == null,
         path: _parentId == null && !_newDir && path.isNotEmpty ? path : null,
         newPath: _parentId == null && _newDir && path.isNotEmpty ? path : null,
         parentId: _parentId,
@@ -225,11 +226,21 @@ class _SpawnSleeveDialogState extends State<_SpawnSleeveDialog> {
                     const SizedBox(height: 12),
                     const Label('Harness'),
                     const SizedBox(height: 6),
-                    Buttons([
-                      for (final h in _harnessChoices)
-                        Btn(harnessName(h), dense: true, active: _harness == h,
-                            onTap: _busy ? null : () => setState(() => _harness = h)),
-                    ]),
+                    ValueListenableBuilder(
+                      valueListenable: _name,
+                      builder: (context, name, _) {
+                        final isEnvoy = _parentId == null && name.text.trim() == 'envoy';
+                        final activeHarness = isEnvoy ? _harness ?? Harness.claude : _harness;
+                        return Buttons([
+                          if (!isEnvoy)
+                            Btn('Auto', dense: true, active: _harness == null,
+                                onTap: _busy ? null : () => setState(() => _harness = null)),
+                          for (final h in _harnessChoices)
+                            Btn(harnessName(h), dense: true, active: activeHarness == h,
+                                onTap: _busy ? null : () => setState(() => _harness = h)),
+                        ]);
+                      },
+                    ),
                     const SizedBox(height: 12),
                     const Label('Initial prompt (optional)'),
                     const SizedBox(height: 4),

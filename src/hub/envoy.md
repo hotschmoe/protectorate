@@ -31,7 +31,10 @@ capability). `--json` prints the API's answer; `protectorate --help` lists every
 | `history search <words> [--sleeve S] [--mode any\|phrase]` | keyword search over every sleeve's past sessions; each hit names its doc |
 | `history read --doc N` / `history read <session> --from T --to T` | a hit's whole text, or a session's turns |
 
-Harnesses: `claude`, `codex`, `grok`, `pi_vendor`, `pi_local` (the free local model).
+Harnesses: `claude`, `codex`, `grok`, `pi_vendor`, `pi_local` (the configured free local model).
+Use `--harness auto` on a spawn to let the hub choose by quota. With Auto, `--task-size
+small|medium|large` requests a class within one of the hub's workspace estimate. See the target
+and reason in `event list`.
 `--effort` sets the harness's reasoning effort (for example `low`, `medium`, or `high`);
 available levels depend on the harness and model. On spawn, omitting it uses the harness default.
 On start or resleeve, omitting it keeps the earlier effort for the same harness; changing harness

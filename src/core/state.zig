@@ -1,6 +1,8 @@
 const std = @import("std");
 const tiger = @import("../tiger.zig");
 const model = @import("model.zig");
+const event = @import("event.zig");
+const intent = @import("intent.zig");
 
 pub fn TimeWindow(comptime capacity: usize) type {
     return struct {
@@ -61,6 +63,7 @@ pub const IncarnationState = struct {
     delivered_kind: ?model.MsgKind = null,
     turn_is_agent_mail: bool = false,
     next_launch: ?PendingLaunch = null,
+    classified_exit: ?event.ClassifiedExit = null,
 };
 
 pub const MailItem = struct {
@@ -87,6 +90,7 @@ pub const SleeveState = struct {
     d9: bool = false,
     next_g: model.Gen = 0,
     inc: ?IncarnationState = null,
+    quota_launch: ?intent.LaunchIncarnation = null,
     queued: std.ArrayList(MailItem) = .empty,
     targets: [model.max_targets]model.Harness = undefined,
     target_len: u8 = 0,
@@ -243,9 +247,24 @@ pub const State = struct {
                 hash_u8(&h, @intFromEnum(inc.activity));
                 hash_u64(&h, inc.turn);
                 hash_u64(&h, inc.context_tokens);
+                if (inc.classified_exit) |handoff| {
+                    hash_u8(&h, 1 + @backingInt(handoff.cause));
+                    if (handoff.selection) |selection| {
+                        hash_u8(&h, if (selection.harness) |harness| 1 + @backingInt(harness) else 0);
+                        hash_str(&h, selection.model_name orelse "");
+                        hash_str(&h, selection.provider orelse "");
+                        hash_str(&h, selection.reason);
+                    }
+                } else hash_u8(&h, 0);
             } else {
                 hash_u8(&h, 0);
             }
+            if (sl.quota_launch) |launch| {
+                hash_u8(&h, 1 + @backingInt(launch.harness));
+                hash_u64(&h, launch.g);
+                hash_str(&h, launch.model_name);
+                hash_str(&h, launch.provider);
+            } else hash_u8(&h, 0);
         }
 
         var akeys: std.ArrayList([]const u8) = .empty;

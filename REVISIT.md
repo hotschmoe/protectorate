@@ -408,15 +408,14 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   as a separate scope and uses the best available model when none is specified; it cannot infer
   shared pools or the duration of a reset window. Right: use a documented quota interface if agy
   exposes one, including explicit shared buckets and window durations.
-- **Zig hub does not yet invoke quota ranking** (`src/hub/runtime.zig`, `src/quota/select.zig`): the
-  selector accepts Antigravity readings, but the hub's resleeve path still follows the configured
-  target order. Right: connect selection to the journaled dispatch decision without changing the
-  pane-only restriction on Antigravity resleeves.
 - **Quota selection constants are untuned** (`src/quota/select.zig`): usable-now minimums per task
   size (5, 15, 30 percent, `TaskSize.min_usable_pct`), the 48 h half-life (`urgent_half_hours`), the
   168 h stand-in for an unknown reset (`unknown_reset_hours`), the 10 min stale grace and the 5 h
-  unknown window length are fixed constants. Right: tune from real dispatch history once a workspace
-  has any.
+  unknown window length are fixed constants. The task-size estimate uses up to nine successful
+  turns (`RecentCosts.sample_count_max`, `src/hub/transcript.zig`), $0.05 and $0.50 boundaries
+  (`small_task_cost_usd` and `medium_task_cost_usd`, `src/hub/runtime.zig`), and
+  `default_task_size` (medium) when there is no measured cost. Right: tune from real dispatch
+  history once a workspace has any.
 - **A hub update stages and switches but does not restart or re-exec** (`src/hub/api_dispatch.zig`,
   `UpdateHub`; `src/update/store.zig`, `activate_staged`): the hub writes `releases/current.txt`,
   `previous.txt` and `probation.json` and replies with `restarting` false (the field is never set);
@@ -598,6 +597,14 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   removes its tag can escape that fallback; inherited stdout or stderr can also delay observing an
   unexpected parent exit. Right: use an isolated, delegated cgroup or equivalent process container
   for every incarnation and monitor the parent independently of its pipes.
+- **Handoff recovery can overlap the old driver** (`src/hub/runtime.zig`, `recover_after_replay`):
+  completing a recorded handoff after a hub crash does not fence the old driver, just as with
+  ordinary recovery today. Bubblewrap uses `--die-with-parent` for sandboxed sleeves. Landlock
+  relies on `PR_SET_PDEATHSIG`, and unsandboxed sleeves have no parent-death guarantee. Right:
+  fence the previous incarnation before starting a replacement after replay. Hub shutdown also
+  destroys drivers without reporting an exit their reader already published; a classified quota,
+  auth or OOM cause is journaled first and survives, any other exit is handled at restart like a
+  running sleeve, so only an unclassified cause is lost.
 - **Losing fleet dials can remain blocked** (`src/net/transport.zig`): a timed-out or losing dial
   retains its worker and process-lifetime I/O until the connection attempt or handshake returns.
   Right: cancel DNS, connect, and handshake operations and wait for each losing worker to exit.
@@ -633,9 +640,6 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   serve --stdio` speaks the fleet protocol over a pipe for an ssh bridge, but nothing on the hub
   calls `accept_stdio`. Right: a hub command that runs the node over ssh and attaches the pipe,
   or drop the node mode.
-- **Quota-weighted selection is not wired** (`src/quota/select.zig`, `select_target`): the hub
-  reads quotas and shows them, but resleeve and spawn never call the selector. Right: call it
-  where a harness is chosen, as SPEC describes.
 - **The hub fleet starts only on Linux** (`src/hub/fleet.zig` `start`, `src/hub/fleet_loop.zig`): the
   loop runs on `src/net/io_epoll.zig`; Windows and macOS hub builds compile but `start` returns
   `error.FleetUnsupportedPlatform`, so `serve` cannot run there. Right: the kqueue and IOCP backends

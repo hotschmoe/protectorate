@@ -635,6 +635,26 @@ enum Subscription {
   String toJson() => wire;
 }
 
+enum TaskSize {
+  small('small'),
+  medium('medium'),
+  large('large'),
+  unknown('unknown');
+
+  const TaskSize(this.wire);
+
+  final String wire;
+
+  static TaskSize fromJson(Object? json) {
+    for (final v in values) {
+      if (v.wire == json) return v;
+    }
+    return unknown;
+  }
+
+  String toJson() => wire;
+}
+
 enum ToolKind {
   command('command'),
   read('read'),
@@ -5448,7 +5468,8 @@ final class SleeveRef {
 final class SpawnSleeveRequest {
   const SpawnSleeveRequest({
     required this.name,
-    required this.harness,
+    this.harness = Harness.claude,
+    this.autoSelect = false,
     this.path,
     this.newPath,
     this.parentId,
@@ -5461,13 +5482,15 @@ final class SpawnSleeveRequest {
     this.message,
     this.budget,
     this.untilDone,
+    this.taskSize,
   });
 
   factory SpawnSleeveRequest.fromJson(Object? json) {
     final j = _object(json, 'SpawnSleeveRequest');
     return SpawnSleeveRequest(
       name: _string(j['name'], 'SpawnSleeveRequest.name'),
-      harness: Harness.fromJson(j['harness']),
+      harness: j['harness'] == null ? Harness.claude : Harness.fromJson(j['harness']),
+      autoSelect: _or(j['auto_select'], false, (e0) => _bool(e0, 'SpawnSleeveRequest.auto_select')),
       path: _opt(j['path'], (e0) => _string(e0, 'SpawnSleeveRequest.path')),
       newPath: _opt(j['new_path'], (e0) => _string(e0, 'SpawnSleeveRequest.new_path')),
       parentId: _opt(j['parent_id'], (e0) => _string(e0, 'SpawnSleeveRequest.parent_id')),
@@ -5480,12 +5503,15 @@ final class SpawnSleeveRequest {
       message: _opt(j['message'], (e0) => _string(e0, 'SpawnSleeveRequest.message')),
       budget: _opt(j['budget'], (e0) => _int(e0, 'SpawnSleeveRequest.budget')),
       untilDone: _opt(j['until_done'], (e0) => _int(e0, 'SpawnSleeveRequest.until_done')),
+      taskSize: _opt(j['task_size'], TaskSize.fromJson),
     );
   }
 
   final String name;
 
   final Harness harness;
+
+  final bool autoSelect;
 
   final String? path;
 
@@ -5511,9 +5537,12 @@ final class SpawnSleeveRequest {
 
   final int? untilDone;
 
+  final TaskSize? taskSize;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'harness': harness.toJson(),
+    'auto_select': autoSelect,
     if (path case final v?) 'path': v,
     if (newPath case final v?) 'new_path': v,
     if (parentId case final v?) 'parent_id': v,
@@ -5526,6 +5555,7 @@ final class SpawnSleeveRequest {
     if (message case final v?) 'message': v,
     if (budget case final v?) 'budget': v,
     if (untilDone case final v?) 'until_done': v,
+    if (taskSize case final v?) 'task_size': v.toJson(),
   };
 }
 

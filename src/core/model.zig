@@ -179,7 +179,7 @@ pub const SendMode = enum {
     steer,
 };
 
-pub const ExitCause = enum {
+pub const ExitCause = enum(u3) {
     clean,
     crash,
     oom,
