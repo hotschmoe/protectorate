@@ -676,13 +676,15 @@ pub fn dispatch(
     } else if (std.mem.eql(u8, method, "EnvoySend")) {
         const req = schema.decode_arena(schema.EnvoySendRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
         const rid = try rt.gen_id(a, "envoy");
+        const vendor = req.agent != null or (principal != null and principal.? == .envoy);
+        const from = if (vendor) try std.fmt.allocPrint(a, "agent:{s}", .{req.agent orelse ""}) else "owner";
         rt.commit(.{ .prompt_enqueued = .{
             .sleeve_id = "envoy",
             .request_id = rid,
-            .from = req.agent orelse "owner",
-            .kind = .prompt,
+            .from = from,
+            .kind = if (vendor) .agent_mail else .prompt,
             .mode = .queue,
-            .text = req.text,
+            .text = if (vendor) try std.fmt.allocPrint(a, "[from {s}]\n{s}", .{ from, req.text }) else req.text,
         } }) catch |err| return map_commit_err(rt.gpa, err);
         return ok_json(rt.gpa, schema.Sent{ .request_id = rid, .queued = true, .queue_length = 1 });
     } else if (std.mem.eql(u8, method, "EnvoyWait")) {

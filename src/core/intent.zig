@@ -30,6 +30,7 @@ pub const Intent = union(enum) {
         sleeve_id: []const u8,
         g: model.Gen,
         request_id: []const u8,
+        from: []const u8 = "owner",
         text: []const u8,
         steer: bool,
     },

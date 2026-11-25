@@ -218,6 +218,7 @@ pub fn encode_stamped(gpa: std.mem.Allocator, se: event.StampedEvent, out: *std.
             try write_str(gpa, out, e.title);
             try write_str(gpa, out, e.summary);
             try write_bool(gpa, out, e.is_d9);
+            if (e.timeout_ms != model.approval_timeout_ms) try write_i64(gpa, out, e.timeout_ms);
         },
         .approval_decided => |e| {
             try write_str(gpa, out, e.approval_id);
@@ -561,6 +562,7 @@ pub fn decode_stamped(arena: std.mem.Allocator, bytes: []const u8) CodecError!ev
             .title = try r.read_str(arena),
             .summary = try r.read_str(arena),
             .is_d9 = try r.read_bool(),
+            .timeout_ms = if (r.i == r.b.len) model.approval_timeout_ms else try r.read_i64(),
         } },
         .approval_decided => .{ .approval_decided = .{
             .approval_id = try r.read_str(arena),

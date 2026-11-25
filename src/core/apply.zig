@@ -207,7 +207,10 @@ pub fn apply(
             inc.last_event_ms = now;
             inc.tool_repeat_count = 0;
             inc.last_tool_sig = null;
-            inc.turn_is_agent_mail = e.from_agent_mail or (inc.delivered_kind == .mail or inc.delivered_kind == .report);
+            inc.turn_is_agent_mail = e.from_agent_mail or switch (inc.delivered_kind orelse .prompt) {
+                .mail, .report, .agent_mail => true,
+                .prompt, .system => false,
+            };
             if (sl.role == .envoy) {
                 sl.d9 = inc.turn_is_agent_mail;
             }
@@ -515,7 +518,7 @@ pub fn apply(
                 .summary = try st.dupe_str(e.summary),
                 .is_d9 = e.is_d9,
                 .requested_at_ms = now,
-                .timeout_at_ms = now + model.approval_timeout_ms,
+                .timeout_at_ms = now + e.timeout_ms,
                 .state = .pending,
             });
             if (st.sleeves.getPtr(e.sleeve_id)) |sl| {
@@ -893,6 +896,7 @@ fn maybe_deliver_next(
         var kind = first.kind;
         // Batch subsequent queued messages of compatible type when multiple are waiting.
         while (sl.queued.items.len > 0 and sl.queued.items[0].mode == .queue) {
+            if ((first.kind == .agent_mail) != (sl.queued.items[0].kind == .agent_mail)) break;
             const nxt = sl.queued.orderedRemove(0);
             text = try std.fmt.allocPrint(st.alloc(), "{s}\n\n{s}", .{ text, nxt.text });
             if (nxt.kind == .mail or nxt.kind == .report) kind = nxt.kind;
@@ -905,6 +909,7 @@ fn maybe_deliver_next(
             .sleeve_id = sl.id,
             .g = inc.g,
             .request_id = first.request_id,
+            .from = if (first.kind == .agent_mail) first.from else "owner",
             .text = text,
             .steer = false,
         } });

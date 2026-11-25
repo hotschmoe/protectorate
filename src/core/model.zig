@@ -171,6 +171,7 @@ pub const MsgKind = enum {
     mail,
     report,
     system,
+    agent_mail,
 };
 
 pub const SendMode = enum {

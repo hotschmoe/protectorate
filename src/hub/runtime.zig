@@ -671,7 +671,7 @@ pub const Runtime = struct {
                         const ce = self.transcripts.append(dp.sleeve_id, dp.g, h.turn_id, at_ms, .{
                             .user_message = .{
                                 .request_id = dp.request_id,
-                                .from = "owner",
+                                .from = dp.from,
                                 .text = dp.text,
                                 .steer = dp.steer,
                             },
@@ -2225,6 +2225,7 @@ pub const Runtime = struct {
             .run_job => "Envoy run job (D9)",
             .git_push => "Envoy git push (D9)",
         };
+        const wait_secs = std.math.clamp(self.hub_home.config.d9_approval_timeout_secs, 1, 600);
         try self.commit(.{ .approval_requested = .{
             .approval_id = app_id,
             .sleeve_id = "envoy",
@@ -2233,24 +2234,22 @@ pub const Runtime = struct {
             .title = title,
             .summary = summary,
             .is_d9 = true,
+            .timeout_ms = @intCast(wait_secs * 1_000),
         } });
         self.record_hub_event(.approval, "d9", "envoy", summary, .warn);
 
-        const wait_secs: u64 = @max(@as(u64, 1), @min(self.hub_home.config.d9_approval_timeout_secs, 600));
-        const deadline = std.Io.Clock.real.now(self.io).toMilliseconds() + @as(i64, @intCast(wait_secs * 1_000));
         var cursor: u64 = 0;
         while (true) {
-            {
+            const deadline = blk: {
                 self.state_mu.lockUncancelable(self.io);
                 defer self.state_mu.unlock(self.io);
-                if (self.core_state.approvals.get(app_id)) |ap| {
-                    switch (ap.state) {
-                        .approved => return try arena.dupe(u8, app_id),
-                        .denied, .cancelled, .fenced, .abandoned, .expired => return error.ApprovalDenied,
-                        .pending => {},
-                    }
-                } else return error.ApprovalDenied;
-            }
+                const ap = self.core_state.approvals.get(app_id) orelse return error.ApprovalDenied;
+                break :blk switch (ap.state) {
+                    .approved => return try arena.dupe(u8, app_id),
+                    .denied, .cancelled, .fenced, .abandoned => return error.ApprovalDenied,
+                    .pending, .expired => ap.timeout_at_ms,
+                };
+            };
             const now = std.Io.Clock.real.now(self.io).toMilliseconds();
             if (now >= deadline) {
                 self.commit(.{ .approval_expired = .{ .approval_id = app_id } }) catch {};

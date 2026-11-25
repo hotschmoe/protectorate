@@ -137,6 +137,7 @@ pub const Event = union(enum) {
         title: []const u8,
         summary: []const u8,
         is_d9: bool = false,
+        timeout_ms: model.Millis = model.approval_timeout_ms,
     },
     approval_decided: struct {
         approval_id: []const u8,

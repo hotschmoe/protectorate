@@ -118,6 +118,9 @@ appcmd() {
     sleep 1.5
 }
 
+approval_timeout_secs=120
+mkdir -p "$home"
+printf '{"d9_approval_timeout_secs":%s}\n' "$approval_timeout_secs" >"$home/config.json"
 "$bin" serve --home "$home" --listen 127.0.0.1:0 --fleet-listen 127.0.0.1:0 --no-sandbox \
     >"$work/serve.log" 2>&1 &
 hub_pid=$!
@@ -173,9 +176,11 @@ appcmd sleeves
 cdp shot "$out/03-sleeves-tree.png"
 
 step "raising a D9 approval: Envoy removes a sleeve during an agent's turn"
-PROTECTORATE_TOKEN=$agent_token pt sleeve send envoy \
+PROTECTORATE_TOKEN=$agent_token pt envoy send --as app-e2e \
     "Write the numbers from 1 to 1500 as words, one per line, with no other text." >/dev/null
-for _ in $(seq 120); do pt sleeve list | grep '^envoy ' | grep -q working && break; sleep 0.5; done
+for _ in $(seq 120); do pt sleeve list | grep -q '^envoy .*working.*\[d9\]' && break; sleep 0.5; done
+pt sleeve list | grep -q '^envoy .*working.*\[d9\]' || die "the vendor message did not start a D9 turn"
+pt envoy read | grep -q 'agent:app-e2e: \[from agent:app-e2e\]' || die "the vendor message has no agent attribution"
 PROTECTORATE_TOKEN=$agent_token pt sleeve rm demo >"$work/rm.out" 2>&1 &
 rm_pid=$!
 for _ in $(seq 40); do pt approval list --pending | grep -q 'D9' && break; sleep 0.5; done
@@ -187,8 +192,14 @@ cdp shot "$out/05-envoy-d9-request.png"
 
 step "denying it from the app"
 id=$(pt --json approval list --pending |
-    node -e 'const a=JSON.parse(require("fs").readFileSync(0,"utf8")).approvals;console.log(a.length?a[0].id:"")')
-[ -n "$id" ] || die "no pending approval id"
+    node -e '
+const { approvals } = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const approval = approvals.find((item) => item.title.includes("(D9)"));
+if (!approval || approval.timeout_at_ms - approval.requested_at_ms !== Number(process.argv[1]) * 1000) {
+  throw new Error("D9 approval did not carry the configured timeout");
+}
+console.log(approval.id);
+' "$approval_timeout_secs")
 appcmd "/deny $id"
 wait "$rm_pid" || true
 rm_pid=
