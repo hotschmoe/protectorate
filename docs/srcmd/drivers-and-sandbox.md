@@ -21,13 +21,19 @@ workspace's native configuration can supply more specific defaults at launch.
 |---|---|---|
 | Claude Code | Native model aliases and effort flags, plus user settings and environment defaults | `--model`, `--effort`, `CLAUDE_CODE_EFFORT_LEVEL` for an explicit effort, and inline `--settings` for the native provider switches. The provider IDs are `anthropic`, `bedrock`, `vertex`, and `foundry`. |
 | Codex | App-server `model/list` and `config/read` | App-server `-c model=...`, `-c model_provider=...`, and `-c model_reasoning_effort=...`. Thread start/resume carries model and provider, and turn start carries effort. |
-| Grok | ACP `initialize` model metadata | ACP `session/set_config_option` sets `model` then `reasoning_effort` before the hub marks the session ready. A custom model ID selects its configured provider. |
-| Pi | `pi --list-models` and Pi's user settings, shared by both Pi sleeve kinds | `--provider`, `--model`, and `--thinking`. Pi requires a model when passing a provider. |
+| Grok | ACP `initialize` model metadata | ACP `session/set_config_option` sets `model` then `reasoning_effort` before the hub marks the session ready. A custom model ID selects its configured provider. The session transcript records the current ACP values and flags a changed or omitted effort. |
+| Pi | RPC `get_available_models` and `get_state`, plus Pi's user settings | `--provider`, `--model`, and `--thinking`. Pi requires a model when passing a provider. The session transcript records the thinking level from `get_state`. |
 | Antigravity | `agy models`, user settings, and CLI effort names | `--model`, `--effort`, and inline `--settings '{"modelProvider":"gemini"}'` when choosing the Gemini API provider. |
 
-Catalog discovery runs native listing or initialization only. It sends no prompts and opens
-no sleeve sessions. Each native probe has a 2.5-second deadline and bounded output. Unreadable
-sources yield an empty model list for the corresponding harness.
+Catalog discovery uses native listing or initialization without prompting the harness. Pi runs
+in offline RPC mode with session persistence disabled. Its model metadata supplies each model's
+efforts. If RPC discovery is unavailable, the picker uses `pi --list-models` and offers all levels
+when the model's exact capabilities are unavailable.
+
+Each subprocess probe has a 2.5-second deadline and bounded output. A timed-out probe kills its
+POSIX process group or Windows job and reaps the direct child, including when the child closes
+stdout before exiting. On Linux the deadline also covers the wait for exec. The Pi RPC and CLI
+fallback share one deadline.
 
 `drivers/session.zig` wraps a spawned child process with dedicated stdout NDJSON and bounded 16 KiB stderr ring threads, exposes `compact()` for native in-session compaction (`claude`, `pi`, with automatic handoff resleeve fallback for other harnesses), and releases `Session.mu` prior to delivering callbacks to eliminate lock-order inversions with `hub/runtime.zig`. Worktree sleeves provision isolated checkouts (`<hub_home>/worktrees/<id>` on `pt/<id>`) separate from the base repo path, and `hub/runtime.zig` monitors configured `sleeve_devices` paths for attach/detach transitions.
 

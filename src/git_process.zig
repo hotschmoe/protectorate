@@ -7,7 +7,6 @@ const metadata_timeout: std.Io.Duration = .fromSeconds(5);
 const worktree_add_timeout: std.Io.Duration = .fromSeconds(60);
 const worktree_remove_timeout: std.Io.Duration = .fromSeconds(30);
 const push_timeout: std.Io.Duration = .fromSeconds(120);
-const exit_poll_interval: std.Io.Duration = .fromMilliseconds(10);
 
 pub const Operation = enum {
     version,
@@ -105,19 +104,10 @@ fn run_until(
         }
         try reader.checkAnyError();
 
-        try wait_for_exit(io, child.id.?, deadline);
+        try child_process.wait_for_exit(io, child.id.?, deadline);
         const term = try child.wait(io);
         const stdout = try reader.toOwnedSlice(0);
         errdefer gpa.free(stdout);
         return .{ .term = term, .stdout = stdout, .stderr = try reader.toOwnedSlice(1) };
-    }
-}
-
-fn wait_for_exit(io: std.Io, id: std.process.Child.Id, deadline: std.Io.Clock.Timestamp) !void {
-    while (true) {
-        if (try child_process.has_exited(id)) return;
-        const remaining = deadline.durationFromNow(io).raw;
-        if (remaining.nanoseconds <= 0) return error.Timeout;
-        try io.sleep(.{ .nanoseconds = @min(remaining.nanoseconds, exit_poll_interval.nanoseconds) }, .awake);
     }
 }

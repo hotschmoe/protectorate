@@ -700,6 +700,7 @@ pub const EntrySessionInfo = struct {
     model: ?[]const u8 = null,
     provider: ?[]const u8 = null,
     effort: ?[]const u8 = null,
+    effort_notice: ?[]const u8 = null,
 };
 
 pub const EntryUserMessage = struct {
@@ -1729,8 +1730,14 @@ fn write_tagged_struct(tag_name: []const u8, v: anytype, jw: anytype) !void {
     const info = @typeInfo(@TypeOf(v)).@"struct";
     inline for (info.field_names, info.field_types) |f_name, f_type| {
         if (f_type == void) continue;
-        try jw.objectField(f_name);
-        try jw.write(@field(v, f_name));
+        const emit = if (@TypeOf(v) == EntrySessionInfo and std.mem.eql(u8, f_name, "effort_notice"))
+            v.effort_notice != null
+        else
+            true;
+        if (emit) {
+            try jw.objectField(f_name);
+            try jw.write(@field(v, f_name));
+        }
     }
     try jw.endObject();
 }

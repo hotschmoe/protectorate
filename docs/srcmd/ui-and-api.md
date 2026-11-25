@@ -7,8 +7,10 @@
 `ListModels` returns a row for each harness, or one row when the request includes `harness`.
 Each row contains model IDs and labels, optional provider IDs, default flags, and reasoning
 effort choices. A model can advertise its own effort choices and default. An empty model list
-keeps manual entry available. The hub refreshes the catalog on demand every 60 seconds, on
-the HTTP handler with its own cache lock and bounded native probes.
+keeps manual entry available. Each harness has a 60-second cache and at most one refresh
+in flight. Concurrent requests can use the last successful snapshot or the initial fallback
+while a probe runs. A failed refresh keeps the previous snapshot. A request for all harnesses
+refreshes expired rows concurrently.
 
 The app shares a model and effort picker across fixed-harness sleeve creation, Envoy setup,
 and resleeve. Auto spawns let the quota selector choose the launch target. The picker

@@ -800,6 +800,7 @@ final class EntrySessionInfo extends Entry {
     this.model,
     this.provider,
     this.effort,
+    this.effortNotice,
   });
 
   factory EntrySessionInfo.fromJson(Object? json) => EntrySessionInfo._fromMap(_object(json, 'EntrySessionInfo'));
@@ -811,6 +812,7 @@ final class EntrySessionInfo extends Entry {
       model: _opt(j['model'], (e0) => _string(e0, 'EntrySessionInfo.model')),
       provider: _opt(j['provider'], (e0) => _string(e0, 'EntrySessionInfo.provider')),
       effort: _opt(j['effort'], (e0) => _string(e0, 'EntrySessionInfo.effort')),
+      effortNotice: _opt(j['effort_notice'], (e0) => _string(e0, 'EntrySessionInfo.effort_notice')),
   );
 
   final Harness harness;
@@ -825,6 +827,8 @@ final class EntrySessionInfo extends Entry {
 
   final String? effort;
 
+  final String? effortNotice;
+
   @override
   Map<String, Object?> toJson() => {
     'type': 'session_info',
@@ -834,6 +838,7 @@ final class EntrySessionInfo extends Entry {
     if (model case final v?) 'model': v,
     if (provider case final v?) 'provider': v,
     if (effort case final v?) 'effort': v,
+    if (effortNotice case final v?) 'effort_notice': v,
   };
 }
 

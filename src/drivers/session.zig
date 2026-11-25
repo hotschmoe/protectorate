@@ -159,7 +159,6 @@ pub const Session = struct {
                 .session_id = sess_id,
                 .model = mod_d,
                 .provider = prov_d,
-                .effort = eff_d,
             } },
             .antigravity => .{ .antigravity = .{
                 .session_id = res_d orelse sess_id,

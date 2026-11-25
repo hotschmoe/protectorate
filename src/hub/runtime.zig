@@ -427,7 +427,7 @@ pub const Runtime = struct {
     }
 
     pub fn close_and_destroy(self: *Runtime) void {
-        self.model_catalog.deinit();
+        self.model_catalog.deinit(self.gpa);
         self.stopping.store(true, .release);
         self.stream_hub.wake_all();
         self.fleet_srv.shutdown();
@@ -1472,12 +1472,6 @@ pub const Runtime = struct {
 
         switch (ev.entry) {
             .session_info => |si| {
-                const nid = si.native_id;
-                self.commit(.{ .session_bound = .{
-                    .sleeve_id = dh.sleeve_id,
-                    .g = dh.g,
-                    .native_id = nid,
-                } }) catch {};
                 const ce = self.transcripts.append(dh.sleeve_id, dh.g, dh.turn_id, ev.time_ms, .{
                     .session_info = .{
                         .harness = map_proto_harness(si.harness),
@@ -1486,8 +1480,14 @@ pub const Runtime = struct {
                         .model = si.model,
                         .provider = si.provider,
                         .effort = si.effort,
+                        .effort_notice = si.effort_notice,
                     },
                 }) catch null;
+                self.commit(.{ .session_bound = .{
+                    .sleeve_id = dh.sleeve_id,
+                    .g = dh.g,
+                    .native_id = si.native_id,
+                } }) catch {};
                 if (ce) |c| self.stream_hub.publish_raw(.{ .entry = .{ .seq = 0, .sleeve_id = dh.sleeve_id, .entry = c } });
             },
             .prompt_ack => |pa| {

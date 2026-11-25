@@ -16,6 +16,25 @@ pub fn io_for_serve(init: process.Init, vtable: *Io.VTable) Io {
 }
 
 fn spawn(_: ?*anyopaque, options: process.SpawnOptions) process.SpawnError!process.Child {
+    return spawn_linux(options, null, null) catch |err| switch (err) {
+        error.Timeout => unreachable,
+        else => |spawn_err| return spawn_err,
+    };
+}
+
+pub fn spawn_until(io: Io, options: process.SpawnOptions, deadline: Io.Clock.Timestamp) !process.Child {
+    if (deadline.durationFromNow(io).raw.nanoseconds <= 0) return error.Timeout;
+    if (comptime builtin.os.tag == .linux) {
+        if (io.vtable.processSpawn == &spawn) return spawn_linux(options, io, deadline);
+    }
+    return process.spawn(io, options);
+}
+
+fn spawn_linux(
+    options: process.SpawnOptions,
+    io: ?Io,
+    deadline: ?Io.Clock.Timestamp,
+) (process.SpawnError || error{Timeout})!process.Child {
     tiger.assert(options.argv.len > 0);
     tiger.assert(options.exe == .detect and options.expand_arg0 == .no_expand);
     tiger.assert(options.inherit_dirs.len == 0 and options.inherit_files.len == 0);
@@ -80,23 +99,24 @@ fn spawn(_: ?*anyopaque, options: process.SpawnOptions) process.SpawnError!proce
         break :blk @as(linux.pid_t, @intCast(result));
     };
 
+    errdefer {
+        _ = linux.kill(pid, .KILL);
+        if (options.pgid == 0) _ = linux.kill(-pid, .KILL);
+        reap_failed(pid);
+    }
     var code: @TypeOf(@intFromError(error.FileNotFound)) = undefined;
     const bytes = std.mem.asBytes(&code);
     while (true) {
+        if (deadline) |limit| try wait_for_exec(io.?, report[0], limit);
         const result = linux.read(report[0], bytes, bytes.len);
         switch (linux.errno(result)) {
             .INTR => continue,
             .SUCCESS => {
                 if (result == 0) break;
                 tiger.assert(result == bytes.len);
-                reap_failed(pid);
                 return @errorCast(@errorFromInt(code));
             },
-            else => |err| {
-                _ = linux.kill(pid, .KILL);
-                reap_failed(pid);
-                return std.posix.unexpectedErrno(err);
-            },
+            else => |err| return std.posix.unexpectedErrno(err),
         }
     }
 
@@ -108,6 +128,21 @@ fn spawn(_: ?*anyopaque, options: process.SpawnOptions) process.SpawnError!proce
         .stderr = as_file(parent_fds[2]),
         .request_resource_usage_statistics = options.request_resource_usage_statistics,
     };
+}
+
+fn wait_for_exec(io: Io, fd: linux.fd_t, deadline: Io.Clock.Timestamp) !void {
+    var fds = [1]linux.pollfd{.{ .fd = fd, .events = linux.POLL.IN, .revents = 0 }};
+    while (true) {
+        const remaining_ns = deadline.durationFromNow(io).raw.nanoseconds;
+        if (remaining_ns <= 0) return error.Timeout;
+        const remaining_ms = @min(std.math.maxInt(i32), @divFloor(remaining_ns - 1, std.time.ns_per_ms) + 1);
+        const rc = linux.poll(&fds, fds.len, @intCast(remaining_ms));
+        switch (linux.errno(rc)) {
+            .SUCCESS => if (rc != 0) return,
+            .INTR => {},
+            else => |err| return std.posix.unexpectedErrno(err),
+        }
+    }
 }
 
 fn exec_child(
@@ -223,6 +258,16 @@ fn close(fd: ?linux.fd_t) void {
 }
 
 extern "c" fn waitid(id_type: c_int, id: std.posix.pid_t, info: *std.c.siginfo_t, options: c_int) c_int;
+
+pub fn wait_for_exit(io: Io, id: process.Child.Id, deadline: Io.Clock.Timestamp) !void {
+    const poll_interval: Io.Duration = .fromMilliseconds(10);
+    while (true) {
+        const remaining = deadline.durationFromNow(io).raw;
+        if (remaining.nanoseconds <= 0) return error.Timeout;
+        if (try has_exited(id)) return;
+        try io.sleep(.{ .nanoseconds = @min(remaining.nanoseconds, poll_interval.nanoseconds) }, .awake);
+    }
+}
 
 pub fn has_exited(id: process.Child.Id) !bool {
     switch (builtin.os.tag) {

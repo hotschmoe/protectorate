@@ -218,6 +218,13 @@ pub const ProcessGuard = struct {
         }
     }
 
+    pub fn attach_suspended(self: *ProcessGuard, child: *const std.process.Child) !void {
+        const job = self.job orelse return error.JobObjectUnavailable;
+        if (WinJob.AssignProcessToJobObject(job, child.id.?) == 0) return error.JobAssignmentFailed;
+        const status = std.os.windows.ntdll.NtResumeThread(child.thread_handle, null);
+        if (status != .SUCCESS) return std.os.windows.unexpectedStatus(status);
+    }
+
     pub fn attach_with_io(self: *ProcessGuard, io: std.Io, child_id: ?std.process.Child.Id) void {
         self.attach(child_id);
         if (comptime builtin.os.tag == .linux) {

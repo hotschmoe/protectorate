@@ -102,6 +102,7 @@ pub const DriverEntry = union(enum) {
         model: ?[]const u8 = null,
         provider: ?[]const u8 = null,
         effort: ?[]const u8 = null,
+        effort_notice: ?[]const u8 = null,
         cwd: ?[]const u8 = null,
     },
     user_message: struct {
