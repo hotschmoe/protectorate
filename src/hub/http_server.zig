@@ -6,6 +6,18 @@ const web_assets = @import("web_assets");
 const home = @import("home.zig");
 const runtime = @import("runtime.zig");
 const api_dispatch = @import("api_dispatch.zig");
+const limits = @import("../net/limits.zig");
+
+const busy_body = "server busy, retry shortly\n";
+const busy_response = std.fmt.comptimePrint(
+    "HTTP/1.1 503 Service Unavailable\r\n" ++
+        "connection: close\r\n" ++
+        "retry-after: 1\r\n" ++
+        "access-control-allow-origin: *\r\n" ++
+        "content-type: text/plain\r\n" ++
+        "content-length: {d}\r\n\r\n{s}",
+    .{ busy_body.len, busy_body },
+);
 
 pub const HttpServer = struct {
     gpa: std.mem.Allocator,
@@ -21,6 +33,7 @@ pub const HttpServer = struct {
     conns_mu: std.Io.Mutex = .init,
     conns_cond: std.Io.Condition = .init,
     conns: ?*ConnArg = null,
+    gate: limits.ConnGate = .init(limits.http_conns_max),
 
     pub fn start(gpa: std.mem.Allocator, io: std.Io, rt: *runtime.Runtime, listen_addr: []const u8) !*HttpServer {
         return start_with_options(gpa, io, rt, listen_addr, &.{});
@@ -113,7 +126,20 @@ pub const HttpServer = struct {
                 stream.close(self.io);
                 continue;
             }
+            switch (self.gate.try_enter()) {
+                .admitted => {},
+                .refused_first => {
+                    std.debug.print("http: {d} connections open, answering 503 to new ones\n", .{self.gate.max});
+                    self.refuse_busy(stream);
+                    continue;
+                },
+                .refused => {
+                    self.refuse_busy(stream);
+                    continue;
+                },
+            }
             const arg = self.gpa.create(ConnArg) catch {
+                self.gate.leave();
                 stream.close(self.io);
                 continue;
             };
@@ -129,6 +155,15 @@ pub const HttpServer = struct {
             t.detach();
         }
     }
+
+    fn refuse_busy(self: *HttpServer, stream: std.Io.net.Stream) void {
+        var wbuf: [busy_response.len]u8 = undefined;
+        var w = stream.writer(self.io, &wbuf);
+        w.interface.writeAll(busy_response) catch {};
+        w.interface.flush() catch {};
+        stream.shutdown(self.io, .send) catch {};
+        stream.close(self.io);
+    }
 };
 
 const ConnArg = struct {
@@ -143,6 +178,7 @@ const ConnArg = struct {
         while (link.* != self) link = &link.*.?.next;
         link.* = self.next;
         self.stream.close(hs.io);
+        hs.gate.leave();
         hs.gpa.destroy(self);
         hs.conns_cond.broadcast(hs.io);
         hs.conns_mu.unlock(hs.io);
@@ -327,7 +363,7 @@ fn conn_thread(arg: *ConnArg) void {
                 continue;
             };
             defer hs.gpa.free(res.body_json);
-            const status_e: std.http.Status = @enumFromInt(res.status);
+            const status_e: std.http.Status = @fromBackingInt(@intCast(res.status));
             req.respond(res.body_json, .{
                 .status = status_e,
                 .extra_headers = &.{

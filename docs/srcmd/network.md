@@ -17,3 +17,13 @@ Dial races use a process-lifetime I/O backend and page allocator: a losing dial 
 1. Hub exports `ptjoin1:<base64url>` (`GetEnrollment`, displayable as ASCII QR via `src/qr.zig`) containing `hub_public_key`, `hub_fingerprint` (`sha256:...`), and `addrs`.
 2. Node runs `protectorate-node join <ptjoin1:...>`, generates/loads its `0o600` X25519 keypair, saves hub identity pin + addresses, and prints its public key + fingerprint.
 3. Unapproved nodes fail Noise_IK responder validation (`UnknownPeer`) and are dropped before accepting any `Hello` or `Job` frame. Once owner runs `AddNode` + `ApproveNode`, node static key enters `allowed_peers` and `protectorate-node authorize` / `serve` connects and begins heartbeating.
+
+## Bounds (`src/net/limits.zig`)
+
+Every wire-facing quantity has a named constant; later phases of docs/design/tigerstyle-network.md reuse them.
+
+- **Piece size** `piece_max` = 256 KiB: the most a log or artifact fetch moves per RPC. The hub never asks for more, and the node clamps the requested `limit` to it in `Runner.read_log` and `Runner.read_artifact`. The hub mirrors at most 1 MiB of a running job's log per poll, one piece per call.
+- **Artifact cap** `artifact_max_bytes` = 64 MiB, the value `hub info` reports. `hub/artifact_sink.zig` refuses an artifact whose declared size exceeds it before any transfer, and refuses any piece that would take the received total past the cap or past the declared size. Pieces go to `<dest>.ptpart` while a SHA-256 runs; size and digest are checked, then the file is renamed into place. Any failure removes the temporary. Nothing holds a whole artifact in memory. A refused job reports `artifact <path> (<n> bytes) exceeds the <cap> byte artifact cap`.
+- **RPC chunks** `rpc_chunks_max` = one piece: a pending call fails with `ReplyTooLarge` when its chunk frames add up to more. Non-chunk replies are one frame (at most 1 MiB) and replace each other, so they cannot accumulate.
+- **Connections**: the fleet server holds at most `fleet_conns_max` = 64 sockets, handshakes included; the next one is closed at once. Each HTTP server holds at most `http_conns_max` = 32; the next one gets `503 Service Unavailable` and is closed. Each gate (`ConnGate`) logs the first refusal of a burst only; a burst ends when a connection is admitted again.
+- **Frame decoder**: `Decoder.feed` fails with `TooLarge` when the buffer would pass one maximum frame plus one Noise record (`decoder_buffer_max`); the decoder then stays failed.

@@ -61,7 +61,10 @@ fn classify(rel_path: []const u8) ?Classification {
     {
         return .{ .tier = .l1, .group = .root };
     }
-    if (std.mem.eql(u8, rel_path, "net/frame.zig") or std.mem.eql(u8, rel_path, "net/noise.zig")) {
+    if (std.mem.eql(u8, rel_path, "net/frame.zig") or
+        std.mem.eql(u8, rel_path, "net/noise.zig") or
+        std.mem.eql(u8, rel_path, "net/limits.zig"))
+    {
         return .{ .tier = .l1, .group = .net };
     }
     if (std.mem.eql(u8, rel_path, "journal/codec.zig")) {

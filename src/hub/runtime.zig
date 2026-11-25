@@ -22,12 +22,15 @@ const doctor = @import("../doctor/doctor.zig");
 const schema = @import("../api/schema.zig");
 const noise = @import("../net/noise.zig");
 const msg = @import("../net/msg.zig");
+const limits = @import("../net/limits.zig");
 const home = @import("home.zig");
 const transcript = @import("transcript.zig");
 const stream = @import("stream.zig");
 const brief = @import("brief.zig");
 const git = @import("git.zig");
 const fleet = @import("fleet.zig");
+
+const log_mirror_max: u64 = 1024 * 1024;
 
 pub const NodeTelemetry = struct {
     inventory: ?msg.Inventory = null,
@@ -1432,6 +1435,20 @@ pub const Runtime = struct {
         t.detach();
     }
 
+    /// Pulls up to log_mirror_max bytes of a node job log from offset 0, one piece per call.
+    fn fetch_log_mirror(self: *Runtime, arena: std.mem.Allocator, node_id: []const u8, job_id: []const u8) !struct { data: []const u8, next_offset: u64 } {
+        var data: std.ArrayList(u8) = .empty;
+        var off: u64 = 0;
+        while (off < log_mirror_max) {
+            const want: usize = @intCast(@min(@as(u64, limits.piece_max), log_mirror_max - off));
+            const res = try self.fleet_srv.fetch_log(arena, node_id, job_id, off, want);
+            try data.appendSlice(arena, res.data);
+            off = res.next_offset;
+            if (res.data.len < want or res.eof) break;
+        }
+        return .{ .data = data.items, .next_offset = off };
+    }
+
     fn poll_inflight_jobs(self: *Runtime) void {
         var arena_st = std.heap.ArenaAllocator.init(self.gpa);
         defer arena_st.deinit();
@@ -1468,7 +1485,7 @@ pub const Runtime = struct {
                 self.meta_mu.unlock(self.io);
             }
             if (info.log_bytes > 0) {
-                if (self.fleet_srv.fetch_log(a, pr.node_id, pr.id, 0, 1024 * 1024)) |lres| {
+                if (self.fetch_log_mirror(a, pr.node_id, pr.id)) |lres| {
                     var lp_opt: ?[]const u8 = null;
                     self.meta_mu.lockUncancelable(self.io);
                     if (self.job_meta.getPtr(pr.id)) |jm| {
@@ -1485,15 +1502,29 @@ pub const Runtime = struct {
             if (info.state == .succeeded or info.state == .failed or info.state == .cancelled or info.state == .interrupted or info.state == .lost) {
                 var arts_list: std.ArrayList(schema.JobArtifact) = .empty;
                 var collection_ok = true;
+                var collection_err: ?[]const u8 = null;
                 for (info.artifacts) |ar| {
-                    if (self.fleet_srv.fetch_artifact(a, pr.node_id, pr.id, ar.path, self.hub_home.artifacts_path)) |verified| {
+                    const declared = ar.size_bytes orelse {
+                        collection_ok = false;
+                        if (collection_err == null) collection_err = std.fmt.allocPrint(a, "artifact {s} has no declared size", .{ar.path}) catch null;
+                        continue;
+                    };
+                    if (self.fleet_srv.fetch_artifact(a, pr.node_id, pr.id, ar.path, self.hub_home.artifacts_path, declared)) |verified| {
                         arts_list.append(a, .{
                             .path = self.core_state.dupe_str(verified.path) catch ar.path,
                             .size_bytes = verified.size_bytes,
                             .sha256 = if (verified.sha256) |s| (self.core_state.dupe_str(s) catch s) else null,
                         }) catch {};
-                    } else |_| {
+                    } else |err| {
                         collection_ok = false;
+                        if (collection_err == null) collection_err = switch (err) {
+                            error.ArtifactTooLarge => std.fmt.allocPrint(
+                                a,
+                                "artifact {s} ({d} bytes) exceeds the {d} byte artifact cap",
+                                .{ ar.path, declared, limits.artifact_max_bytes },
+                            ) catch null,
+                            else => std.fmt.allocPrint(a, "artifact {s} collection failed: {s}", .{ ar.path, @errorName(err) }) catch null,
+                        };
                     }
                 }
                 {
@@ -1516,7 +1547,7 @@ pub const Runtime = struct {
                 } else if (info.state == .lost) {
                     self.commit(.{ .job_failed = .{ .job_id = pr.id, .attempt = 1, .err = info.@"error" orelse "lost on node" } }) catch {};
                 } else if (info.state == .succeeded and !collection_ok) {
-                    self.commit(.{ .job_failed = .{ .job_id = pr.id, .attempt = 1, .err = "artifact collection failed" } }) catch {};
+                    self.commit(.{ .job_failed = .{ .job_id = pr.id, .attempt = 1, .err = collection_err orelse "artifact collection failed" } }) catch {};
                 } else if (info.exit_code) |ec| {
                     self.commit(.{ .job_completed = .{ .job_id = pr.id, .attempt = 1, .exit_code = ec } }) catch {};
                 } else {
@@ -1790,7 +1821,7 @@ pub const Runtime = struct {
             .started_at_ms = .{ .ms = self.started_at_ms },
             .restore_error = self.restore_error,
             .clients = try self.list_client_assets(arena),
-            .job_artifact_max_bytes = 64 << 20,
+            .job_artifact_max_bytes = limits.artifact_max_bytes,
         };
     }
 

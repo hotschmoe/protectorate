@@ -7,6 +7,7 @@ const noise = @import("../net/noise.zig");
 const frame = @import("../net/frame.zig");
 const msg = @import("../net/msg.zig");
 const transport = @import("../net/transport.zig");
+const limits = @import("../net/limits.zig");
 const u_ver = @import("../update/version.zig");
 const u_store = @import("../update/store.zig");
 const sys = @import("sys.zig");
@@ -569,7 +570,7 @@ fn handle_request(
             try sctx.conn.send_json(.response, req_id, msg.JobList{ .jobs = jobs });
         },
         .fetch_log => |fl| {
-            const max_chunk = fl.limit orelse 256 * 1024;
+            const max_chunk = @min(fl.limit orelse limits.piece_max, limits.piece_max);
             if (try run_mgr.read_log(arena, fl.job_id, fl.offset, max_chunk)) |res| {
                 sctx.tx_mu.lockUncancelable(sctx.io);
                 defer sctx.tx_mu.unlock(sctx.io);
@@ -584,7 +585,7 @@ fn handle_request(
             }
         },
         .fetch_artifact => |fa| {
-            const max_chunk = fa.limit orelse 256 * 1024;
+            const max_chunk = @min(fa.limit orelse limits.piece_max, limits.piece_max);
             if (try run_mgr.read_artifact(arena, fa.job_id, fa.path, fa.offset, max_chunk)) |res| {
                 sctx.tx_mu.lockUncancelable(sctx.io);
                 defer sctx.tx_mu.unlock(sctx.io);

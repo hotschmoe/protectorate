@@ -373,7 +373,7 @@ if [[ "$REPLACED" -ne 1 ]]; then
 fi
 
 # RunJob with artifact
-JOB1_REQ="{\"target\":{\"type\":\"node\",\"node_id\":\"${AUTH_ID}\"},\"argv\":[\"sh\",\"-c\",\"echo E2E_JOB_STDOUT; printf 'artifact-payload-99' > out.bin\"],\"artifacts\":[\"out.bin\"]}"
+JOB1_REQ="{\"target\":{\"type\":\"node\",\"node_id\":\"${AUTH_ID}\"},\"argv\":[\"sh\",\"-c\",\"echo E2E_JOB_STDOUT; printf 'artifact-payload-99' > out.bin; head -c 600000 /dev/zero > multi.bin\"],\"artifacts\":[\"out.bin\",\"multi.bin\"]}"
 JOB1_RESP="$(rpc_post "$HTTP3" "$TOK3" RunJob "$JOB1_REQ")"
 JID1="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"$JOB1_RESP")"
 
@@ -383,7 +383,7 @@ for _ in $(seq 1 60); do
   if python3 -c '
 import json, sys
 j = json.load(sys.stdin)
-sys.exit(0 if j["state"] == "succeeded" and len(j.get("artifacts", [])) == 1 else 1)
+sys.exit(0 if j["state"] == "succeeded" and len(j.get("artifacts", [])) == 2 else 1)
 ' <<<"$J_ST"
   then
     JOB1_DONE=1
@@ -408,6 +408,14 @@ want_sha = hashlib.sha256(raw).hexdigest()
 assert a["sha256"] == want_sha, (a["sha256"], want_sha)
 assert a["size_bytes"] == len(raw), a
 ' <<<"$ART_JSON"
+MULTI_JSON="$(rpc_post "$HTTP3" "$TOK3" GetJobArtifact "{\"job_id\":\"${JID1}\",\"path\":\"multi.bin\"}")"
+python3 -c '
+import hashlib, json, sys
+a = json.load(sys.stdin)
+raw = bytes.fromhex(a["hex"])
+assert raw == bytes(600000), len(raw)
+assert a["sha256"] == hashlib.sha256(raw).hexdigest(), a["sha256"]
+' <<<"$MULTI_JSON"
 
 # CancelJob
 JOB2_RESP="$(rpc_post "$HTTP3" "$TOK3" RunJob "{\"target\":{\"type\":\"node\",\"node_id\":\"${AUTH_ID}\"},\"argv\":[\"sleep\",\"30\"]}")"
@@ -474,10 +482,40 @@ for _ in $(seq 1 40); do
   sleep 0.2
 done
 if [[ "$J3_OK" -ne 1 ]]; then
-  echo "post-reconnect job failed" >&2
+  echo "post-reconnect job failed: $J3_ST" >&2
+  tail -n 20 "$TMP_ROOT/node3.log" "$LOG3B" >&2 || true
   exit 1
 fi
 rpc_post "$HTTP3B" "$TOK3" GetJobLog "{\"job_id\":\"${JID3}\"}" | grep -q 'E2E_RECONNECTED'
+
+# An artifact declared above the 64 MiB cap is refused before transfer with the cap in the error
+# (last, because a failed job excludes its node for a while)
+JOBBIG_RESP="$(rpc_post "$HTTP3B" "$TOK3" RunJob "{\"target\":{\"type\":\"node\",\"node_id\":\"${AUTH_ID}\"},\"argv\":[\"sh\",\"-c\",\"head -c 70000000 /dev/zero > big.bin\"],\"artifacts\":[\"big.bin\"]}")"
+JIDBIG="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"$JOBBIG_RESP")"
+JOBBIG_DONE=0
+for _ in $(seq 1 100); do
+  JB_ST="$(rpc_post "$HTTP3B" "$TOK3" GetJob "{\"job_id\":\"${JIDBIG}\"}")"
+  if python3 -c '
+import json, sys
+j = json.load(sys.stdin)
+sys.exit(0 if j["state"] == "failed" and "exceeds the 67108864 byte artifact cap" in (j.get("error") or "") else 1)
+' <<<"$JB_ST"
+  then
+    JOBBIG_DONE=1
+    break
+  fi
+  sleep 0.2
+done
+if [[ "$JOBBIG_DONE" -ne 1 ]]; then
+  echo "oversized artifact was not refused with the cap in the error" >&2
+  rpc_post "$HTTP3B" "$TOK3" GetJob "{\"job_id\":\"${JIDBIG}\"}" >&2 || true
+  exit 1
+fi
+if [[ -n "$(find "$HUB3" \( -name 'big.bin*' -o -name '*.ptpart' \) -print -quit)" ]]; then
+  echo "refused artifact left files on the hub" >&2
+  exit 1
+fi
+
 kill "$NPID3" "$PID3B" >/dev/null 2>&1 || true
 wait "$NPID3" "$PID3B" >/dev/null 2>&1 || true
 check_crashes "$LOG3B" "$TMP_ROOT/node3.log"

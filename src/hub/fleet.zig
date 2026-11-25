@@ -5,8 +5,8 @@ const noise = @import("../net/noise.zig");
 const frame = @import("../net/frame.zig");
 const msg = @import("../net/msg.zig");
 const transport = @import("../net/transport.zig");
-
-const Sha256 = std.crypto.hash.sha2.Sha256;
+const limits = @import("../net/limits.zig");
+const artifact_sink = @import("artifact_sink.zig");
 
 pub const AllowedPeer = struct {
     node_id: []const u8,
@@ -28,6 +28,7 @@ const PendingCall = struct {
     mu: std.Io.Mutex = .init,
     cond: std.Io.Condition = .init,
     done: bool = false,
+    overflow: bool = false,
     kind: frame.Kind = .err,
     payload: []u8 = &.{},
     chunks: std.ArrayList(u8) = .empty,
@@ -119,6 +120,7 @@ const PeerSession = struct {
         if (!pc.wait_done(timeout_ms)) {
             return error.Timeout;
         }
+        if (pc.overflow) return error.ReplyTooLarge;
         const pay = pc.payload;
         pc.payload = &.{};
         const ch = try pc.chunks.toOwnedSlice(self.gpa);
@@ -142,6 +144,7 @@ pub const FleetServer = struct {
     conns_mu: std.Io.Mutex = .init,
     conns_cond: std.Io.Condition = .init,
     conns: ?*ConnArg = null,
+    gate: limits.ConnGate = .init(limits.fleet_conns_max),
 
     pub fn init(
         gpa: std.mem.Allocator,
@@ -310,16 +313,18 @@ pub const FleetServer = struct {
     ) !struct { data: []const u8, next_offset: u64, eof: bool } {
         const ps = self.get_peer(node_id) orelse return error.NodeOffline;
         defer ps.release();
+        const piece = @min(limit, limits.piece_max);
         const res = try ps.call_rpc(.{ .fetch_log = .{
             .job_id = job_id,
             .offset = offset,
-            .limit = limit,
+            .limit = piece,
         } }, 10_000);
         defer {
             self.gpa.free(res.payload);
             self.gpa.free(res.chunks);
         }
         if (res.kind == .err) return error.RemoteError;
+        if (res.chunks.len > piece) return error.ReplyTooLarge;
         const le = try msg.decode_arena(msg.LogEnd, arena, res.payload);
         return .{
             .data = try arena.dupe(u8, res.chunks),
@@ -328,6 +333,9 @@ pub const FleetServer = struct {
         };
     }
 
+    /// Streams one artifact into `artifacts_root/job_id/rel_path` through a temporary file.
+    /// `declared_size` is the size the node reported in the job status; it is refused above the cap
+    /// before any transfer, and the received bytes are checked against it and the cap piece by piece.
     pub fn fetch_artifact(
         self: *FleetServer,
         arena: std.mem.Allocator,
@@ -335,58 +343,48 @@ pub const FleetServer = struct {
         job_id: []const u8,
         rel_path: []const u8,
         artifacts_root: []const u8,
+        declared_size: u64,
     ) !msg.JobArtifact {
         const ps = self.get_peer(node_id) orelse return error.NodeOffline;
         defer ps.release();
 
-        var full_data: std.ArrayList(u8) = .empty;
-        var off: u64 = 0;
-        var expected_sha: []const u8 = "";
-        var total_size: u64 = 0;
+        var sink = try artifact_sink.Sink.open(
+            self.io,
+            arena,
+            artifacts_root,
+            job_id,
+            rel_path,
+            declared_size,
+            limits.artifact_max_bytes,
+        );
+        errdefer sink.abort();
 
+        var expected_sha: []const u8 = "";
         while (true) {
             const res = try ps.call_rpc(.{ .fetch_artifact = .{
                 .job_id = job_id,
                 .path = rel_path,
-                .offset = off,
-                .limit = 256 * 1024,
+                .offset = sink.written,
+                .limit = limits.piece_max,
             } }, 20_000);
             defer {
                 self.gpa.free(res.payload);
                 self.gpa.free(res.chunks);
             }
             if (res.kind == .err) return error.RemoteError;
-            try full_data.appendSlice(arena, res.chunks);
             const ae = try msg.decode_arena(msg.ArtifactEnd, arena, res.payload);
-            off = ae.next_offset;
+            if (ae.size_bytes != declared_size) return error.ArtifactSizeMismatch;
+            try sink.write(res.chunks);
+            if (ae.next_offset != sink.written) return error.ArtifactSizeMismatch;
             expected_sha = ae.sha256;
-            total_size = ae.size_bytes;
             if (ae.eof) break;
+            if (res.chunks.len == 0) return error.ArtifactSizeMismatch;
         }
 
-        var digest: [32]u8 = undefined;
-        Sha256.hash(full_data.items, &digest, .{});
-        const chars = "0123456789abcdef";
-        var hex: [64]u8 = undefined;
-        for (digest, 0..) |b, i| {
-            hex[i * 2] = chars[b >> 4];
-            hex[i * 2 + 1] = chars[b & 0x0f];
-        }
-        if (expected_sha.len == 64 and !std.mem.eql(u8, &hex, expected_sha)) {
-            return error.ChecksumMismatch;
-        }
-
-        const job_art_dir = try std.fs.path.join(arena, &.{ artifacts_root, job_id });
-        try std.Io.Dir.cwd().createDirPath(self.io, job_art_dir);
-        const dest = try std.fs.path.join(arena, &.{ job_art_dir, rel_path });
-        if (std.fs.path.dirname(dest)) |pd| {
-            try std.Io.Dir.cwd().createDirPath(self.io, pd);
-        }
-        try std.Io.Dir.cwd().writeFile(self.io, .{ .sub_path = dest, .data = full_data.items });
-
+        const hex = try sink.finish(expected_sha);
         return .{
             .path = try arena.dupe(u8, rel_path),
-            .size_bytes = total_size,
+            .size_bytes = declared_size,
             .sha256 = try arena.dupe(u8, &hex),
         };
     }
@@ -546,7 +544,20 @@ pub const FleetServer = struct {
                 stream.close(self.io);
                 break;
             }
+            switch (self.gate.try_enter()) {
+                .admitted => {},
+                .refused_first => {
+                    std.debug.print("fleet: {d} connections open, refusing new sockets\n", .{self.gate.max});
+                    stream.close(self.io);
+                    continue;
+                },
+                .refused => {
+                    stream.close(self.io);
+                    continue;
+                },
+            }
             const ctx = self.gpa.create(ConnArg) catch {
+                self.gate.leave();
                 stream.close(self.io);
                 continue;
             };
@@ -583,6 +594,7 @@ const ConnArg = struct {
         var link = &fleet.conns;
         while (link.* != self) link = &link.*.?.next;
         link.* = self.next;
+        fleet.gate.leave();
         fleet.gpa.destroy(self);
         fleet.conns_cond.broadcast(fleet.io);
         fleet.conns_mu.unlock(fleet.io);
@@ -762,7 +774,20 @@ fn peer_conn_thread(arg: *ConnArg) void {
                 const call = ps.pending.get(f.id);
                 if (call) |pc| {
                     pc.mu.lockUncancelable(self.io);
-                    pc.chunks.appendSlice(pc.gpa, f.payload) catch {};
+                    if (!pc.overflow and !pc.done) {
+                        if (f.payload.len > limits.rpc_chunks_max - pc.chunks.items.len) {
+                            pc.overflow = true;
+                        } else {
+                            pc.chunks.appendSlice(pc.gpa, f.payload) catch {
+                                pc.overflow = true;
+                            };
+                        }
+                        if (pc.overflow) {
+                            pc.chunks.clearAndFree(pc.gpa);
+                            pc.done = true;
+                            pc.cond.signal(self.io);
+                        }
+                    }
                     pc.mu.unlock(self.io);
                 }
                 ps.pending_mu.unlock(self.io);
@@ -772,11 +797,13 @@ fn peer_conn_thread(arg: *ConnArg) void {
                 const call = ps.pending.get(f.id);
                 if (call) |pc| {
                     pc.mu.lockUncancelable(self.io);
-                    pc.kind = f.kind;
-                    if (pc.payload.len > 0) pc.gpa.free(pc.payload);
-                    pc.payload = pc.gpa.dupe(u8, f.payload) catch &.{};
-                    pc.done = true;
-                    pc.cond.signal(self.io);
+                    if (!pc.overflow) {
+                        pc.kind = f.kind;
+                        if (pc.payload.len > 0) pc.gpa.free(pc.payload);
+                        pc.payload = pc.gpa.dupe(u8, f.payload) catch &.{};
+                        pc.done = true;
+                        pc.cond.signal(self.io);
+                    }
                     pc.mu.unlock(self.io);
                 }
                 ps.pending_mu.unlock(self.io);

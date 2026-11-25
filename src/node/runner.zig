@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const tiger = @import("../tiger.zig");
 const msg = @import("../net/msg.zig");
+const limits = @import("../net/limits.zig");
 const s_exec = @import("../sandbox/exec.zig");
 const admission = @import("admission.zig");
 
@@ -328,7 +329,7 @@ pub const Runner = struct {
             job.mu.unlock(self.io);
             return .{ .data = "", .eof = finished, .next_offset = st.size };
         }
-        const avail: usize = @intCast(@min(st.size - offset, @as(u64, limit)));
+        const avail: usize = @intCast(@min(st.size - offset, @as(u64, @min(limit, limits.piece_max))));
         const buf = try arena.alloc(u8, avail);
         const got = try f.readPositionalAll(self.io, buf, offset);
         const next_off = offset + got;
@@ -373,7 +374,7 @@ pub const Runner = struct {
         if (offset >= total_size) {
             return .{ .data = "", .eof = true, .next_offset = total_size, .size_bytes = total_size, .sha256 = hex_dup };
         }
-        const avail: usize = @intCast(@min(total_size - offset, @as(u64, limit)));
+        const avail: usize = @intCast(@min(total_size - offset, @as(u64, @min(limit, limits.piece_max))));
         const buf = try arena.alloc(u8, avail);
         const got = try f.readPositionalAll(self.io, buf, offset);
         const next_off = offset + got;
