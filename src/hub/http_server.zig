@@ -216,6 +216,9 @@ fn conn_thread(arg: *ConnArg) void {
 
         var auth_token: ?[]const u8 = null;
         var accept_gzip = false;
+        var origin: ?[]const u8 = null;
+        var host_header: ?[]const u8 = null;
+        var duplicate_origin_or_host = false;
         var hit = req.iterateHeaders();
         while (hit.next()) |h| {
             if (std.ascii.eqlIgnoreCase(h.name, "authorization")) {
@@ -224,6 +227,12 @@ fn conn_thread(arg: *ConnArg) void {
                 }
             } else if (std.ascii.eqlIgnoreCase(h.name, "accept-encoding")) {
                 if (contains_ci(h.value, "gzip")) accept_gzip = true;
+            } else if (std.ascii.eqlIgnoreCase(h.name, "origin")) {
+                if (origin != null) duplicate_origin_or_host = true;
+                origin = h.value;
+            } else if (std.ascii.eqlIgnoreCase(h.name, "host")) {
+                if (host_header != null) duplicate_origin_or_host = true;
+                host_header = h.value;
             }
         }
         const qmark = std.mem.findScalar(u8, target, '?');
@@ -269,6 +278,10 @@ fn conn_thread(arg: *ConnArg) void {
                 else => null,
             };
             if (ws_key) |k| {
+                if (origin != null and (duplicate_origin_or_host or !origin_matches_host(origin.?, host_header))) {
+                    req.respond("forbidden", .{ .status = .forbidden }) catch break;
+                    continue;
+                }
                 handle_websocket(hs, &req, k) catch {};
                 return;
             }
@@ -425,6 +438,19 @@ fn conn_thread(arg: *ConnArg) void {
 
         req.respond("not found", .{ .status = .not_found }) catch break;
     }
+}
+
+fn origin_matches_host(origin: []const u8, host: ?[]const u8) bool {
+    const authority = if (std.mem.startsWith(u8, origin, "http://"))
+        origin[7..]
+    else if (std.mem.startsWith(u8, origin, "https://"))
+        origin[8..]
+    else
+        return false;
+    if (authority.len == 0 or std.mem.indexOfAny(u8, authority, "/?#@ \t\r\n") != null) return false;
+    const uri = std.Uri.parse(origin) catch return false;
+    if (uri.host == null or uri.user != null or !uri.path.isEmpty() or uri.query != null or uri.fragment != null) return false;
+    return std.ascii.eqlIgnoreCase(authority, host orelse return false);
 }
 
 fn normalize_ip4(addr: std.Io.net.IpAddress) ?[4]u8 {
