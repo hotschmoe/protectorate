@@ -70,6 +70,7 @@ pub fn main(init: std.process.Init) !u8 {
             });
             defer hs.stop_and_destroy();
             defer rt.fleet_srv.shutdown();
+            rt.mark_healthy();
 
             var proxy_buf: [192]u8 = undefined;
             const proxy_str = if (hs.has_listener(1))

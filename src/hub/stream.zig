@@ -4,14 +4,14 @@ const tiger = @import("../tiger.zig");
 const schema = @import("../api/schema.zig");
 const record_ring = @import("../net/record_ring.zig");
 
-pub const ring_bytes: usize = 4 * 1024 * 1024;
-pub const record_max: usize = 1024 * 1024;
+pub const ring_bytes: usize = 8 * 1024 * 1024;
+pub const record_max: usize = 3 * 1024 * 1024;
 
-pub const Ring = record_ring.RecordRing(ring_bytes);
+pub const Ring = record_ring.RecordRing(ring_bytes, record_ring.NoHook);
 pub const Peek = record_ring.Peek;
 
 comptime {
-    tiger.comptime_assert(record_max + record_ring.header_len <= ring_bytes / 2, "the ring holds at least two maximum records");
+    tiger.comptime_assert(record_max + record_ring.header_len + 7 <= ring_bytes / 2, "the ring holds at least two maximum records");
 }
 
 /// The sequence-numbered log of encoded stream messages. Publishers serialize on a spin lock for the
@@ -29,7 +29,7 @@ pub const StreamHub = struct {
     wake_fd: std.atomic.Value(i32) = .init(-1),
 
     pub fn init(gpa: std.mem.Allocator, io: std.Io) !StreamHub {
-        return .{ .gpa = gpa, .io = io, .ring = .init(try gpa.alloc(u8, ring_bytes)) };
+        return .{ .gpa = gpa, .io = io, .ring = .init(try gpa.alloc(std.atomic.Value(u64), Ring.words), .{}) };
     }
 
     pub fn deinit(self: *StreamHub) void {

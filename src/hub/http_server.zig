@@ -13,6 +13,7 @@ const epoll = @import("../net/io_epoll.zig");
 const bounded = @import("../net/bounded.zig");
 const limits = @import("../net/limits.zig");
 const wire = @import("../net/http_wire.zig");
+const ws_out = @import("../net/ws_out.zig");
 
 const supported = builtin.os.tag == .linux;
 const linux = std.os.linux;
@@ -48,6 +49,7 @@ const ws_ping_ms = 15_000;
 const resync_wait_ms = 30_000;
 const resyncs_max = 8;
 const accept_retry_ms = 100;
+const shutdown_wait_ms = 15_000;
 
 comptime {
     tiger.comptime_assert(sbuf_bytes >= gunzip_front + gunzip_piece + 8, "a gunzip piece and its framing fit the send buffer");
@@ -175,6 +177,8 @@ const RecvTarget = enum { head, body, stage };
 
 const WsIn = struct {
     have_header: bool = false,
+    fragmenting: bool = false,
+    dead: bool = false,
     opcode: wire.Opcode = .continuation,
     mask: [4]u8 = undefined,
     left: u64 = 0,
@@ -183,7 +187,7 @@ const WsIn = struct {
     control_len: usize = 0,
 };
 
-const WsRecord = struct { pos: u64, next: u64, len: usize, sent: usize };
+const WsOut = ws_out.Out(stream.Ring);
 
 const Listener = struct {
     server: *HttpServer,
@@ -259,13 +263,8 @@ const Slot = struct {
     ws_snapshot: []u8 = &.{},
     ws_live: []u8 = &.{},
     ws_seq: u64 = 0,
-    ws_cursor: u64 = 0,
-    ws_record: ?WsRecord = null,
-    ws_ping_at: u64 = 0,
+    out: WsOut = .{},
     ws_resyncs: u8 = 0,
-    ws_pong: [wire.control_payload_max]u8 = undefined,
-    ws_pong_len: ?usize = null,
-    ws_close_pending: bool = false,
     ws_in: WsIn = .{},
 };
 
@@ -303,6 +302,7 @@ pub const HttpServer = struct {
     refused: u64 = 0,
     stop_requested: std.atomic.Value(bool) = .init(false),
     stopping: std.atomic.Value(bool) = .init(false),
+    abandoned: bool = false,
     loop_thread: ?std.Thread = null,
 
     regular: Pool(regular_workers, regular_queue) = .{},
@@ -441,6 +441,7 @@ pub const HttpServer = struct {
         self.stop_requested.store(true, .release);
         self.backend.wake();
         if (self.loop_thread) |t| t.join();
+        if (self.abandoned) return;
         self.regular.stop(self.io);
         self.long.stop(self.io);
         self.reader.stop(self.io);
@@ -466,14 +467,34 @@ pub const HttpServer = struct {
 
     fn run(self: *HttpServer) void {
         var stopping = false;
+        var stop_began: u64 = 0;
         while (true) {
             self.now = self.backend.now();
-            if (!stopping and self.stop_requested.load(.acquire)) stopping = true;
+            if (!stopping and self.stop_requested.load(.acquire)) {
+                stopping = true;
+                stop_began = self.now;
+            }
             self.turn(stopping);
             if (stopping and self.drained()) break;
+            if (stopping and self.now - stop_began >= shutdown_wait_ms) {
+                self.abandon();
+                return;
+            }
             self.backend.poll(bounded.tick_ms) catch |err| std.debug.panic("http loop: epoll failed: {s}", .{@errorName(err)});
         }
         tiger.assert(self.backend.pending_count == 0);
+    }
+
+    /// A worker stuck in blocking work that no shutdown path can cancel must not hold the hub's exit.
+    /// The server's memory and threads are left as they are (the process is ending), so the worker
+    /// never touches freed slots.
+    fn abandon(self: *HttpServer) void {
+        for (self.slots) |*slot| {
+            if (!slot.job_inflight) continue;
+            const stuck: []const u8 = if (slot.job_kind == .read or slot.job_kind == .snapshot) "(stream or download piece)" else slot.path;
+            std.debug.print("http: shutdown gave up after {d} ms waiting for a worker still running {s} {s}\n", .{ shutdown_wait_ms, @tagName(slot.job_kind), stuck });
+        }
+        self.abandoned = true;
     }
 
     fn drained(self: *const HttpServer) bool {
@@ -961,8 +982,8 @@ pub const HttpServer = struct {
         slot.deadline = self.now + body_progress_ms;
         slot.hard_deadline = self.now + body_total_ms;
         if (req.expect_continue) {
-            const interim = "HTTP/1.1 100 Continue\r\n\r\n";
-            _ = linux.sendto(fd_of(slot.sock), interim.ptr, interim.len, linux.MSG.NOSIGNAL | linux.MSG.DONTWAIT, null, 0);
+            slot.send_slice = "HTTP/1.1 100 Continue\r\n\r\n";
+            self.post_send(slot);
         }
         self.service_body(slot);
     }
@@ -979,6 +1000,7 @@ pub const HttpServer = struct {
     }
 
     fn service_body(self: *HttpServer, slot: *Slot) void {
+        if (slot.send_slice.len > 0) return self.post_send(slot);
         if (slot.recv_inflight) return;
         while (true) {
             if (!slot.req.chunked) {
@@ -1218,11 +1240,8 @@ pub const HttpServer = struct {
         slot.close_after = false;
         slot.mode = .ws;
         slot.ws_in = .{};
-        slot.ws_record = null;
+        slot.out = .{ .ping_at = self.now + ws_ping_ms };
         slot.ws_resyncs = 0;
-        slot.ws_pong_len = null;
-        slot.ws_close_pending = false;
-        slot.ws_ping_at = self.now + ws_ping_ms;
         self.stage_snapshot(slot, snapshot, live, seq);
         self.pump_ws(slot);
     }
@@ -1242,7 +1261,12 @@ pub const HttpServer = struct {
     }
 
     fn resync_ready(self: *HttpServer, slot: *Slot, snapshot: []u8, live: []u8, seq: u64) void {
-        tiger.assert(slot.ws_stage == .resync_wait and slot.ws_snapshot.len == 0);
+        if (slot.ws_stage != .resync_wait) {
+            self.gpa.free(snapshot);
+            self.gpa.free(live);
+            return;
+        }
+        tiger.assert(slot.ws_snapshot.len == 0);
         slot.hard_deadline = 0;
         slot.ws_snapshot = snapshot;
         slot.ws_live = live;
@@ -1254,7 +1278,7 @@ pub const HttpServer = struct {
     fn start_resync(self: *HttpServer, slot: *Slot) void {
         slot.ws_resyncs += 1;
         if (slot.ws_resyncs > resyncs_max) return self.begin_close(slot);
-        slot.ws_record = null;
+        slot.out.record = null;
         slot.ws_stage = .resync_wait;
         slot.hard_deadline = self.now + resync_wait_ms;
         _ = self.submit_aux(slot, .snapshot);
@@ -1267,14 +1291,51 @@ pub const HttpServer = struct {
         self.pump_ws(slot);
     }
 
+    fn ws_fail(slot: *Slot) void {
+        slot.out.queue_close(1002);
+        slot.ws_in.dead = true;
+    }
+
+    fn close_code_valid(code: u16) bool {
+        return switch (code) {
+            1000...1003, 1007...1011, 3000...4999 => true,
+            else => false,
+        };
+    }
+
     fn process_ws_input(self: *HttpServer, slot: *Slot) void {
+        _ = self;
         const in = &slot.ws_in;
+        if (in.dead) {
+            slot.rlen = 0;
+            return;
+        }
         var pos: usize = 0;
-        while (pos < slot.rlen) {
+        while (pos < slot.rlen and !in.dead) {
             if (!in.have_header) {
-                const parsed = wire.ws_parse(slot.rbuf[pos..slot.rlen]) catch return self.begin_close(slot);
+                const parsed = wire.ws_parse(slot.rbuf[pos..slot.rlen]) catch {
+                    ws_fail(slot);
+                    break;
+                };
                 const h = parsed orelse break;
                 pos += h.len;
+                switch (h.opcode) {
+                    .text, .binary => {
+                        if (in.fragmenting) {
+                            ws_fail(slot);
+                            break;
+                        }
+                        in.fragmenting = !h.fin;
+                    },
+                    .continuation => {
+                        if (!in.fragmenting) {
+                            ws_fail(slot);
+                            break;
+                        }
+                        in.fragmenting = !h.fin;
+                    },
+                    else => {},
+                }
                 in.have_header = true;
                 in.opcode = h.opcode;
                 in.mask = h.mask;
@@ -1296,11 +1357,18 @@ pub const HttpServer = struct {
             if (in.have_header and in.left == 0) {
                 in.have_header = false;
                 switch (in.opcode) {
-                    .ping => {
-                        @memcpy(slot.ws_pong[0..in.control_len], in.control[0..in.control_len]);
-                        slot.ws_pong_len = in.control_len;
+                    .ping => slot.out.queue_pong(in.control[0..in.control_len]),
+                    .close => {
+                        in.dead = true;
+                        if (in.control_len == 0) {
+                            slot.out.queue_close(null);
+                        } else if (in.control_len == 1) {
+                            slot.out.queue_close(1002);
+                        } else {
+                            const code = std.mem.readInt(u16, in.control[0..2], .big);
+                            slot.out.queue_close(if (close_code_valid(code)) code else 1002);
+                        }
                     },
-                    .close => slot.ws_close_pending = true,
                     else => {},
                 }
             }
@@ -1308,6 +1376,7 @@ pub const HttpServer = struct {
         const left = slot.rlen - pos;
         std.mem.copyForwards(u8, slot.rbuf[0..left], slot.rbuf[pos..slot.rlen]);
         slot.rlen = left;
+        if (in.dead) slot.rlen = 0;
     }
 
     fn pump_ws(self: *HttpServer, slot: *Slot) void {
@@ -1333,107 +1402,38 @@ pub const HttpServer = struct {
                 },
                 .live_msg => {
                     slot.ws_stage = .live;
-                    slot.ws_cursor = self.rt.stream_hub.ring.find_after(slot.ws_seq) orelse return self.start_resync(slot);
+                    slot.out.cursor = self.rt.stream_hub.ring.find_after(slot.ws_seq) orelse return self.start_resync(slot);
                 },
                 .closing_frame => return self.begin_close(slot),
                 .resync_wait => {
                     if (!slot.job_inflight) _ = self.submit_aux(slot, .snapshot);
-                    _ = self.ws_control(slot);
+                    if (slot.out.stage_control(slot.sbuf)) |step| self.send_staged(slot, step);
                     return;
                 },
                 .resync_ready => self.stage_snapshot(slot, slot.ws_snapshot, slot.ws_live, slot.ws_seq),
                 .live => {
-                    if (self.ws_control(slot)) continue;
-                    if (!self.ws_stage_records(slot)) return;
+                    const step = slot.out.stage(&self.rt.stream_hub.ring, slot.sbuf, self.now, ws_ping_ms);
+                    switch (step) {
+                        .idle => return,
+                        .resync => return self.start_resync(slot),
+                        .abort => return self.begin_close(slot),
+                        else => return self.send_staged(slot, step),
+                    }
                 },
             }
         }
     }
 
-    /// Sends a pending close or pong frame; true when it queued one.
-    fn ws_control(self: *HttpServer, slot: *Slot) bool {
-        if (slot.ws_close_pending) {
-            slot.ws_close_pending = false;
-            const n = self.stage_frame(slot, 0, .close, "");
-            slot.send_slice = slot.sbuf[0..n];
-            slot.ws_stage = .closing_frame;
-            self.post_send(slot);
-            return true;
+    fn send_staged(self: *HttpServer, slot: *Slot, step: WsOut.Step) void {
+        switch (step) {
+            .staged => |n| slot.send_slice = slot.sbuf[0..n],
+            .close_staged => |n| {
+                slot.send_slice = slot.sbuf[0..n];
+                slot.ws_stage = .closing_frame;
+            },
+            else => unreachable,
         }
-        if (slot.ws_pong_len) |len| {
-            slot.ws_pong_len = null;
-            var payload: [wire.control_payload_max]u8 = undefined;
-            @memcpy(payload[0..len], slot.ws_pong[0..len]);
-            const n = self.stage_frame(slot, 0, .pong, payload[0..len]);
-            slot.send_slice = slot.sbuf[0..n];
-            self.post_send(slot);
-            return true;
-        }
-        return false;
-    }
-
-    /// Copies ready stream records into the send buffer. False means the caller has nothing more to do now.
-    fn ws_stage_records(self: *HttpServer, slot: *Slot) bool {
-        const hub = &self.rt.stream_hub;
-        var staged: usize = 0;
-        var started_at: usize = 0;
-        var started_here = false;
-        while (true) {
-            if (slot.ws_record == null) {
-                switch (hub.ring.peek(slot.ws_cursor)) {
-                    .empty => break,
-                    .lagged => {
-                        if (staged == 0) {
-                            self.start_resync(slot);
-                            return false;
-                        }
-                        break;
-                    },
-                    .record => |r| {
-                        if (r.len == 0) {
-                            if (staged == 0) {
-                                self.start_resync(slot);
-                                return false;
-                            }
-                            break;
-                        }
-                        var header: [10]u8 = undefined;
-                        const h = wire.ws_server_header(&header, .text, r.len);
-                        if (staged > 0 and h.len + r.len > slot.sbuf.len - staged) break;
-                        started_at = staged;
-                        started_here = true;
-                        @memcpy(slot.sbuf[staged..][0..h.len], h);
-                        staged += h.len;
-                        slot.ws_record = .{ .pos = slot.ws_cursor, .next = r.next, .len = r.len, .sent = 0 };
-                    },
-                }
-            }
-            const record = &slot.ws_record.?;
-            const n = @min(record.len - record.sent, slot.sbuf.len - staged);
-            if (!hub.ring.read(record.pos, record.sent, slot.sbuf[staged..][0..n])) {
-                if (!started_here or record.sent != 0) {
-                    self.begin_close(slot);
-                    return false;
-                }
-                staged = started_at;
-                slot.ws_record = null;
-                break;
-            }
-            staged += n;
-            record.sent += n;
-            started_here = false;
-            if (record.sent < record.len) break;
-            slot.ws_cursor = record.next;
-            slot.ws_record = null;
-        }
-        if (staged == 0) {
-            if (self.now < slot.ws_ping_at) return false;
-            staged = self.stage_frame(slot, 0, .ping, "");
-        }
-        slot.ws_ping_at = self.now + ws_ping_ms;
-        slot.send_slice = slot.sbuf[0..staged];
         self.post_send(slot);
-        return false;
     }
 };
 

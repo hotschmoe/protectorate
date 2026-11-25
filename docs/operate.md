@@ -328,7 +328,7 @@ release's app builds into `<home>/clients/<version>/`. It does not restart the h
 Before each start, the unit runs `releases/previous/protectorate hub probation`. A release marked on
 trial gets one start recorded; if it is started a second time without having become healthy, the
 probation check switches `current` back to `previous`. The hub marks itself healthy once its journal has
-replayed. `--retry-rollback` forces the switch back. Sleeves do not survive the restart: they
+replayed, its listeners are bound and its fleet and HTTP workers are running. `--retry-rollback` forces the switch back. Sleeves do not survive the restart: they
 resume as after a crash. There are no journal or other snapshots, so an update that changes the
 journal format cannot be undone by a rollback.
 

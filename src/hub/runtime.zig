@@ -296,9 +296,6 @@ pub const Runtime = struct {
         rt.load_host_info();
         rt.refresh_quotas_sync(false);
         try rt.recover_after_replay();
-        if (rt.restore_error == null) {
-            u_store.mark_healthy(gpa, io, hh.releases_path) catch {};
-        }
         _ = rt.history.ingest_roots(null, hh.transcripts_path);
 
         rt.tick_thread = try std.Thread.spawn(.{}, tick_loop, .{rt});
@@ -329,6 +326,13 @@ pub const Runtime = struct {
             self.hub_home.transcripts_path,
             &self.stopping,
         );
+    }
+
+    /// Ends the release's probation. Call it only once the listeners are bound and the workers are
+    /// running: a start that fails before this leaves the release unhealthy so the next start rolls it back.
+    pub fn mark_healthy(self: *Runtime) void {
+        if (self.restore_error != null) return;
+        u_store.mark_healthy(self.gpa, self.io, self.hub_home.releases_path) catch {};
     }
 
     pub fn close_and_destroy(self: *Runtime) void {

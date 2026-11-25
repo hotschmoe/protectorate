@@ -116,9 +116,10 @@ pub fn parse_head(head: []const u8) ParseError!Request {
             if (value.len == 0 or value.len > 19) return error.BadRequest;
             for (value) |c| if (c < '0' or c > '9') return error.BadRequest;
             const parsed = std.fmt.parseInt(u64, value, 10) catch return error.BadRequest;
-            if (req.content_length) |previous| if (previous != parsed) return error.BadRequest;
+            if (req.content_length != null) return error.BadRequest;
             req.content_length = parsed;
         } else if (std.ascii.eqlIgnoreCase(name, "transfer-encoding")) {
+            if (req.chunked) return error.BadRequest;
             if (!std.ascii.eqlIgnoreCase(value, "chunked")) return error.NotImplemented;
             req.chunked = true;
         } else if (std.ascii.eqlIgnoreCase(name, "connection")) {
@@ -191,7 +192,7 @@ pub const Chunked = struct {
                     const c = input[i];
                     i += 1;
                     self.line += 1;
-                    if (self.line > chunk_line_max) return error.BadChunk;
+                    if (self.line > chunk_line_max or c == '\n') return error.BadChunk;
                     if (c == '\r') self.state = .size_lf;
                 },
                 .size_lf => {
@@ -231,13 +232,15 @@ pub const Chunked = struct {
                     if (input[i] == '\r') {
                         i += 1;
                         self.state = .end_lf;
+                    } else if (input[i] == '\n') {
+                        return error.BadChunk;
                     } else self.state = .trailer_line;
                 },
                 .trailer_line => {
                     const c = input[i];
                     i += 1;
                     self.trailer += 1;
-                    if (self.trailer > trailer_max) return error.BadChunk;
+                    if (self.trailer > trailer_max or c == '\n') return error.BadChunk;
                     if (c == '\r') self.state = .trailer_lf;
                 },
                 .trailer_lf => {
