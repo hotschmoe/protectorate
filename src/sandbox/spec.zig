@@ -37,7 +37,7 @@ pub const SandboxSpec = struct {
     readonly: bool = false,
     host_home: ?[]const u8 = null,
     runtime_dir: ?[]const u8 = null,
-    git_dirs: []const []const u8 = &.{},
+    git_mounts: []const Mount = &.{},
     extra_ro: []const []const u8 = &.{},
     extra_rw: []const []const u8 = &.{},
     masks: []const Mount = &.{},
@@ -167,14 +167,6 @@ pub fn build_mounts(gpa: std.mem.Allocator, spec: SandboxSpec) BuildError![]Moun
         try list.append(gpa, .{ .path = rd, .kind = .runtime });
     }
 
-    for (spec.git_dirs) |g| {
-        if (!is_clean_abs(g)) return error.InvalidPath;
-        for (spec.masks) |m| {
-            if (paths_overlap(g, m.path)) return error.GitDirMasked;
-        }
-        try list.append(gpa, .{ .path = g, .kind = if (spec.readonly) .ro else .rw });
-    }
-
     std.mem.sort(Mount, list.items, {}, struct {
         fn less(_: void, a: Mount, b: Mount) bool {
             const da = path_depth(a.path);
@@ -183,6 +175,14 @@ pub fn build_mounts(gpa: std.mem.Allocator, spec: SandboxSpec) BuildError![]Moun
             return std.mem.lessThan(u8, a.path, b.path);
         }
     }.less);
+
+    for (spec.git_mounts) |git_mount| {
+        if (!is_clean_abs(git_mount.path)) return error.InvalidPath;
+        for (spec.masks) |m| {
+            if (paths_overlap(git_mount.path, m.path)) return error.GitDirMasked;
+        }
+        try list.append(gpa, git_mount);
+    }
 
     return list.toOwnedSlice(gpa);
 }

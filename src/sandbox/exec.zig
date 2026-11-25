@@ -634,7 +634,7 @@ fn apply_linux_guard(
 ) !void {
     const linux = std.os.linux;
 
-    _ = linux.prctl(@intFromEnum(linux.PR.SET_PDEATHSIG), @intFromEnum(linux.SIG.KILL), 0, 0, 0);
+    _ = linux.prctl(@backingInt(linux.PR.SET_PDEATHSIG), @backingInt(linux.SIG.KILL), 0, 0, 0);
 
     if (mem_max_opt) |lim| {
         const rl = linux.rlimit{
@@ -687,7 +687,7 @@ fn apply_linux_guard(
         try add_landlock_path(arena, rs_fd, "/dev/null", dir_mask, file_mask);
         try add_landlock_path(arena, rs_fd, "/dev/shm", dir_mask, file_mask);
 
-        if (linux.errno(linux.prctl(@intFromEnum(linux.PR.SET_NO_NEW_PRIVS), 1, 0, 0, 0)) != .SUCCESS) {
+        if (linux.errno(linux.prctl(@backingInt(linux.PR.SET_NO_NEW_PRIVS), 1, 0, 0, 0)) != .SUCCESS) {
             return error.NoNewPrivsFailed;
         }
         const rest_rc = linux.syscall2(.landlock_restrict_self, @as(u32, @bitCast(rs_fd)), 0);
@@ -741,53 +741,144 @@ pub fn probe_bwrap(gpa: std.mem.Allocator, io: std.Io) bool {
     return res.term.success();
 }
 
-pub fn resolve_git_dirs(gpa: std.mem.Allocator, io: std.Io, workdir: []const u8) ![]const []const u8 {
-    var out: std.ArrayList([]const u8) = .empty;
-    errdefer {
-        for (out.items) |p| gpa.free(p);
-        out.deinit(gpa);
-    }
+pub const GitDirs = struct {
+    private: []const u8,
+    common: []const u8,
+};
 
-    const res = std.process.run(gpa, io, .{
-        .argv = &.{ "git", "-C", workdir, "rev-parse", "--git-dir", "--git-common-dir" },
-        .stdout_limit = .limited(64 * 1024),
-        .stderr_limit = .limited(16 * 1024),
-    }) catch return try out.toOwnedSlice(gpa);
-    defer {
-        gpa.free(res.stdout);
-        gpa.free(res.stderr);
-    }
-    if (!res.term.success()) return try out.toOwnedSlice(gpa);
-
-    var lines = std.mem.splitScalar(u8, res.stdout, '\n');
-    while (lines.next()) |raw| {
-        const trimmed = std.mem.trim(u8, raw, " \t\r");
-        if (trimmed.len == 0) continue;
-        const joined = if (std.fs.path.isAbsolute(trimmed))
-            try gpa.dupe(u8, trimmed)
-        else
-            try std.fs.path.join(gpa, &.{ workdir, trimmed });
-        defer gpa.free(joined);
-
-        const real_z = std.Io.Dir.cwd().realPathFileAlloc(io, joined, gpa) catch continue;
-        const clean = try gpa.dupe(u8, real_z);
-        gpa.free(real_z);
-        if (!spec.is_clean_abs(clean)) {
-            gpa.free(clean);
-            continue;
+pub fn resolve_git_dirs(arena: std.mem.Allocator, io: std.Io, workspace: []const u8) !?GitDirs {
+    const cwd = std.Io.Dir.cwd();
+    var checkout = workspace;
+    const private = while (true) {
+        const dot_git = try std.fs.path.join(arena, &.{ checkout, ".git" });
+        const resolved = cwd.realPathFileAlloc(io, dot_git, arena) catch |err| switch (err) {
+            error.FileNotFound => {
+                if (cwd.statFile(io, dot_git, .{ .follow_symlinks = false })) |_| {
+                    return error.InvalidGitDirectory;
+                } else |stat_err| {
+                    if (stat_err != error.FileNotFound) return stat_err;
+                }
+                checkout = std.fs.path.dirname(checkout) orelse return null;
+                continue;
+            },
+            else => return err,
+        };
+        switch ((try cwd.statFile(io, resolved, .{})).kind) {
+            .directory => break resolved,
+            .file => {
+                const gitfile = try cwd.readFileAlloc(io, resolved, arena, .limited(std.fs.max_path_bytes));
+                const prefix = "gitdir: ";
+                if (!std.mem.startsWith(u8, gitfile, prefix)) return error.InvalidGitFile;
+                break try resolve_git_path(arena, io, checkout, gitfile[prefix.len..]);
+            },
+            else => return error.InvalidGitDirectory,
         }
-        var dup = false;
-        for (out.items) |prev| {
-            if (std.mem.eql(u8, prev, clean)) {
-                dup = true;
-                break;
+    };
+
+    const commondir = try std.fs.path.join(arena, &.{ private, "commondir" });
+    const stat = cwd.statFile(io, commondir, .{}) catch |err| switch (err) {
+        error.FileNotFound => return .{ .private = private, .common = private },
+        else => return err,
+    };
+    if (stat.kind != .file) return error.InvalidGitCommonDir;
+    const relative = try cwd.readFileAlloc(io, commondir, arena, .limited(std.fs.max_path_bytes));
+    const common = try resolve_git_path(arena, io, private, relative);
+    return .{ .private = private, .common = common };
+}
+
+fn resolve_git_path(arena: std.mem.Allocator, io: std.Io, base: []const u8, raw: []const u8) ![]const u8 {
+    const path = std.mem.trimEnd(u8, raw, "\r\n");
+    if (path.len == 0 or std.mem.findScalar(u8, path, 0) != null) return error.InvalidGitDirectory;
+    const absolute = if (std.fs.path.isAbsolute(path)) path else try std.fs.path.join(arena, &.{ base, path });
+    const cwd = std.Io.Dir.cwd();
+    const real = try cwd.realPathFileAlloc(io, absolute, arena);
+    if ((try cwd.statFile(io, real, .{})).kind != .directory) return error.InvalidGitDirectory;
+    return real;
+}
+
+pub fn prepare_git_mounts(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    dirs: GitDirs,
+    readonly: bool,
+) ![]const spec.Mount {
+    const kind: spec.MountKind = if (readonly) .ro else .rw;
+    var mounts: std.ArrayList(spec.Mount) = .empty;
+    try mounts.append(arena, .{ .path = dirs.common, .kind = kind });
+    const worktrees_path = try prepare_git_entry(arena, io, dirs.common, "worktrees", .directory);
+    try mounts.append(arena, .{ .path = worktrees_path, .kind = kind });
+    const worktrees = try std.Io.Dir.cwd().openDir(io, worktrees_path, .{
+        .iterate = true,
+        .follow_symlinks = false,
+    });
+    defer worktrees.close(io);
+    var siblings = worktrees.iterate();
+    while (try siblings.next(io)) |entry| {
+        const sibling = try std.fs.path.join(arena, &.{ worktrees_path, entry.name });
+        if (std.mem.eql(u8, sibling, dirs.private)) continue;
+        const stat = worktrees.statFile(io, entry.name, .{ .follow_symlinks = false }) catch |err| switch (err) {
+            error.FileNotFound => continue,
+            else => return err,
+        };
+        if (stat.kind == .sym_link) {
+            std.log.err("refusing symlinked protected Git entry {s}", .{sibling});
+            return error.SymlinkedProtectedGitEntry;
+        }
+        try mounts.append(arena, .{ .path = sibling, .kind = .ro });
+    }
+    if (!std.mem.eql(u8, dirs.private, dirs.common)) {
+        try mounts.append(arena, .{ .path = dirs.private, .kind = kind });
+        try append_protected_git_entries(arena, io, &mounts, dirs.private);
+    }
+    try append_protected_git_entries(arena, io, &mounts, dirs.common);
+    return mounts.items;
+}
+
+fn append_protected_git_entries(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    mounts: *std.ArrayList(spec.Mount),
+    dir: []const u8,
+) !void {
+    for ([_][]const u8{ "hooks", "config", "config.worktree", "info" }, [_]std.Io.File.Kind{
+        .directory, .file, .file, .directory,
+    }) |entry, kind| {
+        const path = try prepare_git_entry(arena, io, dir, entry, kind);
+        try mounts.append(arena, .{ .path = path, .kind = .ro });
+    }
+}
+
+fn prepare_git_entry(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    dir: []const u8,
+    name: []const u8,
+    kind: std.Io.File.Kind,
+) ![]const u8 {
+    const path = try std.fs.path.join(arena, &.{ dir, name });
+
+    const cwd = std.Io.Dir.cwd();
+    const opts: std.Io.Dir.StatFileOptions = .{ .follow_symlinks = false };
+    const stat = cwd.statFile(io, path, opts) catch |err| switch (err) {
+        error.FileNotFound => blk: {
+            if (kind == .directory) {
+                cwd.createDir(io, path, .default_dir) catch |create_err| switch (create_err) {
+                    error.PathAlreadyExists => {},
+                    else => return create_err,
+                };
+            } else if (cwd.createFile(io, path, .{ .exclusive = true, .truncate = false })) |file| {
+                file.close(io);
+            } else |create_err| {
+                if (create_err != error.PathAlreadyExists) return create_err;
             }
-        }
-        if (dup) {
-            gpa.free(clean);
-        } else {
-            try out.append(gpa, clean);
-        }
+            break :blk try cwd.statFile(io, path, opts);
+        },
+        else => return err,
+    };
+    if (stat.kind == .sym_link) {
+        std.log.err("refusing symlinked protected Git entry {s}", .{path});
+        return error.SymlinkedProtectedGitEntry;
     }
-    return try out.toOwnedSlice(gpa);
+    if (stat.kind != kind) return error.InvalidProtectedGitEntryKind;
+    return path;
 }

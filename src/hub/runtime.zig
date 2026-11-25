@@ -639,12 +639,17 @@ pub const Runtime = struct {
                     self.commit(.{ .provision_failed = .{ .sleeve_id = p.sleeve_id, .reason = @errorName(err) } }) catch {};
                     return;
                 };
-                const br = git.current_branch(ia, self.io, p.path);
+                const br = git.current_branch(ia, self.io, p.path) catch |err| {
+                    self.commit(.{ .provision_failed = .{ .sleeve_id = p.sleeve_id, .reason = @errorName(err) } }) catch {};
+                    return;
+                };
                 self.commit(.{ .provisioned = .{ .sleeve_id = p.sleeve_id, .branch = br } }) catch {};
             },
             .remove_worktree => |rw| {
                 self.stop_driver_for(rw.sleeve_id);
-                git.remove_worktree(self.gpa, self.io, rw.path);
+                git.remove_worktree(self.gpa, self.io, rw.path) catch |err| {
+                    self.record_hub_event(.sleeve, "git", rw.sleeve_id, @errorName(err), .warn);
+                };
             },
             .launch_incarnation => |li| {
                 self.launch_driver(li) catch |err| {
@@ -916,12 +921,22 @@ pub const Runtime = struct {
 
             if (builtin.os.tag == .linux) {
                 guard_mode = if (self.bwrap_ok) .bwrap else if (self.landlock_ok) .landlock else .none;
+                const workspace = try std.Io.Dir.cwd().realPathFileAlloc(self.io, sl_path, a);
+                const git_dirs = try s_exec.resolve_git_dirs(a, self.io, workspace);
+                if (git_dirs != null and guard_mode != .bwrap) {
+                    return error.GitMetadataProtectionRequiresBubblewrap;
+                }
                 if (guard_mode != .none) {
+                    sl_path = workspace;
+                    try child_env.put("PROTECTORATE_WORKSPACE", sl_path);
                     if (guard_mode == .landlock and guard_exe == null) {
                         guard_exe = try std.process.executablePathAlloc(self.io, a);
                     }
+                    const git_mounts = if (git_dirs) |dirs|
+                        try s_exec.prepare_git_mounts(a, self.io, dirs, sl_layout == .readonly)
+                    else
+                        &.{};
                     const host_home = self.env.get("HOME");
-                    const git_dirs = try s_exec.resolve_git_dirs(a, self.io, sl_path);
 
                     var masks: std.ArrayList(s_spec.Mount) = .empty;
                     var extra_rw: std.ArrayList([]const u8) = .empty;
@@ -986,7 +1001,7 @@ pub const Runtime = struct {
                         .readonly = (sl_layout == .readonly),
                         .host_home = null,
                         .runtime_dir = sleeve_tmp,
-                        .git_dirs = git_dirs,
+                        .git_mounts = git_mounts,
                         .extra_rw = extra_rw.items,
                         .masks = masks.items,
                         .env_set = env_set.items,

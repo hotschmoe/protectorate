@@ -88,6 +88,9 @@ fn classify(rel_path: []const u8) ?Classification {
     if (std.mem.eql(u8, rel_path, "api/schema.zig")) {
         return .{ .tier = .l2, .group = .api };
     }
+    if (std.mem.eql(u8, rel_path, "git_process.zig")) {
+        return .{ .tier = .l2, .group = .root };
+    }
     if (std.mem.eql(u8, rel_path, "net/msg.zig") or std.mem.eql(u8, rel_path, "net/channel.zig") or
         std.mem.eql(u8, rel_path, "net/handshake.zig") or std.mem.eql(u8, rel_path, "net/fleet_bus.zig") or
         std.mem.eql(u8, rel_path, "net/node_link.zig"))

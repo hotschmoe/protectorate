@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const git_process = @import("../git_process.zig");
 const tiger = @import("../tiger.zig");
 const schema = @import("../api/schema.zig");
 
@@ -72,9 +73,13 @@ pub fn run_checks(
     if (builtin.os.tag == .linux and !sandbox_ok) {
         try problems.append(arena, "neither bubblewrap (bwrap) nor Landlock LSM available");
     }
-    const git_ok = probe_ok(arena, io, &.{ "git", "--version" });
-    if (!git_ok) {
-        try problems.append(arena, "git binary not found");
+    if (git_process.run(arena, io, .version, null, &.{"--version"}, 4096)) |res| {
+        if (!res.term.success()) try problems.append(arena, "git --version failed");
+    } else |err| {
+        try problems.append(arena, switch (err) {
+            error.FileNotFound => "git binary not found",
+            else => @errorName(err),
+        });
     }
 
     return .{

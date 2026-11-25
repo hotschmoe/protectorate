@@ -191,12 +191,9 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   so `/proc/<pid>/cmdline` of the outer bwrap shows it to host processes of the same uid. Right:
   hand the environment over a file descriptor or file through the `__guard` helper
   (`src/sandbox/exec.zig`).
-- **Hub git has no timeout and no sandbox** (`src/hub/git.zig`: worktree add and remove,
-  `rev-parse`, push): each command is a plain `std.process.run` as the hub's user with the hub's git
-  config, run directly in the sleeve's workspace, so hooks, filters and config a sleeve wrote (a
-  `pre-push` hook, say) run outside the sandbox and a hung git blocks its caller. Right: a timeout,
-  and a read-only sandbox runner (or hooks and config switched off) if git itself ever needs
-  containing.
+- **Hub Git runs outside the sandbox** (`src/hub/git.zig`): Git still runs as the hub user and
+  honors configuration for filters, credential helpers, and transports. A read-only sandbox
+  runner or narrower configuration policy would contain those effects.
 - **Provision has no completion barrier** (`src/hub/git.zig`, `provision_worktree`): an existing
   worktree directory counts as provisioned, so a directory left by a cut-short `worktree add` is
   reused as it is. If both `worktree add` forms fail in a git repo, the function falls back to
@@ -629,10 +626,9 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   HTTP gates log one `std.debug.print` line per burst; their `refused_total` and high-water marks
   are not in `hub info` (the fleet's `fleet_refused` is). Right: expose them with the network
   budget (Phase 5 of docs/design/tigerstyle-network.md).
-- **Sleeve git directories are bound writable** (`src/sandbox/`): SPEC 15 describes protecting
-  hooks and git config from sleeves; nothing does yet, so a sleeve can install a hook that the
-  owner's next git command runs. Right: bind `.git/hooks` and `.git/config` read-only, or point
-  `core.hooksPath` at an empty read-only directory inside the sandbox.
+- **Git sleeve mounts require bubblewrap** (`src/sandbox/`): Landlock grants write access to
+  whole trees and cannot exclude protected Git paths from the workspace grant. A Git checkout
+  is refused when Landlock is the only Linux sandbox available.
 - **The hub has no stdio acceptor** (`src/net/transport.zig`, `accept_stdio`): `protectorate-node
   serve --stdio` speaks the fleet protocol over a pipe for an ssh bridge, but nothing on the hub
   calls `accept_stdio`. Right: a hub command that runs the node over ssh and attaches the pipe,

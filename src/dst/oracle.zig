@@ -792,7 +792,7 @@ fn run_misc_oracle(gpa: std.mem.Allocator) !void {
         .workspace = "/home/alice/repo",
         .readonly = true,
         .masks = masks,
-        .git_dirs = &.{"/home/alice/repo/.git"},
+        .git_mounts = &.{.{ .path = "/home/alice/repo/.git", .kind = .ro }},
     };
     const argv = try sbox.build_bwrap_argv(gpa, spec_ok, &.{ "pi", "--mode", "rpc" });
     defer gpa.free(argv);
@@ -818,7 +818,6 @@ fn run_misc_oracle(gpa: std.mem.Allocator) !void {
         .workspace = "/home/alice/repo",
         .readonly = true,
         .runtime_dir = "/tmp/run-ro",
-        .git_dirs = &.{"/home/alice/repo/.git"},
         .memory_max_bytes = 512 * 1024 * 1024,
     }, &.{ "agy", "--input-format", "stream-json" });
     defer sbox.free_guard_argv(gpa, guard_ro);
@@ -839,7 +838,6 @@ fn run_misc_oracle(gpa: std.mem.Allocator) !void {
     const guard_rw = try sbox.build_guard_argv(gpa, "/usr/bin/protectorate", .{
         .workspace = "/home/alice/repo",
         .readonly = false,
-        .git_dirs = &.{"/home/alice/repo/.git"},
     }, &.{ "agy", "--input-format", "stream-json" });
     defer sbox.free_guard_argv(gpa, guard_rw);
     var rw_has_ws = false;
@@ -854,7 +852,7 @@ fn run_misc_oracle(gpa: std.mem.Allocator) !void {
     const spec_bad = sbox.SandboxSpec{
         .workspace = "/home/alice/repo",
         .masks = masks,
-        .git_dirs = &.{"/home/alice/.ssh/gitdir"},
+        .git_mounts = &.{.{ .path = "/home/alice/.ssh/gitdir", .kind = .rw }},
     };
     if (sbox.build_mounts(gpa, spec_bad)) |ms| {
         gpa.free(ms);

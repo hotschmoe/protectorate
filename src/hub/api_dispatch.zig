@@ -323,7 +323,10 @@ pub fn dispatch(
         const summary = try std.fmt.allocPrint(a, "{s} {s}", .{ req.remote orelse "origin", req.branch orelse (sv.branch orelse "HEAD") });
         const d9_app = rt.gate_d9(a, principal, .git_push, summary) catch |err| return map_d9_err(rt.gpa, err);
         var res = git.push(a, rt.io, sid, sv.path, req.remote, req.branch, req.force) catch |err| {
-            return err_json(rt.gpa, .invalid, @errorName(err));
+            return err_json(rt.gpa, switch (err) {
+                error.GitCurrentBranchTimedOut, error.GitHeadCommitTimedOut, error.GitPushTimedOut => .timeout,
+                else => .invalid,
+            }, @errorName(err));
         };
         if (d9_app) |aid| res.approval_id = aid;
         return ok_json(rt.gpa, res);

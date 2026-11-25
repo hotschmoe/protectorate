@@ -395,9 +395,10 @@ crash, every incarnation goes to Recovering and resumes natively.
   Superseded (2026-11, Zig rewrite): `src/sandbox/` builds the sandbox as bubblewrap
   (`--unshare-pid`, `--die-with-parent`, the host root read-only, the workspace and git
   directories bound, a cleared environment with an allow-list, a tmpfs `/tmp`, and
-  `<home>/run/<sleeve>/tmp` as `TMPDIR`) or, where bwrap is missing, a Landlock write-containment
-  re-exec (`__guard`). `--no-sandbox` turns both off. Credential paths under the owner's home
-  (`~/.ssh`, `~/.config/gh`, `~/.aws`, other harnesses' directories and similar) are masked; the
+  `<home>/run/<sleeve>/tmp` as `TMPDIR`) or, for non-Git workspaces where bwrap is missing,
+  a Landlock write-containment re-exec (`__guard`). `--no-sandbox` turns both off. Credential
+  paths under the owner's home (`~/.ssh`, `~/.config/gh`, `~/.aws`, other harnesses' directories
+  and similar) are masked; the
   sleeve's own harness directory stays writable and `HOME` is the owner's, so sleeves share the
   owner's logins and caches. The private home, `<home>/logins/` store and scope CPU quota
   and build-parallelism settings are unimplemented. A sleeve's processes are tracked by process
@@ -1247,8 +1248,8 @@ shortcut is also in `REVISIT.md`.
   stack. Superseded (2026-11, Zig rewrite): it runs `std.http.Client` with the Zig standard library's
   TLS; nothing spawns `curl`.
 - **Sleeve sandbox** is bwrap plus a cgroup v2 scope per incarnation (see 3.4). Superseded
-  (2026-11, Zig rewrite): the git directory protections below are unimplemented and the git
-  directories are bound writable.
+  (2026-11, Zig rewrite): bubblewrap applies the Git mounts below. Git checkouts require
+  bubblewrap when Linux sleeve sandboxing is enabled.
   Git directories of root checkouts and linked worktrees have `hooks/`, `config`,
   `config.worktree` and `info/` bound read-only, including the shared common directory.
   Missing entries are created empty before binding so they cannot be created by a sleeve;
@@ -1257,9 +1258,15 @@ shortcut is also in `REVISIT.md`.
   but cannot define one; read-only configuration prevents introducing a filter driver, and
   `info/` is also protected to prevent changes to host Git behavior. The remaining Git state
   stays writable for ordinary work. A root linked worktree resolves and validates its private
-  and common Git directories just like a child. The common directory’s `worktrees/`
-  is read-only except for the current worktree’s separately protected private gitdir, so
-  another worktree’s configuration cannot be changed through the common directory.
+  and common Git directories just like a child. For writable sleeves, the common directory’s
+  `worktrees/` stays writable so sleeves can register, remove, and prune their own new worktrees.
+  At launch each existing sibling entry is bound read-only. Its mount point prevents renaming
+  or removing the entry. The active private gitdir has the same protected entries as the common
+  gitdir, with the rest writable for writable sleeves.
+- **Hub Git commands** disable hooks and the filesystem monitor. The hub uses a monotonic
+  deadline per invocation and terminates Git on expiry. Version and revision queries get
+  5 seconds, worktree add gets 60 seconds, worktree remove gets 30 seconds, and push gets
+  120 seconds.
 - **Go** (`go/`): `cmd/headscale` builds the official headscale at the pinned tag, unmodified;
   `cmd/member` is our tsnet glue. `member` exposes a unix socket where the Rust side asks it to
   dial `node:7475` (hub), or where accepted tailnet connections are handed over (node).
