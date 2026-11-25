@@ -108,6 +108,10 @@ pub fn Channel(comptime IO: type) type {
             return self.rx_op.state == .idle and self.tx_op.state == .idle;
         }
 
+        pub fn tx_idle(self: *const Self) bool {
+            return self.tx_frame.len == 0 and self.tx_op.state == .idle and self.tx_wire_pos == self.tx_wire_len;
+        }
+
         pub fn deinit(self: *Self, pool: *bounded.SlabPool) void {
             tiger.assert(self.drained());
             self.rx_frame.clear(pool);

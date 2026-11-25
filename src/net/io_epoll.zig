@@ -83,6 +83,11 @@ pub const Epoll = struct {
         return .{ .socket = socket(fd), .port = port };
     }
 
+    /// Closes a socket that no operation owns, such as a listener whose bus never started.
+    pub fn close_now(handle: io.Socket) void {
+        _ = linux.close(descriptor(handle));
+    }
+
     pub fn now(_: *const Epoll) u64 {
         var ts: linux.timespec = undefined;
         tiger.assert(linux.errno(linux.clock_gettime(.MONOTONIC, &ts)) == .SUCCESS);

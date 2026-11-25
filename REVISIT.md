@@ -523,8 +523,8 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   2, principle 10) made that unnecessary. Right: revisit with the threat model.
 - **Incremental frame buffering can exceed one frame** (`src/net/frame.zig`, `Decoder.feed`):
   decoded payload length is capped at `max_payload`, but `feed` appends whatever slice a caller
-  gives it to an unbounded buffer before `next_frame` parses; `src/net/transport.zig` feeds each
-  decrypted message as it arrives. Right: a backpressure API or segmented input that bounds each
+  gives it to an unbounded buffer before `next_frame` parses; no caller remains
+  since `transport.zig` was retired, and `channel.zig` bounds its own frames. Right: drop the decoder, or a backpressure API or segmented input that bounds each
   allocation while preserving streams with many frames.
 - **Node protocol version is declared but not enforced** (`src/net/msg.zig`, `protocol_version`;
   `src/hub/fleet.zig`): `Hello` carries `protocol` (3) and `HelloReply` an `accepted_protocol`, but
@@ -603,9 +603,6 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   destroys drivers without reporting an exit their reader already published; a classified quota,
   auth or OOM cause is journaled first and survives, any other exit is handled at restart like a
   running sleeve, so only an unclassified cause is lost.
-- **Losing fleet dials can remain blocked** (`src/net/transport.zig`): a timed-out or losing dial
-  retains its worker and process-lifetime I/O until the connection attempt or handshake returns.
-  Right: cancel DNS, connect, and handshake operations and wait for each losing worker to exit.
 - **CORS accepts any Origin** (`src/hub/http_server.zig`, `cors_headers`): the WebSocket upgrade now
   checks Origin against Host, but every response still carries `access-control-allow-origin: *`.
   With bearer tokens and no cookies a foreign page cannot ride a session, so this stays by decision.
@@ -633,14 +630,17 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
 - **Git sleeve mounts require bubblewrap** (`src/sandbox/`): Landlock grants write access to
   whole trees and cannot exclude protected Git paths from the workspace grant. A Git checkout
   is refused when Landlock is the only Linux sandbox available.
-- **The hub has no stdio acceptor** (`src/net/transport.zig`, `accept_stdio`): `protectorate-node
-  serve --stdio` speaks the fleet protocol over a pipe for an ssh bridge, but nothing on the hub
-  calls `accept_stdio`. Right: a hub command that runs the node over ssh and attaches the pipe,
-  or drop the node mode.
-- **The hub fleet and HTTP start only on Linux** (`src/hub/fleet.zig` `start`, `src/hub/fleet_loop.zig`): the
-  loop runs on `src/net/io_epoll.zig`; Windows and macOS hub builds compile but `start` returns
-  `error.FleetUnsupportedPlatform` (HTTP: `error.HttpUnsupportedPlatform`), so `serve` cannot run there. Right: the kqueue and IOCP backends
-  of Phase 3 behind one comptime selector.
+- **The HTTP loop is epoll only** (`src/hub/http_server.zig` `start`): the fleet loop and the node use the
+  comptime selector in `src/net/backend.zig` (epoll, kqueue, IOCP), but the HTTP loop imports epoll
+  directly, so Windows and macOS hub builds compile and the fleet starts there while `start` returns
+  `error.HttpUnsupportedPlatform` and `serve` cannot run. Right: Phase 5 moves the HTTP loop onto
+  `backend.zig`.
+- **kqueue has never run; Windows hub only over loopback** (`src/net/backend.zig`,
+  `src/net/io_kqueue.zig`, `src/net/io_iocp.zig`): the backend selector lets the hub fleet start on
+  macOS and Windows, but kqueue is compile-checked only (no Mac here), the Windows hub ran only with a
+  loopback node on officewin, and the arm64 Windows node only compiles. IOCP has no
+  `TCP_USER_TIMEOUT`, so the 15 s receive timeout is what ends a dead link there. Right: a real run on
+  a Mac and on the arm64 laptop.
 - **Fleet telemetry is dropped when the event ring is full** (`src/hub/fleet_loop.zig`, 32 events):
   counted in `hub info` as `fleet_telemetry_dropped`; connected and disconnected events wait in the
   bus instead. Right: coalesce telemetry per node (keep only the newest) so nothing is lost.
@@ -684,3 +684,12 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   `rotate_segment`): every append syncs its file, but the directory entry of a segment created at
   a rollover is not synced, so a power loss right after a rollover can lose that segment. Right: sync
   the journal directory after creating a segment.
+- **One thread per live job, no cap on live jobs** (`src/node/runner.zig`): each job reads its stdout
+  and stderr on its own thread through one bounded batched read, and one supervisor thread per node
+  handles timeouts and lease renewals. Right: a live-job cap, or jobs on the node loop.
+- **Node worker choices are untuned** (`src/node/loop.zig`, `src/net/node_loop.zig`): at most 14
+  workers, 10 waiting leases and 16 request slots, picked without measurement; the heartbeat sample can
+  be 2.5 s old; hub requests past 288 KiB get `invalid` (hubs send at most about 262 KiB); a worker
+  stuck in DNS or a release download delays node shutdown by that long; connect and disconnect
+  `std.debug.print` lines run on the loop thread and would stall it if stderr blocked. Right: measure,
+  and move logging off the loop.

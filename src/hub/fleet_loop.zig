@@ -2,7 +2,7 @@ const std = @import("std");
 const tiger = @import("../tiger.zig");
 const version = @import("../version.zig");
 const io = @import("../net/io.zig");
-const epoll = @import("../net/io_epoll.zig");
+const backend_mod = @import("../net/backend.zig");
 const noise = @import("../net/noise.zig");
 const frame = @import("../net/frame.zig");
 const msg = @import("../net/msg.zig");
@@ -10,7 +10,8 @@ const bounded = @import("../net/bounded.zig");
 const limits = @import("../net/limits.zig");
 const fleet_bus = @import("../net/fleet_bus.zig");
 
-const Bus = fleet_bus.FleetBus(epoll.Epoll);
+const Backend = backend_mod.Backend;
+const Bus = fleet_bus.FleetBus(Backend);
 
 pub const call_slots = 64;
 pub const commands_max = 128;
@@ -146,7 +147,7 @@ pub const Loop = struct {
     gpa: std.mem.Allocator,
     io: std.Io,
     static: *bounded.StaticAllocator,
-    backend: *epoll.Epoll,
+    backend: *Backend,
     pool: *bounded.SlabPool,
     bus: *Bus,
     port: u16,
@@ -177,7 +178,7 @@ pub const Loop = struct {
     events: *EventRing,
     finished: std.atomic.Value(bool) = .init(false),
 
-    pub const reserved_bytes: usize = @sizeOf(Loop) + @sizeOf(epoll.Epoll) + @sizeOf(bounded.SlabPool) +
+    pub const reserved_bytes: usize = @sizeOf(Loop) + @sizeOf(Backend) + @sizeOf(bounded.SlabPool) +
         bounded.slab_count * bounded.slab_bytes + @sizeOf(Bus) + @sizeOf(Peers) * 2 + @sizeOf([peers_max][32]u8) +
         @sizeOf([bounded.fleet_slots]Stash) + limits.fleet_hello_max + @sizeOf(EventRing) + @sizeOf(bounded.StaticAllocator);
 
@@ -189,9 +190,9 @@ pub const Loop = struct {
 
         const self = try a.create(Loop);
         errdefer a.destroy(self);
-        const backend = try a.create(epoll.Epoll);
+        const backend = try a.create(Backend);
         errdefer a.destroy(backend);
-        backend.* = try epoll.Epoll.init();
+        backend.* = try Backend.init();
         errdefer backend.deinit();
         const pool = try a.create(bounded.SlabPool);
         errdefer a.destroy(pool);
@@ -217,8 +218,8 @@ pub const Loop = struct {
         events.head = 0;
         events.len = 0;
 
-        const listener = try epoll.Epoll.listen(endpoint, backlog);
-        errdefer _ = std.os.linux.close(@intCast(@backingInt(listener.socket)));
+        const listener = try Backend.listen(endpoint, backlog);
+        errdefer Backend.close_now(listener.socket);
 
         self.* = .{
             .gpa = gpa,
@@ -397,7 +398,7 @@ pub const Loop = struct {
             self.turn(stopping);
             if (stopping and self.bus.done()) break;
             const wait: u32 = if (self.stalled) 2 else bounded.tick_ms;
-            self.backend.poll(wait) catch |err| std.debug.panic("fleet loop: epoll failed: {s}", .{@errorName(err)});
+            self.backend.poll(wait) catch |err| std.debug.panic("fleet loop: backend poll failed: {s}", .{@errorName(err)});
         }
         self.mu.lockUncancelable(self.io);
         self.closed = true;

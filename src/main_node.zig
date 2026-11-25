@@ -20,7 +20,6 @@ pub fn main(init: std.process.Init) !u8 {
     var home_override: ?[]const u8 = null;
     var sock_override: ?[]const u8 = null;
     var service_name_opt: ?[]const u8 = null;
-    var stdio_mode = false;
     var user_mode = false;
     var retry_rollback = false;
     var interval_secs: u64 = 2;
@@ -42,8 +41,6 @@ pub fn main(init: std.process.Init) !u8 {
         } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             try print_usage(init.io);
             return 0;
-        } else if (std.mem.eql(u8, arg, "--stdio")) {
-            stdio_mode = true;
         } else if (std.mem.eql(u8, arg, "--user")) {
             user_mode = true;
         } else if (std.mem.eql(u8, arg, "--retry-rollback")) {
@@ -101,7 +98,7 @@ pub fn main(init: std.process.Init) !u8 {
     } else if (std.mem.eql(u8, sub, "authorize")) {
         return serve.cmd_authorize(init.gpa, init.io, init.environ_map, home_path);
     } else if (std.mem.eql(u8, sub, "serve")) {
-        return serve.cmd_serve(init.gpa, init.io, init.environ_map, home_path, stdio_mode);
+        return serve.cmd_serve(init.gpa, init.io, init.environ_map, home_path);
     } else if (std.mem.eql(u8, sub, "supervise")) {
         return service.cmd_supervise(init.gpa, init.io, init.environ_map, home_path);
     } else if (std.mem.eql(u8, sub, "install-service")) {
@@ -286,7 +283,7 @@ fn print_usage(io: std.Io) !void {
         \\usage:
         \\  protectorate-node join <ptjoin1:...> [--name <name>] [--home <dir>]
         \\  protectorate-node authorize [--home <dir>]
-        \\  protectorate-node serve [--stdio] [--home <dir>]
+        \\  protectorate-node serve [--home <dir>]
         \\  protectorate-node supervise [--home <dir>]
         \\  protectorate-node install-service [--user] [--service-name <name>] [--home <dir>]
         \\  protectorate-node uninstall [--user] [--service-name <name>] [--home <dir>]

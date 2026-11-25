@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const noise = @import("../net/noise.zig");
 const frame = @import("../net/frame.zig");
 const msg = @import("../net/msg.zig");
@@ -10,9 +9,7 @@ const fleet_loop = @import("fleet_loop.zig");
 
 pub const AllowedPeer = fleet_loop.AllowedPeer;
 
-/// The fleet loop runs on the Linux epoll backend; other targets build the hub but cannot start its fleet.
-const supported = builtin.os.tag == .linux;
-const Loop = if (supported) fleet_loop.Loop else void;
+const Loop = fleet_loop.Loop;
 pub const Hooks = struct {
     ctx: ?*anyopaque,
     get_allowed_peers: *const fn (ctx: ?*anyopaque, arena: std.mem.Allocator) ?[]AllowedPeer,
@@ -31,7 +28,7 @@ const Reply = struct {
 
     fn deinit(self: *Reply) void {
         FleetServer.reply_free(self.buffer);
-        if (comptime supported) self.server.loop.?.release(self.slot);
+        self.server.loop.?.release(self.slot);
     }
 };
 
@@ -68,7 +65,6 @@ pub const FleetServer = struct {
     }
 
     pub fn start(self: *FleetServer) !void {
-        if (comptime !supported) return error.FleetUnsupportedPlatform;
         const address = try std.Io.net.IpAddress.parse(self.host, self.port);
         const endpoint: io_net.Endpoint = switch (address) {
             .ip4 => |a| blk: {
@@ -105,7 +101,6 @@ pub const FleetServer = struct {
 
     /// Hands the loop the current allowed-peer list; call after any change to which nodes may connect.
     pub fn publish_peers(self: *FleetServer) void {
-        if (comptime !supported) return;
         const loop = self.loop orelse return;
         self.publish_mu.lockUncancelable(self.io);
         defer self.publish_mu.unlock(self.io);
@@ -119,7 +114,6 @@ pub const FleetServer = struct {
     }
 
     pub fn shutdown(self: *FleetServer) void {
-        if (comptime !supported) return;
         if (self.stopping.swap(true, .acq_rel)) return;
         const loop = self.loop orelse return;
         loop.request_stop();
@@ -128,18 +122,15 @@ pub const FleetServer = struct {
     }
 
     pub fn stop_and_deinit(self: *FleetServer) void {
-        if (comptime supported) {
-            self.shutdown();
-            if (self.consumer_thread) |t| t.join();
-            self.consumer_thread = null;
-            if (self.loop) |loop| loop.destroy();
-            self.loop = null;
-        }
+        self.shutdown();
+        if (self.consumer_thread) |t| t.join();
+        self.consumer_thread = null;
+        if (self.loop) |loop| loop.destroy();
+        self.loop = null;
         self.gpa.free(self.host);
     }
 
     pub fn disconnect_node(self: *FleetServer, node_id: []const u8) void {
-        if (comptime !supported) return;
         const loop = self.loop orelse return;
         loop.disconnect(node_id);
     }
@@ -177,13 +168,11 @@ pub const FleetServer = struct {
 
     /// Delivery counters for hub info.
     pub fn stats(self: *FleetServer) struct { telemetry_dropped: u64, refused: u64 } {
-        if (comptime !supported) return .{ .telemetry_dropped = 0, .refused = 0 };
         const loop = self.loop orelse return .{ .telemetry_dropped = 0, .refused = 0 };
         return .{ .telemetry_dropped = loop.telemetry_dropped.load(.monotonic), .refused = loop.refused.load(.monotonic) };
     }
 
     fn call(self: *FleetServer, node_id: []const u8, request: msg.Request, timeout_ms: u32, chunk_cap: usize, long: bool) !Reply {
-        if (comptime !supported) return error.NodeOffline;
         const loop = self.loop orelse return error.NodeOffline;
         const slot = try loop.reserve();
         errdefer loop.release(slot);

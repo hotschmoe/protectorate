@@ -74,6 +74,16 @@ pub const StaticAllocator = struct {
     }
 };
 
+/// Allocates without the debug fill that Allocator.create applies in safe builds, so reserved pages stay untouched until used.
+pub fn create_reserved(allocator: std.mem.Allocator, comptime T: type) error{OutOfMemory}!*T {
+    const memory = allocator.rawAlloc(@sizeOf(T), .of(T), @returnAddress()) orelse return error.OutOfMemory;
+    return @ptrCast(@alignCast(memory));
+}
+
+pub fn destroy_reserved(allocator: std.mem.Allocator, comptime T: type, item: *T) void {
+    allocator.rawFree(std.mem.asBytes(item), .of(T), @returnAddress());
+}
+
 pub fn Ring(comptime T: type, comptime capacity: usize) type {
     tiger.comptime_assert(capacity > 0, "ring capacity must be positive");
     return struct {
@@ -108,7 +118,8 @@ pub const SlabPool = struct {
     free_count: usize = slab_count,
 
     pub fn init(allocator: std.mem.Allocator) !SlabPool {
-        var self: SlabPool = .{ .data = try allocator.alloc(u8, slab_count * slab_bytes) };
+        const memory = allocator.rawAlloc(slab_count * slab_bytes, .of(u8), @returnAddress()) orelse return error.OutOfMemory;
+        var self: SlabPool = .{ .data = memory[0 .. slab_count * slab_bytes] };
         for (&self.next, 0..) |*next, i| next.* = if (i + 1 == slab_count) none else @intCast(i + 1);
         tiger.assert(self.data.len == slab_count * slab_bytes);
         return self;
@@ -116,7 +127,7 @@ pub const SlabPool = struct {
 
     pub fn deinit(self: *SlabPool, allocator: std.mem.Allocator) void {
         tiger.assert(self.free_count == slab_count);
-        allocator.free(self.data);
+        allocator.rawFree(self.data, .of(u8), @returnAddress());
         self.* = undefined;
     }
 

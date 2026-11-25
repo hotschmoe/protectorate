@@ -1,12 +1,16 @@
 # TigerStyle networking: investigation and rewrite proposal
 
-Status: accepted 2026-11-24 with every recommendation in section 6; in progress. Phases 0, 1, 2 and 4
-are done: the hub's fleet runs on one epoll loop (src/hub/fleet_loop.zig, docs/srcmd/network.md) and
-its accept and per-peer threads are gone; its HTTP and WebSocket server runs on a second epoll loop
-(src/hub/http_server.zig, docs/srcmd/network.md "HTTP and WebSocket loop"): fixed connection slots,
-a bounded parser, worker pools for the runtime calls, streamed assets and downloads, and a lock-free
-stream ring read by the loop, so the accept thread, the per-connection threads and the StreamHub
-mutex and condition are gone. Phases 3 and 5 are outstanding.
+Status: accepted 2026-11-24 with every recommendation in section 6; in progress. Phases 0 to 4 are
+done. The hub's fleet runs on one loop (src/hub/fleet_loop.zig, docs/srcmd/network.md) and its accept
+and per-peer threads are gone. The node runs on one loop (src/node/loop.zig) with a joined worker pool;
+its dial, heartbeat and lease threads and src/net/transport.zig are gone, and the loop is portable:
+epoll, kqueue (compiles for macOS and FreeBSD, never run) and IOCP (run on Windows 11 x64), picked per
+target by src/net/backend.zig, which the fleet and node loops use. The hub's HTTP and WebSocket server
+runs on a second loop (src/hub/http_server.zig, docs/srcmd/network.md "HTTP and WebSocket loop"):
+fixed connection slots, a bounded parser, worker pools for the runtime calls, streamed assets and
+downloads, and a lock-free stream ring read by the loop, so the accept thread, the per-connection
+threads and the StreamHub mutex and condition are gone; it is still epoll only. Phase 5 is
+outstanding.
 SPEC.md wins where they differ.
 
 Inputs: a read-only source inventory of src/net, src/hub/{fleet,http_server,stream,runtime}.zig,
@@ -102,8 +106,8 @@ Backends, in order of need:
 |---|---|---|
 | `io_sim` | VOPR | seeded; models TCP as an ordered byte stream (loss appears as delay or reset, never as reordered bytes); short reads/writes, partitions, resets, crash/restart |
 | `io_epoll` | Linux hub and nodes | readiness normalised to completions; io_uring is a later optimisation, not a prerequisite |
-| `io_kqueue` | macOS node | same shape as epoll |
-| `io_iocp` | Windows nodes | a nodes-only subset: connect, recv, send, timeout (no accept); tested on officewin and the laptop, not just cross-compiled |
+| `io_kqueue` | macOS and BSD hub and nodes | same shape as epoll; compile-checked only |
+| `io_iocp` | Windows hub and nodes | AcceptEx, ConnectEx, WSARecv, WSASend and CancelIoEx on one completion port; the node side is tested on officewin, the hub side on officewin too (Phase 3 note below) |
 
 Child-process pipes: POSIX pipe fds join the loop. On Windows, anonymous pipes are not IOCP
 handles, so each running job keeps one bounded reader thread that hands off through a fixed

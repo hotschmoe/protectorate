@@ -107,6 +107,14 @@ pub const AdmissionManager = struct {
         }
     }
 
+    /// Makes every waiting acquisition give up; deinit does the rest.
+    pub fn interrupt(self: *AdmissionManager) void {
+        self.stopping.store(true, .release);
+        self.mu.lockUncancelable(self.io);
+        self.cond.broadcast(self.io);
+        self.mu.unlock(self.io);
+    }
+
     pub fn deinit(self: *AdmissionManager) void {
         self.stopping.store(true, .release);
         {
@@ -166,6 +174,7 @@ pub const AdmissionManager = struct {
         arena: std.mem.Allocator,
         req: msg.AcquireLease,
         job_id: ?[]const u8,
+        abandon: ?*const std.atomic.Value(bool),
     ) !msg.LeaseReply {
         const start_ms = std.Io.Clock.awake.now(self.io).toMilliseconds();
         const mem_avail = sys.read_mem_avail_bytes(self.io);
@@ -303,6 +312,14 @@ pub const AdmissionManager = struct {
                     .reason = "node stopping",
                 };
             }
+            if (abandon) |flag| if (flag.load(.acquire)) {
+                _ = self.auth.cancel_ticket(tid);
+                return .{
+                    .ok = false,
+                    .boot_id = try arena.dupe(u8, self.auth.boot_id),
+                    .reason = "hub disconnected",
+                };
+            };
 
             const now_ms = std.Io.Clock.awake.now(self.io).toMilliseconds();
             if (now_ms >= wait_deadline) {
@@ -674,7 +691,7 @@ pub const AdmissionManager = struct {
 
         const out_json: []u8 = switch (req) {
             .acquire_lease => |al| blk: {
-                const rep = self.acquire_blocking(arena, al, al.job_id) catch |e|
+                const rep = self.acquire_blocking(arena, al, al.job_id, null) catch |e|
                     break :blk msg.encode_alloc(arena, msg.ErrorReply{ .code = .internal, .message = @errorName(e) }) catch return;
                 break :blk msg.encode_alloc(arena, rep) catch return;
             },

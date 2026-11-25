@@ -54,6 +54,8 @@ const JobEntry = struct {
     cancel_requested: std.atomic.Value(bool) = .init(false),
     thread: ?std.Thread = null,
     started_ms: i64,
+    run_started_ms: i64 = 0,
+    last_renew_ms: i64 = 0,
 
     fn info_snapshot(self: *JobEntry, arena: std.mem.Allocator) !msg.JobInfo {
         self.mu.lockUncancelable(self.io);
@@ -112,6 +114,8 @@ pub const Runner = struct {
     jobs_dir_path: []const u8,
     mu: std.Io.Mutex = .init,
     jobs: std.StringHashMapUnmanaged(*JobEntry) = .empty,
+    supervisor: ?std.Thread = null,
+    supervisor_stop: std.atomic.Value(bool) = .init(false),
 
     pub fn init(
         gpa: std.mem.Allocator,
@@ -138,6 +142,8 @@ pub const Runner = struct {
     }
 
     pub fn deinit(self: *Runner) void {
+        self.supervisor_stop.store(true, .release);
+        if (self.supervisor) |t| t.join();
         self.mu.lockUncancelable(self.io);
         var list: std.ArrayList(*JobEntry) = .empty;
         var it = self.jobs.iterator();
@@ -233,6 +239,7 @@ pub const Runner = struct {
         self.mu.unlock(self.io);
 
         je.thread = try std.Thread.spawn(.{}, run_job_thread, .{je});
+        self.ensure_supervisor();
         return je.info_snapshot(arena);
     }
 
@@ -387,6 +394,12 @@ pub const Runner = struct {
         };
     }
 
+    fn ensure_supervisor(self: *Runner) void {
+        self.mu.lockUncancelable(self.io);
+        defer self.mu.unlock(self.io);
+        if (self.supervisor == null) self.supervisor = std.Thread.spawn(.{}, supervise_jobs, .{self}) catch null;
+    }
+
     fn renew_if_collecting(self: *Runner, arena: std.mem.Allocator, job: *JobEntry) void {
         const am = self.admission_mgr orelse return;
         var lid_opt: ?[]const u8 = null;
@@ -473,7 +486,7 @@ fn run_job_thread(job: *JobEntry) void {
             .ttl_ms = job.lease_ttl_ms,
             .wait_ms = wait_ms,
             .parent_epoch = job.parent_epoch,
-        }, job.id) catch |err| {
+        }, job.id, null) catch |err| {
             job.mu.lockUncancelable(job.io);
             job.state = .failed;
             job.err_msg = job.gpa.dupe(u8, @errorName(err)) catch null;
@@ -565,105 +578,20 @@ fn run_job_thread(job: *JobEntry) void {
         job.child_id = child.id;
         job.guard = guard;
         job.guard_active = true;
+        job.run_started_ms = std.Io.Clock.awake.now(job.io).toMilliseconds();
+        job.last_renew_ms = job.run_started_ms;
         if (job.cancel_requested.load(.acquire)) {
             job.guard.terminate();
         }
         job.mu.unlock(job.io);
     }
 
-    var proc_done: std.atomic.Value(bool) = .init(false);
-    const RenewCtx = struct {
-        job: *JobEntry,
-        proc_done: *std.atomic.Value(bool),
-        lid: ?[]const u8,
-        ep: ?u64,
-    };
-    const rctx = RenewCtx{
-        .job = job,
-        .proc_done = &proc_done,
-        .lid = granted_lid,
-        .ep = granted_ep,
-    };
-    const renew_fn = struct {
-        fn run(rc: RenewCtx) void {
-            const ttl = rc.job.lease_ttl_ms orelse 30_000;
-            const interval_ms = @max(@as(i64, 1_000), @min(@as(i64, 10_000), @divFloor(ttl, 3)));
-            var last_renew = std.Io.Clock.awake.now(rc.job.io).toMilliseconds();
-            const start_ms = last_renew;
-            var a_st = std.heap.ArenaAllocator.init(rc.job.gpa);
-            defer a_st.deinit();
-
-            while (!rc.proc_done.load(.acquire)) {
-                rc.job.io.sleep(.fromMilliseconds(250), .awake) catch break;
-                if (rc.proc_done.load(.acquire)) break;
-                const now = std.Io.Clock.awake.now(rc.job.io).toMilliseconds();
-
-                if (rc.job.timeout_secs) |ts| {
-                    if (now - start_ms >= @as(i64, @intCast(ts * 1000))) {
-                        rc.job.cancel_requested.store(true, .release);
-                        kill_job_proc(rc.job);
-                        break;
-                    }
-                }
-                if (rc.job.runner.admission_mgr) |am| {
-                    if (rc.lid != null and rc.ep != null and now - last_renew >= interval_ms) {
-                        _ = a_st.reset(.retain_capacity);
-                        const rep = am.renew(a_st.allocator(), .{ .lease_id = rc.lid.?, .epoch = rc.ep.? }) catch null;
-                        if (rep == null or !rep.?.ok) {
-                            rc.job.cancel_requested.store(true, .release);
-                            kill_job_proc(rc.job);
-                            break;
-                        }
-                        last_renew = now;
-                    }
-                }
-            }
-        }
-    }.run;
-    const renew_t = std.Thread.spawn(.{}, renew_fn, .{rctx}) catch null;
-
     const log_file = std.Io.Dir.cwd().openFile(job.io, job.log_path, .{ .mode = .read_write }) catch null;
     defer if (log_file) |lf| lf.close(job.io);
 
-    const PumpCtx = struct {
-        job: *JobEntry,
-        src: std.Io.File,
-        log_f: ?std.Io.File,
-    };
-
-    const pump_fn = struct {
-        fn run(pctx: PumpCtx) void {
-            var tmp: [4096]u8 = undefined;
-            const s: []u8 = &tmp;
-            const bufs = [_][]u8{s};
-            while (true) {
-                const n = pctx.src.readStreaming(pctx.job.io, &bufs) catch break;
-                if (n == 0) break;
-                pctx.job.mu.lockUncancelable(pctx.job.io);
-                if (pctx.log_f) |lf| {
-                    lf.writePositionalAll(pctx.job.io, tmp[0..n], pctx.job.log_bytes) catch {};
-                }
-                pctx.job.log_bytes += n;
-                pctx.job.mu.unlock(pctx.job.io);
-            }
-        }
-    }.run;
-
-    const out_t = if (child.stdout) |out_f|
-        std.Thread.spawn(.{}, pump_fn, .{PumpCtx{ .job = job, .src = out_f, .log_f = log_file }}) catch null
-    else
-        null;
-    const err_t = if (child.stderr) |err_f|
-        std.Thread.spawn(.{}, pump_fn, .{PumpCtx{ .job = job, .src = err_f, .log_f = log_file }}) catch null
-    else
-        null;
-
-    if (out_t) |t| t.join();
-    if (err_t) |t| t.join();
+    pump_output(job, &child, log_file);
 
     const term = child.wait(job.io) catch null;
-    proc_done.store(true, .release);
-    if (renew_t) |t| t.join();
 
     var fence_guard: s_exec.ProcessGuard = .{};
     {
@@ -704,7 +632,7 @@ fn run_job_thread(job: *JobEntry) void {
                 job.state = if (code == 0) .succeeded else .failed;
             },
             .signal => |sig| {
-                job.exit_code = 128 + @as(i32, @intCast(@intFromEnum(sig)));
+                job.exit_code = 128 + @as(i32, @intCast(@backingInt(sig)));
                 job.state = .interrupted;
             },
             else => job.state = .failed,
@@ -715,6 +643,98 @@ fn run_job_thread(job: *JobEntry) void {
     job.done_cond.broadcast(job.io);
     job.mu.unlock(job.io);
     fence_guard.deinit();
+}
+
+const pipe_chunk = 4096;
+
+/// Copies a job's stdout and stderr into its log from this one thread until both pipes close.
+fn pump_output(job: *JobEntry, child: *std.process.Child, log_file: ?std.Io.File) void {
+    const io = job.io;
+    var buffers: [2][pipe_chunk]u8 = undefined;
+    var vectors: [2][1][]u8 = undefined;
+    var storage: [2]std.Io.Operation.Storage = undefined;
+    var batch = std.Io.Batch.init(&storage);
+    defer batch.cancel(io);
+    var open: [2]bool = .{ false, false };
+    const files = [2]?std.Io.File{ child.stdout, child.stderr };
+    for (files, 0..) |maybe, i| {
+        const file = maybe orelse continue;
+        vectors[i] = .{&buffers[i]};
+        batch.addAt(@intCast(i), .{ .file_read_streaming = .{ .file = file, .data = &vectors[i] } });
+        open[i] = true;
+    }
+    while (open[0] or open[1]) {
+        batch.awaitConcurrent(io, .none) catch return;
+        while (batch.next()) |completion| {
+            const i = completion.index;
+            const n = completion.result.file_read_streaming catch 0;
+            if (n == 0) {
+                open[i] = false;
+                continue;
+            }
+            job.mu.lockUncancelable(io);
+            if (log_file) |lf| {
+                lf.writePositionalAll(io, buffers[i][0..n], job.log_bytes) catch {};
+            }
+            job.log_bytes += n;
+            job.mu.unlock(io);
+            batch.addAt(i, .{ .file_read_streaming = .{ .file = files[i].?, .data = &vectors[i] } });
+        }
+    }
+}
+
+const supervise_tick_ms = 250;
+
+/// One thread for every running job: enforces job timeouts and keeps admission leases renewed.
+fn supervise_jobs(self: *Runner) void {
+    var arena_st = std.heap.ArenaAllocator.init(self.gpa);
+    defer arena_st.deinit();
+    while (!self.supervisor_stop.load(.acquire)) {
+        self.io.sleep(.fromMilliseconds(supervise_tick_ms), .awake) catch return;
+        _ = arena_st.reset(.retain_capacity);
+        const arena = arena_st.allocator();
+        var live: std.ArrayList(*JobEntry) = .empty;
+        self.mu.lockUncancelable(self.io);
+        var it = self.jobs.iterator();
+        while (it.next()) |e| live.append(arena, e.value_ptr.*) catch break;
+        self.mu.unlock(self.io);
+        for (live.items) |job| supervise_one(self, arena, job);
+    }
+}
+
+fn supervise_one(self: *Runner, arena: std.mem.Allocator, job: *JobEntry) void {
+    if (job.cancel_requested.load(.acquire)) return;
+    job.mu.lockUncancelable(job.io);
+    const active = job.guard_active;
+    const started = job.run_started_ms;
+    const last_renew = job.last_renew_ms;
+    const lease_id = job.lease_id;
+    const epoch = job.epoch;
+    job.mu.unlock(job.io);
+    if (!active) return;
+    const now = std.Io.Clock.awake.now(job.io).toMilliseconds();
+    if (job.timeout_secs) |ts| {
+        if (now - started >= @as(i64, @intCast(ts * 1000))) {
+            job.cancel_requested.store(true, .release);
+            kill_job_proc(job);
+            return;
+        }
+    }
+    const am = self.admission_mgr orelse return;
+    const lid = lease_id orelse return;
+    const ep = epoch orelse return;
+    const ttl = job.lease_ttl_ms orelse 30_000;
+    const interval_ms = @max(@as(i64, 1_000), @min(@as(i64, 10_000), @divFloor(ttl, 3)));
+    if (now - last_renew < interval_ms) return;
+    const rep = am.renew(arena, .{ .lease_id = lid, .epoch = ep }) catch null;
+    if (rep == null or !rep.?.ok) {
+        job.cancel_requested.store(true, .release);
+        kill_job_proc(job);
+        return;
+    }
+    job.mu.lockUncancelable(job.io);
+    job.last_renew_ms = now;
+    job.mu.unlock(job.io);
 }
 
 fn collect_artifacts(job: *JobEntry) void {

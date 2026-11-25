@@ -13,9 +13,12 @@ pub const Event = union(enum) {
     disconnected: u64,
     request: struct { generation: u64, id: u64, size: usize, serial: u64 },
 };
+pub const resolve_timeout_ms: u64 = 15_000;
+pub const hello_reply_max = 8192;
 pub const Hooks = struct {
     context: *anyopaque,
     hello_reply: *const fn (*anyopaque, []const u8) bool,
+    resolve: ?*const fn (*anyopaque, u64) void = null,
 };
 
 pub fn NodeLink(comptime IO: type) type {
@@ -33,10 +36,13 @@ pub fn NodeLink(comptime IO: type) type {
             has_hs: bool = false,
             deadline: u64 = 0,
         };
-        const Phase = enum { waiting, racing, hello, established, closing, stopped };
+        const Phase = enum { waiting, resolving, racing, hello, established, closing, stopped };
         backend: *IO,
         pool: *bounded.SlabPool,
-        endpoints: []const io.Endpoint,
+        endpoints: [candidate_limit]io.Endpoint = undefined,
+        endpoint_count: usize = 0,
+        resolve_serial: u64 = 0,
+        resolve_started: u64 = 0,
         key: noise.KeyPair,
         hub_key: [32]u8,
         hello: []const u8,
@@ -57,12 +63,14 @@ pub fn NodeLink(comptime IO: type) type {
         connected_event: bool = false,
         disconnected_event: bool = false,
         stopping: bool = false,
-        scratch: [frame.max_payload]u8 = undefined,
+        scratch: [hello_reply_max]u8 = undefined,
 
         pub fn init(self: *Self, backend: *IO, pool: *bounded.SlabPool, endpoints: []const io.Endpoint, key: noise.KeyPair, hub_key: [32]u8, hello: []const u8, hooks: Hooks) !void {
-            if (endpoints.len == 0 or endpoints.len > candidate_limit) return error.BadEndpoints;
+            if (endpoints.len > candidate_limit or (endpoints.len == 0 and hooks.resolve == null)) return error.BadEndpoints;
             tiger.assert(@sizeOf(Self) <= 2 * 1024 * 1024);
-            self.* = .{ .backend = backend, .pool = pool, .endpoints = endpoints, .key = key, .hub_key = hub_key, .hello = hello, .hooks = hooks };
+            self.* = .{ .backend = backend, .pool = pool, .key = key, .hub_key = hub_key, .hello = hello, .hooks = hooks };
+            @memcpy(self.endpoints[0..endpoints.len], endpoints);
+            self.endpoint_count = endpoints.len;
             for (&self.candidates) |*candidate| {
                 candidate.connect_op = .{ .context = candidate, .callback = connect_complete };
                 candidate.close_op = .{ .context = candidate, .callback = close_complete };
@@ -116,6 +124,42 @@ pub fn NodeLink(comptime IO: type) type {
         pub fn set_hello(self: *Self, hello: []const u8) void {
             self.hello = hello;
         }
+        pub fn resolving(self: *const Self) bool {
+            return self.phase == .resolving;
+        }
+        pub fn flushed(self: *const Self) bool {
+            return self.phase == .established and self.conn.tx_idle();
+        }
+        /// Answers a resolve hook call: an empty list keeps the previous endpoints; a stale serial is ignored.
+        pub fn set_endpoints(self: *Self, serial: u64, endpoints: []const io.Endpoint) void {
+            if (self.phase != .resolving or serial != self.resolve_serial) return;
+            const count = @min(endpoints.len, candidate_limit);
+            if (count > 0) {
+                @memcpy(self.endpoints[0..count], endpoints[0..count]);
+                self.endpoint_count = count;
+            }
+            self.finish_resolve(self.backend.now());
+        }
+        fn finish_resolve(self: *Self, now: u64) void {
+            tiger.assert(self.phase == .resolving);
+            if (self.endpoint_count > 0) self.start_race(now) else self.back_off(now);
+        }
+        fn start_race(self: *Self, now: u64) void {
+            tiger.assert(self.endpoint_count > 0);
+            self.phase = .racing;
+            self.race_start = now;
+            for (&self.candidates, 0..) |*candidate, i| {
+                tiger.assert(candidate.connect_op.state == .idle and candidate.close_op.state == .idle);
+                candidate.state = if (i < self.endpoint_count) .idle else .finished;
+                candidate.connect_result = null;
+                candidate.close_result = null;
+            }
+        }
+        fn back_off(self: *Self, now: u64) void {
+            self.next_race = now +| @min(5_000, self.backoff + self.backend.random() % (self.backoff / 4 + 1));
+            self.backoff = @min(5_000, self.backoff * 2);
+            self.phase = .waiting;
+        }
         pub fn event(self: *Self) ?Event {
             if (self.connected_event) return .{ .connected = self.generation };
             if (self.disconnected_event) return .{ .disconnected = self.generation };
@@ -157,14 +201,16 @@ pub fn NodeLink(comptime IO: type) type {
         pub fn drive(self: *Self) !void {
             const now = self.backend.now();
             if (self.phase == .waiting and !self.stopping and !self.disconnected_event and now >= self.next_race) {
-                self.phase = .racing;
-                self.race_start = now;
-                for (&self.candidates, 0..) |*candidate, i| {
-                    tiger.assert(candidate.connect_op.state == .idle and candidate.close_op.state == .idle);
-                    candidate.state = if (i < self.endpoints.len) .idle else .finished;
-                    candidate.connect_result = null;
-                    candidate.close_result = null;
-                }
+                if (self.hooks.resolve) |resolve| {
+                    self.phase = .resolving;
+                    self.resolve_serial +%= 1;
+                    self.resolve_started = now;
+                    resolve(self.hooks.context, self.resolve_serial);
+                } else self.start_race(now);
+            }
+            if (self.phase == .resolving and now -| self.resolve_started >= resolve_timeout_ms) {
+                self.resolve_serial +%= 1;
+                self.finish_resolve(now);
             }
             for (&self.candidates, 0..) |*candidate, index| {
                 switch (candidate.state) {
@@ -310,11 +356,7 @@ pub fn NodeLink(comptime IO: type) type {
                 };
                 if (all_finished) {
                     self.winner = null;
-                    if (self.stopping) self.phase = .stopped else {
-                        self.next_race = now +| @min(5_000, self.backoff + self.backend.random() % (self.backoff / 4 + 1));
-                        self.backoff = @min(5_000, self.backoff * 2);
-                        self.phase = .waiting;
-                    }
+                    if (self.stopping) self.phase = .stopped else self.back_off(now);
                 }
             }
         }

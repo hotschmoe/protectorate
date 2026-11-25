@@ -3,6 +3,7 @@ const tiger = @import("../tiger.zig");
 const sim_storage = @import("sim_storage.zig");
 const sim_fleet = @import("sim_fleet.zig");
 const sim_http = @import("sim_http.zig");
+const sim_node = @import("sim_node.zig");
 const oracle = @import("oracle.zig");
 
 var panic_seed: ?u64 = null;
@@ -71,6 +72,10 @@ pub fn main(init: std.process.Init) !u8 {
         };
         sim_http.run(gpa, s ^ 0x3c6ef372fe94f82b) catch |err| {
             std.debug.print("FAIL http seed={d} err={s}\nRepro: zig build dst -- --seed {d} --steps {d} --verbose\n", .{ s, @errorName(err), s, steps });
+            return 1;
+        };
+        sim_node.run(gpa, s ^ 0x3c6ef372fe94f82b) catch |err| {
+            std.debug.print("FAIL node seed={d} err={s}\nRepro: zig build dst -- --seed {d} --steps {d} --verbose\n", .{ s, @errorName(err), s, steps });
             return 1;
         };
         oracle.run_seed(gpa, s, steps) catch |err| {
