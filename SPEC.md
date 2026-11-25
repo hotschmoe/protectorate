@@ -268,8 +268,8 @@ is given a token inside its sandbox, so per-sleeve `pc1.` capabilities are not i
   handshake and is dropped before any frame is read. After `Hello` the hub reads nothing from a
   node but heartbeats and answers (section 2, principle 4).
 - **Remaining surface, by design:** the fleet listener's handshake and frame parser run before a
-  peer is known. Records and frames are size-capped; there is no connection limit yet
-  (`docs/design/tigerstyle-network.md`, section 1).
+  peer is known. Records, frames, replies and artifacts are size-capped, and the fleet listener
+  holds at most 64 connections (`src/net/limits.zig`).
 - **TLS:** Traefik on stronghold terminates TLS for `protectorate.hotschmoe.com` with its existing
   certificate, and forwards everything to the hub's trusted-proxy listener (`--proxy-listen`,
   `--trusted-proxy`). The fleet link needs no TLS and does not go through Traefik: Noise encrypts
