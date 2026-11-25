@@ -18,6 +18,7 @@ pub const Event = union(enum) {
 };
 
 pub const HelloResult = struct { identity: [32]u8, reply_len: usize };
+pub const allowed_max = 1024;
 
 pub const Hooks = struct {
     context: *anyopaque,
@@ -56,6 +57,7 @@ pub fn FleetBus(comptime IO: type) type {
             rx_serial: u64 = 0,
             peer: [32]u8 = undefined,
             identity: [32]u8 = undefined,
+            identity_valid: bool = false,
             next_id: u64 = 1,
             rpcs: [bounded.rpc_slots_per_node]Rpc = @splat(.{}),
             connected_event: bool = false,
@@ -72,7 +74,8 @@ pub fn FleetBus(comptime IO: type) type {
         pool: *bounded.SlabPool,
         listener: io.Socket,
         key: noise.KeyPair,
-        allowed: []const [32]u8,
+        allowed: [allowed_max][32]u8 = undefined,
+        allowed_count: usize = 0,
         hooks: Hooks,
         slots: [bounded.fleet_slots]Slot = @splat(.{}),
         accept_op: io.Operation = undefined,
@@ -88,9 +91,10 @@ pub fn FleetBus(comptime IO: type) type {
         scratch: [frame.max_payload]u8 = undefined,
         reply: [frame.max_payload]u8 = undefined,
 
-        pub fn init(self: *Self, backend: *IO, pool: *bounded.SlabPool, listener: io.Socket, key: noise.KeyPair, allowed: []const [32]u8, hooks: Hooks) void {
+        pub fn init(self: *Self, backend: *IO, pool: *bounded.SlabPool, listener: io.Socket, key: noise.KeyPair, allowed: []const [32]u8, hooks: Hooks) error{Full}!void {
             tiger.assert(@sizeOf(Self) <= 12 * 1024 * 1024);
-            self.* = .{ .backend = backend, .pool = pool, .listener = listener, .key = key, .allowed = allowed, .hooks = hooks };
+            self.* = .{ .backend = backend, .pool = pool, .listener = listener, .key = key, .hooks = hooks };
+            try self.set_allowed(allowed);
             self.accept_op = .{ .context = self, .callback = accept_complete };
             self.listener_close_op = .{ .context = self, .callback = listener_close_complete };
             self.overflow_op = .{ .context = self, .callback = overflow_complete };
@@ -125,11 +129,40 @@ pub fn FleetBus(comptime IO: type) type {
             if (slot.phase() == .free or slot.generation != peer.generation) return null;
             return slot;
         }
-        pub fn current(self: *Self, identity: [32]u8) ?Handle {
+        pub fn current(self: *Self, wanted: [32]u8) ?Handle {
             for (&self.slots, 0..) |*slot, i| {
-                if (slot.phase() == .established and std.mem.eql(u8, &slot.identity, &identity)) return self.handle(i);
+                if (slot.phase() == .established and std.mem.eql(u8, &slot.identity, &wanted)) return self.handle(i);
             }
             return null;
+        }
+
+        pub fn set_allowed(self: *Self, allowed: []const [32]u8) error{Full}!void {
+            if (allowed.len > self.allowed.len) return error.Full;
+            @memcpy(self.allowed[0..allowed.len], allowed);
+            self.allowed_count = allowed.len;
+            for (&self.slots) |*slot| {
+                if (slot.phase() == .handshake) slot.hs.allowed = self.allowed[0..self.allowed_count];
+                if (slot.phase() == .hello and !self.is_allowed(slot.peer)) self.begin_close(slot, false);
+            }
+        }
+
+        fn is_allowed(self: *const Self, peer: [32]u8) bool {
+            var found = false;
+            for (self.allowed[0..self.allowed_count]) |key| {
+                if (std.crypto.timing_safe.eql([32]u8, key, peer)) found = true;
+            }
+            return found;
+        }
+
+        pub fn identity(self: *Self, peer: Handle) ?[32]u8 {
+            const slot = self.find(peer) orelse return null;
+            if (!slot.identity_valid) return null;
+            return slot.identity;
+        }
+
+        pub fn disconnect(self: *Self, peer: Handle) void {
+            const slot = self.find(peer) orelse return;
+            self.begin_close(slot, false);
         }
 
         fn begin_close(self: *Self, slot: *Slot, replaced: bool) void {
@@ -219,25 +252,32 @@ pub fn FleetBus(comptime IO: type) type {
             return null;
         }
 
-        pub fn event(self: *Self) ?Event {
-            for (&self.slots, 0..) |*slot, i| {
-                const peer = self.handle(i);
-                if (slot.connected_event) return .{ .connected = peer };
-                if (slot.phase() == .established and slot.conn.frame_ready) {
-                    const hdr = slot.conn.header(self.pool) catch unreachable;
-                    if (hdr.kind == .request) return .{ .request = .{ .peer = peer, .id = hdr.id, .size = hdr.payload_len, .serial = slot.conn.rx_serial } };
-                    if (rpc_for(slot, hdr.id)) |rpc| {
-                        if (rpc.terminal == null and hdr.kind == .chunk) return .{ .chunk = .{ .peer = peer, .id = hdr.id, .size = hdr.payload_len, .serial = slot.conn.rx_serial } };
-                        if (rpc.terminal == null) return .{ .terminal = .{ .peer = peer, .id = hdr.id, .result = switch (hdr.kind) {
-                            .response => .response,
-                            .end => .end,
-                            .err => .remote_error,
-                            else => unreachable,
-                        }, .size = hdr.payload_len, .serial = slot.conn.rx_serial } };
-                    }
+        pub fn event_for(self: *Self, i: usize) ?Event {
+            if (i >= self.slots.len) return null;
+            const slot = &self.slots[i];
+            const peer = self.handle(i);
+            if (slot.connected_event) return .{ .connected = peer };
+            if (slot.phase() == .established and slot.conn.frame_ready) {
+                const hdr = slot.conn.header(self.pool) catch unreachable;
+                if (hdr.kind == .request) return .{ .request = .{ .peer = peer, .id = hdr.id, .size = hdr.payload_len, .serial = slot.conn.rx_serial } };
+                if (rpc_for(slot, hdr.id)) |rpc| {
+                    if (rpc.terminal == null and hdr.kind == .chunk) return .{ .chunk = .{ .peer = peer, .id = hdr.id, .size = hdr.payload_len, .serial = slot.conn.rx_serial } };
+                    if (rpc.terminal == null) return .{ .terminal = .{ .peer = peer, .id = hdr.id, .result = switch (hdr.kind) {
+                        .response => .response,
+                        .end => .end,
+                        .err => .remote_error,
+                        else => unreachable,
+                    }, .size = hdr.payload_len, .serial = slot.conn.rx_serial } };
                 }
-                for (slot.rpcs) |rpc| if (rpc.terminal) |result| return .{ .terminal = .{ .peer = peer, .id = rpc.id, .result = result, .size = 0, .serial = 0 } };
-                if (slot.disconnected_event) return .{ .disconnected = peer };
+            }
+            for (slot.rpcs) |rpc| if (rpc.terminal) |result| return .{ .terminal = .{ .peer = peer, .id = rpc.id, .result = result, .size = 0, .serial = 0 } };
+            if (slot.disconnected_event) return .{ .disconnected = peer };
+            return null;
+        }
+
+        pub fn event(self: *Self) ?Event {
+            for (0..self.slots.len) |i| {
+                if (self.event_for(i)) |ev| return ev;
             }
             return null;
         }
@@ -251,7 +291,13 @@ pub fn FleetBus(comptime IO: type) type {
         }
 
         pub fn consume(self: *Self, ev: Event) void {
-            const current_event = self.event() orelse return;
+            const event_peer = switch (ev) {
+                .connected, .disconnected => |p| p,
+                .request => |e| e.peer,
+                .chunk => |e| e.peer,
+                .terminal => |e| e.peer,
+            };
+            const current_event = self.event_for(event_peer.slot) orelse return;
             if (!std.meta.eql(ev, current_event)) return;
             switch (ev) {
                 .connected => |peer| self.find(peer).?.connected_event = false,
@@ -282,7 +328,7 @@ pub fn FleetBus(comptime IO: type) type {
                             const slot = &self.slots[reserved.?];
                             tiger.assert(slot.phase() == .accepting);
                             slot.socket = socket;
-                            slot.hs.init_responder(socket, self.key, self.allowed);
+                            slot.hs.init_responder(socket, self.key, self.allowed[0..self.allowed_count]);
                             slot.state = .{ .handshake = &slot.hs };
                             slot.deadline = self.backend.now() +| 10_000;
                         } else {
@@ -298,7 +344,7 @@ pub fn FleetBus(comptime IO: type) type {
                 }
             }
             if (self.overflow_socket) |socket| {
-                if (self.overflow_op.state == .idle and self.overflow_result == null) try self.backend.submit(&self.overflow_op, .{ .close = socket });
+                if (self.overflow_op.state == .idle and self.overflow_result == null) self.backend.submit(&self.overflow_op, .{ .close = socket }) catch {};
             } else if (!self.stopping and self.accept_op.state == .idle) {
                 tiger.assert(self.accept_slot == null);
                 for (&self.slots, 0..) |*slot, index| {
@@ -310,10 +356,9 @@ pub fn FleetBus(comptime IO: type) type {
                     self.accept_slot = index;
                     break;
                 }
-                self.backend.submit(&self.accept_op, .{ .accept = self.listener }) catch |err| {
+                self.backend.submit(&self.accept_op, .{ .accept = self.listener }) catch {
                     if (self.accept_slot) |index| self.slots[index].state = .{ .free = {} };
                     self.accept_slot = null;
-                    return err;
                 };
             }
             if (self.listener_close_result != null) {
@@ -321,7 +366,7 @@ pub fn FleetBus(comptime IO: type) type {
                 self.listener_closed = true;
             }
             if (self.stopping and !self.listener_closed and self.accept_op.state == .idle and self.accept_result == null and self.listener_close_op.state == .idle) {
-                try self.backend.submit(&self.listener_close_op, .{ .close = self.listener });
+                self.backend.submit(&self.listener_close_op, .{ .close = self.listener }) catch {};
             }
             for (&self.slots, 0..) |*slot, index| {
                 switch (slot.state) {
@@ -336,7 +381,12 @@ pub fn FleetBus(comptime IO: type) type {
                             continue;
                         };
                         if (slot.hs.ready()) {
-                            const session = slot.hs.take();
+                            var session = slot.hs.take();
+                            defer session.deinit();
+                            if (!self.is_allowed(session.peer_static)) {
+                                self.begin_close(slot, false);
+                                continue;
+                            }
                             slot.peer = session.peer_static;
                             slot.hs.deinit();
                             slot.conn.init(slot.socket, session);
@@ -373,6 +423,18 @@ pub fn FleetBus(comptime IO: type) type {
                                     self.begin_close(slot, false);
                                     continue;
                                 };
+                                var established: usize = 0;
+                                var replacement = false;
+                                for (&self.slots) |*other| {
+                                    if (other.phase() == .established) {
+                                        established += 1;
+                                        if (std.mem.eql(u8, &other.identity, &hello_result.identity)) replacement = true;
+                                    }
+                                }
+                                if (established >= bounded.fleet_slots - 16 and !replacement) {
+                                    self.begin_close(slot, false);
+                                    continue;
+                                }
                                 if (hello_result.reply_len > self.reply.len) {
                                     self.begin_close(slot, false);
                                     continue;
@@ -383,6 +445,7 @@ pub fn FleetBus(comptime IO: type) type {
                                 };
                                 slot.conn.take(self.pool);
                                 slot.identity = hello_result.identity;
+                                slot.identity_valid = true;
                                 slot.state = .{ .established = &slot.conn };
                                 for (&self.slots, 0..) |*other, j| {
                                     if (index != j and other.phase() == .established and std.mem.eql(u8, &other.identity, &slot.identity)) self.begin_close(other, true);
@@ -408,7 +471,7 @@ pub fn FleetBus(comptime IO: type) type {
                     .closing => |kind| {
                         const drained = if (kind == .channel) slot.conn.drained() else slot.hs.drained();
                         if (!drained) continue;
-                        try self.backend.submit(&slot.close_op, .{ .close = slot.socket });
+                        self.backend.submit(&slot.close_op, .{ .close = slot.socket }) catch continue;
                         if (kind == .channel) {
                             slot.conn.deinit(self.pool);
                         } else slot.hs.deinit();

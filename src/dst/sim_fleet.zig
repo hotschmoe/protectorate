@@ -14,6 +14,20 @@ const ping = "{\"type\":\"ping\",\"now_ms\":1}";
 const submit = "{\"type\":\"submit_job\",\"job_id\":\"job-dst-1\",\"argv\":[\"echo\",\"hello-fleet\"],\"artifacts\":[\"out/bin\"],\"even_if_present\":true,\"on_present\":\"idle\"}";
 const pong = "{\"now_ms\":1}";
 const error_reply = "{\"code\":\"busy\",\"message\":\"simulation\"}";
+const HubReplies = bounded.Ring(struct { peer: @import("../net/fleet_bus.zig").Handle, id: u64 }, 128);
+
+fn flush_hub_replies(bus: *Bus, replies: *HubReplies) !void {
+    const ready = replies.len;
+    for (0..ready) |_| {
+        const pending = replies.pop().?;
+        bus.send(pending.peer, .response, pending.id, reply) catch |err| switch (err) {
+            error.Busy, error.Full => try replies.push(pending),
+            error.PeerGone => {},
+            else => return err,
+        };
+    }
+    try bus.drive();
+}
 
 fn chunk_count(seed: u64, index: usize, long_stream: bool, all_large: bool) usize {
     if (long_stream and (index == 0 or all_large)) return 3;
@@ -144,7 +158,7 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
     if (seed % 4 == 1 and !fleet_long and seed % 64 != 0) sim.route(endpoint).slow = true;
     if (seed % 8 == 0) sim.transfer_max = 1;
     var context: Context = .{ .original = keys[0].public, .replacement = replacement_key.public, .allowed = allowed[0..node_count] };
-    bus.init(sim, &pool, listener, hub_key, allowed[0 .. node_count + 1], .{ .context = &context, .hello = Context.on_hello });
+    try bus.init(sim, &pool, listener, hub_key, allowed[0..node_count], .{ .context = &context, .hello = Context.on_hello });
     var hello_buffers: [6][4096]u8 = undefined;
     var hello_payloads: [6][]const u8 = undefined;
     for (0..node_count) |i| {
@@ -166,6 +180,7 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
     var requests: [6]u64 = @splat(0);
     var completed: [6]bool = @splat(false);
     var pending_reply: [6]u64 = @splat(0);
+    var hub_replies: HubReplies = .{};
     var chunks_left: [6]usize = @splat(0);
     var chunks_received: [6]usize = @splat(0);
     var generation: [6]u64 = @splat(0);
@@ -203,16 +218,17 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
         if (phase != .partition) for (0..node_count) |i| {
             if (peers[i] == null) peers[i] = bus.current(keys[i].public);
         };
-        if (bus.event()) |event| {
+        if (bus.event_for(step % bounded.fleet_slots)) |event| {
             trace.add(sim.now(), @tagName(std.meta.activeTag(event)), 0);
             switch (event) {
-                .connected => bus.consume(event),
+                .connected => |peer| {
+                    const identity = bus.identity(peer) orelse return error.MissingIdentity;
+                    if (bus.current(identity) == null) return error.MissingIdentity;
+                    bus.consume(event);
+                },
                 .request => |request| {
-                    const sent = if (bus.send(request.peer, .response, request.id, reply)) |_| true else |err| switch (err) {
-                        error.Busy, error.Full => false,
-                        else => return err,
-                    };
-                    if (sent) bus.consume(event);
+                    try hub_replies.push(.{ .peer = request.peer, .id = request.id });
+                    bus.consume(event);
                 },
                 .chunk => |event_chunk| {
                     var found = false;
@@ -261,6 +277,7 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
                 },
             }
         }
+        try flush_hub_replies(bus, &hub_replies);
         for (0..node_count) |i| {
             const link = links[i];
             if (link.event()) |event| {
@@ -361,6 +378,7 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
         else => return error.BadCancellation,
     }
     const old_peer = peers[0].?;
+    try bus.set_allowed(allowed[0 .. node_count + 1]);
     var replaced_calls: [bounded.rpc_slots_per_node]u64 = @splat(0);
     var replaced_done: [bounded.rpc_slots_per_node]bool = @splat(false);
     var calls_started: usize = 0;
@@ -410,15 +428,13 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
                     bus.consume(event);
                 },
                 .request => |request| {
-                    const sent = if (bus.send(request.peer, .response, request.id, reply)) |_| true else |err| switch (err) {
-                        error.Busy, error.Full => false,
-                        else => return err,
-                    };
-                    if (sent) bus.consume(event);
+                    try hub_replies.push(.{ .peer = request.peer, .id = request.id });
+                    bus.consume(event);
                 },
                 .chunk => return error.UnexpectedChunk,
             }
         }
+        try flush_hub_replies(bus, &hub_replies);
         for (links[0..node_count], 0..) |link, i| if (link.event()) |event| switch (event) {
             .connected, .disconnected => link.consume(event),
             .request => if (i != 0) return error.UnexpectedRequest,
@@ -516,15 +532,13 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
                     bus.consume(event);
                 },
                 .request => |request| {
-                    const sent = if (bus.send(request.peer, .response, request.id, reply)) |_| true else |err| switch (err) {
-                        error.Busy, error.Full => false,
-                        else => return err,
-                    };
-                    if (sent) bus.consume(event);
+                    try hub_replies.push(.{ .peer = request.peer, .id = request.id });
+                    bus.consume(event);
                 },
                 .chunk => return error.UnexpectedChunk,
             }
         }
+        try flush_hub_replies(bus, &hub_replies);
         for (links[0..node_count]) |link| if (link.event()) |event| switch (event) {
             .connected, .disconnected => link.consume(event),
             .request => return error.UnexpectedRequest,
@@ -583,11 +597,8 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
             trace.add(sim.now(), @tagName(std.meta.activeTag(event)), 0);
             switch (event) {
                 .request => |request| {
-                    const sent = if (bus.send(request.peer, .response, request.id, reply)) |_| true else |err| switch (err) {
-                        error.Busy, error.Full => false,
-                        else => return err,
-                    };
-                    if (sent) bus.consume(event);
+                    try hub_replies.push(.{ .peer = request.peer, .id = request.id });
+                    bus.consume(event);
                 },
                 else => return error.UnexpectedFleetEvent,
             }
@@ -600,6 +611,7 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
             .connected, .disconnected => duplicate.consume(event),
             .request => return error.UnexpectedRequest,
         };
+        try flush_hub_replies(bus, &hub_replies);
         if (corrupt.event() != null or corrupt.generation != 0) return error.TamperedHandshakeAccepted;
         const candidate = &corrupt.candidates[1];
         if (!handshake_corrupted and candidate.state == .handshake) {
@@ -654,11 +666,8 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
                     bus.consume(event);
                 },
                 .request => |request| {
-                    const sent = if (bus.send(request.peer, .response, request.id, reply)) |_| true else |err| switch (err) {
-                        error.Busy, error.Full => false,
-                        else => return err,
-                    };
-                    if (sent) bus.consume(event);
+                    try hub_replies.push(.{ .peer = request.peer, .id = request.id });
+                    bus.consume(event);
                 },
                 .chunk => return error.UnexpectedChunk,
             }
@@ -687,6 +696,7 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
                 }
             },
         };
+        try flush_hub_replies(bus, &hub_replies);
         if (malformed_call == 0) {
             if (bus.call(live_peer, ping, sim.now() + 10_000)) |id| {
                 malformed_call = id;
@@ -720,6 +730,10 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
         sim.advance();
     }
     if (!malformed_sent or !malformed_liveness_done) return error.MalformedFrameStalled;
+    var revocation_keys: [8][32]u8 = undefined;
+    @memcpy(revocation_keys[0 .. node_count + 1], allowed[0 .. node_count + 1]);
+    revocation_keys[node_count + 1] = rogue_key.public;
+    try bus.set_allowed(revocation_keys[0 .. node_count + 2]);
     try rogue.init(sim, &pool, &endpoints, rogue_key, hub_key.public, hello_payloads[0], .{ .context = &context, .hello_reply = Context.on_reply });
     var attempted = false;
     var rejected = false;
@@ -734,11 +748,8 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
             trace.add(sim.now(), @tagName(std.meta.activeTag(event)), 0);
             switch (event) {
                 .request => |request| {
-                    const sent = if (bus.send(request.peer, .response, request.id, reply)) |_| true else |err| switch (err) {
-                        error.Busy, error.Full => false,
-                        else => return err,
-                    };
-                    if (sent) bus.consume(event);
+                    try hub_replies.push(.{ .peer = request.peer, .id = request.id });
+                    bus.consume(event);
                 },
                 else => return error.UnexpectedFleetEvent,
             }
@@ -751,11 +762,23 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
             .connected, .disconnected => duplicate.consume(event),
             .request => return error.UnexpectedRequest,
         };
+        try flush_hub_replies(bus, &hub_replies);
         if (rogue.event() != null or rogue.generation != 0) return error.UnknownPeerAccepted;
+        for (&bus.slots) |*slot| {
+            if ((slot.state == .hello or slot.state == .established) and std.mem.eql(u8, &slot.peer, &rogue_key.public)) return error.UnknownPeerAccepted;
+        }
         const candidate = &rogue.candidates[1];
         if (candidate.state == .handshake) {
+            if (!attempted) {
+                for (&bus.slots) |*slot| {
+                    if (slot.state == .handshake) {
+                        try bus.set_allowed(allowed[0 .. node_count + 1]);
+                        attempted = true;
+                        break;
+                    }
+                }
+            }
             if (rejected and (candidate.hs.recv_op.state == .submitted or candidate.hs.send_op.state == .submitted)) shutdown_handshake = true;
-            attempted = true;
         }
         if (attempted and candidate.state == .finished) rejected = true;
         bus.assert_invariants();

@@ -93,6 +93,7 @@ pub fn Handshake(comptime IO: type) type {
         pub fn take(self: *Self) noise.Session {
             tiger.assert(self.ready());
             const session = self.session.?;
+            self.session.?.deinit();
             self.session = null;
             return session;
         }
@@ -132,9 +133,8 @@ pub fn Handshake(comptime IO: type) type {
                     @memcpy(self.send_buf[0..noise.msg2_len], &reply);
                     self.send_target = noise.msg2_len;
                 } else {
-                    var handshake = self.initiator.?;
+                    self.session = try self.initiator.?.finish(self.recv_buf[0..self.recv_target], backend.now());
                     self.initiator = null;
-                    self.session = try handshake.finish(self.recv_buf[0..self.recv_target], backend.now());
                 }
             }
             if (self.recv_len < self.recv_target and self.recv_op.state == .idle) {

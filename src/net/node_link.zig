@@ -202,7 +202,8 @@ pub fn NodeLink(comptime IO: type) type {
                                 continue;
                             };
                             if (candidate.hs.ready()) {
-                                const session = candidate.hs.take();
+                                var session = candidate.hs.take();
+                                defer session.deinit();
                                 candidate.hs.deinit();
                                 candidate.has_hs = false;
                                 self.conn.init(candidate.socket, session);

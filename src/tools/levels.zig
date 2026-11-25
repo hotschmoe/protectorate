@@ -65,6 +65,7 @@ fn classify(rel_path: []const u8) ?Classification {
         std.mem.eql(u8, rel_path, "net/noise.zig") or
         std.mem.eql(u8, rel_path, "net/limits.zig") or
         std.mem.eql(u8, rel_path, "net/io.zig") or
+        std.mem.eql(u8, rel_path, "net/io_epoll.zig") or
         std.mem.eql(u8, rel_path, "net/bounded.zig"))
     {
         return .{ .tier = .l1, .group = .net };

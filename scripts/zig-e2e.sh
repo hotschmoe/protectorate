@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 PT="$ROOT_DIR/zig-out/bin/protectorate"
-PT_NODE="$ROOT_DIR/zig-out/bin/protectorate-node"
+PT_NODE="${PT_E2E_NODE_BIN:-$ROOT_DIR/zig-out/bin/protectorate-node}"
 
 if [[ ! -x "$PT" || ! -x "$PT_NODE" ]]; then
   echo "missing binaries under zig-out/bin; run zig build -Doptimize=safe first" >&2

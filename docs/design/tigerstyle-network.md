@@ -1,7 +1,8 @@
 # TigerStyle networking: investigation and rewrite proposal
 
-Status: accepted 2026-11-24 with every recommendation in section 6; in progress. Phase 0 is done
-(`src/net/limits.zig`, `src/hub/artifact_sink.zig`). SPEC.md wins where they differ.
+Status: accepted 2026-11-24 with every recommendation in section 6; in progress. Phases 0 and 1
+are done. Phase 2 has an epoll backend in development; production fleet integration is outstanding.
+SPEC.md wins where they differ.
 
 Inputs: a read-only source inventory of src/net, src/hub/{fleet,http_server,stream,runtime}.zig,
 src/node/{serve,runner,admission}.zig and src/drivers/session.zig against Zig 0.17.1, and a study of
