@@ -277,9 +277,12 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   against a real hub (pairing, Envoy chat, sleeves, a D9 approval denied from the app), outside
   `make e2e` because it needs Chromium and the local model. Reconnect backoff is 1 to 30 s; a
   transcript keeps at most 2000 entries (`_Tx.keep`) with no paging back. The script's default
-  binary path still points at the old cargo `target/release/protectorate`, so it needs
-  `PROTECTORATE_BIN`. Right: paging when a chat scrolls past its first entry, the default path moved
-  to the Zig build output, and the script in CI once a runner has Chromium.
+  binary path is now `zig-out/bin/protectorate`, but the script still follows the Rust-era hub: it
+  writes Rust config keys (`envoy`, `pi_local_provider`), passes `serve --log-level`, reads an
+  envoy-only token from the serve log (the Zig hub prints no tokens; `protectorate token` does),
+  expects `pairing code for NAME:` from `device add` and looks up a systemd scope, so it needs
+  porting before it runs. Right: port it to the Zig hub, add paging when a chat scrolls past its
+  first entry, and run it in CI once a runner has Chromium.
 - **Pairing codes are unthrottled and short** (`src/hub/home.zig`, `create_pairing`,
   `claim_pairing`, `random_short_code_alloc`): `AddDevice` makes a ten-minute, single-use code of 8
   characters from a 32-letter alphabet, but only 6 random bytes feed it, so characters 7 and 8
@@ -606,3 +609,44 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
 - **Losing fleet dials can remain blocked** (`src/net/transport.zig`): a timed-out or losing dial
   retains its worker and process-lifetime I/O until the connection attempt or handshake returns.
   Right: cancel DNS, connect, and handshake operations and wait for each losing worker to exit.
+- **The events WebSocket and CORS accept any Origin** (`src/hub/http_server.zig`, `conn_thread`
+  for `/api/events`, `cors_headers`): the upgrade checks only the token (`Authorization` or
+  `?access_token=`), and every response, errors included, carries `access-control-allow-origin: *`.
+  With bearer tokens and no cookies a foreign page cannot ride a session, so this is low risk
+  today. Right: an allow-list of the hub's own origin and the proxy's host, checked on the upgrade
+  and in the CORS headers, before any cookie or ambient credential is added.
+- **History and transcripts ignore the caller's reach** (`src/hub/api_dispatch.zig`,
+  `GetTranscript`, `SearchHistory`, `ReadHistory`; `src/api/schema.zig`, scope `.sleeve`): these
+  methods are open to every authenticated caller, the envoy-only token included, and none checks
+  that the caller may reach the sleeve it names; `SearchHistory` takes `sleeves` only as a
+  filter. SPEC 3.7 and D26 limit a sleeve to its own docs, with a parent reading a child's
+  transcript, and Envoy and the owner unrestricted. This is the history side of "Scopes are
+  coarse". Right: issue per-sleeve credentials, derive the caller's sleeve from them, and apply the
+  reach rule inside these three methods before anything is read.
+- **No OOM watcher and no memory limit for sleeve scopes** (`src/hub/runtime.zig`, `ProcessGuard`
+  built with `memory_max_bytes = null`; `src/core/model.zig`, `Cause.oom` and `oom_window_ms`;
+  `src/sandbox/spec.zig`, `build_systemd_scope_argv`): a sleeve's cgroup has no `memory.max`,
+  nothing reads `memory.events` or `oom_kill`, and only the simulator (`src/dst/oracle.zig`)
+  produces `Cause.oom`; `oom_window_ms` is defined and unused and the systemd scope builder has no
+  caller. A kernel OOM kill reaches the hub as an ordinary exit (classified `crash` from its
+  output text or `killed`), so it counts a strike and a resume like any crash, and a runaway build
+  can take the host's memory with it. SPEC 3.4 describes `sleeve_memory_max`, per-sleeve
+  overrides and a scope OOM guardrail. Right: a configured limit applied to the cgroup (or a
+  scope), a watcher on `memory.events`, and an `oom` exit cause that names the limit and the
+  override key.
+- **Event stream sequence restarts at 1 after a hub restart** (`src/hub/stream.zig`,
+  `StreamHub.next_seq`; `src/hub/http_server.zig`, `handle_websocket`; `app/lib/real_hub.dart`,
+  `_run`, `_onMessage`): the sequence is in memory, so it starts again at 1 with each hub process.
+  The app keeps its last seq across a dropped connection and reconnects with `from_seq = _seq + 1`.
+  The hub always sends a fresh snapshot and a `live` marker first, and the app then sets `_seq` to
+  the snapshot's (new, small) seq, so the state shown is right. But the hub uses the requested
+  `from_seq`, not the snapshot's seq, as the cursor for the rest of that connection, so after a
+  restart it sends no stream message (state deltas, `entry` chat lines, events) until its counter
+  passes the old value, and the app notices nothing because the pings continue. A new connection
+  with the corrected seq (an app restart or any later drop) repairs it. The app code has no check
+  for a snapshot whose seq is below its own. Read from the code, not reproduced. Right: seed the
+  counter from something that grows across restarts, or have the hub treat a `from_seq` above its
+  current seq as absent; and have the app reconnect when a snapshot's seq is lower than the last one
+  it held. The same code also reads `from_seq` as "after" while the app sends "last seq plus one",
+  which skips one message per reconnect; harmless today because every reconnect starts with a
+  snapshot and reloads open transcripts.

@@ -5,7 +5,7 @@
 #
 #   scripts/app-e2e.sh [OUT_DIR]
 #
-# Needs a release binary with the web app embedded (make web release), chromium, node >= 22
+# Needs a hub binary with the web app embedded (make web, then make build), chromium, node >= 22
 # (global WebSocket) and Pi with a local model for pi_local:
 #   PT_E2E_PI_PROVIDER  a provider in Pi's ~/.pi/agent/models.json (an OpenAI-compatible endpoint)
 #   PT_E2E_PI_MODEL     the model to ask it for
@@ -16,7 +16,7 @@ set -eu
 root=$(cd "$(dirname "$0")/.." && pwd)
 if [ -f "$root/.env.e2e" ]; then set -a; . "$root/.env.e2e"; set +a; fi
 out=${1:-${TMPDIR:-/tmp}/pt-app-e2e}
-bin=${PROTECTORATE_BIN:-${CARGO_TARGET_DIR:-target}/release/protectorate}
+bin=${PROTECTORATE_BIN:-$root/zig-out/bin/protectorate}
 chromium=${CHROMIUM:-chromium}
 provider=${PT_E2E_PI_PROVIDER:-}
 model=${PT_E2E_PI_MODEL:-}
@@ -116,7 +116,7 @@ hub_pid=$!
 url=http://127.0.0.1:$port
 for _ in $(seq 50); do pt hub info >/dev/null 2>&1 && break; sleep 0.2; done
 curl -q -fsS "$url/" | grep -q flutter_bootstrap ||
-    { echo "app-e2e: $bin does not serve the web app (make web release)"; exit 1; }
+    { echo "app-e2e: $bin does not serve the web app (make web, then make build)"; exit 1; }
 step "hub on $url; waiting for Envoy"
 pt sleeve wait envoy --until idle --timeout 180
 
