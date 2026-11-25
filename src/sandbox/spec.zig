@@ -43,7 +43,6 @@ pub const SandboxSpec = struct {
     masks: []const Mount = &.{},
     env_allow: []const []const u8 = &default_env_allow_keys,
     env_set: []const EnvVar = &.{},
-    scope_name: ?[]const u8 = null,
     memory_max_bytes: ?u64 = null,
 };
 
@@ -282,69 +281,4 @@ pub fn free_guard_argv(gpa: std.mem.Allocator, argv: []const []const u8) void {
         }
     }
     gpa.free(argv);
-}
-
-pub fn build_systemd_scope_argv(
-    gpa: std.mem.Allocator,
-    scope: []const u8,
-    memory_max_bytes: ?u64,
-    inner_argv: []const []const u8,
-) error{OutOfMemory}![][]const u8 {
-    tiger.assert(inner_argv.len > 0);
-    var args: std.ArrayList([]const u8) = .empty;
-    errdefer {
-        for (args.items) |s| {
-            if (std.mem.startsWith(u8, s, "--unit=") or std.mem.startsWith(u8, s, "MemoryMax=")) {
-                gpa.free(s);
-            }
-        }
-        args.deinit(gpa);
-    }
-
-    try args.appendSlice(gpa, &.{ "systemd-run", "--user", "--scope" });
-    const unit_flag = try std.fmt.allocPrint(gpa, "--unit={s}", .{scope});
-    try args.append(gpa, unit_flag);
-    if (memory_max_bytes) |lim| {
-        try args.append(gpa, "-p");
-        const mem_prop = try std.fmt.allocPrint(gpa, "MemoryMax={d}", .{lim});
-        try args.append(gpa, mem_prop);
-    }
-    try args.append(gpa, "--");
-    try args.appendSlice(gpa, inner_argv);
-    return args.toOwnedSlice(gpa);
-}
-
-pub fn scope_name_alloc(gpa: std.mem.Allocator, sleeve: []const u8, generation: u64) error{OutOfMemory}![]u8 {
-    const cleaned = try gpa.alloc(u8, sleeve.len);
-    defer gpa.free(cleaned);
-    for (sleeve, 0..) |c, i| {
-        cleaned[i] = if (std.ascii.isAlphanumeric(c) or c == '-' or c == '_') c else '_';
-    }
-    return std.fmt.allocPrint(gpa, "pt-{s}-g{d}.scope", .{ cleaned, generation });
-}
-
-pub fn scope_sleeve_id(tag: []const u8, unit: []const u8) ?u64 {
-    if (!std.mem.startsWith(u8, unit, "pt-") or !std.mem.endsWith(u8, unit, ".scope")) return null;
-    const mid = unit[3 .. unit.len - 6];
-    const g_idx = std.mem.findLast(u8, mid, "-g") orelse return null;
-    const gen_str = mid[g_idx + 2 ..];
-    if (gen_str.len == 0) return null;
-    for (gen_str) |c| {
-        if (!std.ascii.isDigit(c)) return null;
-    }
-
-    const body = mid[0..g_idx];
-    if (body.len <= tag.len + 1) return null;
-    for (0..tag.len) |i| {
-        const tc = tag[i];
-        const expected = if (std.ascii.isAlphanumeric(tc) or tc == '-' or tc == '_') tc else '_';
-        if (body[i] != expected) return null;
-    }
-    if (body[tag.len] != '-') return null;
-    const id_str = body[tag.len + 1 ..];
-    if (id_str.len == 0) return null;
-    for (id_str) |c| {
-        if (!std.ascii.isDigit(c)) return null;
-    }
-    return std.fmt.parseInt(u64, id_str, 10) catch null;
 }

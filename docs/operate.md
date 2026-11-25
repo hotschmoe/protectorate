@@ -281,7 +281,12 @@ hub adds `PROTECTORATE_SLEEVE`, `PROTECTORATE_WORKSPACE`, `PROTECTORATE_ENVOY`, 
   places.
 - Credential paths (`~/.ssh`, `~/.config/gh`, `~/.aws`, `~/.gnupg`, `~/.docker`, `~/.kube`, other
   harnesses' directories and similar) are masked. The hub's own home is not masked.
-- A sleeve has no memory limit and no OOM watcher (REVISIT). `sleeve show` prints `mem_limit=null`.
+- The default sleeve cap is 4 GiB. Set `sleeve_memory_max` in `config.json` to change it, or add a
+  byte count keyed by sleeve name in `sleeve_memory_max_overrides`. Restart the hub to apply the
+  configuration to new incarnations. Use a zero limit for an uncapped sleeve or `"scopes": false`
+  to turn off all sleeve memory caps. `sleeve show` reports the applied limit and
+  `PROTECTORATE_MEMORY_MAX` carries the configured byte count. A second launcher OOM within one
+  hour parks the sleeve.
 
 ## Sleeve devices
 

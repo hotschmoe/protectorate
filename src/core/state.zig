@@ -60,7 +60,6 @@ pub const IncarnationState = struct {
     delivered_request_id: ?[]const u8 = null,
     delivered_kind: ?model.MsgKind = null,
     turn_is_agent_mail: bool = false,
-    oom_seen: bool = false,
     next_launch: ?PendingLaunch = null,
 };
 
@@ -104,6 +103,8 @@ pub const SleeveState = struct {
     resleeve_win: TimeWindow(16) = .{},
     resume_win: TimeWindow(16) = .{},
     strike_win: TimeWindow(16) = .{},
+    last_oom_ms: ?i64 = null,
+    oom_notice_pending: bool = false,
 };
 
 pub const ApprovalRecord = struct {

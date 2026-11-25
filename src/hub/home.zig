@@ -33,6 +33,14 @@ pub const ConfigFile = struct {
     d9_spawn_limit: u32 = 3,
     d9_approval_timeout_secs: u64 = 300,
     sleeve_devices: []const []const u8 = &.{},
+    sleeve_memory_max: u64 = 4 << 30,
+    sleeve_memory_max_overrides: std.json.ArrayHashMap(u64) = .{},
+    scopes: bool = true,
+
+    pub fn sleeve_memory_limit(self: *const ConfigFile, sleeve_name: []const u8) ?u64 {
+        const limit = self.sleeve_memory_max_overrides.map.get(sleeve_name) orelse self.sleeve_memory_max;
+        return if (limit == 0) null else limit;
+    }
 };
 
 const AuthFile = struct {
@@ -178,6 +186,8 @@ pub const HubHome = struct {
         if (self.config.release_channel) |rc| self.gpa.free(rc);
         for (self.config.sleeve_devices) |d| self.gpa.free(d);
         self.gpa.free(self.config.sleeve_devices);
+        for (self.config.sleeve_memory_max_overrides.map.keys()) |name| self.gpa.free(name);
+        self.config.sleeve_memory_max_overrides.deinit(self.gpa);
     }
 
     fn load_or_create_auth(self: *HubHome, root_dir: std.Io.Dir, dev_token: ?[]const u8) !void {
@@ -405,6 +415,7 @@ fn load_or_create_config(gpa: std.mem.Allocator, io: std.Io, root_dir: std.Io.Di
     for (cf.trusted_proxies, 0..) |tp, i| proxies[i] = gpa.dupe(u8, tp) catch "";
     const devs = gpa.alloc([]const u8, cf.sleeve_devices.len) catch return def;
     for (cf.sleeve_devices, 0..) |d, i| devs[i] = gpa.dupe(u8, d) catch "";
+    const memory_overrides = clone_memory_overrides(gpa, cf.sleeve_memory_max_overrides) catch return def;
     const eff_channel = if (cf.release_channel != null and std.mem.eql(u8, cf.update_channel, "stable"))
         cf.release_channel.?
     else
@@ -431,7 +442,23 @@ fn load_or_create_config(gpa: std.mem.Allocator, io: std.Io, root_dir: std.Io.Di
         .d9_spawn_limit = cf.d9_spawn_limit,
         .d9_approval_timeout_secs = cf.d9_approval_timeout_secs,
         .sleeve_devices = devs,
+        .sleeve_memory_max = cf.sleeve_memory_max,
+        .sleeve_memory_max_overrides = memory_overrides,
+        .scopes = cf.scopes,
     };
+}
+
+fn clone_memory_overrides(gpa: std.mem.Allocator, source: std.json.ArrayHashMap(u64)) !std.json.ArrayHashMap(u64) {
+    var result: std.json.ArrayHashMap(u64) = .{};
+    errdefer {
+        for (result.map.keys()) |name| gpa.free(name);
+        result.deinit(gpa);
+    }
+    try result.map.ensureTotalCapacity(gpa, source.map.count());
+    for (source.map.keys(), source.map.values()) |name, limit| {
+        result.map.putAssumeCapacityNoClobber(try gpa.dupe(u8, name), limit);
+    }
+    return result;
 }
 
 fn hex32(bytes: [32]u8) [64]u8 {

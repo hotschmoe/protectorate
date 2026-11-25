@@ -88,9 +88,12 @@ const DriverHandle = struct {
     turn_id: u64 = 0,
     unknown_tool_calls: u64 = 0,
     harness: model.Harness,
+    memory_max_bytes: ?u64 = null,
+    oom_notice_pending: bool = false,
+    memory_prompt_pending: std.atomic.Value(bool) = .init(false),
     interrupt_exit: std.atomic.Value(bool) = .init(false),
     exit_pending: std.atomic.Value(bool) = .init(false),
-    exit_code: ?u8 = null,
+    exit_cause: model.ExitCause = .crash,
 };
 
 pub const RuntimeOptions = struct {
@@ -112,6 +115,7 @@ pub const Runtime = struct {
     no_sandbox: bool,
     bwrap_ok: bool,
     landlock_ok: bool,
+    memory_warning_logged: std.atomic.Value(bool) = .init(false),
 
     state_mu: std.Io.Mutex = .init,
     journal: store.JournalStore,
@@ -324,13 +328,7 @@ pub const Runtime = struct {
             self.sessions.deinit(self.gpa);
             self.meta_mu.unlock(self.io);
         }
-        for (handles.items) |dh| {
-            _ = dh.guard.fence_and_confirm(self.io, 500);
-            dh.sess.kill_and_destroy();
-            dh.guard.deinit();
-            self.gpa.free(dh.sleeve_id);
-            self.gpa.destroy(dh);
-        }
+        for (handles.items) |dh| self.destroy_driver(dh);
         handles.deinit(self.gpa);
 
         self.stream_hub.deinit();
@@ -663,7 +661,10 @@ pub const Runtime = struct {
                 const dh = self.get_driver(dp.sleeve_id);
                 if (dh) |h| {
                     if (h.g == dp.g) {
-                        h.sess.send_user(dp.request_id, dp.text, if (dp.steer) "" else null) catch |err| {
+                        const with_memory_note = h.memory_prompt_pending.swap(false, .acq_rel);
+                        const text = if (with_memory_note) memory_prompt(ia, h, dp.text) catch dp.text else dp.text;
+                        h.sess.send_user(dp.request_id, text, if (dp.steer) "" else null) catch |err| {
+                            if (with_memory_note) h.memory_prompt_pending.store(true, .release);
                             self.record_hub_event(.sleeve, "driver", dp.sleeve_id, @errorName(err), .warn);
                             return;
                         };
@@ -730,7 +731,8 @@ pub const Runtime = struct {
                 self.verify_job_async(vj.job_id, vj.node_id);
             },
             .cancel_job => |cj| {
-                self.cancel_job_async(cj.job_id, cj.node_id);
+                self.cancel_job_async(cj.job_id, cj.node_id, true) catch |err|
+                    self.log_cancel_failure(cj.job_id, cj.node_id, err);
             },
             .emit_notice => |en| {
                 self.record_hub_event(.guardrail, en.code, en.sleeve_id, en.text, .warn);
@@ -817,6 +819,17 @@ pub const Runtime = struct {
         }
     }
 
+    fn memory_prompt(arena: std.mem.Allocator, h: *const DriverHandle, text: []const u8) ![]const u8 {
+        const advice = "Ask Envoy if you need more memory. The owner can raise sleeve_memory_max_overrides.";
+        const oom_note = if (h.oom_notice_pending) "The previous incarnation was killed after a scope OOM. " else "";
+        if (h.memory_max_bytes) |limit| {
+            return std.fmt.allocPrint(arena, "{s}This incarnation's memory limit is {d} bytes. {s}\n\n{s}", .{
+                oom_note, limit, advice, text,
+            });
+        }
+        return std.fmt.allocPrint(arena, "{s}{s}\n\n{s}", .{ oom_note, advice, text });
+    }
+
     fn launch_driver(self: *Runtime, li: anytype) !void {
         var arena_st = std.heap.ArenaAllocator.init(self.gpa);
         defer arena_st.deinit();
@@ -827,6 +840,8 @@ pub const Runtime = struct {
         var sl_path: []const u8 = "";
         var sl_layout: model.Layout = .shared;
         var is_envoy = false;
+        var configured_limit: ?u64 = null;
+        var oom_notice_pending = false;
         {
             self.state_mu.lockUncancelable(self.io);
             defer self.state_mu.unlock(self.io);
@@ -834,7 +849,28 @@ pub const Runtime = struct {
             sl_path = try a.dupe(u8, sl.path);
             sl_layout = sl.layout;
             is_envoy = (sl.role == .envoy);
+            configured_limit = self.hub_home.config.sleeve_memory_limit(sl.name);
+            oom_notice_pending = sl.oom_notice_pending;
         }
+
+        var applied_limit: ?u64 = null;
+        var guard = fenced: {
+            if (self.hub_home.config.scopes) {
+                if (configured_limit) |limit| {
+                    if (s_exec.ProcessGuard.init_sleeve(self.gpa, self.io, process_tag, limit)) |limited| {
+                        applied_limit = limit;
+                        break :fenced limited;
+                    } else |err| {
+                        if (!self.memory_warning_logged.swap(true, .acq_rel)) {
+                            std.log.warn("sleeve memory limits unavailable ({s}); using process fencing without a memory limit", .{@errorName(err)});
+                        }
+                    }
+                }
+            }
+            break :fenced s_exec.ProcessGuard.init_fenced(self.gpa, self.io, process_tag, null);
+        };
+        errdefer guard.deinit();
+        const cgroup_path = if (applied_limit != null) guard.sleeve_cgroup() else null;
 
         const prog: []const u8 = switch (li.harness) {
             .claude => "claude",
@@ -854,9 +890,12 @@ pub const Runtime = struct {
 
         const hub_url = try std.fmt.allocPrint(a, "http://{s}", .{self.http_listen});
         var guard_mode: s_spec.GuardMode = .none;
-        var guard_exe: ?[]const u8 = null;
+        var guard_exe: ?[]const u8 = if (cgroup_path != null) try std.process.executablePathAlloc(self.io, a) else null;
         var sb_spec: ?s_spec.SandboxSpec = null;
         var child_env = try self.env.clone(a);
+        _ = child_env.swapRemove("PROTECTORATE_MEMORY_MAX");
+        const memory_env = if (configured_limit) |limit| try std.fmt.allocPrint(a, "{d}", .{limit}) else null;
+        if (memory_env) |value| try child_env.put("PROTECTORATE_MEMORY_MAX", value);
         try child_env.put("PROTECTORATE_SLEEVE", li.sleeve_id);
         try child_env.put("PROTECTORATE_WORKSPACE", sl_path);
         try child_env.put("PROTECTORATE_ENVOY", "envoy");
@@ -878,7 +917,7 @@ pub const Runtime = struct {
             if (builtin.os.tag == .linux) {
                 guard_mode = if (self.bwrap_ok) .bwrap else if (self.landlock_ok) .landlock else .none;
                 if (guard_mode != .none) {
-                    if (guard_mode == .landlock) {
+                    if (guard_mode == .landlock and guard_exe == null) {
                         guard_exe = try std.process.executablePathAlloc(self.io, a);
                     }
                     const host_home = self.env.get("HOME");
@@ -940,6 +979,7 @@ pub const Runtime = struct {
                     if (is_envoy) {
                         try env_set.append(a, .{ .key = "PROTECTORATE_TOKEN", .value = self.hub_home.envoy_token });
                     }
+                    if (memory_env) |value| try env_set.append(a, .{ .key = "PROTECTORATE_MEMORY_MAX", .value = value });
 
                     sb_spec = .{
                         .workspace = sl_path,
@@ -966,8 +1006,12 @@ pub const Runtime = struct {
             .rt = self,
             .harness = li.harness,
             .sess = undefined,
-            .guard = s_exec.ProcessGuard.init_fenced(self.gpa, self.io, process_tag, null),
+            .guard = guard,
+            .memory_max_bytes = applied_limit,
+            .oom_notice_pending = oom_notice_pending,
+            .memory_prompt_pending = .init(!is_envoy and (oom_notice_pending or (li.g == 1 and applied_limit != null))),
         };
+        guard = .{};
         errdefer dh.guard.deinit();
 
         const sess_id = try std.fmt.allocPrint(a, "{s}-{d}", .{ li.sleeve_id, li.g });
@@ -987,6 +1031,7 @@ pub const Runtime = struct {
             .sandbox_mode = guard_mode,
             .guard_exe = guard_exe,
             .sandbox = sb_spec,
+            .cgroup_path = cgroup_path,
             .environ_map = &child_env,
             .on_event = on_driver_event,
             .on_exit = on_driver_exit,
@@ -996,7 +1041,11 @@ pub const Runtime = struct {
             _ = dh.guard.fence_and_confirm(self.io, 500);
             dh.sess.kill_and_destroy();
         }
-        dh.guard.attach_with_io(self.io, dh.sess.child_id());
+        if (cgroup_path != null) {
+            dh.guard.attach_sleeve(dh.sess.child_id());
+        } else {
+            dh.guard.attach_with_io(self.io, dh.sess.child_id());
+        }
 
         {
             self.meta_mu.lockUncancelable(self.io);
@@ -1045,13 +1094,15 @@ pub const Runtime = struct {
             }
             self.meta_mu.unlock(self.io);
         }
-        if (removed) |dh| {
-            _ = dh.guard.fence_and_confirm(self.io, 500);
-            dh.sess.kill_and_destroy();
-            dh.guard.deinit();
-            self.gpa.free(dh.sleeve_id);
-            self.gpa.destroy(dh);
-        }
+        if (removed) |dh| self.destroy_driver(dh);
+    }
+
+    fn destroy_driver(self: *Runtime, dh: *DriverHandle) void {
+        _ = dh.guard.fence_and_confirm(self.io, 500);
+        dh.sess.kill_and_destroy();
+        dh.guard.deinit();
+        self.gpa.free(dh.sleeve_id);
+        self.gpa.destroy(dh);
     }
 
     fn on_driver_event(ctx: ?*anyopaque, ev: d_proto.DriverEvent) void {
@@ -1266,9 +1317,27 @@ pub const Runtime = struct {
         }) catch null;
         if (ce) |c| self.stream_hub.publish_raw(.{ .entry = .{ .seq = 0, .sleeve_id = dh.sleeve_id, .entry = c } });
 
-        _ = g;
-        dh.exit_code = exit_code;
+        tiger.assert(g == dh.g);
+        dh.exit_cause = if (exit_code == 0) .clean else .crash;
+        if (!requested and exit_code == 137 and dh.memory_max_bytes != null) {
+            const killed = dh.guard.sleeve_oom_killed(self.io) catch |err| blk: {
+                std.log.warn("read sleeve {s} memory.events after exit: {s}", .{ dh.sleeve_id, @errorName(err) });
+                break :blk false;
+            };
+            if (killed) dh.exit_cause = .oom;
+        }
         dh.exit_pending.store(true, .release);
+    }
+
+    fn record_sleeve_oom(self: *Runtime, dh: *const DriverHandle) void {
+        var buf: [256]u8 = undefined;
+        const notice = std.fmt.bufPrint(&buf, "Scope OOM at the {d} byte memory limit. Ask Envoy if you need more memory. The owner can raise sleeve_memory_max_overrides for this sleeve.", .{dh.memory_max_bytes.?}) catch unreachable;
+        self.record_hub_event(.guardrail, "oom", dh.sleeve_id, notice, .warn);
+        const at_ms = std.Io.Clock.real.now(self.io).toMilliseconds();
+        const entry = self.transcripts.append(dh.sleeve_id, dh.g, dh.turn_id, at_ms, .{
+            .notice = .{ .level = .warn, .code = "oom", .text = notice },
+        }) catch null;
+        if (entry) |e| self.stream_hub.publish_raw(.{ .entry = .{ .seq = 0, .sleeve_id = dh.sleeve_id, .entry = e } });
     }
 
     fn reap_driver_exits(self: *Runtime) void {
@@ -1281,6 +1350,7 @@ pub const Runtime = struct {
                     found = entry.value_ptr.*;
                     break;
                 }
+                entry.value_ptr.*.guard.drain_sleeve_after_exit(self.io);
             }
             const dh = found orelse {
                 self.meta_mu.unlock(self.io);
@@ -1292,9 +1362,13 @@ pub const Runtime = struct {
             };
             const g = dh.g;
             const requested = dh.interrupt_exit.load(.acquire);
-            const cause: model.ExitCause = if (dh.exit_code == 0) .clean else .crash;
+            const cause = dh.exit_cause;
+            const removed = self.sessions.fetchRemove(sid).?;
+            tiger.assert(removed.value == dh);
+            self.gpa.free(removed.key);
             self.meta_mu.unlock(self.io);
-            self.stop_driver_generation(sid, g);
+            if (cause == .oom and !requested) self.record_sleeve_oom(dh);
+            self.destroy_driver(dh);
             self.commit(.{ .exited = .{ .sleeve_id = sid, .g = g, .cause = cause, .requested = requested } }) catch {};
             self.gpa.free(sid);
         }
@@ -1397,25 +1471,29 @@ pub const Runtime = struct {
         _ = node_id;
     }
 
-    fn cancel_job_async(self: *Runtime, job_id: []const u8, node_id: []const u8) void {
-        if (!self.enter_worker()) return;
-        var spawned = false;
-        defer if (!spawned) self.exit_worker();
-        const Arg = struct { rt: *Runtime, job_id: []const u8, node_id: []const u8 };
-        const arg = self.gpa.create(Arg) catch return;
+    fn log_cancel_failure(self: *Runtime, job_id: []const u8, node_id: []const u8, err: anyerror) void {
+        var buf: [256]u8 = undefined;
+        const reason = std.fmt.bufPrint(&buf, "job cancel failed: {s}", .{@errorName(err)}) catch "job cancel failed";
+        self.record_hub_event(.node, node_id, job_id, reason, .warn);
+    }
+
+    fn cancel_job_async(self: *Runtime, job_id: []const u8, node_id: []const u8, settle_on_error: bool) !void {
+        if (!self.enter_worker()) return error.ShuttingDown;
+        errdefer self.exit_worker();
+        const Arg = struct { rt: *Runtime, job_id: []const u8, node_id: []const u8, settle_on_error: bool };
+        const arg = try self.gpa.create(Arg);
+        errdefer self.gpa.destroy(arg);
+        const job_id_dup = try self.gpa.dupe(u8, job_id);
+        errdefer self.gpa.free(job_id_dup);
+        const node_id_dup = try self.gpa.dupe(u8, node_id);
+        errdefer self.gpa.free(node_id_dup);
         arg.* = .{
             .rt = self,
-            .job_id = self.gpa.dupe(u8, job_id) catch {
-                self.gpa.destroy(arg);
-                return;
-            },
-            .node_id = self.gpa.dupe(u8, node_id) catch {
-                self.gpa.free(arg.job_id);
-                self.gpa.destroy(arg);
-                return;
-            },
+            .job_id = job_id_dup,
+            .node_id = node_id_dup,
+            .settle_on_error = settle_on_error,
         };
-        const t = std.Thread.spawn(.{}, struct {
+        const t = try std.Thread.spawn(.{}, struct {
             fn run(a_ptr: *Arg) void {
                 defer {
                     const rt = a_ptr.rt;
@@ -1426,18 +1504,13 @@ pub const Runtime = struct {
                 }
                 var arena_st = std.heap.ArenaAllocator.init(a_ptr.rt.gpa);
                 defer arena_st.deinit();
-                _ = a_ptr.rt.fleet_srv.cancel_job(arena_st.allocator(), a_ptr.node_id, a_ptr.job_id) catch {
-                    a_ptr.rt.commit(.{ .job_cancelled = .{ .job_id = a_ptr.job_id } }) catch {};
+                _ = a_ptr.rt.fleet_srv.cancel_job(arena_st.allocator(), a_ptr.node_id, a_ptr.job_id) catch |err| {
+                    a_ptr.rt.log_cancel_failure(a_ptr.job_id, a_ptr.node_id, err);
+                    if (a_ptr.settle_on_error) a_ptr.rt.commit(.{ .job_cancelled = .{ .job_id = a_ptr.job_id } }) catch {};
                     return;
                 };
             }
-        }.run, .{arg}) catch {
-            self.gpa.free(arg.job_id);
-            self.gpa.free(arg.node_id);
-            self.gpa.destroy(arg);
-            return;
-        };
-        spawned = true;
+        }.run, .{arg});
         t.detach();
     }
 
@@ -1601,6 +1674,7 @@ pub const Runtime = struct {
         const reason = std.fmt.allocPrint(arena, "job status unreadable: {s}", .{@errorName(err)}) catch "job status unreadable";
         self.record_hub_event(.node, node_id, job_id, reason, .warn);
         self.commit(.{ .job_failed = .{ .job_id = job_id, .attempt = 1, .err = reason } }) catch {};
+        self.cancel_job_async(job_id, node_id, false) catch |cancel_err| self.log_cancel_failure(job_id, node_id, cancel_err);
     }
 
     fn hook_allowed_peers(ctx: ?*anyopaque, arena: std.mem.Allocator) ?[]fleet.AllowedPeer {
@@ -1790,7 +1864,7 @@ pub const Runtime = struct {
 
     fn publish_event_updates(self: *Runtime, arena: std.mem.Allocator, ev: event.Event) void {
         switch (ev) {
-            inline .sleeve_created, .provisioned, .provision_failed, .start_requested, .launched, .session_bound, .prompt_enqueued, .prompt_delivered, .turn_started, .turn_settled, .stop_requested, .stopped, .resleeve_requested, .parked => |s| {
+            inline .sleeve_created, .provisioned, .provision_failed, .start_requested, .launched, .session_bound, .prompt_enqueued, .prompt_delivered, .turn_started, .turn_settled, .stop_requested, .stopped, .resleeve_requested, .parked, .exited => |s| {
                 if (self.view_sleeve(arena, s.sleeve_id) catch null) |sv| {
                     self.stream_hub.publish_raw(.{ .sleeve = .{ .seq = 0, .sleeve = sv } });
                 }
@@ -1889,7 +1963,15 @@ pub const Runtime = struct {
         self.state_mu.lockUncancelable(self.io);
         defer self.state_mu.unlock(self.io);
         const sl = self.core_state.sleeves.get(sleeve_id) orelse return null;
-        return try sleeve_to_schema(arena, sl);
+        return try sleeve_to_schema(arena, sl, self.sleeve_memory_limit(sl));
+    }
+
+    fn sleeve_memory_limit(self: *Runtime, sl: state.SleeveState) ?u64 {
+        const inc = sl.inc orelse return null;
+        self.meta_mu.lockUncancelable(self.io);
+        defer self.meta_mu.unlock(self.io);
+        const dh = self.sessions.get(sl.id) orelse return null;
+        return if (dh.g == inc.g) dh.memory_max_bytes else null;
     }
 
     pub fn view_state(self: *Runtime, arena: std.mem.Allocator) !schema.HubState {
@@ -1906,7 +1988,8 @@ pub const Runtime = struct {
             var sit = self.core_state.sleeves.iterator();
             while (sit.next()) |e| {
                 if (e.value_ptr.lifecycle == .removed) continue;
-                try sleeves_list.append(arena, try sleeve_to_schema(arena, e.value_ptr.*));
+                const sl = e.value_ptr.*;
+                try sleeves_list.append(arena, try sleeve_to_schema(arena, sl, self.sleeve_memory_limit(sl)));
             }
             var ait = self.core_state.approvals.iterator();
             while (ait.next()) |e| {
@@ -2742,7 +2825,7 @@ fn map_tool_kind(t: d_proto.ToolKind) schema.ToolKind {
     };
 }
 
-fn sleeve_to_schema(arena: std.mem.Allocator, sl: state.SleeveState) !schema.Sleeve {
+fn sleeve_to_schema(arena: std.mem.Allocator, sl: state.SleeveState, memory_max_bytes: ?u64) !schema.Sleeve {
     var targets = try arena.alloc(schema.Harness, sl.target_len);
     for (0..sl.target_len) |i| targets[i] = model_to_schema_harness(sl.targets[i]);
 
@@ -2784,6 +2867,7 @@ fn sleeve_to_schema(arena: std.mem.Allocator, sl: state.SleeveState) !schema.Sle
         .turn = inc.turn,
         .context_tokens = inc.context_tokens,
         .context_window = inc.context_window,
+        .memory_max_bytes = memory_max_bytes,
     } else null;
 
     return .{

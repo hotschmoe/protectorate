@@ -27,6 +27,7 @@ pub const Config = struct {
     sandbox_mode: spec.GuardMode = .none,
     guard_exe: ?[]const u8 = null,
     sandbox: ?spec.SandboxSpec = null,
+    cgroup_path: ?[]const u8 = null,
     environ_map: ?*const std.process.Environ.Map = null,
     on_event: OnEventFn,
     on_exit: OnExitFn,
@@ -106,7 +107,7 @@ pub const Session = struct {
             .antigravity => try antigravity.Antigravity.build_argv(a, s_spec),
         };
 
-        const final_argv = switch (cfg.sandbox_mode) {
+        const sandbox_argv = switch (cfg.sandbox_mode) {
             .bwrap => if (builtin.os.tag == .linux and cfg.sandbox != null)
                 try spec.build_bwrap_argv(a, cfg.sandbox.?, raw_argv)
             else
@@ -118,6 +119,11 @@ pub const Session = struct {
             .none => raw_argv,
         };
 
+        const final_argv = if (cfg.cgroup_path) |path| blk: {
+            const exe = cfg.guard_exe orelse return error.MissingGuardExecutable;
+            const prefix = [_][]const u8{ exe, "__sleeve_cgroup", path };
+            break :blk try std.mem.concat(a, []const u8, &.{ &prefix, sandbox_argv });
+        } else sandbox_argv;
         self.child = try std.process.spawn(io, .{
             .argv = final_argv,
             .cwd = .{ .path = cfg.cwd },
@@ -180,22 +186,27 @@ pub const Session = struct {
     }
 
     pub fn begin(self: *Session) !void {
-        try self.start_protocol();
+        self.start_protocol() catch |err| switch (err) {
+            error.WriteFailed => {},
+            else => return err,
+        };
         self.stderr_thread = try std.Thread.spawn(.{}, stderr_loop, .{self});
         self.stdout_thread = try std.Thread.spawn(.{}, stdout_loop, .{self});
     }
 
     fn start_protocol(self: *Session) !void {
-        self.mu.lockUncancelable(self.io);
-        switch (self.impl) {
-            .claude => |*c| try c.start(&self.out),
-            .codex => |*c| try c.start(&self.out),
-            .grok => |*c| try c.start(&self.out),
-            .pi => |*p| try p.start(&self.out),
-            .antigravity => |*ag| try ag.start(&self.out),
-        }
-        const evs = try self.take_pending_locked();
-        self.mu.unlock(self.io);
+        const evs = blk: {
+            self.mu.lockUncancelable(self.io);
+            defer self.mu.unlock(self.io);
+            switch (self.impl) {
+                .claude => |*c| try c.start(&self.out),
+                .codex => |*c| try c.start(&self.out),
+                .grok => |*c| try c.start(&self.out),
+                .pi => |*p| try p.start(&self.out),
+                .antigravity => |*ag| try ag.start(&self.out),
+            }
+            break :blk try self.take_pending_locked();
+        };
         defer self.gpa.free(evs);
         for (evs) |ev| self.on_event(self.ctx, ev);
     }
@@ -358,6 +369,7 @@ pub const Session = struct {
             const term = if (refused) null else self.child.wait(self.io) catch null;
             const code: ?u8 = if (term) |t| switch (t) {
                 .exited => |c| c,
+                .signal => |sig| if (builtin.os.tag != .windows and sig == .KILL) 137 else 1,
                 else => 1,
             } else null;
             if (self.stderr_thread) |t| {

@@ -253,6 +253,7 @@ pub const ParkReason = enum {
     provision_failed,
     quiesced_without_target,
     removed,
+    oom_rate_exceeded,
 };
 
 pub const ApprovalKind = enum {

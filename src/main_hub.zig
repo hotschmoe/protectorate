@@ -33,6 +33,9 @@ pub fn main(init: std.process.Init) !u8 {
     if (raw_args.len >= 2 and std.mem.eql(u8, raw_args[1], "__guard")) {
         return try s_exec.run_guard_trampoline(init, raw_args[2..]);
     }
+    if (raw_args.len >= 2 and std.mem.eql(u8, raw_args[1], "__sleeve_cgroup")) {
+        return try s_exec.run_sleeve_cgroup(init, raw_args[2..]);
+    }
 
     switch (try commands.dispatch_cli(init, arena)) {
         .exit => |code| return code,

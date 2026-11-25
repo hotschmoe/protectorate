@@ -618,17 +618,6 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   transcript, and Envoy and the owner unrestricted. This is the history side of "Scopes are
   coarse". Right: issue per-sleeve credentials, derive the caller's sleeve from them, and apply the
   reach rule inside these three methods before anything is read.
-- **No OOM watcher and no memory limit for sleeve scopes** (`src/hub/runtime.zig`, `ProcessGuard`
-  built with `memory_max_bytes = null`; `src/core/model.zig`, `Cause.oom` and `oom_window_ms`;
-  `src/sandbox/spec.zig`, `build_systemd_scope_argv`): a sleeve's cgroup has no `memory.max`,
-  nothing reads `memory.events` or `oom_kill`, and only the simulator (`src/dst/oracle.zig`)
-  produces `Cause.oom`; `oom_window_ms` is defined and unused and the systemd scope builder has no
-  caller. A kernel OOM kill reaches the hub as an ordinary exit (classified `crash` from its
-  output text or `killed`), so it counts a strike and a resume like any crash, and a runaway build
-  can take the host's memory with it. SPEC 3.4 describes `sleeve_memory_max`, per-sleeve
-  overrides and a scope OOM guardrail. Right: a configured limit applied to the cgroup (or a
-  scope), a watcher on `memory.events`, and an `oom` exit cause that names the limit and the
-  override key.
 - **An artifact refusal excludes the node** (`src/hub/runtime.zig`, `poll_inflight_jobs`;
   `src/core/apply.zig` `.job_failed`): a job whose artifact is over the cap or fails collection
   commits `job_failed`, and the existing rule then keeps that node out of placement for a while,
@@ -659,9 +648,6 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   `src/hub/http_server.zig`): waiting lease acquisitions are capped at 8 per node and 64 call slots
   in all, but nothing relates that to the HTTP server's 32 connections, so a few nodes' waiters can
   fill them. Right: HTTP on the loop with continuations (Phase 4), so a waiting call holds no thread.
-- **A job failed for an unreadable status keeps running on its node** (`src/hub/runtime.zig`
-  `note_status_failure`): after 5 consecutive non-transient `job_status` errors the hub commits
-  `job_failed` ("job status unreadable") but sends no cancel. Right: cancel it on the node too.
 - **Fleet telemetry is dropped when the event ring is full** (`src/hub/fleet_loop.zig`, 32 events):
   counted in `hub info` as `fleet_telemetry_dropped`; connected and disconnected events wait in the
   bus instead. Right: coalesce telemetry per node (keep only the newest) so nothing is lost.

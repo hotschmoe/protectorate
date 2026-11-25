@@ -159,7 +159,10 @@ writes it; restart the hub after editing). Keys that exist, with their defaults:
   "update_channel": "stable",
   "d9_spawn_limit": 3,
   "d9_approval_timeout_secs": 300,
-  "sleeve_devices": []
+  "sleeve_devices": [],
+  "sleeve_memory_max": 4294967296,
+  "sleeve_memory_max_overrides": {},
+  "scopes": true
 }
 ```
 
@@ -169,6 +172,12 @@ a node on the hub machine, so set it to the hub's LAN address, WireGuard address
 example `["192.0.2.10:7475", "hub.example.lan:7475"]`. A node races all of them, so LAN and VPN
 routes can be listed together. The CLI finds the hub through `listen_addr` in the same file, or
 `--url`.
+
+The Linux installer delegates the memory controller to the hub service and puts the hub in a
+separate subgroup with `DelegateSubgroup=protectorate-hub` (systemd 254 or later). For an existing
+installation, rerun the installer or add `Delegate=memory` and `DelegateSubgroup=protectorate-hub`
+to the unit's `[Service]` drop-in, then restart the hub. A manually started hub needs equivalent
+cgroup v2 delegation for sleeve memory limits.
 
 The drop-in way to add listener flags after install is
 `systemctl --user edit protectorate.service` with an `ExecStart=` reset and a full new line; it

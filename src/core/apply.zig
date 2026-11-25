@@ -180,6 +180,7 @@ pub fn apply(
             const inc = &(sl.inc orelse return);
             if (inc.g != e.g) return;
             inc.last_event_ms = now;
+            sl.oom_notice_pending = false;
         },
         .prompt_acked => |e| {
             const sl = st.sleeves.getPtr(e.sleeve_id) orelse return error.NotFound;
@@ -417,7 +418,18 @@ pub fn apply(
                 return;
             }
 
-            if (!interrupt_exit) {
+            if (e.cause == .oom) {
+                const previous = sl.last_oom_ms;
+                sl.last_oom_ms = now;
+                sl.oom_notice_pending = sl.role != .envoy;
+                if (previous) |at| {
+                    if (now >= at and now -| at <= model.oom_window_ms) {
+                        sl.lifecycle = .parked;
+                        sl.park_reason = .oom_rate_exceeded;
+                        return;
+                    }
+                }
+            } else if (!interrupt_exit) {
                 sl.strike_win.push(now);
                 if (sl.strike_win.count_in_window(now, model.strike_window_ms) >= model.strike_limit) {
                     sl.lifecycle = .parked;

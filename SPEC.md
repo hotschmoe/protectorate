@@ -374,7 +374,8 @@ crash, every incarnation goes to Recovering and resumes natively.
   - tmpfs masks over the hub's state, `~/.ssh` and the owner's own credentials; every
     harness's shared hub login (`<home>/logins/`) and the owner's cargo registry, Go and pub
     caches bound read-write;
-  - a systemd scope per incarnation with a memory limit in bytes from `sleeve_memory_max`
+  - a cgroup v2 scope per incarnation in the hub service's delegated subtree with a memory
+    limit in bytes from `sleeve_memory_max`
     (default 4 GiB), overridden by sleeve name in `sleeve_memory_max_overrides`; swap is
     disabled and build parallelism follows the CPU quota. Configuration is read at hub start
     and applied at launch. A later sleeve with the same name gets the same override.
@@ -383,10 +384,13 @@ crash, every incarnation goes to Recovering and resumes natively.
     reports the limit and tells sleeves needing more to ask Envoy; the owner raises `sleeve_memory_max_overrides`.
     Scope OOM notices and the next non-Envoy prompt name the limit and override key.
     The hub transcript and continuation brief retain the request text without the hub’s
-    prompt preamble, which is still sent to the harness. With scopes
-    disabled no limit is enforced. The scope uses `OOMPolicy=continue` and `cgroup.kill`,
-    plus the orphan reaper. A child the kernel kills for memory does not stop the scope.
-    The guardrail requires a scope OOM kill and a launcher exit by SIGKILL or code 137.
+    prompt preamble, which is still sent to the harness. With `scopes` disabled or a
+    zero limit, the memory cap is off. A hub without a usable delegation warns once
+    and launches without a memory cap. The hub uses `cgroup.kill` and the tagged process
+    scan to fence the incarnation. A child the kernel kills for memory does not stop
+    the scope. The guardrail requires an increase in the scope's `oom_kill` counter and a
+    launcher exit by SIGKILL or code 137. Recovery uses native resume when available.
+    A second OOM exit for the sleeve within one hour parks it.
 
   Superseded (2026-11, Zig rewrite): `src/sandbox/` builds the sandbox as bubblewrap
   (`--unshare-pid`, `--die-with-parent`, the host root read-only, the workspace and git
@@ -395,10 +399,9 @@ crash, every incarnation goes to Recovering and resumes natively.
   re-exec (`__guard`). `--no-sandbox` turns both off. Credential paths under the owner's home
   (`~/.ssh`, `~/.config/gh`, `~/.aws`, other harnesses' directories and similar) are masked; the
   sleeve's own harness directory stays writable and `HOME` is the owner's, so sleeves share the
-  owner's logins and caches. There is no `<home>/logins/` store, no private home, no per-sleeve
-  systemd scope, no memory limit and no OOM watcher (REVISIT). A sleeve's processes are tracked in a
-  fenced cgroup, or by process group and tag where cgroups are not delegated, so stop and remove
-  can kill them. `sleeve_devices` in `config.json` is polled and reported by `doctor` but the
+  owner's logins and caches. The private home, `<home>/logins/` store and scope CPU quota
+  and build-parallelism settings are unimplemented. A sleeve's processes are tracked by process
+  group and tag where cgroups are unavailable. `sleeve_devices` in `config.json` is polled and reported by `doctor` but the
   devices are not bound into the sandbox yet.
 
   Cut from today's sandbox: the network namespace, the egress proxy, cache overlays, nested cgroup
@@ -469,6 +472,8 @@ crash, every incarnation goes to Recovering and resumes natively.
   - each fetched artifact is capped by `job_artifact_max_bytes` on the hub (default 64 MiB),
     and a refused artifact reports the effective cap;
   - cancelling a finished job reports its state and exit code;
+  - after five unreadable job status replies, the hub fails the job and asks its assigned
+    node to cancel it. The hub logs a warning if it cannot send the cancel or read its reply;
   - `hub info` reports the effective artifact cap; a job held for present or unknown presence
     reports the reason in `job show` and once on stderr for `job run --wait`;
   - a job never re-runs by itself;
@@ -1241,9 +1246,9 @@ shortcut is also in `REVISIT.md`.
 - **Outbound HTTPS** (GitHub releases, quota readers) runs the system `curl`. There is no Rust TLS
   stack. Superseded (2026-11, Zig rewrite): it runs `std.http.Client` with the Zig standard library's
   TLS; nothing spawns `curl`.
-- **Sleeve sandbox** is bwrap plus a `systemd-run --user --scope` per incarnation. Superseded
-  (2026-11, Zig rewrite): see 3.4; there is no per-incarnation systemd scope, and the git
-  directory protections in the next sentences are not built: the git directories are bound writable.
+- **Sleeve sandbox** is bwrap plus a cgroup v2 scope per incarnation (see 3.4). Superseded
+  (2026-11, Zig rewrite): the git directory protections below are unimplemented and the git
+  directories are bound writable.
   Git directories of root checkouts and linked worktrees have `hooks/`, `config`,
   `config.worktree` and `info/` bound read-only, including the shared common directory.
   Missing entries are created empty before binding so they cannot be created by a sleeve;
