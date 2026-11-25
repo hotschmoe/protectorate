@@ -82,7 +82,7 @@ const Context = struct {
     replacement: [32]u8,
     allowed: []const [32]u8,
 
-    fn on_hello(context: *anyopaque, key: [32]u8, payload: []const u8, out: []u8) ?@import("../net/fleet_bus.zig").HelloResult {
+    fn on_hello(context: *anyopaque, _: u8, key: [32]u8, payload: []const u8, out: []u8) ?@import("../net/fleet_bus.zig").HelloResult {
         const self: *Context = @ptrCast(@alignCast(context));
         var scratch: [65536]u8 = undefined;
         var fba = std.heap.FixedBufferAllocator.init(&scratch);

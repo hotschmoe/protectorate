@@ -59,12 +59,14 @@ pub fn main(init: std.process.Init) !u8 {
 
             const hs = try hub_http.HttpServer.start(init.gpa, init.io, rt, rt.http_listen);
             defer hs.stop_and_destroy();
+            defer rt.fleet_srv.shutdown();
 
             const proxy_hs = if (rt.proxy_listen) |pl|
                 try hub_http.HttpServer.start_with_options(init.gpa, init.io, rt, pl, rt.trusted_proxies)
             else
                 null;
             defer if (proxy_hs) |ph| ph.stop_and_destroy();
+            defer rt.fleet_srv.shutdown();
 
             var proxy_buf: [192]u8 = undefined;
             const proxy_str = if (proxy_hs) |ph|

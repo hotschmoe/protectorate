@@ -17,6 +17,7 @@ pub fn Channel(comptime IO: type) type {
         tx_result: ?io.Result = null,
         rx_wire: [noise.max_record_wire]u8 = undefined,
         rx_have: usize = 0,
+        rx_progress: u64 = 0,
         rx_need: usize = 2,
         rx_plain: [noise.max_record_plaintext]u8 = undefined,
         rx_plain_pos: usize = 0,
@@ -69,6 +70,11 @@ pub fn Channel(comptime IO: type) type {
             try self.tx_frame.append(pool, payload, control);
         }
 
+        /// True while the peer is held back by this side: an unconsumed frame, or no slab free for the next one.
+        pub fn rx_blocked(self: *const Self) bool {
+            return self.frame_ready or (self.rx_frame_len != null and self.rx_prefix_len == self.rx_prefix.len and self.rx_frame.len == 0);
+        }
+
         pub fn take(self: *Self, pool: *bounded.SlabPool) void {
             tiger.assert(self.frame_ready);
             self.rx_frame.clear(pool);
@@ -116,6 +122,7 @@ pub fn Channel(comptime IO: type) type {
                     .received => |n| {
                         if (n == 0) return error.Closed;
                         self.rx_have += n;
+                        self.rx_progress +%= n;
                     },
                     else => return error.ReceiveFailed,
                 };

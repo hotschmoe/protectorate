@@ -31,6 +31,7 @@ const git = @import("git.zig");
 const fleet = @import("fleet.zig");
 
 const log_mirror_max: u64 = 1024 * 1024;
+const status_failures_max: u8 = 5;
 
 pub const NodeTelemetry = struct {
     inventory: ?msg.Inventory = null,
@@ -75,6 +76,7 @@ pub const JobMeta = struct {
     boot_id: ?[]const u8 = null,
     epoch: ?u64 = null,
     lease_id: ?[]const u8 = null,
+    status_failures: u8 = 0,
 };
 
 const DriverHandle = struct {
@@ -302,10 +304,10 @@ pub const Runtime = struct {
     pub fn close_and_destroy(self: *Runtime) void {
         self.stopping.store(true, .release);
         self.stream_hub.wake_all();
+        self.fleet_srv.shutdown();
         if (self.tick_thread) |t| t.join();
         if (self.quota_thread) |t| t.join();
         if (self.history_thread) |t| t.join();
-        self.fleet_srv.shutdown();
         self.workers_mu.lockUncancelable(self.io);
         while (self.active_workers > 0) self.workers_cond.waitUncancelable(self.io, &self.workers_mu);
         self.workers_mu.unlock(self.io);
@@ -609,6 +611,10 @@ pub const Runtime = struct {
             self.execute_intent(ia, it);
         }
 
+        switch (ev) {
+            .node_approved, .node_removed, .node_renamed => self.fleet_srv.publish_peers(),
+            else => {},
+        }
         self.publish_event_updates(ia, ev);
     }
 
@@ -1472,10 +1478,14 @@ pub const Runtime = struct {
         }
 
         for (pairs.items) |pr| {
-            const info = self.fleet_srv.job_status(a, pr.node_id, pr.id) catch continue;
+            const info = self.fleet_srv.job_status(a, pr.node_id, pr.id) catch |err| {
+                self.note_status_failure(a, pr.node_id, pr.id, err);
+                continue;
+            };
             {
                 self.meta_mu.lockUncancelable(self.io);
                 if (self.job_meta.getPtr(pr.id)) |jm| {
+                    jm.status_failures = 0;
                     const ca = self.core_state.alloc();
                     if (info.boot_id) |bid| jm.boot_id = ca.dupe(u8, bid) catch jm.boot_id;
                     if (info.epoch) |ep| jm.epoch = ep;
@@ -1566,7 +1576,6 @@ pub const Runtime = struct {
             self.reap_driver_exits();
             self.poll_inflight_jobs();
             if (ticks % 5 == 0) {
-                self.fleet_srv.sweep_stale(20_000);
                 self.poll_sleeve_devices();
             }
             if (ticks % 10 == 0) {
@@ -1575,8 +1584,27 @@ pub const Runtime = struct {
         }
     }
 
-    fn hook_allowed_peers(ctx: ?*anyopaque, arena: std.mem.Allocator) []fleet.AllowedPeer {
-        const self: *Runtime = @ptrCast(@alignCast(ctx orelse return &.{}));
+    /// A node that cannot answer a job's status (too large to encode, undecodable) would otherwise be retried forever.
+    fn note_status_failure(self: *Runtime, arena: std.mem.Allocator, node_id: []const u8, job_id: []const u8, err: anyerror) void {
+        switch (err) {
+            error.NodeOffline, error.Timeout, error.Busy => return,
+            else => {},
+        }
+        var failures: u8 = 0;
+        self.meta_mu.lockUncancelable(self.io);
+        if (self.job_meta.getPtr(job_id)) |jm| {
+            jm.status_failures +|= 1;
+            failures = jm.status_failures;
+        }
+        self.meta_mu.unlock(self.io);
+        if (failures != status_failures_max) return;
+        const reason = std.fmt.allocPrint(arena, "job status unreadable: {s}", .{@errorName(err)}) catch "job status unreadable";
+        self.record_hub_event(.node, node_id, job_id, reason, .warn);
+        self.commit(.{ .job_failed = .{ .job_id = job_id, .attempt = 1, .err = reason } }) catch {};
+    }
+
+    fn hook_allowed_peers(ctx: ?*anyopaque, arena: std.mem.Allocator) ?[]fleet.AllowedPeer {
+        const self: *Runtime = @ptrCast(@alignCast(ctx orelse return null));
         self.state_mu.lockUncancelable(self.io);
         defer self.state_mu.unlock(self.io);
 
@@ -1586,10 +1614,10 @@ pub const Runtime = struct {
             const n = e.value_ptr.*;
             if (n.approved and !n.removed) {
                 out.append(arena, .{
-                    .node_id = arena.dupe(u8, n.id) catch continue,
-                    .name = arena.dupe(u8, n.name) catch continue,
+                    .node_id = arena.dupe(u8, n.id) catch return null,
+                    .name = arena.dupe(u8, n.name) catch return null,
                     .pub_key = n.pub_key,
-                }) catch continue;
+                }) catch return null;
             }
         }
         return out.items;
@@ -1822,6 +1850,8 @@ pub const Runtime = struct {
             .restore_error = self.restore_error,
             .clients = try self.list_client_assets(arena),
             .job_artifact_max_bytes = limits.artifact_max_bytes,
+            .fleet_telemetry_dropped = self.fleet_srv.stats().telemetry_dropped,
+            .fleet_refused = self.fleet_srv.stats().refused,
         };
     }
 

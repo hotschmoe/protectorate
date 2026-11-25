@@ -67,6 +67,7 @@ pub fn print_hub_info(arena: std.mem.Allocator, io: std.Io, body: []const u8) !v
         info.started_at_ms.ms,
         info.job_artifact_max_bytes,
     });
+    try print_out(io, "fleet_telemetry_dropped={d}  fleet_refused={d}\n", .{ info.fleet_telemetry_dropped, info.fleet_refused });
     if (info.restore_error) |re| {
         try print_out(io, "WARNING restore_error: {s}\n", .{re});
     }

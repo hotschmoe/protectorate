@@ -249,8 +249,8 @@ is given a token inside its sandbox, so per-sleeve `pc1.` capabilities are not i
   All of that is gone: no headscale, no tsnet, no Go member, no DERP, no tailnet. `go/` is kept
   for reference and is not built. The accepted direction for the network internals (one loop per
   process, fixed slots and pools, simulated IO under VOPR) is
-  [`docs/design/tigerstyle-network.md`](docs/design/tigerstyle-network.md); today's code is
-  thread-per-connection, and that document lists the gaps.
+  [`docs/design/tigerstyle-network.md`](docs/design/tigerstyle-network.md); today the hub's fleet runs on one epoll loop and
+  the rest of the code is still thread-per-connection; that document lists the gaps.
 - **Link:** a node dials the hub's fleet listener (`--fleet-listen`, default `0.0.0.0:7475`).
   - Crypto: `Noise_IK_25519_ChaChaPoly_BLAKE2s`, prologue `protectorate-fleet-v1`, static X25519
     keys on both sides, the node pinning the hub's key from its join token. Records are at most

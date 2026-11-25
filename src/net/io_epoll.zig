@@ -21,6 +21,7 @@ pub const Epoll = struct {
     const Watch = struct { fd: i32, flags: u32, seen: bool = false };
 
     fd: i32,
+    wake_fd: i32,
     pending: [operations_max]Pending = undefined,
     pending_count: usize = 0,
     next_serial: u64 = 0,
@@ -30,12 +31,56 @@ pub const Epoll = struct {
     pub fn init() !Epoll {
         const result = linux.epoll_create1(linux.EPOLL.CLOEXEC);
         if (linux.errno(result) != .SUCCESS) return error.EpollCreateFailed;
-        return .{ .fd = @intCast(result) };
+        const fd: i32 = @intCast(result);
+        errdefer _ = linux.close(fd);
+        const created = linux.eventfd(0, linux.EFD.CLOEXEC | linux.EFD.NONBLOCK);
+        if (linux.errno(created) != .SUCCESS) return error.EpollCreateFailed;
+        const wake_fd: i32 = @intCast(created);
+        errdefer _ = linux.close(wake_fd);
+        var event = linux.epoll_event{ .events = linux.EPOLL.IN, .data = .{ .fd = wake_fd } };
+        if (linux.errno(linux.epoll_ctl(fd, linux.EPOLL.CTL_ADD, wake_fd, &event)) != .SUCCESS) return error.EpollCreateFailed;
+        return .{ .fd = fd, .wake_fd = wake_fd };
     }
 
     pub fn deinit(self: *Epoll) void {
         tiger.assert(self.pending_count == 0);
+        _ = linux.close(self.wake_fd);
         _ = linux.close(self.fd);
+    }
+
+    /// Makes a blocked or future poll return at once. Safe to call from any thread while the backend lives.
+    pub fn wake(self: *const Epoll) void {
+        const one: u64 = 1;
+        _ = linux.write(self.wake_fd, std.mem.asBytes(&one).ptr, @sizeOf(u64));
+    }
+
+    /// Opens a nonblocking listening socket and reports the port it bound.
+    pub fn listen(endpoint: io.Endpoint, backlog: u32) !struct { socket: io.Socket, port: u16 } {
+        const family: u32 = if (endpoint.family == .ipv4) linux.AF.INET else linux.AF.INET6;
+        const created = linux.socket(family, linux.SOCK.STREAM | linux.SOCK.NONBLOCK | linux.SOCK.CLOEXEC, 0);
+        if (linux.errno(created) != .SUCCESS) return error.ListenFailed;
+        const fd: i32 = @intCast(created);
+        errdefer _ = linux.close(fd);
+        const one: c_int = 1;
+        if (linux.errno(linux.setsockopt(fd, linux.SOL.SOCKET, linux.SO.REUSEADDR, std.mem.asBytes(&one).ptr, @sizeOf(c_int))) != .SUCCESS) return error.ListenFailed;
+        var port: u16 = endpoint.port;
+        if (endpoint.family == .ipv4) {
+            const addr = linux.sockaddr.in{ .port = std.mem.nativeToBig(u16, endpoint.port), .addr = @bitCast(endpoint.address[0..4].*) };
+            if (linux.errno(linux.bind(fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr)))) != .SUCCESS) return error.ListenFailed;
+            var bound: linux.sockaddr.in = undefined;
+            var size: linux.socklen_t = @sizeOf(@TypeOf(bound));
+            if (linux.errno(linux.getsockname(fd, @ptrCast(&bound), &size)) != .SUCCESS) return error.ListenFailed;
+            port = std.mem.bigToNative(u16, bound.port);
+        } else {
+            const addr = linux.sockaddr.in6{ .family = linux.AF.INET6, .port = std.mem.nativeToBig(u16, endpoint.port), .flowinfo = 0, .addr = endpoint.address, .scope_id = 0 };
+            if (linux.errno(linux.bind(fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr)))) != .SUCCESS) return error.ListenFailed;
+            var bound: linux.sockaddr.in6 = undefined;
+            var size: linux.socklen_t = @sizeOf(@TypeOf(bound));
+            if (linux.errno(linux.getsockname(fd, @ptrCast(&bound), &size)) != .SUCCESS) return error.ListenFailed;
+            port = std.mem.bigToNative(u16, bound.port);
+        }
+        if (linux.errno(linux.listen(fd, backlog)) != .SUCCESS) return error.ListenFailed;
+        return .{ .socket = socket(fd), .port = port };
     }
 
     pub fn now(_: *const Epoll) u64 {
@@ -271,6 +316,11 @@ pub const Epoll = struct {
         const rc = linux.epoll_wait(self.fd, &events, events.len, @intCast(@min(wait_ms, std.math.maxInt(i32))));
         if (linux.errno(rc) != .SUCCESS and linux.errno(rc) != .INTR) return error.EpollWaitFailed;
         if (linux.errno(rc) == .SUCCESS) for (events[0..rc]) |event| {
+            if (event.data.fd == self.wake_fd) {
+                var drained: u64 = undefined;
+                _ = linux.read(self.wake_fd, std.mem.asBytes(&drained).ptr, @sizeOf(u64));
+                continue;
+            }
             for (self.pending[0..self.pending_count]) |*pending| {
                 if (pending.connect_fd != null and pending.connect_fd.? == event.data.fd) pending.connect_ready = true;
             }

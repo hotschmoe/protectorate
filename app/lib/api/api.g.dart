@@ -3225,6 +3225,8 @@ final class HubInfo {
     this.restoreError,
     this.clients = const <String>[],
     this.jobArtifactMaxBytes = 0,
+    this.fleetTelemetryDropped = 0,
+    this.fleetRefused = 0,
   });
 
   factory HubInfo.fromJson(Object? json) {
@@ -3239,6 +3241,8 @@ final class HubInfo {
       restoreError: _opt(j['restore_error'], (e0) => _string(e0, 'HubInfo.restore_error')),
       clients: _or(j['clients'], const <String>[], (e0) => _list(e0, 'HubInfo.clients', (e0) => _string(e0, 'HubInfo.clients'))),
       jobArtifactMaxBytes: _or(j['job_artifact_max_bytes'], 0, (e0) => _int(e0, 'HubInfo.job_artifact_max_bytes')),
+      fleetTelemetryDropped: _or(j['fleet_telemetry_dropped'], 0, (e0) => _int(e0, 'HubInfo.fleet_telemetry_dropped')),
+      fleetRefused: _or(j['fleet_refused'], 0, (e0) => _int(e0, 'HubInfo.fleet_refused')),
     );
   }
 
@@ -3260,6 +3264,10 @@ final class HubInfo {
 
   final int jobArtifactMaxBytes;
 
+  final int fleetTelemetryDropped;
+
+  final int fleetRefused;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'version': version,
@@ -3270,6 +3278,8 @@ final class HubInfo {
     if (restoreError case final v?) 'restore_error': v,
     'clients': clients,
     'job_artifact_max_bytes': jobArtifactMaxBytes,
+    'fleet_telemetry_dropped': fleetTelemetryDropped,
+    'fleet_refused': fleetRefused,
   };
 }
 

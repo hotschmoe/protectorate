@@ -488,8 +488,8 @@ pub fn dispatch(
         const req = schema.decode_arena(schema.RemoveNodeRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
         const nid = rt.resolve_node_id(a, req.node_id) orelse return err_json(rt.gpa, .not_found, "node not found");
         const old_name = if (try rt.view_node(a, nid)) |nd| nd.name else nid;
-        rt.fleet_srv.disconnect_node(nid);
         rt.commit(.{ .node_removed = .{ .node_id = nid } }) catch |err| return map_commit_err(rt.gpa, err);
+        rt.fleet_srv.disconnect_node(nid);
         return ok_json(rt.gpa, schema.RemovedNode{ .node_id = nid, .name = old_name });
     } else if (std.mem.eql(u8, method, "RenameNode")) {
         const req = schema.decode_arena(schema.RenameNodeRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
@@ -1121,6 +1121,7 @@ fn map_d9_err(gpa: std.mem.Allocator, err: anyerror) !DispatchResult {
 fn map_fleet_err(gpa: std.mem.Allocator, err: anyerror) !DispatchResult {
     return switch (err) {
         error.NodeOffline => err_json(gpa, .unavailable, "node is offline"),
+        error.Busy => err_json(gpa, .unavailable, "fleet is busy"),
         error.RemoteError => err_json(gpa, .invalid, "node rejected request"),
         else => err_json(gpa, .internal, @errorName(err)),
     };

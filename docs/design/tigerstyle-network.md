@@ -1,7 +1,8 @@
 # TigerStyle networking: investigation and rewrite proposal
 
-Status: accepted 2026-11-24 with every recommendation in section 6; in progress. Phases 0 and 1
-are done. Phase 2 has an epoll backend in development; production fleet integration is outstanding.
+Status: accepted 2026-11-24 with every recommendation in section 6; in progress. Phases 0, 1 and 2
+are done: the hub's fleet runs on one epoll loop (src/hub/fleet_loop.zig, docs/srcmd/network.md) and
+its accept and per-peer threads are gone. Phases 3 to 5 are outstanding.
 SPEC.md wins where they differ.
 
 Inputs: a read-only source inventory of src/net, src/hub/{fleet,http_server,stream,runtime}.zig,

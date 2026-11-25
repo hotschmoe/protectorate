@@ -640,10 +640,10 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
 - **The job log mirror re-reads from offset 0** (`src/hub/runtime.zig`, `fetch_log_mirror`):
   every poll pulls the first 1 MiB of a running job's log again in 256 KiB pieces. Right: append
   from the last offset.
-- **Connection refusals are counted but not shown** (`src/net/limits.zig`, `ConnGate`): the fleet
-  and HTTP gates log one `std.debug.print` line per burst; `refused_total` and connection
-  high-water marks are not in `hub info`. Right: expose them with the network budget (Phase 5 of
-  docs/design/tigerstyle-network.md).
+- **HTTP connection refusals are counted but not shown** (`src/net/limits.zig`, `ConnGate`): the
+  HTTP gates log one `std.debug.print` line per burst; their `refused_total` and high-water marks
+  are not in `hub info` (the fleet's `fleet_refused` is). Right: expose them with the network
+  budget (Phase 5 of docs/design/tigerstyle-network.md).
 - **Sleeve git directories are bound writable** (`src/sandbox/`): SPEC 15 describes protecting
   hooks and git config from sleeves; nothing does yet, so a sleeve can install a hook that the
   owner's next git command runs. Right: bind `.git/hooks` and `.git/config` read-only, or point
@@ -660,3 +660,32 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   `model.approval_timeout_ms` (30 min), so the app says "times out in 29m", but `gate_d9` stops
   waiting after `d9_approval_timeout_secs` (default 300 s, at most 600) and commits
   `approval_expired` then. Right: carry the gate's deadline in `approval_requested`.
+
+- **The hub fleet starts only on Linux** (`src/hub/fleet.zig` `start`, `src/hub/fleet_loop.zig`): the
+  loop runs on `src/net/io_epoll.zig`; Windows and macOS hub builds compile but `start` returns
+  `error.FleetUnsupportedPlatform`, so `serve` cannot run there. Right: the kqueue and IOCP backends
+  of Phase 3 behind one comptime selector.
+- **Lease waits can hold every HTTP handler** (`src/hub/fleet_loop.zig` `long_calls_per_peer`,
+  `src/hub/http_server.zig`): waiting lease acquisitions are capped at 8 per node and 64 call slots
+  in all, but nothing relates that to the HTTP server's 32 connections, so a few nodes' waiters can
+  fill them. Right: HTTP on the loop with continuations (Phase 4), so a waiting call holds no thread.
+- **A job failed for an unreadable status keeps running on its node** (`src/hub/runtime.zig`
+  `note_status_failure`): after 5 consecutive non-transient `job_status` errors the hub commits
+  `job_failed` ("job status unreadable") but sends no cancel. Right: cancel it on the node too.
+- **Fleet telemetry is dropped when the event ring is full** (`src/hub/fleet_loop.zig`, 32 events):
+  counted in `hub info` as `fleet_telemetry_dropped`; connected and disconnected events wait in the
+  bus instead. Right: coalesce telemetry per node (keep only the newest) so nothing is lost.
+- **Peer snapshot ordering relies on one publisher** (`src/hub/fleet.zig` `publish_peers`,
+  `publish_mu`): serialized publication stands in for a version number. Right: a version if a
+  second publisher ever appears.
+- **Revoked sessions close quietly** (`src/net/fleet_bus.zig` `set_allowed`): a session whose key
+  left the allowed set closes with no disconnect event, which is right for `node_removed` but would
+  hide any other reason a key leaves. Right: an event with the reason.
+- **Fleet disconnect detail is lost** (`src/hub/fleet_loop.zig`): the disconnect reason is always
+  "closed" (it was the error name), node ids longer than 64 bytes cannot connect, names are cut at
+  128 bytes and a hello is at most 64 KiB. Right: carry the bus's terminal reason.
+- **Fleet reply buffers come from the page allocator** (`src/hub/fleet.zig`): each call maps a
+  1 MiB reply buffer after its slot is admitted (at most 64 at once). Right: the fixed pool of
+  Phase 5, with the network `StaticAllocator` flipped to static.
+- **`fetch_artifact` creates its temporary before checking the node** (`src/hub/fleet.zig`): an
+  offline node costs a create-then-abort of `<dest>.ptpart`. Right: check presence first.

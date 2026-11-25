@@ -22,7 +22,7 @@ pub const allowed_max = 1024;
 
 pub const Hooks = struct {
     context: *anyopaque,
-    hello: *const fn (*anyopaque, [32]u8, []const u8, []u8) ?HelloResult,
+    hello: *const fn (*anyopaque, u8, [32]u8, []const u8, []u8) ?HelloResult,
 };
 
 pub fn FleetBus(comptime IO: type) type {
@@ -55,6 +55,7 @@ pub fn FleetBus(comptime IO: type) type {
             deadline: u64 = 0,
             last_rx: u64 = 0,
             rx_serial: u64 = 0,
+            rx_progress: u64 = 0,
             peer: [32]u8 = undefined,
             identity: [32]u8 = undefined,
             identity_valid: bool = false,
@@ -62,6 +63,7 @@ pub fn FleetBus(comptime IO: type) type {
             rpcs: [bounded.rpc_slots_per_node]Rpc = @splat(.{}),
             connected_event: bool = false,
             disconnected_event: bool = false,
+            quiet_close: bool = false,
 
             fn phase(self: *const Slot) std.meta.Tag(State) {
                 return std.meta.activeTag(self.state);
@@ -87,6 +89,7 @@ pub fn FleetBus(comptime IO: type) type {
         overflow_result: ?io.Result = null,
         overflow_socket: ?io.Socket = null,
         stopping: bool = false,
+        refused: u64 = 0,
         listener_closed: bool = false,
         scratch: [frame.max_payload]u8 = undefined,
         reply: [frame.max_payload]u8 = undefined,
@@ -143,6 +146,10 @@ pub fn FleetBus(comptime IO: type) type {
             for (&self.slots) |*slot| {
                 if (slot.phase() == .handshake) slot.hs.allowed = self.allowed[0..self.allowed_count];
                 if (slot.phase() == .hello and !self.is_allowed(slot.peer)) self.begin_close(slot, false);
+                if (slot.phase() == .established and !self.is_allowed(slot.peer)) {
+                    slot.quiet_close = true;
+                    self.begin_close(slot, false);
+                }
             }
         }
 
@@ -165,6 +172,13 @@ pub fn FleetBus(comptime IO: type) type {
             self.begin_close(slot, false);
         }
 
+        /// Closes the session without a disconnect event, for an owner that already knows it is gone.
+        pub fn disconnect_quiet(self: *Self, peer: Handle) void {
+            const slot = self.find(peer) orelse return;
+            slot.quiet_close = true;
+            self.begin_close(slot, false);
+        }
+
         fn begin_close(self: *Self, slot: *Slot, replaced: bool) void {
             const established = slot.phase() == .established;
             const closing: Closing = switch (slot.state) {
@@ -178,7 +192,7 @@ pub fn FleetBus(comptime IO: type) type {
                 },
                 else => return,
             };
-            if (established and !replaced) slot.disconnected_event = true;
+            if (established and !replaced and !slot.quiet_close) slot.disconnected_event = true;
             slot.connected_event = false;
             for (&slot.rpcs) |*rpc| {
                 if (rpc.id != 0 and rpc.terminal == null) rpc.terminal = if (replaced) .peer_replaced else .peer_gone;
@@ -335,6 +349,7 @@ pub fn FleetBus(comptime IO: type) type {
                             if (reserved) |index| self.slots[index].state = .{ .free = {} };
                             tiger.assert(self.overflow_socket == null);
                             self.overflow_socket = socket;
+                            self.refused +%= 1;
                         }
                     },
                     else => if (reserved) |index| {
@@ -394,9 +409,7 @@ pub fn FleetBus(comptime IO: type) type {
                         }
                     },
                     .hello, .established => {
-                        if (self.backend.now() >= slot.deadline and slot.phase() == .hello or
-                            slot.phase() == .established and self.backend.now() -| slot.last_rx > 20_000)
-                        {
+                        if (self.backend.now() >= slot.deadline and slot.phase() == .hello) {
                             self.begin_close(slot, false);
                             continue;
                         }
@@ -404,6 +417,14 @@ pub fn FleetBus(comptime IO: type) type {
                             self.begin_close(slot, false);
                             continue;
                         };
+                        if (slot.rx_progress != slot.conn.rx_progress or slot.conn.rx_blocked()) {
+                            slot.rx_progress = slot.conn.rx_progress;
+                            slot.last_rx = self.backend.now();
+                        }
+                        if (slot.phase() == .established and self.backend.now() -| slot.last_rx > 20_000) {
+                            self.begin_close(slot, false);
+                            continue;
+                        }
                         if (slot.conn.frame_ready) {
                             if (slot.rx_serial != slot.conn.rx_serial) {
                                 slot.rx_serial = slot.conn.rx_serial;
@@ -419,7 +440,7 @@ pub fn FleetBus(comptime IO: type) type {
                                     continue;
                                 }
                                 slot.conn.read_payload(self.pool, 0, self.scratch[0..hdr.payload_len]);
-                                const hello_result = self.hooks.hello(self.hooks.context, slot.peer, self.scratch[0..hdr.payload_len], &self.reply) orelse {
+                                const hello_result = self.hooks.hello(self.hooks.context, @intCast(index), slot.peer, self.scratch[0..hdr.payload_len], &self.reply) orelse {
                                     self.begin_close(slot, false);
                                     continue;
                                 };
@@ -432,6 +453,7 @@ pub fn FleetBus(comptime IO: type) type {
                                     }
                                 }
                                 if (established >= bounded.fleet_slots - 16 and !replacement) {
+                                    self.refused +%= 1;
                                     self.begin_close(slot, false);
                                     continue;
                                 }
@@ -439,8 +461,8 @@ pub fn FleetBus(comptime IO: type) type {
                                     self.begin_close(slot, false);
                                     continue;
                                 }
-                                slot.conn.queue(self.pool, .response, hdr.id, self.reply[0..hello_result.reply_len], true) catch {
-                                    self.begin_close(slot, false);
+                                slot.conn.queue(self.pool, .response, hdr.id, self.reply[0..hello_result.reply_len], true) catch |err| {
+                                    if (err != error.Busy and err != error.Full) self.begin_close(slot, false);
                                     continue;
                                 };
                                 slot.conn.take(self.pool);
