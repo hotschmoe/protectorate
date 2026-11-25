@@ -30,6 +30,7 @@ const brief = @import("brief.zig");
 const git = @import("git.zig");
 const fleet = @import("fleet.zig");
 const model_catalog = @import("model_catalog.zig");
+const gauge = @import("../net/gauge.zig");
 
 const log_mirror_max: u64 = 1024 * 1024;
 const status_failures_max: u8 = 5;
@@ -190,6 +191,9 @@ pub const Runtime = struct {
     history: h_index.HistoryIndex,
     stream_hub: stream.StreamHub,
     fleet_srv: fleet.FleetServer,
+    pool_source_lock: std.atomic.Mutex = .unlocked,
+    pool_source_context: ?*const anyopaque = null,
+    pool_source: ?*const fn (*const anyopaque, *std.ArrayList(gauge.Reading), std.mem.Allocator) std.mem.Allocator.Error!void = null,
 
     http_listen: []const u8,
     proxy_listen: ?[]const u8 = null,
@@ -2354,9 +2358,36 @@ pub const Runtime = struct {
             .restore_error = self.restore_error,
             .clients = try self.list_client_assets(arena),
             .job_artifact_max_bytes = limits.artifact_max_bytes,
-            .fleet_telemetry_dropped = self.fleet_srv.stats().telemetry_dropped,
-            .fleet_refused = self.fleet_srv.stats().refused,
+            .pools = try self.view_pools(arena),
         };
+    }
+
+    /// The HTTP server hands its pool gauges to hub info through this; detach (null) before freeing them.
+    pub fn set_pool_source(self: *Runtime, context: ?*const anyopaque, source: ?*const fn (*const anyopaque, *std.ArrayList(gauge.Reading), std.mem.Allocator) std.mem.Allocator.Error!void) void {
+        while (!self.pool_source_lock.tryLock()) std.atomic.spinLoopHint();
+        defer self.pool_source_lock.unlock();
+        self.pool_source_context = context;
+        self.pool_source = source;
+    }
+
+    fn view_pools(self: *Runtime, arena: std.mem.Allocator) ![]const schema.PoolStat {
+        var readings: std.ArrayList(gauge.Reading) = .empty;
+        try self.fleet_srv.pools(&readings, arena);
+        {
+            while (!self.pool_source_lock.tryLock()) std.atomic.spinLoopHint();
+            defer self.pool_source_lock.unlock();
+            if (self.pool_source) |source| try source(self.pool_source_context.?, &readings, arena);
+        }
+        const out = try arena.alloc(schema.PoolStat, readings.items.len);
+        for (readings.items, out) |r, *o| o.* = .{
+            .name = r.name,
+            .size = r.size,
+            .reserved = r.reserved,
+            .used = r.used,
+            .high_water = r.high_water,
+            .refused = r.refused,
+        };
+        return out;
     }
 
     /// Return known client bundles staged under `<clients>/<version>/` or `<clients>/current/`.

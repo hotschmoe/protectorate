@@ -80,6 +80,8 @@ pub fn FleetBus(comptime IO: type) type {
         allowed_count: usize = 0,
         hooks: Hooks,
         slots: [bounded.fleet_slots]Slot = @splat(.{}),
+        slot_limit: usize = bounded.fleet_slots,
+        rpc_limit: usize = bounded.rpc_slots_per_node,
         accept_op: io.Operation = undefined,
         accept_result: ?io.Result = null,
         accept_slot: ?usize = null,
@@ -132,6 +134,14 @@ pub fn FleetBus(comptime IO: type) type {
             if (slot.phase() == .free or slot.generation != peer.generation) return null;
             return slot;
         }
+        pub fn slots_in_use(self: *const Self) usize {
+            var count: usize = 0;
+            for (&self.slots) |*slot| {
+                if (slot.phase() != .free and slot.phase() != .accepting) count += 1;
+            }
+            return count;
+        }
+
         pub fn current(self: *Self, wanted: [32]u8) ?Handle {
             for (&self.slots, 0..) |*slot, i| {
                 if (slot.phase() == .established and std.mem.eql(u8, &slot.identity, &wanted)) return self.handle(i);
@@ -242,7 +252,7 @@ pub fn FleetBus(comptime IO: type) type {
         pub fn call(self: *Self, peer: Handle, payload: []const u8, deadline: u64) !u64 {
             const slot = self.find(peer) orelse return error.PeerGone;
             if (slot.phase() != .established) return error.PeerGone;
-            for (&slot.rpcs) |*rpc| {
+            for (slot.rpcs[0..self.rpc_limit]) |*rpc| {
                 if (rpc.id != 0) continue;
                 const id = slot.next_id;
                 if (id > std.math.maxInt(u64) - 2) return error.IdExhausted;
@@ -362,7 +372,7 @@ pub fn FleetBus(comptime IO: type) type {
                 if (self.overflow_op.state == .idle and self.overflow_result == null) self.backend.submit(&self.overflow_op, .{ .close = socket }) catch {};
             } else if (!self.stopping and self.accept_op.state == .idle) {
                 tiger.assert(self.accept_slot == null);
-                for (&self.slots, 0..) |*slot, index| {
+                for (self.slots[0..self.slot_limit], 0..) |*slot, index| {
                     if (slot.phase() != .free) continue;
                     tiger.assert(slot.close_op.state == .idle);
                     slot.generation +%= 1;
@@ -452,7 +462,7 @@ pub fn FleetBus(comptime IO: type) type {
                                         if (std.mem.eql(u8, &other.identity, &hello_result.identity)) replacement = true;
                                     }
                                 }
-                                if (established >= bounded.fleet_slots - 16 and !replacement) {
+                                if (established >= self.slot_limit - self.slot_limit / 4 and !replacement) {
                                     self.refused +%= 1;
                                     self.begin_close(slot, false);
                                     continue;

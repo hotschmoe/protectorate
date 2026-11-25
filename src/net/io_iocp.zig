@@ -58,6 +58,9 @@ extern "ws2_32" fn setsockopt(s: SOCKET, level: c_int, name: c_int, value: *cons
 extern "ws2_32" fn WSAIoctl(s: SOCKET, code: u32, in: ?*const anyopaque, in_len: u32, out: ?*anyopaque, out_len: u32, returned: *u32, overlapped: ?*OVERLAPPED, routine: ?*anyopaque) callconv(.winapi) c_int;
 extern "ws2_32" fn WSARecv(s: SOCKET, buffers: *WSABUF, count: u32, received: ?*u32, flags: *u32, overlapped: *OVERLAPPED, routine: ?*anyopaque) callconv(.winapi) c_int;
 extern "ws2_32" fn WSASend(s: SOCKET, buffers: *WSABUF, count: u32, sent: ?*u32, flags: u32, overlapped: *OVERLAPPED, routine: ?*anyopaque) callconv(.winapi) c_int;
+extern "ws2_32" fn send(s: SOCKET, buf: [*]const u8, len: c_int, flags: c_int) callconv(.winapi) c_int;
+extern "ws2_32" fn shutdown(s: SOCKET, how: c_int) callconv(.winapi) c_int;
+extern "ws2_32" fn getpeername(s: SOCKET, name: *anyopaque, len: *c_int) callconv(.winapi) c_int;
 extern "ws2_32" fn WSAGetLastError() callconv(.winapi) c_int;
 extern "ws2_32" fn WSAGetOverlappedResult(s: SOCKET, overlapped: *OVERLAPPED, transferred: *u32, wait: BOOL, flags: *u32) callconv(.winapi) BOOL;
 extern "kernel32" fn CreateIoCompletionPort(file: HANDLE, port: ?HANDLE, key: usize, threads: u32) callconv(.winapi) ?HANDLE;
@@ -191,6 +194,35 @@ pub const Iocp = struct {
     /// Closes a socket that no operation owns, such as a listener whose bus never started.
     pub fn close_now(handle: io.Socket) void {
         _ = closesocket(descriptor(handle));
+    }
+
+    /// Best-effort short reply on a socket no operation owns; a small write into an empty send buffer does not block.
+    pub fn send_now(handle: io.Socket, bytes: []const u8) void {
+        _ = send(descriptor(handle), bytes.ptr, @intCast(bytes.len), 0);
+    }
+
+    pub fn shutdown_write(handle: io.Socket) void {
+        _ = shutdown(descriptor(handle), 1);
+    }
+
+    pub fn peer(handle: io.Socket) ?io.Endpoint {
+        var storage: [128]u8 align(8) = undefined;
+        var size: c_int = storage.len;
+        if (getpeername(descriptor(handle), &storage, &size) != 0) return null;
+        const family = std.mem.bytesToValue(u16, storage[0..2]);
+        var out: io.Endpoint = .{ .address = @splat(0), .port = 0, .family = .ipv4 };
+        if (family == AF_INET) {
+            const v4: *const windows.ws2_32.sockaddr.in = @ptrCast(&storage);
+            @memcpy(out.address[0..4], std.mem.asBytes(&v4.addr)[0..4]);
+            return out;
+        }
+        if (family == AF_INET6) {
+            const v6: *const windows.ws2_32.sockaddr.in6 = @ptrCast(&storage);
+            out.address = v6.addr;
+            out.family = .ipv6;
+            return out;
+        }
+        return null;
     }
 
     pub fn now(self: *const Iocp) u64 {

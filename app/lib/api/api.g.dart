@@ -3284,8 +3284,7 @@ final class HubInfo {
     this.restoreError,
     this.clients = const <String>[],
     this.jobArtifactMaxBytes = 0,
-    this.fleetTelemetryDropped = 0,
-    this.fleetRefused = 0,
+    this.pools = const <PoolStat>[],
   });
 
   factory HubInfo.fromJson(Object? json) {
@@ -3300,8 +3299,7 @@ final class HubInfo {
       restoreError: _opt(j['restore_error'], (e0) => _string(e0, 'HubInfo.restore_error')),
       clients: _or(j['clients'], const <String>[], (e0) => _list(e0, 'HubInfo.clients', (e0) => _string(e0, 'HubInfo.clients'))),
       jobArtifactMaxBytes: _or(j['job_artifact_max_bytes'], 0, (e0) => _int(e0, 'HubInfo.job_artifact_max_bytes')),
-      fleetTelemetryDropped: _or(j['fleet_telemetry_dropped'], 0, (e0) => _int(e0, 'HubInfo.fleet_telemetry_dropped')),
-      fleetRefused: _or(j['fleet_refused'], 0, (e0) => _int(e0, 'HubInfo.fleet_refused')),
+      pools: _or(j['pools'], const <PoolStat>[], (e0) => _list(e0, 'HubInfo.pools', PoolStat.fromJson)),
     );
   }
 
@@ -3323,9 +3321,7 @@ final class HubInfo {
 
   final int jobArtifactMaxBytes;
 
-  final int fleetTelemetryDropped;
-
-  final int fleetRefused;
+  final List<PoolStat> pools;
 
   Map<String, Object?> toJson() => {
     'name': name,
@@ -3337,8 +3333,7 @@ final class HubInfo {
     if (restoreError case final v?) 'restore_error': v,
     'clients': clients,
     'job_artifact_max_bytes': jobArtifactMaxBytes,
-    'fleet_telemetry_dropped': fleetTelemetryDropped,
-    'fleet_refused': fleetRefused,
+    'pools': [for (final e in pools) e.toJson()],
   };
 }
 
@@ -4564,6 +4559,50 @@ final class PairingCode {
     'name': name,
     'code': code,
     'expires_at_ms': expiresAt.millisecondsSinceEpoch,
+  };
+}
+
+final class PoolStat {
+  const PoolStat({
+    required this.name,
+    required this.size,
+    this.reserved = 0,
+    required this.used,
+    required this.highWater,
+    required this.refused,
+  });
+
+  factory PoolStat.fromJson(Object? json) {
+    final j = _object(json, 'PoolStat');
+    return PoolStat(
+      name: _string(j['name'], 'PoolStat.name'),
+      size: _int(j['size'], 'PoolStat.size'),
+      reserved: _or(j['reserved'], 0, (e0) => _int(e0, 'PoolStat.reserved')),
+      used: _int(j['used'], 'PoolStat.used'),
+      highWater: _int(j['high_water'], 'PoolStat.high_water'),
+      refused: _int(j['refused'], 'PoolStat.refused'),
+    );
+  }
+
+  final String name;
+
+  final int size;
+
+  final int reserved;
+
+  final int used;
+
+  final int highWater;
+
+  final int refused;
+
+  Map<String, Object?> toJson() => {
+    'name': name,
+    'size': size,
+    'reserved': reserved,
+    'used': used,
+    'high_water': highWater,
+    'refused': refused,
   };
 }
 

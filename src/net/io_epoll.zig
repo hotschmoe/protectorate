@@ -88,6 +88,35 @@ pub const Epoll = struct {
         _ = linux.close(descriptor(handle));
     }
 
+    /// Best-effort nonblocking write of a short reply on a socket no operation owns.
+    pub fn send_now(handle: io.Socket, bytes: []const u8) void {
+        _ = linux.sendto(descriptor(handle), bytes.ptr, bytes.len, linux.MSG.NOSIGNAL | linux.MSG.DONTWAIT, null, 0);
+    }
+
+    pub fn shutdown_write(handle: io.Socket) void {
+        _ = linux.shutdown(descriptor(handle), linux.SHUT.WR);
+    }
+
+    pub fn peer(handle: io.Socket) ?io.Endpoint {
+        var storage: [128]u8 align(8) = undefined;
+        var size: linux.socklen_t = storage.len;
+        if (linux.errno(linux.getpeername(descriptor(handle), @ptrCast(&storage), &size)) != .SUCCESS) return null;
+        const family = std.mem.bytesToValue(u16, storage[0..2]);
+        var out: io.Endpoint = .{ .address = @splat(0), .port = 0, .family = .ipv4 };
+        if (family == linux.AF.INET) {
+            const v4: *const linux.sockaddr.in = @ptrCast(&storage);
+            @memcpy(out.address[0..4], std.mem.asBytes(&v4.addr)[0..4]);
+            return out;
+        }
+        if (family == linux.AF.INET6) {
+            const v6: *const linux.sockaddr.in6 = @ptrCast(&storage);
+            out.address = v6.addr;
+            out.family = .ipv6;
+            return out;
+        }
+        return null;
+    }
+
     pub fn now(_: *const Epoll) u64 {
         var ts: linux.timespec = undefined;
         tiger.assert(linux.errno(linux.clock_gettime(.MONOTONIC, &ts)) == .SUCCESS);

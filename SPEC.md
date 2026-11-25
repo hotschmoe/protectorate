@@ -261,8 +261,7 @@ is given a token inside its sandbox, so per-sleeve `pc1.` capabilities are not i
     `config.json`: LAN, WireGuard, DNS names). The node races them with a 150 ms stagger, sends a
     heartbeat every 5 s, redials after 15 s of silence, and a new connection for the same key
     replaces the old one. The hub drops sessions silent for 20 s.
-  - `serve --stdio` on the node runs the same session over stdin and stdout, for a bridge such as
-    ssh; the hub has no stdio acceptor yet.
+  - There is no stdio mode: the node serves over TCP only (`docs/srcmd/network.md`).
 - **Policy:** the hub accepts a handshake only from a key in its approved-node list (journaled
   `node_registered` then `node_approved`; removed nodes drop out). An unknown key fails the
   handshake and is dropped before any frame is read. After `Hello` the hub reads nothing from a
@@ -1204,7 +1203,7 @@ shortcut is also in `REVISIT.md`.
 
   | Group | What it does |
   |---|---|
-  | `src/net/` | Noise IK (`noise.zig`), the frame codec (`frame.zig`), the node protocol messages (`msg.zig`), the TCP and stdio transport with the roaming dial (`transport.zig`) |
+  | `src/net/` | Noise IK (`noise.zig`), the frame codec (`frame.zig`), the node protocol messages (`msg.zig`), the completion IO contract and its epoll, kqueue and IOCP backends (`io.zig`, `backend.zig`), the fleet bus and node link with the roaming dial (`fleet_bus.zig`, `node_link.zig`), the node loop core and the HTTP wire code |
   | `src/journal/` | the append-only journal: length, CRC-32C and payload frames, torn-tail recovery, 64 MiB segments |
   | `src/core/` | the state machines and `apply`, with no I/O, plus the admission authority for node job leases |
   | `src/api/` | API types and the method table in `schema.zig`; `src/tools/apigen.zig` writes the Dart models from it |
@@ -1270,7 +1269,7 @@ shortcut is also in `REVISIT.md`.
   `cmd/member` is our tsnet glue. `member` exposes a unix socket where the Rust side asks it to
   dial `node:7475` (hub), or where accepted tailnet connections are handed over (node).
   Superseded (2026-11, Zig rewrite): there is no Go in the build or at run time; `go/` stays only as
-  reference. The node dials the hub through `src/net/transport.zig`.
+  reference. The node dials the hub through `src/net/node_link.zig`.
 - **Envoy** is a root sleeve in `$PROTECTORATE_HOME/envoy/`. It defaults to Claude Code headless.
   The owner may choose another harness explicitly. Auto selection is refused for Envoy. That
   directory's own `CLAUDE.md` describes the `protectorate` CLI, so no worked-on repo is touched.

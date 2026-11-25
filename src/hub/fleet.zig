@@ -4,6 +4,7 @@ const frame = @import("../net/frame.zig");
 const msg = @import("../net/msg.zig");
 const io_net = @import("../net/io.zig");
 const limits = @import("../net/limits.zig");
+const gauge = @import("../net/gauge.zig");
 const artifact_sink = @import("artifact_sink.zig");
 const fleet_loop = @import("fleet_loop.zig");
 
@@ -166,10 +167,12 @@ pub const FleetServer = struct {
         }
     }
 
-    /// Delivery counters for hub info.
-    pub fn stats(self: *FleetServer) struct { telemetry_dropped: u64, refused: u64 } {
-        const loop = self.loop orelse return .{ .telemetry_dropped = 0, .refused = 0 };
-        return .{ .telemetry_dropped = loop.telemetry_dropped.load(.monotonic), .refused = loop.refused.load(.monotonic) };
+    pub fn pools(self: *FleetServer, out: *std.ArrayList(gauge.Reading), arena: std.mem.Allocator) !void {
+        const loop = self.loop orelse return;
+        try out.append(arena, loop.gauges.slots.read("fleet_slots"));
+        try out.append(arena, loop.gauges.slabs.read("fleet_slabs"));
+        try out.append(arena, loop.gauges.rpc.read("fleet_rpc_slots"));
+        try out.append(arena, loop.gauges.events.read("fleet_events"));
     }
 
     fn call(self: *FleetServer, node_id: []const u8, request: msg.Request, timeout_ms: u32, chunk_cap: usize, long: bool) !Reply {

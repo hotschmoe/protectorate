@@ -5,6 +5,7 @@ const noise = @import("../net/noise.zig");
 const frame = @import("../net/frame.zig");
 const msg = @import("../net/msg.zig");
 const bounded = @import("../net/bounded.zig");
+const Sizes = @import("sizes.zig").Sizes;
 const Sim = @import("io_sim.zig").Sim;
 const Bus = @import("../net/fleet_bus.zig").FleetBus(Sim);
 const Link = @import("../net/node_link.zig").NodeLink(Sim);
@@ -108,25 +109,27 @@ const Context = struct {
     }
 };
 
-pub fn run(gpa: std.mem.Allocator, seed: u64, fleet_long: bool) !void {
+pub fn run(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, sizes: Sizes) !void {
     var trace: Trace = .{};
     active_trace = &trace;
     active_trace_seed = seed;
     defer active_trace = null;
-    run_inner(gpa, seed, fleet_long, &trace) catch |err| {
+    run_inner(gpa, seed, fleet_long, sizes, &trace) catch |err| {
         trace.print(seed);
         return err;
     };
 }
 
-fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace) !void {
+fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, sizes: Sizes, trace: *Trace) !void {
     const node_count: usize = 2 + @as(usize, @intCast(seed % 5));
     var arena: bounded.StaticAllocator = .{ .parent = gpa };
     const allocator = arena.allocator();
     const long_stream = fleet_long or seed % 64 == 0;
+    const call_deadline: u64 = if (sizes.tiny()) 600_000 else 20_000;
+    const first_phase_steps: usize = if (sizes.tiny()) 300_000 else 30_000;
     const chunk = try allocator.alloc(u8, if (long_stream) frame.max_payload else 4096);
     const actual = try allocator.alloc(u8, chunk.len);
-    var pool = try bounded.SlabPool.init(allocator);
+    var pool = try bounded.SlabPool.init_limited(allocator, sizes.slabs);
     const sim = try allocator.create(Sim);
     sim.* = Sim.init(seed);
     const bus = try allocator.create(Bus);
@@ -159,6 +162,8 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
     if (seed % 8 == 0) sim.transfer_max = 1;
     var context: Context = .{ .original = keys[0].public, .replacement = replacement_key.public, .allowed = allowed[0..node_count] };
     try bus.init(sim, &pool, listener, hub_key, allowed[0..node_count], .{ .context = &context, .hello = Context.on_hello });
+    bus.slot_limit = sizes.bus_slots;
+    bus.rpc_limit = sizes.rpc_per_peer;
     var hello_buffers: [6][4096]u8 = undefined;
     var hello_payloads: [6][]const u8 = undefined;
     for (0..node_count) |i| {
@@ -191,7 +196,7 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
     var race_drained = false;
     sim.prng.random().bytes(chunk);
     var step: usize = 0;
-    while (step < 30_000) : (step += 1) {
+    while (step < first_phase_steps) : (step += 1) {
         if (sim.now() >= 500) sim.transfer_max = 4096;
         if (restart_at) |deadline| if (sim.now() >= deadline) {
             sim.restart(endpoint);
@@ -323,7 +328,7 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
                 }
             }
             if (phase != .partition) if (peers[i]) |peer| if (requests[i] == 0) {
-                if (bus.call(peer, if ((i + @as(usize, @intCast(seed % 2))) % 2 == 0) submit else ping, sim.now() + 20_000)) |id| {
+                if (bus.call(peer, if ((i + @as(usize, @intCast(seed % 2))) % 2 == 0) submit else ping, sim.now() + call_deadline)) |id| {
                     if (id % 2 != 1) return error.BadRequestId;
                     requests[i] = id;
                 } else |err| switch (err) {
@@ -369,7 +374,7 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
             } else break;
         }
     }
-    if (step == 30_000) return error.FleetStalled;
+    if (step == first_phase_steps) return error.FleetStalled;
     if (seed % 8 == 0 and (!dial_raced or !race_drained)) return error.DialRaceNotExercised;
     if (timer.count != 1 or timer.result == null or timer.result.? != .timed_out) return error.BadTimerCompletion;
     if (cancelled_timer.count != 1 or cancelled_timer.result == null) return error.BadCancellation;
@@ -379,7 +384,7 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
     }
     const old_peer = peers[0].?;
     try bus.set_allowed(allowed[0 .. node_count + 1]);
-    var replaced_calls: [bounded.rpc_slots_per_node]u64 = @splat(0);
+    const replaced_n = sizes.rpc_per_peer;    var replaced_calls: [bounded.rpc_slots_per_node]u64 = @splat(0);
     var replaced_done: [bounded.rpc_slots_per_node]bool = @splat(false);
     var calls_started: usize = 0;
     var calls_done: usize = 0;
@@ -416,7 +421,7 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
                             if (replaced_done[i] or terminal.result != expected) return error.BadReplacement;
                             replaced_done[i] = true;
                             calls_done += 1;
-                            replacement_terminal = calls_done == replaced_calls.len;
+                            replacement_terminal = calls_done == replaced_n;
                             found = true;
                             break;
                         };
@@ -453,18 +458,18 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
                 if (sent) duplicate.consume(event);
             },
         };
-        if (calls_started < replaced_calls.len) {
+        if (calls_started < replaced_n) {
             const deadline = sim.now() + if (calls_started == 0) @as(u64, 3_000) else 20_000;
             if (bus.call(old_peer, ping, deadline)) |id| {
                 replaced_calls[calls_started] = id;
                 calls_started += 1;
-                if (calls_started == replaced_calls.len) capacity_check_at = sim.now() + 100;
+                if (calls_started == replaced_n) capacity_check_at = sim.now() + 100;
             } else |err| switch (err) {
                 error.Busy, error.Full => {},
                 else => return err,
             }
         }
-        if (calls_started == replaced_calls.len and !capacity_checked and sim.now() >= capacity_check_at) {
+        if (calls_started == replaced_n and !capacity_checked and sim.now() >= capacity_check_at) {
             if (bus.call(old_peer, ping, sim.now() + 10_000)) |_| return error.RpcCapacityExceeded else |err| {
                 if (err != error.Busy) return err;
             }
@@ -814,7 +819,7 @@ fn run_inner(gpa: std.mem.Allocator, seed: u64, fleet_long: bool, trace: *Trace)
     if (step == 20_000) return error.ShutdownStalled;
     sim.assert_drained();
     pool.assert_conservation();
-    tiger.assert(pool.free_count == bounded.slab_count);
+    tiger.assert(pool.free_count == pool.limit);
     arena.begin_deinit();
     for (links[0..node_count]) |link| {
         link.deinit();

@@ -18,7 +18,7 @@ DART := $(or $(DART),dart)
 WEB_DIR ?= app/build/web
 ZIG_FLAGS := -Doptimize=safe -Dversion=$(VERSION) -Dgit-commit=$(GIT_COMMIT) -Dweb-dir=$(WEB_DIR)
 
-.PHONY: all build release-all check-levels gen check-gen dst web app-check e2e app-e2e check version \
+.PHONY: all build release-all check-levels gen check-gen dst bg-check web app-check e2e app-e2e check version \
 	release-assets release-snapshot release-publish
 
 version:
@@ -43,6 +43,15 @@ check-gen:
 
 dst:
 	$(ZIG) build -j4 -Doptimize=safe dst -- --seeds 300 --steps 1500
+
+# The background major gate: long VOPR runs and the network simulators with tiny pools. Never part of make check.
+bg-check:
+	$(ZIG) build -j4 -Doptimize=safe dst -- --seeds 5000 --steps 1500
+	$(ZIG) build -j4 -Doptimize=safe dst -- --net-only --seeds 1000 --fleet-long
+	$(ZIG) build -j4 -Doptimize=safe dst -- --net-only --seeds 2000 --slabs 19 --bus-slots 8 --rpc-slots 1 --request-slots 4
+	$(ZIG) build -j4 -Doptimize=safe dst -- --net-only --seeds 2000 --slabs 24 --bus-slots 12 --rpc-slots 4 --request-slots 6
+	$(ZIG) build -j4 -Doptimize=safe dst -- --net-only --seeds 1000 --fleet-long --slabs 19 --bus-slots 8 --rpc-slots 2 --request-slots 4
+	@echo "bg-check: all steps passed"
 
 web:
 	cd app && $(FLUTTER) build web --release --no-web-resources-cdn $(APP_VERSION_FLAGS)

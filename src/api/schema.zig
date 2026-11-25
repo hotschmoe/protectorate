@@ -1032,8 +1032,16 @@ pub const HubInfo = struct {
     restore_error: ?[]const u8 = null,
     clients: []const []const u8 = &.{},
     job_artifact_max_bytes: u64 = 0,
-    fleet_telemetry_dropped: u64 = 0,
-    fleet_refused: u64 = 0,
+    pools: []const PoolStat = &.{},
+};
+
+pub const PoolStat = struct {
+    name: []const u8,
+    size: u64,
+    reserved: u64 = 0,
+    used: u64,
+    high_water: u64,
+    refused: u64,
 };
 
 pub const Workspace = struct {
@@ -1974,6 +1982,7 @@ pub const wire_records = .{
     PairDeviceRequest,
     PairedDevice,
     PairingCode,
+    PoolStat,
     PendingNode,
     Presence,
     QueuedMessage,

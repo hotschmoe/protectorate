@@ -9,14 +9,13 @@ const runtime = @import("runtime.zig");
 const api_dispatch = @import("api_dispatch.zig");
 const stream = @import("stream.zig");
 const netio = @import("../net/io.zig");
-const epoll = @import("../net/io_epoll.zig");
+const Backend = @import("../net/backend.zig").Backend;
 const bounded = @import("../net/bounded.zig");
+const gauge = @import("../net/gauge.zig");
+const TickGuard = @import("../net/tick_guard.zig").TickGuard;
 const limits = @import("../net/limits.zig");
 const wire = @import("../net/http_wire.zig");
 const ws_out = @import("../net/ws_out.zig");
-
-const supported = builtin.os.tag == .linux;
-const linux = std.os.linux;
 
 pub const listeners_max = 2;
 pub const slots_per_listener = limits.http_conns_max;
@@ -120,6 +119,7 @@ fn Pool(comptime worker_count: usize, comptime queue_len: usize) type {
         idle: usize = 0,
         stopping: bool = false,
         strict: bool = false,
+        gauge: gauge.Gauge = .init(worker_count + queue_len, 0),
         threads: [worker_count]?std.Thread = @splat(null),
 
         fn start(self: *Self, server: *HttpServer) !void {
@@ -132,8 +132,12 @@ fn Pool(comptime worker_count: usize, comptime queue_len: usize) type {
             self.mu.lockUncancelable(io);
             defer self.mu.unlock(io);
             if (self.stopping) return false;
-            if (self.strict and self.queue.len >= self.idle) return false;
-            self.queue.push(job) catch return false;
+            if ((self.strict and self.queue.len >= self.idle) or self.queue.len == queue_len) {
+                self.gauge.refuse();
+                return false;
+            }
+            self.queue.push(job) catch unreachable;
+            self.gauge.set(self.queue.len + worker_count - @min(self.idle, worker_count));
             self.cond.signal(io);
             return true;
         }
@@ -268,6 +272,13 @@ const Slot = struct {
     ws_in: WsIn = .{},
 };
 
+const Gauges = struct {
+    slots: gauge.Gauge = .init(slot_count, 0),
+    large: gauge.Gauge = .init(body_large_count, 0),
+    transfers: gauge.Gauge = .init(transfer_count, 0),
+    lagged: gauge.Gauge = .init(slot_count, 0),
+};
+
 const Gunzip = struct {
     input: std.Io.Reader,
     decoder: std.compress.flate.Decompress,
@@ -285,7 +296,7 @@ pub const HttpServer = struct {
     io: std.Io,
     rt: *runtime.Runtime,
     static: *bounded.StaticAllocator,
-    backend: *epoll.Epoll,
+    backend: *Backend,
     listeners: [listeners_max]Listener = undefined,
     listener_count: usize = 0,
     proxies: []std.Io.net.IpAddress,
@@ -299,7 +310,8 @@ pub const HttpServer = struct {
     gunzip_used: [gunzip_count]bool = @splat(false),
 
     now: u64 = 0,
-    refused: u64 = 0,
+    gauges: Gauges = .{},
+    guard: TickGuard = .{ .name = "http" },
     stop_requested: std.atomic.Value(bool) = .init(false),
     stopping: std.atomic.Value(bool) = .init(false),
     abandoned: bool = false,
@@ -312,13 +324,12 @@ pub const HttpServer = struct {
     cmu: std.Io.Mutex = .init,
     completions: bounded.Ring(Completion, completions_max) = .{},
 
-    pub const reserved_bytes: usize = @sizeOf(HttpServer) + @sizeOf(epoll.Epoll) + @sizeOf(bounded.StaticAllocator) +
+    pub const reserved_bytes: usize = @sizeOf(HttpServer) + @sizeOf(Backend) + @sizeOf(bounded.StaticAllocator) +
         slot_count * (@sizeOf(Slot) + rbuf_bytes + sbuf_bytes + body_small_bytes) +
         body_large_count * body_large_bytes + transfer_count * transfer_bytes + gunzip_count * @sizeOf(Gunzip) +
         stream.ring_bytes;
 
     pub fn start(gpa: std.mem.Allocator, io: std.Io, rt: *runtime.Runtime, config: Config) !*HttpServer {
-        if (comptime !supported) return error.HttpUnsupportedPlatform;
         const static = try gpa.create(bounded.StaticAllocator);
         errdefer gpa.destroy(static);
         static.* = .{ .parent = gpa };
@@ -326,9 +337,9 @@ pub const HttpServer = struct {
 
         const self = try a.create(HttpServer);
         errdefer a.destroy(self);
-        const backend = try a.create(epoll.Epoll);
+        const backend = try a.create(Backend);
         errdefer a.destroy(backend);
-        backend.* = try epoll.Epoll.init();
+        backend.* = try Backend.init();
         errdefer backend.deinit();
         const slots = try a.alloc(Slot, slot_count);
         errdefer a.free(slots);
@@ -374,7 +385,7 @@ pub const HttpServer = struct {
 
         const addresses = [listeners_max]?[]const u8{ config.primary, config.proxy };
         errdefer for (self.listeners[0..self.listener_count]) |l| {
-            _ = linux.close(fd_of(l.socket));
+            Backend.close_now(l.socket);
             a.free(l.host);
         };
         for (addresses, 0..) |maybe, index| {
@@ -389,8 +400,8 @@ pub const HttpServer = struct {
                 },
                 .ip6 => |v6| .{ .address = v6.bytes, .port = v6.port, .family = .ipv6 },
             };
-            const bound = try epoll.Epoll.listen(endpoint, backlog);
-            errdefer _ = linux.close(fd_of(bound.socket));
+            const bound = try Backend.listen(endpoint, backlog);
+            errdefer Backend.close_now(bound.socket);
             const dup_host = try a.dupe(u8, hp.host);
             const l = &self.listeners[self.listener_count];
             l.* = .{
@@ -407,9 +418,10 @@ pub const HttpServer = struct {
             self.listener_count += 1;
         }
 
-        const wake = linux.dup(backend.wake_fd);
-        if (linux.errno(wake) != .SUCCESS) return error.WakeDescriptorFailed;
-        rt.stream_hub.set_wake_fd(@intCast(wake));
+        rt.stream_hub.set_waker(backend, wake_backend);
+        errdefer rt.stream_hub.set_waker(null, null);
+        rt.set_pool_source(self, read_pools);
+        errdefer rt.set_pool_source(null, null);
         tiger.assert(reserved_bytes <= 64 * 1024 * 1024);
         static.freeze();
 
@@ -444,6 +456,8 @@ pub const HttpServer = struct {
         self.backend.wake();
         if (self.loop_thread) |t| t.join();
         if (self.abandoned) return true;
+        self.rt.stream_hub.set_waker(null, null);
+        self.rt.set_pool_source(null, null);
         self.regular.stop(self.io);
         self.long.stop(self.io);
         self.reader.stop(self.io);
@@ -483,7 +497,7 @@ pub const HttpServer = struct {
                 self.abandon();
                 return;
             }
-            self.backend.poll(bounded.tick_ms) catch |err| std.debug.panic("http loop: epoll failed: {s}", .{@errorName(err)});
+            self.backend.poll(bounded.tick_ms) catch |err| std.debug.panic("http loop: poll failed: {s}", .{@errorName(err)});
         }
         tiger.assert(self.backend.pending_count == 0);
     }
@@ -509,12 +523,35 @@ pub const HttpServer = struct {
     }
 
     fn turn(self: *HttpServer, stopping: bool) void {
+        self.guard.begin(self.backend);
         self.take_completions();
+        self.guard.mark(self.backend, "completions");
         for (self.listeners[0..self.listener_count]) |*l| self.service_listener(l, stopping);
+        self.guard.mark(self.backend, "listeners");
+        var open: usize = 0;
+        var lagging: usize = 0;
         for (self.slots) |*slot| {
             if (stopping and slot.mode != .free and slot.mode != .closing) self.begin_close(slot);
+            const mode = slot.mode;
             self.service(slot);
+            self.guard.mark(self.backend, @tagName(mode));
+            if (slot.mode != .free) open += 1;
+            if (slot.mode == .ws and (slot.ws_stage == .resync_wait or slot.ws_stage == .resync_ready)) lagging += 1;
         }
+        self.gauges.slots.set(open);
+        self.gauges.lagged.set(lagging);
+        self.guard.end(self.backend, "gauges");
+    }
+
+    fn read_pools(context: *const anyopaque, out: *std.ArrayList(gauge.Reading), arena: std.mem.Allocator) std.mem.Allocator.Error!void {
+        const self: *const HttpServer = @ptrCast(@alignCast(context));
+        try out.append(arena, self.gauges.slots.read("http_slots"));
+        try out.append(arena, self.gauges.large.read("http_large_bodies"));
+        try out.append(arena, self.gauges.transfers.read("http_transfers"));
+        try out.append(arena, self.regular.gauge.read("http_workers_regular"));
+        try out.append(arena, self.long.gauge.read("http_workers_long"));
+        try out.append(arena, self.reader.gauge.read("http_workers_reader"));
+        try out.append(arena, self.gauges.lagged.read("stream_lagged_readers"));
     }
 
     fn service_listener(self: *HttpServer, l: *Listener, stopping: bool) void {
@@ -522,7 +559,7 @@ pub const HttpServer = struct {
             if (l.accepting) {
                 self.backend.cancel(&l.op);
             } else if (!l.closed) {
-                _ = linux.close(fd_of(l.socket));
+                Backend.close_now(l.socket);
                 l.closed = true;
             }
             return;
@@ -549,18 +586,17 @@ pub const HttpServer = struct {
     }
 
     fn admit(self: *HttpServer, l: *Listener, sock: netio.Socket) void {
-        const fd = fd_of(sock);
         if (self.stopping.load(.acquire)) {
-            _ = linux.close(fd);
+            Backend.close_now(sock);
             return;
         }
         if (l.filtered and self.proxies.len > 0) {
-            const peer = peer_address(fd) orelse {
-                _ = linux.close(fd);
+            const peer = peer_address(sock) orelse {
+                Backend.close_now(sock);
                 return;
             };
             if (!ip_matches_any(peer, self.proxies)) {
-                _ = linux.close(fd);
+                Backend.close_now(sock);
                 return;
             }
         }
@@ -571,10 +607,10 @@ pub const HttpServer = struct {
                 l.refusing = true;
                 std.debug.print("http: {d} connections open on listener {d}, answering 503 to new ones\n", .{ slots_per_listener, l.index });
             }
-            self.refused += 1;
-            _ = linux.sendto(fd, busy_response.ptr, busy_response.len, linux.MSG.NOSIGNAL | linux.MSG.DONTWAIT, null, 0);
-            _ = linux.shutdown(fd, linux.SHUT.WR);
-            _ = linux.close(fd);
+            self.gauges.slots.refuse();
+            Backend.send_now(sock, busy_response);
+            Backend.shutdown_write(sock);
+            Backend.close_now(sock);
             return;
         };
         l.refusing = false;
@@ -640,7 +676,7 @@ pub const HttpServer = struct {
         if (!slot.sock_open) return self.reset(slot, .free);
         self.release_resources(slot);
         self.backend.submit(&slot.close_op, .{ .close = slot.sock }) catch {
-            _ = linux.close(fd_of(slot.sock));
+            Backend.close_now(slot.sock);
             slot.sock_open = false;
             return self.reset(slot, .free);
         };
@@ -658,6 +694,7 @@ pub const HttpServer = struct {
         if (slot.body_large) |index| {
             self.large_used[index] = false;
             slot.body_large = null;
+            self.gauges.large.set(count_used(&self.large_used));
         }
         slot.body = &.{};
         slot.body_len = 0;
@@ -674,7 +711,10 @@ pub const HttpServer = struct {
         if (slot.file) |file| file.close(self.io);
         slot.file = null;
         slot.file_reading = false;
-        if (slot.transfer) |index| self.transfer_used[index] = false;
+        if (slot.transfer) |index| {
+            self.transfer_used[index] = false;
+            self.gauges.transfers.set(count_used(&self.transfer_used));
+        }
         slot.transfer = null;
         slot.src = .none;
     }
@@ -921,8 +961,10 @@ pub const HttpServer = struct {
         for (&self.transfer_used, 0..) |*used, i| {
             if (used.*) continue;
             used.* = true;
+            self.gauges.transfers.set(count_used(&self.transfer_used));
             return @intCast(i);
         }
+        self.gauges.transfers.refuse();
         return null;
     }
 
@@ -945,7 +987,7 @@ pub const HttpServer = struct {
         self.release_source(slot);
         slot.requests_done += 1;
         if (slot.close_after) {
-            _ = linux.shutdown(fd_of(slot.sock), linux.SHUT.WR);
+            Backend.shutdown_write(slot.sock);
             slot.mode = .draining;
             slot.rlen = 0;
             slot.drained = 0;
@@ -997,8 +1039,10 @@ pub const HttpServer = struct {
             used.* = true;
             slot.body_large = @intCast(i);
             slot.body = self.large[i];
+            self.gauges.large.set(count_used(&self.large_used));
             return true;
         }
+        self.gauges.large.refuse();
         return false;
     }
 
@@ -1280,6 +1324,7 @@ pub const HttpServer = struct {
 
     fn start_resync(self: *HttpServer, slot: *Slot) void {
         slot.ws_resyncs += 1;
+        self.gauges.lagged.refuse();
         if (slot.ws_resyncs > resyncs_max) return self.begin_close(slot);
         slot.out.record = null;
         slot.ws_stage = .resync_wait;
@@ -1419,7 +1464,10 @@ pub const HttpServer = struct {
                     switch (step) {
                         .idle => return,
                         .resync => return self.start_resync(slot),
-                        .abort => return self.begin_close(slot),
+                        .abort => {
+                            self.gauges.lagged.refuse();
+                            return self.begin_close(slot);
+                        },
                         else => return self.send_staged(slot, step),
                     }
                 },
@@ -1456,8 +1504,17 @@ fn query_param(query: []const u8, key: []const u8) ?[]const u8 {
     return null;
 }
 
-fn fd_of(sock: netio.Socket) i32 {
-    return @intCast(@backingInt(sock));
+fn count_used(used: []const bool) usize {
+    var count: usize = 0;
+    for (used) |u| {
+        if (u) count += 1;
+    }
+    return count;
+}
+
+fn wake_backend(context: *anyopaque) void {
+    const backend: *Backend = @ptrCast(@alignCast(context));
+    backend.wake();
 }
 
 fn origin_matches_host(origin: []const u8, host: ?[]const u8) bool {
@@ -1473,20 +1530,12 @@ fn origin_matches_host(origin: []const u8, host: ?[]const u8) bool {
     return std.ascii.eqlIgnoreCase(authority, host orelse return false);
 }
 
-fn peer_address(fd: i32) ?std.Io.net.IpAddress {
-    var storage: [128]u8 align(8) = undefined;
-    var size: linux.socklen_t = storage.len;
-    if (linux.errno(linux.getpeername(fd, @ptrCast(&storage), &size)) != .SUCCESS) return null;
-    const family = std.mem.bytesToValue(u16, storage[0..2]);
-    if (family == linux.AF.INET) {
-        const v4: *const linux.sockaddr.in = @ptrCast(&storage);
-        return .{ .ip4 = .{ .bytes = std.mem.asBytes(&v4.addr)[0..4].*, .port = 0 } };
-    }
-    if (family == linux.AF.INET6) {
-        const v6: *const linux.sockaddr.in6 = @ptrCast(&storage);
-        return .{ .ip6 = .{ .bytes = v6.addr, .port = 0 } };
-    }
-    return null;
+fn peer_address(sock: netio.Socket) ?std.Io.net.IpAddress {
+    const endpoint = Backend.peer(sock) orelse return null;
+    return switch (endpoint.family) {
+        .ipv4 => .{ .ip4 = .{ .bytes = endpoint.address[0..4].*, .port = 0 } },
+        .ipv6 => .{ .ip6 = .{ .bytes = endpoint.address, .port = 0 } },
+    };
 }
 
 fn normalize_ip4(addr: std.Io.net.IpAddress) ?[4]u8 {

@@ -623,26 +623,31 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
 - **The job log mirror re-reads from offset 0** (`src/hub/runtime.zig`, `fetch_log_mirror`):
   every poll pulls the first 1 MiB of a running job's log again in 256 KiB pieces. Right: append
   from the last offset.
-- **HTTP refusals are counted but not shown** (`src/hub/http_server.zig`): the HTTP loop counts
-  connections refused past its 32 slots per listener, but the counter is not in `hub info` (the
-  fleet's `fleet_refused` is). Right: expose it with the network budget (Phase 5 of
-  docs/design/tigerstyle-network.md).
 - **Git sleeve mounts require bubblewrap** (`src/sandbox/`): Landlock grants write access to
   whole trees and cannot exclude protected Git paths from the workspace grant. A Git checkout
   is refused when Landlock is the only Linux sandbox available.
-- **The HTTP loop is epoll only** (`src/hub/http_server.zig` `start`): the fleet loop and the node use the
-  comptime selector in `src/net/backend.zig` (epoll, kqueue, IOCP), but the HTTP loop imports epoll
-  directly, so Windows and macOS hub builds compile and the fleet starts there while `start` returns
-  `error.HttpUnsupportedPlatform` and `serve` cannot run. Right: Phase 5 moves the HTTP loop onto
-  `backend.zig`.
 - **kqueue has never run; Windows hub only over loopback** (`src/net/backend.zig`,
-  `src/net/io_kqueue.zig`, `src/net/io_iocp.zig`): the backend selector lets the hub fleet start on
-  macOS and Windows, but kqueue is compile-checked only (no Mac here), the Windows hub ran only with a
-  loopback node on officewin, and the arm64 Windows node only compiles. IOCP has no
+  `src/net/io_kqueue.zig`, `src/net/io_iocp.zig`): all three loops (fleet, node, HTTP) use the
+  selector, so the hub starts on macOS and Windows, but kqueue is compile-checked only (no Mac here),
+  the Windows hub has run only over loopback on officewin (HTTP, an event stream and a Linux node
+  through ssh forwards, as a scratch hub), and the arm64 Windows build only compiles. IOCP has no
   `TCP_USER_TIMEOUT`, so the 15 s receive timeout is what ends a dead link there. Right: a real run on
   a Mac and on the arm64 laptop.
+- **Hub info pool gauges are sampled** (`src/net/gauge.zig`, `src/hub/fleet_loop.zig`): the fleet
+  slot count is read once per turn, so a peak shorter than a turn is missed; `fleet_rpc_slots` is the
+  64-entry call table, not the 16 RPC slots each peer has inside the bus (a full peer shows as
+  `Busy`, not as a count); the node reports no pool metrics. Right: count per peer in the bus and
+  give the node a status line if a fleet ever needs it.
+- **Tiny-pool simulations scale their time budgets** (`src/dst/sim_fleet.zig`): with fewer slabs the
+  first phase needs far more simulated time (a 1 MiB frame at a time through 19 slabs), so a tiny run
+  allows 600 s calls and ten times the steps. Four bus slots cannot hold the simulator's six nodes
+  plus its rogue links, so the smallest bus used is 8. Right: size each phase from the pool instead.
+- **Worker-built buffers stay on the general allocator** (`src/hub/http_server.zig`, `src/hub/fleet.zig`):
+  reply bodies, stream snapshots and call buffers are built by worker threads on the general or page
+  allocator and only freed by the loop; the network pools themselves are static. Right: a fixed pool
+  of reply buffers when the runtime's JSON gets a size limit (decision 1 of the design).
 - **Fleet telemetry is dropped when the event ring is full** (`src/hub/fleet_loop.zig`, 32 events):
-  counted in `hub info` as `fleet_telemetry_dropped`; connected and disconnected events wait in the
+  counted in `hub info` (the `fleet_events` pool's refused count); connected and disconnected events wait in the
   bus instead. Right: coalesce telemetry per node (keep only the newest) so nothing is lost.
 - **Peer snapshot ordering relies on one publisher** (`src/hub/fleet.zig` `publish_peers`,
   `publish_mu`): serialized publication stands in for a version number. Right: a version if a

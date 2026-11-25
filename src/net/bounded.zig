@@ -115,35 +115,52 @@ pub const SlabPool = struct {
     next: [slab_count]Index = undefined,
     refs: [slab_count]u16 = @splat(0),
     head: Index = 0,
+    limit: usize = slab_count,
     free_count: usize = slab_count,
+    high_water: usize = 0,
+    refused: u64 = 0,
+
+    pub const limit_min = control_reserve + 2 * frame_slab_limit + 1;
 
     pub fn init(allocator: std.mem.Allocator) !SlabPool {
-        const memory = allocator.rawAlloc(slab_count * slab_bytes, .of(u8), @returnAddress()) orelse return error.OutOfMemory;
-        var self: SlabPool = .{ .data = memory[0 .. slab_count * slab_bytes] };
-        for (&self.next, 0..) |*next, i| next.* = if (i + 1 == slab_count) none else @intCast(i + 1);
-        tiger.assert(self.data.len == slab_count * slab_bytes);
+        return init_limited(allocator, slab_count);
+    }
+
+    /// A pool of fewer slabs than production for simulation runs that must see it run out.
+    pub fn init_limited(allocator: std.mem.Allocator, limit: usize) !SlabPool {
+        tiger.assert(limit <= slab_count and limit >= limit_min);
+        const memory = allocator.rawAlloc(limit * slab_bytes, .of(u8), @returnAddress()) orelse return error.OutOfMemory;
+        var self: SlabPool = .{ .data = memory[0 .. limit * slab_bytes], .limit = limit, .free_count = limit };
+        for (self.next[0..limit], 0..) |*next, i| next.* = if (i + 1 == limit) none else @intCast(i + 1);
         return self;
     }
 
     pub fn deinit(self: *SlabPool, allocator: std.mem.Allocator) void {
-        tiger.assert(self.free_count == slab_count);
+        tiger.assert(self.free_count == self.limit);
         allocator.rawFree(self.data, .of(u8), @returnAddress());
         self.* = undefined;
     }
 
     pub fn acquire(self: *SlabPool, control: bool) ?Index {
-        if (self.free_count == 0 or (!control and self.free_count <= control_reserve)) return null;
+        if (self.free_count == 0 or (!control and self.free_count <= control_reserve)) {
+            self.refused +%= 1;
+            return null;
+        }
         const index = self.head;
         tiger.assert(index < slab_count and self.refs[index] == 0);
         self.head = self.next[index];
         self.refs[index] = 1;
         self.free_count -= 1;
+        self.high_water = @max(self.high_water, self.limit - self.free_count);
         return index;
     }
 
     pub fn acquire_send(self: *SlabPool, control: bool) ?Index {
         const reserve: usize = if (control) 1 else control_reserve + frame_slab_limit;
-        if (self.free_count <= reserve) return null;
+        if (self.free_count <= reserve) {
+            self.refused +%= 1;
+            return null;
+        }
         return self.acquire(true);
     }
 
@@ -170,7 +187,7 @@ pub const SlabPool = struct {
 
     pub fn assert_conservation(self: *const SlabPool) void {
         var free: usize = 0;
-        for (self.refs) |refs| if (refs == 0) {
+        for (self.refs[0..self.limit]) |refs| if (refs == 0) {
             free += 1;
         };
         tiger.assert(free == self.free_count);

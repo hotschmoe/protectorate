@@ -7,6 +7,7 @@ const msg = @import("msg.zig");
 const bounded = @import("bounded.zig");
 const limits = @import("limits.zig");
 const node_link = @import("node_link.zig");
+const TickGuard = @import("tick_guard.zig").TickGuard;
 
 pub const work_slots = 16;
 pub const task_reserve = 2;
@@ -106,6 +107,8 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
         stop_flush: bool = false,
         stop_deadline: u64 = 0,
         stalled: bool = false,
+        slot_limit: usize = work_slots,
+        guard: TickGuard = .{ .name = "node" },
         stopping: bool = false,
         stop_reply_sent: bool = false,
         busy_replies: u64 = 0,
@@ -181,7 +184,7 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
 
         pub fn free_slots(self: *const Self) usize {
             var count: usize = 0;
-            for (&self.slots) |*slot| {
+            for (self.slots[0..self.slot_limit]) |*slot| {
                 if (slot.state == .free) count += 1;
             }
             return count;
@@ -206,11 +209,14 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
             var pass: usize = 0;
             while (pass < passes_max) : (pass += 1) {
                 self.link.drive() catch |err| std.debug.panic("node loop: link drive failed: {s}", .{@errorName(err)});
+                self.guard.mark(self.backend, "link drive");
                 var progress = self.take_finished();
                 if (self.service_events()) progress = true;
+                self.guard.mark(self.backend, "events");
                 if (self.flush()) progress = true;
                 if (self.settle()) progress = true;
                 if (self.submit_resolve()) progress = true;
+                self.guard.mark(self.backend, "flush and settle");
                 if (!progress) break;
             }
             if (pass == passes_max) self.stalled = true;
@@ -230,7 +236,7 @@ pub fn NodeLoop(comptime IO: type, comptime Sync: type) type {
 
         fn free_slot(self: *Self, reserve: usize) ?u8 {
             if (self.free_slots() <= reserve) return null;
-            for (&self.slots, 0..) |*slot, i| {
+            for (self.slots[0..self.slot_limit], 0..) |*slot, i| {
                 if (slot.state == .free) return @intCast(i);
             }
             unreachable;

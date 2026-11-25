@@ -1,7 +1,6 @@
 # TigerStyle networking: investigation and rewrite proposal
 
-Status: accepted 2026-11-24 with every recommendation in section 6; in progress. Phases 0 to 4 are
-done. The hub's fleet runs on one loop (src/hub/fleet_loop.zig, docs/srcmd/network.md) and its accept
+Status: accepted 2026-11-24 with every recommendation in section 6; complete (Phases 0 to 5). The hub's fleet runs on one loop (src/hub/fleet_loop.zig, docs/srcmd/network.md) and its accept
 and per-peer threads are gone. The node runs on one loop (src/node/loop.zig) with a joined worker pool;
 its dial, heartbeat and lease threads and src/net/transport.zig are gone, and the loop is portable:
 epoll, kqueue (compiles for macOS and FreeBSD, never run) and IOCP (run on Windows 11 x64), picked per
@@ -9,8 +8,11 @@ target by src/net/backend.zig, which the fleet and node loops use. The hub's HTT
 runs on a second loop (src/hub/http_server.zig, docs/srcmd/network.md "HTTP and WebSocket loop"):
 fixed connection slots, a bounded parser, worker pools for the runtime calls, streamed assets and
 downloads, and a lock-free stream ring read by the loop, so the accept thread, the per-connection
-threads and the StreamHub mutex and condition are gone; it is still epoll only. Phase 5 is
-outstanding.
+threads and the StreamHub mutex and condition are gone. Phase 5 is done: the HTTP loop uses
+backend.zig too, all three loops allocate their pools from a StaticAllocator frozen before the loop
+starts, `hub info` reports every pool's size, use, high-water mark and refusals, a safe-build loop
+logs any turn over 50 ms, and `make bg-check` runs the long and tiny-pool simulations. All phases
+(0 to 5) are done; what remains is in REVISIT.md.
 SPEC.md wins where they differ.
 
 Inputs: a read-only source inventory of src/net, src/hub/{fleet,http_server,stream,runtime}.zig,

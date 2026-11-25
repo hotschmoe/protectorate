@@ -72,6 +72,8 @@ fn classify(rel_path: []const u8) ?Classification {
         std.mem.eql(u8, rel_path, "net/ws_out.zig") or
         std.mem.eql(u8, rel_path, "net/io_kqueue.zig") or
         std.mem.eql(u8, rel_path, "net/io_iocp.zig") or
+        std.mem.eql(u8, rel_path, "net/gauge.zig") or
+        std.mem.eql(u8, rel_path, "net/tick_guard.zig") or
         std.mem.eql(u8, rel_path, "net/bounded.zig"))
     {
         return .{ .tier = .l1, .group = .net };

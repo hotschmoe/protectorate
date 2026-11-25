@@ -5,6 +5,7 @@ const noise = @import("../net/noise.zig");
 const frame = @import("../net/frame.zig");
 const msg = @import("../net/msg.zig");
 const bounded = @import("../net/bounded.zig");
+const Sizes = @import("sizes.zig").Sizes;
 const fleet_bus = @import("../net/fleet_bus.zig");
 const node_loop = @import("../net/node_loop.zig");
 const Sim = @import("io_sim.zig").Sim;
@@ -123,13 +124,13 @@ const Expect = struct {
     done: bool = true,
 };
 
-pub fn run(gpa: std.mem.Allocator, seed: u64) !void {
+pub fn run(gpa: std.mem.Allocator, seed: u64, sizes: Sizes) !void {
     var arena: bounded.StaticAllocator = .{ .parent = gpa };
     const allocator = arena.allocator();
     const sim = try allocator.create(Sim);
     sim.* = Sim.init(seed);
     const pool = try allocator.create(bounded.SlabPool);
-    pool.* = try bounded.SlabPool.init(allocator);
+    pool.* = try bounded.SlabPool.init_limited(allocator, sizes.slabs);
     const bus = try allocator.create(Bus);
     const core = try allocator.create(Core);
     const ctx = try allocator.create(Ctx);
@@ -159,6 +160,8 @@ pub fn run(gpa: std.mem.Allocator, seed: u64) !void {
         .notify = Ctx.notify,
         .resolve = true,
     });
+    core.slot_limit = sizes.request_slots;
+    bus.slot_limit = sizes.bus_slots;
     arena.freeze();
 
     var workers: [fake_workers]Worker = @splat(.{});
@@ -295,7 +298,7 @@ pub fn run(gpa: std.mem.Allocator, seed: u64) !void {
                     phase_step = 0;
                 }
             },
-            .reconnect => if (peer != null and ctx.connects >= 2 and settled and core.free_slots() == node_loop.work_slots) {
+            .reconnect => if (peer != null and ctx.connects >= 2 and settled and core.free_slots() == sizes.request_slots) {
                 if (ctx.disconnects == 0) return error.NoDisconnect;
                 if (stale_requests == 0 or gone_seen == 0) return error.NothingInFlight;
                 if (core.dropped_replies < dropped_before + stale_requests) return error.StaleReplyNotDropped;
@@ -352,7 +355,7 @@ pub fn run(gpa: std.mem.Allocator, seed: u64) !void {
     if (ctx.healthy != 0) return error.UnexpectedTask;
     sim.assert_drained();
     pool.assert_conservation();
-    tiger.assert(pool.free_count == bounded.slab_count);
+    tiger.assert(pool.free_count == pool.limit);
     arena.begin_deinit();
     core.deinit(allocator);
     bus.deinit();

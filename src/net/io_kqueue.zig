@@ -106,6 +106,35 @@ pub const Kqueue = struct {
         _ = c.close(descriptor(handle));
     }
 
+    /// Best-effort nonblocking write of a short reply on a socket no operation owns.
+    pub fn send_now(handle: io.Socket, bytes: []const u8) void {
+        _ = c.send(descriptor(handle), bytes.ptr, bytes.len, no_signal | c.MSG.DONTWAIT);
+    }
+
+    pub fn shutdown_write(handle: io.Socket) void {
+        _ = c.shutdown(descriptor(handle), c.SHUT.WR);
+    }
+
+    pub fn peer(handle: io.Socket) ?io.Endpoint {
+        var storage: [128]u8 align(8) = undefined;
+        var size: c.socklen_t = storage.len;
+        if (c.getpeername(descriptor(handle), @ptrCast(&storage), &size) != 0) return null;
+        const family: c_int = @intCast(@as(*const c.sockaddr, @ptrCast(&storage)).family);
+        var out: io.Endpoint = .{ .address = @splat(0), .port = 0, .family = .ipv4 };
+        if (family == c.AF.INET) {
+            const v4: *const c.sockaddr.in = @ptrCast(&storage);
+            @memcpy(out.address[0..4], std.mem.asBytes(&v4.addr)[0..4]);
+            return out;
+        }
+        if (family == c.AF.INET6) {
+            const v6: *const c.sockaddr.in6 = @ptrCast(&storage);
+            out.address = v6.addr;
+            out.family = .ipv6;
+            return out;
+        }
+        return null;
+    }
+
     pub fn now(_: *const Kqueue) u64 {
         var ts: c.timespec = undefined;
         tiger.assert(c.clock_gettime(.MONOTONIC, &ts) == 0);

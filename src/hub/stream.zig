@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const tiger = @import("../tiger.zig");
 const schema = @import("../api/schema.zig");
 const record_ring = @import("../net/record_ring.zig");
@@ -26,7 +25,9 @@ pub const StreamHub = struct {
     notify: std.atomic.Value(u32) = .init(0),
     writing: std.atomic.Mutex = .unlocked,
     closed: std.atomic.Value(bool) = .init(false),
-    wake_fd: std.atomic.Value(i32) = .init(-1),
+    waker_lock: std.atomic.Mutex = .unlocked,
+    waker_context: ?*anyopaque = null,
+    waker: ?*const fn (*anyopaque) void = null,
 
     pub fn init(gpa: std.mem.Allocator, io: std.Io) !StreamHub {
         return .{ .gpa = gpa, .io = io, .ring = .init(try gpa.alloc(std.atomic.Value(u64), Ring.words), .{}) };
@@ -34,17 +35,17 @@ pub const StreamHub = struct {
 
     pub fn deinit(self: *StreamHub) void {
         self.wake_all();
-        self.set_wake_fd(-1);
+        self.set_waker(null, null);
         self.gpa.free(self.ring.data);
         self.ring.data = &.{};
     }
 
-    /// Takes ownership of a duplicate of the loop's wakeup descriptor: every publication writes to it. Pass -1 to detach.
-    pub fn set_wake_fd(self: *StreamHub, fd: i32) void {
-        const previous = self.wake_fd.swap(fd, .acq_rel);
-        if (comptime builtin.os.tag == .linux) {
-            if (previous >= 0) _ = std.os.linux.close(previous);
-        }
+    /// Every publication calls the waker, which must be callable from any thread. Detaching waits for a call in progress.
+    pub fn set_waker(self: *StreamHub, context: ?*anyopaque, waker: ?*const fn (*anyopaque) void) void {
+        while (!self.waker_lock.tryLock()) std.atomic.spinLoopHint();
+        self.waker_context = context;
+        self.waker = waker;
+        self.waker_lock.unlock();
     }
 
     pub fn wake_all(self: *StreamHub) void {
@@ -59,11 +60,9 @@ pub const StreamHub = struct {
     }
 
     fn poke(self: *StreamHub) void {
-        if (comptime builtin.os.tag != .linux) return;
-        const fd = self.wake_fd.load(.acquire);
-        if (fd < 0) return;
-        const one: u64 = 1;
-        _ = std.os.linux.write(fd, std.mem.asBytes(&one).ptr, @sizeOf(u64));
+        while (!self.waker_lock.tryLock()) std.atomic.spinLoopHint();
+        defer self.waker_lock.unlock();
+        if (self.waker) |wake| wake(self.waker_context.?);
     }
 
     pub fn publish_raw(self: *StreamHub, json_msg_with_seq_placeholder: schema.HubStreamMessage) void {

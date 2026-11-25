@@ -359,8 +359,11 @@ pub const Server = struct {
                 self.core.shutdown();
                 self.adm_interrupt();
             }
+            self.core.guard.begin(self.backend);
             if (!stopping) self.schedule();
+            self.core.guard.mark(self.backend, "schedule");
             self.core.turn();
+            self.core.guard.end(self.backend, "turn");
             if (stopping and self.core.done()) break;
             const wait: u32 = if (self.core.stalled) 2 else bounded.tick_ms;
             self.backend.poll(wait) catch |err| std.debug.panic("node loop: backend poll failed: {s}", .{@errorName(err)});

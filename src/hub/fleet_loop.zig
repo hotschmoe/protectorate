@@ -7,6 +7,8 @@ const noise = @import("../net/noise.zig");
 const frame = @import("../net/frame.zig");
 const msg = @import("../net/msg.zig");
 const bounded = @import("../net/bounded.zig");
+const Gauge = @import("../net/gauge.zig").Gauge;
+const TickGuard = @import("../net/tick_guard.zig").TickGuard;
 const limits = @import("../net/limits.zig");
 const fleet_bus = @import("../net/fleet_bus.zig");
 
@@ -143,6 +145,13 @@ const Stash = struct {
     payload: [limits.fleet_hello_max]u8,
 };
 
+pub const Gauges = struct {
+    slots: Gauge = .init(bounded.fleet_slots, 0),
+    slabs: Gauge = .init(bounded.slab_count, bounded.control_reserve),
+    rpc: Gauge = .init(call_slots, 0),
+    events: Gauge = .init(events_max, 0),
+};
+
 pub const Loop = struct {
     gpa: std.mem.Allocator,
     io: std.Io,
@@ -159,8 +168,9 @@ pub const Loop = struct {
     info: [bounded.fleet_slots]SlotInfo = @splat(.{}),
     replies: [bounded.fleet_slots]PendingReply = @splat(.{}),
     stalled: bool = false,
-    telemetry_dropped: std.atomic.Value(u64) = .init(0),
-    refused: std.atomic.Value(u64) = .init(0),
+    slots_high: usize = 0,
+    guard: TickGuard = .{ .name = "fleet" },
+    gauges: Gauges = .{},
 
     snap_mu: std.Io.Mutex = .init,
     staging: *Peers,
@@ -300,18 +310,33 @@ pub const Loop = struct {
         self.mu.lockUncancelable(self.io);
         defer self.mu.unlock(self.io);
         if (self.closed) return error.NodeOffline;
+        var count: usize = 0;
+        var found: ?u8 = null;
         for (&self.busy, 0..) |*used, i| {
-            if (used.*) continue;
-            used.* = true;
-            return @intCast(i);
+            if (used.*) {
+                count += 1;
+            } else if (found == null) {
+                found = @intCast(i);
+            }
         }
-        return error.Busy;
+        const index = found orelse {
+            self.gauges.rpc.refuse();
+            return error.Busy;
+        };
+        self.busy[index] = true;
+        self.gauges.rpc.set(count + 1);
+        return index;
     }
 
     pub fn release(self: *Loop, index: u8) void {
         self.mu.lockUncancelable(self.io);
         tiger.assert(self.busy[index]);
         self.busy[index] = false;
+        var count: usize = 0;
+        for (self.busy) |used| {
+            if (used) count += 1;
+        }
+        self.gauges.rpc.set(count);
         self.mu.unlock(self.io);
     }
 
@@ -384,6 +409,7 @@ pub const Loop = struct {
         @memcpy(out.payload[0..front.len], front.payload[0..front.len]);
         self.events.head = (self.events.head + 1) % events_max;
         self.events.len -= 1;
+        self.gauges.events.set(self.events.len);
         return true;
     }
 
@@ -416,21 +442,31 @@ pub const Loop = struct {
 
     fn turn(self: *Loop, stopping: bool) void {
         self.stalled = false;
+        self.guard.begin(self.backend);
         if (!stopping) self.apply_peers();
         self.take_commands(stopping);
+        self.guard.mark(self.backend, "peers and commands");
         var pass: usize = 0;
         while (pass < passes_max) : (pass += 1) {
             self.bus.drive() catch |err| std.debug.panic("fleet loop: bus drive failed: {s}", .{@errorName(err)});
+            self.guard.mark(self.backend, "bus drive");
             var progress = self.flush_replies();
+            self.guard.mark(self.backend, "flush replies");
             for (0..bounded.fleet_slots) |slot| {
                 if (self.service_slot(slot)) progress = true;
             }
+            self.guard.mark(self.backend, "service slots");
             if (self.retry_calls()) progress = true;
             self.release_stash();
+            self.guard.mark(self.backend, "retry calls");
             if (!progress) break;
         }
-        self.refused.store(self.bus.refused, .monotonic);
+        const in_use = self.bus.slots_in_use();
+        self.slots_high = @max(self.slots_high, in_use);
+        self.gauges.slots.publish(in_use, self.slots_high, self.bus.refused);
+        self.gauges.slabs.publish(bounded.slab_count - self.pool.free_count, self.pool.high_water, self.pool.refused);
         if (pass == passes_max) self.stalled = true;
+        self.guard.end(self.backend, "gauges");
     }
 
     fn apply_peers(self: *Loop) void {
@@ -599,6 +635,7 @@ pub const Loop = struct {
         slot.len = @intCast(payload.len);
         @memcpy(slot.payload[0..payload.len], payload);
         self.events.len += 1;
+        self.gauges.events.set(self.events.len);
         self.ev_cond.signal(self.io);
         return true;
     }
@@ -682,7 +719,7 @@ pub const Loop = struct {
         switch (request_kind(payload)) {
             .hello => {
                 const info = &self.info[r.peer.slot];
-                if (!self.push_event(.telemetry, info.id[0..info.id_len], payload)) _ = self.telemetry_dropped.fetchAdd(1, .monotonic);
+                if (!self.push_event(.telemetry, info.id[0..info.id_len], payload)) self.gauges.events.refuse();
                 const body = msg.encode_fixed(&buffer, msg.HelloReply{ .ok = true, .hub_version = version.version, .node_name = self.peer_name(r.peer.slot) }) catch
                     msg.encode_fixed(&buffer, msg.HelloReply{ .ok = true, .hub_version = version.version }) catch unreachable;
                 self.queue_reply(r.peer, r.id, .response, body);

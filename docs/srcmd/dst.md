@@ -17,10 +17,15 @@ Robustness rests on `vopr` (`src/dst/vopr.zig`), a Viewstamped-Replication-style
   - Full crash-replay equivalence: resetting `State` to empty and replaying the exact committed journal bytes must reproduce an identical canonical `State.state_hash(gpa)`.
   - Resleeve replay with recorded quota picks, recorded parks, and exits that predate quota selection.
 
+## Background gate (`make bg-check`)
+
+`make bg-check` is the background major gate and never runs inside `make check`: 5,000 full VOPR seeds at 1,500 steps, 1,000 `--fleet-long` network seeds, and three runs of 1,000 to 2,000 network seeds with tiny pools. The VOPR takes the pool sizes as flags (`--net-only` skips the storage and core worlds; `--slabs`, `--bus-slots`, `--rpc-slots`, `--request-slots`; `src/dst/sizes.zig`) and hands them to the real code as runtime limits (`SlabPool.init_limited`, `FleetBus.slot_limit` and `rpc_limit`, the node core's `slot_limit`); the production constants and array sizes do not change. The smallest sizes that hold the simulators' workloads are 19 slabs (`SlabPool.limit_min`, a control reserve plus a send and a receive frame), 8 bus slots, 1 RPC slot per peer and 4 request slots; the tiny runs make the pool run out constantly, which exercises `Busy`, `Full` and `busy` replies, slab backpressure and slot refusal under the same conservation checks. A tiny fleet run allows far longer calls and phases because a pool of 19 slabs moves one 1 MiB frame at a time. The HTTP simulator is wire-level and already runs its rings at 4 and 8 KiB, so it takes no flags. A failure prints its reproduction command including the size flags.
+
 ## Reproducing Failures
 
 ```sh
 zig build -Doptimize=safe dst -- --seeds 300 --steps 1500
 zig build dst -- --seed 41 --steps 1500 --verbose
 zig build -Doptimize=safe dst -- --seeds 300 --steps 1500 --fleet-long
+zig build -Doptimize=safe dst -- --net-only --seeds 2000 --slabs 19 --bus-slots 8 --rpc-slots 1 --request-slots 4
 ```
