@@ -390,6 +390,11 @@ fn cmd_sleeve(
     if (std.mem.eql(u8, act, "list")) {
         return call_and_render(arena, init.io, cl, "ListSleeves", "{}", json_out, render.print_sleeve_list);
     }
+    if (std.mem.eql(u8, act, "models") and rest.len <= 2) {
+        const harness = if (rest.len == 2) parse_harness(rest[1]) orelse return 2 else null;
+        const req = try schema.encode_alloc(arena, schema.ModelCatalogRequest{ .harness = harness });
+        return call_and_render(arena, init.io, cl, "ListModels", req, json_out, render.print_model_catalog);
+    }
     if (std.mem.eql(u8, act, "show") and rest.len >= 2) {
         const res = cl.call_raw(arena, "ListSleeves", "{}") catch |err| {
             try render.print_out(init.io, "error: {s}\n", .{@errorName(err)});
@@ -522,10 +527,7 @@ fn cmd_sleeve_spawn(
     rest: []const []const u8,
     json_out: bool,
 ) !u8 {
-    var req = schema.SpawnSleeveRequest{
-        .name = rest[0],
-        .harness = .claude,
-    };
+    var req = schema.SpawnSleeveRequest{ .name = rest[0], .harness = .claude };
     var resleeve_list: std.ArrayList(schema.Harness) = .empty;
     var idx: usize = 1;
     while (idx < rest.len) : (idx += 1) {
@@ -543,9 +545,11 @@ fn cmd_sleeve_spawn(
             req.view = .readonly;
         } else if (std.mem.eql(u8, a, "--worktree")) {
             req.view = .worktree;
-        } else if (std.mem.eql(u8, a, "--harness") and idx + 1 < rest.len) {
+        } else if (std.mem.eql(u8, a, "--harness")) {
             idx += 1;
-            req.harness = parse_harness(rest[idx]) orelse return 2;
+            if (idx == rest.len) return 2;
+            req.auto_select = std.mem.eql(u8, rest[idx], "auto");
+            req.harness = if (req.auto_select) .claude else parse_harness(rest[idx]) orelse return 2;
         } else if (std.mem.eql(u8, a, "--provider") and idx + 1 < rest.len) {
             idx += 1;
             req.provider = rest[idx];
@@ -562,6 +566,10 @@ fn cmd_sleeve_spawn(
                 const tr = std.mem.trim(u8, p, " \t");
                 if (parse_harness(tr)) |rh| try resleeve_list.append(arena, rh);
             }
+        } else if (std.mem.eql(u8, a, "--task-size")) {
+            idx += 1;
+            if (idx == rest.len) return 2;
+            req.task_size = parse_task_size(rest[idx]) orelse return 2;
         } else if (std.mem.eql(u8, a, "--budget") and idx + 1 < rest.len) {
             idx += 1;
             req.budget = std.fmt.parseInt(u64, rest[idx], 10) catch null;
@@ -1806,6 +1814,11 @@ fn parse_harness(raw: []const u8) ?schema.Harness {
     return null;
 }
 
+fn parse_task_size(raw: []const u8) ?schema.TaskSize {
+    const size = std.meta.stringToEnum(schema.TaskSize, raw) orelse return null;
+    return if (size == .unknown) null else size;
+}
+
 fn parse_time_arg(raw: []const u8, now_ms: i64) ?i64 {
     if (raw.len == 0) return null;
     const last = raw[raw.len - 1];
@@ -1859,9 +1872,10 @@ fn print_usage(io: std.Io) !void {
         \\  protectorate [--json] version | status | doctor [--refresh] | pair [<name>] | token | quota [list]
         \\  protectorate [--json] hub (info | state | update [--check|--rollback] [--channel stable|dev] [--version <v>] | probation [--retry-rollback])
         \\  protectorate [--json] harness (update [<program>...] | login <claude|codex|grok|pi|agy> [-- <args...>])
-        \\  protectorate [--json] sleeve (list | show <id> | spawn <name> [opts] | send <id> <text> | inbox [<id>] [--drop] |
-        \\                                interrupt <id> | stop <id> | rm <id> | start <id> [opts] | resleeve <id> --harness <h> |
+        \\  protectorate [--json] sleeve (list | models [harness] | show <id> | spawn <name> [--harness <h|auto>] [opts] | send <id> <text> | inbox [<id>] [--drop] |
+        \\                                interrupt <id> | stop <id> | rm <id> | start <id> [opts] | resleeve <id> --harness <h> [opts] |
         \\                                takeover <id> | attach <id> | transcript <id> [opts] | wait <id>... [opts] | push <id> [opts])
+        \\                    spawn and resleeve selection: [--model <id>] [--provider <provider>] [--effort <level>]
         \\  protectorate [--json] node (list | show <n> | set <n> --jobs any|owner|none [--note <txt>] | join-token |
         \\                              add <reg> | approve <id> [--name <n>] [--fingerprint <fp>] | rename <n> <new> | rm <n> | update [opts])
         \\  protectorate [--json] job (list [--node <n>] [--limit <k>] | get <id> | run [opts] -- <argv...> | cancel <id> | logs <id> [opts] | artifact <id> <path> [--out <f>])

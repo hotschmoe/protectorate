@@ -9,10 +9,27 @@ wins, and the conflict is listed in section 12.
 
 | Report | Covers |
 |---|---|
-| `docs/design/network-trust-language.md` | embedded headscale, one-way trust, enrollment, TLS, language |
+| `docs/design/network-trust-language.md` | embedded headscale, one-way trust, enrollment, TLS, language (historical, see 3.2) |
 | `docs/design/sleeves-state-machines.md` | sleeve tree, isolation, harnesses, panes, Pi, guardrails, state machines |
 | `docs/design/history-continuation.md` | history index, resume, continuation brief, mainplane findings |
 | `docs/design/nodes-ci-deliverables-verus.md` | node daemon, presence, jobs, git/CI, deliverables, doctor, install, Verus, UI |
+| `docs/design/tigerstyle-network.md` | the accepted direction for the network internals: one loop per process, fixed slots and pools, a simulated IO twin under VOPR |
+
+**Zig rewrite (2026-11).** The program is now one Zig 0.17.1 program in `src/`, standard library
+only (`build.zig.zon` has no dependencies). Rust, cargo, crates, headscale, tsnet, the Go member,
+DERP and Verus are gone from the build and from the running system. Where this file still names
+them, a line starting "Superseded (2026-11, Zig rewrite)" says what is true now, and the original
+text stays as the record of the decision. Design the code has not reached yet is left as written.
+`docs/design/README.md` marks which design reports and sessions are current.
+
+Where the old crates went: `pt-json` is `std.json` plus `src/json_util.zig`; `pt-hash` is `std`
+hashing (CRC-32C in `src/journal/codec.zig`, SHA-256 in `src/update/version.zig`); `pt-http` is
+`std.http` with the hub's server in `src/hub/http_server.zig` and the CLI client in
+`src/cli/client.zig`; `pt-journal` is `src/journal/`; `pt-core` is `src/core/`; `pt-api` and
+`pt-apigen` are `src/api/schema.zig` and `src/tools/apigen.zig`; `pt-drivers` is `src/drivers/`;
+`pt-history` is `src/history/`; `pt-sandbox` is `src/sandbox/`; `pt-frame` is `src/net/`;
+`pt-node` is `src/node/`. Every file has a tier L0 to L5 and a group in `src/tools/levels.zig`, and
+`make check-levels` fails an import that points upward.
 
 ## 1. What it is
 
@@ -37,15 +54,23 @@ CLI on the hub machine (section 3.1).
    config, and never type into a TUI on our own.
 3. **One writer.** One core task owns all orchestration state. Each event goes through a pure
    `apply(state, event) -> (state, intents)`, is journaled with group commit, then executed.
-4. **Every device is untrusted.** The hub may reach and execute on nodes. A node cannot open a
-   flow to the hub API or to any hub listener. What a node does send is named and bounded:
-   - control and DERP traffic to headscale, a separate sandboxed process holding none of the
-     hub's secrets;
-   - WireGuard and disco packets to the hub member, which has no listener;
-   - answers on connections the hub opened.
+4. **Every device is untrusted.** The hub may reach and execute on nodes. A node reaches the hub
+   through one door, the fleet listener, and what it sends there is named and bounded:
+   - one connection that the node dials (TCP, to an address in its join token), wrapped in a
+     `Noise_IK_25519_ChaChaPoly_BLAKE2s` handshake against pinned static keys; a key the owner has
+     not approved is dropped before any frame is read;
+   - from an approved node, the heartbeat `Hello` (inventory, presence, load) and answers to
+     requests the hub sent; every other node-initiated request is ignored;
+   - the hub sends every job, lease and update RPC over that same connection.
 
-   Every byte from a node is parsed as hostile, and a node's job result is that node's claim, not
-   proof (sections 12a, 12b).
+   A node never reaches the hub API or its web listeners: those are separate listeners (loopback by
+   default, or a trusted proxy) and need a token. Every byte from a node is parsed as hostile, and
+   a node's job result is that node's claim, not proof (sections 12a, 12b).
+
+   Superseded (2026-11, Zig rewrite): the earlier text said "a node cannot open a flow to the hub"
+   and listed headscale control and DERP traffic, WireGuard packets to a hub member, and answers
+   on connections the hub opened. Nodes now dial the hub; the one-way rule is kept as "the hub
+   accepts nothing from a node but its heartbeat and its answers, on an authenticated connection".
 5. **Record before effect.** Every write to a harness or node is an effect record, fsynced before the
    first byte leaves. An unconfirmed write is Uncertain, never silently retried or dropped.
 6. **Fewest binaries and fewest dependencies we don't own.** Two binaries plus the Flutter apps.
@@ -58,12 +83,21 @@ CLI on the hub machine (section 3.1).
    - no Python or Node in the product;
    - the allowed list and its reasons live in `DEPENDENCIES.md`, and `make check` fails on a crate
      that is not listed.
+
+   Superseded (2026-11, Zig rewrite): there are no crates, Go modules or Zig packages, so nothing
+   to pin or fork: `build.zig.zon` has `.dependencies = .{}` and the program uses `std` only.
+   Dart packages stay pinned in `app/pubspec.yaml`. `make check` has no dependency step; its
+   `check-levels` step enforces the tier rules and rejects `test` blocks.
 7. **LAN only.** `protectorate.hotschmoe.com` resolves and answers only on the LAN and over the
    owner's WireGuard. WAN access is a later, separate design.
 8. **Repo rules carry over** from `dev-hotschmoe` CLAUDE.md: no emojis, full migrations with no
    shims, real-binary e2e and fuzz tests only, no hand-edited generated code.
+   Superseded (2026-11, Zig rewrite): the tests are `scripts/zig-e2e.sh` (real binaries) and the
+   VOPR deterministic simulator in `src/dst/` (`make dst`); there are no fuzz targets. Builds use
+   `-Doptimize=safe` and `src/tiger.zig` assertions fail fast.
 9. **No Verus** (D40, section 10). Tests are proportionate: real-binary e2e where behaviour broke
-   or is security-relevant, and fuzz seeds that earn their keep.
+   or is security-relevant, and fuzz seeds that earn their keep. Superseded (2026-11, Zig
+   rewrite): VOPR replaces the fuzz seeds (section 4, Testing).
 10. **Threat model: outsiders, not our own agents** (owner, 2026-11-01; revisit as needed). The
     one fear is people outside the owner's network gaining access to it. Agents breaking things
     on the owner's machines (deleted directories, broken settings, a bad node job) is accepted:
@@ -78,7 +112,7 @@ CLI on the hub machine (section 3.1).
       is content that steers an agent: a prompt injection, or a vendor agent's message. So:
       - no sleeve can widen who reaches the network: pairing devices, minting tokens,
         enrolling or approving nodes, and deciding approvals are owner-only methods;
-      - credentials and keys (`~/.ssh`, other harnesses' logins, hub tokens, headscale keys)
+      - credentials and keys (`~/.ssh`, other harnesses' logins, hub tokens, the hub's fleet key)
         stay masked from sleeves;
       - D9 still applies: in a turn a vendor agent or a D9-marked sleeve started, Envoy's
         removals, mass spawns and node jobs wait for the owner. This is the one remaining approval.
@@ -97,6 +131,14 @@ CLI on the hub machine (section 3.1).
 | Flutter desktop (Linux, Windows), Android, web | HTTPS through Traefik | `pd1.` device token |
 | Owner CLI on the hub, Envoy and sleeves | loopback | `pc1.` capability (sleeves), owner token (CLI) |
 | Vendor general agents (GrokBot, Claude Duet, ChatGPT Dot) | installed **on the hub machine**, running `protectorate envoy ...` through their own shell tool, or the stdio `protectorate mcp --envoy` | the local **envoy-only** capability: it can talk to Envoy and read Envoy's replies, nothing else |
+
+Superseded (2026-11, Zig rewrite): credentials are random hex strings with no `pd1.` or `pc1.`
+prefix. The owner token, the envoy-only token and each paired device's token are in
+`<home>/auth.json`, and the CLI reads the owner token from there. The CLI and Envoy reach the hub
+over HTTP at `listen_addr` (default `127.0.0.1:7470`); there is no unix-socket API. Only Envoy
+is given a token inside its sandbox, so per-sleeve `pc1.` capabilities are not issued yet (REVISIT,
+"Scopes are coarse"). The proxy listener is `--proxy-listen ADDR` with one or more
+`--trusted-proxy IP`; connections from any other address are closed.
 
 - **Vendor general agents talk to Envoy, never to the API** (D9, D6 changed). They get no hub
   token and no network path. The owner installs the vendor app on the hub, logs it in, and tells it
@@ -200,41 +242,53 @@ CLI on the hub machine (section 3.1).
 
 ### 3.2 Network
 
-- **Official headscale, pinned (v0.29.7 at the time of writing) and unmodified**, built in CI from
-  upstream source. The hub binary embeds it (gzipped, about 18 MB) and runs it as a supervised,
-  sandboxed **child process** from a sealed memfd. It is inside the hub binary, not inside the hub
-  process: headscale's `Serve` takes over signals and calls `log.Fatal`.
-- Administration goes through headscale's own CLI over its unix socket with `-o json`. No API key
-  is ever created.
-- **Go is limited to one module, `go/`**, with two mains, both `CGO_ENABLED=0`:
-  - `cmd/headscale`: the upstream main;
-  - `cmd/member`: our tsnet glue, about 500 lines.
-- The hub and every node run `member` (userspace tsnet: no TUN, no root, no tailscaled) as a child
-  of the Rust process.
-- **Policy:** one rule in a static embedded file, `tag:hub -> tag:node:7475`. Nodes cannot request
-  tags. The hub member only dials and has peerAPI compiled out. The hub API never listens on the
-  tailnet; the listener check refuses `100.64.0.0/10`.
-- **Remaining surface, by design:** nodes must reach headscale's control and DERP endpoints. That is
-  why headscale runs sandboxed with none of the hub's secrets. Its compromise would mean control of
-  the nodes, but not of the hub's state or tokens.
+- **The fleet link is our own and lives in `src/net/` and `src/hub/fleet.zig`.** Superseded
+  (2026-11, Zig rewrite): the earlier design embedded official headscale (v0.29.7) as a sandboxed
+  child process, ran a Go tsnet `member` beside the hub and every node, and reached nodes over a
+  WireGuard tailnet with headscale's DERP relays, with a one-rule policy `tag:hub -> tag:node:7475`.
+  All of that is gone: no headscale, no tsnet, no Go member, no DERP, no tailnet. `go/` is kept
+  for reference and is not built. The accepted direction for the network internals (one loop per
+  process, fixed slots and pools, simulated IO under VOPR) is
+  [`docs/design/tigerstyle-network.md`](docs/design/tigerstyle-network.md); today the hub's fleet and its HTTP and WebSocket
+  server each run on one epoll loop, and the node is still thread-per-connection; that document lists the gaps.
+- **Link:** a node dials the hub's fleet listener (`--fleet-listen`, default `0.0.0.0:7475`).
+  - Crypto: `Noise_IK_25519_ChaChaPoly_BLAKE2s`, prologue `protectorate-fleet-v1`, static X25519
+    keys on both sides, the node pinning the hub's key from its join token. Records are at most
+    32 KiB; a session fails at 1 GiB or 24 h and the node redials.
+  - Frames: `[u32 len][u8 kind][u64 id][payload]`, at most 1 MiB; the hub's request ids are odd and
+    the node's are even.
+  - Roaming: the join token carries every address the hub advertises (`advertise_addrs` in
+    `config.json`: LAN, WireGuard, DNS names). The node races them with a 150 ms stagger, sends a
+    heartbeat every 5 s, redials after 15 s of silence, and a new connection for the same key
+    replaces the old one. The hub drops sessions silent for 20 s.
+  - There is no stdio mode: the node serves over TCP only (`docs/srcmd/network.md`).
+- **Policy:** the hub accepts a handshake only from a key in its approved-node list (journaled
+  `node_registered` then `node_approved`; removed nodes drop out). An unknown key fails the
+  handshake and is dropped before any frame is read. After `Hello` the hub reads nothing from a
+  node but heartbeats and answers (section 2, principle 4).
+- **Remaining surface, by design:** the fleet listener's handshake and frame parser run before a
+  peer is known. Records, frames, replies and artifacts are size-capped, and the fleet listener
+  holds at most 64 connections (`src/net/limits.zig`).
 - **TLS:** Traefik on stronghold terminates TLS for `protectorate.hotschmoe.com` with its existing
-  certificate.
-  - One router sends headscale's control and DERP paths to headscale.
-  - Everything else goes to the hub's trusted-proxy listener.
-  - DERP is headscale's own, with an IP-pinned map and STUN off. No public DERP.
-  - The ts2021 and DERP upgrades through Traefik are the first thing to prove.
+  certificate, and forwards everything to the hub's trusted-proxy listener (`--proxy-listen`,
+  `--trusted-proxy`). The fleet link needs no TLS and does not go through Traefik: Noise encrypts
+  and authenticates it, so nodes dial the hub's fleet port directly.
 - **Enrollment, "scan to join":**
-  1. The README one-liner installs the node and runs `protectorate-node join <url>`.
-  2. The node shows a QR code of its headscale registration plus a control-key fingerprint.
-  3. The owner scans or pastes it in the app, names the node and approves.
-  4. The hub checks the fingerprint, then registers, tags and renames the node through the
-     headscale CLI.
+  1. The owner runs `protectorate node join-token` on the hub. It prints the `ptjoin1:` token (the
+     base64url of the hub's public key, its `sha256:` fingerprint and its addresses) and a QR code
+     of it.
+  2. On the new machine, `protectorate-node join TOKEN` pins the hub, creates the node's key
+     (mode 0600) and prints the node's public key and fingerprint. Nothing leaves the node.
+  3. The owner adds that key on the hub with `protectorate node add NAME:NODE_KEY` and approves it
+     with `protectorate node approve AUTH_ID [--name N] [--fingerprint FP]` (a wrong fingerprint is
+     refused). `protectorate-node authorize` or `serve` then connects.
 
-  No secret leaves the hub, and nothing on the node calls a hub endpoint.
+  No secret leaves the hub, and nothing on the node calls a hub endpoint before approval. The app
+  cannot scan the QR code yet (D5).
 
 ### 3.3 Hub
 
-One Linux machine, one `protectorate` process plus its headscale and member children. It holds:
+One Linux machine, one `protectorate` process. It holds:
 
 - Tick processing tracks Uncertain and Probing effects, active jobs, eligible sleeves and pending approvals in id order; replay rebuilds these derived indexes from the same state transitions. Terminal records remain available, including finished jobs with retryable node writes.
 - **The journal and state:** sleeves, incarnations, activity, queues, effects, guardrails, jobs,
@@ -319,7 +373,8 @@ crash, every incarnation goes to Recovering and resumes natively.
   - tmpfs masks over the hub's state, `~/.ssh` and the owner's own credentials; every
     harness's shared hub login (`<home>/logins/`) and the owner's cargo registry, Go and pub
     caches bound read-write;
-  - a systemd scope per incarnation with a memory limit in bytes from `sleeve_memory_max`
+  - a cgroup v2 scope per incarnation in the hub service's delegated subtree with a memory
+    limit in bytes from `sleeve_memory_max`
     (default 4 GiB), overridden by sleeve name in `sleeve_memory_max_overrides`; swap is
     disabled and build parallelism follows the CPU quota. Configuration is read at hub start
     and applied at launch. A later sleeve with the same name gets the same override.
@@ -328,10 +383,26 @@ crash, every incarnation goes to Recovering and resumes natively.
     reports the limit and tells sleeves needing more to ask Envoy; the owner raises `sleeve_memory_max_overrides`.
     Scope OOM notices and the next non-Envoy prompt name the limit and override key.
     The hub transcript and continuation brief retain the request text without the hub’s
-    prompt preamble, which is still sent to the harness. With scopes
-    disabled no limit is enforced. The scope uses `OOMPolicy=continue` and `cgroup.kill`,
-    plus the orphan reaper. A child the kernel kills for memory does not stop the scope.
-    The guardrail requires a scope OOM kill and a launcher exit by SIGKILL or code 137.
+    prompt preamble, which is still sent to the harness. With `scopes` disabled or a
+    zero limit, the memory cap is off. A hub without a usable delegation warns once
+    and launches without a memory cap. The hub uses `cgroup.kill` and the tagged process
+    scan to fence the incarnation. A child the kernel kills for memory does not stop
+    the scope. The guardrail requires an increase in the scope's `oom_kill` counter and a
+    launcher exit by SIGKILL or code 137. Recovery uses native resume when available.
+    A second OOM exit for the sleeve within one hour parks it.
+
+  Superseded (2026-11, Zig rewrite): `src/sandbox/` builds the sandbox as bubblewrap
+  (`--unshare-pid`, `--die-with-parent`, the host root read-only, the workspace and git
+  directories bound, a cleared environment with an allow-list, a tmpfs `/tmp`, and
+  `<home>/run/<sleeve>/tmp` as `TMPDIR`) or, for non-Git workspaces where bwrap is missing,
+  a Landlock write-containment re-exec (`__guard`). `--no-sandbox` turns both off. Credential
+  paths under the owner's home (`~/.ssh`, `~/.config/gh`, `~/.aws`, other harnesses' directories
+  and similar) are masked; the
+  sleeve's own harness directory stays writable and `HOME` is the owner's, so sleeves share the
+  owner's logins and caches. The private home, `<home>/logins/` store and scope CPU quota
+  and build-parallelism settings are unimplemented. A sleeve's processes are tracked by process
+  group and tag where cgroups are unavailable. `sleeve_devices` in `config.json` is polled and reported by `doctor` but the
+  devices are not bound into the sandbox yet.
 
   Cut from today's sandbox: the network namespace, the egress proxy, cache overlays, nested cgroup
   delegation and the pin-approval gate. Sleeves share the host network and the owner's download
@@ -343,7 +414,7 @@ crash, every incarnation goes to Recovering and resumes natively.
 | Claude Code | headless stream-json (with `--replay-user-messages` for prompt ack), or pane |
 | Codex | headless `codex app-server`, or pane |
 | Grok Build | headless `grok agent stdio` (ACP, with `--always-approve` when unsupervised), or pane |
-| Antigravity CLI | replaces Gemini CLI, which is dropped (D35). Pane only, until approvals work headless and plan policy is clear. A standalone binary is required; if it only ships through npm, it waits |
+| Antigravity CLI | replaces Gemini CLI, which is dropped (D35). Pane only, until approvals work headless and plan policy is clear. A standalone binary is required; if it only ships through npm, it waits. Superseded (2026-11, Zig rewrite): `src/drivers/antigravity.zig` runs `agy` headless with `--input-format stream-json --output-format stream-json`, like the other harnesses |
 | Pi, two sleeve kinds | headless `pi --mode rpc`, run as the standalone binary so the hub needs no Node. **`pi_vendor`** offers any login or API key Pi supports, from Pi's own provider catalog: xAI, OpenAI (ChatGPT sign-in), DeepSeek, Kimi/Moonshot, GLM (Z.ai), MiniMax, Qwen, OpenRouter and more. The sleeve picks provider and model. **`pi_local`** points at a local OpenAI-compatible endpoint. Anthropic through Pi bills as extra usage and is labelled so. Gemini and Antigravity logins are not offered (removed upstream, ban risk) |
 
 - **Default tools:** none beyond what each harness ships, plus our CLI mounted in the sandbox.
@@ -379,7 +450,9 @@ crash, every incarnation goes to Recovering and resumes natively.
   to queued jobs, and survive hub restart. Inventory and rollout are unaffected.
 - **One node binary** per OS. It runs as a system service on Linux and as a LocalSystem service with a
   runner account on Windows. It also builds for Android (Termux), and for macOS once a Mac exists.
-  All RPCs are hub-initiated on tailnet port 7475.
+  All RPCs are hub-initiated, over the connection the node dials to the hub's fleet port (7475 by
+  default), not on a tailnet port. Superseded (2026-11, Zig rewrite): releases build the node for Linux
+  (amd64, arm64), Windows (amd64, arm64) and macOS (arm64); there is no Android node build.
 - **Inventory**, every 10 minutes: arch, CPU, RAM, GPU, disks. **Samples**, every 15 or 60 s: load,
   memory, disk.
 - **Human present:** PRESENT, AWAY or UNKNOWN, with idle time, lock state and the source used.
@@ -399,6 +472,8 @@ crash, every incarnation goes to Recovering and resumes natively.
   - each fetched artifact is capped by `job_artifact_max_bytes` on the hub (default 64 MiB),
     and a refused artifact reports the effective cap;
   - cancelling a finished job reports its state and exit code;
+  - after five unreadable job status replies, the hub fails the job and asks its assigned
+    node to cancel it. The hub logs a warning if it cannot send the cancel or read its reply;
   - `hub info` reports the effective artifact cap; a job held for present or unknown presence
     reports the reason in `job show` and once on stderr for `job run --wait`;
   - a job never re-runs by itself;
@@ -429,13 +504,15 @@ the same dispatch code. There are no external sources such as email, calendar or
      - pre-run search hits.
 
      Planned resleeves also wait for an optional LLM summary; forced resleeves skip it. Handoff and
-     forced resleeve are one flow. The file is `.protectorate/BRIEF.md`.
+     forced resleeve are one flow. The file is `.protectorate/BRIEF.md`. Superseded (2026-11, Zig rewrite):
+     the hub writes `<home>/briefs/<sleeve>.md` (`src/hub/brief.zig`), outside the workspace, with the
+     cause and a short summary; the fuller brief and the optional LLM summary are not built.
   3. **Search:** `protectorate history search|read` over a keyword index. The brief already carries
      the top hits, because the forced-resleeve target (pi_local) is the weakest reader.
-- **Storage:** our own keyword index, crate `pt-history`, in a directory of checksummed,
+- **Storage:** our own keyword index, `src/history/` (the old crate `pt-history`), in a directory of checksummed,
   append-only segments plus a manifest of source cursors. It is a derived, rebuildable index;
   native logs stay authoritative and are only read.
-  - Reason: SQLite FTS5 through `rusqlite` would bring a third-party crate plus bundled C SQLite
+  - Reason: SQLite FTS5 through a binding would bring a third-party package plus bundled C SQLite
     for one feature, against the minimal-dependency rule (D37). Owner decision 2026-11-01; this
     overrides `docs/design/history-continuation.md` 1.4, 4.2 and 4.7.
   - What it does: a tokenizer for paths and identifiers (camelCase and snake_case parts),
@@ -478,10 +555,10 @@ the same dispatch code. There are no external sources such as email, calendar or
     the same warning, and the commit stands.
   - Measured on this hub (2026-11-01, release build): 1 GiB of the newest real logs ingested
     in 1.9 s (540 MB/s, 48 MB peak RSS) into an 11 MB index; queries take 0.05 to 0.7 ms.
-  - Fallback: `rusqlite` with FTS5, if our index proves insufficient (REVISIT.md).
+  - Fallback: SQLite with FTS5, if our index proves insufficient (REVISIT.md).
 - **Vectors:** off until keyword search proves insufficient. When turned on, they come from an
-  external llama.cpp server over HTTP, stored as f32 blobs with brute-force cosine in Rust (bge-small
-  first). No new Rust dependency.
+  external llama.cpp server over HTTP, stored as f32 blobs with brute-force cosine in Zig (bge-small
+  first). No new dependency.
 - **Compaction:** native for now. The index records context usage per session, which a later
   "end the session and continue with a brief" replacement needs. That is mainplane's model, and the
   only one compatible with hands-off. Mainplane itself has no index or vectors: its agent runs `rg`
@@ -509,9 +586,11 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   - budget, forbidden path, disk limit;
   - interrupt unresponsive, protocol desync.
 - **Guardrail actions:** interrupt, resume (at most twice in 10 min), resleeve, or park. Automatic
-  resleeves go to headless mode, walking the sleeve's ordered `resleeve_to` list (default
-  `[pi_local]`). A third resleeve within an hour parks the sleeve. When that trip is an auth
-  failure, the park reason names the login that was rejected (`flapping (<harness> login rejected)`).
+  quota and auth resleeves go to headless mode. Section 8 ranks allowed targets and uses the
+  sleeve's configured `resleeve_to` alternatives in order for degraded readings. A sleeve
+  with no configured alternative parks. A third resleeve within an hour parks the sleeve. When
+  that trip is an auth failure, the park reason names the login that was rejected
+  (`flapping (<harness> login rejected)`).
   Any other flap stays `flapping`. The hourly limit itself is unchanged.
 - **Auto-continue:** after a native resume of a headless turn that a crash ended, the core sends
   one short continuation prompt, keyed to that owner turn. A relaunch that is a fresh session,
@@ -550,6 +629,12 @@ https://claude.ai/artifact/EBXmFg7wokeJTvSNNJSLwd.
   hub start does not send `TurnNeedsPrompt` for a turn the journal already settled.
 - **Testing:** each machine is a pure function with a fuzz target. The target checks invariants I1
   to I10 against a table-driven reference model and checks `replay(journal) == live`.
+  Superseded (2026-11, Zig rewrite): there are no fuzz targets. VOPR (`src/dst/oracle.zig`)
+  drives the real core, journal and Noise/frame code for hundreds of seeds under injected faults
+  (torn writes, bit flips, drops, reordering, tampering) and asserts after every step: no
+  overlapping claims, approval and D9 cleanup, child bounds, the job state machine, and that
+  replaying the committed journal bytes into an empty state gives an identical state hash
+  (`make dst`; `docs/srcmd/dst.md`).
 
 ## 5. Code decides, Envoy decides
 
@@ -563,17 +648,23 @@ Code never resleeves a healthy idle sleeve just to chase quota, because that bus
 ## 6. Deliverables and build
 
 ```
-protectorate-linux-{amd64,arm64}       hub: serve | cli | mcp | sleeve-runner | sandbox-helper | doctor
-                                       embeds: Flutter web build, headscale, member
-protectorate-node-{linux-amd64,linux-arm64,windows-amd64,windows-arm64,android-arm64}
-                                       node: serve | join | uninstall | doctor; embeds member
-protectorate-desktop-{linux,windows}-{amd64,arm64}, protectorate-android.apk
+protectorate-{linux-amd64,linux-arm64,macos-arm64,windows-amd64.exe,windows-arm64.exe}
+                                       hub: serve | CLI | mcp | doctor; embeds the Flutter web build
+protectorate-node-{linux-amd64,linux-arm64,macos-arm64,windows-amd64.exe,windows-arm64.exe}
+                                       node: join | authorize | serve | supervise | install-service |
+                                       uninstall | probation | status | doctor
+protectorate-desktop-windows-{amd64,arm64}.zip, protectorate-android.apk
 install.sh, install-node.sh, install-node.ps1, VERSION, SHA256SUMS
 ```
 
-- **Language: Rust and Go.** Rust for everything except `go/`, and Dart for the Flutter app. Zig is
-  used only as the C toolchain behind cargo-zigbuild for glibc 2.31 linking. Neither the hub nor the
-  node needs cgo. Go is only the official headscale and our `member` glue on tailscale's tsnet.
+Superseded (2026-11, Zig rewrite): the block above is the asset list `scripts/release.sh` builds.
+The earlier list had a Linux desktop build, an Android node and a `member` and headscale embedded
+in every binary; none of those exist now. Linux binaries are static (musl).
+
+- **Language: Zig 0.17.1 and Dart.** Zig, standard library only, for the hub, the node and the
+  tools (`src/`); Dart for the Flutter app. Superseded (2026-11, Zig rewrite): this was "Rust and
+  Go", with Zig only as the C toolchain behind cargo-zigbuild and Go only for headscale and the
+  tsnet `member`. `zig build release-all` cross-compiles every target from one machine.
 - The sleeve runner and sandbox helper are subcommands that re-exec `/proc/self/exe`.
 - **Releases are built locally, not in GitHub Actions** (owner, 2026-11-01). `make release` builds
   every asset on the dev hub and on nodes over ssh for targets it cannot cross-build. It writes
@@ -593,18 +684,28 @@ straight from GitHub releases, on the stable or dev channel, as today.
 
 - **Verification:** every update checks the asset's sha256 against the release's `SHA256SUMS`
   before anything is staged (no signing key for now; section 6).
+- **As built (2026-11, Zig rewrite):** the update code is `src/update/store.zig`, using
+  `std.http.Client` (no `curl`). `hub update` stages the release in `<home>/releases/<version>/`,
+  moves `current` and `previous` (links, plus `current.txt` and `previous.txt`) and writes
+  `probation.json`; it does not restart the hub or re-exec it, so the service restarts it and sleeves
+  resume as after a crash (D17 is not built). The service runs `releases/previous/protectorate hub
+  probation` before each start, which switches back a release that was started twice without
+  being marked healthy; the hub marks itself healthy once its journal has replayed. `hub update
+  --rollback` only switches the links. There are no journal snapshots, update-aside quarantine or
+  `rollback-open` marker yet, so the snapshot and restore text below is design not built. A node
+  fetches the release from GitHub itself, and if that fails the hub downloads it, checks it and
+  streams it over the fleet link in 128 KiB pieces; the node exits, its service or supervisor
+  starts the new release, and the node marks it healthy once the hub has answered its first
+  `Hello`. A node release that starts twice without that is switched back by `probation`.
 - **Hub:**
   - `protectorate hub update [--version]`, or the app's UPDATE key, downloads the release and stages it
     in `releases/<version>/`.
-  - Before switching, the hub snapshots the journal at a durable batch boundary and then, if the
-    fleet is running, headscale's database. The journal snapshot is the earlier of the two: a
-    node that enrolls between them is in the restored headscale database and absent from the
-    restored journal. Headscale's migrations are one-way. The probation record stores
-    `next_sleeve` from that journal snapshot.
+  - Before switching, the hub snapshots the journal at a durable batch boundary. The probation
+    record stores `next_sleeve` from that snapshot.
   - The hub re-execs in place (D17), so sleeves keep running. The previous release stays on disk.
   - If the new hub fails its health check within 2 minutes, prestart (the previous release)
     restores the snapshots before switching `current` back. The whole journal directory is
-    replaced. Journal events after the journal snapshot and headscale changes after its snapshot
+    replaced. Journal events after the journal snapshot
     are lost. Sleeve directories with an id at or above the recorded `next_sleeve` move to
     `<home>/update-aside/<time>-<pid>/` and are not deleted. Worktree checkouts and gitdirs
     stay; prestart lists a sleeve that recorded `worktree.path` and stops those sleeves'
@@ -612,12 +713,11 @@ straight from GitHub releases, on the stable or dev channel, as today.
     Until then the checkout holds `pt/<name>`, so a new worktree for that name is refused.
     The branch survives, and a new sleeve with the same name starts from those commits once
     the checkout is gone. A new worktree does not adopt a path that already exists.
-  - Manual `hub update --rollback` runs the restore offline before switching. It always restores
-    headscale when there is a snapshot. It keeps the journal when the previous release can decode
-    every intact frame; a torn final frame is ignored, the same way the journal opens. Otherwise
+  - Manual `hub update --rollback` runs the restore offline before switching. It keeps the journal
+    when the previous release can decode every intact frame; a torn final frame is ignored, the same way the journal opens. Otherwise
     it restores the journal snapshot and loses events after that snapshot. There is no separate
     event-tag declaration: the previous binary's codec is the decision, and prestart must be that
-    binary. A rollback without a matching journal or required headscale snapshot is refused. A
+    binary. A rollback without a matching journal snapshot is refused. A
     new update and a manual rollback both require snapshot-aware rollback in the target release,
     which runs prestart.
   - A restore that fails before any live file is replaced keeps the trial release. The next start
@@ -633,9 +733,8 @@ straight from GitHub releases, on the stable or dev channel, as today.
     finishing an interrupted journal swap, when the journal directory
     is present, and before judging. While the hub holds that lock, `hub probation` prints
     the probation state and exits 0. It does not judge, restore, or count a start.
-    `--retry-rollback` refuses while the hub holds the journal or headscale still has the
-    database or its socket open. If the trial binary itself cannot start, service needs the repair: neither an
-    unreadable journal nor a failed binary can serve.
+    `--retry-rollback` refuses while the hub holds the journal. If the trial binary itself cannot
+    start, service needs the repair: neither an unreadable journal nor a failed binary can serve.
 - **Nodes, triggered by the hub:**
   - The hub sends `Update(version)` over its own connection. The node downloads the release from
     GitHub itself: outbound to GitHub, not to the hub.
@@ -643,12 +742,14 @@ straight from GitHub releases, on the stable or dev channel, as today.
     service manager.
   - **Self-rollback:** if the hub has not contacted the node within 10 minutes of the restart, the
     node reverts to the previous binary. Hub contact is the only proof that matters, because the
-    node can't call the hub.
-  - A node without internet gets the verified bytes streamed by the hub over a hub-opened
-    connection, so the one-way rule still holds.
-- **Order:** hub first, then one canary node per OS and arch, then the rest. Headscale accepts
-  clients up to 10 minor versions old, and `member` shares headscale's `tailscale.com` version
-  through one go.mod, so a fleet mid-rollout keeps working.
+    node can't call the hub. Superseded (2026-11, Zig rewrite): the node does dial the hub; its
+    first answered `Hello` on the new release is the contact, and rollback is by start count (a
+    release started twice without that contact is switched back), not by a 10-minute timer.
+  - A node without internet gets the verified bytes streamed by the hub over the node's own
+    fleet connection.
+- **Order:** hub first, then one canary node per OS and arch, then the rest. `Hello` carries a
+  protocol number (`protocol_version`, `src/net/msg.zig`) that nothing checks yet, so a release
+  that changes the wire format has to update nodes before the hub.
   Node update runs OS/architecture groups independently, preferring an online idle canary. A
   busy deferred canary gives way to the next candidate; a failed canary skips the rest of its
   group, whose remaining rows are labeled `SKIPPED`. A running job holds its node for up to 30 seconds, then the
@@ -685,24 +786,30 @@ backup that recovers a dead hub moves a live one.
 
 1. **One root.** Everything the hub owns lives under `$PROTECTORATE_HOME`:
    - the journal and state;
-   - `tailnet/`: headscale's DB, noise key and DERP key, and the hub member's keys;
-   - token hashes, history and doctor caches;
+   - `auth.json`: the hub's fleet key, the tokens and the paired devices (the `tailnet/` directory
+     of the headscale design is gone);
+   - history and doctor caches;
    - sleeve homes, which hold the harness logins and native session logs.
+
+   Superseded (2026-11, Zig rewrite): `hub export` and `hub import` are not built. What a backup
+   has to hold is in `docs/operate.md` ("Where state lives": `auth.json`, `config.json`, `journal/`,
+   `transcripts/`, `briefs/`, `artifacts/`, `worktrees/`, `envoy/`). `history/` is derived. There is
+   no `doctor.json` cache and sleeves have no private home.
 
    Workspaces live in the owner's own directories. The export records their paths and git remotes.
 2. **Export:** `protectorate hub export`.
    - It quiesces every sleeve at a turn boundary (the resleeve machine's Quiescing, without the
-     relaunch) and stops headscale.
+     relaunch) and stops the fleet listener.
    - It writes a `.pbackup`, and pushes or bundles every workspace's
      unpushed branches.
-   - The old hub then writes a `migrated` tombstone and refuses to start headscale again. Two
-     control servers with the same noise key would split the fleet.
+   - The old hub then writes a `migrated` tombstone and refuses to start the fleet listener again.
+     Two hubs with the same fleet key would split the fleet.
 3. **Import:** install the hub with the one-liner on the new machine, then run
    `protectorate hub import <file>`. The architecture may differ, because every on-disk format is
    arch-independent.
-4. **Cut over:** point Traefik's two routes and the hub's firewall rule at the new address. Node
-   trust needs no change: the nodes reach the same hostname, headscale presents the same noise
-   key, and the hub member keeps its node key and `tag:hub`. No re-enrollment.
+4. **Cut over:** point Traefik's route, and the name or address the nodes dial (`advertise_addrs`),
+   at the new hub. Node trust needs no change: the new hub holds the same fleet key (restored from
+   `auth.json`), so the key each node pinned still matches. No re-enrollment.
 5. **Resume:** sleeves come back through Recovering. Native resume works where the session logs
    moved with the sleeve homes; otherwise they get a continuation brief. `doctor` re-validates
    every harness login and mails you any that need a re-login.
@@ -710,10 +817,10 @@ backup that recovers a dead hub moves a live one.
 ## 7. Git, CI and doctor
 
 - **GitHub stays the origin.** `gh` is installed and authed on the hub, and the hub alone holds
-  the push token. Sleeves push through `protectorate git push` (12b item 6) and get a read-only
-  token for `gh` queries. The hub keeps bare mirrors as backup. No Forgejo, GitLab or Woodpecker.
-- **Cross-arch CI** is a hub rule: dispatch `make test-heavy` as a node job to each required arch. Plain
-  binaries; containers only when a job asks for them.
+  the push token. Sleeves push through `protectorate sleeve push <id>` (12b item 6, where the design calls it
+  `protectorate git push`) and get a read-only token for `gh` queries. The hub keeps bare mirrors as backup. No Forgejo, GitLab or Woodpecker.
+- **Cross-arch CI** is a hub rule: dispatch `make e2e` and `make dst` as node jobs to each
+  required arch. Plain binaries; containers only when a job asks for them.
 - **`doctor`**, on hub and node, checks:
   - harness CLIs present, with versions and install method (D33);
   - credentials valid, through the read-only quota readers, never printed;
@@ -723,12 +830,19 @@ backup that recovers a dead hub moves a live one.
   Output is fixed JSON, cached in `doctor.json`, and it gates harness eligibility for dispatch and
   resleeve. Failures mail the owner.
 
+  Superseded (2026-11, Zig rewrite): `src/doctor/doctor.zig` runs on each `GetDoctor` call (and
+  `protectorate-node doctor`) and reports per harness whether it is present, its version, its install
+  hint and whether it is `eligible`, plus bwrap or Landlock availability, `git` and `gh` login and the
+  configured `sleeve_devices`. It is not cached in `doctor.json`, it does not check clock or disk,
+  and it mails no one.
+
 ## 8. Quota and dispatch
 
 Quota readers stay read-only per subscription. `select_target(task_size, allow, mode, exclude,
 quota, health)` is pure code, using fresh data only. It weighs projected unused quota at reset with a
 48 h urgency half-life and falls back to the local model. "Dispatch by quota" is this function,
-called at spawn and at guardrail time. Code derives the task-size class, Envoy may nudge it one
+called at spawn when the request opts into Auto and at guardrail time for quota and auth trips.
+Spawns default to Claude. Code derives the task-size class, Envoy may nudge it one
 class, and code clamps it (D27).
 
 A stale reading keeps the windows of its last good fetch. The resleeve fallback treats those
@@ -845,7 +959,17 @@ What stays:
   presence; D19).
 - No pinned Rust toolchain: the workspace builds on the current stable release.
 
+Superseded (2026-11, Zig rewrite): the Rust rules above are gone with the Rust workspace. What
+replaces them: every build is `-Doptimize=safe`, so bounds and overflow checks stay on in the
+parser and writer code; `src/tiger.zig` assertions fail fast; and the only foreign calls
+(`extern` declarations) are in `src/sandbox/exec.zig`, `src/node/sys.zig` and
+`src/node/service.zig` (D19). There is no Verus and no fuzz harness; VOPR and the e2e script are the
+tests (section 4).
+
 ## 11. Salvage map
+
+Superseded (2026-11, Zig rewrite): this was the plan for rebuilding in Rust. The Zig program
+reimplemented from it; the table is history, and the `references/` clones still apply.
 
 | From | Take |
 |---|---|
@@ -902,8 +1026,13 @@ These rules override the design reports wherever the reports say otherwise. The 
 7. **Every non-terminal state has a recovery action.** Probing re-probes. Collecting re-fetches
    from its recorded offset. Cancelling re-sends the cancel. Provisioning waits for its completion
    barrier and then records or removes the worktree. Stop during Provisioning waits for that
-   barrier too. The fuzz targets insert a hub crash at every journal boundary.
-8. **The control-key pin is enforced on every start.** Before starting tsnet, `member` fetches
+   barrier too. The fuzz targets insert a hub crash at every journal boundary. Superseded (2026-11,
+   Zig rewrite): VOPR crashes the simulated store and replays the journal instead
+   (`src/dst/sim_storage.zig`).
+8. **The control-key pin is enforced on every start.** Superseded (2026-11, Zig rewrite): the node
+   pins the hub's Noise public key and fingerprint from its join token, and the handshake fails
+   closed against any other key (`src/node/serve.zig`, `src/net/noise.zig`); there is no `/key`
+   fetch. The original text: before starting tsnet, `member` fetches
    `/key` itself and compares it with the fingerprint pinned at enrollment. On a mismatch it fails
    closed and reports "control key changed", so it never silently re-registers.
 9. **Installers are fetched by commit, not by tag.** The README one-liner uses the raw URL at a
@@ -918,7 +1047,8 @@ These rules override the design reports wherever the reports say otherwise. The 
     needs. If hostile code is ever in scope, D12 must be revisited before that work runs.
 12. **Count runtime processes as well as deliverables.** A running hub is three processes: hub,
     headscale and member. A node is two: agent and member. Any further runtime process needs an
-    explicit decision.
+    explicit decision. Superseded (2026-11, Zig rewrite): the hub is one process and the node is
+    one (a node run as a service has a supervisor beside it); sleeves and jobs are children.
 
 ## 12b. Corrections from adversarial review (Grok, 2026-11-01)
 
@@ -940,7 +1070,9 @@ not repeated here.
 4. **Executors are serial per sleeve, behind an fsync barrier.** Intents are released only after
    their journal batch is fsynced. Each executor re-checks `g` or `attempt` immediately before the
    syscall, and drops the intent if it is stale.
-5. **Headscale is reachable only from Traefik.** Headscale binds the hub's LAN address, and one
+5. **Headscale is reachable only from Traefik.** Superseded (2026-11, Zig rewrite): there is no
+   headscale; the fleet listener takes only Noise handshakes from approved keys (section 3.2). The
+   original text: headscale binds the hub's LAN address, and one
    host-firewall rule on the hub admits only stronghold's IP to that port. A node dialling the LAN
    address directly cannot reach `/register`, `/swagger` or anything else.
 6. **No GitHub token inside sleeves (D20 changed).** A sleeve asks the hub to push its branch
@@ -987,8 +1119,8 @@ All decided. The owner's answers are recorded in `docs/sessions/2026-11-01-decis
 
 | # | Decision | Outcome |
 |---|---|---|
-| D1 | Headscale inside the hub binary but outside the process (sandboxed child) | yes |
-| D2 | Build headscale from the pinned upstream source, or embed the release binary | official headscale, built locally from the pinned tag |
+| D1 | Headscale inside the hub binary but outside the process (sandboxed child) | yes. Superseded (2026-11, Zig rewrite): no headscale; nodes dial the hub's fleet listener over Noise IK (3.2) |
+| D2 | Build headscale from the pinned upstream source, or embed the release binary | official headscale, built locally from the pinned tag. Superseded (2026-11, Zig rewrite): nothing is embedded or built from Go; `go/` is unused |
 | D3 | Split-horizon DNS for `protectorate.hotschmoe.com` at both sites and in the phone's WireGuard DNS | yes |
 | D4 | Agent VLAN for nodes, excluded from Traefik's API router | later |
 | D5 | Scan to join with a QR plugin in the app (paste also works) | yes |
@@ -999,21 +1131,21 @@ All decided. The owner's answers are recorded in `docs/sessions/2026-11-01-decis
 | D10 | Linux node as a system service (one sudo at install) | yes |
 | D11 | Windows node as LocalSystem plus runner account | yes |
 | D12 | Cut the sandbox network namespace and egress proxy | yes |
-| D13 | Antigravity pane-only until headless approvals work | yes |
-| D15 | Resleeve target: ordered list per sleeve, default `[pi_local]` | yes |
+| D13 | Antigravity pane-only until headless approvals work | yes. Superseded (2026-11, Zig rewrite): `src/drivers/antigravity.zig` runs `agy` headless (stream-json) |
+| D15 | Resleeve targets: ordered alternatives per sleeve | Superseded: no implicit alternative. Section 8 ranks by quota first and uses the list order for fallback |
 | D16 | Guardrail thresholds as listed; no auto-revert on forbidden-path edits | yes |
-| D17 | Hub updates by re-exec in place, keeping sleeves alive | yes |
+| D17 | Hub updates by re-exec in place, keeping sleeves alive | yes. Superseded (2026-11, Zig rewrite): `hub update` stages the release and moves the `current` link; the service restarts the hub and sleeves resume as after a crash (6a) |
 | D18 | The hub never types into a pane after launch | yes |
-| D19 | FFI `unsafe` exemption to Verus rule 6 for sandbox and presence crates | yes |
-| D20 | Push token location | hub only; sleeves push through `protectorate git push` |
+| D19 | FFI `unsafe` exemption to Verus rule 6 for sandbox and presence crates | yes. Superseded (2026-11, Zig rewrite): no Rust crates and no Verus; the foreign calls are the `extern` declarations in `src/sandbox/exec.zig`, `src/node/sys.zig` and `src/node/service.zig` (section 10) |
+| D20 | Push token location | hub only; sleeves push through `protectorate git push`. Superseded (2026-11, Zig rewrite): the command is `protectorate sleeve push <id> [--remote R] [--branch B] [--force]` |
 | D21 | Index the owner's own interactive CLI logs too, or hub-launched sessions only | hub-launched only |
 | D22 | Vectors off until keyword search falls short | yes |
-| D23 | Brief file `.protectorate/BRIEF.md`, LLM summary for planned resleeves only | yes |
+| D23 | Brief file `.protectorate/BRIEF.md`, LLM summary for planned resleeves only | yes. Superseded (2026-11, Zig rewrite): the hub writes `<home>/briefs/<sleeve>.md` and builds no LLM summary (3.7) |
 | D24 | `===>` command line and F-key legend in the app | yes; since 2026-11-02 a command palette (Esc, Ctrl+K) and F-keys shown in the sidebar (SPEC 9) |
 | D25 | macOS node and desktop only once a Mac exists | yes |
 | D26 | `history.read` scope | Envoy, plus a continued sleeve for its own run; wider is owner-only |
-| D27 | Source of the task-size class for dispatch | code (median of the last N), Envoy may nudge one class, code clamps |
-| D28 | Verus phasing: phase 1 is journal and frame codec; presence, audit and brief math dropped | yes |
+| D27 | Source of the task-size class for dispatch | code (median cost of recent tasks in the workspace), or an owner-set class. Envoy may nudge one class, code clamps |
+| D28 | Verus phasing: phase 1 is journal and frame codec; presence, audit and brief math dropped | yes. Superseded (2026-11, Zig rewrite): no Verus; the journal and frame codecs are covered by VOPR (`src/dst/`) and the e2e script |
 | D29 | Backlog with a spare-quota trigger in code and a review inbox for public repos (PROBLEMS P6) | yes, after resleeve works |
 | D30 | GPU/resource leases with a TTL (PROBLEMS P9) | later |
 | D31 | A network spike before the core | **no separate spike**: build straight away and fix roadblocks as they come |
@@ -1022,10 +1154,10 @@ All decided. The owner's answers are recorded in `docs/sessions/2026-11-01-decis
 | D34 | Pi as a standalone binary, updated natively | yes; check every 24 h, `pi update self` preferred |
 | D35 | Gemini CLI | **dropped**; Antigravity CLI replaces it, as a standalone binary |
 | D36 | Release signing key | **none for now**; releases built locally and checked against SHA256SUMS; revisit |
-| D37 | Third-party dependencies | as few as possible, pinned exactly, forked and trimmed when large; listed in `DEPENDENCIES.md` |
+| D37 | Third-party dependencies | as few as possible, pinned exactly, forked and trimmed when large; listed in `DEPENDENCIES.md`. Superseded (2026-11, Zig rewrite): the Zig program has none: `std` only (principle 6) |
 | D38 | Primary interface | chat with Envoy; sleeve chats next; terminal takeover is last resort |
-| D39 | Hub-to-node transport: headscale and member, or plain SSH | **headscale for now**; SSH logged in REVISIT.md (`serve --stdio` stays as a tested path) |
-| D40 | Keep Verus past phase 1 | **removed** 2026-11-02: the proofs found nothing fuzzing and e2e had not; frees the Rust toolchain |
+| D39 | Hub-to-node transport: headscale and member, or plain SSH | **headscale for now**; SSH logged in REVISIT.md (`serve --stdio` stays as a tested path). Superseded (2026-11, Zig rewrite): neither: our own Noise IK link over TCP that the node dials (3.2); `serve --stdio` runs the same session over a pipe on the node side, with no hub-side stdio acceptor yet |
+| D40 | Keep Verus past phase 1 | **removed** 2026-11-02: the proofs found nothing fuzzing and e2e had not; frees the Rust toolchain. Superseded (2026-11, Zig rewrite): there is no Rust toolchain at all now (section 10) |
 
 ## 14. Build order
 
@@ -1045,6 +1177,10 @@ nothing has to stay compatible with it.
 5. **Jobs:** node jobs, cross-arch CI, `doctor`.
 6. **Hardening:** the stdio `mcp --envoy`, terminal takeover and the remaining harnesses.
 
+Superseded (2026-11, Zig rewrite): all six stages were rebuilt in Zig, and stage 4 became the Noise IK
+fleet link (3.2), not the `go/` module with headscale and member. The remaining network work is
+`docs/design/tigerstyle-network.md`.
+
 Proposed follow-on design, awaiting owner review: [background gates, releases and a hub-host node](docs/design/ci-and-release.md). Current SPEC rules remain in force until amended.
 
 ## 15. Implementation choices (2026-11-01)
@@ -1058,27 +1194,28 @@ shortcut is also in `REVISIT.md`.
   - each connection, child pipe and node link gets its own thread;
   - timeouts use deadlines on sockets and `poll`.
 
-  This avoids tokio, hyper and axum. The owner allows them if they turn out to be needed
+  This avoids an async runtime and an HTTP framework (tokio, hyper and axum in the Rust plan). The owner allows them if they turn out to be needed
   (2026-11-01), "incredibly deliberate and cautious", but prefers a performant build without them.
   The fallback is a pinned, trimmed fork, chosen only after our own code has measurably failed.
-- **Our own crates** for what we would otherwise import:
+- **Our own code** for what we would otherwise import. Superseded (2026-11, Zig rewrite): the crate
+  table became the `src/` groups below. Every file has a tier, L0 (no local imports) to L5 (entry
+  points, `src/dst/`, `src/tools/`), and imports only point down; `make check-levels` enforces it.
 
-  | Crate | What it does |
+  | Group | What it does |
   |---|---|
-  | `pt-json` | JSON value, parser, writer, `ToJson`/`FromJson`; insertion-ordered objects so output is deterministic |
-  | `pt-hash` | SHA-1 (WebSocket handshake), SHA-256 (release sums), CRC-32C (journal) |
-  | `pt-http` | HTTP/1.1 server on TCP and unix sockets, WebSocket server, a small blocking client for loopback and unix sockets |
-  | `pt-journal` | the append-only journal: length, CRC and payload frames, group-commit fsync, torn-tail recovery |
-  | `pt-core` | the pure state machines and `apply`, with no I/O |
-  | `pt-api` | API types and the method table, declared once in a macro; `pt-apigen` writes the Dart models from it |
-  | `pt-drivers` | headless harness adapters (Claude stream-json, Codex app-server, Grok ACP, Pi rpc) into one event stream |
-  | `pt-history` | the history index (3.7): native session logs and hub transcripts into checksummed segments with BM25, in place of SQLite FTS5 |
-  | `pt-sandbox` | the bwrap argument builder and systemd scopes |
-  | `pt-frame` | the hub-node frame codec |
-  | `pt-node` | inventory, samples, presence and jobs (the node side) |
+  | `src/net/` | Noise IK (`noise.zig`), the frame codec (`frame.zig`), the node protocol messages (`msg.zig`), the completion IO contract and its epoll, kqueue and IOCP backends (`io.zig`, `backend.zig`), the fleet bus and node link with the roaming dial (`fleet_bus.zig`, `node_link.zig`), the node loop core and the HTTP wire code |
+  | `src/journal/` | the append-only journal: length, CRC-32C and payload frames, torn-tail recovery, 64 MiB segments |
+  | `src/core/` | the state machines and `apply`, with no I/O, plus the admission authority for node job leases |
+  | `src/api/` | API types and the method table in `schema.zig`; `src/tools/apigen.zig` writes the Dart models from it |
+  | `src/drivers/` | headless harness adapters (Claude, Codex, Grok, Pi, Antigravity) into one event stream, and the child session |
+  | `src/history/` | the history index (3.7): native session logs and hub transcripts into checksummed segments with BM25, in place of SQLite FTS5 |
+  | `src/quota/`, `src/update/`, `src/doctor/` | quota readers and the selector, release staging and probation, the doctor checks |
+  | `src/sandbox/` | the bwrap and Landlock argument builders and the process guard |
+  | `src/hub/`, `src/cli/`, `src/node/` | the hub daemon (HTTP and WebSocket server, fleet server, runtime), the CLI and stdio MCP, the node daemon (inventory, presence, jobs, supervisor) |
+  | `src/dst/` | the VOPR simulator and its oracle |
 
-  Each is fuzzed against a reference where one exists: `serde_json`, `sha2` and `crc32c` are
-  dev-only fuzz dependencies. There is no SQLite: `pt-history` replaces `rusqlite` (3.7).
+  There is no SQLite: `src/history/` replaces it (3.7). Nothing is fuzzed against a reference;
+  VOPR and the e2e script are the tests (section 4).
 - **The API** is JSON over HTTP:
   - `POST /api/<Method>` carries the request and response bodies;
   - `GET /api/events` is a WebSocket of state changes. A client resumes with `from_seq`
@@ -1094,14 +1231,23 @@ shortcut is also in `REVISIT.md`.
     query parameter. Other messages retain their original sequence numbers, so clients must
     allow gaps. A client changes subscriptions by reconnecting and loads each open transcript
     after `live` to cover the changeover;
-  - loopback and unix-socket listeners serve the CLI and sleeves; the trusted-proxy listener serves
-    Traefik.
+  - the loopback listener serves the CLI and sleeves; the trusted-proxy listener serves Traefik.
 
-  There is no protobuf, buf or Connect. The Dart client is generated from `pt-api` and uses
-  `dart:io` and `package:web` sockets.
+  Superseded (2026-11, Zig rewrite): there is no unix-socket listener. Every events connection
+  starts with a `snapshot` and a `live` marker, whatever `from_seq` says; the hub then sends the
+  messages in its ring of 512 whose seq is above `from_seq` (or above the snapshot's seq when none
+  is given). The `transcripts` parameter is ignored, so entry messages for every sleeve are sent. A
+  subscriber that falls behind the ring loses the gap with no new snapshot, and the stream's seq is
+  in memory and restarts at 1 when the hub restarts (REVISIT, "Event stream sequence").
+
+  There is no protobuf, buf or Connect. The Dart client is generated from `src/api/schema.zig`
+  (`make gen`) and uses `dart:io`, or `dart:js_interop` fetch and WebSocket on the web.
 - **Outbound HTTPS** (GitHub releases, quota readers) runs the system `curl`. There is no Rust TLS
-  stack.
-- **Sleeve sandbox** is bwrap plus a `systemd-run --user --scope` per incarnation.
+  stack. Superseded (2026-11, Zig rewrite): it runs `std.http.Client` with the Zig standard library's
+  TLS; nothing spawns `curl`.
+- **Sleeve sandbox** is bwrap plus a cgroup v2 scope per incarnation (see 3.4). Superseded
+  (2026-11, Zig rewrite): bubblewrap applies the Git mounts below. Git checkouts require
+  bubblewrap when Linux sleeve sandboxing is enabled.
   Git directories of root checkouts and linked worktrees have `hooks/`, `config`,
   `config.worktree` and `info/` bound read-only, including the shared common directory.
   Missing entries are created empty before binding so they cannot be created by a sleeve;
@@ -1110,13 +1256,23 @@ shortcut is also in `REVISIT.md`.
   but cannot define one; read-only configuration prevents introducing a filter driver, and
   `info/` is also protected to prevent changes to host Git behavior. The remaining Git state
   stays writable for ordinary work. A root linked worktree resolves and validates its private
-  and common Git directories just like a child. The common directory’s `worktrees/`
-  is read-only except for the current worktree’s separately protected private gitdir, so
-  another worktree’s configuration cannot be changed through the common directory.
+  and common Git directories just like a child. For writable sleeves, the common directory’s
+  `worktrees/` stays writable so sleeves can register, remove, and prune their own new worktrees.
+  At launch each existing sibling entry is bound read-only. Its mount point prevents renaming
+  or removing the entry. The active private gitdir has the same protected entries as the common
+  gitdir, with the rest writable for writable sleeves.
+- **Hub Git commands** disable hooks and the filesystem monitor. The hub uses a monotonic
+  deadline per invocation and terminates Git on expiry. Version and revision queries get
+  5 seconds, worktree add gets 60 seconds, worktree remove gets 30 seconds, and push gets
+  120 seconds.
 - **Go** (`go/`): `cmd/headscale` builds the official headscale at the pinned tag, unmodified;
   `cmd/member` is our tsnet glue. `member` exposes a unix socket where the Rust side asks it to
   dial `node:7475` (hub), or where accepted tailnet connections are handed over (node).
-- **Envoy** is a root sleeve running Claude Code headless in `$PROTECTORATE_HOME/envoy/`. That
+  Superseded (2026-11, Zig rewrite): there is no Go in the build or at run time; `go/` stays only as
+  reference. The node dials the hub through `src/net/node_link.zig`.
+- **Envoy** is a root sleeve in `$PROTECTORATE_HOME/envoy/`. It defaults to Claude Code headless.
+  The owner may choose another harness explicitly. Auto selection is refused for Envoy. That
   directory's own `CLAUDE.md` describes the `protectorate` CLI, so no worked-on repo is touched.
 
-The blocking gate is `make check`; `make test` runs its e2e scenarios. `make test-heavy` runs the background e2e suite, every `#[ignore]`d long feature scenario, fuzz seed replay and fuzz builds. Real-scope tests skip without a systemd user bus.
+The blocking gate is `make check`; `make e2e` runs its real-binary scenarios and `make dst` the VOPR run. Superseded (2026-11, Zig rewrite): `make test`, `make test-heavy`, fuzz seed replay and the
+`#[ignore]`d scenarios are gone; there is no background gate.

@@ -313,6 +313,20 @@ pub fn download_release_asset(
     };
 }
 
+/// Downloads and extracts a release without activating it: no release state is touched, so callers need no lock.
+pub fn stage_release(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    releases_dir_path: []const u8,
+    info: ReleaseInfo,
+    component: Component,
+) !void {
+    const dl = try download_release_asset(gpa, io, info);
+    defer gpa.free(dl.bytes);
+
+    try stage_archive_only(gpa, io, releases_dir_path, info.tag, info.asset_name, &dl.sha256_hex, dl.bytes, component);
+}
+
 pub fn stage_and_apply(
     gpa: std.mem.Allocator,
     io: std.Io,
@@ -407,6 +421,21 @@ pub fn stage_archive_bytes(
     bytes: []const u8,
     component: Component,
 ) !void {
+    try stage_archive_only(gpa, io, releases_dir_path, tag, asset_name, expected_hex, bytes, component);
+    _ = try activate_staged(gpa, io, releases_dir_path, tag);
+}
+
+/// Verifies and extracts a release into releases/<tag> without touching current.txt or probation.json.
+pub fn stage_archive_only(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    releases_dir_path: []const u8,
+    tag: []const u8,
+    asset_name: []const u8,
+    expected_hex: []const u8,
+    bytes: []const u8,
+    component: Component,
+) !void {
     if (!version.verify_sha256(bytes, expected_hex)) {
         return error.ChecksumMismatch;
     }
@@ -447,7 +476,6 @@ pub fn stage_archive_bytes(
 
     rel_dir.deleteTree(io, tag) catch {};
     try std.Io.Dir.rename(rel_dir, stage_name, rel_dir, tag, io);
-    _ = try activate_staged(gpa, io, releases_dir_path, tag);
 }
 
 pub fn activate_staged(
@@ -498,11 +526,25 @@ pub fn activate_staged(
     return true;
 }
 
+/// The release tag current.txt names right now; the caller frees it.
+pub fn current_release(gpa: std.mem.Allocator, io: std.Io, releases_dir_path: []const u8) ?[]const u8 {
+    var rel_dir = std.Io.Dir.cwd().openDir(io, releases_dir_path, .{}) catch return null;
+    defer rel_dir.close(io);
+    return read_marker(gpa, io, rel_dir, "current.txt");
+}
+
 pub fn mark_healthy(gpa: std.mem.Allocator, io: std.Io, releases_dir_path: []const u8) !void {
+    return mark_healthy_if(gpa, io, releases_dir_path, null);
+}
+
+/// Marks the active release healthy, but only when it is the one the caller says it is running.
+/// A different current.txt means an update arrived since the caller started: that release has not run yet.
+pub fn mark_healthy_if(gpa: std.mem.Allocator, io: std.Io, releases_dir_path: []const u8, running: ?[]const u8) !void {
     var rel_dir = std.Io.Dir.cwd().openDir(io, releases_dir_path, .{}) catch return;
     defer rel_dir.close(io);
     const active = read_marker(gpa, io, rel_dir, "current.txt") orelse return;
     defer gpa.free(active);
+    if (running) |tag| if (!std.mem.eql(u8, tag, active)) return;
     const prev = read_marker(gpa, io, rel_dir, "previous.txt");
     defer if (prev) |p| gpa.free(p);
     try write_probation(gpa, io, rel_dir, .{

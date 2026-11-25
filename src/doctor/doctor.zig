@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const tiger = @import("../tiger.zig");
+const git_process = @import("../git_process.zig");
 const schema = @import("../api/schema.zig");
 
 pub fn run_checks(
@@ -10,9 +10,41 @@ pub fn run_checks(
 ) !schema.DoctorReport {
     const now_ms: i64 = std.Io.Clock.real.now(io).toMilliseconds();
 
-    var harnesses: std.ArrayList(schema.DoctorHarness) = .empty;
+    const harnesses = try check_harnesses(arena, io, user_home);
     var problems: std.ArrayList([]const u8) = .empty;
 
+    const gh_ok = probe_ok(arena, io, &.{ "gh", "auth", "status" });
+    const sandbox_ok = if (builtin.os.tag == .linux)
+        (probe_ok(arena, io, &.{ "bwrap", "--version" }) or probe_landlock())
+    else if (builtin.os.tag == .windows)
+        true
+    else
+        false;
+    if (builtin.os.tag == .linux and !sandbox_ok) {
+        try problems.append(arena, "neither bubblewrap (bwrap) nor Landlock LSM available");
+    }
+    if (git_process.run(arena, io, .version, null, &.{"--version"}, 4096)) |res| {
+        if (!res.term.success()) try problems.append(arena, "git --version failed");
+    } else |err| {
+        try problems.append(arena, switch (err) {
+            error.FileNotFound => "git binary not found",
+            else => @errorName(err),
+        });
+    }
+
+    return .{
+        .checked_at_ms = .{ .ms = now_ms },
+        .os = @tagName(builtin.os.tag),
+        .arch = @tagName(builtin.cpu.arch),
+        .harnesses = harnesses,
+        .gh_logged_in = gh_ok,
+        .sandbox_ok = sandbox_ok,
+        .problems = problems.items,
+    };
+}
+
+pub fn check_harnesses(arena: std.mem.Allocator, io: std.Io, user_home: ?[]const u8) ![]const schema.DoctorHarness {
+    var harnesses: std.ArrayList(schema.DoctorHarness) = .empty;
     const specs = [_]struct {
         name: []const u8,
         bin: []const u8,
@@ -62,30 +94,7 @@ pub fn run_checks(
         });
     }
 
-    const gh_ok = probe_ok(arena, io, &.{ "gh", "auth", "status" });
-    const sandbox_ok = if (builtin.os.tag == .linux)
-        (probe_ok(arena, io, &.{ "bwrap", "--version" }) or probe_landlock())
-    else if (builtin.os.tag == .windows)
-        true
-    else
-        false;
-    if (builtin.os.tag == .linux and !sandbox_ok) {
-        try problems.append(arena, "neither bubblewrap (bwrap) nor Landlock LSM available");
-    }
-    const git_ok = probe_ok(arena, io, &.{ "git", "--version" });
-    if (!git_ok) {
-        try problems.append(arena, "git binary not found");
-    }
-
-    return .{
-        .checked_at_ms = .{ .ms = now_ms },
-        .os = @tagName(builtin.os.tag),
-        .arch = @tagName(builtin.cpu.arch),
-        .harnesses = harnesses.items,
-        .gh_logged_in = gh_ok,
-        .sandbox_ok = sandbox_ok,
-        .problems = problems.items,
-    };
+    return harnesses.items;
 }
 
 fn probe_version(arena: std.mem.Allocator, io: std.Io, argv: []const []const u8) ?[]const u8 {
@@ -93,6 +102,7 @@ fn probe_version(arena: std.mem.Allocator, io: std.Io, argv: []const []const u8)
         .argv = argv,
         .stdout_limit = .limited(4096),
         .stderr_limit = .limited(4096),
+        .timeout = .{ .duration = .{ .raw = .fromSeconds(5), .clock = .awake } },
     }) catch return null;
     if (!res.term.success()) return null;
     const raw = if (res.stdout.len > 0) res.stdout else res.stderr;

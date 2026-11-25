@@ -21,10 +21,11 @@ abstract class HubClient {
 
   Future<void> send(String sleeveId, String text);
   Future<Sleeve> spawnSleeve(SpawnSleeveRequest req);
+  Future<ModelCatalog> listModels(Harness harness);
   Future<void> start(String sleeveId, {Harness? target});
   Future<void> interrupt(String sleeveId);
   Future<void> stop(String sleeveId);
-  Future<void> resleeve(String sleeveId, Harness target);
+  Future<void> resleeve(ResleeveRequest req);
   Future<void> decide(String approvalId, Decision decision);
   Future<void> markEventsRead();
 

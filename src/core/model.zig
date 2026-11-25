@@ -171,6 +171,7 @@ pub const MsgKind = enum {
     mail,
     report,
     system,
+    agent_mail,
 };
 
 pub const SendMode = enum {
@@ -178,7 +179,7 @@ pub const SendMode = enum {
     steer,
 };
 
-pub const ExitCause = enum {
+pub const ExitCause = enum(u3) {
     clean,
     crash,
     oom,
@@ -252,6 +253,7 @@ pub const ParkReason = enum {
     provision_failed,
     quiesced_without_target,
     removed,
+    oom_rate_exceeded,
 };
 
 pub const ApprovalKind = enum {

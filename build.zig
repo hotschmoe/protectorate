@@ -47,6 +47,7 @@ pub fn build(b: *std.Build) void {
     pack_web.addArg(web_dir);
     pack_web.addArg("--out");
     const web_out_dir = pack_web.addOutputDirectoryArg("web_assets");
+    pack_web.has_side_effects = true;
     const web_assets_mod = b.createModule(.{
         .root_source_file = web_out_dir.path(b, "assets.zig"),
     });

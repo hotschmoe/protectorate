@@ -1,140 +1,87 @@
 # Protectorate
 
 A self-hosted software factory on one hub machine. You talk to Envoy, our orchestrator agent, and
-Envoy talks to sleeves. A sleeve is a vendor coding CLI (Claude Code, Codex, Grok Build) or Pi,
-running untouched in a light sandbox and bound to one directory. The hub also reaches a fleet of
-untrusted machines (nodes) to inventory them and run build, test and maintenance jobs across
-architectures. It is a software factory only: no email, calendar or errand agent.
+Envoy talks to sleeves. A sleeve is a vendor coding CLI (Claude Code, Codex, Grok Build,
+Antigravity) or Pi, running untouched in a light sandbox and bound to one directory. The hub also
+reaches a fleet of untrusted machines (nodes) to inventory them and run build, test and
+maintenance jobs across architectures. It is a software factory only: no email, calendar or
+errand agent.
 
-Protectorate v0.7 is a ground-up rewrite of the v0.6 hub. [SPEC.md](SPEC.md) is the design;
-[REVISIT.md](REVISIT.md) lists every shortcut taken so far and what "right" would be;
-[DEPENDENCIES.md](DEPENDENCIES.md) lists every third-party package and why it is there.
+Protectorate is one Zig 0.17.1 program that uses only the Zig standard library: no external Zig
+packages, and no Go, Rust, headscale or tsnet at build or run time. [SPEC.md](SPEC.md) is the
+design; [REVISIT.md](REVISIT.md) lists the shortcuts taken so far and what "right" would be;
+[DEPENDENCIES.md](DEPENDENCIES.md) lists what the build and runtime rely on.
 
-## Architecture
+## How it works
 
-```
-  app (web, Linux, Windows, Android)          owner CLI, Envoy, sleeves, vendor agents
-          |  HTTPS, pd1. device token                  |  unix socket on the hub
-          v                                            v
-   TLS reverse proxy  ------------------------>  protectorate serve (the hub)
-          |  control and DERP paths              journal, core thread, sleeves, approvals,
-          v                                      history, quota, doctor, updates
-   headscale (child of the hub, sandboxed)            |
-          ^                                      member (child of the hub, tsnet, dials only)
-          |  control, DERP                            |
-          |                                           |  hub-initiated RPCs, tailnet port 7475
-   protectorate-node + member on each node  <---------+
-```
-
-- **One writer.** One core thread owns all state. Each event goes through a pure
-  `apply(state, event)`, is journaled with group commit, then executed. Every write to a harness
-  or a node is recorded before it is sent.
+- **One writer.** All state sits behind one state lock. Each event goes through a pure
+  `apply(state, event)`, is journaled (CRC32C frames, fsynced), then executed. Every
+  write to a harness or a node is recorded before it is sent.
 - **Headless first.** Sleeves run through each harness's official headless protocol, and the
-  transcript is the chat the app shows.
-- **One-way trust.** The hub may reach and execute on nodes; a node cannot open a flow to the hub
-  API. Nodes reach only headscale's control and DERP endpoints, and answer connections the hub
-  opened. Official headscale and our small tsnet glue (`member`) are embedded in the binaries and
-  run as child processes.
-- **Two binaries.** `protectorate` (hub, CLI, stdio MCP) and `protectorate-node`. No async
-  runtime, no TLS stack (outbound HTTPS goes through the system `curl`), one shipped third-party
-  Rust crate (`libc`).
+  transcript is the chat the app shows. We never wrap, patch or re-prompt a harness.
+- **Fleet link.** A node dials the hub's fleet listener (`--fleet-listen`) over TCP, or over a
+  stdio pipe for ssh, with a `Noise_IK_25519_ChaChaPoly_BLAKE2s` handshake against pinned keys.
+  A node joins with a `ptjoin1:` token, the owner approves its key, and unapproved keys are
+  dropped before any frame is read. The hub sends the job and update RPCs over that link.
+- **Two binaries.** `protectorate` (hub, CLI, stdio MCP for Envoy) and `protectorate-node`. The
+  Flutter web app is packed into the hub binary at build time.
+- **Testing.** No unit tests. Reliability comes from the VOPR deterministic simulator
+  (`src/dst/`) and a real-binary e2e script.
 
-## Status
+## Layout
 
-Development started 2026-11-01. Against the build order in SPEC section 14:
-
-| Stage | State |
-|---|---|
-| 1. Core | done: journal, `pt-core` state machines, `sleeve_core` fuzz target with a reference model |
-| 2. Chat and one harness | done: headless drivers for Claude Code, Codex, Grok and Pi; Envoy as a root sleeve; `envoy send/wait/read`; the Flutter shell. Terminal takeover is a stub |
-| 3. Resleeve | done: guardrails, history index, continuation brief, `pi_local`, forced resleeve end to end. The brief has no LLM summary yet |
-| 4. Network | mostly done: embedded headscale and member, join with a terminal QR code and approval from the CLI, inventory and presence. Headscale behind a real TLS proxy is untested |
-| 5. Jobs | mostly done: node jobs with artifacts, hub `doctor`, harness updates, hub and node self-update with probation. No cross-arch CI rule, no node `doctor` |
-| 6. Hardening | started: the stdio `mcp --envoy`. Not started: terminal takeover, Antigravity. Verus was tried and removed (SPEC D40) |
-
-**Covered by e2e tests** (`make test`, real binaries, real sockets, real sandboxes): sleeve
-lifecycle, crash mid-turn and recovery, the Envoy round trip, root stop stopping its children,
-scoped sleeve capabilities, forced resleeve with a brief, the API surface and its scopes, the D9
-approval rule, device pairing, the MCP bridge, history search and rebuild, a local fleet with node
-jobs, node job timeouts, cancels, restarts, presence refusal and artifact fencing, and hub and
-node updates with rollback against a stand-in release server. The web app is driven against a
-real hub in headless Chromium by `scripts/app-e2e.sh` (pairing, Envoy chat, sleeves, a D9
-approval). The fleet and harness tests skip when Go, Pi or a login is missing.
-
-**Run on real machines** (from the development log): the hub on a Linux arm64 machine as a user
-service behind a TLS reverse proxy (the web app loads, the API refuses requests without a token);
-Envoy on Claude Code answering and resuming natively after a redeploy; two Linux nodes (amd64 and
-arm64) as system services, joined LAN-direct, running jobs and returning 2 MB artifacts whose
-sha256 matched; the local quota reader; history search. On Windows, the node service, presence
-through the idle probe and a job through the service were checked by hand, not yet through a hub.
-
-**Not built or never run:**
-- no GitHub release from `next` exists, so the installers have run only as dry runs or against
-  local release assets (`--from`), and `hub update` and `node update` have run only against a
-  stand-in release server;
-- terminal takeover, Antigravity, `protectorate git push`, hub export
-  and import, GPU leases, the backlog and spare-quota
-  trigger (the function exists, nothing calls it), node `doctor`;
-- a hub update restarts the hub instead of re-executing it, so sleeves resume as after a crash;
-- Windows nodes cannot take the `Update` RPC; macOS and Android nodes do not compile;
-- the app has no QR scanner and cannot approve nodes; desktop and Android builds forget their
-  pairing on restart and are not release assets;
-- pending approvals and hub events live in memory and are lost on restart;
-- releases are unsigned (sha256 against `SHA256SUMS` only).
+```
+src/       the program; every file has a tier (L0-L5) checked by src/tools/levels.zig
+  core/ journal/ history/ quota/ update/ net/ api/    state machines, storage, wire formats, schema
+  drivers/ sandbox/ doctor/ node/ hub/ cli/           harness drivers, sandbox, daemons, the CLI
+  dst/ tools/                                         VOPR simulator, codegen, web packer, level checker
+app/       Flutter client (desktop, Android, web); app/lib/api/api.g.dart is generated
+scripts/   installers, release.sh, zig-e2e.sh, app-e2e.sh
+docs/      install.md, operate.md, srcmd/ (notes per module group), design/ and sessions/ (historical)
+go/        old headscale and tsnet glue, kept for reference; not built or used
+```
 
 ## Build and test
 
-Linux is the hub platform. You need a Rust toolchain; Go (for headscale and member), Flutter (for
-the app and the embedded web build) and Dart (for `make check-gen`) are optional for a plain build.
+You need Zig 0.17.1. Flutter (for the web app and `make app-check`) is needed only to embed the
+UI and to run `make check`; Dart is needed for `make gen` and `make check-gen`.
 
 ```
-make build          # debug build of the workspace
-make release        # release binaries for this machine
-make web release    # the same, with the Flutter web build embedded
-make test           # e2e test binaries side by side (scripts/test.sh), then the fuzz seeds
-make test-paid      # also the Claude, Codex and Grok e2e tests, which spend a little quota
-make check          # fmt --check, clippy -D warnings, test, check-deps, check-gen, app-check, check-version
-make version        # the version every build here carries: the git tag (docs/install.md, Versioning)
-make release-assets # every release asset into dist/<version>/ with SHA256SUMS
+make build           # zig build: protectorate and protectorate-node into zig-out/bin (safe mode)
+make release-all     # cross-compile Linux (amd64, arm64), Windows and macOS binaries
+make web             # flutter build web; run it before make build to embed the UI (WEB_DIR=app/build/web)
+make check-levels    # module tier rules; no test blocks allowed
+make gen / check-gen # write or verify app/lib/api/api.g.dart from src/api/schema.zig
+make dst             # VOPR deterministic simulation (300 seeds, 1500 steps)
+make e2e             # scripts/zig-e2e.sh against the binaries in zig-out/bin
+make check           # check-levels, check-gen, app-check, build, dst, release-all, e2e
+make version         # the version every build here carries: the git tag (docs/install.md, Versioning)
 ```
 
-The hub e2e tests need `bwrap`, `systemd-run --user`, `git` and `pi` with a provider for an
-OpenAI-compatible endpoint, named by `PT_E2E_PI_PROVIDER` and `PT_E2E_PI_MODEL`; without them those
-tests print SKIP and pass. Machine-specific settings like these go in a gitignored `.env.e2e`
-(`KEY=value` lines) at the repo root, which the Makefile reads; the Makefile header lists them.
-A binary built without Go has no fleet; `protectorate version` says so. Fuzz targets live in `crates/<crate>/fuzz/` and run
-with `cargo +nightly fuzz`.
+A single failing simulation replays with `zig build dst -- --seed N --steps M --verbose`. The e2e
+script starts real hubs and nodes on ephemeral ports with `--no-sandbox` in temp homes, so it
+needs `curl`, `git`, `python3` and (for its Pi scenarios) the settings in a gitignored
+`.env.e2e` at the repo root that the Makefile reads. `scripts/app-e2e.sh` drives the web app in
+headless Chromium.
 
-To install a hub or a node, see [docs/install.md](docs/install.md). Day-to-day commands are in
-[docs/operate.md](docs/operate.md).
+## Run
 
-## Crates
+```
+zig-out/bin/protectorate serve --home DIR      # the hub; prints the owner and envoy-only tokens once
+zig-out/bin/protectorate pair NAME             # a pairing code for a device
+zig-out/bin/protectorate status | doctor | quota
+zig-out/bin/protectorate sleeve | node | job | approval | history | envoy ...
+zig-out/bin/protectorate node join-token       # on the hub: the join token for a new node
+zig-out/bin/protectorate-node join TOKEN       # on a node; then the owner runs: protectorate node approve ID
+zig-out/bin/protectorate-node authorize        # on the node, once approved; then: protectorate-node serve
+```
 
-| Crate | Purpose |
-|---|---|
-| `protectorate` | the hub binary: `serve`, the CLI (one API method per command) and `mcp --envoy` |
-| `protectorate-node` | the node binary: `join`, `serve`, `install-service`, inventory, presence, jobs |
-| `pt-api` | the hub API defined once: types, method table, scopes, event-stream messages |
-| `pt-apigen` | dev tool: writes the Dart client (`app/lib/api/api.g.dart`) from `pt-api` |
-| `pt-core` | the pure state machines and `apply`, with no I/O |
-| `pt-journal` | the append-only journal: CRC frames, group-commit fsync, torn-tail recovery |
-| `pt-hub` | the hub runtime: listeners, core thread, executors, fleet, approvals, updates |
-| `pt-drivers` | headless harness drivers (Claude stream-json, Codex app-server, Grok ACP, Pi rpc) |
-| `pt-sandbox` | the `systemd-run --user --scope` plus `bwrap` prefix for one incarnation |
-| `pt-history` | our keyword index over native session logs and hub transcripts, with BM25 |
-| `pt-quota` | read-only quota readers per subscription, `select_target` and the spare trigger |
-| `pt-doctor` | checks of this machine as fixed JSON, cached in `doctor.json` |
-| `pt-update` | updates from GitHub releases: staging against `SHA256SUMS`, probation, rollback |
-| `pt-fleet` | the hub's side of the tailnet: headscale and member as children, enrollment, node RPC |
-| `pt-frame` | the hub-node frame codec, blocking frame I/O and the RPC messages |
-| `pt-node` | the node side: inventory, samples, presence, job priority and the job runner |
-| `pt-embed` | binaries a binary carries (headscale, member), gzipped, unpacked by SHA-256 |
-| `pt-http` | HTTP/1.1 server and small client on std sockets, with WebSockets |
-| `pt-json` | JSON value, strict parser, deterministic writer and the API type macros |
-| `pt-hash` | SHA-1, SHA-256 and hex |
-| `pt-qr` | QR codes for a terminal, a trimmed port of qrcodegen |
-| `pt-sys` | the one place for OS FFI |
-| `pt-version` | the release stamp every binary prints |
+`protectorate` with no arguments prints the full command list. To install a hub or a node, see
+[docs/install.md](docs/install.md). Day-to-day commands are in [docs/operate.md](docs/operate.md).
+The notes per module group are in [docs/srcmd/](docs/srcmd/README.md).
 
-Outside `crates/`: `go/` holds the only Go (headscale's upstream main and `member`), `app/` the
-Flutter client, and `scripts/` the installers, release and network test scripts.
+## Release
+
+Releases are built and published locally, not in CI. Tag a clean commit on `master`, then
+`make release-assets` and `make release-publish` (`PUBLISH=1` to upload). Details and the
+asset list are in [docs/install.md](docs/install.md#release-assets).

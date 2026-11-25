@@ -395,15 +395,33 @@ const CoreWorld = struct {
                         .harness = .claude,
                         .by = if (self.rng.boolean()) .rule else .owner,
                         .cause = .quota,
+                        .inherit_preferences = self.rng.boolean(),
                     } }, &intents);
                 } else if (self.st.sleeves.get(sid)) |sl| {
                     if (sl.inc) |inc| {
                         const causes = [_]model.ExitCause{ .crash, .oom, .quota_exhausted, .auth_error };
+                        const cause = causes[self.rng.uintLessThan(usize, causes.len)];
+                        const quota_reviewed = (cause == .quota_exhausted or cause == .auth_error) and self.rng.boolean();
+                        const target = if (inc.harness == .pi_local) model.Harness.codex else .pi_local;
+                        const selection: ?event.QuotaSelection = if (quota_reviewed) .{
+                            .harness = if (self.rng.boolean()) target else null,
+                            .reason = "quota reviewed",
+                        } else null;
+                        const settled = quota_reviewed and inc.activity == .working;
+                        if (settled) {
+                            _ = try self.apply_checked(.{ .turn_settled = .{
+                                .sleeve_id = sid,
+                                .g = inc.g,
+                                .turn_end = .@"error",
+                                .quota_handoff = .{ .cause = cause, .selection = selection },
+                            } }, &intents);
+                        }
                         _ = try self.apply_checked(.{ .exited = .{
                             .sleeve_id = sid,
                             .g = inc.g,
-                            .cause = causes[self.rng.uintLessThan(usize, causes.len)],
+                            .cause = cause,
                             .requested = false,
+                            .quota_selection = if (settled) null else selection,
                         } }, &intents);
                     }
                 }
@@ -792,7 +810,7 @@ fn run_misc_oracle(gpa: std.mem.Allocator) !void {
         .workspace = "/home/alice/repo",
         .readonly = true,
         .masks = masks,
-        .git_dirs = &.{"/home/alice/repo/.git"},
+        .git_mounts = &.{.{ .path = "/home/alice/repo/.git", .kind = .ro }},
     };
     const argv = try sbox.build_bwrap_argv(gpa, spec_ok, &.{ "pi", "--mode", "rpc" });
     defer gpa.free(argv);
@@ -818,7 +836,6 @@ fn run_misc_oracle(gpa: std.mem.Allocator) !void {
         .workspace = "/home/alice/repo",
         .readonly = true,
         .runtime_dir = "/tmp/run-ro",
-        .git_dirs = &.{"/home/alice/repo/.git"},
         .memory_max_bytes = 512 * 1024 * 1024,
     }, &.{ "agy", "--input-format", "stream-json" });
     defer sbox.free_guard_argv(gpa, guard_ro);
@@ -839,7 +856,6 @@ fn run_misc_oracle(gpa: std.mem.Allocator) !void {
     const guard_rw = try sbox.build_guard_argv(gpa, "/usr/bin/protectorate", .{
         .workspace = "/home/alice/repo",
         .readonly = false,
-        .git_dirs = &.{"/home/alice/repo/.git"},
     }, &.{ "agy", "--input-format", "stream-json" });
     defer sbox.free_guard_argv(gpa, guard_rw);
     var rw_has_ws = false;
@@ -854,7 +870,7 @@ fn run_misc_oracle(gpa: std.mem.Allocator) !void {
     const spec_bad = sbox.SandboxSpec{
         .workspace = "/home/alice/repo",
         .masks = masks,
-        .git_dirs = &.{"/home/alice/.ssh/gitdir"},
+        .git_mounts = &.{.{ .path = "/home/alice/.ssh/gitdir", .kind = .rw }},
     };
     if (sbox.build_mounts(gpa, spec_bad)) |ms| {
         gpa.free(ms);

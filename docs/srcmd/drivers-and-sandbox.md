@@ -5,22 +5,63 @@
 Protectorate drives upstream CLIs exclusively via their official machine-readable stdio modes without injecting synthetic hooks or patching external binaries:
 - **`claude`** (`claude.zig`): `-p --verbose --output-format stream-json --input-format stream-json --include-partial-messages`
 - **`codex`** (`codex.zig`): `app-server` JSON-RPC 2.0
-- **`grok`** (`grok.zig`): `--acp` JSON-RPC 2.0
+- **`grok`** (`grok.zig`): `grok agent stdio` over ACP
 - **`antigravity`** (`antigravity.zig`): `agy --input-format stream-json --output-format stream-json` (`event: init / step_update / result`, subtracting cumulative session usage counters per turn). The CLI rejects `control_request`; an interrupt terminates its process tree and resumes the native conversation in a new incarnation.
 - **`pi`** (`pi.zig`): `--mode rpc` JSONL (`get_state`, `prompt`, `steer`, `abort`, `compact`)
 
 Each adapter translates raw protocol lines into normalized `DriverEntry` events (`session_info`, `assistant_text`, `reasoning`, `tool_call`, `tool_result`, `approval_request`, `compaction`, `turn_started`, `turn_settled`) through `protocol.Out`, coalescing streaming deltas and capping block/output sizes (`max_block = 1 MiB`).
 
+## Model, provider and effort
+
+Spawn and resleeve pass incarnation settings to the same driver entry point. An unset selection
+lets the harness resolve its native defaults. The catalog is scoped to the hub account. A
+workspace's native configuration can supply more specific defaults at launch.
+
+| Harness | Catalog source | Launch and resleeve |
+|---|---|---|
+| Claude Code | Native model aliases and effort flags, plus user settings and environment defaults | `--model`, `--effort`, `CLAUDE_CODE_EFFORT_LEVEL` for an explicit effort, and inline `--settings` for the native provider switches. The provider IDs are `anthropic`, `bedrock`, `vertex`, and `foundry`. |
+| Codex | App-server `model/list` and `config/read` | App-server `-c model=...`, `-c model_provider=...`, and `-c model_reasoning_effort=...`. Thread start/resume carries model and provider, and turn start carries effort. |
+| Grok | ACP `initialize` model metadata | ACP `session/set_config_option` sets `model` then `reasoning_effort` before the hub marks the session ready. A custom model ID selects its configured provider. The session transcript records the current ACP values and flags a changed or omitted effort. |
+| Pi | RPC `get_available_models` and `get_state`, plus Pi's user settings | `--provider`, `--model`, and `--thinking`. Pi requires a model when passing a provider. The session transcript records the thinking level from `get_state`. |
+| Antigravity | `agy models`, user settings, and CLI effort names | `--model`, `--effort`, and inline `--settings '{"modelProvider":"gemini"}'` when choosing the Gemini API provider. |
+
+Catalog discovery uses native listing or initialization without prompting the harness. Pi runs
+in offline RPC mode with session persistence disabled. Its model metadata supplies each model's
+efforts. If RPC discovery is unavailable, the picker uses `pi --list-models` and offers all levels
+when the model's exact capabilities are unavailable.
+
+Each subprocess probe has a 2.5-second deadline and bounded output. A timed-out probe kills its
+POSIX process group or Windows job and reaps the direct child, including when the child closes
+stdout before exiting. On Linux the deadline also covers the wait for exec. The Pi RPC and CLI
+fallback share one deadline.
+
 `drivers/session.zig` wraps a spawned child process with dedicated stdout NDJSON and bounded 16 KiB stderr ring threads, exposes `compact()` for native in-session compaction (`claude`, `pi`, with automatic handoff resleeve fallback for other harnesses), and releases `Session.mu` prior to delivering callbacks to eliminate lock-order inversions with `hub/runtime.zig`. Worktree sleeves provision isolated checkouts (`<hub_home>/worktrees/<id>` on `pt/<id>`) separate from the base repo path, and `hub/runtime.zig` monitors configured `sleeve_devices` paths for attach/detach transitions.
 
 The G6 signature combines the tool name with a SHA-256 digest of the serialized input before transcript clipping. Calls with unavailable input receive distinct signatures. Exit callbacks hand cleanup to the runtime tick thread so recovery never joins the reader from itself. A guardrail notice is recorded in the sleeve transcript as well as the hub event log.
+
+The session mutex serializes reaping with teardown. Each reader owns its pipe once its thread starts. The stdout thread observes launcher exit without reaping, then waits under the mutex once the launcher has exited. Stop, resleeve and shutdown can take the same mutex and kill and reap a launcher that is still running. The session map admits one handle per sleeve. The thread that removes the handle owns teardown and any resulting generation-specific exit report. It fences the process tree, waits for operations using the handle to return, and joins the readers. The first published exit cause survives a concurrent fence, and a completed stop or resleeve advances through the same exit report as a spontaneous exit. A compaction fallback journals its generation-checked handoff on the tick thread before teardown or brief writing.
 
 Interrupts have a 30-second grace period; an unresponsive incarnation is fenced and recovered. Antigravity stays interrupting until its exit is reaped, so queued prompts wait for the new incarnation. Interrupt-driven Antigravity relaunches and crash recoveries share a limit of two resumes in ten minutes; exceeding it parks the sleeve with `resume_rate_exceeded`.
 
 Crash recovery passes the bound native session ID back to each adapter: Claude uses `--resume`, Codex `thread/resume`, Grok `session/load`, Pi `--session`, and Antigravity `--conversation`. An exit before binding starts a fresh session. Repeated crashes and refused handshakes are bounded by the resume window and the crash strike limit; the strike window also bounds boot timeouts, whose 15-minute interval exceeds the resume window. The adapters implement these resume paths; their success depends on the installed harness and its stored session.
 
+The thread that removes and fences a driver generation commits that generation's exit. A pending
+resleeve consumes the exit to start the replacement. The exit's generation protects the
+replacement from stale completions.
+
 ## Cross-Platform Guardrails & Sandboxing (`src/sandbox/`)
 
 - **Per-sleeve hygiene (all OSes):** When sandboxing is enabled, `hub/runtime.zig` provisions an isolated per-sleeve temp directory (`<hub_home>/run/<sleeve_id>/tmp` exposed via `TMPDIR`/`TEMP`/`TMP`), exports `PROTECTORATE_SLEEVE`/`PROTECTORATE_WORKSPACE`, and strips nested session markers (`CLAUDECODE`, `CODEX_THREAD_ID`, etc.).
 - **Process trees (`ProcessGuard` in `sandbox/exec.zig`):** Tracks POSIX process groups, Linux cgroups where available and tagged processes, and Win32 Job Objects for both local sleeves and remote `node/runner.zig` jobs. The runtime fences a sleeve tree before discarding its handle.
-- **Linux `bwrap` + Landlock `__guard` fallback:** On Linux, `sandbox/spec.zig` prefers `bwrap` (`ro-bind / /`, explicit workspace/git mounts, `--clearenv`, credential masks leaving only the active harness state dir accessible). When `bwrap` is unavailable, `hub/runtime.zig` falls back to self-re-exec via `<exe> __guard` (`sandbox/exec.zig`), applying `PR_SET_PDEATHSIG`, optional `RLIMIT_AS`, and Landlock LSM write restrictions (`handled_access_fs`) allowing writes only inside the workspace, git admin dirs, active harness state dir, sleeve temp dir, `/dev/null`, and `/dev/shm`.
+- **Sleeve memory:** The installed hub service delegates the memory controller and runs the hub in a leaf subgroup. `ProcessGuard` makes a fresh sibling cgroup for each limited incarnation and sets `memory.max` and `memory.swap.max` before starting its launcher. The launcher joins the cgroup before it execs the sandbox, so the harness and its descendants inherit it. A launcher pidfd lets the runtime fence descendants that still hold the protocol pipes after the launcher exits. The hub retains the cgroup until it reaps the launcher and samples `memory.events`. An increase in `oom_kill` plus an unrequested SIGKILL or exit code 137 commits an `exited` event with cause `oom`. The kernel's per-process OOM policy lets the harness survive a child OOM. If delegation is unavailable, the hub warns once and uses its ordinary process fence without a memory cap.
+- **Memory notices:** `sleeve show` reads the applied limit from the live, generation-matched driver. `PROTECTORATE_MEMORY_MAX` carries the configured byte count. The hub records an OOM notice with the cap and override key. The first prompt for a new capped non-Envoy sleeve and the next prompt after an OOM receive a preamble on delivery. The journal and user-message transcript use the original request text.
+- **Linux `bwrap` and Landlock `__guard`:** `sandbox/spec.zig` builds the bubblewrap mounts over a read-only host root, clears the environment, and masks credential directories except for the active harness. Without bubblewrap, non-Git workspaces can use the Landlock re-exec guard. It allows writes in the workspace, active harness state dir, sleeve temp dir, `/dev/null`, and `/dev/shm`. A Git checkout requires bubblewrap because Landlock cannot subtract paths from a writable ancestor.
+- **Git mounts** use filesystem metadata to canonicalize the workspace and resolve `.git` and `commondir`. The launcher creates absent `hooks/`, `config`, `config.worktree`, and `info/` entries empty, validates their types without following symlinks, and mounts them read-only in both the private and common directories. It binds `worktrees/` with the sleeve’s write policy, then binds each existing sibling entry read-only, refusing symlinked entries. The directory and sibling mount points prevent renaming them. The active private gitdir keeps its writable index and other unprotected state in writable sleeves. A writable sleeve can add a worktree at a writable checkout path and remove or prune the registration it creates.
+
+## Hub Git subprocesses
+
+`src/git_process.zig` runs worktree add and remove, revision queries, push, and Doctor's version probe with `core.hooksPath` pointed at the platform's null device and `core.fsmonitor` disabled. An absolute monotonic deadline covers output capture and process exit, including when a helper keeps a pipe open or Git closes both pipes before exiting. The process is killed and reaped on expiry. On POSIX the kill targets Git's process group. Revision and version queries have a 5-second deadline, worktree add 60 seconds per attempt, worktree remove 30 seconds, and push 120 seconds. A deadline failure identifies the operation, and the hub logs its working directory.
+
+## Linux hub process launch
+
+`src/child_process.zig` supplies the Linux hub's spawn operation for driver launchers, Git, Doctor, the bubblewrap probe and harness updates. The child sets up its working directory, pipes and process group with syscalls before exec. A close-on-exec pipe carries any setup or exec error back to the parent. A reported error leaves the launcher PID with the spawn operation, which reaps it and closes the pipes before returning the error. Successful launches transfer the child handle to the caller. This covers the path where Zig 0.17.1 returns an error after fork and leaves a child with the hub's process name.

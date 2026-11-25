@@ -178,7 +178,12 @@ pub const JournalStore = struct {
         self.cur_size = header_len;
     }
 
-    pub fn replay_into(self: *JournalStore, st: *state.State) !void {
+    pub fn replay_into(
+        self: *JournalStore,
+        st: *state.State,
+        context: anytype,
+        comptime observe: fn (@TypeOf(context), i64, []const intent.Intent) void,
+    ) !void {
         var seg_names: std.ArrayList([]const u8) = .empty;
         defer {
             for (seg_names.items) |n| self.gpa.free(n);
@@ -215,6 +220,7 @@ pub const JournalStore = struct {
                 const se = try ccodec.decode_stamped(arena_st.allocator(), payload);
                 intents.clearRetainingCapacity();
                 try apply.apply(self.gpa, st, se, &intents);
+                observe(context, se.ts_ms, intents.items);
             }
         }
     }

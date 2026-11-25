@@ -16,4 +16,8 @@ void reloadPage() => _location.reload();
 Future<String> downloadClient(Uri url, String? token, void Function(int got, int total) progress) =>
     throw UnsupportedError('the web app reloads from the hub');
 
-Future<String> installClient(String path) => throw UnsupportedError('the web app reloads from the hub');
+String? installHint() => null;
+
+Future<({String text, bool ok})?> lastInstall(String running) async => null;
+
+Future<String> installClient(String path, String version) => throw UnsupportedError('the web app reloads from the hub');

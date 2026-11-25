@@ -246,6 +246,8 @@ main() {
 
 	[Service]
 	Type=simple
+	Delegate=memory
+	DelegateSubgroup=protectorate-hub
 	Environment="PROTECTORATE_HOME=$home"
 	Environment="PATH=$path_line"
 	# A release on trial that keeps failing to start is switched back from the previous one.

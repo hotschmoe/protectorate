@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const child_process = @import("../child_process.zig");
 const tiger = @import("../tiger.zig");
 const proto = @import("protocol.zig");
 const claude = @import("claude.zig");
@@ -27,6 +28,7 @@ pub const Config = struct {
     sandbox_mode: spec.GuardMode = .none,
     guard_exe: ?[]const u8 = null,
     sandbox: ?spec.SandboxSpec = null,
+    cgroup_path: ?[]const u8 = null,
     environ_map: ?*const std.process.Environ.Map = null,
     on_event: OnEventFn,
     on_exit: OnExitFn,
@@ -55,7 +57,6 @@ pub const Session = struct {
     impl: DriverImpl,
     child: std.process.Child,
     stopping: std.atomic.Value(bool) = .init(false),
-    stdout_done: std.atomic.Value(bool) = .init(false),
 
     stderr_mu: std.Io.Mutex = .init,
     stderr_buf: [16 * 1024]u8 = undefined,
@@ -106,7 +107,7 @@ pub const Session = struct {
             .antigravity => try antigravity.Antigravity.build_argv(a, s_spec),
         };
 
-        const final_argv = switch (cfg.sandbox_mode) {
+        const sandbox_argv = switch (cfg.sandbox_mode) {
             .bwrap => if (builtin.os.tag == .linux and cfg.sandbox != null)
                 try spec.build_bwrap_argv(a, cfg.sandbox.?, raw_argv)
             else
@@ -118,17 +119,11 @@ pub const Session = struct {
             .none => raw_argv,
         };
 
-        self.child = try std.process.spawn(io, .{
-            .argv = final_argv,
-            .cwd = .{ .path = cfg.cwd },
-            .environ_map = cfg.environ_map,
-            .stdin = .pipe,
-            .stdout = .pipe,
-            .stderr = .pipe,
-            .pgid = if (builtin.os.tag != .windows) 0 else null,
-        });
-        errdefer self.child.kill(io);
-
+        const final_argv = if (cfg.cgroup_path) |path| blk: {
+            const exe = cfg.guard_exe orelse return error.MissingGuardExecutable;
+            const prefix = [_][]const u8{ exe, "__sleeve_cgroup", path };
+            break :blk try std.mem.concat(a, []const u8, &.{ &prefix, sandbox_argv });
+        } else sandbox_argv;
         const sess_id = try a.dupe(u8, cfg.session_id orelse "pt-sess");
         const cwd_d = try a.dupe(u8, cfg.cwd);
         const mod_d = if (cfg.model) |m| try a.dupe(u8, m) else null;
@@ -141,12 +136,14 @@ pub const Session = struct {
                 .session_id = sess_id,
                 .uuid_base = "00000000-0000-4000-8000-",
                 .model = mod_d,
+                .provider = prov_d,
                 .effort = eff_d,
                 .supervised = cfg.permission == .supervised,
             } },
             .codex => .{ .codex = .{
                 .cwd = cwd_d,
                 .model = mod_d,
+                .provider = prov_d,
                 .effort = eff_d,
                 .resume_id = res_d,
                 .supervised = cfg.permission == .supervised,
@@ -154,6 +151,7 @@ pub const Session = struct {
             .grok => .{ .grok = .{
                 .cwd = cwd_d,
                 .model = mod_d,
+                .effort = eff_d,
                 .resume_id = res_d,
                 .supervised = cfg.permission == .supervised,
             } },
@@ -161,15 +159,24 @@ pub const Session = struct {
                 .session_id = sess_id,
                 .model = mod_d,
                 .provider = prov_d,
-                .effort = eff_d,
             } },
             .antigravity => .{ .antigravity = .{
                 .session_id = res_d orelse sess_id,
                 .model = mod_d,
+                .provider = prov_d,
                 .effort = eff_d,
                 .supervised = cfg.permission == .supervised,
             } },
         };
+        self.child = try std.process.spawn(io, .{
+            .argv = final_argv,
+            .cwd = .{ .path = cfg.cwd },
+            .environ_map = cfg.environ_map,
+            .stdin = .pipe,
+            .stdout = .pipe,
+            .stderr = .pipe,
+            .pgid = if (builtin.os.tag != .windows) 0 else null,
+        });
         return self;
     }
 
@@ -180,22 +187,32 @@ pub const Session = struct {
     }
 
     pub fn begin(self: *Session) !void {
-        try self.start_protocol();
-        self.stderr_thread = try std.Thread.spawn(.{}, stderr_loop, .{self});
-        self.stdout_thread = try std.Thread.spawn(.{}, stdout_loop, .{self});
+        self.start_protocol() catch |err| switch (err) {
+            error.WriteFailed => {},
+            else => return err,
+        };
+        const stderr_f = self.child.stderr.?;
+        self.stderr_thread = try std.Thread.spawn(.{}, stderr_loop, .{ self, stderr_f });
+        self.child.stderr = null;
+        const stdout_f = self.child.stdout.?;
+        self.child.stdout = null;
+        errdefer self.child.stdout = stdout_f;
+        self.stdout_thread = try std.Thread.spawn(.{}, stdout_loop, .{ self, stdout_f });
     }
 
     fn start_protocol(self: *Session) !void {
-        self.mu.lockUncancelable(self.io);
-        switch (self.impl) {
-            .claude => |*c| try c.start(&self.out),
-            .codex => |*c| try c.start(&self.out),
-            .grok => |*c| try c.start(&self.out),
-            .pi => |*p| try p.start(&self.out),
-            .antigravity => |*ag| try ag.start(&self.out),
-        }
-        const evs = try self.take_pending_locked();
-        self.mu.unlock(self.io);
+        const evs = blk: {
+            self.mu.lockUncancelable(self.io);
+            defer self.mu.unlock(self.io);
+            switch (self.impl) {
+                .claude => |*c| try c.start(&self.out),
+                .codex => |*c| try c.start(&self.out),
+                .grok => |*c| try c.start(&self.out),
+                .pi => |*p| try p.start(&self.out),
+                .antigravity => |*ag| try ag.start(&self.out),
+            }
+            break :blk try self.take_pending_locked();
+        };
         defer self.gpa.free(evs);
         for (evs) |ev| self.on_event(self.ctx, ev);
     }
@@ -297,19 +314,14 @@ pub const Session = struct {
         for (evs) |ev| self.on_event(self.ctx, ev);
     }
 
-    pub fn kill_and_destroy(self: *Session) void {
+    pub fn request_stop(self: *Session) void {
         self.stopping.store(true, .release);
+    }
+
+    pub fn kill_and_destroy(self: *Session) void {
+        tiger.assert(self.stopping.load(.acquire));
         self.mu.lockUncancelable(self.io);
-        if (self.child.stdin) |f| {
-            f.close(self.io);
-            self.child.stdin = null;
-        }
-        if (builtin.os.tag != .windows) {
-            if (self.child.id) |pid| {
-                std.posix.kill(-pid, .KILL) catch {};
-            }
-        }
-        self.child.kill(self.io);
+        self.kill_child_locked();
         self.mu.unlock(self.io);
 
         if (self.stdout_thread) |t| t.join();
@@ -318,22 +330,62 @@ pub const Session = struct {
         self.gpa.destroy(self);
     }
 
-    fn stdout_loop(self: *Session) void {
-        defer self.stdout_done.store(true, .release);
-        const stdout_f = self.child.stdout orelse return;
+    fn kill_child_locked(self: *Session) void {
+        if (comptime builtin.os.tag != .windows) {
+            if (self.child.id) |pid| {
+                std.posix.kill(-pid, .KILL) catch {};
+                std.posix.kill(pid, .KILL) catch {};
+            }
+        }
+        self.child.kill(self.io);
+    }
+
+    fn finish_child(self: *Session, kill: bool) ?std.process.Child.Term {
+        while (!self.stopping.load(.acquire)) {
+            {
+                self.mu.lockUncancelable(self.io);
+                defer self.mu.unlock(self.io);
+                const pid = self.child.id orelse return null;
+                if (kill) {
+                    self.kill_child_locked();
+                    return null;
+                }
+                if (child_process.has_exited(pid) catch {
+                    self.kill_child_locked();
+                    return null;
+                }) {
+                    if (self.stopping.load(.acquire)) return null;
+                    const previous = self.io.swapCancelProtection(.blocked);
+                    defer _ = self.io.swapCancelProtection(previous);
+                    return self.child.wait(self.io) catch null;
+                }
+            }
+            self.io.sleep(.fromMilliseconds(10), .awake) catch unreachable;
+        }
+        return null;
+    }
+
+    fn stdout_loop(self: *Session, stdout_f: std.Io.File) void {
+        defer stdout_f.close(self.io);
         var rbuf: [16 * 1024]u8 = undefined;
         var r = stdout_f.reader(self.io, &rbuf);
         var line_aw: std.Io.Writer.Allocating = .init(self.gpa);
         defer line_aw.deinit();
 
-        var refused = false;
+        var failed = false;
         while (!self.stopping.load(.acquire)) {
             line_aw.clearRetainingCapacity();
-            _ = r.interface.streamDelimiterLimit(&line_aw.writer, '\n', .limited(16 << 20)) catch break;
+            _ = r.interface.streamDelimiterLimit(&line_aw.writer, '\n', .limited(16 << 20)) catch {
+                failed = true;
+                break;
+            };
             const at_eof = blk: {
                 const b = r.interface.peekByte() catch |err| switch (err) {
                     error.EndOfStream => break :blk true,
-                    else => break,
+                    else => {
+                        failed = true;
+                        break;
+                    },
                 };
                 if (b == '\n') r.interface.toss(1);
                 break :blk false;
@@ -346,18 +398,17 @@ pub const Session = struct {
                     for (evs) |ev| self.on_event(self.ctx, ev);
                 }
                 self.mu.lockUncancelable(self.io);
-                refused = self.out.refused;
-                if (refused) self.child.kill(self.io);
+                failed = self.out.refused;
                 self.mu.unlock(self.io);
-                if (refused) break;
             }
-            if (at_eof) break;
+            if (at_eof or failed) break;
         }
 
-        if (!self.stopping.load(.acquire)) {
-            const term = if (refused) null else self.child.wait(self.io) catch null;
+        const term = self.finish_child(failed);
+        if (term != null or !self.stopping.load(.acquire)) {
             const code: ?u8 = if (term) |t| switch (t) {
                 .exited => |c| c,
+                .signal => |sig| if (builtin.os.tag != .windows and sig == .KILL) 137 else 1,
                 else => 1,
             } else null;
             if (self.stderr_thread) |t| {
@@ -388,8 +439,8 @@ pub const Session = struct {
         return self.take_pending_locked();
     }
 
-    fn stderr_loop(self: *Session) void {
-        const stderr_f = self.child.stderr orelse return;
+    fn stderr_loop(self: *Session, stderr_f: std.Io.File) void {
+        defer stderr_f.close(self.io);
         var rbuf: [4096]u8 = undefined;
         var r = stderr_f.reader(self.io, &rbuf);
         var tmp: [2048]u8 = undefined;

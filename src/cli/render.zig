@@ -67,6 +67,14 @@ pub fn print_hub_info(arena: std.mem.Allocator, io: std.Io, body: []const u8) !v
         info.started_at_ms.ms,
         info.job_artifact_max_bytes,
     });
+    if (info.pools.len > 0) try print_out(io, "{s:<22} {s:>10} {s:>10} {s:>10} {s:>8}\n", .{ "pool", "size", "used", "high", "refused" });
+    for (info.pools) |p| {
+        if (p.reserved > 0) {
+            try print_out(io, "{s:<22} {d:>10} {d:>10} {d:>10} {d:>8}  (reserve {d})\n", .{ p.name, p.size, p.used, p.high_water, p.refused, p.reserved });
+        } else {
+            try print_out(io, "{s:<22} {d:>10} {d:>10} {d:>10} {d:>8}\n", .{ p.name, p.size, p.used, p.high_water, p.refused });
+        }
+    }
     if (info.restore_error) |re| {
         try print_out(io, "WARNING restore_error: {s}\n", .{re});
     }
@@ -129,6 +137,27 @@ pub fn print_sleeve_list(arena: std.mem.Allocator, io: std.Io, body: []const u8)
         return;
     }
     try render_sleeves(io, ls.sleeves);
+}
+
+pub fn print_model_catalog(arena: std.mem.Allocator, io: std.Io, body: []const u8) !void {
+    const catalog = try schema.decode_arena(schema.ModelCatalog, arena, body);
+    for (catalog.harnesses) |h| {
+        try print_out(io, "{s} (efforts: {s}; default effort: {s})\n", .{
+            @tagName(h.harness),
+            if (h.efforts.len == 0) "-" else try std.mem.join(arena, ", ", h.efforts),
+            h.default_effort orelse "native",
+        });
+        if (h.models.len == 0) try print_out(io, "  No catalog entries. Use --model to enter an ID.\n", .{});
+        for (h.models) |m| {
+            try print_out(io, "  {s}{s}{s}  {s}{s}\n", .{
+                m.provider orelse "",
+                if (m.provider != null) "/" else "",
+                m.id,
+                m.label,
+                if (m.is_default) " (default)" else "",
+            });
+        }
+    }
 }
 
 pub fn render_sleeves(io: std.Io, sleeves: []const schema.Sleeve) !void {
@@ -207,7 +236,13 @@ pub fn print_transcript(arena: std.mem.Allocator, io: std.Io, body: []const u8) 
     }
     for (tx.entries) |ce| {
         switch (ce.entry) {
-            .session_info => |s| try print_out(io, "[#{d} g{d}.t{d}] session harness={s} id={s}\n", .{ ce.seq, ce.g, ce.turn, @tagName(s.harness), s.native_id }),
+            .session_info => |s| {
+                try print_out(io, "[#{d} g{d}.t{d}] session harness={s} id={s}", .{ ce.seq, ce.g, ce.turn, @tagName(s.harness), s.native_id });
+                if (s.model) |model| try print_out(io, " model={s}", .{model});
+                if (s.effort) |effort| try print_out(io, " effort={s}", .{effort});
+                if (s.effort_notice) |notice| try print_out(io, "  {s}", .{notice});
+                try print_out(io, "\n", .{});
+            },
             .user_message => |u| try print_out(io, "[#{d} g{d}.t{d}] {s}: {s}\n", .{ ce.seq, ce.g, ce.turn, u.from, u.text }),
             .prompt_ack => |p| try print_out(io, "[#{d} g{d}.t{d}] ack({s}) {s}\n", .{ ce.seq, ce.g, ce.turn, @tagName(p.ack), p.detail orelse "" }),
             .assistant_text => |a| try print_out(io, "[#{d} g{d}.t{d}] assistant: {s}\n", .{ ce.seq, ce.g, ce.turn, a.text }),

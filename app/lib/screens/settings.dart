@@ -306,7 +306,7 @@ const commandHelp = [
   ('/deny [id]', 'Deny; same rule'),
   ('/interrupt', 'Interrupt the open sleeve'),
   ('/stop', 'Stop the open sleeve and its children'),
-  ('/resleeve h', 'Resleeve the open sleeve to harness h'),
+  ('/resleeve <harness> [model] [effort]', 'Resleeve the open sleeve'),
   ('theme', 'Switch between dark and light'),
   ('set', 'Settings'),
 ];

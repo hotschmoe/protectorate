@@ -80,18 +80,58 @@ Future<String> downloadClient(
   }
 }
 
-Future<String> installClient(String path) async {
+const _androidHint =
+    'Android may close the app during the update; reopen it afterwards';
+
+String? installHint() => Platform.isAndroid ? _androidHint : null;
+
+Future<String> installClient(String path, String version) async {
   if (Platform.isAndroid) {
-    final r = await _channel.invokeMethod<String>('install', {'path': path});
+    final r = await _channel.invokeMethod<String>('install', {
+      'path': path,
+      'version': version,
+    });
     return r == 'allow'
         ? 'Allow installs from Protectorate, then press Install again'
-        : 'Confirm the update in the Android dialog';
+        : 'Confirm the update in the Android dialog. $_androidHint';
   }
   if (Platform.isWindows) {
     await _installWindows(path);
     exit(0);
   }
   throw UnsupportedError('no installer for ${Platform.operatingSystem}');
+}
+
+/// What the last Android install attempt came to, once, judged against the running version; null
+/// when there was none. The record survives the app being killed during the update.
+Future<({String text, bool ok})?> lastInstall(String running) async {
+  if (!Platform.isAndroid) return null;
+  try {
+    final raw = await _channel.invokeMethod<String>('lastInstall');
+    if (raw == null) return null;
+    await _channel.invokeMethod<void>('clearInstall');
+    final rec = jsonDecode(raw) as Map<String, dynamic>;
+    final version = rec['version'] as String? ?? 'the new version';
+    final status = rec['status'] as int?;
+    final message = rec['message'] as String? ?? '';
+    if (rec['version'] == running) {
+      return (text: 'Updated to $version', ok: true);
+    }
+    // 0 is success and -1 is waiting for the owner's confirmation: neither is a final failure.
+    if (status != null && status != 0 && status != -1) {
+      return (
+        text:
+            'The update to $version failed: ${message.isEmpty ? 'status $status' : message}',
+        ok: false,
+      );
+    }
+    return (
+      text: 'The update to $version did not finish (Android closed the app)',
+      ok: false,
+    );
+  } on Object {
+    return null;
+  }
 }
 
 String _ps(String s) => "'${s.replaceAll("'", "''")}'";

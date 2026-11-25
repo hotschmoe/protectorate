@@ -601,11 +601,9 @@ fn generate_dart(gpa: std.mem.Allocator) ![]u8 {
         \\  }
         \\
         \\  Stream<HubStreamMessage> events({
-        \\    int? fromSeq,
         \\    Iterable<String> transcripts = const [],
         \\  }) => openSocket(
         \\    _url('/api/events', {
-        \\      if (fromSeq != null) 'from_seq': '$fromSeq',
         \\      if (transcripts.isNotEmpty) 'transcripts': transcripts.join(','),
         \\    }),
         \\    token,

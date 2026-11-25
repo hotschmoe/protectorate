@@ -24,7 +24,6 @@ pub const Pi = struct {
     session_id: []const u8,
     model: ?[]const u8 = null,
     provider: ?[]const u8 = null,
-    effort: ?[]const u8 = null,
     ready: bool = false,
     turn_counter: u64 = 0,
     msg_n: u64 = 0,
@@ -197,7 +196,7 @@ pub const Pi = struct {
                     .native_id = self.session_id,
                     .model = if (model_id) |mid| try out.alloc.dupe(u8, mid) else self.model,
                     .provider = if (prov) |pv| try out.alloc.dupe(u8, pv) else self.provider,
-                    .effort = json_util.value_str(data, "thinkingLevel") orelse self.effort,
+                    .effort = if (json_util.value_nonempty_str(data, "thinkingLevel")) |level| try out.alloc.dupe(u8, level) else null,
                 } });
             },
             .prompt => |req_id| {

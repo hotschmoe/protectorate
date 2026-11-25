@@ -3,17 +3,14 @@ const tiger = @import("../tiger.zig");
 const json_util = @import("../json_util.zig");
 const select = @import("select.zig");
 
-pub const PiModel = struct {
+pub const LocalModel = struct {
     provider: []const u8,
     id: []const u8,
-    name: []const u8,
-    base_url: []const u8 = "",
-    reasoning: bool = false,
 };
 
 pub const Report = struct {
     quotas: []const select.Quota,
-    pi_models: []const PiModel,
+    local_model: ?LocalModel,
     claude_present: bool,
     codex_present: bool,
     grok_present: bool,
@@ -26,9 +23,10 @@ pub fn read_all(
     user_home: ?[]const u8,
     now_ms: i64,
     poll_remote: bool,
+    local_provider: ?[]const u8,
 ) !Report {
     var quotas: std.ArrayList(select.Quota) = .empty;
-    var pi_models: std.ArrayList(PiModel) = .empty;
+    var local_model: ?LocalModel = null;
 
     var claude_q: select.Quota = .{
         .subscription = .claude,
@@ -64,8 +62,6 @@ pub fn read_all(
     var claude_ok = false;
     var codex_ok = false;
     var grok_ok = false;
-
-    var first_local_key: []const u8 = "";
 
     if (user_home) |home| {
         if (try read_json_rel(arena, io, home, ".gemini/antigravity-cli/antigravity-oauth-token")) |v| {
@@ -159,40 +155,23 @@ pub fn read_all(
             grok_q.note = "settings present";
         }
 
-        if (try read_json_rel(arena, io, home, ".pi/agent/models.json")) |v| {
-            if (json_util.value_get(v, "providers")) |provs| {
-                if (provs == .object) {
-                    var pit = provs.object.iterator();
-                    while (pit.next()) |pe| {
-                        const p_name = pe.key_ptr.*;
-                        const p_val = pe.value_ptr.*;
-                        const base = json_util.value_str(p_val, "baseUrl") orelse "";
-                        if (first_local_key.len == 0 and base.len > 0) {
-                            first_local_key = json_util.value_str(p_val, "apiKey") orelse "";
-                        }
-                        const models = json_util.value_array(p_val, "models") orelse continue;
-                        for (models) |m| {
-                            const mid = json_util.value_str(m, "id") orelse continue;
-                            const mname = json_util.value_str(m, "name") orelse mid;
-                            const reas = json_util.value_bool(m, "reasoning") == true;
-                            try pi_models.append(arena, .{
-                                .provider = try arena.dupe(u8, p_name),
-                                .id = try arena.dupe(u8, mid),
-                                .name = try arena.dupe(u8, mname),
-                                .base_url = try arena.dupe(u8, base),
-                                .reasoning = reas,
-                            });
-                        }
-                    }
-                }
-            }
-            if (pi_models.items.len > 0) {
-                local_q.plan = try arena.dupe(u8, pi_models.items[0].provider);
-                local_q.reading = .ok;
-                local_q.note = try arena.dupe(u8, pi_models.items[0].id);
+        local: {
+            const provider = local_provider orelse break :local;
+            const v = try read_json_rel(arena, io, home, ".pi/agent/models.json") orelse break :local;
+            const providers = json_util.value_object(v, "providers") orelse break :local;
+            const config = providers.object.get(provider) orelse break :local;
+            const base = json_util.value_nonempty_str(config, "baseUrl") orelse break :local;
+            const models = json_util.value_array(config, "models") orelse break :local;
+            for (models) |m| {
+                const id = json_util.value_nonempty_str(m, "id") orelse continue;
+                local_model = .{ .provider = provider, .id = id };
+                local_q.plan = provider;
+                local_q.note = id;
                 if (poll_remote) {
-                    poll_local(arena, io, env, pi_models.items, first_local_key, &local_q, now_ms);
+                    const key = json_util.value_str(config, "apiKey") orelse "";
+                    poll_local(arena, io, env, base, key, &local_q, now_ms);
                 }
+                break;
             }
         }
     }
@@ -205,7 +184,7 @@ pub fn read_all(
 
     return .{
         .quotas = quotas.items,
-        .pi_models = pi_models.items,
+        .local_model = local_model,
         .claude_present = claude_ok,
         .codex_present = codex_ok,
         .grok_present = grok_ok,
@@ -678,19 +657,11 @@ fn poll_local(
     arena: std.mem.Allocator,
     io: std.Io,
     env: ?*const std.process.Environ.Map,
-    pi_models: []const PiModel,
+    base: []const u8,
     raw_api_key: []const u8,
     out_q: *select.Quota,
     now_ms: i64,
 ) void {
-    var base: []const u8 = "";
-    for (pi_models) |m| {
-        if (m.base_url.len > 0) {
-            base = m.base_url;
-            break;
-        }
-    }
-    if (base.len == 0) return;
     if (raw_api_key.len > 0 and raw_api_key[0] == '!') {
         out_q.reading = .stale;
         out_q.note = "apiKey uses command; health check skipped";

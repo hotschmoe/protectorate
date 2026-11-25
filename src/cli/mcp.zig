@@ -29,8 +29,8 @@ const tools = [_]ToolDef{
         .name = "spawn_sleeve",
         .method = "SpawnSleeve",
         .desc = "Create and start a sleeve in a workspace",
-        .required = &.{ "name", "harness", "path" },
-        .props_json = "{\"name\":{\"type\":\"string\"},\"harness\":{\"type\":\"string\"},\"path\":{\"type\":\"string\"},\"model\":{\"type\":\"string\"},\"provider\":{\"type\":\"string\"},\"message\":{\"type\":\"string\"}}",
+        .required = &.{ "name", "path" },
+        .props_json = "{\"name\":{\"type\":\"string\"},\"harness\":{\"type\":\"string\"},\"auto_select\":{\"type\":\"boolean\"},\"path\":{\"type\":\"string\"},\"model\":{\"type\":\"string\"},\"provider\":{\"type\":\"string\"},\"task_size\":{\"enum\":[\"small\",\"medium\",\"large\"]},\"message\":{\"type\":\"string\"}}",
     },
     .{
         .name = "send_message",

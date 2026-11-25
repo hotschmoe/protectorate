@@ -131,7 +131,10 @@ List<ChatRow> foldTranscript(List<ChatEntry> entries) {
     switch (e.entry) {
       case final EntrySessionInfo x:
         final model = x.model == null ? '' : ' ${x.model}';
-        line(e, '${x.harness.wire}$model g${e.g} ${x.mode.wire}', Level.info);
+        final effort = x.effort == null ? '' : ' • ${x.effort} effort';
+        final notice = x.effortNotice == null ? '' : ' • ${x.effortNotice}';
+        line(e, '${x.harness.wire}$model g${e.g} ${x.mode.wire}$effort$notice',
+            x.effortNotice == null ? Level.info : Level.warn);
       case final EntryUserMessage x:
         final r = UserRow(e.seq, e.at, x);
         users[x.requestId] = r;

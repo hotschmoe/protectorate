@@ -1,5 +1,18 @@
 const model = @import("model.zig");
 
+const event = @import("event.zig");
+
+pub const LaunchIncarnation = struct {
+    sleeve_id: []const u8,
+    g: model.Gen,
+    harness: model.Harness,
+    mode: model.Mode,
+    model_name: []const u8,
+    provider: []const u8,
+    effort: ?[]const u8,
+    resume_id: ?[]const u8 = null,
+};
+
 pub const Intent = union(enum) {
     provision_worktree: struct {
         sleeve_id: []const u8,
@@ -16,20 +29,17 @@ pub const Intent = union(enum) {
         g: model.Gen,
         cause: model.Cause,
     },
-    launch_incarnation: struct {
+    launch_incarnation: LaunchIncarnation,
+    record_quota_selection: struct {
         sleeve_id: []const u8,
-        g: model.Gen,
-        harness: model.Harness,
-        mode: model.Mode,
-        model_name: []const u8,
-        provider: []const u8,
-        effort: ?[]const u8,
-        resume_id: ?[]const u8 = null,
+        source: enum { spawn, guardrail },
+        choice: event.QuotaSelection,
     },
     deliver_prompt: struct {
         sleeve_id: []const u8,
         g: model.Gen,
         request_id: []const u8,
+        from: []const u8 = "owner",
         text: []const u8,
         steer: bool,
     },

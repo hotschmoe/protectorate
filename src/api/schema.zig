@@ -217,6 +217,30 @@ pub const Harness = enum {
     }
 };
 
+pub const ModelChoice = struct {
+    id: []const u8,
+    label: []const u8,
+    provider: ?[]const u8 = null,
+    is_default: bool = false,
+    efforts: ?[]const []const u8 = null,
+    default_effort: ?[]const u8 = null,
+};
+
+pub const HarnessModels = struct {
+    harness: Harness,
+    models: []const ModelChoice = &.{},
+    efforts: []const []const u8 = &.{},
+    default_effort: ?[]const u8 = null,
+};
+
+pub const ModelCatalogRequest = struct {
+    harness: ?Harness = null,
+};
+
+pub const ModelCatalog = struct {
+    harnesses: []const HarnessModels,
+};
+
 pub const HarnessUpdateState = enum {
     started,
     deferred,
@@ -676,6 +700,7 @@ pub const EntrySessionInfo = struct {
     model: ?[]const u8 = null,
     provider: ?[]const u8 = null,
     effort: ?[]const u8 = null,
+    effort_notice: ?[]const u8 = null,
 };
 
 pub const EntryUserMessage = struct {
@@ -1007,6 +1032,16 @@ pub const HubInfo = struct {
     restore_error: ?[]const u8 = null,
     clients: []const []const u8 = &.{},
     job_artifact_max_bytes: u64 = 0,
+    pools: []const PoolStat = &.{},
+};
+
+pub const PoolStat = struct {
+    name: []const u8,
+    size: u64,
+    reserved: u64 = 0,
+    used: u64,
+    high_water: u64,
+    refused: u64,
 };
 
 pub const Workspace = struct {
@@ -1331,6 +1366,19 @@ pub const RenamedNode = struct {
     to: []const u8,
 };
 
+pub const TaskSize = enum {
+    small,
+    medium,
+    large,
+    unknown,
+
+    pub fn jsonParseFromValue(a: std.mem.Allocator, s: std.json.Value, o: std.json.ParseOptions) !TaskSize {
+        _ = a;
+        _ = o;
+        return wire_enum_parse(TaskSize, s);
+    }
+};
+
 pub const ResleeveRequest = struct {
     sleeve_id: []const u8,
     target: Harness,
@@ -1399,7 +1447,8 @@ pub const SleeveRef = struct {
 
 pub const SpawnSleeveRequest = struct {
     name: []const u8,
-    harness: Harness,
+    harness: Harness = .claude,
+    auto_select: bool = false,
     path: ?[]const u8 = null,
     new_path: ?[]const u8 = null,
     parent_id: ?[]const u8 = null,
@@ -1412,6 +1461,7 @@ pub const SpawnSleeveRequest = struct {
     message: ?[]const u8 = null,
     budget: ?u64 = null,
     until_done: ?u64 = null,
+    task_size: ?TaskSize = null,
 };
 
 pub const StartSleeveRequest = struct {
@@ -1688,8 +1738,14 @@ fn write_tagged_struct(tag_name: []const u8, v: anytype, jw: anytype) !void {
     const info = @typeInfo(@TypeOf(v)).@"struct";
     inline for (info.field_names, info.field_types) |f_name, f_type| {
         if (f_type == void) continue;
-        try jw.objectField(f_name);
-        try jw.write(@field(v, f_name));
+        const emit = if (@TypeOf(v) == EntrySessionInfo and std.mem.eql(u8, f_name, "effort_notice"))
+            v.effort_notice != null
+        else
+            true;
+        if (emit) {
+            try jw.objectField(f_name);
+            try jw.write(@field(v, f_name));
+        }
     }
     try jw.endObject();
 }
@@ -1718,6 +1774,7 @@ pub const MethodSpec = struct {
 pub const methods = [_]MethodSpec{
     .{ .name = "GetState", .dart_name = "getState", .scope = .owner, .Req = Empty, .Resp = HubState, .default_empty = true, .doc = "The full snapshot." },
     .{ .name = "ListSleeves", .dart_name = "listSleeves", .scope = .sleeve, .Req = Empty, .Resp = SleeveList, .default_empty = true },
+    .{ .name = "ListModels", .dart_name = "listModels", .scope = .sleeve, .Req = ModelCatalogRequest, .Resp = ModelCatalog, .default_empty = true },
     .{ .name = "GetInbox", .dart_name = "getInbox", .scope = .sleeve, .Req = InboxRequest, .Resp = Inbox },
     .{ .name = "DropQueued", .dart_name = "dropQueued", .scope = .sleeve, .Req = SleeveRef, .Resp = Empty },
     .{ .name = "GetTranscript", .dart_name = "getTranscript", .scope = .sleeve, .Req = GetTranscriptRequest, .Resp = Transcript },
@@ -1802,6 +1859,7 @@ pub const wire_enums = .{
     SleeveRole,
     Stop,
     Subscription,
+    TaskSize,
     ToolKind,
     ToolStatus,
     TurnStatusState,
@@ -1868,6 +1926,7 @@ pub const wire_records = .{
     GitPushRequest,
     GitPushResult,
     Gpu,
+    HarnessModels,
     HarnessUpdate,
     HarnessUpdates,
     HistoryDoc,
@@ -1911,6 +1970,9 @@ pub const wire_records = .{
     ListEventsRequest,
     ListJobsRequest,
     MarkEventsReadRequest,
+    ModelCatalog,
+    ModelCatalogRequest,
+    ModelChoice,
     Node,
     NodeAdmission,
     NodeList,
@@ -1920,6 +1982,7 @@ pub const wire_records = .{
     PairDeviceRequest,
     PairedDevice,
     PairingCode,
+    PoolStat,
     PendingNode,
     Presence,
     QueuedMessage,

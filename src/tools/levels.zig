@@ -56,12 +56,26 @@ fn classify(rel_path: []const u8) ?Classification {
     {
         return .{ .tier = .l0, .group = .root };
     }
-    if (std.mem.eql(u8, rel_path, "qr.zig") or
+    if (std.mem.eql(u8, rel_path, "child_process.zig") or
+        std.mem.eql(u8, rel_path, "qr.zig") or
         std.mem.eql(u8, rel_path, "json_util.zig"))
     {
         return .{ .tier = .l1, .group = .root };
     }
-    if (std.mem.eql(u8, rel_path, "net/frame.zig") or std.mem.eql(u8, rel_path, "net/noise.zig")) {
+    if (std.mem.eql(u8, rel_path, "net/frame.zig") or
+        std.mem.eql(u8, rel_path, "net/noise.zig") or
+        std.mem.eql(u8, rel_path, "net/limits.zig") or
+        std.mem.eql(u8, rel_path, "net/io.zig") or
+        std.mem.eql(u8, rel_path, "net/io_epoll.zig") or
+        std.mem.eql(u8, rel_path, "net/http_wire.zig") or
+        std.mem.eql(u8, rel_path, "net/record_ring.zig") or
+        std.mem.eql(u8, rel_path, "net/ws_out.zig") or
+        std.mem.eql(u8, rel_path, "net/io_kqueue.zig") or
+        std.mem.eql(u8, rel_path, "net/io_iocp.zig") or
+        std.mem.eql(u8, rel_path, "net/gauge.zig") or
+        std.mem.eql(u8, rel_path, "net/tick_guard.zig") or
+        std.mem.eql(u8, rel_path, "net/bounded.zig"))
+    {
         return .{ .tier = .l1, .group = .net };
     }
     if (std.mem.eql(u8, rel_path, "journal/codec.zig")) {
@@ -82,7 +96,14 @@ fn classify(rel_path: []const u8) ?Classification {
     if (std.mem.eql(u8, rel_path, "api/schema.zig")) {
         return .{ .tier = .l2, .group = .api };
     }
-    if (std.mem.eql(u8, rel_path, "net/msg.zig")) {
+    if (std.mem.eql(u8, rel_path, "git_process.zig")) {
+        return .{ .tier = .l2, .group = .root };
+    }
+    if (std.mem.eql(u8, rel_path, "net/msg.zig") or std.mem.eql(u8, rel_path, "net/channel.zig") or
+        std.mem.eql(u8, rel_path, "net/handshake.zig") or std.mem.eql(u8, rel_path, "net/fleet_bus.zig") or
+        std.mem.eql(u8, rel_path, "net/node_link.zig") or std.mem.eql(u8, rel_path, "net/node_loop.zig") or
+        std.mem.eql(u8, rel_path, "net/backend.zig"))
+    {
         return .{ .tier = .l2, .group = .net };
     }
     if (std.mem.startsWith(u8, rel_path, "core/")) {
@@ -111,9 +132,6 @@ fn classify(rel_path: []const u8) ?Classification {
     }
     if (std.mem.eql(u8, rel_path, "sandbox/exec.zig")) {
         return .{ .tier = .l3, .group = .sandbox };
-    }
-    if (std.mem.eql(u8, rel_path, "net/transport.zig")) {
-        return .{ .tier = .l3, .group = .net };
     }
     if (std.mem.eql(u8, rel_path, "update/store.zig")) {
         return .{ .tier = .l3, .group = .update };
@@ -245,12 +263,12 @@ fn parse_imports_and_check_tests(
 fn check_allowed_edge(src_file: SourceFile, dst_file: SourceFile) ?[]const u8 {
     if (src_file.class.group == .dst) {
         if (dst_file.class.group == .dst) return null;
-        if (@intFromEnum(dst_file.class.tier) <= @intFromEnum(Tier.l2)) return null;
+        if (@backingInt(dst_file.class.tier) <= @backingInt(Tier.l2)) return null;
         return "dst module may only import L0-L2 or dst/*";
     }
     if (src_file.class.group == .tools) {
         if (dst_file.class.group == .tools) return null;
-        if (@intFromEnum(dst_file.class.tier) <= @intFromEnum(Tier.l2)) return null;
+        if (@backingInt(dst_file.class.tier) <= @backingInt(Tier.l2)) return null;
         return "tools module may only import L0-L2 or tools/*";
     }
 
@@ -258,8 +276,8 @@ fn check_allowed_edge(src_file: SourceFile, dst_file: SourceFile) ?[]const u8 {
         return null;
     }
 
-    const src_tier = @intFromEnum(src_file.class.tier);
-    const dst_tier = @intFromEnum(dst_file.class.tier);
+    const src_tier = @backingInt(src_file.class.tier);
+    const dst_tier = @backingInt(dst_file.class.tier);
     if (dst_tier > src_tier) {
         return "upward import to higher layer";
     }

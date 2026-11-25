@@ -314,10 +314,7 @@ pub const InitiatorHandshake = struct {
     }
 
     pub fn finish(self: *InitiatorHandshake, msg2: []const u8, started_ms: u64) NoiseError!Session {
-        defer {
-            self.e.zeroize();
-            self.ss.zeroize();
-        }
+        defer self.deinit();
         if (msg2.len != msg2_len) return error.BadLength;
 
         var re: [32]u8 = undefined;
@@ -342,6 +339,12 @@ pub const InitiatorHandshake = struct {
             .peer_static = self.rs,
             .started_ms = started_ms,
         };
+    }
+
+    pub fn deinit(self: *InitiatorHandshake) void {
+        self.e.zeroize();
+        self.s.zeroize();
+        self.ss.zeroize();
     }
 };
 

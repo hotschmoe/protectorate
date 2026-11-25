@@ -76,6 +76,16 @@ fn write_opt_i32(gpa: std.mem.Allocator, out: *std.ArrayList(u8), v: ?i32) !void
     }
 }
 
+fn write_quota_selection(gpa: std.mem.Allocator, out: *std.ArrayList(u8), selection: event.QuotaSelection) !void {
+    try write_bool(gpa, out, selection.harness != null);
+    if (selection.harness) |harness| {
+        try write_u8(gpa, out, @backingInt(harness));
+        try write_opt_str(gpa, out, selection.model_name);
+        try write_opt_str(gpa, out, selection.provider);
+    }
+    try write_str(gpa, out, selection.reason);
+}
+
 pub fn encode_stamped(gpa: std.mem.Allocator, se: event.StampedEvent, out: *std.ArrayList(u8)) CodecError!void {
     try write_u32(gpa, out, format_version);
     try write_u64(gpa, out, se.seq);
@@ -113,6 +123,7 @@ pub fn encode_stamped(gpa: std.mem.Allocator, se: event.StampedEvent, out: *std.
             try write_opt_str(gpa, out, e.provider);
             try write_opt_str(gpa, out, e.effort);
             try write_opt_u64(gpa, out, e.until_done);
+            if (e.selection_reason) |reason| try write_str(gpa, out, reason);
         },
         .launched => |e| {
             try write_str(gpa, out, e.sleeve_id);
@@ -168,6 +179,11 @@ pub fn encode_stamped(gpa: std.mem.Allocator, se: event.StampedEvent, out: *std.
             }
             try write_u64(gpa, out, e.context_tokens);
             try write_u64(gpa, out, e.context_window);
+            if (e.quota_handoff) |handoff| {
+                try write_bool(gpa, out, true);
+                try write_u8(gpa, out, @backingInt(handoff.cause));
+                if (handoff.selection) |selection| try write_quota_selection(gpa, out, selection);
+            }
         },
         .tool_activity => |e| {
             try write_str(gpa, out, e.sleeve_id);
@@ -189,6 +205,7 @@ pub fn encode_stamped(gpa: std.mem.Allocator, se: event.StampedEvent, out: *std.
             try write_u64(gpa, out, e.g);
             try write_u8(gpa, out, @intFromEnum(e.cause));
             try write_bool(gpa, out, e.requested);
+            if (e.quota_selection) |selection| try write_quota_selection(gpa, out, selection);
         },
         .stop_requested => |e| {
             try write_str(gpa, out, e.sleeve_id);
@@ -203,6 +220,7 @@ pub fn encode_stamped(gpa: std.mem.Allocator, se: event.StampedEvent, out: *std.
             try write_opt_str(gpa, out, e.effort);
             try write_u8(gpa, out, @intFromEnum(e.by));
             try write_u8(gpa, out, @intFromEnum(e.cause));
+            if (!e.inherit_preferences) try write_bool(gpa, out, false);
         },
         .parked => |e| {
             try write_str(gpa, out, e.sleeve_id);
@@ -218,6 +236,7 @@ pub fn encode_stamped(gpa: std.mem.Allocator, se: event.StampedEvent, out: *std.
             try write_str(gpa, out, e.title);
             try write_str(gpa, out, e.summary);
             try write_bool(gpa, out, e.is_d9);
+            if (e.timeout_ms != model.approval_timeout_ms) try write_i64(gpa, out, e.timeout_ms);
         },
         .approval_decided => |e| {
             try write_str(gpa, out, e.approval_id);
@@ -327,6 +346,11 @@ pub fn encode_stamped(gpa: std.mem.Allocator, se: event.StampedEvent, out: *std.
         },
         .rollout_cancelled => |e| try write_str(gpa, out, e.rollout_id),
         .tick => {},
+        .exit_classified => |e| {
+            try write_str(gpa, out, e.sleeve_id);
+            try write_u64(gpa, out, e.g);
+            try write_u8(gpa, out, @backingInt(e.cause));
+        },
     }
 }
 
@@ -411,6 +435,16 @@ const Reader = struct {
     }
 };
 
+fn read_quota_selection(r: *Reader, arena: std.mem.Allocator) CodecError!event.QuotaSelection {
+    const launching = try r.read_bool();
+    return .{
+        .harness = if (launching) try r.read_enum(model.Harness) else null,
+        .model_name = if (launching) try r.read_opt_str(arena) else null,
+        .provider = if (launching) try r.read_opt_str(arena) else null,
+        .reason = try r.read_str(arena),
+    };
+}
+
 pub fn decode_stamped(arena: std.mem.Allocator, bytes: []const u8) CodecError!event.StampedEvent {
     var r = Reader{ .b = bytes };
     const ver = try r.read_u32();
@@ -456,6 +490,7 @@ pub fn decode_stamped(arena: std.mem.Allocator, bytes: []const u8) CodecError!ev
                 .provider = try r.read_opt_str(arena),
                 .effort = try r.read_opt_str(arena),
                 .until_done = try r.read_opt_u64(),
+                .selection_reason = if (r.i == r.b.len) null else try r.read_str(arena),
             } };
         },
         .launched => .{ .launched = .{
@@ -511,6 +546,10 @@ pub fn decode_stamped(arena: std.mem.Allocator, bytes: []const u8) CodecError!ev
             },
             .context_tokens = try r.read_u64(),
             .context_window = try r.read_u64(),
+            .quota_handoff = if (r.i < r.b.len and try r.read_bool()) .{
+                .cause = if (r.i == r.b.len) .quota_exhausted else try r.read_enum(model.ExitCause),
+                .selection = if (r.i == r.b.len) null else try read_quota_selection(&r, arena),
+            } else null,
         } },
         .tool_activity => .{ .tool_activity = .{
             .sleeve_id = try r.read_str(arena),
@@ -532,6 +571,7 @@ pub fn decode_stamped(arena: std.mem.Allocator, bytes: []const u8) CodecError!ev
             .g = try r.read_u64(),
             .cause = try r.read_enum(model.ExitCause),
             .requested = try r.read_bool(),
+            .quota_selection = if (r.i == r.b.len) null else try read_quota_selection(&r, arena),
         } },
         .stop_requested => .{ .stop_requested = .{
             .sleeve_id = try r.read_str(arena),
@@ -546,6 +586,7 @@ pub fn decode_stamped(arena: std.mem.Allocator, bytes: []const u8) CodecError!ev
             .effort = try r.read_opt_str(arena),
             .by = try r.read_enum(model.Party),
             .cause = try r.read_enum(model.Cause),
+            .inherit_preferences = if (r.i == r.b.len) true else try r.read_bool(),
         } },
         .parked => .{ .parked = .{
             .sleeve_id = try r.read_str(arena),
@@ -561,6 +602,7 @@ pub fn decode_stamped(arena: std.mem.Allocator, bytes: []const u8) CodecError!ev
             .title = try r.read_str(arena),
             .summary = try r.read_str(arena),
             .is_d9 = try r.read_bool(),
+            .timeout_ms = if (r.i == r.b.len) model.approval_timeout_ms else try r.read_i64(),
         } },
         .approval_decided => .{ .approval_decided = .{
             .approval_id = try r.read_str(arena),
@@ -676,6 +718,11 @@ pub fn decode_stamped(arena: std.mem.Allocator, bytes: []const u8) CodecError!ev
         } },
         .rollout_cancelled => .{ .rollout_cancelled = .{ .rollout_id = try r.read_str(arena) } },
         .tick => .{ .tick = .{} },
+        .exit_classified => .{ .exit_classified = .{
+            .sleeve_id = try r.read_str(arena),
+            .g = try r.read_u64(),
+            .cause = try r.read_enum(model.ExitCause),
+        } },
     };
 
     if (r.i != r.b.len) return error.CorruptEvent;

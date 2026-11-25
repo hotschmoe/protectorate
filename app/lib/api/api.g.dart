@@ -635,6 +635,26 @@ enum Subscription {
   String toJson() => wire;
 }
 
+enum TaskSize {
+  small('small'),
+  medium('medium'),
+  large('large'),
+  unknown('unknown');
+
+  const TaskSize(this.wire);
+
+  final String wire;
+
+  static TaskSize fromJson(Object? json) {
+    for (final v in values) {
+      if (v.wire == json) return v;
+    }
+    return unknown;
+  }
+
+  String toJson() => wire;
+}
+
 enum ToolKind {
   command('command'),
   read('read'),
@@ -780,6 +800,7 @@ final class EntrySessionInfo extends Entry {
     this.model,
     this.provider,
     this.effort,
+    this.effortNotice,
   });
 
   factory EntrySessionInfo.fromJson(Object? json) => EntrySessionInfo._fromMap(_object(json, 'EntrySessionInfo'));
@@ -791,6 +812,7 @@ final class EntrySessionInfo extends Entry {
       model: _opt(j['model'], (e0) => _string(e0, 'EntrySessionInfo.model')),
       provider: _opt(j['provider'], (e0) => _string(e0, 'EntrySessionInfo.provider')),
       effort: _opt(j['effort'], (e0) => _string(e0, 'EntrySessionInfo.effort')),
+      effortNotice: _opt(j['effort_notice'], (e0) => _string(e0, 'EntrySessionInfo.effort_notice')),
   );
 
   final Harness harness;
@@ -805,6 +827,8 @@ final class EntrySessionInfo extends Entry {
 
   final String? effort;
 
+  final String? effortNotice;
+
   @override
   Map<String, Object?> toJson() => {
     'type': 'session_info',
@@ -814,6 +838,7 @@ final class EntrySessionInfo extends Entry {
     if (model case final v?) 'model': v,
     if (provider case final v?) 'provider': v,
     if (effort case final v?) 'effort': v,
+    if (effortNotice case final v?) 'effort_notice': v,
   };
 }
 
@@ -2908,6 +2933,40 @@ final class Gpu {
   };
 }
 
+final class HarnessModels {
+  const HarnessModels({
+    required this.harness,
+    this.models = const <ModelChoice>[],
+    this.efforts = const <String>[],
+    this.defaultEffort,
+  });
+
+  factory HarnessModels.fromJson(Object? json) {
+    final j = _object(json, 'HarnessModels');
+    return HarnessModels(
+      harness: Harness.fromJson(j['harness']),
+      models: _or(j['models'], const <ModelChoice>[], (e0) => _list(e0, 'HarnessModels.models', ModelChoice.fromJson)),
+      efforts: _or(j['efforts'], const <String>[], (e0) => _list(e0, 'HarnessModels.efforts', (e0) => _string(e0, 'HarnessModels.efforts'))),
+      defaultEffort: _opt(j['default_effort'], (e0) => _string(e0, 'HarnessModels.default_effort')),
+    );
+  }
+
+  final Harness harness;
+
+  final List<ModelChoice> models;
+
+  final List<String> efforts;
+
+  final String? defaultEffort;
+
+  Map<String, Object?> toJson() => {
+    'harness': harness.toJson(),
+    'models': [for (final e in models) e.toJson()],
+    'efforts': efforts,
+    if (defaultEffort case final v?) 'default_effort': v,
+  };
+}
+
 final class HarnessUpdate {
   const HarnessUpdate({
     required this.program,
@@ -3225,6 +3284,7 @@ final class HubInfo {
     this.restoreError,
     this.clients = const <String>[],
     this.jobArtifactMaxBytes = 0,
+    this.pools = const <PoolStat>[],
   });
 
   factory HubInfo.fromJson(Object? json) {
@@ -3239,6 +3299,7 @@ final class HubInfo {
       restoreError: _opt(j['restore_error'], (e0) => _string(e0, 'HubInfo.restore_error')),
       clients: _or(j['clients'], const <String>[], (e0) => _list(e0, 'HubInfo.clients', (e0) => _string(e0, 'HubInfo.clients'))),
       jobArtifactMaxBytes: _or(j['job_artifact_max_bytes'], 0, (e0) => _int(e0, 'HubInfo.job_artifact_max_bytes')),
+      pools: _or(j['pools'], const <PoolStat>[], (e0) => _list(e0, 'HubInfo.pools', PoolStat.fromJson)),
     );
   }
 
@@ -3260,6 +3321,8 @@ final class HubInfo {
 
   final int jobArtifactMaxBytes;
 
+  final List<PoolStat> pools;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'version': version,
@@ -3270,6 +3333,7 @@ final class HubInfo {
     if (restoreError case final v?) 'restore_error': v,
     'clients': clients,
     'job_artifact_max_bytes': jobArtifactMaxBytes,
+    'pools': [for (final e in pools) e.toJson()],
   };
 }
 
@@ -4065,6 +4129,88 @@ final class MarkEventsReadRequest {
   };
 }
 
+final class ModelCatalog {
+  const ModelCatalog({
+    required this.harnesses,
+  });
+
+  factory ModelCatalog.fromJson(Object? json) {
+    final j = _object(json, 'ModelCatalog');
+    return ModelCatalog(
+      harnesses: _list(j['harnesses'], 'ModelCatalog.harnesses', HarnessModels.fromJson),
+    );
+  }
+
+  final List<HarnessModels> harnesses;
+
+  Map<String, Object?> toJson() => {
+    'harnesses': [for (final e in harnesses) e.toJson()],
+  };
+}
+
+final class ModelCatalogRequest {
+  const ModelCatalogRequest({
+    this.harness,
+  });
+
+  factory ModelCatalogRequest.fromJson(Object? json) {
+    final j = _object(json, 'ModelCatalogRequest');
+    return ModelCatalogRequest(
+      harness: _opt(j['harness'], Harness.fromJson),
+    );
+  }
+
+  final Harness? harness;
+
+  Map<String, Object?> toJson() => {
+    if (harness case final v?) 'harness': v.toJson(),
+  };
+}
+
+final class ModelChoice {
+  const ModelChoice({
+    required this.id,
+    required this.label,
+    this.provider,
+    this.isDefault = false,
+    this.efforts,
+    this.defaultEffort,
+  });
+
+  factory ModelChoice.fromJson(Object? json) {
+    final j = _object(json, 'ModelChoice');
+    return ModelChoice(
+      id: _string(j['id'], 'ModelChoice.id'),
+      label: _string(j['label'], 'ModelChoice.label'),
+      provider: _opt(j['provider'], (e0) => _string(e0, 'ModelChoice.provider')),
+      isDefault: _or(j['is_default'], false, (e0) => _bool(e0, 'ModelChoice.is_default')),
+      efforts: _opt(j['efforts'], (e0) => _list(e0, 'ModelChoice.efforts', (e0) => _string(e0, 'ModelChoice.efforts'))),
+      defaultEffort: _opt(j['default_effort'], (e0) => _string(e0, 'ModelChoice.default_effort')),
+    );
+  }
+
+  final String id;
+
+  final String label;
+
+  final String? provider;
+
+  final bool isDefault;
+
+  final List<String>? efforts;
+
+  final String? defaultEffort;
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'label': label,
+    if (provider case final v?) 'provider': v,
+    'is_default': isDefault,
+    if (efforts case final v?) 'efforts': v,
+    if (defaultEffort case final v?) 'default_effort': v,
+  };
+}
+
 final class Node {
   const Node({
     required this.id,
@@ -4413,6 +4559,50 @@ final class PairingCode {
     'name': name,
     'code': code,
     'expires_at_ms': expiresAt.millisecondsSinceEpoch,
+  };
+}
+
+final class PoolStat {
+  const PoolStat({
+    required this.name,
+    required this.size,
+    this.reserved = 0,
+    required this.used,
+    required this.highWater,
+    required this.refused,
+  });
+
+  factory PoolStat.fromJson(Object? json) {
+    final j = _object(json, 'PoolStat');
+    return PoolStat(
+      name: _string(j['name'], 'PoolStat.name'),
+      size: _int(j['size'], 'PoolStat.size'),
+      reserved: _or(j['reserved'], 0, (e0) => _int(e0, 'PoolStat.reserved')),
+      used: _int(j['used'], 'PoolStat.used'),
+      highWater: _int(j['high_water'], 'PoolStat.high_water'),
+      refused: _int(j['refused'], 'PoolStat.refused'),
+    );
+  }
+
+  final String name;
+
+  final int size;
+
+  final int reserved;
+
+  final int used;
+
+  final int highWater;
+
+  final int refused;
+
+  Map<String, Object?> toJson() => {
+    'name': name,
+    'size': size,
+    'reserved': reserved,
+    'used': used,
+    'high_water': highWater,
+    'refused': refused,
   };
 }
 
@@ -5438,7 +5628,8 @@ final class SleeveRef {
 final class SpawnSleeveRequest {
   const SpawnSleeveRequest({
     required this.name,
-    required this.harness,
+    this.harness = Harness.claude,
+    this.autoSelect = false,
     this.path,
     this.newPath,
     this.parentId,
@@ -5451,13 +5642,15 @@ final class SpawnSleeveRequest {
     this.message,
     this.budget,
     this.untilDone,
+    this.taskSize,
   });
 
   factory SpawnSleeveRequest.fromJson(Object? json) {
     final j = _object(json, 'SpawnSleeveRequest');
     return SpawnSleeveRequest(
       name: _string(j['name'], 'SpawnSleeveRequest.name'),
-      harness: Harness.fromJson(j['harness']),
+      harness: j['harness'] == null ? Harness.claude : Harness.fromJson(j['harness']),
+      autoSelect: _or(j['auto_select'], false, (e0) => _bool(e0, 'SpawnSleeveRequest.auto_select')),
       path: _opt(j['path'], (e0) => _string(e0, 'SpawnSleeveRequest.path')),
       newPath: _opt(j['new_path'], (e0) => _string(e0, 'SpawnSleeveRequest.new_path')),
       parentId: _opt(j['parent_id'], (e0) => _string(e0, 'SpawnSleeveRequest.parent_id')),
@@ -5470,12 +5663,15 @@ final class SpawnSleeveRequest {
       message: _opt(j['message'], (e0) => _string(e0, 'SpawnSleeveRequest.message')),
       budget: _opt(j['budget'], (e0) => _int(e0, 'SpawnSleeveRequest.budget')),
       untilDone: _opt(j['until_done'], (e0) => _int(e0, 'SpawnSleeveRequest.until_done')),
+      taskSize: _opt(j['task_size'], TaskSize.fromJson),
     );
   }
 
   final String name;
 
   final Harness harness;
+
+  final bool autoSelect;
 
   final String? path;
 
@@ -5501,9 +5697,12 @@ final class SpawnSleeveRequest {
 
   final int? untilDone;
 
+  final TaskSize? taskSize;
+
   Map<String, Object?> toJson() => {
     'name': name,
     'harness': harness.toJson(),
+    'auto_select': autoSelect,
     if (path case final v?) 'path': v,
     if (newPath case final v?) 'new_path': v,
     if (parentId case final v?) 'parent_id': v,
@@ -5516,6 +5715,7 @@ final class SpawnSleeveRequest {
     if (message case final v?) 'message': v,
     if (budget case final v?) 'budget': v,
     if (untilDone case final v?) 'until_done': v,
+    if (taskSize case final v?) 'task_size': v.toJson(),
   };
 }
 
@@ -6099,11 +6299,9 @@ final class HubApi {
   }
 
   Stream<HubStreamMessage> events({
-    int? fromSeq,
     Iterable<String> transcripts = const [],
   }) => openSocket(
     _url('/api/events', {
-      if (fromSeq != null) 'from_seq': '$fromSeq',
       if (transcripts.isNotEmpty) 'transcripts': transcripts.join(','),
     }),
     token,
@@ -6118,6 +6316,10 @@ final class HubApi {
   /// `POST /api/ListSleeves`, scope `sleeve`.
   Future<SleeveList> listSleeves([Empty request = const Empty()]) =>
       _call('ListSleeves', request.toJson(), SleeveList.fromJson);
+
+  /// `POST /api/ListModels`, scope `sleeve`.
+  Future<ModelCatalog> listModels(ModelCatalogRequest request) =>
+      _call('ListModels', request.toJson(), ModelCatalog.fromJson);
 
   /// `POST /api/GetInbox`, scope `sleeve`.
   Future<Inbox> getInbox(InboxRequest request) =>

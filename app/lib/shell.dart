@@ -93,6 +93,12 @@ class _ShellState extends State<Shell> {
     _sub = widget.hub.states.listen((s) => setState(() => _state = s));
     HardwareKeyboard.instance.addHandler(_onKey);
     _cmd.addListener(() => setState(() {}));
+    unawaited(_sayLastInstall());
+  }
+
+  Future<void> _sayLastInstall() async {
+    final r = await lastInstall(kVersion);
+    if (r != null) _say(r.text, level: r.ok ? Level.info : Level.warn);
   }
 
   @override
@@ -272,11 +278,17 @@ class _ShellState extends State<Shell> {
         } else if (head == '/stop') {
           unawaited(app.act(() => widget.hub.stop(id)));
         } else {
-          final h = Harness.fromJson(arg);
-          if (h == Harness.unknown) {
-            return _say('Resleeve to what? claude codex grok pi_local pi_vendor', level: Level.warn);
+          final h = parts.length > 1 ? Harness.fromJson(parts[1]) : Harness.unknown;
+          if (h == Harness.unknown || parts.length > 4) {
+            return _say('Usage: /resleeve <harness> [model] [effort]', level: Level.warn);
           }
-          unawaited(app.act(() => widget.hub.resleeve(id, h), done: 'Resleeving to ${h.wire}'));
+          final req = ResleeveRequest(
+            sleeveId: id, target: h,
+            model: parts.length > 2 ? parts[2] : null,
+            provider: parts.length > 2 && (h == Harness.piLocal || h == Harness.piVendor) ? '' : null,
+            effort: parts.length > 3 ? parts[3] : null,
+          );
+          unawaited(app.act(() => widget.hub.resleeve(req), done: 'Resleeving to ${h.wire}'));
         }
       default:
         _say('Unknown command: $head  (? for help)', level: Level.alarm);
@@ -1042,8 +1054,9 @@ class _UpdateBannerState extends State<_UpdateBanner> {
         }
       });
       if (!mounted) return;
-      setState(() => _note = 'Installing ${widget.version}');
-      final next = await installClient(path);
+      final hint = installHint();
+      setState(() => _note = hint == null ? 'Installing ${widget.version}' : 'Installing ${widget.version}. $hint');
+      final next = await installClient(path, widget.version);
       if (mounted) {
         setState(() {
           _busy = false;
@@ -1085,7 +1098,7 @@ class _UpdateBannerState extends State<_UpdateBanner> {
     } else {
       text = error != null
           ? 'Update to ${widget.version} failed: $error'
-          : _note ?? 'The hub runs ${widget.version}; this app is $kVersion';
+          : _note ?? 'The hub runs ${widget.version}; this app is $kVersion${installHint() == null ? '' : '. ${installHint()}'}';
       action = Btn(
         error != null ? 'Retry' : 'Install update',
         kind: BtnKind.primary,
@@ -1103,7 +1116,7 @@ class _UpdateBannerState extends State<_UpdateBanner> {
       child: Row(children: [
         Icon16(error == null ? Glyph.download : Glyph.alert, color: color, size: 14),
         const SizedBox(width: 10),
-        Expanded(child: T(text, maxLines: 2)),
+        Expanded(child: T(text, maxLines: 3)),
         const SizedBox(width: 12),
         action,
         const SizedBox(width: 6),

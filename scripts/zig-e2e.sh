@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-PT="$ROOT_DIR/zig-out/bin/protectorate"
-PT_NODE="$ROOT_DIR/zig-out/bin/protectorate-node"
+PT="${PT_E2E_HUB_BIN:-$ROOT_DIR/zig-out/bin/protectorate}"
+PT_NODE="${PT_E2E_NODE_BIN:-$ROOT_DIR/zig-out/bin/protectorate-node}"
 
 if [[ ! -x "$PT" || ! -x "$PT_NODE" ]]; then
   echo "missing binaries under zig-out/bin; run zig build -Doptimize=safe first" >&2
@@ -77,7 +77,8 @@ rpc_post() {
 echo "=== E2E 1: Hub Web / REST / WS / Pairing / Envoy MCP ==="
 HUB1="$TMP_ROOT/hub1"
 LOG1="$TMP_ROOT/hub1.log"
-"$PT" serve --home "$HUB1" --listen 127.0.0.1:0 --fleet-listen 127.0.0.1:0 --no-sandbox >"$LOG1" 2>&1 &
+mkdir "$TMP_ROOT/empty-path"
+PATH="$TMP_ROOT/empty-path" "$PT" serve --home "$HUB1" --listen 127.0.0.1:0 --fleet-listen 127.0.0.1:0 --no-sandbox >"$LOG1" 2>&1 &
 PID1=$!
 PIDS+=("$PID1")
 wait_for_listen "$LOG1"
@@ -169,6 +170,13 @@ JSON
 grep -q 'protectorate-envoy' <<<"$MCP_OUT"
 grep -q 'spawn_sleeve' <<<"$MCP_OUT"
 grep -q '"isError":false' <<<"$MCP_OUT"
+rpc_post "$HTTP1" "$TOK1" GetDoctor '{}' | python3 -c 'import json,sys; d=json.load(sys.stdin); assert all(not h["present"] for h in d["harnesses"]) and "git binary not found" in d["problems"], d'
+ZOMBIES1="$(ps -eo pid,stat,ppid,comm | awk -v hub="$PID1" '$3 == hub && $2 ~ /^Z/')"
+if [[ -n "$ZOMBIES1" ]]; then
+  echo "hub retained children after failed process launches:" >&2
+  echo "$ZOMBIES1" >&2
+  exit 1
+fi
 kill "$PID1" >/dev/null 2>&1 || true
 wait "$PID1" >/dev/null 2>&1 || true
 check_crashes "$LOG1"
@@ -208,6 +216,7 @@ print(json.dumps({
     "harness": "pi_local",
     "provider": "hotschmoe-local",
     "model": "hotschmoe-dd",
+    "effort": "low",
     "path": sys.argv[1],
     "message": "Reply with exactly the token E2E_PI_MARKER_7391 and nothing else."
 }))
@@ -230,6 +239,23 @@ if [[ "$MARKER_FOUND" -ne 1 ]]; then
   rpc_post "$HTTP2" "$TOK2" GetTranscript "{\"sleeve_id\":\"${SLV2}\"}" >&2 || true
   exit 1
 fi
+if grep -q '"type":"exited"' "$HUB2"/transcripts/*.jsonl || grep -qv '"g":1,' "$HUB2"/transcripts/*.jsonl; then
+  echo "pi + hotschmoe-dd was killed or relaunched before its first turn settled; transcript:" >&2
+  cat "$HUB2"/transcripts/*.jsonl >&2
+  exit 1
+fi
+
+"$PT" --home "$HUB2" --url "http://127.0.0.1:$HTTP2" sleeve resleeve "$SLV2" \
+  --harness pi_local --provider hotschmoe-local --model hotschmoe-dd --effort high >/dev/null
+"$PT" --home "$HUB2" --url "http://127.0.0.1:$HTTP2" sleeve wait "$SLV2" --until idle --timeout 30 >/dev/null
+rpc_post "$HTTP2" "$TOK2" GetTranscript "{\"sleeve_id\":\"$SLV2\"}" | python3 -c '
+import json, sys
+sessions = [row for row in json.load(sys.stdin)["entries"] if row["entry"]["type"] == "session_info"]
+for generation, effort in [(1, "low"), (2, "high")]:
+    assert any(row["g"] == generation and row["entry"]["effort"] == effort
+               and row["entry"]["model"] == "hotschmoe-dd"
+               and row["entry"]["provider"] == "hotschmoe-local" for row in sessions), sessions
+'
 
 # Test SIGKILL + Journal Crash Replay
 kill -9 "$PID2" >/dev/null 2>&1 || true
@@ -373,7 +399,7 @@ if [[ "$REPLACED" -ne 1 ]]; then
 fi
 
 # RunJob with artifact
-JOB1_REQ="{\"target\":{\"type\":\"node\",\"node_id\":\"${AUTH_ID}\"},\"argv\":[\"sh\",\"-c\",\"echo E2E_JOB_STDOUT; printf 'artifact-payload-99' > out.bin\"],\"artifacts\":[\"out.bin\"]}"
+JOB1_REQ="{\"target\":{\"type\":\"node\",\"node_id\":\"${AUTH_ID}\"},\"argv\":[\"sh\",\"-c\",\"echo E2E_JOB_STDOUT; printf 'artifact-payload-99' > out.bin; head -c 600000 /dev/zero > multi.bin\"],\"artifacts\":[\"out.bin\",\"multi.bin\"]}"
 JOB1_RESP="$(rpc_post "$HTTP3" "$TOK3" RunJob "$JOB1_REQ")"
 JID1="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"$JOB1_RESP")"
 
@@ -383,7 +409,7 @@ for _ in $(seq 1 60); do
   if python3 -c '
 import json, sys
 j = json.load(sys.stdin)
-sys.exit(0 if j["state"] == "succeeded" and len(j.get("artifacts", [])) == 1 else 1)
+sys.exit(0 if j["state"] == "succeeded" and len(j.get("artifacts", [])) == 2 else 1)
 ' <<<"$J_ST"
   then
     JOB1_DONE=1
@@ -408,6 +434,14 @@ want_sha = hashlib.sha256(raw).hexdigest()
 assert a["sha256"] == want_sha, (a["sha256"], want_sha)
 assert a["size_bytes"] == len(raw), a
 ' <<<"$ART_JSON"
+MULTI_JSON="$(rpc_post "$HTTP3" "$TOK3" GetJobArtifact "{\"job_id\":\"${JID1}\",\"path\":\"multi.bin\"}")"
+python3 -c '
+import hashlib, json, sys
+a = json.load(sys.stdin)
+raw = bytes.fromhex(a["hex"])
+assert raw == bytes(600000), len(raw)
+assert a["sha256"] == hashlib.sha256(raw).hexdigest(), a["sha256"]
+' <<<"$MULTI_JSON"
 
 # CancelJob
 JOB2_RESP="$(rpc_post "$HTTP3" "$TOK3" RunJob "{\"target\":{\"type\":\"node\",\"node_id\":\"${AUTH_ID}\"},\"argv\":[\"sleep\",\"30\"]}")"
@@ -474,10 +508,40 @@ for _ in $(seq 1 40); do
   sleep 0.2
 done
 if [[ "$J3_OK" -ne 1 ]]; then
-  echo "post-reconnect job failed" >&2
+  echo "post-reconnect job failed: $J3_ST" >&2
+  tail -n 20 "$TMP_ROOT/node3.log" "$LOG3B" >&2 || true
   exit 1
 fi
 rpc_post "$HTTP3B" "$TOK3" GetJobLog "{\"job_id\":\"${JID3}\"}" | grep -q 'E2E_RECONNECTED'
+
+# An artifact declared above the 64 MiB cap is refused before transfer with the cap in the error
+# (last, because a failed job excludes its node for a while)
+JOBBIG_RESP="$(rpc_post "$HTTP3B" "$TOK3" RunJob "{\"target\":{\"type\":\"node\",\"node_id\":\"${AUTH_ID}\"},\"argv\":[\"sh\",\"-c\",\"head -c 70000000 /dev/zero > big.bin\"],\"artifacts\":[\"big.bin\"]}")"
+JIDBIG="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<<"$JOBBIG_RESP")"
+JOBBIG_DONE=0
+for _ in $(seq 1 100); do
+  JB_ST="$(rpc_post "$HTTP3B" "$TOK3" GetJob "{\"job_id\":\"${JIDBIG}\"}")"
+  if python3 -c '
+import json, sys
+j = json.load(sys.stdin)
+sys.exit(0 if j["state"] == "failed" and "exceeds the 67108864 byte artifact cap" in (j.get("error") or "") else 1)
+' <<<"$JB_ST"
+  then
+    JOBBIG_DONE=1
+    break
+  fi
+  sleep 0.2
+done
+if [[ "$JOBBIG_DONE" -ne 1 ]]; then
+  echo "oversized artifact was not refused with the cap in the error" >&2
+  rpc_post "$HTTP3B" "$TOK3" GetJob "{\"job_id\":\"${JIDBIG}\"}" >&2 || true
+  exit 1
+fi
+if [[ -n "$(find "$HUB3" \( -name 'big.bin*' -o -name '*.ptpart' \) -print -quit)" ]]; then
+  echo "refused artifact left files on the hub" >&2
+  exit 1
+fi
+
 kill "$NPID3" "$PID3B" >/dev/null 2>&1 || true
 wait "$NPID3" "$PID3B" >/dev/null 2>&1 || true
 check_crashes "$LOG3B" "$TMP_ROOT/node3.log"

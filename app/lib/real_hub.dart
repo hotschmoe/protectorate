@@ -6,7 +6,7 @@ import 'api/api.g.dart';
 import 'hub.dart';
 
 /// A hub over the generated [HubApi]: the events WebSocket keeps [state] current and reconnects
-/// with `from_seq` after a drop; actions are API calls. Transcripts load with `GetTranscript`
+/// after a drop, starting again from the snapshot the hub sends first; actions are API calls. Transcripts load with `GetTranscript`
 /// when first asked for and then follow the stream's `entry` messages.
 class RealHub implements HubClient {
   RealHub(this.url, {String? token})
@@ -78,7 +78,6 @@ class RealHub implements HubClient {
       final drop = _drop = Completer<void>();
       _sub = _api
           .events(
-            fromSeq: _seq == null ? null : _seq! + 1,
             transcripts: [
               for (final e in _tx.entries)
                 if (e.value.ctl.hasListener) e.key,
@@ -400,8 +399,11 @@ class RealHub implements HubClient {
       _api.stopSleeve(SleeveRef(sleeveId: sleeveId));
 
   @override
-  Future<void> resleeve(String sleeveId, Harness target) =>
-      _api.resleeve(ResleeveRequest(sleeveId: sleeveId, target: target));
+  Future<ModelCatalog> listModels(Harness harness) =>
+      _api.listModels(ModelCatalogRequest(harness: harness));
+
+  @override
+  Future<void> resleeve(ResleeveRequest req) => _api.resleeve(req);
 
   @override
   Future<void> decide(String approvalId, Decision decision) =>

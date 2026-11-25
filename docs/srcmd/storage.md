@@ -4,6 +4,8 @@
 
 Every state mutation is serialized canonically (`core/codec.zig`), wrapped in a length-prefixed CRC32C frame (`journal/codec.zig`), written positionally to `segment-000000000001` under an exclusive advisory file lock (`journal/store.zig`), and `fsync`ed before mutating external systems. Segments rotate automatically at 64 MiB (`max_segment_bytes`).
 
+`approval_requested` can end with a little-endian i64 timeout duration in milliseconds. An absent duration means 30 minutes, so historical approvals replay with their original deadlines. The reducer adds the duration to the event's timestamp.
+
 Recovery distinguishes between crash-time incomplete tails and true disk corruption:
 - **Torn tail on the last segment** (`stop == .truncated` or last-frame CRC mismatch with no intact subsequent frames): truncated cleanly via `setLength` to the last valid prefix.
 - **Mid-log or non-final segment corruption** (CRC mismatch with an intact frame after it, or corruption on an earlier segment): refuses to start with `error.JournalCorrupted`.

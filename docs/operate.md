@@ -1,371 +1,214 @@
 # Operating a hub
 
-Every command below runs on the hub as the hub's user and maps onto one hub API method over the
-unix socket `<home>/run/api.sock`. Global flags come first:
+Every command below runs against the hub's HTTP API and maps onto one API method. Global flags
+come first:
 
 ```
-protectorate [--home DIR] [--socket PATH] [--json] <noun> <verb> ...
+protectorate [--home DIR] [--url URL] [--token TOKEN | --token-file PATH] [--json] <noun> <verb> ...
 ```
 
-`--home` defaults to `$PROTECTORATE_HOME`, else `~/.local/share/protectorate`. `--json` prints the
-API's own answer instead of a table. `PROTECTORATE_TOKEN`, when set, is sent as the bearer token;
-without it, a caller of the hub's own uid on the socket is the owner. `protectorate` with no
-arguments prints the full usage, which this page follows.
+- `--home` defaults to `$PROTECTORATE_HOME`, else `~/.local/share/protectorate`.
+- The URL is `--url`, else `$PROTECTORATE_URL`, else `listen_addr` from `<home>/config.json`, else
+  `http://127.0.0.1:7470`. There is no unix-socket API.
+- The token is `--token`, `--token-file` or `$PROTECTORATE_TOKEN`, else the owner token the CLI reads
+  from `<home>/auth.json`. So a process that can read that file as the hub's user is the owner
+  (REVISIT).
+- `--json` prints the API's own answer instead of a table. `protectorate --version` prints the version.
+  `protectorate` with no arguments prints the usage this page follows.
 
-Harness names: `claude`, `codex`, `grok`, `pi_vendor`, `pi_local`.
+Harness names: `claude`, `codex`, `grok`, `pi_vendor`, `pi_local` (`pi` also works),
+`antigravity` (`agy` also works).
+
+Some behaviour in [SPEC.md](../SPEC.md) is design the code has not reached; this page describes
+what the commands do now.
 
 ## Envoy
 
-Envoy is a root sleeve that the hub starts itself, running in `<home>/envoy/` with its own
-`CLAUDE.md` describing this CLI. Its harness, provider and model are the `envoy` key of
-`config.json` (Claude Code by default).
+Envoy is a root sleeve that the hub starts itself, running in `<home>/envoy/` with a `CLAUDE.md` and
+`AGENTS.md` there that describe this CLI.
 
 ```
-envoy send <text...> [--as NAME]           # queue a message for Envoy; prints its request id
-envoy wait [REQUEST_ID] [--timeout SECS]   # wait for Envoy's reply (default 600 s) and print it
-envoy read [--from SEQ]                    # Envoy's chat from a transcript seq
-envoy token                                # the envoy-only token
+envoy send <text...> [--as NAME] [--message-file FILE]   # queue a message for Envoy; prints its request id
+envoy wait [REQUEST_ID] [--timeout SECS]                 # wait for Envoy's reply and print it
+envoy read [--from SEQ] [--limit N]                      # Envoy's chat from a transcript seq
+envoy token                                              # the envoy-only token
 ```
 
-**Vendor general agents** (installed on the hub machine) reach Protectorate only through Envoy.
-Give them the envoy-only token, which can send to Envoy and read its replies and nothing else:
+`envoy wait` waits at most 60 s per call (30 s without `--timeout`); the reply says whether the
+turn `settled`, so call it again if it did not. `--message-file -` reads the message from stdin.
+
+**Vendor general agents** (installed on the hub machine) reach Protectorate only through Envoy. Give
+them the envoy-only token, which can send to Envoy and read its replies and nothing else:
 
 - through their shell tool: `PROTECTORATE_TOKEN=<envoy-only token> protectorate envoy send --as
-  <agent> ...`, then `envoy wait`. That wait includes the reply from a continuation
-  of the same turn, and it stays open while that continuation is still owed or queued;
-- through MCP: `protectorate mcp --envoy [--token-file PATH] [--as NAME]`, a stdio server with
-  the tools `envoy_send`, `envoy_wait` and `envoy_read`. The token comes from `--token-file` or
-  `PROTECTORATE_TOKEN`; the agent's name from `--as` or the client's own name.
+  <agent> ...`, then `envoy wait`;
+- through MCP: `protectorate mcp --envoy [--token-file PATH] [--as NAME]`, a stdio server with the
+  tools `envoy_send`, `envoy_wait` and `envoy_read`. Without `--envoy`, `protectorate mcp` offers the
+  full tool set with the caller's own token.
 
-An agent that runs as the hub's user without the token is the owner on the socket (REVISIT), so
-always give it the token.
+An agent that runs as the hub's user without the token is the owner, so always give it the token.
 
 ## Sleeves
 
 ```
-sleeve list | sleeve show <sleeve> | sleeve inbox [<sleeve>] | sleeve inbox <sleeve> --drop
-sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly]) [--harness H]
-      [--provider P] [--model M] [--resleeve-to H,H] [--budget TOKENS] [--message TEXT | --message-file FILE] [--until-done N]
-sleeve send <sleeve> <text...> [--steer | --supersede] [--until-done N]
-sleeve interrupt|stop|rm|takeover <sleeve>
-sleeve start <sleeve> [--harness H] [--provider P] [--model M] [--until-done N]
-sleeve resleeve <sleeve> --harness H [--provider P] [--model M]
+sleeve list | sleeve show <sleeve> | sleeve inbox [<sleeve>] [--drop]
+sleeve spawn <name> (--path DIR | --new-path DIR | --parent SLEEVE [--readonly | --worktree])
+      [--harness H] [--provider P] [--model M] [--effort E] [--resleeve-to H,H] [--budget N]
+      [--message TEXT | --message-file FILE] [--until-done N]
+sleeve send <sleeve> <text...> [--steer | --supersede] [--until-done N] [--message-file FILE]
+sleeve interrupt|stop|rm|takeover|attach <sleeve>
+sleeve start <sleeve> [--harness H] [--provider P] [--model M] [--effort E] [--until-done N]
+sleeve resleeve <sleeve> --harness H [--provider P] [--model M] [--effort E]
 sleeve transcript <sleeve> [--from SEQ] [--limit N]
-sleeve wait <sleeve>... [--all | --any] [--until idle|done|blocked|parked|ended|report] [--timeout SECS]
+sleeve wait <sleeve>... [--all | --any] [--until idle|done|blocked|parked|ended|report] [--after-seq N] [--timeout SECS]
+sleeve push <sleeve> [--remote R] [--branch B] [--force]
 ```
-
-For `sleeve send` and `envoy send`, `--message-file FILE` replaces the text arguments;
-for `sleeve spawn` it replaces `--message`. Use `-` for stdin. This avoids shell expansion
-of long or code-bearing messages. A sleeve reaches a sibling through its parent.
 
 A sleeve is named by its id or its name.
 
-`--until-done N` on spawn, send or start sends a fixed continuation as the original sender after
-a `STATUS: CONTINUING` settle, at most N times. It stops on DONE, BLOCKED,
-a missing declaration, a usage limit or auth failure, a message from another sender, stop or
-park. The settle and count are journaled, so a restart keeps the remaining rounds. An
-unconfirmed round counts against N; the requester is told it may have applied, and it is not
-silently retried. Exactly-once delivery cannot be promised across a crash during a harness write.
-
-List and show include the oldest queued message's age beside the queue count. They also show the
-latest settled turn's declared status and up to 80 characters of its detail. The API includes
-its turn number, state and full detail.
-A final line `STATUS: DONE`, `STATUS: CONTINUING <remaining work>` or `STATUS: BLOCKED <reason>`
-declares the status; the last two require a nonempty detail. A later turn without a valid final
-status clears it. Turn reports include the declaration. The hub records an owner turn's
-declaration with its settle observation for journal replay. `sleeve send` reports whether the
-message was queued or sent for delivery and the queue length at acceptance.
-Each new transcript turn-settled entry includes its structured status, if declared, in the API.
-Turn reports expose their sleeve, turn and status as structured fields in the inbox API and in
-the delivered transcript entry, including when several reports are batched.
-Queued messages wait for a turn boundary. At a headless turn start, consecutive queued prompts
-are delivered together in FIFO order, with their normal sender headers; a continuation ends
-the batch. For Envoy, a switch between vendor-agent and other senders also ends the batch,
-so vendor agents cannot read other parties' prompts. The batch shares one delivery outcome.
-Steers still enter the running turn.
-`sleeve inbox` peeks at the FIFO, showing sender,
-age and text without consuming or reordering it. A sleeve credential can inspect only its own
-queue and can omit the name. For another reachable sleeve it sees only messages it sent;
-the owner supplies a name and can inspect any queue. `sleeve inbox <sleeve> --drop`
-removes only the caller's queued messages to that sleeve. `sleeve send <sleeve>
---supersede <text>` atomically replaces the caller's queued messages with the new send;
-it cannot be combined with `--steer`. In-flight messages and other senders' messages are
-unaffected. A refused send does not drop anything.
-
-- **spawn** with `--path DIR` makes a root sleeve on that directory (one root per directory). The
-  directory must already exist where the hub can see it; a missing one is `the hub cannot see
-  DIR`, and a path that overlaps a root or writable claim names that sleeve and its claim. With
-  `--new-path DIR` the owner, a paired device or Envoy (not a sleeve) creates a root that does
-  not exist yet. `projects_dir` in `config.json` is the absolute directory this is allowed under;
-  empty, the default, turns it off, and `/` is refused. `DIR` is a relative path under that
-  directory or an absolute path strictly inside it. A trailing slash is ignored. An absolute
-  path may use the configured `projects_dir` spelling when that path is a symlink; the claim is
-  the canonical directory, and a refusal names that directory. The hub creates it and `git init`s
-  it on branch `main` with one empty commit, as the owner's `user.name` and `user.email` (or
-  `protectorate <protectorate@localhost>` when a field is unset), then claims it, so a child
-  worktree has a commit to branch from. A `.` or `..` component, a symlink, a path outside
-  `projects_dir`, or a path inside the hub's home is refused. A directory a live root holds is
-  refused with that sleeve's name. A repository with no commit is refused and told to remove it
-  or to commit before `--path`. `--path DIR` adopts any other repository that already exists.
-  A name already in use, a name the core would refuse, or a harness with no headless mode,
-  is refused before the directory is
-  created and before D9 counts the spawn. A crash, a spawn the core does not answer or whose
-  reply is lost, or a refusal that finds the directory claimed or no longer the empty
-  repository this call made, leaves the directory and says so; remove it before trying the
-  same path again.
-  With `--parent SLEEVE` it makes a child of that root: its own git worktree and branch by
-  default, or a read-only view of the root with `--readonly`. A root has at most 8 live
-  children. `--harness` defaults to `claude`. `--resleeve-to` is the ordered list automatic
-  resleeves walk (default `pi_local`). `--message` is the first prompt.
+- **spawn** with `--path DIR` makes a root sleeve on an existing directory (a missing one is refused).
+  A path that overlaps another live sleeve's claim is refused. With `--new-path DIR` the hub creates
+  the directory if it is missing and claims it; it does not `git init` it, and there is no
+  `projects_dir` check yet. With `--parent SLEEVE` it makes a child of that root: its own git worktree
+  at `<home>/worktrees/<id>` on branch `pt/<id>` by default, or a read-only view of the root with
+  `--readonly`. A root has at most 8 live children. `--harness` defaults to `claude`.
+  `--resleeve-to` is the ordered list of harnesses a quota or auth failure moves the sleeve to (at
+  most three harnesses in all, counting `--harness`); with none, such a failure parks the sleeve.
+  `--message` is the first prompt. `--budget N` counts settled turns, and when it is reached the
+  `--until-done` rounds stop.
 - **send** queues a message, delivered at the next turn boundary; `--steer` sends it into the
-  current turn instead. A sleeve credential may send to itself, its children, its parent, and
-  Envoy (the sleeve named `envoy`), and to nothing else. From inside a sleeve the form is
-  `protectorate sleeve send <parent-or-envoy> <text>`. A new sleeve's first prompt names
-  `$PROTECTORATE_PARENT` when it has one, `$PROTECTORATE_ENVOY` and `$PROTECTORATE_MAIL`.
-  The hub marks it `[from sleeve <name>]` with a `mail:<id>:` request id, and delivers it through
-  the same path as any other send. `envoy send` stays the vendor-agent command and refuses a
-  sleeve. One tree may land at most 8 messages on Envoy per 10 minutes, counted on the tree's
-  root; the core journals the events and replay rebuilds the times. Upward mail to a parent who
-  is not Envoy has the same bound per sender. The refusal says when the window reopens.
-- **interrupt** stops the current turn; **stop** ends the incarnation; **rm** removes the sleeve.
-  Stopping or removing a root stops its children in the same step.
+  current turn instead; `--supersede` drops the queued messages and interrupts the running turn
+  before queueing the new one. `prompt` is another name for `send`. Called with the Envoy token the
+  message is mail from Envoy; any other caller sends as the owner. There are no sleeve-to-sleeve
+  routing rules yet (REVISIT, "Scopes are coarse"). The reply says whether it was queued and the
+  queue length.
+- **--until-done N** (on spawn, send or start): when a turn ends normally with nothing queued, the
+  hub queues the fixed message "Continue until done, or report status blocked/done.", at most N
+  times. Stop, a budget limit and a declared `done` end it; the hub does not yet read a `STATUS:` line
+  from the final message.
+- **inbox** shows the messages queued for a sleeve (Envoy by default); `--drop` empties that queue.
+- **interrupt** stops the current turn; **stop** ends the incarnation; **rm** removes the sleeve
+  (and, for a worktree sleeve, its worktree).
 - **start** starts a stopped or parked sleeve, optionally on another harness. **resleeve** moves a
-  sleeve to another harness, with a continuation brief in `.protectorate/BRIEF.md`.
+  sleeve to another harness and writes a handoff brief to `<home>/briefs/<sleeve>.md`.
+- **takeover** stops the managed incarnation and writes the same handoff brief, so the owner can
+  work in the harness's own terminal UI. **attach** does the takeover and then runs that harness's
+  own CLI with its resume flag in the sleeve's directory, in your terminal. There is no hub-owned
+  terminal and no hand back yet (REVISIT).
 - **transcript** prints the chat: messages, tool calls and results, approvals, turns.
-- **wait** blocks until all named sleeves reach a state (default `idle`, 600 s); `--any`
-  returns when one reaches it. A sleeve that reaches the state stays counted for that wait.
-  It exits non-zero if the requested condition cannot be reached or times out. It prints each
-  sleeve's result; JSON includes the overall result and per-sleeve results. `--until report`
-  returns when the sleeve has mailed since the cursor, and prints
-  that report's seq. `--after-seq N` counts only mail with a seq above N. Without it the cursor
-  is the waiter's newest message to the sleeve, so the same report releases a later wait again.
-  The hub's continuation of a turn after a crash is not mail for that cursor: it is not a
-  report, and it does not move the cursor. A waiter who has never messaged the sleeve counts
-  all of its past upward mail. The owner's wait
-  counts mail to the parent or to Envoy. A parent's wait counts only mail to that parent. A wait
-  on Envoy is invalid, because Envoy never sends as a sleeve.
-- **takeover** (the terminal view) is not built; it answers `unavailable`.
+- **wait** blocks until the sleeves reach a state (default `done`, which is the same as `idle`: the
+  incarnation is idle with nothing queued, or the sleeve is stopped). `--any` returns when one
+  does. One call waits at most 60 s; check `reached` and call again. `--until report` is not a
+  real report wait yet: it returns once the sleeve has an incarnation.
+- **push** has the hub push the sleeve's branch (the hub, not the sleeve, runs `git push`).
 
-Guardrails in code interrupt, resume, resleeve or park a sleeve that fails (quota exhausted,
-crash, silent, looping and so on). A third resleeve within an hour parks it; `sleeve list` shows
-the park reason. When that trip is a rejected login, the reason names that login
-(`flapping (claude login rejected)` and the same for the other harnesses). Any other flap stays
-`flapping`. After a native resume of a headless turn that a crash ended, the hub sends one
-short continuation prompt for that owner turn, including when a later generation is the one that
-sends it. A fresh session does not get that prompt: if the dead incarnation never acked one,
-the owner is warned instead. The prompt is sent as the party that opened that owner turn.
-An agent steer, or mail from a marked sleeve, replaces that party, which keeps D9 on the
-continued turn and reports a rejection to that party. A continuation does not reset the spawn
-count. An exit keeps that origin. A usage-limit or auth settle keeps the origin and the
-count, and the Envoy resleeve brief is sent as the owner, so it does not clear them. A second
-crash of the same turn does not send another, even
-after the ten-minute resume window, and a later owner message is a new turn with its own
-prompt. An owner
-interrupt, a guardrail interrupt, a desync during either of those, a planned stop, a restart
-of an idle sleeve, and a manual resleeve do not. A stop, park, or resleeve also drops a
-continuation that is still queued, including one that never left the hub, and warns once.
-An idle crash that ends in a park or a resleeve drops a debt and does not warn. A restart
-while the resumed incarnation is still booting still sends it. A hub restart that finds
-that incarnation already idle drops the debt with no warning: it reached Ready and
-nothing was sent after that. A crash of an incarnation that already reached idle does not
-carry it. A protocol desync while it is idle drops the debt, and the owner is warned when
-the resume does not replace it. A desync during boot keeps a debt. A settle of that turn
-drops it with no warning, including one recorded after
-resume while the sleeve is idle, so a later start does not warn about a turn the journal
-already settled. If that prompt cannot be sent, the debt is dropped and the event log says
-the turn will not continue on its own.
+Guardrails in code resume, resleeve or park a sleeve that fails. An unrequested exit counts as a
+strike, and the second strike within an hour parks the sleeve (`strike_rate_exceeded`). A crash is
+resumed on the same harness's native session, at most twice in 10 minutes. A quota or auth exit
+moves the sleeve to the next harness in its `--resleeve-to` list; a third automatic resleeve within
+an hour parks it (`resleeve_rate_exceeded`), and an empty list parks it (`no_fallback_target`).
+`sleeve list` shows the park reason; `sleeve start` brings a parked sleeve back.
 
 ## Approvals and D9
 
 ```
 approval list [--pending]
-approval decide <id> allow|allow-session|deny
+approval decide <id> allow|allow-once|allow-session|deny
 ```
 
 Approvals come from two places: a supervised harness asking to run a tool, and the D9 rule. The
-app shows them too, inline in the chat.
+app shows them too, inline in the chat. Envoy cannot decide approvals.
 
-**D9.** While Envoy's current turn was started by a vendor agent's message, or by mail from a
-sleeve a D9-origin turn spawned or sent to (the mark is journaled, permanent for that sleeve id,
-and inherited by that sleeve's children; a send from a marked sleeve marks its recipient, and
-`sleeve show` reports the mark), these calls by Envoy wait for the owner's approval, whatever
-Envoy decides. Mail from an unmarked sleeve does not start such a turn. The bound on how often
-mail can start a turn is the 8-per-10-minutes limit above:
+**D9.** While Envoy's current turn was started by a vendor agent's message (`envoy send --as NAME`
+with the envoy-only token), these calls by Envoy wait for the owner's approval, whatever Envoy
+decides:
 
 - `sleeve rm`;
 - `job run`;
-- `sleeve spawn` past `d9_spawn_limit` spawns in that turn (default 3). A spawn counts once
-  it is made, so a denied or timed-out one does not. A crash keeps
-  the origin and that count: the exit does not clear them, and the continuation is the same
-  turn. A usage-limit or auth settle keeps them too. The resleeve brief is sent as the owner
-  and does not clear them. Both are journaled, so a hub restart keeps them.
+- `sleeve push`;
+- `sleeve spawn` past `d9_spawn_limit` spawns in that turn (default 3).
 
-A node job with `--maintenance` from any sleeve, Envoy included, always waits for the owner. The
-waiting call fails after `d9_approval_timeout_secs` (default 900). Pending approvals live in
-memory: a hub restart forgets them.
+The waiting call fails after `d9_approval_timeout_secs` (default 300, at most 600), both in
+`config.json`. The owner's own turns and sleeve mail do not trigger it.
 
 ## Nodes
 
 ```
-node ls | node show <node>
+node list | node show <node>
 node set <node> --jobs any|owner|none [--note TEXT]
-node add [REGISTRATION]
+node join-token
+node add <NAME:NODE_KEY>
 node approve <auth_id> [--name NAME] [--fingerprint FP]
 node rename <node> <new-name>
-node rm <node> [--force]
-node update (<node>... | --all) [--version TAG] [--channel stable|dev] [--probation SECS] [--no-wait]
+node rm <node>
+node update [<node>... | --all] [--version TAG] [--channel stable|dev] [--no-wait] [--cancel ROLLOUT_ID]
 ```
 
-- **ls** shows each node's OS and arch, link, presence (PRESENT, AWAY or UNKNOWN), job policy,
-  last contact and version; **show** adds the inventory, policy note and where presence came from.
-- **set** records the job policy in the hub journal. `any` (the default) allows all callers;
-  `owner` allows only the owner and paired devices; `none` refuses all jobs. The optional note
-  replaces the prior note and appears in refusals. Omitting it clears the note. The policy applies
-  to queued jobs as well as new jobs; inventory and node updates continue normally.
-- **add** with no argument prints the join command for a new machine, the hub's control-key
-  fingerprint and pending registrations; with the registration text that `join` printed, it
-  records it. **approve** registers, tags and names the node. See [install.md](install.md).
-- A node is named by its id or its name. A name is never digits alone (`join`, **approve** and
-  **rename** refuse one), so digits always mean the id.
-- **rename** renames the node in headscale (its tailnet name) and in the hub's enrollment record
-  (`tailnet/enrolled.json`). The name follows the `join --name` rules (1 to 63 lowercase letters,
-  digits and inner hyphens), may not be digits alone (that reads as an id) and may not be any
-  other machine's on the tailnet, the hub's own member included. The machine keeps the hostname
-  it joined with; only the hub's name for it changes. Jobs keep to the node's id, so a rename
-  moves no job.
-- **rm** deletes the node from headscale, which revokes its tailnet key, and drops its enrollment
-  record. Its machine cannot come back on the old key: to rejoin it runs `join` again and the
-  owner approves it. Queued jobs that could run only on that node fail with `node N was
-  removed` (`job show` says so); so does any job pinned to it that would otherwise wait queued
-  later, such as one whose approval was still pending, or one left queued by a hub crash in the
-  middle of the removal. An online node,
-  or one with jobs in flight (submitting, running, collecting, cancelling or lost), is refused
-  unless `--force`; run `protectorate-node uninstall` on a live machine first. Forced, its jobs
-  in flight are left to the lease: they go lost, then abandoned, and the node may still finish
-  them on its own. Its old jobs stay in `job ls` under its id.
-- A name freed by **rm** is free at once: removing a stale entry, then renaming its successor
-  into that name, is the way to tidy up after a machine was reinstalled and joined again.
-- Both write headscale first, then the record. If the record cannot be written after a rename,
-  the hub puts headscale's name back and says so (and raises an alarm event if that fails too).
-  If it cannot be dropped after a removal, the node is already gone from headscale and the
-  error says so and names its id; finish with `node rm <id>` (by id: its name is free, and
-  another node may hold it by then). Repeating a rename whose record write was cut short by a
-  crash repairs the record. Both are node events (`event list`).
-- **update**: see Updates below.
+A node is named by its id or its name. The install steps (`join-token`, `add`, `approve`) are in
+[install.md](install.md#join-and-approve).
 
-The hub polls presence and the node list every `fleet.poll_secs` (15 s), samples every 60 s and
-inventory every 10 minutes.
+- **list** shows each node's OS and arch, link, presence (PRESENT, AWAY or UNKNOWN), job policy,
+  last contact and version; **show** adds the inventory and where presence came from.
+- **set** records the job policy in the journal. `any` (the default) allows jobs, `none` refuses all
+  of them (queued jobs stay queued and the scheduler skips the node), and `owner` is recorded and
+  shown but the scheduler does not tell callers apart yet. The note is kept with the policy.
+  Inventory and updates continue under every policy.
+- **rename** changes the node's name in the journal; jobs keep to the node's id.
+- **rm** disconnects the node and marks it removed, so its key is no longer accepted. To bring the
+  machine back, it runs `join` again and the owner adds and approves it again. `--force` is accepted
+  and ignored. Run `protectorate-node uninstall` on a live machine first.
+- **update** asks each approved node (or the named ones) to move to the hub's own version, or to
+  `--version`. See Updates below.
+
+The hub learns presence from each node's heartbeat (every 5 s) and inventory from its hello.
 
 ## Jobs
 
 ```
-job run (--node ID | --arch ARCH) [--even-if-present] [--on-present idle|kill]
-      [--maintenance] [--timeout SECS] [--cwd DIR] [--artifact PATH]... -- <argv...>
-job ls [--node N] [--limit N] | job show|cancel <job> | job log <job> [--offset N] [--limit N]
+job run (--node ID | --arch ARCH) [--even-if-present] [--on-present idle|kill] [--maintenance]
+      [--timeout SECS] [--cwd DIR] [--artifact PATH]... [--wait]
+      [--exclusive] [--slots N] [--long-slots N] [--mem-mib N] [--parent-epoch EP]
+      [--ttl-ms MS] [--wait-ms MS] -- <argv...>
+job list [--node N] [--limit N] | job get|show <job> | job cancel <job>
+job logs <job> [--offset N] [--limit N]
 job artifact <job> <path> [--out FILE]
+lease list <node> | lease acquire <node> [...] | lease renew|release <node> <lease> <epoch>
+lease verify <node> <boot> <epoch> | lease unquarantine <node>
 ```
 
-- Human-readable `job ls` shows only the first command line, capped at 80 characters with
-  `...` when shortened. `job show` and JSON retain the full command.
-- `--node` names a node by id or name, and the hub keeps its id: a later rename does not move
-  the job, a node not on the tailnet is refused, and a job pinned to a node that is removed
-  before it starts fails; `--arch` lets the hub pick an AWAY node of that arch (the
-  least loaded eligible one). Placement skips nodes whose job policy refuses the caller; an
-  explicit `--node` request to such a node is refused.
-- A node refuses to start a job while someone is present or presence is UNKNOWN.
-  `--even-if-present` overrides that for one job.
-- If someone arrives mid-job, the job drops to idle priority and keeps running; `--on-present
-  kill` kills it instead.
-- `--timeout` defaults to 1 hour; a log is capped at 64 MiB. A job never re-runs by itself.
-- Each artifact is capped by the hub's `job_artifact_max_bytes` config (default 67108864 bytes); restart the hub after changing it. Cancelling a finished job reports its state and exit code.
-- `hub info` shows the effective artifact cap. A job queued for a present node or one with unknown presence reports the hold in `job show`; `job run --wait` prints it once to stderr. Unknown presence is held by the scheduler just like present.
-- Without `--cwd` a job runs in its own directory on the node. `--cwd` is an absolute path in
-  the node's OS (`/srv/x`, `C:\dev\x` or `C:/dev/x`); the hub checks it when `--node` names a
-  node it has met, otherwise (`--arch`) the node does and the job fails there.
-- `--artifact PATH` (repeatable) names a file inside the job's directory (the `--cwd`), relative
-  or absolute for the node; it is fetched when the job ends, and `job artifact` writes it to
-  `--out` or stdout after checking its sha256. A path outside that directory is refused. A
-  dropped connection while fetching saves what arrived and does not use up the three attempts;
-  the hub collects again when the node next reports the job. A local save failure is submitted
-  as an incomplete collection and fails the job through those three attempts. The job is
-  abandoned 24 hours after it is first lost, including when collection keeps restarting.
-  The owner hears about that loss once; a later drop in the same episode does not alarm again.
-- `job run --wait` prints the log and exits with the job's code. A hub that cannot be reached is
-  retried for about 60 seconds, including across a restart or `hub update`, and the same retry
-  covers the log read after the job ends. It then exits 6, naming the job id. A refusal is not
-  retried. When the job has no process exit code, the hub's own result is 3 for
-  interrupted, 5 for lost, and 1 for cancelled, abandoned, or failed without a code. A failed
-  job still returns its own code, so a job that itself exits 3, 5, or 6 shares that number; the
-  message names which one it was.
-- `job log` lags a running job by up to 10 s.
+- `--node` names a node by id or name; `--arch` lets the hub pick the eligible node of that arch with
+  the lowest id. A node is eligible when it is approved, online, not excluded after a failure, its
+  job policy is not `none`, and it is not PRESENT. `--even-if-present` overrides the PRESENT hold
+  for one job (UNKNOWN presence is not held).
+- If someone arrives while a job runs, the job keeps running unless it was started with
+  `--on-present kill`, which cancels it.
+- `--timeout` is in seconds; `--cwd` is an absolute path in the node's OS; `--artifact PATH`
+  (repeatable) names a file the hub fetches when the job ends and checks against its sha256.
+- The node admits a job through its admission authority: `--exclusive`, `--slots`, `--long-slots`,
+  `--mem-mib` and `--parent-epoch` (a child borrowing its parent's lease) shape the lease, and
+  `lease ...` lists and manages leases on a node. Jobs run in a fenced group (a cgroup on Linux, a
+  Job Object on Windows) that is killed when the job is cancelled or its lease is lost.
+- `job run --wait` prints the log and exits with the job's exit code.
+- `hub info` shows `artifact_cap` (64 MiB). A job is never re-run by itself; one that loses its node
+  goes lost, then abandoned after 24 hours.
 
-A job result is the node's claim: `job show` says which node reported it.
+A job result is the node's claim: `job get` says which node reported it.
 
 ## Quota
 
 ```
-quota list
+quota [list]
 ```
 
-One row per subscription (Claude, Codex, Grok, the local endpoint): the reading, its windows with
-percent used, and a note. The readers are read-only: they use the hub's harness logins (below)
-and never refresh or print a token, so a harness no sleeve has run for a while can read `login
-expired` until one does. They run every `quota_poll_secs` (60; 0 turns them off); a reading is
-refreshed after 5 minutes and becomes stale after 10. A read that finishes after its deadline
-is kept, and ages from when it finished. A response with a malformed usage window,
-or with no window at all, is reported as an error.
-For Codex, the note reports when the subscription limit is reached and credits are available,
-the balance, the estimated hourly decrease between consecutive readings when available, and
-the number of reset credits available. The estimate is not a vendor-provided rate.
-Envoy receives a queued notice when Codex starts or stops using credits. The last notice is
-journaled, so a hub restart does not repeat a transition; an unknown or stale reading does not
-change the reported state.
-Spawn, start and resleeve onto Codex still succeed while it uses credits. The CLI warns and,
-when a fresh reading identifies an eligible alternative with headroom, names that harness. JSON
-responses carry the warning as a field; later sleeve readings do not retain the spawn warning.
-Set `quota_credit_floor` in `config.json` to a non-negative credit balance to park a new Codex
-incarnation when the last known balance is strictly below it. It defaults to unset. The last
-known balance still applies when its reading is stale; without a balance the floor cannot be
-applied. Running incarnations continue. The parked reason is `credit_floor`; after the balance
-is replenished and a new reading arrives, start the sleeve again. Configuration changes require
-a hub restart.
-Resleeve targets are weighted by fresh readings; known-exhausted candidates are skipped, and the
-sleeve parks if all eligible candidates are exhausted. A stale reading keeps its last windows:
-under the usable minimum it counts as exhausted, and with spare left the fallback may still
-choose it. One that is exhausted and names no reset stops blocking after its own length, or
-after five hours when that length is unknown, and may then be spent as a candidate with no
-reading. The local endpoint has no such windows: a stale reading is not spent, the same as
-a failed one, while one that was never read still may be. A candidate with no reading
-(`unknown`: no login, an expired login, or not read yet) can still be selected. For Claude,
-Codex, and Grok, a rejected OAuth login (HTTP 401) or a login that lacks the usage scope is
-the same. The scope case is the provider's structured error (`insufficient_scope`,
-`invalid_scope`, or an error object whose type or code is `permission_error`), not a 403 that
-only mentions permission. A wrong key on the local endpoint stays a failed reading. A failed
-reading (`error`: a body that did not parse, another HTTP status, or a timeout) cannot. The park reason names a failed reading, a stale row that is
-short of quota, or a local endpoint whose last reading is stale or failed. A fresh row
-under the minimum still says it is short of fresh quota. A window whose reset time has already passed still blocks while it is over that
-line. The block lasts the same ten minutes a reading stays fresh. Taken before the reset,
-it lasts that long after the reset. Taken with the reset already a few seconds behind, it
-lasts that long after the reading. A stamp that was
-already long past, and a window once that grace has ended, count as reset, and the fallback
-may spend the row for that reason. It is not a missing reading. A reset at or before the
-epoch is ignored and the percent still counts.
-A model-scoped Claude window (the weekly Sonnet or Opus cap, shown as `wk <name>`) gates a
-resleeve of the same family, ignoring case and version, so `Sonnet 4.5` gates `sonnet` and
-`claude-sonnet-4-5`. `opusplan` is gated by both the Opus and the Sonnet cap. A candidate
-with no model, and the model `default`, are not blocked by a model cap. A cap under the usable
-minimum only ranks that candidate below an otherwise equal one, and the chosen or parked
-reason names the cap (`; wk sonnet under the minimum`, and the same for the other labels).
-A scope that is not opus, sonnet, or haiku still gates when its name is at least three letters
-and the model name contains it. A row that only reports
-other models' caps may be spent, as a candidate with no reading for that
-model. The account windows always count. Pi with a vendor login and
-Antigravity have no meter and are never chosen. A resleeve list that is only those is not
-reported as short of quota. A Codex window keeps the length the vendor
-reported, which the dispatch weight uses.
-The label can be coarser (`119` seconds shows as `1m`). A local
-endpoint may use HTTPS or loopback HTTP; other HTTP
-endpoints are reported as misconfigured and are not contacted.
+One row per subscription (Claude, Codex, Grok, Antigravity, the local endpoint): the reading, its
+windows with percent used, and a note. The readers are read-only: they read the hub user's own
+login files and never refresh or write a token, so a harness no sleeve has run for a while can read
+`login expired` until one does. They refresh in the background every two minutes (set
+`PROTECTORATE_NO_REMOTE_QUOTA` to turn them off). A failed read keeps the last windows, marked
+stale, for at most 24 hours. How the Antigravity reader works is in
+[srcmd/quota.md](srcmd/quota.md). The selector in `src/quota/select.zig` is not called by the hub
+yet: a quota or auth failure resleeves to the next harness in the sleeve's list, whatever the
+readings say.
 
 ## History
 
@@ -376,33 +219,12 @@ history search <query...> [--mode all|any|phrase] [--sleeve S]... [--harness H]
 history read --doc ID | history read <session> [--from TURN] [--to TURN] [--after DOC]
 ```
 
-A keyword index over the native session logs of the sessions the hub launched, plus the hub's own
-transcripts. `--since` and `--until` take `7d`, `3h`, `30m`, `90s` or epoch milliseconds. The
-owner can search everything; Envoy too; a sleeve only its own runs. `history read` returns at
-most 200 docs, or 8 MiB of their text. When the range continues, `--after` is the last doc id
-and the next page starts after it. The index is
-derived and rebuilt in the background if it fails to open. Catch-up commits bounded batches.
-A failed commit removes the segment files that attempt wrote, and the hub retries it with
-backoff up to 30 seconds. Below each configured root, discovery and reopening ignore
-symbolic links and non-regular files. Tool paths in the index are clipped to 512 bytes.
-`history_budget_bytes` (default 1 GiB) is read when the hub starts. A value under 1 MiB,
-including 0, is a config error and the hub does not start. Exactly 1 MiB is allowed, and a
-missing key keeps the default. Each sleeve, and each
-log, may keep that many bytes. That counts each doc's source text plus a
-per-doc overhead, so a flood of tiny docs stays inside the budget. Past a sleeve's budget the index
-keeps the newest lines across that sleeve's logs. Newest means the order they were ingested.
-A rebuild reads each sleeve's files oldest first, by mtime. An unsleeved log still keeps its
-own newest lines once it is past the budget. `hub info` and `doctor` report `history capped: <sleeve id>` once eviction has dropped
-any of that sleeve's docs. The name stays while the sleeve is under the same budget, including
-across a restart. It leaves when that sleeve is removed, when its sources are gone, or when a
-later start finds the total under a raised budget. Other sleeves are unaffected. A commit writes the
-manifest when the index changed. It removes segments whose docs are all dead in their own
-manifest update, and deletes those files only after that rename. It then rewrites a segment
-whose dead bytes are at least its live bytes, with some docs still live, and deletes the old
-file after that rename. A rewrite failure leaves the dead-segment removal in place. Opening the index removes
-segment files the manifest does not name, warns when the manifest itself is missing, and
-warns and still opens when reclaim fails. A reclaim failure after a durable commit is the
-same warning, and the commit stands.
+A keyword index (BM25) over the native session logs on the hub machine (`~/.claude/projects`,
+`~/.codex/sessions`, `~/.pi/agent/sessions`, `~/.grok`) and the hub's own transcripts. It is derived
+and rebuilt from those logs; `<home>/history/` can be deleted. `--since` and `--until` take `7d`,
+`3h`, `30m`, `90s` or epoch milliseconds. `history read` returns at most 50 documents; `--after` is
+the last document id of the previous page. Any caller with a token can search and read every
+sleeve's history and transcript (REVISIT, "History and transcripts ignore the caller's reach").
 
 ## Events
 
@@ -411,9 +233,8 @@ event list [--from SEQ] [--limit N]
 event read <seq>
 ```
 
-Hub events: sleeve, job, node, approval, doctor and update news. `event list` prints the newest
-`--limit` (500), or with `--from` the ones from that seq on, oldest first. `event read` marks
-everything up to that seq as read. Events live in memory (the last 500).
+Hub events: sleeve, job, node, approval, guardrail, harness and update news. The hub keeps the last
+512 in memory, so a restart empties the list. `event read` marks everything up to that seq as read.
 
 ## Doctor
 
@@ -421,113 +242,70 @@ everything up to that seq as read. Events live in memory (the last 500).
 doctor [--refresh]
 ```
 
-Checks this machine: each harness CLI (path, version, install method, login present), `gh`
-login, the sandbox prerequisites (`bwrap`, `systemd-run --user`, linger), disk, clock, `curl` and
-the embedded headscale and member. The result is cached in `<home>/doctor.json` and gates which
-harnesses dispatch and resleeve may use; a harness marked `NO` under ELIGIBLE is skipped. It runs
-at start, every 6 hours, and on `--refresh`. It checks that the hub's login files exist (below),
-not that they are valid. A login is a file in that store only: `ANTHROPIC_API_KEY` and the like in
-the hub's environment do not count, because the sandbox clears the environment and a sleeve never
-sees them. Nodes have no doctor yet.
+Checks this machine: each harness CLI (present, version, how to install, and whether it is
+`ready`, `installed` or `missing`; ready means the binary is on `PATH` and its login files exist), `gh` login, whether bwrap or Landlock is available, `git`, and any `sleeve_devices`. The
+checks run on every call (`--refresh` is accepted); nothing is cached. `protectorate-node doctor`
+runs the same checks on a node. The checks look for the harness's own login files under the hub user's home and do not test
+that they are valid.
 
 ## Harness logins
 
 ```
-harness login <claude|codex|grok|pi> [-- ARGS...]
+harness login <claude|codex|grok|pi|agy> [-- ARGS...]
 ```
 
-Sleeves never use your own logins. The hub keeps one login per harness in `<home>/logins/`, and
-every sleeve shares all of them, whatever its own harness (a Claude sleeve can run `codex exec`):
-each directory is bound read-write into the sandbox, so a token one sleeve refreshes reaches the
-others (a copy per sleeve would fork the refresh token, and the first refresh would log the other
-copies out). `harness login` runs on the hub machine, on
-your terminal, without the API:
+Sleeves use the hub user's own harness logins: there is no separate hub login store. `harness
+login` runs the vendor's own login command in your terminal, as you, so the login lands in your
+home: `claude`, `codex login`, `grok`, `pi` or `agy`, with the words after `--` passed to it (for
+example `harness login codex -- --device-auth` on a machine without a browser). The sandbox keeps a
+sleeve's own harness directory writable (so its token refreshes reach you) and masks the other
+harnesses' directories and `~/.ssh`.
 
-- `claude`, `codex`, `grok`: the vendor's own login command (`claude auth login`, `codex login`,
-  `grok login`) pointed at the store; words after `--` go to it, for example
-  `harness login codex -- --device-auth` on a machine without a browser.
-- `pi`: copies `auth.json`, `models.json` and `settings.json` from your `~/.pi/agent` (API keys
-  and your local endpoint's provider). An OAuth entry there is refused, since a copy would fork
-  it; log that one in with `PI_CODING_AGENT_DIR=<home>/logins/.pi/agent pi` and `/login`.
-  Run it again after you change your Pi models.
+## Sleeve environment
 
-Then `doctor --refresh`. Doctor names the command for a harness with no login.
+A sleeve runs with a cleared environment: `PATH`, `LANG`, `LANGUAGE`, `LC_ALL`, `LC_CTYPE`, `TERM`,
+`COLORTERM`, `TZ`, `USER`, `LOGNAME`, `SHELL`, `SSL_CERT_FILE`, `SSL_CERT_DIR`,
+`NODE_EXTRA_CA_CERTS`, `XDG_CONFIG_HOME` and `XDG_DATA_HOME` are copied from the hub's environment,
+`HOME` is the owner's home, `TMPDIR`, `TEMP` and `TMP` point to `<home>/run/<sleeve id>/tmp`, and the
+hub adds `PROTECTORATE_SLEEVE`, `PROTECTORATE_WORKSPACE`, `PROTECTORATE_ENVOY`, `PROTECTORATE_URL`,
+`PROTECTORATE_JOB_ID` (and `PROTECTORATE_TOKEN` for Envoy only).
 
-## Sleeve toolchains
-
-A sleeve builds with your toolchains, from a private home and a cleared environment:
-
-- `PATH` is the hub's CLI dir, the hub's own `PATH`, then `~/.cargo/bin`, `~/go/bin`,
-  `/usr/local/go/bin` and the dirs in `config.json` `sleeve_path`, where they exist. The hub
-  service often has a thinner `PATH` than your shell: list Go and Flutter there, for example
-  `"sleeve_path": ["/home/you/.local/go/bin", "/home/you/development/flutter/bin"]`. A seeded
-  `~/.profile` restores it in `bash -lc`, which otherwise resets it.
-- Rust: `RUSTUP_HOME` and `CARGO_HOME` are yours, read-only except cargo's `registry` and `git`.
-  A toolchain a project asks for that you have not installed fails; `rustup` cannot install.
-- Go (`GOMODCACHE`, `GOCACHE`) and Dart (`PUB_CACHE`) caches are yours, read-write. The Flutter SDK
-  is read-only except its `bin/cache`.
-- Builds start warm and every sleeve fills the same caches. The cost is that a sleeve can damage
-  them, and a corrupt cache hurts all of them; the tools lock for concurrent use.
-- `CARGO_BUILD_JOBS`, `GOMAXPROCS`, `GOFLAGS=-p=N` and `FLUTTER_TEST_CONCURRENCY` follow the
-  scope's CPU quota (`N` = quota / 100), since tools count host cores and a 4 GiB scope runs out
-  of memory otherwise.
-- Git metadata `hooks/`, `config`, `config.worktree` and `info/` is read-only in root
-  and child workspaces, including linked worktrees. Missing entries are created empty at launch. The common Git directory’s `worktrees/`
-  is also read-only except for the current worktree’s private Git directory; worktree creation
-  is handled by the hub or owner.
-  Add, commit, branch, checkout, rebase, merge, stash and log remain available. Commands that
-  update repository config, such as `git remote add`, `git branch --set-upstream-to` and
-  `git config user.name`, must be run by the owner outside the sandbox. For commit identity,
-  sleeves can use `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and
-  `GIT_COMMITTER_EMAIL`, or pass `git -c user.name=... -c user.email=...`.
-  Running sleeves retain their existing binds until relaunched; a hub restart relaunches them.
-- git commits as your global `user.name` and `user.email`, copied into the sleeve's `~/.gitconfig`
-  when it has none; later changes to yours do not reach a sleeve that already has one.
-
-Not available: the systemd user bus (`systemd-run --user` in a test) and long unix socket paths.
-
-## Sleeve memory
-
-`config.json` sets `sleeve_memory_max` in bytes (default 4294967296, 4 GiB).
-`sleeve_memory_max_overrides` is an object keyed by sleeve name, for example
-`"sleeve_memory_max_overrides": {"zig": 17179869184}` for 16 GiB. Values must
-be positive. The hub reads config at startup; changes apply on the next sleeve launch
-after a hub restart. Names include `envoy`, and an override applies to a new sleeve
-with the same name too. With scopes disabled no memory limit is enforced. Swap remains
-disabled in scopes; build parallelism continues to follow the CPU quota. `sleeve show` reports
-the incarnation limit in bytes (including JSON); `PROTECTORATE_MEMORY_MAX` supplies the
-configured value inside the sleeve. A non-Envoy sleeve’s first prompt reports the limit and
-directs a sleeve that needs more to ask Envoy; the owner raises `sleeve_memory_max_overrides`. A scope OOM
-notice and the next non-Envoy prompt name the limit and override key. The transcript and
-continuation brief show the original request, without the hub’s prompt preamble.
+- The toolchains are whatever is on the hub's `PATH`. The hub service gets the `PATH` of the shell that
+  ran `install.sh` (written into the unit), which is often thinner than your login shell's: put
+  Zig, Go, Flutter and the like on it, or reinstall from a shell that has them. There is no
+  `sleeve_path` setting and the hub sets no `CARGO_HOME`, `GOCACHE` or `PUB_CACHE`.
+- With bubblewrap the host root is read-only, so only the workspace, the sleeve's own harness
+  directory, its git directories and `TMPDIR` are writable. A build that wants to write caches under
+  `~/.cargo`, `~/go` or `~/.cache` fails there; point the tool at `TMPDIR` (for example `CARGO_HOME`
+  or `GOCACHE`) or run the hub with `--no-sandbox`. The Landlock fallback allows writes to the same
+  places.
+- Credential paths (`~/.ssh`, `~/.config/gh`, `~/.aws`, `~/.gnupg`, `~/.docker`, `~/.kube`, other
+  harnesses' directories and similar) are masked. The hub's own home is not masked.
+- The default sleeve cap is 4 GiB. Set `sleeve_memory_max` in `config.json` to change it, or add a
+  byte count keyed by sleeve name in `sleeve_memory_max_overrides`. Restart the hub to apply the
+  configuration to new incarnations. Use a zero limit for an uncapped sleeve or `"scopes": false`
+  to turn off all sleeve memory caps. `sleeve show` reports the applied limit and
+  `PROTECTORATE_MEMORY_MAX` carries the configured byte count. A second launcher OOM within one
+  hour parks the sleeve.
 
 ## Sleeve devices
 
-`config.json` `sleeve_devices` lists host device paths bound into every sleeve with
-`--dev-bind` when the path exists, for example
-`"sleeve_devices": ["/dev/aipu", "/dev/mali0"]`. A path that is not there is skipped and
-the hub log says it was not bound; the sleeve still starts. The list is empty by default,
-so a sleeve sees only the sandbox's own `/dev`. Adding a device requires a hub restart,
-then a new sleeve launch. The hub checks paths once a second; when a missing or replaced node
-appears, running sleeves record a notice naming the path and relaunch with native session
-resume. An idle sleeve relaunches immediately; a working sleeve waits for its next turn
-boundary. A replugged device can keep its `/dev/serial/by-id/` name while getting a new
-`ttyUSBn`. Inside a sleeve the
-device may appear as `nobody:nogroup` and `id` may show `nogroup`; supplementary host
-groups still apply, so this alone does not mean a 0666 udev rule is needed.
-Doctor reports each configured path, resolved node, owner, group, mode and hub read/write access without opening it. At each launch the hub logs the same information and any host processes holding the device; the first prompt lists bound devices and their holders. Processes that cannot be inspected are skipped.
+`sleeve_devices` in `config.json` lists host device paths (for example `["/dev/aipu"]`). The hub
+watches them once a second and records a `device_attached`, `device_detached` or `device_reattached`
+event when one appears, disappears or is replaced; `doctor` shows whether each is present. They
+are not bound into the sandbox yet, so a sleeve sees only the sandbox's own `/dev`. Restart the hub
+after changing the list.
 
 ## Updates and rollback
 
-**Harnesses** update natively, through each program's own command (`claude update`, `codex
-update`, `grok update`, `pi update self`), once every `harness_update_hours` (24). A program is
-updated only while none of its sleeves is starting or mid-turn.
-The hub logs when this wait starts, changes sleeve, and ends. A long turn can defer an update
-indefinitely.
+**Harnesses** update through each program's own command, only when you ask:
 
 ```
-harness update [PROGRAM...]          # claude, codex, grok, pi; none means every installed one
+harness update [PROGRAM...]          # none means every installed one
 ```
+
+A program with an active sleeve is deferred. The result (started, deferred or skipped, with a
+detail) is printed and recorded as an event. There is no automatic 24-hour update.
 
 **The hub:**
 
@@ -535,133 +313,40 @@ harness update [PROGRAM...]          # claude, codex, grok, pi; none means every
 hub info | hub state
 hub update [--check] [--channel stable|dev] [--version TAG]
 hub update --rollback
+hub probation [--retry-rollback]
 ```
 
-`hub update` downloads the release from GitHub, checks it against `SHA256SUMS`, stages it in
-`<home>/releases/<version>/`, snapshots the journal and then headscale's database, switches
-`releases/current` on probation and restarts. The journal snapshot is taken first, so a node that
-enrolls between the two snapshots is in the restored headscale database and absent from the
-restored journal. The new hub keeps the release once its health check passes within 2
-minutes; a release that keeps failing to start is switched back by `hub probation`, which the
-unit runs before each start. Automatic rollback restores both snapshots before switching back:
-the whole journal directory is replaced, so events after the journal snapshot are lost, and
-headscale changes after its snapshot are lost. This includes nodes enrolled after the headscale
-snapshot; enroll them again. Sleeve directories whose id is at or above `next_sleeve` from the
-journal snapshot are moved to `<home>/update-aside/<time>-<pid>/` and are not deleted.
-Worktree checkouts and their gitdirs stay; the prestart log names a sleeve that recorded
-its worktree. Remove a leftover checkout and run `git worktree prune` in the root
-repository. Until then the checkout holds `pt/<name>`, so a new worktree for that name is
-refused. The branch survives, and a new sleeve with the same name starts from those
-commits once the checkout is gone. A new worktree does not adopt a path that already
-exists. Prestart and the next hub start stop the systemd scopes of the quarantined sleeves.
-The prestart log names the quarantine directory.
-A configured fleet must be running so the database can be snapshotted. The service
-must run the snapshot-aware `hub probation` before each start and stop if it fails; regenerate an
-older unit with the current installer before relying on this rollback. `--check` only reports what
-it would do. `--rollback` requests an offline switch to `releases/previous`, including during a
-trial. It restores the headscale snapshot, losing changes since that snapshot. It keeps the whole
-journal when the previous release can read every intact frame; a torn final frame does not force
-a restore. Otherwise it restores the journal snapshot, losing events after its recorded time.
-The prestart log reports which happened. The matching snapshot record and any snapshot needed for
-the restore must be available. The target must support snapshot-aware prestart; a release
-installed before journal snapshots were introduced cannot be rolled back this way. New updates
-require a target that supports this rollback protocol. The channel defaults to
-`release_channel` in `config.json` (`stable`).
-Sleeves do not survive the restart: they resume as after a crash.
+`hub update` downloads the release for this OS and arch from `update_repo` (default
+`hotschmoe/protectorate`) on the channel (`update_channel`, default `stable`), checks it against its
+`SHA256SUMS`, stages it in `<home>/releases/<version>/`, points `releases/current` at it
+(`releases/previous` keeps the old one) and writes `releases/probation.json`. It also fetches the
+release's app builds into `<home>/clients/<version>/`. It does not restart the hub: restart the unit
+(`systemctl --user restart protectorate.service`). `--check` only reports what it would do;
+`--version` can name a release that is already staged; `--rollback` points `current` back at
+`previous`, again without a restart.
 
-An update is refused if the stopped headscale snapshot still contains SQLite WAL or SHM files,
-or if the hub journal has more than its current single segment. A trial that later rotates the
-journal is still replaced as a whole directory on rollback. An update that fails before the
-probation record is written removes the snapshot directories it just created. A failure after
-that record is written keeps every snapshot directory the record names.
+Before each start, the unit runs `releases/previous/protectorate hub probation`. A release marked on
+trial gets one start recorded; if it is started a second time without having become healthy, the
+probation check switches `current` back to `previous`. The hub marks itself healthy once its journal has
+replayed, its listeners are bound and its fleet and HTTP workers are running. `--retry-rollback` forces the switch back. Sleeves do not survive the restart: they
+resume as after a crash. There are no journal or other snapshots, so an update that changes the
+journal format cannot be undone by a rollback.
 
-If a snapshot cannot be restored before any live file is replaced, prestart reports the path and
-error, cancels the rollback, and keeps the trial release as `current`. The next start shows the
-error on `hub info` and records an alarm. Repair the named snapshot from backup, stop the hub,
-and run
-`<home>/releases/previous/protectorate --home <home> hub probation --retry-rollback`, then start
-the service. The retry keeps a manual rollback: it restores headscale, and restores the journal
-only when the previous release cannot read it. It refuses while the hub holds the journal or
-headscale still has the database or its socket open. While the hub holds the journal
-lock, `hub probation` prints the probation state and exits 0. It does not judge, restore,
-or count a start. Prestart takes the journal lock before it finishes an interrupted
-journal swap, when the journal directory is present, and before judging. A new trial is
-refused while `releases/rollback-open` exists. The marker applies while that probation
-names the current release. If a restore fails after a live file was
-replaced, prestart exits and the next prestart continues; it does not leave the trial serving
-half-restored data. `releases/rollback-open` records that open restore until the rollback
-finishes, so a later failure continues it too, including a validation failure that replaces
-nothing this time and a manual rollback of a release that was already confirmed. If the trial
-binary cannot start, the hub stays unavailable until the snapshot is repaired; do not point the old
-binary at an unreadable journal. The first update from a binary predating journal snapshots is not
-protected by this mechanism, because that binary takes the snapshot and runs prestart.
+**Nodes:** `node update` tells each node to move to the hub's own version (or `--version`). The node
+tries to fetch the release from GitHub itself; if that fails the hub downloads it, checks it and
+streams it to the node over the fleet link. The node stages it in its own `releases/` directory,
+switches `current`, and exits; its supervisor (`protectorate-node supervise`, which the systemd
+unit, the launchd agent and the Windows service all run) starts the new release. The node marks the release healthy after the hub has answered its first hello; a release
+that starts twice without that is switched back by `protectorate-node probation`, which the
+supervisor runs before every start. The command waits up to 90 s for every node, or returns the
+rollout id at once with `--no-wait` (follow it with `event list`; `--cancel ROLLOUT_ID` abandons
+it). See [Windows node updates](windows-node-update.md).
+Update the hub first, then the nodes: nodes move to the hub's version by default.
 
-**Nodes:**
-
-`node update` asks each node to fetch the release from GitHub itself, verify it, stage it and
-restart through its service manager. A node confirms its release after it has fully answered a
-hub request other than Hello. A node that has not done so within the
-probation window (`--probation`, default 600 s) reverts to its previous binary. The command waits
-for every node unless `--no-wait`. Update the hub first, then one node per OS and arch, then the
-rest. Updates run OS/architecture groups independently, preferring an online idle canary. A busy
-deferred canary gives way to the next node; a failed canary skips its group, labeling those rows
-`SKIPPED`. A node with a running job waits up to 30 seconds and then is
-deferred; an offline node is deferred. Deferred rows are labeled `DEFERRED` in the CLI results
-table; a pending update cancelled before dispatch is labeled `CANCELLED`. The CLI prints progress and then the results table, and the
-hub records progress in events. A lost update reply can be confirmed by Hello and Presence on the
-target release. `--all --no-wait` accepts the rollout in the background and prints
-its event id; follow it with `event list`. A hub restart stops an unfinished rollout. With named nodes `--no-wait` waits for the switch but
-not the return. Once an update is admitted, new jobs answer `busy` until the restart.
-
-The journal retains each deferred target and probation window. `node show <node>` shows its
-pending target; a newer rollout replaces it, and `node update --cancel <node>` drops it. When the
-node returns the hub makes one attempt using the normal switch and confirmation path. An attempt
-interrupted by a hub crash is not sent again: the hub confirms it if the node returns on the target,
-otherwise it remains pending with an uncertain outcome reported in events. Unattempted targets
-survive a hub restart.
-
-A Windows node updates the same way. The SCM cannot run a step before each start or restart a
-service from inside it, so the service runs a supervisor, `protectorate-node supervise --service`,
-from the copy under `%ProgramFiles%\protectorate-node`; that copy is never switched. The supervisor
-does what the systemd unit does: before each start it runs `releases\previous\protectorate-node.exe
-probation`, then it starts `releases\current\protectorate-node.exe serve` in a kill-on-close job,
-and it starts the node again 1 s after it exits 75 (update or rollback), 5 s after any other exit. A
-release that keeps failing to start is switched back after three starts, as on Linux. The running
-`.exe` is never overwritten: each release has its own directory. A rename cannot replace a directory
-link on Windows, so `current` and `previous` change by renaming the old link aside and the new one
-into place. A crash between the two leaves no `current`; the supervisor finishes the switch before
-its next start. A failed or hung probation (killed after 60 s) does not keep the node down: the
-supervisor counts the start itself and starts `current`. A Windows node refuses an update to a
-release older than the supervisor (its `--version` lacks `supervise: 1`). The supervisor itself is
-the release that was installed and changes only with a reinstall. A Windows node installed by
-v0.7.0-dev.5 or older (`sc.exe qc protectorate-node` shows `serve --service`) runs `serve` straight
-from `%ProgramFiles%`, answers `unsupported` and must be reinstalled once; see [Windows node
-updates](windows-node-update.md), which also has the manual check for a real Windows machine.
-
-Neither hub nor node switches releases while a release is on trial; wait for confirmation or
-automatic rollback. Without `--version`, an update is available only when the newest release on
-the selected channel has higher semver precedence than the running release. `--version` can select
-an older release, and the result identifies a downgrade. If the running version cannot be compared,
-specify `--version` explicitly.
-
-The hub talks only to nodes at its own node protocol (`node ls` shows "reinstall the node"
-otherwise). When a release bumps the protocol, update the nodes first, from the old hub, and the
-hub last. A node the old hub cannot update is reinstalled with the new release.
-
-Both update paths are tested end to end against a stand-in release server, and have run on the
-real fleet: `hub update` from v0.7.0-dev.1 to dev.2 and dev.3, `node update` from dev.2 to dev.3.
-The Windows supervisor loop and its pointer switch are tested end to end on Linux
-(`supervise` with `PT_TEST_POINTER_ASIDE=1`); on a real Windows node they have not run yet.
-
-**Apps:**
-
-The hub offers its own release's builds of the app. `hub info` lists them as client builds: those
-the release's `SHA256SUMS` names out of `protectorate-android.apk` and
-`protectorate-desktop-windows-{amd64,arm64}.zip`, none for a hub not started from
-`releases/current`. A paired app whose version differs from the hub's shows a banner; Install
-downloads `GET /api/client/<name>` with its device token (the owner token works too; sleeves and
-the envoy-only token are refused). The hub fetches each build from its release on the first
-request, checks it against `SHA256SUMS` and keeps it in `<home>/clients/<version>/`.
+**Apps:** the hub offers its own release's builds of the app. `hub info` lists them as client builds:
+those of `protectorate-android.apk` and `protectorate-desktop-windows-{amd64,arm64}.zip` that sit in
+`<home>/clients/<version>/`. A paired app whose version differs from the hub's shows a banner; Install
+downloads `GET /api/client/<name>` with its device token (any authenticated token works).
 
 - Android installs through the system installer, which asks to confirm. The first time, Android
   asks to allow installs from Protectorate; allow it and press Install again. Every release must
@@ -676,73 +361,68 @@ Neither installer has run on a real device yet.
 
 ## Devices
 
-The app's event stream resumes a short interruption from its last sequence. After a gap of more
-than 500 retained stream messages, or when that cursor is unavailable, the hub sends a current
-snapshot instead of replaying the gap.
-The app holds the catch-up state until the hub's `live` marker, then displays it in one update.
-The stream sends transcript entries only for open chats; the app reloads those chats after a
-reconnect to fill any gap.
-
-For development, `make test-heavy` runs the large-gap reconnect scenario separately from
-`make test`. To pace its 3,000-entry fake-harness workload across 30 minutes, run
-`PT_RECONNECT_GAP_SECS=1801 cargo test --locked --workspace --test hub stream_large_gap_uses_snapshot -- --ignored --nocapture`.
-One run with one open transcript measured 2,838,984 bytes of backlog message payload versus
-674,268 network bytes received on reconnect, including the transcript reload; the snapshot alone
-was 4,137 bytes. These are synthetic workload measurements, not mobile traffic estimates.
+The app's event stream starts every connection with a snapshot of the hub's state and a `live`
+marker, then follows new messages. After a reconnect the app reloads the transcripts it has open.
+The hub keeps the last 512 stream messages in memory; the stream's sequence restarts when the hub
+does (REVISIT, "Event stream sequence").
 
 ```
 device list | device add <name> | device pair <code> | device revoke <id>
+pair [<name>]                  # the same as device add
+token                          # prints the owner and envoy-only tokens from <home>/auth.json
 ```
 
 See [install.md](install.md#pairing-a-device).
 
 ## Where state lives
 
-The hub owns one root, `<home>` (default `~/.local/share/protectorate`, mode 0700):
+The hub owns one root, `<home>` (default `~/.local/share/protectorate`). The hub does not set a
+mode on it, so make it private (`chmod 700`).
 
-| Path | What |
-|---|---|
-| `journal/` | the journal: snapshots and segments of every state change |
-| `config.json` | settings; written with every default on first start |
-| `tokens` | the hub secret and the owner token's hash |
-| `devices.json` | paired devices, tokens stored as SHA-256 |
-| `doctor.json` | the cached doctor report |
-| `harness-updates.json` | the last run of each harness's update command |
-| `envoy/` | Envoy's working directory |
-| `logins/` | the harness logins every sleeve shares (`harness login`) |
-| `sleeves/<id>/` | a sleeve's private `home/` (native session logs, links to `logins/`), `transcript.jsonl`, checkpoints |
-| `worktrees/` | child sleeves' git worktrees |
-| `jobs/<job>/<attempt>/` | node job logs and fetched artifacts |
-| `history/` | the history index (derived; keep it private and out of backups) |
-| `tailnet/` | headscale's database and keys, the hub member's state, `enrolled.json`, `pending.json` |
-| `net/` | the embedded headscale and member, unpacked by SHA-256 |
-| `releases/` | staged hub releases and the `current` and `previous` links |
-| `clients/<version>/` | the release's app builds, fetched on first download |
-| `run/` | `api.sock` and `bin/`, bound into every sandbox |
+| Path | What | Back up |
+|---|---|---|
+| `auth.json` | the hub's fleet private key, the owner and envoy-only tokens, paired devices (tokens in plain text) and open pairing codes; written with mode 0600 | yes, and keep it secret |
+| `config.json` | settings you wrote (optional) | yes |
+| `journal/` | the journal: every state change, in 64 MiB segments, under an exclusive file lock | yes |
+| `transcripts/` | each sleeve's chat transcript, one `.jsonl` per sleeve | yes |
+| `briefs/` | handoff briefs, `<sleeve>.md` | yes |
+| `artifacts/` | node job logs and fetched artifacts | yes, if you need old job output |
+| `worktrees/` | child sleeves' git worktrees | yes: uncommitted work lives only here |
+| `envoy/` | Envoy's working directory and its `CLAUDE.md` and `AGENTS.md` | yes, if Envoy keeps files there |
+| `history/` | the history index | no: derived, rebuilt from the logs |
+| `releases/` | staged hub releases, `current` and `previous` links, `probation.json` | no: re-downloadable; keep it if you want to roll back |
+| `clients/<version>/` | the release's app builds | no |
+| `run/<sleeve id>/tmp` | each sleeve's `TMPDIR` | no |
 
-Workspaces stay in your own directories; nothing is written into a worked-on repo.
+Workspaces stay in your own directories; the hub writes nothing into a worked-on repo except the
+git worktrees it creates for child sleeves (under `<home>/worktrees/`).
 
-A node keeps its state in `/var/lib/protectorate-node` (Linux) or the `--state-dir` it was
-installed with (Windows): `node.json` (from join), `member/` with its keys and `control-key.pin`,
-`jobs.jsonl` (the job journal), `work/`, `releases/` and `install-manifest.json`.
+**Backing up.** Stop the hub (`systemctl --user stop protectorate.service`), copy the rows marked
+yes, and start it again. The journal recovers a torn last frame, but a copy taken while the hub
+runs can mix files from different moments, and the journal, `auth.json` and the transcripts have
+to agree. To restore, put them back under an empty `<home>` and start the hub. A restore keeps the
+fleet key, so nodes need no re-enrollment; without `auth.json` the hub generates a new key and every
+node has to join again. The same copy moves the hub to a new machine of any architecture: point
+`advertise_addrs` and the proxy at the new address. `hub export` and `hub import` do not exist.
 
-`tokens`, `devices.json`, `tailnet/` and the sleeve homes hold secrets. Never commit or share
-them.
+A node keeps its state in its home: `config.json` (its name, the pinned hub key and addresses),
+`node_key.hex` (its private key), `jobs/` (job logs), `releases/` and `install-manifest.json`
+(default `/var/lib/protectorate-node` when installed as root, else `~/.local/share/protectorate-node`;
+`%ProgramData%\protectorate-node` on Windows). Back up `node_key.hex` and `config.json` if you want
+a reinstalled machine to keep its identity; otherwise it joins again as a new node.
+
+`auth.json`, `node_key.hex` and the sleeve harness logins hold secrets. Never commit or share them.
 
 ## Logs
 
 | Where | What |
 |---|---|
-| `journalctl --user -u protectorate.service` | the hub: `<seconds since start> <level> <message>` lines (`serve --log-level`) |
-| `<home>/tailnet/headscale/headscale.log` | headscale |
-| `<home>/tailnet/member.log` | the hub's member |
-| `journalctl -u protectorate-node` | a Linux node, member lines prefixed `member:` |
-| `<state>\node.log` | a Windows node under its service |
-| `<state>/join-member.log` | member during `join` |
-| `sleeve transcript`, `event list`, `job log` | what the hub saw from sleeves, itself and jobs |
+| `journalctl --user -u protectorate.service` | the hub's output |
+| `journalctl -u protectorate-node` | a Linux node (`--user` for a user service) |
+| `sleeve transcript`, `event list`, `job logs` | what the hub saw from sleeves, itself and jobs |
 
-None of these rotate yet.
+A Windows node has no log file; its service output is not kept (see
+[Windows node updates](windows-node-update.md)). None of these rotate beyond what journald does.
 
-Tick processing tracks uncertain and probing effects, active jobs, eligible sleeves and pending approvals while retaining terminal records. These indexes are rebuilt during journal replay.
-
-The blocking gate is `make check`; `make test` runs its e2e scenarios. `make test-heavy` runs the background e2e suite, every `#[ignore]`d long feature scenario, fuzz seed replay and fuzz builds. Real-scope tests skip without a systemd user bus.
+The blocking gate is `make check`; `make e2e` runs its real-binary scenarios (`scripts/zig-e2e.sh`)
+and `make dst` the VOPR simulation. There is no separate background gate.

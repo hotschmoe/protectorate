@@ -1,8 +1,24 @@
 const std = @import("std");
 const tiger = @import("../tiger.zig");
 const sim_storage = @import("sim_storage.zig");
-const sim_net = @import("sim_net.zig");
+const sim_fleet = @import("sim_fleet.zig");
+const sim_http = @import("sim_http.zig");
+const sim_node = @import("sim_node.zig");
 const oracle = @import("oracle.zig");
+const Sizes = @import("sizes.zig").Sizes;
+
+var panic_seed: ?u64 = null;
+var panic_steps: usize = 0;
+var repro_tail_buf: [192]u8 = undefined;
+var repro_tail: []const u8 = "";
+
+pub fn panic_handler(message: []const u8, address: ?usize) noreturn {
+    sim_fleet.print_panic_trace();
+    if (panic_seed) |seed| {
+        std.debug.print("FAIL panic seed={d}\nRepro: zig build dst -- --seed {d} --steps {d} --verbose{s}\n", .{ seed, seed, panic_steps, repro_tail });
+    }
+    std.debug.defaultPanic(message, address);
+}
 
 pub fn main(init: std.process.Init) !u8 {
     var arena_st = std.heap.ArenaAllocator.init(init.gpa);
@@ -14,6 +30,9 @@ pub fn main(init: std.process.Init) !u8 {
     var steps: usize = 400;
     var single_seed: ?u64 = null;
     var verbose = false;
+    var fleet_long = false;
+    var sizes: Sizes = .{};
+    var net_only = false;
 
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
@@ -28,35 +47,69 @@ pub fn main(init: std.process.Init) !u8 {
             single_seed = try std.fmt.parseInt(u64, args[i], 10);
         } else if (std.mem.eql(u8, args[i], "--verbose")) {
             verbose = true;
+        } else if (std.mem.eql(u8, args[i], "--fleet-long")) {
+            fleet_long = true;
+        } else if (std.mem.eql(u8, args[i], "--net-only")) {
+            net_only = true;
+        } else if (std.mem.eql(u8, args[i], "--slabs") and i + 1 < args.len) {
+            i += 1;
+            sizes.slabs = try std.fmt.parseInt(usize, args[i], 10);
+        } else if (std.mem.eql(u8, args[i], "--bus-slots") and i + 1 < args.len) {
+            i += 1;
+            sizes.bus_slots = try std.fmt.parseInt(usize, args[i], 10);
+        } else if (std.mem.eql(u8, args[i], "--rpc-slots") and i + 1 < args.len) {
+            i += 1;
+            sizes.rpc_per_peer = try std.fmt.parseInt(usize, args[i], 10);
+        } else if (std.mem.eql(u8, args[i], "--request-slots") and i + 1 < args.len) {
+            i += 1;
+            sizes.request_slots = try std.fmt.parseInt(usize, args[i], 10);
         }
     }
 
     const start_seed: u64 = single_seed orelse 0;
     const end_seed: u64 = if (single_seed) |s| s + 1 else seeds;
+    panic_steps = steps;
+    repro_tail = try std.fmt.bufPrint(&repro_tail_buf, "{s}{s} --slabs {d} --bus-slots {d} --rpc-slots {d} --request-slots {d}", .{
+        if (fleet_long) " --fleet-long" else "",
+        if (net_only) " --net-only" else "",
+        sizes.slabs,
+        sizes.bus_slots,
+        sizes.rpc_per_peer,
+        sizes.request_slots,
+    });
 
     var out_buf: [4096]u8 = undefined;
     var out = std.Io.File.stdout().writer(init.io, &out_buf);
 
     var s: u64 = start_seed;
     while (s < end_seed) : (s += 1) {
+        panic_seed = s;
         var dbg: std.heap.DebugAllocator(.{}) = .init;
         const gpa = dbg.allocator();
 
-        sim_storage.run_storage_sim(gpa, s ^ 0x9e3779b97f4a7c15, steps) catch |err| {
-            std.debug.print("FAIL storage seed={d} err={s}\nRepro: zig build dst -- --seed {d} --steps {d} --verbose\n", .{ s, @errorName(err), s, steps });
+        if (!net_only) sim_storage.run_storage_sim(gpa, s ^ 0x9e3779b97f4a7c15, steps) catch |err| {
+            std.debug.print("FAIL storage seed={d} err={s}\nRepro: zig build dst -- --seed {d} --steps {d} --verbose{s}\n", .{ s, @errorName(err), s, steps, repro_tail });
             return 1;
         };
-        sim_net.run_net_sim(gpa, s ^ 0xbf58476d1ce4e5b9) catch |err| {
-            std.debug.print("FAIL net seed={d} err={s}\nRepro: zig build dst -- --seed {d} --steps {d} --verbose\n", .{ s, @errorName(err), s, steps });
+        sim_fleet.run(gpa, s ^ 0x6a09e667f3bcc909, fleet_long, sizes) catch |err| {
+            std.debug.print("FAIL fleet seed={d} err={s}\nRepro: zig build dst -- --seed {d} --steps {d} --verbose{s}\n", .{ s, @errorName(err), s, steps, repro_tail });
             return 1;
         };
-        oracle.run_seed(gpa, s, steps) catch |err| {
-            std.debug.print("FAIL oracle seed={d} err={s}\nRepro: zig build dst -- --seed {d} --steps {d} --verbose\n", .{ s, @errorName(err), s, steps });
+        sim_http.run(gpa, s ^ 0x3c6ef372fe94f82b) catch |err| {
+            std.debug.print("FAIL http seed={d} err={s}\nRepro: zig build dst -- --seed {d} --steps {d} --verbose{s}\n", .{ s, @errorName(err), s, steps, repro_tail });
+            return 1;
+        };
+        sim_node.run(gpa, s ^ 0x3c6ef372fe94f82b, sizes) catch |err| {
+            std.debug.print("FAIL node seed={d} err={s}\nRepro: zig build dst -- --seed {d} --steps {d} --verbose{s}\n", .{ s, @errorName(err), s, steps, repro_tail });
+            return 1;
+        };
+        if (!net_only) oracle.run_seed(gpa, s, steps) catch |err| {
+            std.debug.print("FAIL oracle seed={d} err={s}\nRepro: zig build dst -- --seed {d} --steps {d} --verbose{s}\n", .{ s, @errorName(err), s, steps, repro_tail });
             return 1;
         };
 
         if (dbg.deinit() == .leak) {
-            std.debug.print("FAIL memory leak on seed={d}\nRepro: zig build dst -- --seed {d} --steps {d} --verbose\n", .{ s, s, steps });
+            std.debug.print("FAIL memory leak on seed={d}\nRepro: zig build dst -- --seed {d} --steps {d} --verbose{s}\n", .{ s, s, steps, repro_tail });
             return 1;
         }
 

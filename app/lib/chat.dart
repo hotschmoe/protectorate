@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'api/api.g.dart';
 import 'derived.dart';
 import 'icons.dart';
+import 'model_selection.dart';
 import 'scope.dart';
 import 'theme.dart';
 import 'widgets.dart';
@@ -38,6 +39,8 @@ class _SleeveViewState extends State<SleeveView> {
   final _text = TextEditingController();
   final _focus = FocusNode();
   _Pending _pending = _Pending.none;
+  Harness? _resleeveTarget;
+  ModelSelection _selection = defaultModelSelection;
   bool _takeover = false;
 
   @override
@@ -92,7 +95,11 @@ class _SleeveViewState extends State<SleeveView> {
         _Action('Stop', Glyph.power, 'Stop this sleeve and its children',
             () => setState(() => _pending = _Pending.stop)),
       _Action('Resleeve', Glyph.resleeve, 'Move this sleeve to another harness',
-          () => setState(() => _pending = _Pending.resleeve)),
+          () => setState(() {
+            _pending = _Pending.resleeve;
+            _resleeveTarget = null;
+            _selection = defaultModelSelection;
+          })),
       _Action('Terminal', Glyph.terminal, 'Take over the harness terminal (advanced)',
           () => setState(() => _takeover = true)),
     ];
@@ -190,29 +197,49 @@ class _SleeveViewState extends State<SleeveView> {
   Widget _pendingBar(AppScope app, Sleeve s, Palette p) {
     switch (_pending) {
       case _Pending.resleeve:
-        final order = [
-          ...s.resleeveTo,
-          for (final h in const [Harness.claude, Harness.codex, Harness.grok, Harness.piLocal, Harness.antigravity])
-            if (!s.resleeveTo.contains(h)) h,
-        ];
+        final order = {
+          ...s.resleeveTo.where((h) => h != Harness.unknown),
+          Harness.claude, Harness.codex, Harness.grok, Harness.piVendor,
+          Harness.piLocal, Harness.antigravity,
+        };
         final current = s.incarnation?.harness;
+        final target = _resleeveTarget;
         return Panel(
           padding: const EdgeInsets.all(12),
-          child: Buttons([
-            T('Resleeve ${s.name} to', color: p.dim),
-            for (final h in order)
-              Btn(
-                harnessName(h),
-                kind: h == current ? BtnKind.ghost : BtnKind.secondary,
-                tooltip: h == current ? 'Current harness' : null,
-                onTap: () {
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              T('Resleeve ${s.name} to', color: p.dim),
+              const SizedBox(height: 6),
+              Buttons([
+                for (final h in order)
+                  Btn(harnessName(h), dense: true, active: h == target,
+                      tooltip: h == current ? 'Current harness' : null,
+                      onTap: () => setState(() {
+                        if (target != h) _selection = defaultModelSelection;
+                        _resleeveTarget = h;
+                      })),
+              ]),
+              if (target != null) ...[
+                const SizedBox(height: 10),
+                ModelSelectionFields(key: ValueKey(target), hub: app.hub, harness: target,
+                    onChanged: (value) => _selection = value),
+              ],
+              const SizedBox(height: 10),
+              Buttons([
+                Btn('Resleeve', kind: BtnKind.primary, dense: true, onTap: target == null ? null : () {
+                  final req = ResleeveRequest(sleeveId: s.id, target: target,
+                      model: _selection.model ?? '', provider: _selection.provider ?? '',
+                      effort: _selection.effort ?? '');
                   setState(() => _pending = _Pending.none);
-                  unawaited(app.act(() => app.hub.resleeve(s.id, h),
-                      done: 'Resleeving ${s.name} to ${harnessName(h)}'));
-                },
-              ),
-            Btn('Cancel', kind: BtnKind.ghost, onTap: () => setState(() => _pending = _Pending.none)),
-          ]),
+                  unawaited(app.act(() => app.hub.resleeve(req),
+                      done: 'Resleeving ${s.name} to ${harnessName(target)}'));
+                }),
+                Btn('Cancel', kind: BtnKind.ghost, dense: true,
+                    onTap: () => setState(() => _pending = _Pending.none)),
+              ]),
+            ],
+          ),
         );
       case _Pending.stop:
         final kids = app.state.sleeves

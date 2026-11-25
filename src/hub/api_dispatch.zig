@@ -1,6 +1,7 @@
 const std = @import("std");
 const tiger = @import("../tiger.zig");
 const schema = @import("../api/schema.zig");
+const event = @import("../core/event.zig");
 const model = @import("../core/model.zig");
 const msg = @import("../net/msg.zig");
 const noise = @import("../net/noise.zig");
@@ -9,6 +10,7 @@ const h_ext = @import("../history/extract.zig");
 const u_ver = @import("../update/version.zig");
 const u_store = @import("../update/store.zig");
 const doctor = @import("../doctor/doctor.zig");
+const claude = @import("../drivers/claude.zig");
 const home = @import("home.zig");
 const git = @import("git.zig");
 const fleet = @import("fleet.zig");
@@ -46,6 +48,20 @@ fn err_json(gpa: std.mem.Allocator, code: schema.ErrorCode, message: []const u8)
     return .{
         .status = code.http_status(),
         .body_json = try schema.encode_alloc(gpa, body),
+    };
+}
+
+fn provider_error(harness: schema.Harness, provider: ?[]const u8) ?[]const u8 {
+    const id = provider orelse return null;
+    if (id.len == 0) return null;
+    return switch (harness) {
+        .claude, .unknown => if (std.meta.stringToEnum(claude.Provider, id) == null)
+            "Claude provider must be anthropic, bedrock, vertex, or foundry"
+        else
+            null,
+        .antigravity => if (std.mem.eql(u8, id, "gemini")) null else "Antigravity provider must be gemini",
+        .grok => "Select a configured Grok provider by its custom --model ID",
+        else => null,
     };
 }
 
@@ -87,6 +103,10 @@ pub fn dispatch(
     } else if (std.mem.eql(u8, method, "ListSleeves")) {
         const st = try rt.view_state(a);
         return ok_json(rt.gpa, schema.SleeveList{ .sleeves = st.sleeves });
+    } else if (std.mem.eql(u8, method, "ListModels")) {
+        const req = schema.decode_arena(schema.ModelCatalogRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        if (req.harness == .unknown) return err_json(rt.gpa, .invalid, "unknown harness");
+        return .{ .status = 200, .body_json = try rt.model_catalog.encode(rt.gpa, rt.io, rt.env, req.harness) };
     } else if (std.mem.eql(u8, method, "GetInbox")) {
         const req = schema.decode_arena(schema.InboxRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
         const raw_sid = req.sleeve_id orelse "envoy";
@@ -111,6 +131,10 @@ pub fn dispatch(
         return ok_json(rt.gpa, tx);
     } else if (std.mem.eql(u8, method, "SpawnSleeve")) {
         const req = schema.decode_arena(schema.SpawnSleeveRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        if (req.harness == .unknown or req.task_size == .unknown) return err_json(rt.gpa, .invalid, "unknown harness or task size");
+        const caller = principal.?;
+        if (req.task_size != null and caller == .sleeve) return err_json(rt.gpa, .forbidden, "task size requires owner or Envoy scope");
+        if (provider_error(req.harness, req.provider)) |message| return err_json(rt.gpa, .invalid, message);
         var parent_sid: ?[]const u8 = null;
         var parent_path: ?[]const u8 = null;
         if (req.parent_id) |raw_pid| {
@@ -119,6 +143,7 @@ pub fn dispatch(
         }
         const is_envoy = parent_sid == null and std.mem.eql(u8, req.name, "envoy");
         if (is_envoy) {
+            if (req.auto_select) return err_json(rt.gpa, .invalid, "Envoy requires a fixed harness");
             rt.state_mu.lockUncancelable(rt.io);
             var dup_envoy = false;
             var sit = rt.core_state.sleeves.iterator();
@@ -160,6 +185,15 @@ pub fn dispatch(
             d.close(rt.io);
         }
 
+        const choice: ?event.QuotaSelection = if (req.auto_select and req.harness == .claude and req.model == null and req.provider == null)
+            try rt.choose_target(a, &runtime.spawn_harnesses, null, parent_sid, raw_base_path, req.task_size, caller == .envoy)
+        else
+            null;
+        const harness = if (choice) |picked|
+            picked.harness orelse return err_json(rt.gpa, .unavailable, picked.reason)
+        else
+            runtime.schema_to_model_harness(req.harness);
+
         if (rt.gate_d9(a, principal, .spawn_sleeve, req.name)) |_| {} else |err| {
             return map_d9_err(rt.gpa, err);
         }
@@ -192,10 +226,11 @@ pub fn dispatch(
         } }) catch |err| return map_commit_err(rt.gpa, err);
 
         var targets: [model.max_targets]model.Harness = undefined;
-        targets[0] = runtime.schema_to_model_harness(req.harness);
+        targets[0] = harness;
         var tlen: u8 = 1;
         for (req.resleeve_to) |rh| {
             if (tlen >= model.max_targets) break;
+            if (rh == .unknown) continue;
             targets[tlen] = runtime.schema_to_model_harness(rh);
             tlen += 1;
         }
@@ -207,10 +242,11 @@ pub fn dispatch(
                 .pane => .pane,
                 else => .headless,
             },
-            .model_name = req.model,
-            .provider = req.provider,
+            .model_name = if (choice) |picked| picked.model_name else req.model,
+            .provider = if (choice) |picked| picked.provider else req.provider,
             .effort = req.effort,
             .until_done = req.until_done,
+            .selection_reason = if (choice) |picked| picked.reason else null,
         } }) catch |err| return map_commit_err(rt.gpa, err);
 
         if (req.message) |msg_txt| {
@@ -231,24 +267,24 @@ pub fn dispatch(
     } else if (std.mem.eql(u8, method, "StartSleeve")) {
         const req = schema.decode_arena(schema.StartSleeveRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
         const sid = rt.resolve_sleeve_id(a, req.sleeve_id) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
-        var default_h: model.Harness = .claude;
+        var targets: [model.max_targets]model.Harness = undefined;
+        var target_len: u8 = 1;
         {
             rt.state_mu.lockUncancelable(rt.io);
             defer rt.state_mu.unlock(rt.io);
-            if (rt.core_state.sleeves.get(sid)) |sl| {
-                if (sl.inc) |inc| {
-                    default_h = inc.harness;
-                } else if (sl.target_len > 0) {
-                    default_h = sl.targets[0];
-                }
+            const sl = rt.core_state.sleeves.get(sid) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
+            const primary = if (sl.target_len > 0) sl.targets[0] else .claude;
+            targets[0] = if (req.target) |h| runtime.schema_to_model_harness(h) else if (sl.inc) |inc| inc.harness else primary;
+            for (sl.targets[1..@max(sl.target_len, 1)]) |h| {
+                targets[target_len] = h;
+                target_len += 1;
             }
         }
-        var targets: [model.max_targets]model.Harness = undefined;
-        targets[0] = if (req.target) |h| runtime.schema_to_model_harness(h) else default_h;
+        if (provider_error(runtime.model_to_schema_harness(targets[0]), req.provider)) |message| return err_json(rt.gpa, .invalid, message);
         rt.commit(.{ .start_requested = .{
             .sleeve_id = sid,
             .targets = targets,
-            .target_len = 1,
+            .target_len = target_len,
             .mode = .headless,
             .model_name = req.model,
             .provider = req.provider,
@@ -300,6 +336,8 @@ pub fn dispatch(
         return ok_json(rt.gpa, schema.Accepted{});
     } else if (std.mem.eql(u8, method, "Resleeve")) {
         const req = schema.decode_arena(schema.ResleeveRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
+        if (req.target == .unknown) return err_json(rt.gpa, .invalid, "unknown harness");
+        if (provider_error(req.target, req.provider)) |message| return err_json(rt.gpa, .invalid, message);
         const sid = rt.resolve_sleeve_id(a, req.sleeve_id) orelse return err_json(rt.gpa, .not_found, "sleeve not found");
         rt.commit(.{ .resleeve_requested = .{
             .sleeve_id = sid,
@@ -323,7 +361,10 @@ pub fn dispatch(
         const summary = try std.fmt.allocPrint(a, "{s} {s}", .{ req.remote orelse "origin", req.branch orelse (sv.branch orelse "HEAD") });
         const d9_app = rt.gate_d9(a, principal, .git_push, summary) catch |err| return map_d9_err(rt.gpa, err);
         var res = git.push(a, rt.io, sid, sv.path, req.remote, req.branch, req.force) catch |err| {
-            return err_json(rt.gpa, .invalid, @errorName(err));
+            return err_json(rt.gpa, switch (err) {
+                error.GitCurrentBranchTimedOut, error.GitHeadCommitTimedOut, error.GitPushTimedOut => .timeout,
+                else => .invalid,
+            }, @errorName(err));
         };
         if (d9_app) |aid| res.approval_id = aid;
         return ok_json(rt.gpa, res);
@@ -488,8 +529,8 @@ pub fn dispatch(
         const req = schema.decode_arena(schema.RemoveNodeRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
         const nid = rt.resolve_node_id(a, req.node_id) orelse return err_json(rt.gpa, .not_found, "node not found");
         const old_name = if (try rt.view_node(a, nid)) |nd| nd.name else nid;
-        rt.fleet_srv.disconnect_node(nid);
         rt.commit(.{ .node_removed = .{ .node_id = nid } }) catch |err| return map_commit_err(rt.gpa, err);
+        rt.fleet_srv.disconnect_node(nid);
         return ok_json(rt.gpa, schema.RemovedNode{ .node_id = nid, .name = old_name });
     } else if (std.mem.eql(u8, method, "RenameNode")) {
         const req = schema.decode_arena(schema.RenameNodeRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
@@ -676,13 +717,15 @@ pub fn dispatch(
     } else if (std.mem.eql(u8, method, "EnvoySend")) {
         const req = schema.decode_arena(schema.EnvoySendRequest, a, body) catch return err_json(rt.gpa, .invalid, "bad request");
         const rid = try rt.gen_id(a, "envoy");
+        const vendor = req.agent != null or (principal != null and principal.? == .envoy);
+        const from = if (vendor) try std.fmt.allocPrint(a, "agent:{s}", .{req.agent orelse ""}) else "owner";
         rt.commit(.{ .prompt_enqueued = .{
             .sleeve_id = "envoy",
             .request_id = rid,
-            .from = req.agent orelse "owner",
-            .kind = .prompt,
+            .from = from,
+            .kind = if (vendor) .agent_mail else .prompt,
             .mode = .queue,
-            .text = req.text,
+            .text = if (vendor) try std.fmt.allocPrint(a, "[from {s}]\n{s}", .{ from, req.text }) else req.text,
         } }) catch |err| return map_commit_err(rt.gpa, err);
         return ok_json(rt.gpa, schema.Sent{ .request_id = rid, .queued = true, .queue_length = 1 });
     } else if (std.mem.eql(u8, method, "EnvoyWait")) {
@@ -724,8 +767,7 @@ pub fn dispatch(
             if (settled) break;
             const now = std.Io.Clock.real.now(rt.io).toMilliseconds();
             if (now >= deadline) break;
-            const ws = try rt.stream_hub.wait_since(a, cursor, @min(500, deadline - now));
-            cursor = ws.last_seq;
+            cursor = try rt.stream_hub.wait_change(cursor, @min(500, deadline - now));
         }
         const reply_text = extract_envoy_reply(a, rt, req.request_id);
         return ok_json(rt.gpa, schema.EnvoyReply{
@@ -769,8 +811,7 @@ pub fn dispatch(
             }
             const now = std.Io.Clock.real.now(rt.io).toMilliseconds();
             if (now >= deadline) break;
-            const ws = try rt.stream_hub.wait_since(a, cursor, @min(500, deadline - now));
-            cursor = ws.last_seq;
+            cursor = try rt.stream_hub.wait_change(cursor, @min(500, deadline - now));
         }
         return ok_json(rt.gpa, schema.WaitResult{ .reached = reached, .sleeves = res_sleeves.items });
     } else if (std.mem.eql(u8, method, "SearchHistory")) {
@@ -886,7 +927,10 @@ pub fn dispatch(
         const req = schema.decode_arena(schema.UpdateHubRequest, a, body) catch schema.UpdateHubRequest{};
         const cur_ver = @import("../version.zig").version;
         if (req.rollback) {
-            const target = u_store.rollback(a, rt.io, rt.hub_home.releases_path) catch {
+            rt.release_mu.lockUncancelable(rt.io);
+            const rolled = u_store.rollback(a, rt.io, rt.hub_home.releases_path);
+            rt.release_mu.unlock(rt.io);
+            const target = rolled catch {
                 return err_json(rt.gpa, .not_found, "no previous release");
             };
             rt.record_hub_event(.hub, "hub_update", target, "rolled back release", .warn);
@@ -896,7 +940,12 @@ pub fn dispatch(
             if (std.mem.eql(u8, want_ver, cur_ver)) {
                 return ok_json(rt.gpa, schema.HubUpdate{ .current = cur_ver, .target = cur_ver, .available = false });
             }
-            if (!req.check and (u_store.activate_staged(rt.gpa, rt.io, rt.hub_home.releases_path, want_ver) catch false)) {
+            const activated = if (req.check) false else blk: {
+                rt.release_mu.lockUncancelable(rt.io);
+                defer rt.release_mu.unlock(rt.io);
+                break :blk u_store.activate_staged(rt.gpa, rt.io, rt.hub_home.releases_path, want_ver) catch false;
+            };
+            if (activated) {
                 rt.record_hub_event(.hub, "hub_update", want_ver, "activated staged release", .info);
                 return ok_json(rt.gpa, schema.HubUpdate{ .current = cur_ver, .target = want_ver, .available = true });
             }
@@ -908,7 +957,13 @@ pub fn dispatch(
         };
         if (latest) |rel| {
             if (!req.check) {
-                u_store.stage_and_apply(rt.gpa, rt.io, rt.hub_home.releases_path, rel, .hub) catch |err| {
+                u_store.stage_release(rt.gpa, rt.io, rt.hub_home.releases_path, rel, .hub) catch |err| {
+                    return err_json(rt.gpa, .internal, @errorName(err));
+                };
+                rt.release_mu.lockUncancelable(rt.io);
+                const applied = u_store.activate_staged(rt.gpa, rt.io, rt.hub_home.releases_path, rel.tag);
+                rt.release_mu.unlock(rt.io);
+                _ = applied catch |err| {
                     return err_json(rt.gpa, .internal, @errorName(err));
                 };
                 u_store.cache_release_clients(rt.gpa, rt.io, rt.hub_home.clients_path, rel) catch {};
@@ -1121,6 +1176,7 @@ fn map_d9_err(gpa: std.mem.Allocator, err: anyerror) !DispatchResult {
 fn map_fleet_err(gpa: std.mem.Allocator, err: anyerror) !DispatchResult {
     return switch (err) {
         error.NodeOffline => err_json(gpa, .unavailable, "node is offline"),
+        error.Busy => err_json(gpa, .unavailable, "fleet is busy"),
         error.RemoteError => err_json(gpa, .invalid, "node rejected request"),
         else => err_json(gpa, .internal, @errorName(err)),
     };

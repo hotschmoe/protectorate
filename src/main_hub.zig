@@ -5,6 +5,7 @@ const commands = @import("cli/commands.zig");
 const hub_home = @import("hub/home.zig");
 const hub_rt = @import("hub/runtime.zig");
 const hub_http = @import("hub/http_server.zig");
+const child_process = @import("child_process.zig");
 
 var sig_stop: std.atomic.Value(bool) = .init(false);
 
@@ -33,6 +34,9 @@ pub fn main(init: std.process.Init) !u8 {
     if (raw_args.len >= 2 and std.mem.eql(u8, raw_args[1], "__guard")) {
         return try s_exec.run_guard_trampoline(init, raw_args[2..]);
     }
+    if (raw_args.len >= 2 and std.mem.eql(u8, raw_args[1], "__sleeve_cgroup")) {
+        return try s_exec.run_sleeve_cgroup(init, raw_args[2..]);
+    }
 
     switch (try commands.dispatch_cli(init, arena)) {
         .exit => |code| return code,
@@ -46,7 +50,9 @@ pub fn main(init: std.process.Init) !u8 {
         },
         .serve => |s| {
             install_signal_handlers();
-            const rt = try hub_rt.Runtime.open(init.gpa, init.io, init.environ_map, .{
+            var process_vtable: std.Io.VTable = undefined;
+            const io = child_process.io_for_serve(init, &process_vtable);
+            const rt = try hub_rt.Runtime.open(init.gpa, io, init.environ_map, .{
                 .home_override = s.home_opt,
                 .listen_override = s.listen_opt,
                 .proxy_listen_override = s.proxy_listen_opt,
@@ -57,25 +63,28 @@ pub fn main(init: std.process.Init) !u8 {
             });
             defer rt.close_and_destroy();
 
-            const hs = try hub_http.HttpServer.start(init.gpa, init.io, rt, rt.http_listen);
-            defer hs.stop_and_destroy();
-
-            const proxy_hs = if (rt.proxy_listen) |pl|
-                try hub_http.HttpServer.start_with_options(init.gpa, init.io, rt, pl, rt.trusted_proxies)
-            else
-                null;
-            defer if (proxy_hs) |ph| ph.stop_and_destroy();
+            const hs = try hub_http.HttpServer.start(init.gpa, io, rt, .{
+                .primary = rt.http_listen,
+                .proxy = rt.proxy_listen,
+                .trusted_proxies = rt.trusted_proxies,
+            });
+            defer if (hs.stop_and_destroy()) {
+                std.debug.print("http: a worker is still running, so the runtime is not torn down: fencing the sleeves and ending the process (every journal commit is already synced)\n", .{});
+                rt.end_process_fenced();
+            };
+            defer rt.fleet_srv.shutdown();
+            rt.mark_healthy();
 
             var proxy_buf: [192]u8 = undefined;
-            const proxy_str = if (proxy_hs) |ph|
-                std.fmt.bufPrint(&proxy_buf, " proxy={s}:{d}", .{ ph.host, ph.listen_port() }) catch ""
+            const proxy_str = if (hs.has_listener(1))
+                std.fmt.bufPrint(&proxy_buf, " proxy={s}:{d}", .{ hs.host(1), hs.listen_port(1) }) catch ""
             else
                 "";
 
             try commands.print_out(
                 init.io,
                 "protectorate listening http={s}:{d}{s} fleet=0.0.0.0:{d} home={s}\n",
-                .{ hs.host, hs.listen_port(), proxy_str, rt.fleet_srv.listen_port(), rt.hub_home.root_path },
+                .{ hs.host(0), hs.listen_port(0), proxy_str, rt.fleet_srv.listen_port(), rt.hub_home.root_path },
             );
 
             while (!sig_stop.load(.acquire) and !rt.shutdown_requested.load(.acquire)) {

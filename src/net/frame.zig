@@ -1,10 +1,13 @@
 const std = @import("std");
 const tiger = @import("../tiger.zig");
+const noise = @import("noise.zig");
 
 pub const max_frame: usize = 1_048_576;
 pub const head_bytes: usize = 9;
 pub const max_payload: usize = max_frame - head_bytes;
 pub const prefix_bytes: usize = 4 + head_bytes;
+
+pub const decoder_buffer_max: usize = 4 + max_frame + noise.max_record_plaintext;
 
 pub const Kind = enum(u8) {
     request = 1,
@@ -106,8 +109,13 @@ pub const Decoder = struct {
         self.buf.deinit(gpa);
     }
 
-    pub fn feed(self: *Decoder, gpa: std.mem.Allocator, bytes: []const u8) error{OutOfMemory}!void {
+    pub fn feed(self: *Decoder, gpa: std.mem.Allocator, bytes: []const u8) FrameError!void {
         if (self.failed != null) return;
+        if (bytes.len > decoder_buffer_max - self.buf.items.len) {
+            self.failed = error.TooLarge;
+            self.buf.clearAndFree(gpa);
+            return error.TooLarge;
+        }
         try self.buf.appendSlice(gpa, bytes);
     }
 

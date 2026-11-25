@@ -91,6 +91,7 @@ pub const ProcessGuard = struct {
     gpa: ?std.mem.Allocator = null,
     tag: ?[]u8 = null,
     cgroup_path: if (builtin.os.tag == .linux) ?[]u8 else void = if (builtin.os.tag == .linux) null else {},
+    launcher_pidfd: if (builtin.os.tag == .linux) ?std.posix.fd_t else void = if (builtin.os.tag == .linux) null else {},
 
     pub fn init(memory_max_bytes: ?u64) ProcessGuard {
         if (comptime builtin.os.tag == .windows) {
@@ -132,6 +133,80 @@ pub const ProcessGuard = struct {
         return g;
     }
 
+    pub fn init_sleeve(
+        gpa: std.mem.Allocator,
+        io: std.Io,
+        tag: []const u8,
+        memory_max_bytes: u64,
+    ) !ProcessGuard {
+        if (comptime builtin.os.tag != .linux) return error.CgroupUnavailable;
+        tiger.assert(memory_max_bytes > 0);
+        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        const current = try current_cgroup_path(io, &path_buf);
+        const root = if (std.mem.eql(u8, std.fs.path.basename(current), "protectorate-hub"))
+            std.fs.path.dirname(current) orelse return error.CgroupUnavailable
+        else
+            current;
+        var dir = try std.Io.Dir.cwd().openDir(io, root, .{});
+        defer dir.close(io);
+        const procs = try dir.openFile(io, "cgroup.procs", .{ .mode = .write_only });
+        procs.close(io);
+        try dir.writeFile(io, .{ .sub_path = "cgroup.subtree_control", .data = "+memory\n" });
+
+        const seq = next_cg_seq.fetchAdd(1, .monotonic);
+        const path = try std.fmt.allocPrint(gpa, "{s}/pt-sleeve-{d}-{d}", .{ root, std.os.linux.getpid(), seq });
+        errdefer gpa.free(path);
+        try std.Io.Dir.cwd().createDir(io, path, .default_dir);
+        errdefer std.Io.Dir.deleteDirAbsolute(io, path) catch {};
+        const cg = try std.Io.Dir.cwd().openDir(io, path, .{});
+        defer cg.close(io);
+        const kill = try cg.openFile(io, "cgroup.kill", .{ .mode = .write_only });
+        kill.close(io);
+        var limit_buf: [32]u8 = undefined;
+        const limit = try std.fmt.bufPrint(&limit_buf, "{d}\n", .{memory_max_bytes});
+        try cg.writeFile(io, .{ .sub_path = "memory.max", .data = limit });
+        try cg.writeFile(io, .{ .sub_path = "memory.swap.max", .data = "0\n" });
+        try cg.writeFile(io, .{ .sub_path = "memory.oom.group", .data = "0\n" });
+        if (try oom_kill_count(io, cg) != 0) return error.CgroupAlreadyUsed;
+        return .{
+            .gpa = gpa,
+            .tag = try gpa.dupe(u8, tag),
+            .cgroup_path = path,
+        };
+    }
+
+    pub fn sleeve_cgroup(self: *const ProcessGuard) ?[]const u8 {
+        if (comptime builtin.os.tag != .linux) return null;
+        return self.cgroup_path;
+    }
+
+    pub fn sleeve_oom_killed(self: *const ProcessGuard, io: std.Io) !bool {
+        const path = self.sleeve_cgroup() orelse return false;
+        const dir = try std.Io.Dir.cwd().openDir(io, path, .{});
+        defer dir.close(io);
+        return try oom_kill_count(io, dir) > 0;
+    }
+
+    pub fn attach_sleeve(self: *ProcessGuard, child_id: ?std.process.Child.Id) void {
+        self.attach(child_id);
+        if (comptime builtin.os.tag != .linux) return;
+        const pid = child_id orelse return;
+        const result = std.os.linux.pidfd_open(pid, 0);
+        if (std.os.linux.errno(result) == .SUCCESS) self.launcher_pidfd = @intCast(result);
+    }
+
+    pub fn drain_sleeve_after_exit(self: *const ProcessGuard, io: std.Io) void {
+        if (comptime builtin.os.tag != .linux) return;
+        const fd = self.launcher_pidfd orelse return;
+        var pfd: [1]std.os.linux.pollfd = .{.{ .fd = fd, .events = std.os.linux.POLL.IN, .revents = 0 }};
+        if (std.os.linux.poll(&pfd, pfd.len, 0) != 1) return;
+
+        const path = self.sleeve_cgroup().?;
+        const dir = std.Io.Dir.cwd().openDir(io, path, .{}) catch return;
+        defer dir.close(io);
+        kill_cgroup(io, dir);
+    }
+
     pub fn attach(self: *ProcessGuard, child_id: ?std.process.Child.Id) void {
         const cid = child_id orelse return;
         if (comptime builtin.os.tag == .windows) {
@@ -141,6 +216,13 @@ pub const ProcessGuard = struct {
         } else {
             self.pgid = cid;
         }
+    }
+
+    pub fn attach_suspended(self: *ProcessGuard, child: *const std.process.Child) !void {
+        const job = self.job orelse return error.JobObjectUnavailable;
+        if (WinJob.AssignProcessToJobObject(job, child.id.?) == 0) return error.JobAssignmentFailed;
+        const status = std.os.windows.ntdll.NtResumeThread(child.thread_handle, null);
+        if (status != .SUCCESS) return std.os.windows.unexpectedStatus(status);
     }
 
     pub fn attach_with_io(self: *ProcessGuard, io: std.Io, child_id: ?std.process.Child.Id) void {
@@ -208,7 +290,7 @@ pub const ProcessGuard = struct {
                 if (std.Io.Dir.cwd().openDir(io, cg, .{})) |dir_val| {
                     var dir = dir_val;
                     defer dir.close(io);
-                    dir.writeFile(io, .{ .sub_path = "cgroup.kill", .data = "1\n" }) catch {};
+                    kill_cgroup(io, dir);
                     var procs_buf: [8192]u8 = undefined;
                     if (read_small_file_in_dir(io, dir, "cgroup.procs", &procs_buf)) |raw| {
                         var it = std.mem.tokenizeAny(u8, raw, " \t\r\n");
@@ -244,11 +326,23 @@ pub const ProcessGuard = struct {
             return false;
         }
         if (self.pgid) |pid| {
-            if (std.posix.kill(-pid, @as(std.posix.SIG, @enumFromInt(0)))) |_| {
+            if (std.posix.kill(-pid, @as(std.posix.SIG, @fromBackingInt(@intCast(0))))) |_| {
                 return true;
             } else |_| {}
         }
         return false;
+    }
+
+    /// Removes the (empty, fenced) cgroup scope directory. Frees and clears nothing, so a process that
+    /// is about to exit can call it without tearing the guard down.
+    pub fn remove_cgroup_scope(self: *const ProcessGuard) void {
+        if (comptime builtin.os.tag != .linux) return;
+        const cg = self.cgroup_path orelse return;
+        var z_buf: [std.fs.max_path_bytes]u8 = undefined;
+        if (cg.len >= z_buf.len) return;
+        @memcpy(z_buf[0..cg.len], cg);
+        z_buf[cg.len] = 0;
+        _ = std.os.linux.rmdir(@ptrCast(&z_buf));
     }
 
     pub fn deinit(self: *ProcessGuard) void {
@@ -260,13 +354,12 @@ pub const ProcessGuard = struct {
         } else {
             self.pgid = null;
             if (comptime builtin.os.tag == .linux) {
+                if (self.launcher_pidfd) |fd| {
+                    _ = std.os.linux.close(fd);
+                    self.launcher_pidfd = null;
+                }
                 if (self.cgroup_path) |cg| {
-                    var z_buf: [512]u8 = undefined;
-                    if (cg.len < z_buf.len) {
-                        @memcpy(z_buf[0..cg.len], cg);
-                        z_buf[cg.len] = 0;
-                        _ = std.os.linux.rmdir(@ptrCast(&z_buf));
-                    }
+                    self.remove_cgroup_scope();
                     if (self.gpa) |gpa| {
                         gpa.free(cg);
                     }
@@ -281,6 +374,46 @@ pub const ProcessGuard = struct {
         self.gpa = null;
     }
 };
+
+fn kill_cgroup(io: std.Io, dir: std.Io.Dir) void {
+    dir.writeFile(io, .{ .sub_path = "cgroup.kill", .data = "1\n" }) catch {};
+}
+
+fn current_cgroup_path(io: std.Io, buf: []u8) ![]const u8 {
+    var membership_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const membership = read_small_file_abs(io, "/proc/self/cgroup", &membership_buf) orelse return error.CgroupUnavailable;
+    var lines = std.mem.splitScalar(u8, membership, '\n');
+    while (lines.next()) |line| {
+        const path = std.mem.cutPrefix(u8, line, "0::") orelse continue;
+        if (std.mem.eql(u8, path, "/")) return "/sys/fs/cgroup";
+        if (!spec.is_clean_abs(path)) return error.CgroupUnavailable;
+        return std.fmt.bufPrint(buf, "/sys/fs/cgroup{s}", .{path});
+    }
+    return error.CgroupUnavailable;
+}
+
+fn oom_kill_count(io: std.Io, dir: std.Io.Dir) !u64 {
+    var buf: [512]u8 = undefined;
+    const events = read_small_file_in_dir(io, dir, "memory.events", &buf) orelse return error.MemoryEventsUnreadable;
+    var lines = std.mem.splitScalar(u8, events, '\n');
+    while (lines.next()) |line| {
+        const count = std.mem.cutPrefix(u8, line, "oom_kill ") orelse continue;
+        return std.fmt.parseInt(u64, count, 10);
+    }
+    return error.OomKillCounterMissing;
+}
+
+pub fn run_sleeve_cgroup(init: std.process.Init, args: []const []const u8) !u8 {
+    if (comptime builtin.os.tag != .linux) return error.CgroupUnavailable;
+    if (args.len < 2 or !spec.is_clean_abs(args[0]) or
+        !std.mem.startsWith(u8, args[0], "/sys/fs/cgroup/") or
+        !std.mem.startsWith(u8, std.fs.path.basename(args[0]), "pt-sleeve-")) return error.InvalidCgroup;
+
+    const dir = try std.Io.Dir.cwd().openDir(init.io, args[0], .{});
+    defer dir.close(init.io);
+    try dir.writeFile(init.io, .{ .sub_path = "cgroup.procs", .data = "0\n" });
+    return std.process.replace(init.io, .{ .argv = args[1..] });
+}
 
 fn read_small_file_abs(io: std.Io, path: []const u8, buf: []u8) ?[]const u8 {
     var f = std.Io.Dir.cwd().openFile(io, path, .{}) catch return null;
@@ -303,23 +436,8 @@ fn create_job_cgroup(
     memory_max_bytes: ?u64,
 ) ?[]u8 {
     if (comptime builtin.os.tag != .linux) return null;
-    var cg_buf: [2048]u8 = undefined;
-    const raw = read_small_file_abs(io, "/proc/self/cgroup", &cg_buf) orelse return null;
-    var rel_cg: ?[]const u8 = null;
-    var lines = std.mem.splitScalar(u8, raw, '\n');
-    while (lines.next()) |line| {
-        const tr = std.mem.trim(u8, line, " \t\r");
-        if (std.mem.startsWith(u8, tr, "0::")) {
-            rel_cg = tr[3..];
-            break;
-        }
-    }
-    const rel = rel_cg orelse return null;
-    const cur_dir = if (std.mem.eql(u8, rel, "/") or rel.len == 0)
-        gpa.dupe(u8, "/sys/fs/cgroup") catch return null
-    else
-        std.fmt.allocPrint(gpa, "/sys/fs/cgroup{s}", .{rel}) catch return null;
-    defer gpa.free(cur_dir);
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const cur_dir = current_cgroup_path(io, &path_buf) catch return null;
 
     var safe_buf: [48]u8 = undefined;
     var safe_len: usize = 0;
@@ -530,7 +648,7 @@ fn apply_linux_guard(
 ) !void {
     const linux = std.os.linux;
 
-    _ = linux.prctl(@intFromEnum(linux.PR.SET_PDEATHSIG), @intFromEnum(linux.SIG.KILL), 0, 0, 0);
+    _ = linux.prctl(@backingInt(linux.PR.SET_PDEATHSIG), @backingInt(linux.SIG.KILL), 0, 0, 0);
 
     if (mem_max_opt) |lim| {
         const rl = linux.rlimit{
@@ -583,7 +701,7 @@ fn apply_linux_guard(
         try add_landlock_path(arena, rs_fd, "/dev/null", dir_mask, file_mask);
         try add_landlock_path(arena, rs_fd, "/dev/shm", dir_mask, file_mask);
 
-        if (linux.errno(linux.prctl(@intFromEnum(linux.PR.SET_NO_NEW_PRIVS), 1, 0, 0, 0)) != .SUCCESS) {
+        if (linux.errno(linux.prctl(@backingInt(linux.PR.SET_NO_NEW_PRIVS), 1, 0, 0, 0)) != .SUCCESS) {
             return error.NoNewPrivsFailed;
         }
         const rest_rc = linux.syscall2(.landlock_restrict_self, @as(u32, @bitCast(rs_fd)), 0);
@@ -637,77 +755,144 @@ pub fn probe_bwrap(gpa: std.mem.Allocator, io: std.Io) bool {
     return res.term.success();
 }
 
-pub fn probe_systemd_scope(gpa: std.mem.Allocator, io: std.Io) bool {
-    if (builtin.os.tag != .linux) return false;
-    const res = std.process.run(gpa, io, .{
-        .argv = &.{ "systemd-run", "--user", "--version" },
-        .stdout_limit = .limited(4096),
-        .stderr_limit = .limited(4096),
-    }) catch return false;
-    gpa.free(res.stdout);
-    gpa.free(res.stderr);
-    return res.term.success();
+pub const GitDirs = struct {
+    private: []const u8,
+    common: []const u8,
+};
+
+pub fn resolve_git_dirs(arena: std.mem.Allocator, io: std.Io, workspace: []const u8) !?GitDirs {
+    const cwd = std.Io.Dir.cwd();
+    var checkout = workspace;
+    const private = while (true) {
+        const dot_git = try std.fs.path.join(arena, &.{ checkout, ".git" });
+        const resolved = cwd.realPathFileAlloc(io, dot_git, arena) catch |err| switch (err) {
+            error.FileNotFound => {
+                if (cwd.statFile(io, dot_git, .{ .follow_symlinks = false })) |_| {
+                    return error.InvalidGitDirectory;
+                } else |stat_err| {
+                    if (stat_err != error.FileNotFound) return stat_err;
+                }
+                checkout = std.fs.path.dirname(checkout) orelse return null;
+                continue;
+            },
+            else => return err,
+        };
+        switch ((try cwd.statFile(io, resolved, .{})).kind) {
+            .directory => break resolved,
+            .file => {
+                const gitfile = try cwd.readFileAlloc(io, resolved, arena, .limited(std.fs.max_path_bytes));
+                const prefix = "gitdir: ";
+                if (!std.mem.startsWith(u8, gitfile, prefix)) return error.InvalidGitFile;
+                break try resolve_git_path(arena, io, checkout, gitfile[prefix.len..]);
+            },
+            else => return error.InvalidGitDirectory,
+        }
+    };
+
+    const commondir = try std.fs.path.join(arena, &.{ private, "commondir" });
+    const stat = cwd.statFile(io, commondir, .{}) catch |err| switch (err) {
+        error.FileNotFound => return .{ .private = private, .common = private },
+        else => return err,
+    };
+    if (stat.kind != .file) return error.InvalidGitCommonDir;
+    const relative = try cwd.readFileAlloc(io, commondir, arena, .limited(std.fs.max_path_bytes));
+    const common = try resolve_git_path(arena, io, private, relative);
+    return .{ .private = private, .common = common };
 }
 
-pub fn resolve_git_dirs(gpa: std.mem.Allocator, io: std.Io, workdir: []const u8) ![]const []const u8 {
-    var out: std.ArrayList([]const u8) = .empty;
-    errdefer {
-        for (out.items) |p| gpa.free(p);
-        out.deinit(gpa);
-    }
+fn resolve_git_path(arena: std.mem.Allocator, io: std.Io, base: []const u8, raw: []const u8) ![]const u8 {
+    const path = std.mem.trimEnd(u8, raw, "\r\n");
+    if (path.len == 0 or std.mem.findScalar(u8, path, 0) != null) return error.InvalidGitDirectory;
+    const absolute = if (std.fs.path.isAbsolute(path)) path else try std.fs.path.join(arena, &.{ base, path });
+    const cwd = std.Io.Dir.cwd();
+    const real = try cwd.realPathFileAlloc(io, absolute, arena);
+    if ((try cwd.statFile(io, real, .{})).kind != .directory) return error.InvalidGitDirectory;
+    return real;
+}
 
-    const res = std.process.run(gpa, io, .{
-        .argv = &.{ "git", "-C", workdir, "rev-parse", "--git-dir", "--git-common-dir" },
-        .stdout_limit = .limited(64 * 1024),
-        .stderr_limit = .limited(16 * 1024),
-    }) catch return try out.toOwnedSlice(gpa);
-    defer {
-        gpa.free(res.stdout);
-        gpa.free(res.stderr);
-    }
-    if (!res.term.success()) return try out.toOwnedSlice(gpa);
-
-    var lines = std.mem.splitScalar(u8, res.stdout, '\n');
-    while (lines.next()) |raw| {
-        const trimmed = std.mem.trim(u8, raw, " \t\r");
-        if (trimmed.len == 0) continue;
-        const joined = if (std.fs.path.isAbsolute(trimmed))
-            try gpa.dupe(u8, trimmed)
-        else
-            try std.fs.path.join(gpa, &.{ workdir, trimmed });
-        defer gpa.free(joined);
-
-        const real_z = std.Io.Dir.cwd().realPathFileAlloc(io, joined, gpa) catch continue;
-        const clean = try gpa.dupe(u8, real_z);
-        gpa.free(real_z);
-        if (!spec.is_clean_abs(clean)) {
-            gpa.free(clean);
-            continue;
+pub fn prepare_git_mounts(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    dirs: GitDirs,
+    readonly: bool,
+) ![]const spec.Mount {
+    const kind: spec.MountKind = if (readonly) .ro else .rw;
+    var mounts: std.ArrayList(spec.Mount) = .empty;
+    try mounts.append(arena, .{ .path = dirs.common, .kind = kind });
+    const worktrees_path = try prepare_git_entry(arena, io, dirs.common, "worktrees", .directory);
+    try mounts.append(arena, .{ .path = worktrees_path, .kind = kind });
+    const worktrees = try std.Io.Dir.cwd().openDir(io, worktrees_path, .{
+        .iterate = true,
+        .follow_symlinks = false,
+    });
+    defer worktrees.close(io);
+    var siblings = worktrees.iterate();
+    while (try siblings.next(io)) |entry| {
+        const sibling = try std.fs.path.join(arena, &.{ worktrees_path, entry.name });
+        if (std.mem.eql(u8, sibling, dirs.private)) continue;
+        const stat = worktrees.statFile(io, entry.name, .{ .follow_symlinks = false }) catch |err| switch (err) {
+            error.FileNotFound => continue,
+            else => return err,
+        };
+        if (stat.kind == .sym_link) {
+            std.log.err("refusing symlinked protected Git entry {s}", .{sibling});
+            return error.SymlinkedProtectedGitEntry;
         }
-        var dup = false;
-        for (out.items) |prev| {
-            if (std.mem.eql(u8, prev, clean)) {
-                dup = true;
-                break;
+        try mounts.append(arena, .{ .path = sibling, .kind = .ro });
+    }
+    if (!std.mem.eql(u8, dirs.private, dirs.common)) {
+        try mounts.append(arena, .{ .path = dirs.private, .kind = kind });
+        try append_protected_git_entries(arena, io, &mounts, dirs.private);
+    }
+    try append_protected_git_entries(arena, io, &mounts, dirs.common);
+    return mounts.items;
+}
+
+fn append_protected_git_entries(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    mounts: *std.ArrayList(spec.Mount),
+    dir: []const u8,
+) !void {
+    for ([_][]const u8{ "hooks", "config", "config.worktree", "info" }, [_]std.Io.File.Kind{
+        .directory, .file, .file, .directory,
+    }) |entry, kind| {
+        const path = try prepare_git_entry(arena, io, dir, entry, kind);
+        try mounts.append(arena, .{ .path = path, .kind = .ro });
+    }
+}
+
+fn prepare_git_entry(
+    arena: std.mem.Allocator,
+    io: std.Io,
+    dir: []const u8,
+    name: []const u8,
+    kind: std.Io.File.Kind,
+) ![]const u8 {
+    const path = try std.fs.path.join(arena, &.{ dir, name });
+
+    const cwd = std.Io.Dir.cwd();
+    const opts: std.Io.Dir.StatFileOptions = .{ .follow_symlinks = false };
+    const stat = cwd.statFile(io, path, opts) catch |err| switch (err) {
+        error.FileNotFound => blk: {
+            if (kind == .directory) {
+                cwd.createDir(io, path, .default_dir) catch |create_err| switch (create_err) {
+                    error.PathAlreadyExists => {},
+                    else => return create_err,
+                };
+            } else if (cwd.createFile(io, path, .{ .exclusive = true, .truncate = false })) |file| {
+                file.close(io);
+            } else |create_err| {
+                if (create_err != error.PathAlreadyExists) return create_err;
             }
-        }
-        if (dup) {
-            gpa.free(clean);
-        } else {
-            try out.append(gpa, clean);
-        }
+            break :blk try cwd.statFile(io, path, opts);
+        },
+        else => return err,
+    };
+    if (stat.kind == .sym_link) {
+        std.log.err("refusing symlinked protected Git entry {s}", .{path});
+        return error.SymlinkedProtectedGitEntry;
     }
-    return try out.toOwnedSlice(gpa);
-}
-
-pub fn kill_scope(gpa: std.mem.Allocator, io: std.Io, scope_name: []const u8) void {
-    if (builtin.os.tag != .linux) return;
-    if (scope_name.len == 0) return;
-    const res = std.process.run(gpa, io, .{
-        .argv = &.{ "systemctl", "--user", "stop", scope_name },
-        .stdout_limit = .limited(4096),
-        .stderr_limit = .limited(4096),
-    }) catch return;
-    gpa.free(res.stdout);
-    gpa.free(res.stderr);
+    if (stat.kind != kind) return error.InvalidProtectedGitEntryKind;
+    return path;
 }

@@ -3,6 +3,8 @@ const tiger = @import("../tiger.zig");
 const json_util = @import("../json_util.zig");
 const proto = @import("protocol.zig");
 
+pub const Provider = enum { anthropic, bedrock, vertex, foundry };
+
 const Pending = struct {
     request_id: []const u8,
     uuid: []const u8,
@@ -12,6 +14,7 @@ pub const Claude = struct {
     session_id: []const u8,
     uuid_base: []const u8,
     model: ?[]const u8 = null,
+    provider: ?[]const u8 = null,
     effort: ?[]const u8 = null,
     supervised: bool = false,
     sent: u64 = 0,
@@ -46,6 +49,15 @@ pub const Claude = struct {
         if (spec.model) |m| {
             try argv.appendSlice(arena, &.{ "--model", m });
         }
+        if (spec.provider) |id| {
+            const provider = std.meta.stringToEnum(Provider, id) orelse return error.UnsupportedProvider;
+            const settings = try std.json.Stringify.valueAlloc(arena, .{ .env = .{
+                .CLAUDE_CODE_USE_BEDROCK = if (provider == .bedrock) "1" else "0",
+                .CLAUDE_CODE_USE_VERTEX = if (provider == .vertex) "1" else "0",
+                .CLAUDE_CODE_USE_FOUNDRY = if (provider == .foundry) "1" else "0",
+            } }, .{});
+            try argv.appendSlice(arena, &.{ "--settings", settings });
+        }
         if (spec.effort) |e| {
             try argv.appendSlice(arena, &.{ "--effort", e });
         }
@@ -62,6 +74,7 @@ pub const Claude = struct {
             .harness = .claude,
             .native_id = self.session_id,
             .model = self.model,
+            .provider = self.provider,
             .effort = self.effort,
         } });
     }
@@ -138,6 +151,7 @@ pub const Claude = struct {
                 .harness = .claude,
                 .native_id = self.session_id,
                 .model = self.model,
+                .provider = self.provider,
                 .effort = self.effort,
                 .cwd = json_util.value_str(msg, "cwd"),
             } });

@@ -5,12 +5,17 @@ const proto = @import("protocol.zig");
 const RpcKind = union(enum) {
     initialize,
     session_open,
+    model_set,
+    effort_set,
     prompt: []const u8,
 };
 
 pub const Grok = struct {
     cwd: []const u8,
     model: ?[]const u8 = null,
+    effort: ?[]const u8 = null,
+    effective_model: ?[]const u8 = null,
+    effective_effort: ?[]const u8 = null,
     resume_id: ?[]const u8 = null,
     supervised: bool = false,
     session_id: ?[]const u8 = null,
@@ -25,8 +30,7 @@ pub const Grok = struct {
 
     pub fn build_argv(arena: std.mem.Allocator, spec: proto.SpawnSpec) ![]const []const u8 {
         var argv: std.ArrayList([]const u8) = .empty;
-        try argv.appendSlice(arena, &.{ spec.program, "--acp" });
-        if (spec.model) |m| try argv.appendSlice(arena, &.{ "--model", m });
+        try argv.appendSlice(arena, &.{ spec.program, "agent", "stdio" });
         try argv.appendSlice(arena, spec.extra_args);
         return argv.items;
     }
@@ -44,6 +48,56 @@ pub const Grok = struct {
         self.next_id += 1;
         try self.pending_rpc.put(out.alloc, id, kind);
         try out.write_value(.{ .jsonrpc = "2.0", .id = id, .method = method, .params = params }, null);
+    }
+
+    fn configure(self: *Grok, key: []const u8, value: []const u8, kind: RpcKind, out: *proto.Out) !void {
+        try self.call("session/set_config_option", .{
+            .sessionId = self.session_id.?,
+            .configId = key,
+            .value = value,
+        }, kind, out);
+    }
+
+    fn configure_effort(self: *Grok, out: *proto.Out) !void {
+        if (self.effort) |effort| {
+            return self.configure("reasoning_effort", effort, .effort_set, out);
+        }
+        try self.session_info(out);
+    }
+
+    fn session_info(self: *Grok, out: *proto.Out) !void {
+        const effort_notice = if (self.effort) |requested| notice: {
+            if (self.effective_effort) |effective| {
+                if (std.mem.eql(u8, requested, effective)) break :notice null;
+                break :notice try std.fmt.allocPrint(out.alloc, "Grok used {s} effort after {s} was requested.", .{ effective, requested });
+            }
+            break :notice try std.fmt.allocPrint(out.alloc, "Grok did not report an active effort after {s} was requested.", .{requested});
+        } else null;
+        try out.emit(.{ .session_info = .{
+            .harness = .grok,
+            .native_id = self.session_id.?,
+            .model = self.effective_model,
+            .effort = self.effective_effort,
+            .effort_notice = effort_notice,
+            .cwd = self.cwd,
+        } });
+    }
+
+    fn read_options(self: *Grok, result: std.json.Value, a: std.mem.Allocator) !void {
+        const models = json_util.value_object(result, "models") orelse .null;
+        var model = json_util.value_nonempty_str(models, "currentModelId");
+        var effort: ?[]const u8 = null;
+        for (json_util.value_array(result, "configOptions") orelse &.{}) |option| {
+            const key = json_util.value_str(option, "id") orelse continue;
+            const current = json_util.value_nonempty_str(option, "currentValue") orelse continue;
+            if (std.mem.eql(u8, key, "model")) {
+                model = current;
+            } else if (std.mem.eql(u8, key, "reasoning_effort")) {
+                effort = current;
+            }
+        }
+        if (model) |id| self.effective_model = try a.dupe(u8, id);
+        self.effective_effort = if (effort) |level| try a.dupe(u8, level) else null;
     }
 
     pub fn on_line(self: *Grok, arena: std.mem.Allocator, line: []const u8, out: *proto.Out) !void {
@@ -90,9 +144,9 @@ pub const Grok = struct {
                     return;
                 }
                 if (self.resume_id) |rid| {
-                    try self.call("session/load", .{ .sessionId = rid, .cwd = self.cwd }, .session_open, out);
+                    try self.call("session/load", .{ .sessionId = rid, .cwd = self.cwd, .mcpServers = [_]std.json.Value{} }, .session_open, out);
                 } else {
-                    try self.call("session/new", .{ .cwd = self.cwd, .model = self.model }, .session_open, out);
+                    try self.call("session/new", .{ .cwd = self.cwd, .mcpServers = [_]std.json.Value{} }, .session_open, out);
                 }
             },
             .session_open => {
@@ -107,12 +161,25 @@ pub const Grok = struct {
                     return;
                 };
                 self.session_id = try out.alloc.dupe(u8, sid);
-                try out.emit(.{ .session_info = .{
-                    .harness = .grok,
-                    .native_id = self.session_id.?,
-                    .model = self.model,
-                    .cwd = self.cwd,
-                } });
+                try self.read_options(result, out.alloc);
+                if (self.model) |id_model| {
+                    try self.configure("model", id_model, .model_set, out);
+                } else {
+                    try self.configure_effort(out);
+                }
+            },
+            .model_set, .effort_set => {
+                if (failed) {
+                    out.refused = true;
+                    try out.emit_error(.protocol, err_msg);
+                    return;
+                }
+                try self.read_options(result, out.alloc);
+                if (kind == .model_set) {
+                    try self.configure_effort(out);
+                } else {
+                    try self.session_info(out);
+                }
             },
             .prompt => |req_id| {
                 self.ack(out);
