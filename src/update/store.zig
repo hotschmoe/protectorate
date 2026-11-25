@@ -498,11 +498,25 @@ pub fn activate_staged(
     return true;
 }
 
+/// The release tag current.txt names right now; the caller frees it.
+pub fn current_release(gpa: std.mem.Allocator, io: std.Io, releases_dir_path: []const u8) ?[]const u8 {
+    var rel_dir = std.Io.Dir.cwd().openDir(io, releases_dir_path, .{}) catch return null;
+    defer rel_dir.close(io);
+    return read_marker(gpa, io, rel_dir, "current.txt");
+}
+
 pub fn mark_healthy(gpa: std.mem.Allocator, io: std.Io, releases_dir_path: []const u8) !void {
+    return mark_healthy_if(gpa, io, releases_dir_path, null);
+}
+
+/// Marks the active release healthy, but only when it is the one the caller says it is running.
+/// A different current.txt means an update arrived since the caller started: that release has not run yet.
+pub fn mark_healthy_if(gpa: std.mem.Allocator, io: std.Io, releases_dir_path: []const u8, running: ?[]const u8) !void {
     var rel_dir = std.Io.Dir.cwd().openDir(io, releases_dir_path, .{}) catch return;
     defer rel_dir.close(io);
     const active = read_marker(gpa, io, rel_dir, "current.txt") orelse return;
     defer gpa.free(active);
+    if (running) |tag| if (!std.mem.eql(u8, tag, active)) return;
     const prev = read_marker(gpa, io, rel_dir, "previous.txt");
     defer if (prev) |p| gpa.free(p);
     try write_probation(gpa, io, rel_dir, .{

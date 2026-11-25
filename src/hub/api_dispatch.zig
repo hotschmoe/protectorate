@@ -905,7 +905,10 @@ pub fn dispatch(
         const req = schema.decode_arena(schema.UpdateHubRequest, a, body) catch schema.UpdateHubRequest{};
         const cur_ver = @import("../version.zig").version;
         if (req.rollback) {
-            const target = u_store.rollback(a, rt.io, rt.hub_home.releases_path) catch {
+            rt.release_mu.lockUncancelable(rt.io);
+            const rolled = u_store.rollback(a, rt.io, rt.hub_home.releases_path);
+            rt.release_mu.unlock(rt.io);
+            const target = rolled catch {
                 return err_json(rt.gpa, .not_found, "no previous release");
             };
             rt.record_hub_event(.hub, "hub_update", target, "rolled back release", .warn);
@@ -915,7 +918,12 @@ pub fn dispatch(
             if (std.mem.eql(u8, want_ver, cur_ver)) {
                 return ok_json(rt.gpa, schema.HubUpdate{ .current = cur_ver, .target = cur_ver, .available = false });
             }
-            if (!req.check and (u_store.activate_staged(rt.gpa, rt.io, rt.hub_home.releases_path, want_ver) catch false)) {
+            const activated = if (req.check) false else blk: {
+                rt.release_mu.lockUncancelable(rt.io);
+                defer rt.release_mu.unlock(rt.io);
+                break :blk u_store.activate_staged(rt.gpa, rt.io, rt.hub_home.releases_path, want_ver) catch false;
+            };
+            if (activated) {
                 rt.record_hub_event(.hub, "hub_update", want_ver, "activated staged release", .info);
                 return ok_json(rt.gpa, schema.HubUpdate{ .current = cur_ver, .target = want_ver, .available = true });
             }
@@ -927,7 +935,10 @@ pub fn dispatch(
         };
         if (latest) |rel| {
             if (!req.check) {
-                u_store.stage_and_apply(rt.gpa, rt.io, rt.hub_home.releases_path, rel, .hub) catch |err| {
+                rt.release_mu.lockUncancelable(rt.io);
+                const applied = u_store.stage_and_apply(rt.gpa, rt.io, rt.hub_home.releases_path, rel, .hub);
+                rt.release_mu.unlock(rt.io);
+                applied catch |err| {
                     return err_json(rt.gpa, .internal, @errorName(err));
                 };
                 u_store.cache_release_clients(rt.gpa, rt.io, rt.hub_home.clients_path, rel) catch {};

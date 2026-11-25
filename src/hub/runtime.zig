@@ -40,6 +40,11 @@ const small_task_cost_usd = 0.05;
 const medium_task_cost_usd = 0.50;
 const default_task_size: q_select.TaskSize = .medium;
 
+/// How long close_and_destroy waits for background workers (dispatch, cancel and update calls): the
+/// fleet is shut down first so their calls fail at once; a worker still running after this is stuck in
+/// blocking work, and the process ends without freeing what it uses.
+const teardown_wait_ms: i64 = 15_000;
+
 pub const NodeTelemetry = struct {
     inventory: ?msg.Inventory = null,
     sample: ?msg.Sample = null,
@@ -166,6 +171,10 @@ pub const Runtime = struct {
     cached_quotas_arena: std.heap.ArenaAllocator,
     quotas_remote_polled: std.atomic.Value(bool) = .init(false),
     restore_error: ?[]const u8 = null,
+    /// The release this process started as (current.txt at open) and the lock that keeps an update from
+    /// changing the release between the check and the write when the hub marks itself healthy.
+    running_release: ?[]const u8 = null,
+    release_mu: std.Io.Mutex = .init,
 
     transcripts: transcript.TranscriptStore,
     history: h_index.HistoryIndex,
@@ -212,6 +221,9 @@ pub const Runtime = struct {
 
         var hh = try home.HubHome.open(gpa, io, home_path, opts.dev_token_override);
         errdefer hh.deinit();
+
+        const running_release = u_store.current_release(gpa, io, hh.releases_path);
+        errdefer if (running_release) |tag| gpa.free(tag);
 
         const http_listen = try gpa.dupe(u8, opts.listen_override orelse hh.config.listen_addr);
         errdefer gpa.free(http_listen);
@@ -265,6 +277,7 @@ pub const Runtime = struct {
             .journal = journal,
             .core_state = state.State.init(gpa),
             .cached_quotas_arena = std.heap.ArenaAllocator.init(gpa),
+            .running_release = running_release,
             .transcripts = tx_store,
             .history = h_idx,
             .stream_hub = hub_stream,
@@ -332,7 +345,9 @@ pub const Runtime = struct {
     /// running: a start that fails before this leaves the release unhealthy so the next start rolls it back.
     pub fn mark_healthy(self: *Runtime) void {
         if (self.restore_error != null) return;
-        u_store.mark_healthy(self.gpa, self.io, self.hub_home.releases_path) catch {};
+        self.release_mu.lockUncancelable(self.io);
+        defer self.release_mu.unlock(self.io);
+        u_store.mark_healthy_if(self.gpa, self.io, self.hub_home.releases_path, self.running_release orelse return) catch {};
     }
 
     pub fn close_and_destroy(self: *Runtime) void {
@@ -343,7 +358,17 @@ pub const Runtime = struct {
         if (self.quota_thread) |t| t.join();
         if (self.history_thread) |t| t.join();
         self.workers_mu.lockUncancelable(self.io);
-        while (self.active_workers > 0) self.workers_cond.waitUncancelable(self.io, &self.workers_mu);
+        const give_up = std.Io.Clock.awake.now(self.io).toMilliseconds() + teardown_wait_ms;
+        while (self.active_workers > 0) {
+            const left = give_up - std.Io.Clock.awake.now(self.io).toMilliseconds();
+            if (left <= 0) {
+                std.debug.print("runtime: {d} background worker(s) still running after {d} ms; ending the process without tearing the runtime down (every journal commit is already synced, and sleeve processes end with this one)\n", .{ self.active_workers, teardown_wait_ms });
+                std.process.exit(0);
+            }
+            self.workers_cond.waitTimeout(self.io, &self.workers_mu, .{
+                .duration = .{ .raw = .fromMilliseconds(left), .clock = .awake },
+            }) catch {};
+        }
         self.workers_mu.unlock(self.io);
         self.fleet_srv.stop_and_deinit();
 
@@ -409,6 +434,7 @@ pub const Runtime = struct {
         for (self.trusted_proxies) |tp| self.gpa.free(tp);
         self.gpa.free(self.trusted_proxies);
         self.gpa.free(self.fleet_listen);
+        if (self.running_release) |tag| self.gpa.free(tag);
         self.gpa.destroy(self);
     }
 

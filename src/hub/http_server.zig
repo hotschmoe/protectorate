@@ -435,13 +435,15 @@ pub const HttpServer = struct {
         return index < self.listener_count;
     }
 
-    pub fn stop_and_destroy(self: *HttpServer) void {
+    /// True when a worker did not finish within shutdown_wait_ms: nothing was freed, and the caller must end
+    /// the process without destroying anything a worker can still touch (the runtime).
+    pub fn stop_and_destroy(self: *HttpServer) bool {
         self.stopping.store(true, .release);
         self.rt.stream_hub.wake_all();
         self.stop_requested.store(true, .release);
         self.backend.wake();
         if (self.loop_thread) |t| t.join();
-        if (self.abandoned) return;
+        if (self.abandoned) return true;
         self.regular.stop(self.io);
         self.long.stop(self.io);
         self.reader.stop(self.io);
@@ -463,6 +465,7 @@ pub const HttpServer = struct {
         a.destroy(self);
         static.finish_deinit();
         gpa.destroy(static);
+        return false;
     }
 
     fn run(self: *HttpServer) void {
