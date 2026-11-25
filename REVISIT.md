@@ -655,3 +655,8 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
 - **Quota-weighted selection is not wired** (`src/quota/select.zig`, `select_target`): the hub
   reads quotas and shows them, but resleeve and spawn never call the selector. Right: call it
   where a harness is chosen, as SPEC describes.
+- **A D9 approval shows the core's timeout, not the gate's** (`src/hub/runtime.zig`, `gate_d9`;
+  `src/core/apply.zig`, `approval_requested`): the core stamps every approval with
+  `model.approval_timeout_ms` (30 min), so the app says "times out in 29m", but `gate_d9` stops
+  waiting after `d9_approval_timeout_secs` (default 300 s, at most 600) and commits
+  `approval_expired` then. Right: carry the gate's deadline in `approval_requested`.
