@@ -11,7 +11,7 @@ published release.
 
 | Step | Covered how |
 |---|---|
-| Device pairing, Envoy, sleeves, history | e2e (`scripts/zig-e2e.sh`; `scripts/app-e2e.sh` drives the web app but still follows the old hub, see REVISIT) |
+| Device pairing, Envoy, sleeves, history | e2e (`scripts/zig-e2e.sh`; `make app-e2e` drives the web app in headless Chrome) |
 | Node `join`, rejection of an unapproved or wrong-key node, `add` and `approve`, jobs, artifacts, reconnect after a hub restart | e2e |
 | Proxy listener (`--proxy-listen`, `--trusted-proxy`): a listed peer is served, another is refused | e2e |
 | `hub probation`, `node probation` and its rollback of a release started twice, `node update` to the version already running | e2e |

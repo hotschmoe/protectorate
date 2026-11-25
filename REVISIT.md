@@ -275,14 +275,13 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   notice on the bus that closes every stream of that token at once.
 - **RealHub is exercised only by `scripts/app-e2e.sh`** (`app/lib/real_hub.dart`): the web build
   against a real hub (pairing, Envoy chat, sleeves, a D9 approval denied from the app), outside
-  `make e2e` because it needs Chromium and the local model. Reconnect backoff is 1 to 30 s; a
-  transcript keeps at most 2000 entries (`_Tx.keep`) with no paging back. The script's default
-  binary path is now `zig-out/bin/protectorate`, but the script still follows the Rust-era hub: it
-  writes Rust config keys (`envoy`, `pi_local_provider`), passes `serve --log-level`, reads an
-  envoy-only token from the serve log (the Zig hub prints no tokens; `protectorate token` does),
-  expects `pairing code for NAME:` from `device add` and looks up a systemd scope, so it needs
-  porting before it runs. Right: port it to the Zig hub, add paging when a chat scrolls past its
-  first entry, and run it in CI once a runner has Chromium.
+  `make e2e` because it needs Chrome and the local model (`make app-e2e`). Reconnect backoff is 1
+  to 30 s; a transcript keeps at most 2000 entries (`_Tx.keep`) with no paging back. The script
+  runs against the Zig hub; it raises D9 with the envoy-only token's `sleeve send envoy`, because
+  `envoy send --as NAME` queues a prompt, not mail, and so never gives the Envoy turn D9 origin
+  (`EnvoySend` in `src/hub/api_dispatch.zig`). Right: decide whether the vendor-agent door should
+  mark D9 (SPEC says it does), add paging when a chat scrolls past its first entry, and run the
+  script in CI once a runner has Chrome.
 - **Pairing codes are unthrottled and short** (`src/hub/home.zig`, `create_pairing`,
   `claim_pairing`, `random_short_code_alloc`): `AddDevice` makes a ten-minute, single-use code of 8
   characters from a 32-letter alphabet, but only 6 random bytes feed it, so characters 7 and 8

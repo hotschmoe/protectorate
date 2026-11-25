@@ -2206,7 +2206,7 @@ pub const Runtime = struct {
         } });
         self.record_hub_event(.approval, "d9", "envoy", summary, .warn);
 
-        const wait_secs = @max(@as(u64, 1), @min(self.hub_home.config.d9_approval_timeout_secs, 600));
+        const wait_secs: u64 = @max(@as(u64, 1), @min(self.hub_home.config.d9_approval_timeout_secs, 600));
         const deadline = std.Io.Clock.real.now(self.io).toMilliseconds() + @as(i64, @intCast(wait_secs * 1_000));
         var cursor: u64 = 0;
         while (true) {

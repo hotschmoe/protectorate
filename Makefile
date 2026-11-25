@@ -18,7 +18,7 @@ DART := $(or $(DART),dart)
 WEB_DIR ?= app/build/web
 ZIG_FLAGS := -Doptimize=safe -Dversion=$(VERSION) -Dgit-commit=$(GIT_COMMIT) -Dweb-dir=$(WEB_DIR)
 
-.PHONY: all build release-all check-levels gen check-gen dst web app-check e2e check version \
+.PHONY: all build release-all check-levels gen check-gen dst web app-check e2e app-e2e check version \
 	release-assets release-snapshot release-publish
 
 version:
@@ -52,6 +52,9 @@ app-check:
 
 e2e:
 	bash scripts/zig-e2e.sh
+
+app-e2e:
+	sh scripts/app-e2e.sh
 
 release-assets:
 	VERSION=$(VERSION) APP_VERSION_FLAGS="$(APP_VERSION_FLAGS)" scripts/release.sh assets
