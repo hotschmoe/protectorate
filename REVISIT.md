@@ -634,3 +634,25 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   overrides and a scope OOM guardrail. Right: a configured limit applied to the cgroup (or a
   scope), a watcher on `memory.events`, and an `oom` exit cause that names the limit and the
   override key.
+- **An artifact refusal excludes the node** (`src/hub/runtime.zig`, `poll_inflight_jobs`;
+  `src/core/apply.zig` `.job_failed`): a job whose artifact is over the cap or fails collection
+  commits `job_failed`, and the existing rule then keeps that node out of placement for a while,
+  as for any failure. Right: decide whether a collection failure should count against the node.
+- **The job log mirror re-reads from offset 0** (`src/hub/runtime.zig`, `fetch_log_mirror`):
+  every poll pulls the first 1 MiB of a running job's log again in 256 KiB pieces. Right: append
+  from the last offset.
+- **Connection refusals are counted but not shown** (`src/net/limits.zig`, `ConnGate`): the fleet
+  and HTTP gates log one `std.debug.print` line per burst; `refused_total` and connection
+  high-water marks are not in `hub info`. Right: expose them with the network budget (Phase 5 of
+  docs/design/tigerstyle-network.md).
+- **Sleeve git directories are bound writable** (`src/sandbox/`): SPEC 15 describes protecting
+  hooks and git config from sleeves; nothing does yet, so a sleeve can install a hook that the
+  owner's next git command runs. Right: bind `.git/hooks` and `.git/config` read-only, or point
+  `core.hooksPath` at an empty read-only directory inside the sandbox.
+- **The hub has no stdio acceptor** (`src/net/transport.zig`, `accept_stdio`): `protectorate-node
+  serve --stdio` speaks the fleet protocol over a pipe for an ssh bridge, but nothing on the hub
+  calls `accept_stdio`. Right: a hub command that runs the node over ssh and attaches the pipe,
+  or drop the node mode.
+- **Quota-weighted selection is not wired** (`src/quota/select.zig`, `select_target`): the hub
+  reads quotas and shows them, but resleeve and spawn never call the selector. Right: call it
+  where a harness is chosen, as SPEC describes.
