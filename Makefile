@@ -12,9 +12,9 @@ export PT_E2E_PI_PROVIDER PT_E2E_PI_MODEL ZIG \
 	PT_RELEASE_ARM64_PATH PT_RELEASE_ARM64_TIMEOUT PT_RELEASE_HUB_CLI PT_RELEASE_SERVE_ADDR \
 	PT_RELEASE_WORK_DIR
 
-ZIG ?= zig
-FLUTTER ?= flutter
-DART ?= dart
+ZIG := $(or $(ZIG),zig)
+FLUTTER := $(or $(FLUTTER),flutter)
+DART := $(or $(DART),dart)
 WEB_DIR ?= app/build/web
 ZIG_FLAGS := -Doptimize=safe -Dversion=$(VERSION) -Dgit-commit=$(GIT_COMMIT) -Dweb-dir=$(WEB_DIR)
 
