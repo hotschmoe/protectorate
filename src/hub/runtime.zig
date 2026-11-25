@@ -44,6 +44,8 @@ const default_task_size: q_select.TaskSize = .medium;
 /// fleet is shut down first so their calls fail at once; a worker still running after this is stuck in
 /// blocking work, and the process ends without freeing what it uses.
 const teardown_wait_ms: i64 = 15_000;
+/// How long ending the process without teardown waits for the lock that guards the sleeve table.
+const fence_lock_wait_ms: i64 = 2_000;
 
 pub const NodeTelemetry = struct {
     inventory: ?msg.Inventory = null,
@@ -350,6 +352,27 @@ pub const Runtime = struct {
         u_store.mark_healthy_if(self.gpa, self.io, self.hub_home.releases_path, self.running_release orelse return) catch {};
     }
 
+    /// For a process that must end without teardown because a worker may still use runtime state: kills
+    /// every sleeve's process tree, confirms it and removes its cgroup scope, as destroy_driver does, but
+    /// frees and deinitializes nothing. It takes the one lock normal teardown takes (meta_mu) and gives up on
+    /// it after fence_lock_wait_ms, in which case the sleeves are left to end with the parent.
+    pub fn end_process_fenced(self: *Runtime) noreturn {
+        const give_up = std.Io.Clock.awake.now(self.io).toMilliseconds() + fence_lock_wait_ms;
+        while (!self.meta_mu.tryLock()) {
+            if (std.Io.Clock.awake.now(self.io).toMilliseconds() >= give_up) {
+                std.debug.print("runtime: could not lock the sleeve table in {d} ms; sleeves are left to end with the process\n", .{fence_lock_wait_ms});
+                std.process.exit(0);
+            }
+            self.io.sleep(.fromMilliseconds(10), .awake) catch {};
+        }
+        var drivers = self.sessions.valueIterator();
+        while (drivers.next()) |dh| {
+            _ = dh.*.guard.fence_and_confirm(self.io, 500);
+            dh.*.guard.remove_cgroup_scope();
+        }
+        std.process.exit(0);
+    }
+
     pub fn close_and_destroy(self: *Runtime) void {
         self.stopping.store(true, .release);
         self.stream_hub.wake_all();
@@ -362,8 +385,8 @@ pub const Runtime = struct {
         while (self.active_workers > 0) {
             const left = give_up - std.Io.Clock.awake.now(self.io).toMilliseconds();
             if (left <= 0) {
-                std.debug.print("runtime: {d} background worker(s) still running after {d} ms; ending the process without tearing the runtime down (every journal commit is already synced, and sleeve processes end with this one)\n", .{ self.active_workers, teardown_wait_ms });
-                std.process.exit(0);
+                std.debug.print("runtime: {d} background worker(s) still running after {d} ms; fencing the sleeves and ending the process without tearing the runtime down (every journal commit is already synced)\n", .{ self.active_workers, teardown_wait_ms });
+                self.end_process_fenced();
             }
             self.workers_cond.waitTimeout(self.io, &self.workers_mu, .{
                 .duration = .{ .raw = .fromMilliseconds(left), .clock = .awake },

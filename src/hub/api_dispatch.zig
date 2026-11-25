@@ -935,10 +935,13 @@ pub fn dispatch(
         };
         if (latest) |rel| {
             if (!req.check) {
+                u_store.stage_release(rt.gpa, rt.io, rt.hub_home.releases_path, rel, .hub) catch |err| {
+                    return err_json(rt.gpa, .internal, @errorName(err));
+                };
                 rt.release_mu.lockUncancelable(rt.io);
-                const applied = u_store.stage_and_apply(rt.gpa, rt.io, rt.hub_home.releases_path, rel, .hub);
+                const applied = u_store.activate_staged(rt.gpa, rt.io, rt.hub_home.releases_path, rel.tag);
                 rt.release_mu.unlock(rt.io);
-                applied catch |err| {
+                _ = applied catch |err| {
                     return err_json(rt.gpa, .internal, @errorName(err));
                 };
                 u_store.cache_release_clients(rt.gpa, rt.io, rt.hub_home.clients_path, rel) catch {};

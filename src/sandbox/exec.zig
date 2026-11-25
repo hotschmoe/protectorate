@@ -326,6 +326,18 @@ pub const ProcessGuard = struct {
         return false;
     }
 
+    /// Removes the (empty, fenced) cgroup scope directory. Frees and clears nothing, so a process that
+    /// is about to exit can call it without tearing the guard down.
+    pub fn remove_cgroup_scope(self: *const ProcessGuard) void {
+        if (comptime builtin.os.tag != .linux) return;
+        const cg = self.cgroup_path orelse return;
+        var z_buf: [std.fs.max_path_bytes]u8 = undefined;
+        if (cg.len >= z_buf.len) return;
+        @memcpy(z_buf[0..cg.len], cg);
+        z_buf[cg.len] = 0;
+        _ = std.os.linux.rmdir(@ptrCast(&z_buf));
+    }
+
     pub fn deinit(self: *ProcessGuard) void {
         if (comptime builtin.os.tag == .windows) {
             if (self.job) |j| {
@@ -340,12 +352,7 @@ pub const ProcessGuard = struct {
                     self.launcher_pidfd = null;
                 }
                 if (self.cgroup_path) |cg| {
-                    var z_buf: [std.fs.max_path_bytes]u8 = undefined;
-                    if (cg.len < z_buf.len) {
-                        @memcpy(z_buf[0..cg.len], cg);
-                        z_buf[cg.len] = 0;
-                        _ = std.os.linux.rmdir(@ptrCast(&z_buf));
-                    }
+                    self.remove_cgroup_scope();
                     if (self.gpa) |gpa| {
                         gpa.free(cg);
                     }

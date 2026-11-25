@@ -69,8 +69,8 @@ pub fn main(init: std.process.Init) !u8 {
                 .trusted_proxies = rt.trusted_proxies,
             });
             defer if (hs.stop_and_destroy()) {
-                std.debug.print("http: a worker is still running, so the runtime is not torn down; every journal commit is already synced, and sleeve processes end with this one\n", .{});
-                std.process.exit(0);
+                std.debug.print("http: a worker is still running, so the runtime is not torn down: fencing the sleeves and ending the process (every journal commit is already synced)\n", .{});
+                rt.end_process_fenced();
             };
             defer rt.fleet_srv.shutdown();
             rt.mark_healthy();

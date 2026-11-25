@@ -671,3 +671,16 @@ Each entry: where, what was done, what right looks like. The Rust-era list is in
   body are dropped and the connection closes after the reply; a client that disconnects while its
   call runs is noticed only when the call ends; single-stream downloads run at about half the old
   server's speed (1.2 vs 2.6 GB/s in curl, far above any real link). Right: each as it matters.
+- **`hub probation --retry-rollback` ignores the release lock** (`src/cli/commands.zig`,
+  `src/hub/runtime.zig` `release_mu`): the lock that orders `UpdateHub` writes against the startup
+  health mark is inside the hub process, and the CLI rollback runs in another process without it. Run
+  it only when the hub is stopped, which is when it is needed (the unit's `ExecStartPre` does).
+  Right: a lock file in `releases/` that both sides take.
+- **The running release is read from `current.txt` at start** (`src/hub/runtime.zig`,
+  `running_release`): not from the executable that was launched. If `current.txt` is switched
+  between exec and `Runtime.open`, the process marks the wrong release healthy. Right: have the
+  supervisor pass the release tag, or resolve `/proc/self/exe` against `releases/<tag>`.
+- **A new journal segment's directory entry is not fsynced** (`src/journal/store.zig`,
+  `rotate_segment`): every append syncs its file, but the directory entry of a segment created at
+  a rollover is not synced, so a power loss right after a rollover can lose that segment. Right: sync
+  the journal directory after creating a segment.
