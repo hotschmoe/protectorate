@@ -1,1071 +1,608 @@
 # REVISIT
 
 Shortcuts taken to make something work, and what "right" (then "fast") would be. Newest last.
-Each entry: where, what was done, what right looks like.
+Each entry: where, what was done, what right looks like. The Rust-era list is in
+`.archive/REVISIT-rust-era-20261124.md` (local, gitignored).
 
-
-- **Release signing** (SPEC 6): no signing key; updates trust SHA256SUMS over HTTPS. Right: an
-  offline-held key and a signature checked against a key embedded in the binary.
-- **Outbound HTTPS through curl** (hub, nodes): no Rust TLS stack. Right: decide between
-  curl forever, or a forked and trimmed rustls when curl's absence or output parsing bites.
-- **Sandbox through bwrap**: right is our own small namespaces helper (SPEC 3.4).
-- **Windows idle time through a probe process** (`pt-node`, `sys/windows_presence.rs`):
-  `WTSINFOEXW.LastInputTime` is 0 for the console session even from LocalSystem (checked on
-  officewin through a SYSTEM scheduled task), so the service starts `protectorate-node
-  idle-probe` in the console session (WTSQueryUserToken + CreateProcessAsUserW on
-  `winsta0\default`, windowless, kill-on-close job, 5 s timeout) and reads its
-  GetLastInputInfo as one JSON line; lock state stays WTS's. One process per detection (every
-  `--presence-interval` while jobs run, and per hub Presence call). From an ordinary admin (ssh)
-  WTSQueryUserToken is refused (1314), so `presence` there stays UNKNOWN unless locked. The lock
-  flag (`SessionFlags` 0 = locked) was only seen unlocked. Right: verify locked, and cache the
-  probe's answer for a few seconds if its cost shows.
-- **Linux evdev path untested with real input** (`pt-node`, `sys/linux_presence.rs`): hub has no
-  keyboard or mouse, agent-world's AT keyboard needs root. Opening and watching works as root
-  ("evdev watching 1 devices"); reading an actual keystroke was not exercised, and logind's
-  Present branches run only against a stand-in `loginctl` in the e2e tests. Right: type on a real
-  seat once.
-- **Linux idle needs a long-lived Detector** (`pt-node`): logind gives IdleHint, and
-  IdleHint=no is reported PRESENT with idle null (desktops that never set it, such as bare X or
-  sway, stay PRESENT forever, the safe direction). GNOME sets IdleHint after its idle-delay and
-  IdleSinceHint is the moment it was set, so idle is underestimated by that delay. `/dev/input`
-  needs root or the `input` group (the system service is root). One-shot `presence` cannot use
-  evdev (no history); `watch-presence` and the future service can. Right: record IdleSinceHint
-  changes over time and add the X11/Wayland session-bus readers if a desktop box needs them.
-- **Windows GPUs from the registry class key** (`pt-node`): ghost entries from replaced drivers are
-  deduped by (vendor, device, name) keeping the newest driver; VRAM is
-  `HardwareInformation.qwMemorySize` (a 4 GiB cap on old drivers). Right: DXGI/`nvidia-smi` for
-  live GPU numbers when GPU sampling arrives.
-- **Linux GPU names** (`pt-node`): from `pci.ids` when hwdata is installed (else the raw ids), SoC
-  GPUs report only the kernel driver (`linlondp` on the CIX board), VRAM only for amdgpu and
-  nvidia-smi. Right: per-vendor readers with the sample's utilisation and temperature.
-- **Job priority** (`pt-node`): jobs on Windows are lowered through their Job Object's priority
-  class (all processes, running and later). The `lower-idle PID` command still sets one process
-  only. On Linux lowering walks the process tree (plus the scope's `cgroup.procs`) once, so
-  processes forked afterwards keep normal priority, and nothing raises a job back when the person
-  leaves. Right: a cgroup with `cpu.weight`/`io.weight` set to idle, which covers later children.
-  (Windows checked on officewin: a running cmd and ping and a ping started later all read Idle.)
-- **Windows build path**: no Windows SDK libs on the dev hub, so there is no cross-build; both
-  Windows targets build natively on officewin (VS Build Tools 14.44 incl. ARM64 libs), now as the
-  `windows` step of `make release-assets`: the workspace goes over as a tar pushed by scp into
-  `%USERPROFILE%\pt-release\src`, `cargo +stable build -p protectorate-node` builds both targets
-  with `%USERPROFILE%\.cargo\bin` first on PATH (the system Rust lacks the arm64 std), and the
-  `.exe` files come back as base64 over ssh, checked against the remote sha256. That is rustup's
-  stable (1.96 there) while Linux builds with 1.99.1, and the arm64 `.exe` has never been run (the
-  snapdragon laptop was off). Right: one pinned toolchain (`rust-toolchain.toml`) on both sides, and
-  cargo-xwin or a vendored SDK sysroot if officewin, the owner's desktop, should not be required.
-- **No macOS or Android code paths** in `pt-node` yet; the crate does not compile there.
-- **pt-json record! keys** (crates/pt-json): JSON keys are the Rust field names (`r#type` is
-  `type`), with no rename, so camelCase foreign JSON (Codex app-server) goes through `Value`
-  accessors. Right: an optional `field: T as "key"` when the first driver needs typed decoding.
-- **pt-json tagged_enum!** (crates/pt-json): the tag key is always `type` and variants are
-  struct-like only. Right: a configurable tag and newtype variants wrapping a `record!` type,
-  once an API needs them.
-- **pt-json FromJson borrows** (crates/pt-json): `from_json(&Value)` clones every string.
-  Fast: an owned `from_json_value(Value)` that moves strings out, if large driver payloads show
-  up in profiles.
-- **pt-json numbers and maps** (crates/pt-json): each number is a heap `Box<str>` and object
-  lookups are linear. Fast: inline storage for short number text, and an index for large
-  objects if a hot path decodes many-keyed objects by key. No pretty writer yet either.
-- **SHA-256 is portable Rust** (pt-hash): about 235 MB/s on the aarch64 dev host, near
-  coreutils `sha256sum`. The aarch64 SHA2 instructions (`vsha256hq_u32` and friends in
-  `std::arch::aarch64`, plus `is_aarch64_feature_detected!("sha2")`) would give several GB/s, but
-  calling a `#[target_feature]` function from generic code needs `unsafe`, which pt-hash forbids.
-  Right: once a release-sum or content-addressing path is measured as slow, add the accelerated
-  compress behind one audited unsafe call (in pt-hash with a narrow exemption, or in pt-sys).
-- **No CRC-32C yet** (pt-hash): SPEC 15 lists it for the journal; it lands with pt-journal.
-- **pt-http is Unix-only** (std `UnixStream`), and outside Linux `peer_cred` is Unsupported, so
-  unix connections are refused there. Right: `getpeereid` on the BSDs and macOS; a Windows build
-  gates the unix listener out if a Windows binary ever needs pt-http.
-- **Unix socket mode is set after bind** (pt-http `bind_unix`): a connect can race the chmod to
-  0600. The hub checks peer uid anyway. Right: bind inside a 0700 directory the hub owns. Bind also
-  fails on an existing path, so the hub must decide about stale sockets after a crash.
-- **No Date header** in pt-http responses (RFC 9110 wants one from servers with a clock).
-- **pt-http client opens one connection per request** (`Connection: close`) and a unix connect
-  has no timeout. Right, if the CLI ever gets chatty: keep-alive reuse for idempotent requests.
-- **WebSocket extras left out** (pt-http): no permessage-deflate and no subprotocol negotiation
-  helper (a handler can set `Sec-WebSocket-Protocol` itself). Origin checks are the hub's job.
-- **pt-http client `read_timeout` is a whole-request deadline** (sending the request and reading
-  all of the response) but keeps its per-read name, so callers in pt-hub, pt-fleet and
-  protectorate did not change with it. Right: rename it `timeout` in one commit with its callers.
-- **pt-http is about 2050 lines** (about 1780 without blank and comment lines) against a 1500-line
-  target. Right: trim when the hub's real use shows which parts can go.
-- **pt-sandbox: no automatic fallback without a scope.** `systemd-run --user --scope` works here
-  only with `XDG_RUNTIME_DIR` set (the builder sets it; it fails with "No medium found" without it
-  and needs a user manager, so a headless box needs `loginctl enable-linger`). `SandboxSpec.scope =
-  false` runs bwrap alone, but nothing probes and flips it yet, and then there are no limits and
-  no `cgroup.kill`. Right: the hub probes once at startup and records it in `doctor.json`.
-- **pt-sandbox masks skip missing paths and mask files with /dev/null.** bwrap cannot create a
-  mountpoint on the read-only root, so a credential dir that appears later in the owner's home is
-  not masked until the next incarnation. The mask list is also home-relative guesses; a harness
-  with a new credential location needs an entry in `default_masks`.
-- **pt-sandbox has no fuzz target** for `resolve_git_dirs` (the one parser). Right: add one with
-  the other crates' fuzz targets.
-- **pt-sandbox: other roots are hidden only if the hub masks them** (SPEC 3.4 light isolation).
-  The read-only `/` shows every other workspace; the hub is to push every other sleeve's claim
-  onto `masks` (not a child's own root, which holds its git dirs; a View child needs its root
-  visible). A claim made after a launch stays visible until the next incarnation, like the
-  credential masks.
-- **pt-sandbox: the runtime dir is private and empty.** The host's `$XDG_RUNTIME_DIR` is covered
-  by a 0700 tmpfs, so the user bus and the systemd user manager (which would start units outside
-  the scope and sandbox) are gone, and so are the keyring, ssh-agent, gpg-agent and pipewire
-  sockets. Abstract unix sockets still reach the host, since the network namespace is shared
-  (X11 `@/tmp/.X11-unix`, other users' buses). Right: a network namespace or the own helper.
-- **pt-sandbox: the docker socket is reachable** (SPEC 2, principle 10). The owner's supplementary
-  groups survive the user namespace, so `/run/docker.sock` is root on the host from any sleeve; the
-  threat model accepts that. Right: revisit with the threat model.
-- **Own namespaces helper instead of bwrap** stays a later option (host dependency on bwrap's
-  version; 0.13.1 here).
-- **Control-key pin is checked by a separate fetch** (`go/cmd/member`): member fetches `/key` and
-  compares it with the pin, then tsnet fetches `/key` again itself, so an active man in the middle
-  (stronghold) can answer the two fetches differently. It catches a re-keyed or replaced headscale,
-  not an attacker. Right: point tsnet at a loopback front inside member that answers `/key` with the
-  pinned key and forwards the rest, so Noise IK fails against any other server, or an upstream
-  pinned-server-key option.
-- **dnsfallback can ask Tailscale's public DERPs** (`go/cmd/member`): if the control host name does
-  not resolve, controlclient queries the bootstrap DNS of the DERP map baked into tailscale.com;
-  `dnsfallback.SetCachePath` only merges into that map and there is no knob. The e2e uses IP
-  literals, so it never hits this. Right: split-horizon DNS that cannot fail, or a control URL that
-  needs no lookup.
-- **Reverse proxy proven with a stand-in, not Traefik** (`scripts/net-e2e.sh`): ts2021 (`POST
-  /ts2021`, `Upgrade: tailscale-control-protocol`) and DERP (`GET /derp`, `Upgrade: DERP`) both pass
-  Go's `httputil.ReverseProxy` behind TLS with a path allowlist, and DERP-only traffic works through
-  it. Open for stronghold: Traefik v3's entrypoint `respondingTimeouts.readTimeout` (60 s default)
-  on hijacked upgrade connections, which would cut the long-lived control and DERP streams; HTTP/1.1
-  to the backend for upgrades; `trusted_proxies` with stronghold's IP. Right: the same e2e phases
-  against the real router.
-- **A member starts only while control answers `/key`** (`go/cmd/member`): the pin check needs it,
-  so a member restarted during a headscale or stronghold outage stays down until control is back.
-  Right: decide whether a start with an unverifiable key may run on the cached netmap.
-- **Windows UDP socket and the firewall prompt**: officewin (the owner's desktop) ran member
-  DERP-only (`TS_DEBUG_ALWAYS_USE_DERP=1`), which binds no UDP socket, so no Defender Firewall prompt
-  could appear. Whether a normal member's UDP bind prompts on a desktop is unverified. Right: try it
-  on a spare Windows box; the installer adds a rule for the fixed `--udp-port`, or Windows nodes
-  build with `ts_omit_udptransport` and relay through DERP.
-- **tsnet close can hang** (`go/cmd/member`): with `TS_DEBUG_ALWAYS_USE_DERP`, wireguard-go's bind
-  close waited forever, on stop and after `--print-registration`; member now gives Close 5 s and
-  exits anyway. Right: an upstream fix.
-- **`headscale version` reports our module version**, since headscale reads it from the main
-  module's build info. Right: stamp it, or have the hub report the go.mod pin instead.
-- **Android member is unverified at runtime**: `GOOS=android GOARCH=arm64 CGO_ENABLED=0` builds (a
-  PIE using /system/bin/linker64, which picks tailscale's raw-binary netmon and dnsproxyd paths), so
-  that is the Termux target rather than a static linux/arm64 build. No device has run it (netmon,
-  DNS, SELinux exec). Right: a Termux trial before promising it.
-- **Claude supervised approvals ride a hidden flag** (`pt-drivers`, claude.rs):
-  `--permission-prompt-tool stdio --permission-mode manual` works with Claude Code 2.1.316
-  (e2e `supervised_approval`: `control_request can_use_tool` arrives, `control_response allow`
-  runs the tool), but the flag is only named in `--permission-prompts` help. `allow_session`
-  sends the request's `permission_suggestions` as `updatedPermissions`, untested. Right:
-  `doctor` reruns that e2e after every Claude update; if it breaks, supervised Claude becomes
-  allowedTools-only (`--permission-prompts none` plus `--allowedTools`).
-- **Approval answers are unconfirmed except on Codex** (`pt-drivers`): only Codex acknowledges
-  an answer (`serverRequest/resolved`, emitted as `approval_decision` with `confirmed: true`).
-  Claude and Grok answers stay `confirmed: false`, so per SPEC 12a item 4 the hub must keep
-  them Uncertain. Right: take the matching `tool_result` (or its absence at `turn_settled`) as
-  the harness's evidence.
-- **Claude prompt ack rides an undocumented echo** (`pt-drivers`, claude.rs): each stdin
-  message carries a `uuid` we make (a random per-incarnation prefix plus a counter), and the
-  `--replay-user-messages` echo returns it (checked on Claude Code 2.1.316), so an echo
-  confirms exactly its own message; a late echo of a settled one is a notice, an unknown one a
-  protocol error. If Claude stops echoing our uuid, no prompt is ever confirmed (the e2e
-  `ready_resume_tool` catches it). Right: `doctor` reruns that e2e after every Claude update.
-- **Claude session_info before init** (`pt-drivers`): `system/init` arrives only after the first
-  input, so the driver reports the assigned (`--session-id`) or resumed id at spawn and checks it
-  at init and at each `result`; a mismatch is a protocol error, and the hub kills (G14).
-- **Untested permission paths** (`pt-drivers`): supervised Codex (`approvalPolicy untrusted`,
-  `sandbox workspace-write`, likely to clash with bwrap) and supervised Grok (no
-  `--always-approve`) have mappings but no e2e run yet, to save quota. Unsupervised Codex is
-  `never` plus `danger-full-access`: the hub's sandbox is the boundary. Pi has no gate, so a
-  supervised Pi spawn is refused. Grok decisions never widen: allow-once without an
-  `allow_once` option is refused (unsupervised it cancels), deny without `reject_once`
-  cancels instead of `reject_always`. Right: one e2e each before supervised sleeves ship.
-- **Pi extension dialogs are cancelled** (`pt-drivers`, pi.rs): `extension_ui_request`
-  select/confirm/input/editor gets `cancelled: true` plus a notice. Right: route confirm and
-  select to `approval_request` if the owner runs a Pi extension gate.
-- **Cost and usage gaps** (`pt-drivers`): Grok reports `costUsdTicks` in an undocumented unit and
-  Codex reports no cost, so `cost_usd` is None for both; Grok has no context window in the
-  prompt reply. Codex per-turn usage is the difference of `thread/tokenUsage` totals. Right:
-  fill from the quota readers once their units are known.
-- **Error classes from text** (`pt-drivers`, event.rs `classify`): Codex uses `codexErrorInfo`
-  and Claude `api_error_status` when present; everything else is keyword matching on the
-  harness's message, and an unexpected exit is `crash` unless the stderr tail says auth or
-  quota. Right: structured fields as each harness exposes them; collect real auth and quota
-  failures into the fuzz seeds.
-- **Shutdown kills only the direct child** (`pt-drivers`, session.rs): `Session::shutdown`
-  closes stdin, waits, then `Child::kill`; descendants (MCP servers, shells) are the hub's
-  systemd scope to reap (`KillScope`). The exit waiter polls `try_wait` every 50 ms. Right:
-  wire the scope kill into shutdown once pt-sandbox lands, and a pidfd wait instead of polling.
-- **Codex resume settle is unverified** (`pt-drivers`, codex.rs): settling on `thread/resume`
-  is unverified, and the driver turns any unseen `turn/completed` into a settle
-  (`on_turn_completed`, around lines 611-680), which would drop every continuation silently.
-  Right: one real Codex resume after a mid-turn kill.
-- **No driver-side handshake timeout** (`pt-drivers`): a Codex or Grok handshake that never
-  replies leaves the session without `session_info`; the hub's G5 (Booting 60 s) covers it.
-  Explicit compaction is not exposed either (native only, SPEC 3.7). Right: `compact()` per
-  harness (Codex `thread/compact/start`, Pi `compact`) when the hub asks for it.
-- **Text block ids** (`pt-drivers`, emit.rs): a late authoritative end for an already-closed
-  block is dropped (Pi ends thinking after its text began). A delta for a closed id (a steer's
-  ack or a notice landed mid-block, as in the Pi `steer` e2e) opens a continuation block
-  `<id>~<n>` that keeps only the streamed text; ids are remembered for the last 64 blocks.
-  Blocks are cut at 1 MiB with a marker, and live deltas stop there. Grok sends no message id,
-  so its blocks are numbered per turn and tool call. Right: per-harness block identity from
-  content indexes if either shows up in real streams.
-- **Pi turn ids are ours** (`pt-drivers`, pi.rs): Pi's rpc names no turn, so acks and
-  `turn_started` carry `pi-turn-<n>`, counted per incarnation, and a steer must name the
-  running one or gets `TurnEnded`. A steer Pi queued just as its run ended stays in Pi's own
-  queue (Pi's behavior), so it can surface in the next run. A settle before Pi answered our
-  prompt is taken as the previous run's and dropped. Right: Pi's own turn id if rpc gains one.
-- **Grok prompt identity from `_meta.promptId`** (`pt-drivers`, grok.rs): `session/update`,
-  `_x.ai/queue/changed` (`runningPromptId`) and the prompt reply name Grok's prompt id, an
-  x.ai extension outside ACP. Notices naming one of the last 16 ended prompts, or another
-  prompt than the running one, are dropped. Right: ACP's own prompt id if it gains one.
+- **Release signing** (SPEC 6): no signing key; updates trust SHA256SUMS over HTTPS
+  (`src/update/store.zig`, `src/update/version.zig` `verify_sha256`). The Android APK is signed
+  locally by `scripts/release.sh`, but the binaries and SHA256SUMS are not. Right: an offline-held
+  key and a signature checked against a key embedded in the binary.
+- **Windows idle time through a probe process** (`src/node/sys.zig`, `probe_windows_console_idle`,
+  `windows_idle_probe_json`; `src/main_node.zig` `idle-probe`): `WTSINFOEXW.LastInputTime` is 0 for
+  the console session even from LocalSystem (checked on officewin through a SYSTEM scheduled task),
+  so the service starts `protectorate-node idle-probe` in the console session (WTSQueryUserToken +
+  CreateProcessAsUserW on `winsta0\default`, no window, 3 s timeout then TerminateProcess) and reads
+  its GetLastInputInfo as one JSON line; lock state stays WTS's. The answer is cached for 10 s. From
+  an ordinary admin (ssh) WTSQueryUserToken is refused (1314), so `presence` there stays UNKNOWN
+  unless locked. The lock flag (`SessionFlags` 0 = locked) was only seen unlocked. Right: verify the
+  locked state.
+- **Linux evdev path untested with real input** (`src/node/sys.zig`, `scan_evdev`, `poll_evdev`):
+  hub has no keyboard or mouse, agent-world's AT keyboard needs root. Reading an actual keystroke
+  was not exercised, and the logind branches (`query_logind`) are not run against a real session in
+  the e2e (`scripts/zig-e2e.sh` only uses the `PROTECTORATE_NODE_TEST_PRESENCE` override). Right:
+  type on a real seat once.
+- **Linux idle needs a long-lived detector** (`src/node/sys.zig`, `PresenceDetector`,
+  `query_logind`): without readable evdev devices presence falls back to logind, and IdleHint=no is
+  reported PRESENT with idle null (desktops that never set it, such as bare X or sway, stay PRESENT
+  forever, the safe direction). GNOME sets IdleHint after its idle-delay and IdleSinceHint is the
+  moment it was set, so idle is underestimated by that delay. `/dev/input` needs root or the `input`
+  group (the system service is root). One-shot `presence` cannot use evdev (no history);
+  `watch-presence` and `serve` keep a detector. Right: record IdleSinceHint changes over time and
+  add the X11/Wayland session-bus readers if a desktop box needs them.
+- **Windows GPUs from the registry class key** (`src/node/sys.zig`, `collect_gpus`): entries are
+  read from `Control\Class\{4d36e968-...}\0000..0015` with no dedupe, so ghost entries from replaced
+  drivers can show up; VRAM is `HardwareInformation.qwMemorySize` with `MemorySize` as fallback (a 4
+  GiB cap on old drivers). Right: dedupe by (vendor, device, name) keeping the newest driver, and
+  DXGI/`nvidia-smi` for live GPU numbers when GPU sampling arrives.
+- **Linux GPU names** (`src/node/sys.zig`, `collect_gpus`): `nvidia-smi` when present, else
+  `/sys/class/drm` where the name is the raw `PCI_ID` (no `pci.ids` lookup), SoC GPUs report only
+  the kernel driver, VRAM only for amdgpu and nvidia-smi, utilisation only from nvidia-smi. Right:
+  per-vendor readers with the sample's utilisation and temperature.
+- **macOS node has only a Linux and Windows reader set** (`src/node/sys.zig`): `aarch64-macos`
+  builds and ships (`build.zig` `release-all`, `scripts/release.sh`), and `src/node/service.zig` has
+  a macOS branch, but presence always returns AWAY (`headless`) and the OS version, CPU model and
+  RAM readers cover Linux and Windows only. There is no Android node. Right: macOS readers (IOKit or
+  `sysctl`) and a decision on Android.
+- **Sandbox through bwrap** (`src/sandbox/spec.zig` `build_bwrap_argv`, `src/sandbox/exec.zig`
+  `probe_bwrap`, `src/hub/runtime.zig`): the hub probes bwrap once at startup and falls back to a
+  Landlock guard (`build_guard_argv`, `probe_landlock`) when bwrap is missing; only the pid
+  namespace is unshared. Right: our own small namespaces helper (SPEC 3.4), which also removes the
+  host dependency on bwrap's version.
+- **Sandbox masks skip missing paths and mask files with /dev/null** (`src/sandbox/spec.zig`
+  `default_masks`, `src/hub/runtime.zig`): bwrap cannot create a mountpoint on the read-only root,
+  so a credential dir that appears later in the owner's home is not masked until the next
+  incarnation. The mask list (`default_mask_rels`) is also home-relative guesses; a harness with a
+  new credential location needs an entry there.
+- **Other roots are hidden only if the hub masks them** (SPEC 3.4 light isolation;
+  `src/hub/runtime.zig`): the read-only `/` shows every other workspace, and the hub does not yet
+  push other sleeves' claims onto `masks` (not a child's own root, which holds its git dirs; a View
+  child needs its root visible). A claim made after a launch stays visible until the next
+  incarnation, like the credential masks.
+- **The host runtime dir is not hidden** (`src/sandbox/spec.zig`, `src/hub/runtime.zig`): the
+  `runtime` mount covers only the sleeve's own tmp dir, not the host `$XDG_RUNTIME_DIR`, and the
+  network namespace is shared, so the user bus, keyring, ssh-agent, gpg-agent and pipewire sockets
+  and abstract unix sockets (X11 `@/tmp/.X11-unix`, other users' buses) stay reachable from a
+  sleeve. Right: a private runtime dir, a network namespace or the own helper.
+- **The docker socket is reachable** (SPEC 2, principle 10): the owner's supplementary groups
+  survive, there is no user namespace and `/` is bound read-only, so `/run/docker.sock` is root on
+  the host from any sleeve; the threat model accepts that. Right: revisit with the threat model.
+- **Claude supervised approvals ride a hidden flag** (`src/drivers/claude.zig`, `build_argv`,
+  `on_control_request`, `respond_approval`): supervised Claude uses `--permission-prompt-tool stdio`
+  (`control_request can_use_tool` in, `control_response allow` or `deny` out), but the flag is only
+  named in Claude Code's own help and no e2e covers it (`scripts/zig-e2e.sh` runs real pi only).
+  `allow_session` is answered as a plain allow, with no `updatedPermissions`. Right: an e2e that
+  runs after every Claude update; if it breaks, supervised Claude becomes allowedTools-only.
+- **Approval answers are marked confirmed when written** (`src/drivers/claude.zig`, `codex.zig`,
+  `grok.zig`, `respond_approval`): each driver emits `approval_decision` with `confirmed: true` as
+  soon as it writes the answer, without any acknowledgement from the harness (Codex sends
+  `serverRequest/resolved`, which is not used). Per SPEC 12a item 4 an unacknowledged answer should
+  stay Uncertain. Right: take the matching `tool_result` (or its absence at `turn_settled`) or
+  Codex's `serverRequest/resolved` as the harness's evidence.
+- **Claude prompt ack rides an undocumented echo** (`src/drivers/claude.zig`, `send_user`,
+  `on_user`): each stdin message carries a `uuid` we make (`uuid_base` plus a counter), and the
+  `isReplay` user message that comes back with it confirms exactly its own message. If Claude stops
+  echoing our uuid, no prompt is ever confirmed. Right: an e2e that runs after every Claude update.
+- **Untested permission paths** (`src/drivers/codex.zig`, `grok.zig`, `session.zig`): supervised
+  Codex (`approvalPolicy untrusted`) and supervised Grok (`session/request_permission`) have
+  mappings but no e2e run, and no e2e runs Codex, Grok or Claude at all, to save quota. Pi has no
+  gate, so `permission` has no effect on a Pi spawn. Grok decisions never widen: allow-once without
+  an `allow_once` option cancels, and deny cancels. Right: one e2e each before supervised sleeves
+  ship.
+- **Pi extension dialogs are cancelled** (`src/drivers/pi.zig`, `extension_ui_request`): select,
+  confirm, input and editor requests get `cancelled: true`. Right: route confirm and select to
+  `approval_request` if the owner runs a Pi extension gate.
+- **Cost and usage gaps** (`src/drivers/codex.zig`, `grok.zig`, `protocol.zig` `Usage`): only Claude
+  (`total_cost_usd`) and Pi report `cost_usd`; the Codex and Grok drivers report no usage at all,
+  and `context_window` is never filled. Right: fill from the quota readers (`src/quota/readers.zig`)
+  once their units are known.
+- **Error classes from text** (`src/drivers/protocol.zig`, `classify_error`): every driver error is
+  classified by keyword matching on the harness's message (auth, quota, rate limit, crash, else
+  other); structured fields such as Codex `codexErrorInfo` or Claude `api_error_status` are not
+  read. Right: use structured fields as each harness exposes them.
+- **No driver-side handshake timeout or compaction for some harnesses** (`src/drivers/codex.zig`,
+  `grok.zig`, `session.zig` `compact`): a Codex or Grok handshake that never replies leaves the
+  session without `session_info`; the core's `start_timeout_ms` (60 s, `src/core/model.zig`) covers
+  it. Explicit compaction exists for Claude and Pi only; Codex, Grok and Antigravity return
+  `Unsupported`. Right: `compact()` per harness (Codex `thread/compact/start`) when the hub asks for
+  it.
+- **Pi turn ids are ours** (`src/drivers/pi.zig`, `ensure_turn`, `send_user`): Pi's rpc names no
+  turn, so acks and `turn_started` carry `pi-turn-<n>` from a per-session counter, and a steer must
+  name the running one. A steer Pi queued just as its run ended stays in Pi's own queue (Pi's
+  behavior), so it can surface in the next run. Right: Pi's own turn id if rpc gains one.
 - **Linux desktop bundle is built but not released**: `flutter build linux --release` succeeds on
-  the dev host (arm64) and was not run beyond that. Right: add the Linux bundle to the release.
+  the dev host (arm64) and was not run beyond that; `scripts/release.sh` builds only the APK and the
+  Windows desktop zips. Right: add the Linux bundle to the release.
 - **Chat Markdown is a small subset** (`app/lib/chat.dart`): fences (diffs coloured), headings,
   lists, quotes, inline code, bold, italics and links; no tables, no syntax highlighting, links are
-  not clickable. Right: tables and clickable links when transcripts need them.
-- **App tables don't sort** (nodes report 7, rule 8: sort by clicking the header rule). Right: a
-  sort key per column in the shared table rows.
-- **F-keys in the web build**: the browser may keep some keys (F12 always opens devtools; F5 and
-  F11 depend on the browser). Right: check per browser; the sidebar and the command palette
-  (Esc, Ctrl+K) cover every F-key screen meanwhile.
-- **Journal retention** (pt-journal): every snapshot and segment is kept forever, because product
-  code deletes nothing yet (RULE 1). Right: a retention rule (keep the last N snapshots and their
-  segments, archive the rest into backups) once the owner approves deleting old segments. The
-  stream log is bounded on purpose (below): its messages are derived output, not the record.
-- **CRC-32C in pt-journal** (SPEC 15 lists it under `pt-hash`): a plain one-table loop. Right: move
-  it to `pt-hash` when that crate exists; fast: slicing-by-8 or the SSE4.2/ARMv8 CRC instruction.
-- **pt-core records are kept forever** (State): every effect record, message request id and job
-  stays in the state, and there is no State encoding, so the journal is only ever replayed from
-  the start of a segment. Right: a versioned State codec for `Journal::write_snapshot`, then
-  pruning terminal records once they are reported and older than the snapshot.
-- **Pane silence (G6)** is approximated: any Working screen verdict counts as progress, not "the
-  screen changed". Right: the pane reader sends progress only on screen damage.
-- **Node polling** (pt-core jobs): every Tick re-polls every Running, SubmitUncertain,
-  Cancelling and Lost job. Right: per-job backoff driven by the lease.
-- **sleeve_core reference model** (pt-core fuzz): transitions are checked as paths of at most 5
-  edges through the lifecycle and effect tables, and the guardrail machine only through I10 and
-  the scenario seeds. Right: one reference arm per table row for each machine, compared state by
-  state.
-- **Node job journal as JSON lines** (`pt-node`, `jobs/journal.rs`): one fsync per entry, no
-  CRC, no group commit, never compacted, so it grows with every job. A torn last line is
-  dropped; any other bad line stops the agent. Right: pt-journal (length and CRC frames, group
-  commit, torn-tail recovery), with compaction that drops collected jobs.
-- **Linux jobs without systemd-run** (`pt-node`, `sys/linux_job.rs`): when a trial
-  `systemd-run --scope` fails, jobs run in a plain process group. A job that calls `setsid`
-  escapes cancel, timeout and lowering, and nothing outlives a dead agent's timeout. After a
-  restart the reaper kills only members it can prove (pidfds taken while the stopped leader holds
-  the group id), so the members of a job whose leader already died live on. `--no-scope`
-  forces this mode (the tests use it). Right: the system service's delegated cgroup subtree
-  (design report 1.3), one cgroup per job with `cgroup.kill`.
-- **Job isolation is limits only** (`pt-node`): a job gets its timeout, a capped log and a scope,
-  process group or Job Object, and runs as the agent's user with the agent's environment plus its
-  `env`. There is no `cpu.max`/`memory.max`/`pids.max`, no namespaces and no `mode` (sandboxed,
-  plain, admin). Right: design report 1.3.
-- **No runner account** (`pt-node`, `sys/windows_job.rs`; D11): jobs run as the agent's account,
-  so as root on Linux and LocalSystem on Windows, inside a Job Object with kill-on-close, all
-  JOB_OBJECT_UILIMIT_* restrictions and the idle priority class once a person is present. SPEC 2
-  principle 10 (2026-11-01) accepts this, so no low-privilege account is planned. Right: revisit
-  with the threat model.
-- **A node fetches its update from GitHub itself** (`protectorate-node` update.rs): `Update{version,
-  api, repo}` has the node call the releases API and download its asset through its own curl, so
-  a node without outbound internet cannot update, and every node spends unauthenticated API
-  calls. A node with running jobs answers `busy` instead of draining. Right: the hub streams the
-  verified bytes over its connection (`FetchArtifact` in reverse) when a node has no route out.
-- **Who may speak on the agent's listener** (`protectorate-node serve`): the unix socket is mode
-  0600, so `member` must run as the agent's user; `--listen-tcp` (Windows, tests) trusts any
-  local process to write an honest `tag:hub` header; on Windows that includes every job, which
-  runs as SYSTEM (runner account deferred). Right: on Linux an installer-made group for the
-  socket; on Windows a named pipe whose ACL admits only member's account.
-- **Windows jobs** (`pt-node`, `sys/windows_job.rs`): cancel and timeout call
-  `TerminateJobObject` at once (no grace period). After an agent restart every running job is
-  Lost: kill-on-close ended it, or it ended unobserved, and the two cannot be told apart. The serve
-  e2e tests are Linux only; Windows was checked by hand on officewin. Right: a console-control
-  stop with a grace period for console jobs, a launch-time marker in the job (exit-code file) to
-  tell the cases apart, and the e2e suite ported with `cmd /c` scripts.
-- **Presence while a job runs** (`pt-node`, `jobs/mod.rs`): only PRESENT acts (lower or kill),
-  polled every `--presence-interval` (15 s default); UNKNOWN mid-job changes nothing, although it
-  blocks a start. Right: decide whether a detector failing mid-job should lower jobs too.
-- **Tombstones have no bound** (`pt-node`): every (job, attempt) and its log stay until
-  `AckCollected` (SPEC 12a item 5), so a hub that never acks fills the node's disk. Right: `doctor`
-  reports old uncollected jobs and the hub acks after collection as part of its job machine.
-- **Node ids and journal epochs from std's RandomState** (`pt-node`, `random_id`): SipHash keyed
-  by the OS once per process, not a CSPRNG. Fine for ids; never use it for secrets. Right: read
-  `getrandom`/`BCryptGenRandom` directly if a secret is ever needed on the node.
-- **`serve --stdio` starts its own resident agent** (`protectorate-node`, `stdio.rs`): an ssh
-  session is a splice into the agent on `<state>/agent.sock`, which the first session spawns
-  detached (no service manager) and which exits after `--idle-exit` (300 s) with no job and no
-  connection; a connection arriving in the instant of that exit is cut. An agent serving the same
-  state dir through `--forward-socket` elsewhere holds the lock, so a stdio session then fails.
-  Under an sshd without PAM there is no logind session or user bus, so `systemd-run --user` fails
-  and jobs fall back to process groups. Not on Windows. Right: once SSH or member is chosen, the
-  system service owns the agent and always listens on `agent.sock`; `--stdio` stays a splice.
-- **SSH instead of headscale for hub-to-node** (owner, 2026-11-01: keep headscale for now and
-  revisit; 2026-11-02, after reading network-without-go.md: hole punching and relay are required,
-  so SSH comes back only with an answer for both). Plain OpenSSH would carry the same frames: the hub runs `ssh node`, and the node's
-  authorized_keys pins the hub's key to `restrict,command="protectorate-node serve --stdio"`.
-  Nothing on the hub would listen for nodes, so headscale's control and DERP, the one surface nodes
-  reach today, would disappear, as would the whole `go/` tree, headscale's 49 MB and member's 18 MB.
-  `serve --stdio` already works behind real sshd on msr1-kids and agent-world (with a resident agent
-  so jobs outlive the session). What SSH loses is NAT traversal, roaming and stable addresses (DHCP
-  churn; the snapdragon laptop moved .176 to .172). The combined form is SSH as the protocol, with
-  the official tailscale client on any machine the hub cannot route to.
-- **SSH enrollment and key rotation** (`docs/design/network-without-go.md`): the isolated SSH
-  proof of concept uses pre-provisioned keys. Right: owner-only enrollment with an authenticated
-  out-of-band exchange in both directions, durable node IDs, host-key pinning on every dial,
-  revocation, and an overlap and recovery procedure for both host and hub keys.
-- **SSH on Windows and service privilege separation** (`protectorate-node`, `stdio.rs`): the
-  existing stdio splice only works on Unix, and a system service and its sshd account cannot
-  automatically share a mode-0600 socket. Right: authenticated, access-controlled local IPC and
-  a long-lived service on each supported OS, with Windows forced-command and presence/job behavior
-  proved on an actual Windows node; verify macOS and Termux separately.
-- **SSH for nodes outside the routed private networks** (`docs/design/network-without-go.md`):
-  plain SSH does not do NAT traversal or relay. Right: prefer the owner's private WireGuard or
-  tailnet; if a separate private jump host is needed, design and test its restricted reverse
-  tunnels, pins, failure recovery and isolation from hub listeners before using it.
-- **One-way trust on physical networks** (`docs/design/network-without-go.md`): SSH authenticates
-  the node connection but does not stop a compromised node from initiating unrelated LAN, VPN or
-  proxy connections to the hub. Right: enforce the source zones, return traffic and proxy policy
-  end to end, including IPv6 and spoofing, before retiring the tailnet policy.
-- **Other sleeves' workspaces are masked as of the launch** (`pt-hub`, exec.rs
-  `other_claims`): a sandbox masks every live claim but its parent's and its children's, read
-  from the view when the incarnation starts. A root spawned later stays visible to sandboxes
-  already running until they relaunch, and a workspace outside every claim (the owner's other
-  repos) is readable. Right: a deny-by-default view of the filesystem (only the claim, its git
-  dirs and the toolchains bound in).
-- **One shared login per harness** (`pt-hub`, logins.rs): every sleeve of a harness uses the
-  hub's one login in `<home>/logins/`, bound read-write, so concurrent sleeves may refresh the
-  same token at once. That has not been seen to conflict, and the old Rust hub ran this way; it
-  is not tested against the real CLIs. Codex and Grok follow a symlink from the sleeve's home to the store when they rewrite
-  their login; a harness that replaced the file by rename would fork it again (not seen yet).
-  Quota reads that same login and never refreshes it. An idle-expired grok key (it lasts about
-  6 hours) is renewed by the hub running the CLI's own `grok models` at most every 10 minutes
-  (logins.rs `renew_grok`), and the row says the key renews rather than asking for a login.
-  Claude (about 8 hours) and Codex logins can idle-expire the same way when no sleeve of theirs
-  runs for hours: their rows still say `login expired; log in again` until a sleeve runs. Right:
-  the same renewal through each CLI's own non-chat command, once one is found. The copies an earlier hub seeded into sleeve homes stay where they are, except the
-  files a link now replaces at that harness's next launch.
-- **A harness program is bound by its resolved file only** (`pt-hub`, exec.rs): grok lives in
-  the masked `~/.grok/downloads/`, so a launch binds the resolved program read-only. That is
-  enough for grok, which fills an empty `~/.grok` itself (checked by hand, 1.0.70; no real Grok
-  sleeve has run in the e2e). A vendor program that needs files beside it under a masked dir
-  would not start. Right: fine until one does.
-- **Same-uid callers on the owner's socket are the owner** (`pt-hub`, http.rs): sleeves never
-  see that socket (`run/api.sock`); they get `run/sleeves/api.sock`, which takes only a sleeve
-  capability (checked against the caller's scope cgroup when it has one), so with `scopes` off a
-  sleeve still cannot act as the owner. On the owner's socket a caller without a token is the
-  owner only when `/proc/<pid>/cgroup` of its SO_PEERCRED pid was read at the request and names
-  no sleeve of this hub; an exited peer is refused. The pid is read per request, not at accept,
-  so a peer that exits and whose pid is reused by an owner process in between would pass.
-  A vendor general agent runs as the owner's user, so envoy-only holds only while it presents
-  its `PROTECTORATE_TOKEN`. Right: identity captured at accept in pt-http (SO_PEERPIDFD or the
-  cgroup read then), and vendor agents under their own uid.
-- **The capability is in bwrap's argv** (`--setenv PROTECTORATE_TOKEN`), so `/proc/<pid>/cmdline`
-  of the outer bwrap shows it to same-uid processes. Right: hand the environment over a file
-  descriptor once the sandbox helper subcommand exists.
-- **The sleeves' socket is reached through a read-only bind of `run/sleeves/`** (the
-  directory, at its host path), not a fixed path like `/run/protectorate.sock`: bwrap cannot
-  create a mount point on the read-only root, and a directory bind keeps a socket re-created by a
-  restarted hub reachable. `run/bin/` (the CLI link, first on PATH) and the binary it names are
-  bound read-only too, so a sleeve cannot replace or unlink what other sleeves use. Sleeves get
-  `PROTECTORATE_SOCKET`. Right: the sandbox helper makes the fixed mount point, or pt-sandbox
-  gains src-to-dst binds.
-- **A View child runs in a scratch dir** (`pt-hub`, exec.rs `workdir`): `SandboxSpec` binds the
-  workspace writable, so a read-only view's cwd is `sleeves/<id>/view` and the root is visible
-  read-only at its own path through `/` (not when the root sits under a masked directory). Right:
-  a read-only workspace mode in pt-sandbox.
-- **Checkpoints are commit objects nobody points at** (`pt-hub`, git.rs): `commit-tree` over the
-  working tree with HEAD as parent, through a private index into `sleeves/<id>/objects` (the
-  repo's objects as an alternate), listed in `sleeves/<id>/checkpoints.jsonl`. No branch moves,
-  because a commit on a root's branch would land on the owner's branch. Right: decide with the
-  owner; likely a hidden ref namespace in a hub-owned bare mirror, plus a pruning rule.
-- **Hub git has no timeout and no sandbox** (worktree add, checkpoint, brief facts). It runs
-  nothing from the workspace: the real repo is read only through `rev-parse` and `worktree add
-  --no-checkout` with hooks off and no system or global config, and every command that reads a
-  work tree or an index runs against a shadow git dir of the hub's own (`sleeves/<id>/
-  shadow.git`: our config, HEAD as a commit id, the repo's objects as an alternate), so filters,
-  hooks, fsmonitor and textconv a sleeve configured are never defined there. A child's checkout
-  is therefore raw blobs (an LFS file stays a pointer). Right: a timeout, and the read-only
-  sandbox runner the old hub had if git itself ever needs containing.
-- **Provision has a completion barrier file** (`pt-hub`, exec.rs): `sleeves/<id>/provisioned`
-  is written (fsynced) after the layout is whole; the probe answers Applied only on it, and a
-  retried provision finishes a registered but cut-short worktree (`read-tree --reset -u`). A
-  directory left by an add cut short before git registered it is not removed; git refuses a
-  non-empty one and the provision fails. Right: fine; record the barrier in the journal if the
-  home is ever split from it.
-- **Approval answers are reported Lost** (`pt-hub`, exec.rs): `RespondApproval` is written, then
-  left Uncertain, because only Codex confirms an answer; the harness's `approval_decision` entry
-  becomes `ApprovalResolved` for activity. Right: Acked on a confirmed decision (Codex) or the
-  matching `tool_result`.
-- **OOM evidence can disappear with the scope** (`pt-hub`, exec.rs): an incarnation watches
-  `memory.events` for `oom_kill` while its scope exists, then checks it again at exit. A scope
-  collected before the watch attaches or before it can read an event leaves the cause unknown;
-  the hub logs that and uses the driver's exit cause rather than guessing OOM. A hub restart can
-  likewise lose evidence for an already-collected scope; a recovered scope without a driver has
-  no exit status. Right: preserve the scope counter until the hub records it. Under a full
-  parallel test run the watcher thread can be starved past the scope's removal (`OOM status
-  unknown: No such device`), so `repeated_scope_oom_parks_and_reports_the_memory_limit`
-  occasionally sees exit 137 instead of an OOM (2026-11-02).
-- **Exit 137 can be ambiguous**: a normal exit 137 after another scope process's OOM kill counts as OOM.
-- **A message sent during the post-restart probe is rejected** (pt-core `deliverable` ignores
-  `Sleeve::probing`): a recovered Idle sleeve takes a `SendPrompt` before `ScopeProbed` answers,
-  the executor holds no session for that g, and the Nack rejects the message (the sender is
-  told). Right: `deliverable` is false while `probing`, so the message waits in the queue.
-- **Resleeve selection is quota-weighted only among `resleeve_to`** (`pt-hub`, select.rs): the
-  candidates that are headless, not excluded, installed and not `ineligible` in `doctor.json` go
-  to quota selection with task size Medium and no health list. A candidate with no reading
-  (`unknown`: no login, reader off, or not read yet) can win, in the owner's order, after any
-  stale row that still has spare. A failed reading (`error`) cannot win, and neither can a row
-  whose windows are under the usable minimum. Readings are not journaled, so a restart spends
-  on `unknown` until the first refresh. A new sleeve always names its harness
-  (`SpawnSleeve.harness` is required), so nothing else is chosen by quota, and G1 does not read
-  quota yet. Right: the task
-  size from the sleeve's history (D27), node and probe health, and an optional harness on spawn.
-- **FetchArtifact reads one file at a time and hashes it twice** (`pt-node` `read_artifact`,
-  `pt-hub` `fetch_artifact`): the hub asks 4 MiB slices; at the end the node re-reads the whole
-  file for its SHA-256 and the hub compares it with the hash of what it received, so a file that
-  changed between slices fails the check and is fetched again (3 tries). Files over 64 MiB fail.
-  The opened file's own path is checked again only on Linux (`/proc/self/fd`); elsewhere the
-  canonical-path check stands alone, so a directory swapped between check and open could lead
-  outside. Right: a bounded archive when jobs return trees, and `GetFinalPathNameByHandleW` on
-  Windows.
-- **A held (job, attempt) with another token fails the new job** (`pt-hub` job_exec.rs `run_job`):
-  the node answers a submit of a (job, attempt) it holds with the job it holds; when that job's
-  token is not the submit's, the hub ignores the status and reports the submit refused as
-  invalid, so the job fails and the other submit's job stays on the node, unacknowledged. That
-  happens only when node job ids repeat (a hub on an older journal with the same hub tag). Right:
-  fine; an owner command to drop such a foreign tombstone if one ever shows up.
-- **A node's own job directories can outlive a crash** (`pt-node` jobs): a job without `cwd`
-  runs in `work/<job>.<attempt>/`, removed with its tombstone on AckCollected; an agent killed
-  between the `collected` line and the removal leaves it. Right: sweep `work/` against the
-  journal at open.
-- **The scheduler picks the least-loaded eligible node** (`pt-hub`, job_exec.rs `choose`): online,
-  hello seen, presence AWAY (unless `even_if_present`), not excluded, then lowest load1; retried
-  every 2 s. No per-node concurrency limit beyond one hub call at a time per node, no fairness
+  shown as text with the URL in parentheses and are not clickable. Right: tables and clickable links
+  when transcripts need them.
+- **App tables don't sort** (nodes report 7, rule 8: sort by clicking the header rule): the table
+  heads (`TableHead`, `app/lib/widgets.dart`) are static and rows keep a fixed order (`nodeOrder` in
+  `app/lib/screens/nodes.dart`). Right: a sort key per column in the shared table rows.
+- **F-keys in the web build**: the browser may keep some keys (F12 always opens devtools; F5 and F11
+  depend on the browser). Right: check per browser; the sidebar and the command palette (Esc,
+  Ctrl+K; `app/lib/shell.dart`) cover every F-key screen meanwhile.
+- **Journal retention** (`src/journal/store.zig`): every segment (rotated at 64 MiB,
+  `max_segment_bytes`) is kept forever, because nothing prunes them. `write_snapshot` exists but
+  nothing calls it, and `replay_into` reads only segments. Right: a retention rule (keep the last N
+  snapshots and their segments, archive the rest into backups) once the owner approves deleting old
+  segments. The stream log is bounded on purpose (below): its messages are derived output, not the
+  record.
+- **State records are kept forever** (`src/core/state.zig`, `src/core/apply.zig`): every approval,
+  job and rollout stays in the state, and removed sleeves and nodes are only flagged. There is no
+  State encoding (`src/core/codec.zig` encodes events only), so the journal is only ever replayed
+  from the start of the first segment (`JournalStore.replay_into`). Right: a versioned State codec
+  for `JournalStore.write_snapshot`, then pruning terminal records once they are reported and older
+  than the snapshot.
+- **Hub polls every in-flight job every second** (`src/hub/runtime.zig`, `poll_inflight_jobs`,
+  `tick_loop`): each job that is not terminal and has a node gets a status call once a second, with
+  no backoff, whatever its lease. A lease that expires (`job_lease_ms`, 5 min, `handle_tick` in
+  `src/core/apply.zig`) emits `verify_job`, whose executor (`verify_job_async`) does nothing. Right:
+  per-job backoff driven by the lease, and a real verify probe.
+- **Linux job fencing falls back to a process group** (`src/sandbox/exec.zig`, `ProcessGuard`,
+  `create_job_cgroup`): the node makes one cgroup per job under its own cgroup (`cgroup.kill`,
+  `memory.max`). When that cgroup is not writable it uses the process group plus a `/proc` scan for
+  `PROTECTORATE_JOB_ID` in each environment, so a job that calls `setsid` and clears its environment
+  escapes cancel, timeout and the fence. The unit `install-service` writes (`src/node/service.zig`)
+  has no `Delegate=`. Right: the system service's delegated cgroup subtree, one cgroup per job with
+  `cgroup.kill`, and no fallback.
+- **Job isolation is limits only** (`src/node/runner.zig`): a job gets its timeout, an optional
+  `mem_bytes` limit (cgroup `memory.max`, or the Job Object memory limit on Windows) and the process
+  guard, and runs as the agent's user with the agent's environment plus the `PROTECTORATE_*` ids.
+  The log is not capped (`pump_fn` appends all output). There is no `cpu.max` or `pids.max`, no
+  namespaces and no `mode` (sandboxed, plain, admin). Right:
+  `docs/design/nodes-ci-deliverables-verus.md` 1.3.
+- **No runner account** (`src/node/service.zig`, `src/sandbox/exec.zig`; D11): jobs run as the
+  agent's account, so as root for a system systemd unit and LocalSystem for the Windows service made
+  by `sc.exe create`, inside a Job Object with kill-on-close. SPEC 2 principle 10 (2026-11-01)
+  accepts this, so no low-privilege account is planned. Right: revisit with the threat model.
+- **Windows jobs** (`src/sandbox/exec.zig`, `ProcessGuard`): cancel and timeout call
+  `TerminateJobObject` at once (no grace period). A node restart ends every running job
+  (kill-on-close) and the node keeps no record of them afterwards. The node job e2e scenarios
+  (`scripts/zig-e2e.sh`) are Linux only; Windows was checked by hand. Right: a console-control stop
+  with a grace period for console jobs, a launch-time marker in the job (exit-code file) to tell a
+  restart from a normal end, and the e2e suite ported with `cmd /c` scripts.
+- **Presence while a job runs** (`src/core/apply.zig`, `node_presence_updated`): only PRESENT acts,
+  and only on running jobs with `on_present` kill, which the hub cancels. An `idle` job is never
+  lowered (the node has no priority change on either OS). UNKNOWN changes nothing mid-job and does
+  not block a start either (`dispatch_ready_jobs` skips only PRESENT nodes). Right: decide whether a
+  detector failing mid-job should lower jobs too, and whether UNKNOWN should block a start.
+- **Node jobs have no bound** (`src/node/runner.zig`): every job stays in the node's in-memory table
+  and its `jobs/<id>/` directory (log, and the working directory when the job has no `cwd`) stays on
+  disk; `ack_job` only releases the lease and deletes nothing. The hub acks after collection
+  (`poll_inflight_jobs`), so the growth is the node's own. Right: remove the entry and directory on
+  ack after a retention period, and have `doctor` report old uncollected jobs.
+- **The sleeve sandbox hides only credentials, not other workspaces** (`src/hub/runtime.zig`,
+  `launch_driver`; `src/sandbox/spec.zig`, `build_bwrap_argv`): `/` is bound read-only, the sleeve's
+  workspace and git dirs read-write, and only the default credential paths under the host home
+  (`default_masks`) are masked. Other sleeves' worktrees and the owner's other repos stay readable
+  (not writable). The Landlock fallback (`__guard`) restricts writes only. Right: a deny-by-default
+  view of the filesystem (only the claim, its git dirs and the toolchains bound in).
+- **Sleeves share the owner's own harness login** (`src/hub/runtime.zig`, `launch_driver`): a
+  sleeve's home is the owner's home, and its harness directory (`~/.claude`, `~/.codex`, `~/.grok`,
+  `~/.pi` or `~/.gemini`) is bound read-write, so concurrent sleeves and the owner's own CLI may
+  refresh the same token at once. That has not been seen to conflict and is not tested against the
+  real CLIs. The hub never renews a login: quota (`src/quota/readers.zig`) only reads the files, and
+  an idle-expired login shows as expired until some CLI session runs. Right: renewal through each
+  CLI's own non-chat command, once one is found.
+- **The Envoy token is in bwrap's argv** (`src/hub/runtime.zig`, `launch_driver`;
+  `src/sandbox/spec.zig`, `build_bwrap_argv`): Envoy's `PROTECTORATE_TOKEN` goes in as `--setenv`,
+  so `/proc/<pid>/cmdline` of the outer bwrap shows it to host processes of the same uid. Right:
+  hand the environment over a file descriptor or file through the `__guard` helper
+  (`src/sandbox/exec.zig`).
+- **Hub git has no timeout and no sandbox** (`src/hub/git.zig`: worktree add and remove,
+  `rev-parse`, push): each command is a plain `std.process.run` as the hub's user with the hub's git
+  config, run directly in the sleeve's workspace, so hooks, filters and config a sleeve wrote (a
+  `pre-push` hook, say) run outside the sandbox and a hung git blocks its caller. Right: a timeout,
+  and a read-only sandbox runner (or hooks and config switched off) if git itself ever needs
+  containing.
+- **Provision has no completion barrier** (`src/hub/git.zig`, `provision_worktree`): an existing
+  worktree directory counts as provisioned, so a directory left by a cut-short `worktree add` is
+  reused as it is. If both `worktree add` forms fail in a git repo, the function falls back to
+  creating an empty directory instead of failing. Right: a marker written after the layout is whole,
+  and a failed provision when git refuses.
+- **FetchArtifact buffers the whole file and hashes it once** (`src/node/runner.zig`
+  `read_artifact`, `collect_artifacts`; `src/hub/fleet.zig` `fetch_artifact`): the node hashes each
+  declared artifact when the job ends; the hub reads 256 KiB slices into memory, compares the
+  SHA-256 at the end and writes the file. There is no size limit and no retry, and a file changed
+  after collection fails with `ChecksumMismatch`. Only single files are collected, and the path
+  check is lexical (no absolute path, no `..`), so a symlink inside the job's directory is followed.
+  Right: a bounded archive when jobs return trees, a size limit, and opening without following
+  symlinks.
+- **The scheduler picks the first eligible node by id** (`src/core/apply.zig`,
+  `dispatch_ready_jobs`): approved, online, not removed, not excluded, `jobs_policy` not none,
+  presence not PRESENT (unless `even_if_present`), matching target node and arch; the lowest node id
+  wins, with no look at load or free slots. It runs on job and node events and on every 10 s Tick. A
+  node's own admission queue (`src/node/admission.zig`) holds the excess; there is no fairness
   between requesters. Right: node slots from the inventory and a queue per requester.
-- **Hub job logs are refreshed only on the core's Tick** (`pt-hub`, job_exec.rs): a running job's log
-  is pulled when pt-core polls it (every 10 s Tick), so `job log` lags by up to a Tick. Right: a
-  log follow RPC on the node that pushes appended bytes.
-- **A cancelled job can lose its final log tail** (`pt-core` jobs): cancellation can acknowledge
-  collection before the hub fetches the final output, and the node then removes its copy.
-  `job run --wait` exposes the gap. Right: collect the final log before AckCollected.
-- **Hub job metadata outside the journal** (`pt-hub`, jobs.rs `JobStore`): the request record
-  rides in the core's `JobSpec.command` (its digest is the spec's), but artifact results live in
-  `<home>/jobs/<job>/<attempt>/artifacts.json` and the per-job view cache in memory. Right: fine
-  while the core owns state; journal artifact results if `job show` must survive a lost home.
-- **Incomplete artifact collection retains the node tombstone** (`pt-core` jobs): after three
-  failed collection attempts the hub fails the job without acknowledging it, preserving the
-  node's files, but has no command to retry collection of that failed attempt. A dropped
-  connection is not one of those attempts: the hub saves what it fetched and collects again on
-  the next status. Right: an explicit collection retry that keeps the original attempt and never
-  re-runs the job.
-- **Fleet poll interval is one knob** (`pt-hub`, `fleet.poll_secs`, default 15): presence and the
-  node list share it. Right: split them if presence must react faster than listings.
-- **Embedded binaries are never pruned** (`pt-embed`): the hub unpacks headscale and member to
-  `<home>/net/<name>-<sha256>`, the node member to `<state>/net/`, with our own inflate (after
-  zlib's puff, a bit at a time); old versions stay, since nothing deletes. Build scripts gzip with
-  the system `gzip -9`; officewin, which has none, gets member gzipped by release.sh. Right:
-  prune old unpacked versions once the owner agrees to that rule; table-driven decoding if
-  unpack time ever shows.
-- **D9 covers three calls and the turn, not the request chain** (`pt-hub`, rule.rs): while
-  Envoy's current turn was started (or steered) by an `agent:` message, Envoy's own `sleeve rm`,
-  `job run` and spawns past `d9_spawn_limit` (default 3 per turn) wait for an owner approval
-  (`d9_approval_timeout_secs`, default 900, then `timeout`). The origin is cleared when the turn
-  settles, so a background process Envoy started in that turn acts as the owner's afterwards;
-  a sleeve Envoy prompted on the agent's behalf is not gated at all; no push method exists yet
-  to gate. Outside such a turn no node job waits for the owner, `maintenance` or not: a node runs
-  every job with its own account (root, or LocalSystem on Windows), and SPEC 2 principle 10
-  accepts that. Right: carry the origin through messages Envoy sends (a request chain), and add
-  pushes to the list when the API grows them.
-- **Vendor agents read a filtered Envoy transcript** (`pt-hub`, api.rs `agent_transcript`):
-  `EnvoyRead` with the envoy-only token shows each agent message and the assistant text and
-  settle of the turn it started, up to another sender's message; owner and sleeve messages,
-  tools and reasoning are left out. All agents share the one token, so they see each other's
-  exchanges, and an answer can still quote what Envoy learned elsewhere. It reads the whole
-  transcript per call. Sleeves get none of `EnvoyRead` or `EnvoyWait`. Right: a token per
-  agent, and an index of agent turns if transcripts grow large.
-- **Who sent a message is a text prefix** (`pt-hub`, api.rs): mail reaches the harness as
-  `[from sleeve <name>] ...` and agent requests as `[from agent:<name>] ...`, since a prompt has no
-  other sender field; owner and Envoy messages are unprefixed. Right: revisit if a harness grows
-  a sender field.
-- **The brief has no summary** (`pt-hub`, brief.rs): facts plus pre-run history hits (the
-  latest and first task prompts and the last tool error, through `pt_history::brief_query`, top
-  3 each within 4 KiB, this sleeve only), but no planned-resleeve summary, no checkpoint id, and
-  no 6 KiB small-target variant. Context usage is shown from the outgoing session's log; no
-  guardrail reads it yet.
-- **Ticks are journaled and every batch clones the State** (`pt-hub`, core.rs): 8640 Tick frames
-  a day, and the published view is a full copy that grows with the never-pruned records. Right:
-  the State codec and snapshots (above), then a cheaper view (shared sub-trees or per-sleeve
-  snapshots).
-- **Transcripts never rotate** (`pt-hub`, transcript.rs): one JSONL per sleeve, a 4096-entry
-  tail in memory, and a full read for older ranges and for `EnvoyWait`. Fast: an offset index.
-- **Activity `since_ms` restarts with the hub**: it is tracked in the core thread, not journaled.
-- **The stale unix socket is unlinked at start** (`pt-hub`, serve.rs): only when the path is a
-  socket and the journal lock is held (no other hub can own it). The owner may prefer a fresh
-  socket name per start.
-- **Wait and EnvoyWait hold a connection thread** for up to an hour, out of 256. Fine for a few
-  clients; right if Envoy fans out: wait on the event stream instead. The idle keep-alive is
-  pt-http's 60 s (a request being answered is not idle), so up to 256 idle clients can still hold
-  every slot for a minute. Right: a pt-http option that closes the oldest idle connection when
-  the slots run out, and a shorter idle limit for unauthenticated connections.
-- **A revoked caller's event stream ends within a second** (`pt-hub`, http.rs `events`): the
-  stream re-runs the caller's authentication once per bus wait (at most 1 s) and sends close
-  1008 once it no longer yields the same principal. Right: a revocation notice on the bus that
-  wakes every stream of that token at once.
-- **`PT_TEST_FAULT=usage_limit:<sleeve name>`** (`pt-hub`, hub.rs `Fault`): a test-only knob.
-  The named sleeve's first settled
-  turn in this hub process is reported to the core as `TurnEnd::UsageLimit`, which trips G1 and
-  forces a resleeve; the e2e `forced_resleeve_with_brief` uses it. The hub warns at start when it is set. Never set it in production.
+- **Hub job logs are mirrored by re-fetching** (`src/hub/runtime.zig`, `poll_inflight_jobs`): while
+  a job runs, each poll fetches the first 1 MiB of the node's log from offset 0 and rewrites the
+  hub's copy, so `job log` lags up to a second and anything past 1 MiB never reaches the hub.
+  `GetJobLog` (`src/hub/api_dispatch.zig`) reads the whole mirror, up to 16 MiB. Right: a log follow
+  RPC that pushes appended bytes, fetched by offset.
+- **Hub job metadata is memory only** (`src/hub/runtime.zig`, `JobMeta` in `job_meta`): the request
+  record (argv, cwd, declared artifacts, limits), the artifact results, the log path and the lease
+  ids live only in memory, while the journaled `JobRecord` holds just the state. After a hub restart
+  `GetJobLog` and `job show` no longer find the job's data. Right: journal the request and the
+  artifact results.
+- **Artifact collection is one attempt** (`src/hub/runtime.zig`, `poll_inflight_jobs`): when a
+  finished job has an artifact that cannot be fetched, even from a dropped connection, a succeeded
+  job is failed with "artifact collection failed" and the hub acks it anyway. There is no command to
+  retry the collection. The node keeps the files, since nothing there is deleted. Right: an explicit
+  collection retry that keeps the original attempt and never re-runs the job.
+- **D9 covers four calls and the turn, not the request chain** (`src/hub/runtime.zig`, `gate_d9`;
+  `src/core/apply.zig`): while Envoy's turn is flagged `d9` (the turn was started by agent mail, or
+  by mail or a report from a sleeve), Envoy's own `sleeve rm`, `job run`, git push and spawns past
+  `d9_spawn_limit` (default 3 per turn) wait for an owner approval (`d9_approval_timeout_secs`,
+  default 300, capped at 600; then the approval expires). The flag clears when the turn settles, so
+  a background process Envoy started in that turn acts as the owner's afterwards, and a sleeve Envoy
+  prompted on the agent's behalf is not gated at all. Outside such a turn no node job waits for the
+  owner: a node runs every job with its own account, and SPEC 2 principle 10 accepts that. Right:
+  carry the origin through messages Envoy sends (a request chain), and add new pushing calls to the
+  list when the API grows them.
+- **Vendor agents read the whole Envoy transcript** (`src/hub/api_dispatch.zig`, `EnvoyRead`,
+  `extract_envoy_reply`): `EnvoyRead` with the envoy-only token returns the unfiltered Envoy
+  transcript, with owner and sleeve messages, tools and reasoning. All agents share the one token,
+  so they see each other's exchanges. Each read and each `EnvoyWait` reads the whole transcript
+  file. Right: a filtered view of an agent's own exchanges, a token per agent, and an index of agent
+  turns if transcripts grow large.
+- **Who sent a message is mostly not carried to the harness** (`src/hub/runtime.zig`,
+  `notify_parent`, `deliver_prompt`): a child's report reaches its parent as the text prefix `[child
+  report from <name>] ...`, since a prompt has no sender field; mail from Envoy and owner messages
+  arrive unprefixed, and the transcript's `user_message.from` is always "owner". Right: revisit if a
+  harness grows a sender field, and record the real sender in the transcript entry.
+- **The brief is a stub** (`src/hub/brief.zig`, `write_handoff`): one markdown file per sleeve with
+  the generation, the cause and a fixed one-line summary ("Auto handoff", "Context ceiling reached;
+  auto-handoff", "Terminal takeover handoff"). It has no workspace facts, no pre-run history hits,
+  no planned-resleeve summary and no checkpoint id.
+- **Ticks are journaled** (`src/hub/runtime.zig`, `tick_loop`, `commit`): a Tick event every 10 s is
+  appended and fsynced, 8640 frames a day, and replay applies each one. Right: the State codec and
+  snapshots (above).
+- **Transcripts never rotate** (`src/hub/transcript.zig`): one JSONL per sleeve, and every read
+  loads and parses the whole file to find its range. A file over 64 MiB reads as an empty
+  transcript. Fast: an offset index.
+- **Wait and EnvoyWait hold a connection thread** (`src/hub/api_dispatch.zig`,
+  `src/hub/http_server.zig`): each call polls the stream hub for up to 60 s on its own request
+  thread. The HTTP server starts one detached thread per connection (`accept_loop`, `conn_thread`)
+  with no connection cap and no idle timeout, so idle or slow clients can pile up threads. Fine for
+  a few clients. Right: a connection limit that closes the oldest idle connection, a shorter idle
+  limit for unauthenticated connections, and an event-driven wait if Envoy fans out.
+- **A revoked caller's event stream stays open** (`src/hub/http_server.zig`, `handle_websocket`):
+  the token is checked once when `/api/events` is opened. `revoke_device` (`src/hub/home.zig`) stops
+  the token working for new requests but does not end streams already open, which keep receiving
+  until the client disconnects. Right: re-check the principal on each bus wait, or a revocation
+  notice on the bus that closes every stream of that token at once.
 - **RealHub is exercised only by `scripts/app-e2e.sh`** (`app/lib/real_hub.dart`): the web build
   against a real hub (pairing, Envoy chat, sleeves, a D9 approval denied from the app), outside
-  `make test` because it needs Chromium and the local model. Reconnect backoff is 1 to 30 s; a
-  transcript loads its last 2000 entries with no paging back. Right: paging when a chat scrolls
-  past its first entry, and the script in CI once a runner has Chromium.
-- **Pairing codes are in memory and unthrottled** (`pt-hub`, devices.rs): `AddDevice` makes a
-  ten-minute, single-use code (12 base32 characters, about 60 bits, with a small modulo bias);
-  pending codes die with the hub; `PairDevice` is public and has no attempt limit. Tokens are
-  stored as SHA-256 in `devices.json`; `last_seen` is written at most once a minute. Right: a
-  per-address attempt limit if the hub is ever reachable beyond the owner's networks, and a QR
-  code in the app for scan to join.
-- **TakeoverTerminal is a stub** (`pt-api`): it answers `unavailable`, and the app's Terminal
-  view is a placeholder. Right: the PTY handoff of SPEC 3.3 and an xterm.dart view (build
-  stage 6).
-- **Web events token in the URL** (`app/lib/api/transport_web.dart`): a browser cannot set
-  `Authorization` on a WebSocket, so the web client sends `?access_token=` on `/api/events`,
-  where Traefik's access log may record it. Right: a short-lived ticket from a POST, or a
+  `make e2e` because it needs Chromium and the local model. Reconnect backoff is 1 to 30 s; a
+  transcript keeps at most 2000 entries (`_Tx.keep`) with no paging back. The script's default
+  binary path still points at the old cargo `target/release/protectorate`, so it needs
+  `PROTECTORATE_BIN`. Right: paging when a chat scrolls past its first entry, the default path moved
+  to the Zig build output, and the script in CI once a runner has Chromium.
+- **Pairing codes are unthrottled and short** (`src/hub/home.zig`, `create_pairing`,
+  `claim_pairing`, `random_short_code_alloc`): `AddDevice` makes a ten-minute, single-use code of 8
+  characters from a 32-letter alphabet, but only 6 random bytes feed it, so characters 7 and 8
+  repeat characters 1 and 2 (about 30 bits). `PairDevice` is public (`src/api/schema.zig`) and has
+  no attempt limit. Codes are saved in `auth.json` (mode 0600 off Windows) and survive a restart.
+  Device tokens are stored there in plain text and compared in constant time. `last_seen_ms` is
+  updated in memory on each request and reaches disk only at the next `auth.json` save. Right: 8
+  independent random characters, a per-address attempt limit if the hub is ever reachable beyond the
+  owner's networks, hashed device tokens, and a QR code in the app for scan to join.
+- **TakeoverTerminal only stops the managed sleeve** (`src/hub/runtime.zig` `takeover_sleeve`,
+  `src/cli/commands.zig` `cmd_sleeve_attach`): the hub writes a handoff brief, posts a notice and
+  stops the incarnation, and `sleeve attach` then runs the harness's own TUI with its resume flag in
+  the caller's terminal. There is no hub-owned PTY and no hand back, and the app's Terminal view
+  (`app/lib/chat.dart`, `_TakeoverPlaceholder`) is a placeholder. The method's doc in
+  `src/api/schema.zig` still says it answers unavailable. Right: the PTY handoff of SPEC 3.3 and an
+  xterm.dart view (build stage 6).
+- **Web events token in the URL** (`app/lib/api/transport_web.dart`, `src/hub/http_server.zig`): a
+  browser cannot set `Authorization` on a WebSocket, so the web client sends `?access_token=` on
+  `/api/events`. The hub accepts `access_token` or `token` in the query of any request, where a
+  reverse proxy's access log may record it. Right: a short-lived ticket from a POST, or a
   same-origin cookie for the web build the hub serves.
-- **Scopes are coarse** (`pt-api`, `Scope`): owner, sleeve, envoy_only or public per method. The subtree
-  rule for sleeve scope (own sleeve and children; Envoy reaches all) is the hub's job per
-  request. Envoy cannot `Decide`, though the design lists answering sleeves as Envoy's; a child
-  has no API path to mail its parent or Envoy (Wait `report` assumes one). Right: decide whether
-  Envoy may answer tool approvals, and add a mail method with its own routing rule.
-- **Large integers on web** (`app/lib/api/api.g.dart`): u64 fields are Dart `int`, which on web
-  is a JS double, exact only to 2^53. Seqs, sizes and epoch ms stay far below; a random 64-bit
-  value would not. Right: send such fields as strings if one ever appears.
-- **Job log as lossy text** (`pt-api`, `JobLog`): log bytes go out as UTF-8 with invalid
-  sequences replaced, so a binary log is not exact. Right: base64 bytes if exact logs matter.
-- **A UTF-8 character split between job log pages is corrupted** (`protectorate` job wait): each
-  page is independently decoded with replacement, so a character across the 1 MiB boundary is
-  printed as two replacement characters. Right: page bytes and decode incrementally.
-- **check-gen needs the Dart SDK** (`Makefile`): `pt-apigen`'s output is formatted with
-  `dart format`, so `make check` needs `dart` on PATH (or `DART=`). Right: fine while the app is
-  built on the same host; emit formatter-stable Dart directly if CI ever lacks Flutter.
-- **Node reports fenced by node, not by submit** (pt-core jobs): `JobStatus` names the node that
-  answered, and a report from any node but the job's current one is dropped. A node chosen again
-  for the same attempt, after its 10 min exclusion, is trusted to have no answer that old in
-  flight. Right: a per-submit token in `NodeSubmit` that the node echoes in every status.
-- **Prompt evidence by ordering** (pt-core, `prompt_evidence`): harness output confirms an
-  in-flight prompt or compaction only once its `Dispatched` is in, which relies on a sleeve's
-  observations and executor reports sharing one ordered stream. The hub meets it in the pump
-  (`pt-hub`, exec.rs): a prompt's `Dispatched` is submitted when the driver's `user_message`
-  for it comes through the event stream, so output read before the write is the previous
-  turn's, and its `Acked` (with the native turn id from the ack or, failing that, from the
-  `turn_started` that follows within 2 s) or `Nacked` when the ack does. Other executor reports
-  are handed to the pump, which submits them after the harness events it has received; it wakes
-  every 10 ms to look for them, since std channels have no select. A confirmed prompt whose turn
-  id arrives later than 2 s stays unbound, so its turn cannot be steered. Right: drivers tag
-  output with the native turn id where the protocol has one, and evidence must match the
-  prompt's turn.
-- **A prompt that never left waits for the next incarnation** (pt-core `return_unsent`,
-  `deliverable`; `pt-hub` exec.rs `prompt`): after a restart nothing is delivered until the old
-  scope is probed, and a prompt or steer still `Intent` when its incarnation is fenced goes back
-  to the head of the queue. The executor leaves a prompt for an incarnation it has no live
-  session for (or whose driver says it ended) unreported, so the fence finds it `Intent`. A
-  prompt written to a harness that died before reading it is still "may have applied". Right:
-  fine.
-- **An unregistered systemd-run is found by its command line** (`pt-hub`, exec.rs
-  `kill_unregistered`): before probing a scope it has no session for, the hub SIGKILLs any
-  process of its uid whose argv is `systemd-run ... --unit <that scope>`, one a crashed hub
-  started that has not yet become the sandbox, and waits for it to go; otherwise it could
-  register the scope after the probe found none. Right: pt-sandbox registers the scope through
-  the user manager's D-Bus API before forking the sandbox, so no unregistered launcher exists.
-- **Cancel re-sent every Tick** (pt-core jobs): Cancelling re-sends an uncertain cancel at each
-  10 s Tick until the lease ends. Right: the per-job backoff of node polling.
-- **Torn batch versus corruption** (pt-journal, `open_segment`): a frame failing its CRC is cut as
-  a torn append only when no intact frame follows it; otherwise open fails. A group-commit batch
-  whose blocks reached disk out of order after a power loss also fails open, though none of it
-  was acknowledged. The length is not checksummed, so a corrupted length is indistinguishable
-  from a torn append and is cut. Right: a batch-end marker, so a torn batch is told apart from
-  corruption, and a versioned format with protected headers.
-- **Collecting lease** (pt-core jobs): an artifact check that does not answer within the lease
-  makes the job Lost, and its next Exited report collects again, so a slow fetch can run twice.
-  Right: fetch progress reported to the core, and the lease measured from it.
-- **A binary built without Go has no member** (`protectorate`, `protectorate-node`): with no
-  `go/bin` and no Go to build it, the hub has no fleet (`version` says so; the fleet e2e skips)
-  and the node needs `--member PATH` (`--version` says so). The live nodes' units still pass
-  `--member /usr/local/lib/protectorate-node/member`, which wins over the embedded one. Right:
-  fine; a reinstall drops the flag.
-- **LAN-direct DERP is plain HTTP** (`pt-fleet` `Config::lan_direct`, node `member::command`):
-  with an `http://` server URL both sides set `TS_DEBUG_USE_DERP_HTTP=1`, tailscale's debug knob,
-  and the DERP map pins the IPv4 with STUN off. Right: production goes through Traefik with TLS
-  (`derp.tls`); keep the knob for LAN tests only.
-- **headscale's bwrap has the host network** (`pt-fleet`, headscale.rs): user, pid, ipc, uts and
-  cgroup namespaces, caps dropped, only its own dir writable, but no seccomp filter, no memory or
-  pid limit, and it can reach anything the hub can. Right: the namespaces helper with a seccomp
-  allowlist and a cgroup when the hub has a scope.
-- **Child stop signals go through the `kill` binary** (`pt-fleet`, child.rs): SIGTERM, then
-  SIGKILL after 10 s, and bwrap's child is found through /proc. Right: `pt_sys` grows a `kill`
-  wrapper (libc is already there) and pidfds to close the pid-reuse race.
-- **Fleet logs never rotate**: `tailnet/headscale/headscale.log`, `tailnet/member.log` and the
-  node's member log grow forever. Right: size-capped rotation shared with the hub's transcripts.
-- **Stale sockets accumulate** (`pt-fleet`): a killed member leaves `member.sock`, so the next
-  start uses `member-2.sock` and so on, and the stand-in hub makes `ctl-<pid>.sock` per run,
-  because nothing here may unlink. Right: one path, unlinked at start after a failed connect (as
-  the hub's own socket is), once the owner agrees to that rule for runtime files.
-- **QR codes never decoded by a scanner**: zbarimg is not on the dev host and the app has no
-  scanner yet; the `encode` fuzz target only proves pt-qr matches qrcodegen module for module.
-  Right: decode `join`'s terminal output with a real scanner (zbar or the app) in an e2e.
-- **Linux `uninstall` never ran** (`protectorate-node`, service.rs): it removes only manifest
-  paths, but no test or machine has exercised it on Linux, since that deletes files. (Windows ran
-  it on officewin, after a partial install and after a full one.) Right: run it on a throwaway VM
-  (or a container with systemd) in an e2e, then reinstall.
-- **Windows service through sc.exe** (`protectorate-node`, winservice.rs, supervise.rs): our own
-  dispatcher and control handler (pt-node `sys/win32_service.rs`), but create, start, stop,
-  delete and failure actions go through `sc.exe`, and the state dir is limited to SYSTEM and
-  Administrators through `icacls.exe` (not recorded: the state dir is not ours to undo). Stop
-  reports STOPPED and ends the supervisor, so the node, member and running jobs die by
-  kill-on-close and the jobs read Lost after the next start. `uninstall` must run from a copy outside
-  `%ProgramFiles%\protectorate-node` (Windows cannot delete the running exe). Tested on officewin
-  with a sleeping stand-in for member (officewin must not join a fleet for this): install, member
-  in the job, killing serve kills member and the SCM restarts serve, a job ran as SYSTEM, stop,
-  uninstall left no service, files or process (that was `serve --service` before the
-  supervisor). A reboot was not tried there. Right: our own SCM
-  calls if sc.exe output parsing bites, a reboot test on a spare box, and stop that lets jobs
-  finish or records them as interrupted.
-- **`join` leaves the Windows state dir open until install-service** (`protectorate-node`):
-  under `%ProgramData%` it inherits read access for every user (member keys), until
-  install-service runs icacls. Right: join sets the private DACL itself.
-- **No fleet job e2e on Windows yet**: presence now works from the service (AWAY through the
-  idle-probe on officewin), and a job ran through the installed service's listener, but not
-  through a hub and member. Right: a fleet job e2e on a Windows node.
-- **The poller runs the headscale CLI every 15 s and a thread per node** (`pt-fleet`,
-  poller.rs): fine for a home fleet. Right: headscale's gRPC over its unix socket, and one
-  scheduler thread if the fleet ever reaches hundreds.
-- **`Node.id` is headscale's node id** (`pt-fleet` view.rs): the API, `job run --node` (which also
-  takes the name) and the core's job records use it; the agent's own id and journal epoch are
-  only in `NodeView.hello`, and the hub derives its node-side job ids (`<hub tag>-j<n>`) and
-  epoch from the hub's own journal. A reinstalled node keeps neither id. Right: fine until nodes
-  are re-enrolled under the same name; then key nodes by the agent id.
-- **headscale listens on the whole LAN** (stand-in hub at `192.168.10.44:7480`): no host firewall
-  admits only the reverse proxy. Right: production binds where Traefik reaches it and a firewall
-  rule admits only stronghold.
-- **Stand-in hub** (`pt-fleet` examples/fleet.rs): agent-world, msr1-kids and officewin joined a
-  fleet run by the example, home `~/.local/share/protectorate-fleet`. The hub now runs the fleet
-  itself and can adopt that dir (`serve --fleet-dir ~/.local/share/protectorate-fleet/tailnet
-  --fleet-listen 192.168.10.44:7480 --fleet-udp-port 7483`, after stopping the example), keeping
-  the Noise key the nodes pin. Right: adopt it, then retire the example's `serve`.
-- **Node installers ran in dry-run mode only** (`scripts/install-node.sh`, `install-node.ps1`):
-  they fetch from the GitHub release (12b item 13 supersedes a hub-served installer), check
-  SHA256SUMS, stage, then run `join` and `install-service`. install-node.sh was dry-run on
-  agent-world (whose node is live; not root, so its 0700 state dir reads as unknown) and the ps1
-  on officewin; install.sh's real path ran into a scratch home with stand-in `systemctl` and
-  `loginctl`. No real node install, `join` from an installer, or real hub service start has run.
-  Right: one real install each on a throwaway VM, then on a spare box.
-- **`join` waits 15 minutes then gives up**: headscale keeps a registration that long in memory,
-  so an unapproved node must run `join` again. Right: fine; the app's scan path approves in
-  seconds.
-- **Approvals are core state and kept forever** (pt-core approval.rs): the ledger is journaled
-  like every other record and never pruned (see "pt-core records are kept forever"). A decision
-  is recorded once: abandoning an Uncertain answer releases its record but not the decision, so
-  the harness then waits until G8 or an interrupt. `allow_session` is recorded and sent as allow
-  once, since `RespondApproval` carries only allow or deny. Right: a decision kind in the event
-  and the record once a driver keeps session rules.
-- **A D9 call does not survive a restart** (pt-core `recover_approvals`): the API call waiting on
-  an action approval dies with the hub, so recovery marks the approval and a later decision is
-  recorded as `abandoned` and runs nothing; the agent must ask again. One past its deadline at
-  recovery ends `abandoned` with no decision. Right: fine while D9 calls are synchronous; a
-  durable action queue if they ever become requests the hub carries out later.
-- **A tool approval of a live incarnation outside G9 has no deadline** (pt-core
-  `tick_approvals`): one asked in a pane, or left pending once the turn moved on without a
-  settle, stays pending until the incarnation ends; its journaled deadline is shown but only G9
-  answers the harness. Right: let the core time those out (cancel, nothing written) once panes
-  report approvals.
-- **The stream log is a side file, not the journal** (`pt-hub`, stream.rs): kept messages go to
-  `<home>/stream.log` with one fdatasync per writer batch (a subscriber sees a message only
-  once it is on disk, so seqs continue exactly after a crash), and it is rewritten through a
-  temp file and rename once it holds twice what it keeps: the newest 10,000 messages or 7 days,
-  whichever is more, plus hub events by the same rule. Entry messages repeat transcript JSON,
-  so the file is larger than it needs to be. Right: store transcript references, or move the
-  stream into journal snapshots once pt-journal has retention.
-- **An interrupted-turn notice can be lost across a crash** (`pt-core` sleeve): if the hub crashes
-  after journaling `Exited` but before executing its `Notify` intents, recovery does not recreate
-  that notice. Right: journal notification delivery or re-derive it on recovery.
-- **The first batch after a restart re-announces recent state** (`pt-hub`, core.rs): sleeves,
-  and jobs and approvals pending or changed in the 10 minutes before the journal's last event,
-  because a crash between the journal's fsync and the stream log's could lose their messages.
-  A sleeve removed in that window is not re-announced. Right: journal the stream position with
-  each batch, or a single fsync for both.
-- **`supervised` is new and mostly untested in the hub** (`pt-hub`, exec.rs): config
-  `supervised: ["claude"]` starts those harnesses with their approval gate on; only Claude's
-  gate is run for real, by the driver (`supervised_approval`), and the hub's side of an approval
-  across a restart by `d9_approval_across_restart` and the core fuzz seeds. (The paid hub test
-  went away with per-hub logins: a suite hub has none.) Right: run Codex and Grok the same way.
-- **Quota readers run on one thread** (`pt-hub`, quota.rs): a `pt_quota::Cache` (5 min TTL,
-  stale after 10 min, backoff from 30 s) over the readers of installed harnesses, refreshed every
-  `quota_poll_secs` (default 60; 0 never reads, which the e2e suite uses so no test hub reads
-  the owner's vendor quotas); a changed row goes out as a `quota` message. Readings are not
-  journaled, so a restart starts at `unknown`. Right: fine; persist the last good reading if a
-  restart must keep dispatch weighting.
-- **A stuck quota read can leave one worker behind** (`pt-quota`, cache.rs): publication has a
-  deadline and cached rows age monotonically, but an OS-blocked file read cannot be cancelled;
-  the cache allows at most one such worker per reader and retries only after it returns. A read
-  that does finish after the deadline is applied on the next refresh, and each curl in the read
-  gets only the time still left. Right: use a killable helper process if network filesystems
-  make this a practical problem.
-- **The web app embedded is about 17.7 MB** (`crates/protectorate/build.rs`; the bundled Inter fonts
-  added about 1 MB on 2026-11-02): the release binary
-  is 19.4 MB with it and 1.7 MB without; with gzipped headscale and member too (25 MB) the
-  release hub assets are 44.9 MB (arm64) and 47.8 MB (amd64). Debug symbols, the experimental CanvasKit and the skwasm
-  renderers are left out; both CanvasKit variants stay (Chromium and the full one for other
-  browsers, only Chromium tested). Files go out uncompressed with an ETag. Right: precompressed
-  gzip copies with `Content-Encoding` and a check in Firefox and Safari.
-- **The events WebSocket checks Origin against Host** (`pt-hub`, http.rs): a browser page from
-  another origin is refused, so the web app works only from the hub that serves it (or a
-  client that sends no Origin, like dart:io). Right: an allowed-origins setting if a separately
-  hosted web app is ever wanted.
-- **The MCP bridge has tools only** (`protectorate mcp --envoy`): envoy_send, envoy_wait and
-  envoy_read over line-delimited JSON-RPC, protocol versions 2025-06-18, 2025-03-26 and
-  2024-11-05; no resources, prompts or notifications, and the agent name comes from `--as` or
+- **Scopes are coarse** (`src/api/schema.zig` `Scope`, `src/hub/api_dispatch.zig`): owner, sleeve,
+  envoy_only or public per method, and the check only tests the kind of caller. `owner` admits the
+  owner token and paired devices, `envoy_only` adds Envoy, and `sleeve` admits any authenticated
+  caller. There is no per-request subtree rule (own sleeve and children), and `sleeve_tokens` in
+  `src/hub/home.zig` is never filled: only Envoy gets `PROTECTORATE_TOKEN` (`src/hub/runtime.zig`),
+  so other sleeves are given no token to mail a parent or Envoy. Envoy cannot `Decide` (owner
+  scope), though the design lists answering sleeves as Envoy's. Right: decide whether Envoy may
+  answer tool approvals, issue per-sleeve tokens with the subtree rule, and add a mail method with
+  its own routing rule.
+- **Large integers on web** (`app/lib/api/api.g.dart`, `src/tools/apigen.zig` `dart_type_name`):
+  u64, i64, u32, i32 and usize fields are all Dart `int`, which on web is a JS double, exact only to
+  2^53. Seqs, sizes and epoch ms stay far below; a random 64-bit value would not. Right: send such
+  fields as strings if one ever appears.
+- **Job log text must be valid UTF-8** (`src/api/schema.zig` `JobLog`, `src/hub/api_dispatch.zig`
+  `GetJobLog`): a log page is sliced at a byte offset and limit and returned as the `text` string.
+  Zig's JSON writer emits a slice that is not valid UTF-8 as an array of byte values instead of a
+  string, which happens for a binary log or a page boundary that splits a multibyte character, and
+  the Dart client (`_string` in `api.g.dart`) then rejects the response. The hub reads at most 16
+  MiB of a log, and a larger log reads as empty. Right: base64 bytes, or pages cut on character
+  boundaries.
+- **Torn tail versus corruption** (`src/journal/store.zig` `JournalStore.open`,
+  `src/journal/codec.zig` `recovery`): a frame failing its CRC is cut as a torn append only when no
+  intact frame follows it (`has_intact_frame_after`); otherwise open fails with `JournalCorrupted`.
+  A torn tail in any segment but the last also fails open. The frame length is not covered by the
+  CRC, so a corrupted length (zero, too large or past the end) is read as a torn append and cut,
+  even with intact frames after it. The segment header is a magic and a version with no checksum.
+  Each event is one frame with one fsync, so there is no batch to tell apart. Right: a checksummed
+  length and header, so a torn append is told apart from corruption.
+- **QR codes never decoded by a scanner** (`src/qr.zig`, `src/cli/commands.zig`): `device add` and
+  `node join-token` print the code with `to_terminal_alloc`, and the app has no scanner yet. The
+  only check is the DST oracle (`src/dst/oracle.zig`), which asserts a matrix of at least version 1
+  and a non-empty terminal render, not that it decodes. Right: decode the terminal output with a
+  real scanner (zbar or the app) in an e2e.
+- **Linux `uninstall` is not exercised** (`src/node/service.zig`, `cmd_uninstall`): it disables the
+  systemd unit by name and deletes the unit file and `install-manifest.json`, but no script in
+  `scripts/` runs it and `docs/install.md` records no Linux run, since it deletes files. Right: run
+  it on a throwaway VM (or a container with systemd) in an e2e, then reinstall.
+- **Windows service through sc.exe** (`src/node/service.zig`, `cmd_install_service`,
+  `cmd_uninstall`, `cmd_supervise`): our own dispatcher and control handler (`win_service_main`,
+  `win_ctrl_handler`), but create, start, failure actions, stop and delete go through `sc.exe`. A
+  stop control ends the supervised `serve` process with `TerminateProcess` (`stop_active_child`); it
+  does not wait for running jobs. Install, run and uninstall were checked by hand, not through a hub
+  (`docs/install.md`). Right: our own SCM calls if sc.exe handling bites, a reboot test on a spare
+  box, and a stop that lets jobs finish or records them as interrupted.
+- **Join and install-service do not restrict the Windows state dir** (`src/node/serve.zig`,
+  `src/node/service.zig`): no code in `src/` calls icacls or sets a DACL, so the state dir (the
+  node's key) keeps its inherited permissions. The default home is
+  `%USERPROFILE%\.protectorate-node`, but a home under `%ProgramData%` would inherit read access for
+  every user. `docs/windows-node-update.md` says `install-service` limits the dir to SYSTEM and
+  Administrators, which the code does not do. Right: `join` and `install-service` set the private
+  DACL themselves.
+- **No fleet job e2e on a Windows node**: `scripts/zig-e2e.sh` only checks that the Windows hub and
+  node binaries cross-build (PE32+), and `scripts/windows-client-update-e2e.ps1` covers the desktop
+  client's updater, not node jobs. Right: a fleet job e2e on a Windows node.
+- **Node installers are tested by dry run only** (`scripts/install-node.sh`,
+  `scripts/install-node.ps1`): they fetch from the GitHub release, check `SHA256SUMS`, stage under
+  `<home>/releases/<version>/`, then run `join` and `install-service`. `docs/install.md` records dry
+  runs on real machines and `install.sh`'s real path against a scratch home with stand-in
+  `systemctl` and `loginctl`; no real node install through an installer is recorded. Right: one real
+  install each on a throwaway VM, then on a spare box.
+- **Approvals are core state and kept forever** (`src/core/apply.zig`, `src/core/state.zig`): the
+  ledger is journaled like every other record and never pruned. The hub never writes a snapshot
+  (`write_snapshot` in `src/journal/store.zig` has no caller), so replay reads every segment.
+  `allow_session` reaches the driver as given, but only Codex maps it to `acceptForSession`; Claude
+  and Grok treat it as allow once. Right: prune terminal approvals once they are older than a
+  snapshot, and keep session rules once a driver supports them.
+- **A D9 call does not survive a restart** (`src/hub/runtime.zig` `gate_d9`, `src/core/apply.zig`):
+  the API call waiting on an action approval holds its request thread (`d9_approval_timeout_secs`,
+  300 s by default, at most 600) and dies with the hub. After a restart the approval stays pending
+  until its timeout expires it, a decision on it finds no live incarnation and is recorded as
+  `fenced`, and nothing runs; the agent must ask again. Right: fine while D9 calls are synchronous;
+  a durable action queue if they ever become requests the hub carries out later.
+- **An interrupted-turn notice can be lost across a crash** (`src/core/apply.zig`,
+  `src/hub/runtime.zig` `commit`): notices are `emit_notice` intents run after the event is
+  journaled, and `replay_into` (`src/journal/store.zig`) discards the intents it regenerates. If the
+  hub crashes after the journal append but before the intent runs, the notice is never recreated.
+  Right: journal notification delivery or re-derive it on recovery.
+- **`supervised` is never selected by the hub** (`src/drivers/session.zig`, `src/hub/runtime.zig`):
+  the drivers support a supervised permission mode (Claude `--permission-prompt-tool stdio`, Codex
+  `untrusted`, Grok and Antigravity flags), but nothing in the hub or the API sets it, so every
+  sleeve runs unsupervised. Only the DST oracle exercises Claude's supervised gate. Right: a hub
+  setting that starts chosen harnesses supervised, then run Claude, Codex and Grok that way for
+  real.
+- **Quota readers run on one thread** (`src/hub/runtime.zig` `quota_bg_loop`, `refresh_quotas_sync`;
+  `src/quota/readers.zig` `read_all`): one background thread reads every installed harness's quota
+  every 120 s (fixed, not configurable) and publishes a `quota` message per row.
+  `PROTECTORATE_NO_REMOTE_QUOTA` or `PROTECTORATE_NO_HOST_HISTORY` stops it, and
+  `scripts/zig-e2e.sh` sets the latter so no test hub reads the owner's vendor quotas. A stale row
+  with no windows keeps the previous windows if they are younger than 24 h and not yet reset.
+  Readings are not journaled. Right: fine; persist the last good reading if a restart must keep
+  dispatch weighting.
+- **A stuck quota read blocks every reader** (`src/quota/readers.zig`): only the Antigravity reader
+  has deadlines (5 s to connect, 10 s in all). The Claude, Codex, Grok and local readers call
+  `std.http.Client.fetch` with none, and the single refresh thread runs the readers one after
+  another, so one hung request stops all quota refreshes. Right: a deadline on every read, or a
+  killable helper process if a hung endpoint becomes a practical problem.
+- **The MCP bridge has tools only** (`protectorate mcp [--envoy]`, `src/cli/mcp.zig`):
+  line-delimited JSON-RPC answering `initialize`, `ping`, `tools/list` and `tools/call`, with a
+  fixed protocol version 2024-11-05 (the client's is not negotiated). No resources, prompts or
+  notifications (messages without an id are ignored), and the agent name comes from `--as` or
   `clientInfo.name`. Right: grow it with what the vendor apps actually call.
-- **Quota readers drop the old extras** (`pt-quota`): no reset credits (Claude cedar_ember, Codex
-  rate-limit-reset-credits, Grok GetRemainingResets and its protobuf walker), because
-  `pt_api::Quota` has no field for them; no Claude `extra` overage window; no Codex `app-server`
-  path (it would launch the CLI, which may refresh a token; the wham endpoint is the only source);
-  Right: add a resets field to `Quota` when dispatch uses credits; revisit Codex `app-server` if wham breaks.
-- **Antigravity quota uses an internal API** (`quota/readers.zig`): the model and tier endpoints
-  are observed CLI interfaces, with no stable public quota contract. The reader treats each named
-  model as a separate scope and uses the best available model when none is specified; it cannot infer
+- **Quota readers skip some extras** (`src/quota/readers.zig`): the Codex reset-credit count and
+  credits are read, but there are no reset credits for Claude or Grok, no Claude extra-usage overage
+  window (only the 5h, weekly and per-model weekly windows), and no Codex `app-server` path (it
+  would launch the CLI, which may refresh a token; the wham usage endpoint is the only source).
+  Right: add Claude and Grok reset credits when dispatch uses credits; revisit Codex `app-server` if
+  wham breaks.
+- **Antigravity quota uses an internal API** (`src/quota/readers.zig`): the model and tier endpoints are
+  observed CLI interfaces, with no stable public quota contract. The reader treats each named model
+  as a separate scope and uses the best available model when none is specified; it cannot infer
   shared pools or the duration of a reset window. Right: use a documented quota interface if agy
   exposes one, including explicit shared buckets and window durations.
-- **Zig hub does not yet invoke quota ranking** (`hub/runtime.zig`, `quota/select.zig`): the
+- **Zig hub does not yet invoke quota ranking** (`src/hub/runtime.zig`, `src/quota/select.zig`): the
   selector accepts Antigravity readings, but the hub's resleeve path still follows the configured
   target order. Right: connect selection to the journaled dispatch decision without changing the
   pane-only restriction on Antigravity resleeves.
-- **Local endpoint address can still be configuration** (`pt-quota`): `local_url` (or the probe's
-  `--local` and `PT_LOCAL_URL`) overrides the `baseUrl` of Pi's `pi_local_provider`, which is used
-  when it is empty, so the two can still disagree when both are set. Right: drop `local_url` once
-  every hub leaves it empty.
-- **Quota selection constants are untuned** (`pt-quota`): usable-now minimums per task size
-  (5, 15, 30 percent), the 48 h half-life and the 168 h stand-in for an unknown reset are the old
-  dev-hotschmoe values; `TaskSize` thresholds and N are caller inputs with no defaults. Right: tune
-  from real dispatch history once a workspace has any.
-- **`select_target` takes `now_ms`** (`pt-quota`): the pure function needs a clock for time to
-  reset, so it is the first argument. Pi with a vendor login (`PiVendor`) and Antigravity are never
-  selected, including by the resleeve fallback (no quota subscription behind them).
-- **A late quota read has no deterministic probe** (`pt-quota` cache.rs): a body that arrives
-  after the deadline is kept, stamped when the read finished, and aged from that finish rather
-  than from the refresh that collects it. A late error does not add a second backoff. Showing
-  that needs the read to outlive the deadline without a test-only flag, and the timed probe
-  flaked under load. Right: a deterministic e2e if one can be had without hooks; until then the
-  behavior is this paragraph.
-- **Quota fuzz runs wrote corpus into `fuzz/seeds`** (`pt-quota`): `cargo fuzz run <t> seeds/<t>`
-  adds new inputs to the seed dir; only the hand-written seeds (named, not hex) are committed.
-  Right: run with `corpus` as first dir and seeds as the second.
-- **A hub update restarts the process; it does not re-exec** (`pt-hub` update.rs; D17): the hub
-  exits 75 and the service manager starts `releases/current`, so every sleeve's harness dies with
-  it (bwrap `--die-with-parent`) and resumes as after a crash; there is no fd handoff. The new
-  hub's health check is the core applying `HubRecovered` plus `GetHubInfo` on its own socket; it
-  does not check the fleet or launch a sleeve. The headscale snapshot is taken only while the
-  fleet is up. Old `releases/<version>` directories are never pruned. Right: re-exec with the
-  listeners and sandboxes handed over, and a health check that includes a fleet round trip.
-- **Release switches order their writes for crashes** (`pt-update` store.rs): probation and
-  `previous` are each synced before `current` changes. Trial rollback restores the snapshots,
-  syncs `current` back to the confirmed release, restores the earlier `previous`, then records
-  the outcome. Debug-only `PT_TEST_CRASH_AT` exercises selected crash points. Right: fine.
-- **Hub update snapshots require the core's current single-segment journal** (`pt-journal`): the
-  core does not yet write journal snapshots or rotate segments. An update still refuses a journal
-  that already has more than one segment. Rollback replaces the whole journal directory, so a
-  trial release that rotates later is swapped out wholesale rather than segment by segment.
-  The readability check does not decode `snapshot-*` payloads until the core writes journal
-  snapshots.
-  Right: snapshot a rotating journal the same way once the core writes one.
-- **Starting a just-written binary can fail with ETXTBSY** (`pt-update`, the node supervisor):
-  on Linux a file still open for writing anywhere, including a descriptor a concurrent fork
-  inherited for a moment before exec, cannot be executed. The update e2e hit it once under load
-  (`node_update_admission_lost_reply_and_confirmation`, "Text file busy" at spawn); three reruns
-  passed. A staged release is executed for its version check right after it is written. The
-  update e2e's systemd stand-in now retries a busy start (`unbusy`), since its own test threads
-  fork while others write wrappers; `release_switches_survive_a_crash_at_each_step` failed that
-  way twice on 2026-11-02. Right: retry a start that fails with ETXTBSY a few times, briefly, in
-  pt-update's version check and the node supervisor too.
-- **Probation counts on wall-clock time and on the new binary's own watch** (`pt-update`): the
-  units run `releases/previous/<bin> probation` before each start, which rolls back after
-  `MAX_TRIAL_STARTS` (3) failed starts or a passed window, and the release on trial watches its
-  own window. A new binary that starts and then hangs is never restarted, so it stays until the
-  next start. The deadline is wall-clock milliseconds, so a clock jump moves it. Right: a
-  systemd watchdog (`WatchdogSec`) the binaries ping, and a boot-relative deadline.
-- **Windows release pointers are renamed aside** (`pt-update` `set_pointer_aside`): a rename
-  cannot replace a directory symlink on Windows, so `current` and `previous` change in three steps
-  (`.X-new` made, `X` to `.X-old`, `.X-new` to `X`); a crash between the renames leaves no `X`
-  until the next `Store::open` (the supervisor's, before each start) finishes the switch. Tested
-  only on Linux, where the debug knob `PT_TEST_POINTER_ASIDE=1` takes this path (with crash points
-  `<pointer>-aside` and `<pointer>-swapped`); Windows directory-symlink rename and removal
-  semantics are from the documentation, not a run. Right: run docs/windows-node-update.md's
-  manual check on a spare Windows box, then a Windows e2e once a Windows runner exists.
-- **The Windows service is a frozen supervisor** (`protectorate-node` supervise.rs, D11): the SCM
-  runs `supervise --service` from the %ProgramFiles% copy made at install, which runs
-  `releases\previous` probation (in a kill-on-close job, killed after 60 s; if it fails or hangs,
-  the supervisor's own probation code counts the start and `current` starts anyway) and
-  `releases\current` serve in a kill-on-close job with silent breakaway (the node's own children,
-  including the idle probe in the console session, which may not share a job with session 0, go
-  to jobs of their own), and restarts it 1 s after exit 75 and 5 s after any other. Known
-  limitation: `node update` never replaces the supervisor and there is no remote command that
-  does, so a bug in it is fixed only by a reinstall; installs from v0.7.0-dev.5 and older run
-  `serve --service` directly and must be reinstalled once. The manual way out from the hub is a
-  `--maintenance` job that reruns the installer through Task Scheduler (the job itself dies with
-  the service it uninstalls); docs/windows-node-update.md has the steps, never run. A Windows
-  node refuses an update to a binary whose `--version` lacks `supervise: 1`, so it cannot be
-  downgraded below the supervisor. Never run on a real Windows node: the loop is e2e-tested on
-  Linux only, and the breakaway, `CREATE_NO_WINDOW` children and stdio into node.log are
-  compiled for Windows but untried. Right: the manual check in docs/windows-node-update.md on a
-  spare box; a supervisor that updates itself only if a real need appears.
-- **Node releases are state** (`protectorate-node install-service`): the unit runs
-  `<state>/releases/current/protectorate-node`; install-service copies a binary that does not
-  already run from there into `releases/<its version>/`. The manifest lists only the unit, so
-  uninstall keeps every staged release with the rest of the state dir. Right: fine; a `prune`
-  that keeps `current` and `previous` once disks fill.
-- **arm64 Linux assets link against the build host's glibc** (`scripts/release.sh`): the task's
-  native arm64 build needs glibc 2.34 (it links on the dev hub's Debian 12); amd64 is built by cargo-zigbuild
-  for glibc 2.31. Right: `aarch64-unknown-linux-gnu.2.31` through zigbuild too, if an older arm64
-  box ever runs the hub or a node.
+- **Quota selection constants are untuned** (`src/quota/select.zig`): usable-now minimums per task
+  size (5, 15, 30 percent, `TaskSize.min_usable_pct`), the 48 h half-life (`urgent_half_hours`), the
+  168 h stand-in for an unknown reset (`unknown_reset_hours`), the 10 min stale grace and the 5 h
+  unknown window length are fixed constants. Right: tune from real dispatch history once a workspace
+  has any.
+- **A hub update stages and switches but does not restart or re-exec** (`src/hub/api_dispatch.zig`,
+  `UpdateHub`; `src/update/store.zig`, `activate_staged`): the hub writes `releases/current.txt`,
+  `previous.txt` and `probation.json` and replies with `restarting` false (the field is never set);
+  the running process keeps the old binary until the service manager or the owner restarts it, and
+  every sleeve's harness dies with that restart and resumes as after a crash. The new hub's health
+  check is `mark_healthy` after journal replay (`src/hub/runtime.zig`) when there is no restore
+  error; it does not check the fleet or launch a sleeve. Old `releases/<version>` directories are
+  never pruned. Right: restart or re-exec on update with the listeners and sandboxes handed over, a
+  health check that includes a fleet round trip, and a `prune` that keeps `current` and `previous`.
+- **Probation counts starts, with no watchdog** (`src/update/store.zig`, `check_probation`,
+  `mark_healthy`): `activate_staged` writes `probation.json` unhealthy with 0 attempts; the hub unit
+  runs `releases/previous/protectorate hub probation` before each start (`scripts/install.sh`) and
+  the node supervisor runs `cmd_probation` before each start (`src/node/service.zig`). The first
+  start without `mark_healthy` is allowed and counted, and the next one rolls back to `previous`. A
+  new binary that starts and then hangs is never restarted, so it stays until the next start. Right:
+  a systemd watchdog (`WatchdogSec`) the binaries ping, and a boot-relative deadline.
+- **The node supervisor is frozen** (`src/node/service.zig`, `cmd_install_service`,
+  `supervise_loop`; D11): the systemd unit, launchd agent or Windows service runs `<installed exe>
+  supervise --home <dir>`, and the supervisor starts the release named by `releases/current.txt`,
+  restarting it with backoff after any exit. `node update` stages only into `releases/` and never
+  replaces the installed supervisor binary, and no remote command does, so a bug in it is fixed only
+  by a reinstall. The Windows service path (`win_service_main`) is cross-built but covered by no e2e
+  (`scripts/zig-e2e.sh` runs on Linux and only checks that the Windows executables build). Right: a
+  manual check of the supervise loop and an update on a spare Windows box, and a supervisor that
+  updates itself only if a real need appears.
+- **Node releases are state** (`scripts/install-node.sh`, `src/node/service.zig`, `cmd_uninstall`):
+  the installer stages the binary in `<home>/releases/<version>/` and the supervisor runs the
+  release `current.txt` names. Uninstall removes the unit and `install-manifest.json` only, so every
+  staged release stays with the rest of the state dir. Right: fine; a `prune` that keeps `current`
+  and `previous` once disks fill.
 - **Linux desktop and Android-node assets are not built** (`scripts/release.sh`): the release
-  carries `protectorate-android.apk` and `protectorate-desktop-windows-{amd64,arm64}.zip`, but
-  not `protectorate-desktop-linux-{amd64,arm64}` or `protectorate-node-android-arm64` (SPEC 6).
-  The arm64 Windows build runs as a hub job on an arm64 Windows node, so a release waits for
-  that node to be online. Right: the Linux bundles (cmake, ninja and GTK 3 on the build host),
-  and the Android node once `pt-node` has Android code paths.
-- **Release publishing is untried** (`make release-publish`): it stops at a dry run unless
-  `PUBLISH=1`, refuses a dirty tree, an untagged HEAD and a tag missing on origin, and uses
-  `gh release create --verify-tag`; no release has been created from `next`. GitHub immutable
-  releases (SPEC 6) are not checked. Right: enable immutable releases on the repo, then publish a
-  first `v*-dev.1` with the owner.
-- **Installers read GitHub's JSON with grep** (`install.sh`, `install-node.sh`): with no jq, a
-  channel's newest tag comes from `"tag_name": "..."` matches, ordered by `sort -V` with the
-  pre-release dash read as `~`; the API is unauthenticated (60 requests an hour per address),
-  as is pt-update's. `--version TAG` skips the lookup. Right: fine while GitHub's format holds;
-  an optional token through a curl config file, never argv, if rate limits bite.
-- **Doctor checks presence, not validity** (`pt-doctor`): a login counts when its file is
-  non-empty or its key variable is set; SPEC 7 wants validity through the read-only quota readers,
-  which do not exist yet. Antigravity's login location is unknown, so it is not checked. Disk
-  comes from `df -P`, linger from `/var/lib/systemd/linger/<user>`, and each run starts one
-  `systemd-run --user --scope true`. The hub runs it at start, every 6 h and on `doctor
-  --refresh`; a hub with no cached report holds its first launch up to 60 s for the first run.
-  New and resolved problems are hub events; nobody is mailed. A harness that fails to launch
-  right after its update is not marked ineligible (only `--version`, login and sandbox are). The
-  node has no `doctor` yet. Right: the quota-reader validity check, a node `doctor`, mail on new
-  problems, and a launch failure after an update counted against the harness.
-- **Harness updates run each program's own command, one at a time** (`pt-hub` harness_update.rs;
-  D33, D34): `claude update`, `codex update`, `grok update` and `pi update self` every
-  `harness_update_hours` (24; 0 runs only `harness update`), each only while no sleeve on a
-  harness of that program is starting or mid-turn, retried every 3 s until then, so a sleeve that
-  never idles holds it back indefinitely. `codex update` is kept for npm installs too: the npm
-  launcher sets `CODEX_MANAGED_BY_NPM`, so the command updates through npm. A failed run is tried
-  again only in the next period. Right: a ceiling on the deferral (stop accepting turns on that
-  harness), and a retry with backoff after a failure.
-- **The version stamp falls back to `git describe`** (`pt-version`): a build without
-  `PROTECTORATE_BUILD_VERSION` (plain `cargo build` or `cargo test`) gets `git describe --tags
-  --always --dirty`, recomputed when HEAD, its branch or the tags move, so a `-dirty` mark is the
-  tree's at the last such move, not now. The installers check the staged binary's first
-  `--version` line against the tag. Right: fine; releases always set it.
-- **Own keyword index instead of SQLite FTS5** (`pt-history`, SPEC 3.7): segments, BM25 and
-  merges are ours, to avoid `rusqlite` plus bundled C SQLite. Right if it proves insufficient
-  (recall, query features, corruption we cannot explain, or size well past the measured 1 GiB of
-  logs to 11 MB): `rusqlite` with FTS5, pinned and listed in DEPENDENCIES.md.
-- **Grok docs carry the session start time** (`pt-history`, extract/grok.rs): `chat_history.jsonl`
-  records have no timestamp, so every doc gets `summary.json` `created_at`, and time filters are
-  per session for Grok. Grok context usage is not read at all. Right: per-record times and usage
-  from the session's `updates.jsonl` or `usage.json`.
-- **Tool errors by text for Codex, none for Grok** (`pt-history`): a Codex output counts as
-  failed on "Process exited with code N" (N not 0) or "Script failed"; Grok tool results carry no
-  error flag and are never indexed. Right: a structured exit code if either log gains one.
-- **Claude subagent logs are skipped** (`pt-history`, discover.rs and claude.rs): sidechain records
-  and `subagents/` files are not indexed. Right: index them with a parent link once a brief or
-  search needs a subagent's work.
-- **Merges re-tokenize stored text** (`pt-history`, index.rs): merging two segments decodes their
-  texts and builds a new one from scratch. Fast: a k-way merge of postings, if merge time shows up.
-- **History keeps a sleeve's newest lines** (`pt-history`, index.rs): each sleeve and each
-  source may keep `history_budget_bytes` (default 1 GiB), counting each doc's source text
-  plus its per-doc overhead. The hub reads that key once, at start. A value under
-  1 MiB, including 0, is a config error. Exactly 1 MiB is allowed. An unsleeved
-  source drops its own oldest docs past the budget. A sleeved source does not.
-  Past a sleeve's budget, the oldest docs of that sleeve go, from any of its logs, so a new
-  session still gets indexed. Newest means ingest order. A rebuild ingests each sleeve's
-  files oldest first, by mtime. `doctor` / `hub info` name each capped sleeve (`history capped: <id>`)
-  once eviction has dropped any of its docs. The name stays under the same budget and leaves
-  when that sleeve is removed, when its sources are gone, or when a later start finds the
-  total under a raised budget. A segment is rewritten when its dead bytes are at least its
-  live bytes and some docs are still live. A sleeve at its
-  budget does not stop the others. There is no cap across all sleeves. Streaming
-  reclaim, to avoid holding about 1 GiB, is not wanted. The measured ratio is
-  1 GiB of logs to 11 MB of index.
-  Right: raise the caps if a real log needs more of the index.
-- **One source per session, decided per hub run** (`pt-hub`, history.rs): a headless session
-  is in both its native log and the transcript; the native log wins once found, the transcript
-  covers a session that ended without one, and the transcript waits at a live session's
-  `session_info` until its log appears. The choice is per sleeve, and the cursor, the drop
-  watermark and the budget share one key of sleeve plus path, so one sleeve's session id
-  does not select another's log. Discover walks a
-  harness's log root only while one of that sleeve's sessions is still undecided. A session
-  already chosen as native is left out of the transcript even when that pass did not see the
-  file, and a discover that returns a different path replaces the old one only when
-  that path is gone, and then drops its docs.
-  Decisions are not persisted, so a
-  session indexed from the transcript whose log appears in a later run (a native resume of a
-  session that had none) is indexed twice. Right: keep the choice per session in the index
-  manifest.
-- **A parent reads a child's live transcript** (`pt-hub`, api.rs `get_transcript`): `reaches`
-  is the sleeve itself or a direct child, so a parent still receives the child's full
-  transcript. That is supervision of a running child, and it is separate from history search,
-  which a sleeve credential limits to its own sleeve id (D26). Right: keep it.
-- **Pi must report the session id from argv** (`pt-drivers`, pi.rs): `get_state`'s `sessionId`
-  has to equal the id the hub passed (`--session` on resume, `--session-id` on a new session).
-  A different id is a protocol error. That becomes `Desync`, which trips G14
-  (`ProtocolDesync`, a kill). The death then follows G3: at most two resumes in ten minutes,
-  then a forced resleeve, and a third automatic resleeve within an hour parks the sleeve
-  (`ParkReason::Flapping`). A Pi that mints a new id on resume takes that path. Right: keep
-  the equality check.
-- **Native logs are found by session id under the sleeve's home** (`pt-hub`, history.rs): the
-  drivers report the session id, not the log path, so the hub walks the harness's log root in the
-  sleeve's private home (`pt_history::discover`), each second while a live session has no log
-  yet. Right: the path from the driver where the protocol states it (Pi's `get_state`
-  `sessionFile`, Codex's thread path).
-- **A corrupt history index is moved aside, never pruned** (`pt-hub`, history.rs): at start an
-  index that fails to open is renamed `<dir>.corrupt-<ms>` and rebuilt in the background; the
-  copies accumulate. Right: drop them once the owner agrees to a rule for derived files. A
-  rebuild reads every source again, so search answers partially until it catches up.
-- **No history tools on `mcp --envoy`** (`protectorate`, mcp.rs): the bridge holds the
-  envoy-only capability of vendor general agents (D9), and D26 gives history to Envoy and to
-  sleeves for their own runs only, so `history_search`/`history_read` there would always be
-  refused. Right: add them if the owner widens D26 to vendor agents.
-- **Local quota key from Pi's models.json** (`pt-quota`, local.rs): the `pi_local_provider`
-  entry's `apiKey`, as a set environment variable's name or a literal; a `!command` key is never
-  run (the local row stays `unknown`). The key goes to `local_url` even when that is not the
-  provider's own `baseUrl`, but plain HTTP is restricted to loopback. Right: fine while both are
-  the owner's endpoints.
+  carries `protectorate-android.apk` and `protectorate-desktop-windows-{amd64,arm64}.zip`, but not
+  `protectorate-desktop-linux-{amd64,arm64}` or `protectorate-node-android-arm64` (SPEC 6);
+  `release-all` in `build.zig` has no Android target. The arm64 Windows build runs as a hub job on
+  an arm64 Windows node, so a release waits for that node to be online. Right: the Linux bundles
+  (cmake, ninja and GTK 3 on the build host), and the Android node once the node has an Android
+  target.
+- **Release publishing does not check immutable releases** (`make release-publish`,
+  `scripts/release.sh`, `publish`): it stops at a dry run unless `PUBLISH=1`, refuses a dirty tree,
+  an untagged HEAD and a tag missing on origin, and uses `gh release create --verify-tag`; GitHub
+  immutable releases are neither enabled nor checked. Right: enable immutable releases on the repo
+  and have `publish` refuse a repo without them.
+- **Installers read GitHub's JSON with grep** (`scripts/install.sh`, `scripts/install-node.sh`,
+  `resolve_tag`): with no jq, a channel's newest tag comes from `"tag_name": "..."` matches, ordered
+  by `sort -V` with the pre-release dash read as `~`; the API is unauthenticated (60 requests an
+  hour per address), as is `check_latest` in `src/update/store.zig`. `--version TAG` skips the
+  lookup. Right: fine while GitHub's format holds; an optional token through a curl config file,
+  never argv, if rate limits bite.
+- **Doctor checks presence, not validity** (`src/doctor/doctor.zig`, `run_checks`): a login counts
+  when the harness's credential file or directory exists (`~/.claude/.credentials.json`,
+  `~/.codex/auth.json`, `~/.grok/auth.json`, `~/.gemini`, `~/.pi/agent/models.json`); nothing checks
+  that it is still valid. Right: a validity check, for example through the read-only quota readers
+  (`src/quota/readers.zig`).
+- **Harness updates run only on request, one program at a time** (`src/hub/runtime.zig`,
+  `update_harnesses`): `harness update` runs `claude update`, `codex update`, `grok update`, `agy
+  update` and `pi update self` through the hub, each only while no sleeve on a harness of that
+  program is launching, running or recovering; a busy program is reported `deferred` and nothing
+  retries it. There is no periodic run (`harness_update_hours` is not read by the hub). Right: a
+  periodic run with a ceiling on the deferral (stop accepting turns on that harness) and a retry
+  with backoff after a failure.
+- **The version stamp comes from the build line** (`Makefile`, `build.zig`, `src/version.zig`):
+  `make` takes `git describe --tags --match 'v[0-9]*' --always --dirty` once, when make starts, so a
+  `-dirty` mark is the tree's at that moment; a plain `zig build` stamps `0.0.0-dev`. The installers
+  check the staged binary's first `--version` line against the tag, and `scripts/release.sh` checks
+  the host binaries. Right: fine; releases always set it.
+- **Own keyword index instead of SQLite FTS5** (`src/history/segment.zig`, `src/history/index.zig`,
+  SPEC 3.7): segments and BM25 are ours, to avoid linking C SQLite. Right if it proves insufficient
+  (recall, query features, corruption we cannot explain, or size): SQLite with FTS5, pinned and
+  listed in DEPENDENCIES.md.
+- **Grok docs carry no time** (`src/history/extract.zig`, `extract_grok_line`): `chat_history.jsonl`
+  records have no timestamp and the extractor reads none, so every Grok doc has `time_ms` 0 and time
+  filters cannot place Grok docs. Grok context usage is not read at all. Right: the session start
+  from `summary.json` `created_at`, then per-record times and usage from the session's
+  `updates.jsonl` or `usage.json`.
+- **Tool errors by text for Codex, none for Grok** (`src/history/extract.zig`, `extract_codex_line`,
+  `extract_grok_line`): a Codex output counts as failed on "Process exited with code" or text
+  starting "Script failed"; Grok tool results carry no error flag and are never indexed as errors.
+  Right: a structured exit code if either log gains one.
+- **Claude sidechain records are skipped** (`src/history/extract.zig`, `extract_claude_line`):
+  records with `isSidechain` or `isMeta` are not indexed, so subagent work is not searchable. Right:
+  index them with a parent link once a brief or search needs a subagent's work.
+- **History has one global cap, not a per-sleeve budget** (`src/history/index.zig`,
+  `evict_over_budget`): `max_bytes` is a hard-coded 512 MiB with no config key, and past it the
+  oldest whole segments are deleted, whichever sleeve they belong to, keeping at least one segment.
+  A busy sleeve can therefore push out the history of the others, and nothing reports that eviction
+  happened. Right: a configured per-sleeve budget that evicts a sleeve's own oldest docs and names a
+  capped sleeve in `doctor`.
+- **Local quota key from Pi's models.json** (`src/quota/readers.zig`, `poll_local`): the first
+  provider with a `baseUrl` supplies its `apiKey`, as a set environment variable's name or a
+  literal, and it is sent to the first model's `baseUrl` over whatever scheme that URL uses, with no
+  loopback restriction; a `!command` key is never run (the local row becomes `stale` with a note).
+  Right: fine while both are the owner's endpoints.
 - **One account per native harness** (future feature, owner 2026-11-01; not a top priority):
-  `pt_api::Subscription` is a fixed enum (claude, codex, grok, local, api), and each quota reader
-  reads the hub's single login per harness (`<home>/logins/`). Two Grok
-  accounts, for example, can't be told apart. Right: accounts as data. Each one is a named login
-  (harness, a label, and the login home or config dir it lives in, such as `CLAUDE_CONFIG_DIR` or
-  `CODEX_HOME` where the harness supports one). The label is probably the account's email, read
-  from the login itself (owner's idea; to settle later). There is one quota row and reader per
-  account, and the app's QUOTA screen lists every account. `select_target` weighs accounts rather than
-  harnesses, and a sleeve's incarnation records the account it draws on.
-- **Windows job identity, dropped** (`pt-node`, Windows job runner): the owner first chose
-  (2026-11-01) ordinary jobs as LocalService or a restricted token, and maintenance jobs as
-  SYSTEM. Two agent attempts at the token code were cut off by a safety classifier. The same
-  day the owner's threat model (SPEC 2, principle 10) made it unnecessary, so jobs stay
-  LocalSystem inside a Job Object. Right: revisit with the threat model.
-- **Review coverage**: pt-core, pt-journal and pt-http have had an adversarial review, and pt-hub,
-  pt-drivers and pt-sandbox one each by GPT-6.1-Terra (2026-11-01; its findings are being fixed).
-  pt-quota, pt-history and pt-update have had none, and none of the fixes has been re-reviewed.
-  Right: review each before it is trusted with more than the owner's own machines.
-- **`pi_local` is unconfigured by default** (`pt-hub`, home.rs, doctor.rs): `pi_local_provider`
-  and `pi_local_model` default to empty, and doctor marks `pi_local` ineligible
-  until both are set, so the default `resleeve_to` (`["pi_local"]`) parks a sleeve that must
-  resleeve. Right: offer the configured local model when there is one, or ask for it at setup.
-- **Incremental frame buffering can exceed one frame** (`pt-frame`, `Decoder::feed`): decoded
-  payload length is capped at `MAX_PAYLOAD`, but a caller may feed an arbitrarily large slice,
-  and the decoder copies all of it before parsing. `FrameReader` reads in 64 KiB chunks and drains
-  frames between reads, but its initial `pending` input is also supplied by its caller. Right: a
-  backpressure API or segmented input that bounds each allocation while preserving streams with
-  many frames, then prove that bound. This allocation property is not covered by phase 1 yet.
-- **Node protocol bump discipline** (`pt-frame`, `msg::PROTOCOL`): protocol 3 covers the Update
-  change, and the hub refuses a mismatched Hello. Every incompatible wire change must bump the
-  protocol. Right: detect incompatible message changes without a bump automatically in CI.
-- **Four-hour fleet poller stall** (`pt-fleet`, d2dad77): the 2026-11-01 logs do not identify
-  the blocked thread or prove a cause. Poll RPCs and member replies now have whole-call deadlines,
-  and a finished node poll thread is restarted. Right: capture hub thread stacks and member logs
-  if a stall recurs.
-- **Release verification is not bound to an inode** (`pt-update`, store.rs): verified staged
-  files can be replaced before the binary check or switch; agents on the owner's machines are
-  trusted. Right: bind execution and switching to the verified inode if that threat model changes.
-- **Enrollment record beside headscale, not one transaction** (`pt-fleet` `rename_node`,
-  `remove_node`): headscale is written first, then `enrolled.json`; a rename whose record write
-  fails is put back in headscale, a removal is finished by retrying it by id. Nothing compares
-  the two on its own. Right: a doctor check that reports a record headscale does not list, or a
-  name that differs.
-- **Sleeves have no systemd user bus** (`pt-sandbox`): the runtime dir is a private empty tmpfs on
-  purpose, so a project test that needs `systemd-run --user` fails inside a sleeve. Right: decide
-  whether a sleeve gets its own user manager or a scope-local one, if such tests matter.
-- **Sleeve toolchain env is guessed from the owner's home** (`pt-hub` `toolchain.rs`): PATH tail,
-  cache dirs and the Flutter SDK come from conventional locations, the hub's env and
-  `sleeve_path`; a cargo `rustup` auto-install, `cargo install` and a second Flutter SDK are
-  unsupported (read-only). The shared registry, Go and pub caches are one blast radius for all
-  sleeves. Right: per-sleeve overlay caches seeded from the owner's, if a sleeve damages one.
-- **Sleeve git identity is seeded once** (`toolchain.rs`): `~/.gitconfig` is written when absent,
-  so a changed owner identity reaches only new sleeves. Right: rewrite a file that still carries
-  the seeded content.
-- **Doctor ignores API-key env vars** (`pt-doctor`): `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and
-  `XAI_API_KEY` no longer count as a login, since sleeves never see them. Right: a deliberate
-  API-key login per harness in `<home>/logins/` if API billing is wanted for a sleeve.
-- **Effort is checked by a fixed list for Claude, Grok and Pi** (`pt-drivers` `vet_effort`): each
-  CLI's documented levels are compiled in; a model that accepts fewer is the CLI's to refuse.
-  Codex is checked against its `model/list` catalog after the handshake. An automatic resleeve
-  to another harness starts on that harness's default effort without a notice of its own (the
-  view shows `effort`); a manual start or resleeve may set it. Right: read each CLI's model
-  catalog if a model-specific refusal costs a sleeve.
-- **Rate limits are a failed turn, not a guardrail** (`pt-hub` `exec.rs`): a 429 or "overloaded"
-  that survives the harness's own retries ends the turn as an error, the sleeve stays and idles,
-  and the error entry is in the transcript; only quota (G1) and auth (G2) resleeve. The reset
-  times in Claude's `rate_limit_event` and Codex's `account/rateLimits/updated` are still
-  ignored. Right: read them to hold the queue until the reset instead of letting the next
-  message hit the limit again.
-- **Exit classification reads a stderr tail** (`pt-drivers` `session.rs`, `exec.rs`): a harness
-  that dies unasked is a G2 or G1 resleeve when `classify` calls its last words or a prior error
-  of the turn auth or quota, so a crash whose stderr merely mentions "credentials" resleeves
-  instead of resuming. Right: harness-specific exit codes or structured exit reasons if a false
-  positive costs a cache.
-- **A refused handshake is a kill, not a verdict** (`pt-drivers`): Codex, Grok and Pi end their
-  own process on an error reply to initialize, thread/session open or get_state, and the exit
-  takes the normal unasked-exit path (StartFailed, or G2/G1 from the reply's class). A handshake
-  timeout with no reply is still G5's 60 s.
-- **pi_durable removed**: removed on 2026-11-02 before it was built. The owner wants to revisit
-  it later; the design is in the git history.
-- **New-project cleanup races a concurrent claim** (`pt-hub` `settle_new_project`): after a
-  refused `--new-path`, the hub re-reads the view and checks that the directory is still the
-  empty commit it made, then `remove_dir_all`. A `--path` spawn that claims the directory in
-  that gap, or a symlink swapped in under `projects_dir`, can remove a live root. SPEC 2
-  principle 10 treats our own agents as trusted, so this is left. Right: delete through a
-  directory fd opened before the check, and hold the path against spawn until the delete ends.
-- **Fence-only prompt requeue repeats turn accounting** (pt-core `return_unsent`): an ordinary
-  prompt fenced before its first write is queued again, but its first dequeue already advanced
-  the owner turn and replaced its continuation debt and D9 origin. The retry can advance and
-  replace them again. An `Unwritten` retry, including a later fence of that retry, restores the
-  accounting; a fence without that new event retains its historical behavior so existing
-  journals replay unchanged. Right: journal a new pre-fence event that restores the accounting
-  before returning such a prompt to the queue.
-- **App self-update is simple and partly untried** (`pt-hub` `clients.rs`, `app/lib/client_update_io.dart`,
-  `MainActivity.kt`): `GET /api/client/<name>` has no Range support, so an interrupted download
-  starts over; one lock serializes every first fetch, whichever build it is. The Windows script
+  `schema.Subscription` (`src/api/schema.zig`) is a fixed enum (claude, codex, grok, antigravity,
+  local, api), and each quota reader (`src/quota/readers.zig`) reads the one login the hub user's
+  home holds per harness. Two Grok accounts, for example, can't be told apart. Right: accounts as
+  data. Each one is a named login (harness, a label, and the login home or config dir it lives in,
+  such as `CLAUDE_CONFIG_DIR` or `CODEX_HOME` where the harness supports one). The label is probably
+  the account's email, read from the login itself (owner's idea; to settle later). There is one
+  quota row and reader per account, and the app's QUOTA screen lists every account. `select_target`
+  (`src/quota/select.zig`) weighs accounts rather than harnesses, and a sleeve's incarnation records
+  the account it draws on.
+- **Windows jobs run as the service account** (`src/node/runner.zig`, `src/node/service.zig`):
+  `sc.exe create` sets no account, so the service and the jobs it starts run as LocalSystem, with no
+  restricted token and no Job Object. The owner first chose (2026-11-01) ordinary jobs as
+  LocalService or a restricted token and maintenance jobs as SYSTEM; the owner's threat model (SPEC
+  2, principle 10) made that unnecessary. Right: revisit with the threat model.
+- **Incremental frame buffering can exceed one frame** (`src/net/frame.zig`, `Decoder.feed`):
+  decoded payload length is capped at `max_payload`, but `feed` appends whatever slice a caller
+  gives it to an unbounded buffer before `next_frame` parses; `src/net/transport.zig` feeds each
+  decrypted message as it arrives. Right: a backpressure API or segmented input that bounds each
+  allocation while preserving streams with many frames.
+- **Node protocol version is declared but not enforced** (`src/net/msg.zig`, `protocol_version`;
+  `src/hub/fleet.zig`): `Hello` carries `protocol` (3) and `HelloReply` an `accepted_protocol`, but
+  the hub never compares them and the node never reads the reply's field, so a mismatched node
+  connects. Every incompatible wire change must still bump the version. Right: refuse a mismatched
+  `Hello`, and detect incompatible message changes without a bump automatically in CI.
+- **Release verification is not bound to an inode** (`src/update/store.zig`, `stage_archive_bytes`,
+  `activate_staged`): the SHA256SUMS check covers the downloaded bytes before they are written;
+  `activate_staged` later switches to a staged `releases/<tag>` directory it only checks exists, so
+  staged files can be replaced between staging and the switch. Agents on the owner's machines are
+  trusted. Right: bind execution and switching to the verified files if that threat model changes.
+- **Sleeves have no systemd user bus** (`src/sandbox/spec.zig`, `build_bwrap_argv`;
+  `src/hub/runtime.zig`): under bwrap the sleeve runs with `--clearenv` and gets only the
+  environment allowlist plus its own tmpfs `TMPDIR`, so `XDG_RUNTIME_DIR` and
+  `DBUS_SESSION_BUS_ADDRESS` are absent and a project test that needs `systemd-run --user` fails
+  inside a sleeve. Right: decide whether a sleeve gets its own user manager or a scope-local one, if
+  such tests matter.
+- **Doctor ignores API-key env vars** (`src/doctor/doctor.zig`): `ANTHROPIC_API_KEY`,
+  `OPENAI_API_KEY` and `XAI_API_KEY` do not count as a login, since sleeves never see them (the
+  sandbox environment is an allowlist). Right: a deliberate API-key login per harness if API billing
+  is wanted for a sleeve.
+- **Rate limits are a failed turn, not a guardrail** (`src/drivers/protocol.zig`, `classify_error`;
+  `src/hub/runtime.zig`, `on_driver_event`): a 429 or "overloaded" error is classed `rate_limit` and
+  recorded as an error entry in the transcript; it does not resleeve or hold the queue, and the next
+  message can hit the limit again. Claude's `rate_limit_event` (`src/drivers/claude.zig`) is
+  ignored, as are Codex's rate-limit updates. Right: read the reset times to hold the queue until
+  the reset.
+- **A refused handshake is a kill, not a verdict** (`src/drivers/session.zig`; `codex.zig`,
+  `grok.zig`, `pi.zig`): Codex, Grok and Pi set `out.refused` on an error reply to initialize,
+  thread/session open or get_state, and the session kills the child, so the exit takes the normal
+  unasked-exit path with no exit code.
+- **pi_durable removed**: removed on 2026-11-02 before it was built, and the Zig program has no such
+  harness. The owner wants to revisit it later; the design is in the git history.
+- **App self-update is simple and partly untried** (`src/hub/http_server.zig`, `GET
+  /api/client/<name>`; `app/lib/client_update_io.dart`; `MainActivity.kt`): the hub streams the
+  whole file with no Range support, so an interrupted download starts over. The Windows script
   copies the new files over the old ones with robocopy, so a copy that fails midway can leave a
   mixed install (the old exe is started again and the error goes to
   `%TEMP%\protectorate-update.log`); files the new build dropped stay. Android reports a failed
-  install only as a toast, and the app learns nothing of the outcome. Windows was exercised on
-  the Snapdragon laptop on 2026-11-04: detached PowerShell never ran; a normal launch with a
-  startup marker fixes that, and the downloaded dev.12 archive was installed manually and its
-  executable hash verified. Android remains untried. Right: try the phone; then a staged side-by-side
-  install with a pointer swap on Windows, and the session status back over the channel on
-  Android, if failures show up.
-- **Only Claude compacts on request** (`pt-drivers`, `Protocol::compact`; `pt-hub` exec.rs): the
-  Claude driver writes `/compact` and reads its boundary and the `num_turns: 0` result as the
-  compaction, not a turn. Codex (`thread/compact/start`), Grok and Pi refuse it, and the hub's
-  500k Envoy ceiling only fires on Claude. Right: map each harness's own compaction, checked
-  against the real CLI, then drop the harness gate.
-- **A compaction that never reports stays Compacting** (`pt-core`, `pt-drivers` claude.rs): the
-  sleeve leaves Compacting on the compaction entry or a `compaction_failed` notice, which the
-  driver emits on the result after `/compact`; no guardrail covers a harness that sends neither.
-  Right: a G6-like timeout for Compacting.
-- **The Envoy context ceiling counts the last model call's prompt** (`pt-hub` exec.rs): Claude's
-  input plus cache reads and writes of the turn's last assistant message, checked at each settle.
-  A turn that grows past 500k mid-turn compacts only after it settles, unless the harness's own
-  auto-compaction runs first. Right: fine while the harness auto-compacts below its window.
-- **Background node rollouts:** `node update --all --no-wait` stops at a hub restart. Right:
-  persist rollout progress and recover in-flight nodes after restart.
-- **Sleeve process fencing without a delegated cgroup** (`src/sandbox/exec.zig`): the fallback
-  finds the process group and processes carrying the sleeve tag. A descendant that starts a new
-  group and removes its tag can escape that fallback; inherited stdout or stderr can also delay
-  observing an unexpected parent exit. Right: use an isolated, delegated cgroup or equivalent
-  process container for every incarnation and monitor the parent independently of its pipes.
+  install only as a toast, and the app learns nothing of the outcome. Windows was exercised on the
+  Snapdragon laptop on 2026-11-04: detached PowerShell never ran, so the script starts with a normal
+  launch and a `.ready` marker, and the downloaded dev.12 archive was installed manually and its
+  executable hash verified. Android remains untried. Right: try the phone; then a staged
+  side-by-side install with a pointer swap on Windows, and the session status back over the channel
+  on Android, if failures show up.
+- **Only Claude and Pi compact on request** (`src/drivers/session.zig`, `Session.compact`;
+  `src/hub/runtime.zig`, `compact_incarnation`): the Claude driver writes `/compact` and reads
+  `compact_boundary` as the compaction; Pi sends its `compact` command. Codex, Grok and Antigravity
+  return `Unsupported`, so at the Envoy ceiling the hub writes a handoff brief and resleeves the
+  same harness instead of compacting. Right: map each harness's own compaction, checked against the
+  real CLI.
+- **A compaction that never reports stays Compacting** (`src/drivers/claude.zig`): `compacting` is
+  set by `compact` and cleared only by a `compact_boundary` system message, and `send_user` and
+  `compact` return `Busy` while it is set; there is no failure notice and no timeout. Right: a
+  G6-like timeout for Compacting.
+- **The Envoy context ceiling counts the last model call's prompt** (`src/drivers/claude.zig`,
+  `src/core/apply.zig`): Claude's input plus cache reads and writes of the turn's last assistant
+  message become `context_tokens`, checked against `envoy_context_ceiling` (500k,
+  `src/core/model.zig`) at each settle. A turn that grows past 500k mid-turn compacts only after it
+  settles, unless the harness's own auto-compaction runs first. Right: fine while the harness
+  auto-compacts below its window.
+- **Background node rollouts** (`src/hub/runtime.zig`, `send_node_update_async`): `node update --all
+  --no-wait` runs one detached thread per node; the rollout and its results are journaled, but
+  nothing resumes in-flight nodes after a hub restart. Right: persist rollout progress and recover
+  in-flight nodes after restart.
+- **Sleeve process fencing without a delegated cgroup** (`src/sandbox/exec.zig`): the fallback finds
+  the process group and processes carrying the sleeve tag. A descendant that starts a new group and
+  removes its tag can escape that fallback; inherited stdout or stderr can also delay observing an
+  unexpected parent exit. Right: use an isolated, delegated cgroup or equivalent process container
+  for every incarnation and monitor the parent independently of its pipes.
 - **Losing fleet dials can remain blocked** (`src/net/transport.zig`): a timed-out or losing dial
   retains its worker and process-lifetime I/O until the connection attempt or handshake returns.
   Right: cancel DNS, connect, and handshake operations and wait for each losing worker to exit.

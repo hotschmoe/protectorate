@@ -683,10 +683,8 @@ The app holds the catch-up state until the hub's `live` marker, then displays it
 The stream sends transcript entries only for open chats; the app reloads those chats after a
 reconnect to fill any gap.
 
-For development, `make test-heavy` runs the large-gap reconnect scenario separately from
-`make test`. To pace its 3,000-entry fake-harness workload across 30 minutes, run
-`PT_RECONNECT_GAP_SECS=1801 cargo test --locked --workspace --test hub stream_large_gap_uses_snapshot -- --ignored --nocapture`.
-One run with one open transcript measured 2,838,984 bytes of backlog message payload versus
+The Rust-era large-gap reconnect scenario (3,000 fake-harness entries paced across 30 minutes) is
+gone, and the Zig e2e has no replacement. One run of it with one open transcript measured 2,838,984 bytes of backlog message payload versus
 674,268 network bytes received on reconnect, including the transcript reload; the snapshot alone
 was 4,137 bytes. These are synthetic workload measurements, not mobile traffic estimates.
 
@@ -745,4 +743,4 @@ None of these rotate yet.
 
 Tick processing tracks uncertain and probing effects, active jobs, eligible sleeves and pending approvals while retaining terminal records. These indexes are rebuilt during journal replay.
 
-The blocking gate is `make check`; `make test` runs its e2e scenarios. `make test-heavy` runs the background e2e suite, every `#[ignore]`d long feature scenario, fuzz seed replay and fuzz builds. Real-scope tests skip without a systemd user bus.
+The blocking gate is `make check`; `make e2e` runs its real-binary scenarios (`scripts/zig-e2e.sh`) and `make dst` the VOPR simulation. There is no separate background gate.

@@ -55,7 +55,7 @@ and `SHA256SUMS` downloaded into a new, empty directory:
 ```
 $s = "$env:ProgramData\protectorate-node"
 Get-FileHash -Algorithm SHA256 .\protectorate-node-windows-amd64.exe   # must match SHA256SUMS
-.\protectorate-node-windows-amd64.exe --version                        # protectorate-node <tag>, member: embedded
+.\protectorate-node-windows-amd64.exe --version                        # protectorate-node <tag> (<commit>)
 & "$s\releases\current\protectorate-node.exe" uninstall --state-dir $s  # the old release removes its service
 .\protectorate-node-windows-amd64.exe install-service --state-dir $s
 sc.exe qc protectorate-node                                             # supervise --service

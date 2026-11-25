@@ -15,7 +15,7 @@ an e2e test, run on a real machine, or only dry-run.
 | hub as a user service with linger | run on a real hub, with a hand-written unit rather than `install.sh`'s |
 | hub API and web app behind a TLS reverse proxy | run on a real hub |
 | headscale behind a TLS reverse proxy | a stand-in Go reverse proxy in `scripts/net-e2e.sh` only |
-| device pairing | e2e (`crates/protectorate/tests/api.rs`, `scripts/app-e2e.sh` for the web app) |
+| device pairing | e2e (`scripts/zig-e2e.sh`, `scripts/app-e2e.sh` for the web app) |
 | node `join`, approval, system service (Linux) | real Linux nodes run as system services, enrolled LAN-direct |
 | node service (Windows) | install, run and uninstall checked by hand, not through a hub; the update supervisor and its pointer switch e2e on Linux only |
 | `make release-publish` | never run |
@@ -23,15 +23,14 @@ an e2e test, run on a real machine, or only dry-run.
 ## Release assets
 
 Releases are built locally, not in CI (SPEC 6). `make release-assets` writes `dist/<version>/`:
-`protectorate-linux-{amd64,arm64}` (the hub, with the web app, headscale and member embedded),
-`protectorate-node-linux-{amd64,arm64}`, `protectorate-node-windows-{amd64,arm64}.exe` (each with
-member embedded), the client builds `protectorate-android.apk` and
+`protectorate-{linux-amd64,linux-arm64,macos-arm64,windows-amd64.exe,windows-arm64.exe}` (the hub,
+with the web app embedded), the same five for `protectorate-node-*`, the client builds `protectorate-android.apk` and
 `protectorate-desktop-windows-{amd64,arm64}.zip`, the three installers, `VERSION` and
-`SHA256SUMS`. The Windows node assets and the x64 desktop app are built natively on a Windows
-machine over ssh (`PT_RELEASE_WIN_HOST`), the APK on a Linux amd64 machine with the Android SDK
+`SHA256SUMS`. All hub and node binaries are cross-compiled here with Zig. The x64 desktop app is built
+on a Windows machine over ssh (`PT_RELEASE_WIN_HOST`), the APK on a Linux amd64 machine with the Android SDK
 over ssh and signed here (`PT_RELEASE_APK_HOST`), and the arm64 desktop app as a hub job on an
 arm64 Windows node (`PT_RELEASE_ARM64_NODE`, which must be online); each is skipped while its
-setting is unset. The glibc 2.31 amd64 build needs `zig` on PATH or `ZIG`. The hub serves its
+setting is unset. The cross-builds need `zig` on PATH or `ZIG`. The hub serves its
 release's client builds to the owner's devices, which offer to update themselves (SPEC 6a).
 `make release-publish` uploads them with `gh release create`; it is a dry run unless `PUBLISH=1`.
 
@@ -40,11 +39,11 @@ release's client builds to the owner's devices, which offer to update themselves
 The git tag is the version, and the only place it is written: `vX.Y.Z` for the stable channel,
 `vX.Y.Z-PRE` (such as `v0.7.0-dev.1`) for the dev channel. `make version` prints what a build
 here carries (`git describe`: the tag itself on a tagged commit, otherwise `vX.Y.Z-N-gHASH`,
-with `-dirty` for uncommitted changes). The Makefile passes it to every build: cargo as
-`PROTECTORATE_BUILD_VERSION`, Flutter as `--build-name`, `--build-number` and
-`--dart-define=PROTECTORATE_VERSION`. The versions in `Cargo.toml` (`0.0.0`) and
-`app/pubspec.yaml` (`0.0.0+0`) are placeholders, and `make check-version` (part of `make check`)
-fails if they change or if any build path in the Makefile or `scripts/` skips the tag.
+with `-dirty` for uncommitted changes). The Makefile passes it to every build: Zig as
+`-Dversion` and `-Dgit-commit`, Flutter as `--build-name`, `--build-number` and
+`--dart-define=PROTECTORATE_VERSION`. The defaults in `build.zig` (`0.0.0-dev`) and
+`app/pubspec.yaml` (`0.0.0+0`) are placeholders; build through the Makefile or `scripts/` so
+the tag is stamped.
 
 To release:
 
