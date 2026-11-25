@@ -597,7 +597,9 @@ pub const Runtime = struct {
             };
 
             try apply.apply(self.gpa, &self.core_state, se, &intents);
-            self.journal.append(se) catch {};
+            self.journal.append(se) catch |err| {
+                std.debug.panic("journal append failed at seq {d}: {s}", .{ seq, @errorName(err) });
+            };
         }
 
         for (intents.items) |it| {
